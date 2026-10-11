@@ -636,6 +636,42 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
     assert session.entry.ledger.events() == before
 
 
+@pytest.mark.parametrize(
+    ("label", "error_type"),
+    [("missing", FileNotFoundError), ("../outside", ValueError)],
+    ids=["missing", "invalid-label"],
+)
+def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
+    session: _Session, label: str, error_type: type[Exception]
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    selected = _select(session, "a")
+    capture = session.control.read_context()
+    points = session.entry.list_points()
+    version = session.state.version.get("context")
+    target = SavedPoint(entry_id=session.entry.entry_id, point=label)
+
+    with pytest.raises(error_type):
+        session.service.apply_writeback(
+            target,
+            (writeback.SampleWriteback("Q1", {"t1_us": 50}),),
+            evidence=writeback.WritebackEvidence(
+                kind="test/sample", origin="gui", run_id="run-1"
+            ),
+        )
+
+    assert session.entry.ledger.events() == ()
+    assert session.entry.samples("Q1").read().empty
+    assert session.entry.list_points() == points
+    current = session.control.read_context()
+    assert current.target == selected
+    assert current.document() == capture.document()
+    assert current.library.document() == capture.library.document()
+    assert snapshot(session.entry.use_point("a")) == capture.document()
+    assert session.state.version.get("context") == version
+
+
 def test_saved_point_samples_persist_and_replace_latest_run_row(
     session: _Session,
 ) -> None:
