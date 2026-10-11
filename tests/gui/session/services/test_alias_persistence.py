@@ -219,7 +219,9 @@ def test_missing_names_are_diagnosed_only_when_used(tmp_path: Path) -> None:
     assert capture.value("$flux_dev") == "MissingDevice"
     with pytest.raises(RoleResolutionError, match="Unknown path prefix 'Gone'"):
         capture.value("$driver.rate")
-    with pytest.raises(RoleResolutionError, match="Unknown path prefix 'MissingDevice'"):
+    with pytest.raises(
+        RoleResolutionError, match="Unknown path prefix 'MissingDevice'"
+    ):
         capture.value("$flux_dev.rate")
 
 
