@@ -375,11 +375,13 @@ class ContextService:
     ) -> ParameterContext:
         """Capture published point/library/storage and all current alias rows.
 
-        aliases optionally maps alias names to temporary concrete component
-        names. Overrides retain dependent authored links and change only this
+        aliases optionally maps aliases to temporary component or device names.
+        Names need not belong to the point or device catalog. Overrides retain
+        dependent authored links and change only this
         capture, never global rows, versions, publication or selection. Invalid
-        identifiers raise InvalidInputError(alias_invalid). $alias.path reads
-        resolve lazily without consumer declarations or kind checks; missing or
+        identifiers raise InvalidInputError(alias_invalid). $alias returns its
+        name string; $alias.path reads resolve lazily without consumer kind
+        checks. Missing or
         unbound aliases raise RoleResolutionError naming the alias, with no
         concrete-name fallback. Bare concrete paths remain independent.
         The capture never follows later source or alias edits and performs no

@@ -24,6 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
+    EvalValue,
     ReferenceValue,
     make_custom_reference_key,
     make_default_value,
@@ -47,6 +48,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
 from zcu_lab.v2._support.measure.seeds import (
     custom,
     flux_range,
+    literal,
     path_seed,
     res_freq_range,
 )
@@ -143,8 +145,8 @@ class OneToneFluxDepAdapter(
             "Run after lookback and an initial onetone/freq, before any "
             "twotone flux mapping, to find 'flx_int' / period from the "
             "resonator map. Interactive flux-line pick (no fit). Also set the "
-            "'flux_dev' field — the flux-bias device reference (defaults to a "
-            "registered device named 'flux', falling back to 'flux_yoko') — "
+            "'flux_dev' field — the flux-bias device name ($flux_dev resolves "
+            "from the alias table with no fallback) — "
             "and confirm it points at a connected device. Typical sweep: "
             "flux ~101 points "
             "across one period (driven by flx_half/flx_int when calibrated), "
@@ -182,11 +184,10 @@ class OneToneFluxDepAdapter(
                 .lock_literal("ro_cfg.ro_freq", 0.0),
                 default=custom(_blank_readout, description="inline flux readout"),
             )
-            .device_from_value_source(
+            .device(
                 "flux_dev",
                 label="Flux Device",
-                source_key="device.flux.name",
-                fallback="flux_yoko",
+                default=literal(EvalValue("$flux_dev")),
             )
             .relax_delay(1.0)
             .sweep(
