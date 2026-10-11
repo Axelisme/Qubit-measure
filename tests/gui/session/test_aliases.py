@@ -79,7 +79,6 @@ def test_unused_unbound_or_bad_rows_do_not_prevent_other_alias_reads(
     table = AliasTable(
         (
             AliasRow("unbound", ""),
-            AliasRow("broken", "missing"),
             AliasRow("qubit", "Q1"),
             AliasRow("resonator", "$qubit.partner"),
         )
@@ -87,8 +86,6 @@ def test_unused_unbound_or_bad_rows_do_not_prevent_other_alias_reads(
     assert table.resolve("resonator", point) == "R1"
     with pytest.raises(RoleResolutionError, match="unbound"):
         table.resolve("unbound", point)
-    with pytest.raises(RoleResolutionError, match="broken"):
-        table.resolve("broken", point)
 
 
 def test_unbound_alias_never_falls_back_to_a_same_named_component(

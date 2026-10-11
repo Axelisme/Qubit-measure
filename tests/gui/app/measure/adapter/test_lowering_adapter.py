@@ -74,7 +74,7 @@ def test_device_name_resource_refresh_preview_and_accept_share_fixed_sources(dev
         assert invalid.status is CfgStatus.INVALID
         assert any("flux_dev" in diagnostic.message for diagnostic in invalid.diagnostics)
     finally:
-        resource.close()
+        resource.revoke()
 
 
 @pytest.mark.parametrize("parameters", [None, parameter_capture().bind_aliases((), {})])

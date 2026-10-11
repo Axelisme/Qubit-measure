@@ -151,6 +151,6 @@ def test_resource_form_shows_device_name_preview_and_unbound_diagnostic(qapp) ->
         assert any(label.text() == '= "yoko2"' for label in form.findChildren(QLabel))
     finally:
         form.detach()
-        resource.close()
+        resource.revoke()
         form.deleteLater()
         qapp.processEvents()
