@@ -137,7 +137,7 @@ class OvernightPoint:
     t2_reason: str | None
 
 
-def init_overnight(_env: InitEnv[None], _plan: OvernightPlan) -> OvernightState:
+def init_overnight[C](_env: InitEnv[C], _plan: OvernightPlan) -> OvernightState:
     """Initialize a fresh pair cursor without hardware, timing or capture reads."""
     return OvernightState()
 
@@ -159,20 +159,15 @@ def _summary(
     return fit.lifetime_us, fit.error_us, None
 
 
-@workflow(
-    name="overnight",
-    plan=OvernightPlan,
-    tunables=OvernightTunables,
-    init=init_overnight,
-)
-def overnight(
-    env: WorkflowEnv[None],
+def overnight[C](
+    env: WorkflowEnv[C],
     plan: OvernightPlan,
     tun: OvernightTunables,
     state: OvernightState,
 ) -> Step[OvernightState, OvernightPoint]:
     """Acquire T1 then Echo at fixed flux, publishing a complete pair via Next.
 
+    Does not read or produce context; it may be any value, including None.
     All hardware/wait effects use Engine cancellation. A native Failed outcome
     is recorded per member; the other member is still attempted. Unexpected
     acquisition/analysis/plot/saver/device errors propagate and stop the run.
@@ -255,3 +250,12 @@ def overnight(
     state.round_index += 1
     state.last_actual_start = actual
     return Next(point, state)
+
+
+# Declare the original function without erasing its parametric context type.
+workflow(
+    name="overnight",
+    plan=OvernightPlan,
+    tunables=OvernightTunables,
+    init=init_overnight,
+)(overnight)
