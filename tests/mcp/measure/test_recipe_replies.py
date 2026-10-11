@@ -575,12 +575,12 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
 
 def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path):
     gui = LookbackGui()
-    gui.md["r_f"] = 6120.0
+    gui.md["$resonator.freq"] = 6120.0
 
     def respond(method, params):
         response = gui(method, params)
         if method == "tab.run_start":
-            gui.md["r_f"] = 7000.0
+            gui.md["$resonator.freq"] = 7000.0
             readout = gui.publication["tree"]["children"]["modules"]["children"][
                 "readout"
             ]
@@ -597,8 +597,8 @@ def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path)
         )
         frequency = full["actual"]["fields"]["modules.readout.pulse_cfg.freq"]
         assert frequency["value"] == 6120.0
-        assert frequency["source"] == "r_f"
-        assert frequency["input"]["raw"] == "r_f"
+        assert frequency["source"] == "$resonator.freq"
+        assert frequency["input"]["raw"] == "$resonator.freq"
         assert frequency["input"]["mode"] == "expression"
         assert frequency["input"]["resolved"] == 6120.0
         assert (

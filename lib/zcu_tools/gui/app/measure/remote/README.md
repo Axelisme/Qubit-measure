@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-10, named alias queries, cfg preview and Run acceptance
+**Last updated:** 2026-10-11, stored device flux units
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -126,8 +126,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 89`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 121`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 91`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 123`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 112`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -260,8 +260,13 @@ The wire surface is grouped by ownership:
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to
 `run_operation_id`, or an analysis preview to `operation_id`, never both.
-Omitting both retains the current-pane read. `device.snapshot.unit` comes from
-the registered device owner; `none` does not identify a physical flux unit. `method_entries/` owns the wire method
+Omitting both retains the current-pane read. `device.snapshot.unit` reads the cached Info's stored `value_unit`: YOKO reports
+A or V, and Fake reports native. Missing Info reports none without inferring from
+device type or polling hardware; none is not a usable flux coordinate. Recipe
+unit selection matches this snapshot exactly, including native, and rejects a
+mismatch before editing cfg. Remote cfg updates may include `value_unit`; Info
+validation rejects conflicting mode/unit pairs. The GUI panel does not expose
+an independent unit editor. `method_entries/` owns the wire method
 name, handler ref, schema, agent exposure and guard/reveal/operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
 `rpc.catalog` after its version handshake. Descriptions direct the caller to

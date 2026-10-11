@@ -1193,27 +1193,9 @@ class RecipeTab:
 
     def _flux_unit(self, snapshot: dict[str, object], requested: str) -> str:
         unit = snapshot["unit"]
-        info_value = snapshot.get("info")
-        info = _cfg_object(info_value) if info_value is not None else {}
-        native = (
-            unit == "none"
-            and snapshot.get("type_name") == "FakeDevice"
-            and info.get("type") == "FakeDevice"
-            and requested == "native"
-        )
-        if native:
-            return "native"
-        if (
-            snapshot.get("type_name") == "FakeDevice"
-            or info.get("type") == "FakeDevice"
-        ):
+        if not isinstance(unit, str) or not unit.strip() or unit == "none":
             raise GuiRpcError(
-                "Fake flux requires confirmed native coordinates",
-                reason="invalid_device",
-            )
-        if not isinstance(unit, str) or not unit.strip() or unit in ("none", "native"):
-            raise GuiRpcError(
-                "Flux device has no physical unit", reason="invalid_device"
+                "Flux device has no usable flux coordinate", reason="invalid_device"
             )
         if requested != unit:
             raise GuiRpcError(
@@ -1227,8 +1209,8 @@ class RecipeTab:
 
         name and unit must be non-empty strings; null or blanks raise ValueError.
         No GUI-observed default is selected. Unknown devices and mismatched units
-        fail as invalid_device. Physical units must match the device snapshot;
-        native requires confirmed FakeDevice type and snapshot unit none.
+        fail as invalid_device. Units must match the device snapshot exactly,
+        including native; none means no usable flux coordinate and is rejected.
         Selection edits dev.flux_dev and flux_unit only after validation. The
         asserted unit remains recorded for the subsequent Run snapshot. This
         method never connects a device or converts coordinates.
