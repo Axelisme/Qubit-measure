@@ -360,19 +360,20 @@ def _calibrate_frequency(
 
 def calibrate(
     env: WorkflowEnv[Calibrated],
+    *,
     qub_pulse: PulseCfg,
     readout: PulseReadoutCfg,
     tun: CalibrationTunables,
     flux: float,
     carry: CalCarry,
-    *,
     t1_estimate_us: float,
     savers: CalibrationSavers,
 ) -> Generator[Effect, None, Calibrated | CalibrationFailed]:
     """Acquire native calibration stages and update carry only on full success.
 
-    Use yield from inside a workflow step. env supplies SoC through Engine
-    ports. qub_pulse is the shared host-resolved drive; readout is the shared
+    Use yield from inside a workflow step, passing env positionally and all
+    other inputs by keyword. env supplies SoC through Engine ports.
+    qub_pulse is the shared host-resolved drive; readout is the shared
     pulse-backed module. Routing/waveform/gain come from these fixed selections.
     tun controls grids, averaging and acceptance. flux must be finite and labels accepted frequency history.
     carry is the current step's mutable copy, seeded with a valid Calibrated.

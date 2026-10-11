@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont, QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -334,14 +335,14 @@ class InspectDialog(InspectDialogBase):
                     continue
                 group_item = QTreeWidgetItem(self._ml_tree, [group])
                 group_item.setFont(0, bold)
-                group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # type: ignore[attr-defined]
+                group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 group_item.setExpanded(True)
                 for name in sorted(store):
                     child = QTreeWidgetItem(group_item, [name])
                     child.setData(
                         0,
                         Qt.ItemDataRole.UserRole,
-                        (group, name),  # type: ignore[attr-defined]
+                        (group, name),
                     )
                     if desired == (group, name):
                         restore_item = child
@@ -626,10 +627,12 @@ class InspectDialog(InspectDialogBase):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         try:
-            if group == "modules":
-                self._app_ctrl.del_ml_module(name)
-            else:
-                self._app_ctrl.del_ml_waveform(name)
+            self._app_ctrl.apply_library_change(
+                self._ctrl.read_context(),
+                LibraryChange(
+                    "module" if group == "modules" else "waveform", "delete", name
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — surface domain failures
             QMessageBox.warning(self, "Delete failed", str(exc))
             return

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from base64 import b64encode
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
 from zcu_tools.experiment.workflows import (
@@ -34,6 +34,33 @@ class RunTarget(TypedDict):
     """run_id is the non-empty native identity supplied to Start, never a token."""
 
     run_id: str
+
+
+class FluxdepOutputReply(TypedDict):
+    """One current output attempt, not a measurement outcome.
+
+    format names the native data_h5 or Labber writer. path is its allocated
+    local destination as text, or null only on failed Labber allocation.
+    status is saved/failed; error is null on success and a nonempty diagnostic
+    on failure. Earlier calls' successful paths are not merged into this reply.
+    """
+
+    format: Literal["data_h5", "labber"]
+    path: str | None
+    status: Literal["saved", "failed"]
+    error: str | None
+
+
+class FluxdepExportReply(RunTarget):
+    """Latest terminal export report for the explicitly targeted run_id.
+
+    outputs lists native then Labber attempts, including allocation failures.
+    ledger_error is null after saved-event append, otherwise its diagnostic;
+    it does not erase successful file paths or change the workflow outcome.
+    """
+
+    outputs: list[FluxdepOutputReply]
+    ledger_error: str | None
 
 
 class RecordsParams(RunTarget):
@@ -107,11 +134,14 @@ class StartParams(RunTarget):
     """Start identity and two required partial-input batches.
 
     plan/tunables contain FormWrite objects; [] uses current captured defaults.
-    Each path occurs once. They never edit the existing GUI draft before success.
+    name is an optional native workflow name; omitted/null selects catalog's T1
+    default, independently of the GUI selection. Each path occurs once. Batches
+    never edit existing draft before success; selection uses the same app owner.
     """
 
     plan: list[FormWrite]
     tunables: list[FormWrite]
+    name: NotRequired[str | None]
 
 
 class TunablesParams(RunTarget):
@@ -299,6 +329,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                     self._resume, METHOD_SPECS["workflow.resume"]
                 ),
                 "workflow.stop": BoundMethod(self._stop, METHOD_SPECS["workflow.stop"]),
+                "workflow.export_fluxdep": BoundMethod(
+                    self._export_fluxdep, METHOD_SPECS["workflow.export_fluxdep"]
+                ),
             },
             event_serializers={},
             wire_event_name=str,
@@ -314,11 +347,13 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
     ) -> WorkflowReply:
         plan_batch = _parse_form_batch(params["plan"])
         tunables_batch = _parse_form_batch(params["tunables"])
+        name = params.get("name")
         try:
             result = self.ctrl.start(
                 params["run_id"],
                 plan_batch=plan_batch,
                 tunables_batch=tunables_batch,
+                name=self.ctrl.default_workflow_name if name is None else name,
             )
         except InvalidRunState as exc:
             raise _project_control_error(exc) from exc
@@ -477,6 +512,27 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             "run_id": controller.run_id,
             "operation_id": operation_id,
             "status": _project_status(controller.status()),
+        }
+
+    def _export_fluxdep(
+        self, _adapter: RemoteControlServiceBase, params: RunTarget
+    ) -> FluxdepExportReply:
+        try:
+            report = self.ctrl.export_fluxdep(params["run_id"], origin="mcp")
+        except (RunMismatch, InvalidRunState) as exc:
+            raise _project_control_error(exc) from exc
+        return {
+            "run_id": report.run_id,
+            "outputs": [
+                {
+                    "format": out.format,
+                    "path": None if out.path is None else str(out.path),
+                    "status": out.status,
+                    "error": out.error,
+                }
+                for out in report.outputs
+            ],
+            "ledger_error": report.ledger_error,
         }
 
     def _stop(

@@ -228,15 +228,14 @@ def test_waveformref_inherits():
     assert wrv.value.fields["amp"] == DirectValue(0.9)
 
 
-def test_nested_reference_retains_link_and_override_without_sharing_values():
+def test_nested_inline_reference_inherits_without_sharing_values():
     original = _section({"length": _scalar_spec(float)})
     expanded = _section({"length": _scalar_spec(float), "sigma": _scalar_spec(float)})
     old_ref = ReferenceSpec(kind="waveform", allowed=[original])
     new_ref = ReferenceSpec(kind="waveform", allowed=[expanded])
     nested = ReferenceValue(
-        "library-waveform",
+        "<Custom:Custom>",
         _val({"length": EvalValue("duration", resolved=2.5)}),
-        is_overridden=True,
         resolved_label="Old snapshot",
         error="old error",
     )
@@ -248,8 +247,7 @@ def test_nested_reference_retains_link_and_override_without_sharing_values():
 
     inherited = result.fields["nested"]
     assert isinstance(inherited, ReferenceValue)
-    assert inherited.chosen_key == "library-waveform"
-    assert inherited.is_overridden
+    assert inherited.chosen_key == "<Custom:Custom>"
     assert inherited.error is None
     assert inherited.value.fields == {
         "length": EvalValue("duration"),

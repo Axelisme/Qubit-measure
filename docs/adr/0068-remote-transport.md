@@ -14,9 +14,19 @@ Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。
 
 ## Method 與一致性
 
-Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure、guard dependencies、成功讀取所揭露的資源及 operation key。GUI 的 `rpc.catalog` 只投影非 internal method 呼叫所需的名稱、描述、參數 schema、timeout、exposure、tool 路由與 operation key，不把 guard／reveal policy 複製到 MCP。MCP 每次連線重新讀 catalog。MCP 組合根 `scripts/run_measure_mcp.py` 將 `zcu_lab` 的 generator recipe definitions 注入 framework。共用工具固定包含分析／控制／關閉、`answer`、`apply_writeback`、`rpc_list`、`rpc_describe`、`rpc_call`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide`。日常量測優先 recipe，既有資料分析使用 `tab_analyze` 與 `tab_interact`，細部操作及排查使用 RPC。這是指引，不是權限模式。固定工具不從 catalog 動態生成。`rpc_call` 接受 catalog 中的 `rpc` 與 `tool` method，tool 路由只提示可用的高層工具。`internal` 不列入 catalog。`entry.info` 與 `point.list` 是公開 metadata 查詢，分別提供 opened entry 的 UUID／name／owner paths、目前 entry 的工作點清單。`entry.new/open` 明確建立／開啟 entry，成功發布空 DRAFT，不從 chip／qubit 名称推導 entry。每個入口最終仍經 GUI 驗證，不提供任意程式碼執行。載入、cfg、保存及個別 writeback 由公開 RPC 承接。`tab.save_data` 與 `tab.save_artifacts` 同步回傳當次完整 Save report，沒有 Save handle、await 或保存後 snapshot 二讀。Raw RPC 不接管 recipe 或共用分析的後續保存。Recipe 與共用分析的 execution 由 MCP session 持有，`wait(execution)` 觀察完整接續；`cancel` 記錄停止接續的意圖，GUI cancellation 的結果另外回報。Recipe 的 `finish_early` 停止採集後繼續處理可用結果，`cancel` 則不啟動新的分析或保存。固定的 `tab_interact` 對應 GUI `tab.interact`，讀取不切焦點、command 跟隨 Analysis pane；此 method 不用 seen guard。工具的個別輸入、畫面跟隨與 operation 結果見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)。
+Measure GUI 的 `RemoteMethodEntry` 同時宣告 method schema、agent exposure、guard dependencies、成功讀取所揭露的資源及 operation key。GUI 的 `rpc.catalog` 只投影非 internal method 呼叫所需的名稱、描述、參數 schema、timeout、exposure、tool 路由與 operation key，不把 guard／reveal policy 複製到 MCP。MCP 每次連線重新讀 catalog。MCP 組合根 `scripts/run_measure_mcp.py` 將 `zcu_lab` 的 generator recipe definitions 注入 framework。共用工具固定包含分析／控制／關閉、`answer`、`apply_writeback`、`rpc_list`、`rpc_describe`、`rpc_call`，以及 `simulation_initialize`、`device_setup`、`recipe_guide`。日常量測優先 recipe，既有資料分析使用 `tab_analyze` 與 `tab_interact`，細部操作及排查使用 RPC。這是指引，不是權限模式。固定工具不從 catalog 動態生成。`rpc_call` 接受 catalog 中的 `rpc` 與 `tool` method，tool 路由只提示可用的高層工具。`internal` 不列入 catalog。`entry.info` 與 `point.list` 是公開 metadata 查詢，分別提供 opened entry 的 UUID／name／owner paths、目前 entry 的工作點清單。`entry.new/open` 明確建立／開啟 entry，成功發布空 DRAFT，不從 chip／qubit 名称推導 entry。每個入口最終仍經 GUI 驗證，不提供任意程式碼執行。載入、cfg、保存及個別 writeback 由公開 RPC 承接。`tab.save_data` 與 `tab.save_artifacts` 同步回傳當次完整 Save report，沒有 Save handle、await 或保存後 snapshot 二讀。Raw RPC 不接管 recipe 或共用分析的後續保存。Recipe 與共用分析的 execution 由 MCP session 持有，`wait(execution)` 觀察完整接續；`cancel` 記錄停止接續的意圖，GUI cancellation 的結果另外回報。Recipe 的 `finish_early` 停止採集後繼續處理可用結果，`cancel` 則不啟動新的分析或保存。固定的 `tab_interact` 對應 GUI `tab.interact`，讀取不切焦點、command 跟隨 Analysis pane；此 method 不用 seen guard。工具的個別輸入、畫面跟隨與 operation 結果見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)。
 
-Setup 工具只編排既有 GUI owners。`simulation_initialize` 走現行 coordinator，切換時可能斷開真實裝置。`device_set_value` 宣告完整 pre-read，只送 value，不改 output 或 rampstep。Unit 不換算。兩者保留 native operation、階段與前後 snapshot。等待逾時不取消，工具不自動重連、retry 或 rollback。`recipe_guide` 從 authoritative recipe registry 的 adapter mapping 讀 native guide。這些流程不改 GUI method policy，也不授權 raw RPC 隱藏讀取。
+Setup 工具只編排既有 GUI owners。`simulation_initialize` 走現行 coordinator，切換時可能斷開真實裝置。`recipe_guide` 從 authoritative recipe registry 的 adapter mapping 讀 native guide。這些流程不改 GUI method policy，也不授權 raw RPC 隱藏讀取。
+
+### Device setup
+
+RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cached 舊值。RPC 以既有 Info 的 model class 驗 required、extra、validator 和 limits；connected admission 由 DeviceService 擁有。YOKO mode 必填，value_unit 可省略，由 Info 依 mode 產生並保存，顯式矛盾拒絕。RPC 保非同步 operation handle。Raw caller 明確讀 snapshot、改完整 cfg、setup、wait，再讀 snapshot，不新增 `device.set_value` RPC。
+
+固定 MCP `device_setup(name, cfg)` 接 partial patch。它讀 before Info，合併完整候選後送一次 RPC。YOKO patch 含 value 時，caller 必須同時明填 value_unit，不借 before unit 或 constructor 推導代替意圖。只改 output／rampstep 不需 unit。其他 model 規則仍由 RPC 驗證，不在 MCP 建第二份 validator。
+
+工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
+
+當前握手版本為 WIRE_VERSION 95、GUI_VERSION 127、MCP_VERSION 114。只有 wire 版本用於相容比對，其餘是程式版本投影；權威仍在各 owner 的版本宣告。
 
 Recipe、`tab_analyze`、`wait(execution)` 與互動完成回覆使用同一 execution 摘要。MCP 在 Run 前捕捉 resolved publication，以它投影條件與來源，不以後來的 GUI 狀態代替當次事實。`status(execution, detail="full")` 讀同一已保存的 native snapshot，不新增 RPC 或 guard 觀察。摘要列出 Primary/Post 結果、全部 writeback candidates 及 destination 身分。
 
@@ -30,13 +40,15 @@ Standalone `apply_writeback(tab, items=None)` 按穩定 `target_name` 選擇當�
 
 Measure tab cfg 使用明示的 `CfgRef`，不另加 per-connection cfg seen。`tab.get_cfg` 回完整 publication，`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 必須帶 caller 觀察到的 identity／revision。Reset 由既有 cfg resource 取得目前 adapter defaults，不複製預設值或新增 unsaved guard。另一條連線讀到的 ref 也可用，但不能代替 authentication 或請求連線的 tab、SoC、device guards。Stale 回 expected／actual，不換成最新版本。直接 RPC 保留完整 publication，edit／reset／Run 只轉送 supplied ref 一次，不隱藏重讀、refresh 或 retry。Recipe 在其已宣告流程內觀察 cfg，重用 tab 時 reset，再套本次參數與 Run；這不授權 RPC 自動修補 stale。Cfg source publication 與固定 Run acceptance 見 [[0065]]。
 
-共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。MCP flux recipe 的 native 座標只允許已確認的 FakeDevice、unit=none 與 caller 明確 opt-in，不延伸到共用 device 或 cfg 安全規則。
+共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。`device.snapshot.unit` 讀 cached Info 的 `value_unit`，YOKO 為 A／V，Fake 為 native。缺 Info 標 none，不按 device type 猜單位，不讀硬體。Zcu_lab flux recipe helper 比對 caller 明填 unit 與 snapshot unit，包括 native，沒有 Fake 特例；none 不是可用 flux 座標。Recipe policy 不延伸到共用 device 或 cfg 安全規則。
 
 Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 原樣保留這份 summary 與 invalid，不解讀 fit_quality、不改寫路徑，不猜測物理原因，不改 operation outcome、保存事實或 writeback policy。有擬合時附 fit_quality 是實驗定義者的約定，框架不檢查。這項轉換不延伸到 generic context 或 framing。
 
 其他 guarded resources 由共用 GUI remote 在 owner 序列中比較每條連線的 seen map。`ResourceObservationPolicy` 擁有 guard／reveal／write tracking 欄位，measure 的 `AgentMethodPolicy` 繼承這些欄位並另加 exposure 與 operation metadata。Shared base 在組裝時拒絕不完整的 method policy mapping，以及 off-main method 的 observation 宣告。Prefix wildcard dependency 比較 current 與 seen 兩份 key 集，包含已刪除的資源。成功的完整讀取才建立宣告的觀察；部分讀取、失敗與回覆編碼失敗不建立新觀察，版本零也不能代替未曾觀察。成功寫入只推進先前看過且版本相符的資源。建立新 tab 的例外只認證存在性，`tab.new` 與 `tab.open_file` 成功回傳 tab ID，且存在版本由 0 變 1 時，GUI 將該資源記入該連線的 seen。Result 等其他 guarded resources 仍須明確完整讀取。Load、library commit 與 writeback 仍保留各自的 context guard。
 
 MCP 不保存第二份 seen，也不用 wire expected-version table 或隱藏預讀解鎖。其他資源的 Stale 須重讀對應完整 snapshot，再由 caller 決定是否重試；event origin 不能授權寫入。Guard 不替代 operation snapshot、互斥及後續提交檢查，生命週期歸 [[0066]]。Timeout、斷線或回覆編碼失敗不證明命令沒有副作用。Reply failure 可撤回該回覆建立的 seen observation，但不回滾 business publication。沒有明確冪等契約時不自動重送。
+
+`context.snapshot` 從同一次公開 capture 回 native target、point、library 與有序 aliases。Alias rows 保留 authored value 與 resolved 名稱，單列解析失敗附 error；它不是歷史 Run 的參數版本。Parameter／library 變更事件提示重讀這份 snapshot，alias 變更提示重讀已先發布的 tab cfg，Caller 使用 native snapshot，不使用舊 md／ml getters。Optional summaries 或 path 是部分讀取，即使 false 或空 path 也不建立完整 seen；精確投影見 remote owner README。
 
 ## Workflows 的同一 run
 
@@ -56,7 +68,7 @@ Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自
 
 Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
-共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與完整 device cfg 的 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不授權硬體或真實資料。
+共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Source reload S4 與 input 保存還原 U7 未做，由 workflows-p3 承接。S1–S3 的既有 in-process simulator 證據與完整 device cfg 的 bounded 接受紀錄保留，但不代表完整 integration 或使用者 CP-B 驗收。Startup-failure scenario 14 未完成完整驗證。Base 09 終驗與 land review 前完整 integration gates 仍待完成。Agent 交付 CP-B 功能證據；UI／UX 設計與使用者走查由 UI／UX 工作另行負責，不等待 UI 修改才申請功能 landing 授權。這些證據不授權硬體或真實資料。
 
 ## 事件與錯誤
 

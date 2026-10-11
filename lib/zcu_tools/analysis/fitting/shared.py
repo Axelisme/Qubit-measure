@@ -67,6 +67,21 @@ class SharedFitResult:
         return float(vector @ self.covariance @ vector)
 
 
+def _validate_parameter_numerics(parameter: ParameterSpec) -> None:
+    """Reject nonfinite values, empty limits, then initial values outside limits."""
+    if not np.isfinite(parameter.initial):
+        raise ValueError(f"initial value for {parameter.name!r} must be finite")
+    lower, upper = parameter.limits
+    if any(bound is not None and not np.isfinite(bound) for bound in (lower, upper)):
+        raise ValueError(f"limits for {parameter.name!r} must be finite or None")
+    if lower is not None and upper is not None and lower >= upper:
+        raise ValueError(f"parameter {parameter.name!r} has empty limits")
+    if lower is not None and parameter.initial < lower:
+        raise ValueError(f"initial value for {parameter.name!r} is below its limit")
+    if upper is not None and parameter.initial > upper:
+        raise ValueError(f"initial value for {parameter.name!r} is above its limit")
+
+
 def _validate_parameters(
     parameters: Sequence[ParameterSpec], traces: Sequence[FitTrace]
 ) -> tuple[tuple[str, ...], dict[str, int]]:
@@ -80,19 +95,7 @@ def _validate_parameters(
 
     indices = {name: index for index, name in enumerate(names)}
     for parameter in parameters:
-        if not np.isfinite(parameter.initial):
-            raise ValueError(f"initial value for {parameter.name!r} must be finite")
-        lower, upper = parameter.limits
-        if any(
-            bound is not None and not np.isfinite(bound) for bound in (lower, upper)
-        ):
-            raise ValueError(f"limits for {parameter.name!r} must be finite or None")
-        if lower is not None and upper is not None and lower >= upper:
-            raise ValueError(f"parameter {parameter.name!r} has empty limits")
-        if lower is not None and parameter.initial < lower:
-            raise ValueError(f"initial value for {parameter.name!r} is below its limit")
-        if upper is not None and parameter.initial > upper:
-            raise ValueError(f"initial value for {parameter.name!r} is above its limit")
+        _validate_parameter_numerics(parameter)
 
     if not traces:
         raise ValueError("at least one fit trace is required")

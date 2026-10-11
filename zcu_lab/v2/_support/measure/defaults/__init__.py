@@ -11,10 +11,6 @@ from zcu_lab.v2._support.measure.defaults.helpers import (
     patch_pulse_fields,
     patch_ro_cfg_fields,
 )
-from zcu_lab.v2._support.measure.defaults.module_defaults import (
-    NamedModuleValue,
-    select_named_module_value,
-)
 from zcu_lab.v2._support.measure.defaults.role_factories import (
     ROLE_FACTORIES,
     RoleFactorySpec,
@@ -40,6 +36,4 @@ __all__ = [
     "make_trig_offset",
     "patch_pulse_fields",
     "patch_ro_cfg_fields",
-    "select_named_module_value",
-    "NamedModuleValue",
 ]

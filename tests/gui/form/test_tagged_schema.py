@@ -17,7 +17,8 @@ from zcu_tools.gui.form import (
     LinRange,
     RangeInput,
 )
-from zcu_tools.resources.context import MetaDict
+
+from tests.gui._form_context import captured_ext_env
 
 
 class NumericAliasBranch(FormModel):
@@ -44,15 +45,22 @@ class DiscriminatorChoicesForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Allow one alias or no tags using only the captured context."""
-        return {("branch", "kind"): () if env.md.get("empty_tags") else (2,)}
+        return {
+            ("branch", "kind"): ()
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.empty_tags").value
+            )
+            else (2,)
+        }
 
 
 def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     state = FormState(FormInput(DiscriminatorChoicesForm, {"branch": {"kind": 2}}))
     before = state.input.data
     for empty in (False, True, False):
-        env.md.update({"empty_tags": empty})
+        env = captured_ext_env(empty_tags=empty)
         schema = DiscriminatorChoicesForm.input_schema(env)
         properties = schema["properties"]
         assert isinstance(properties, dict)
@@ -68,10 +76,7 @@ def test_discriminator_identity_survives_dynamic_choices_refresh() -> None:
             assert isinstance(fields, dict)
             selector = fields["kind"]
             assert isinstance(selector, dict)
-            alternatives = selector["anyOf"]
-            assert isinstance(alternatives, list)
-            direct = alternatives[0]
-            assert isinstance(direct, dict)
+            direct = selector
             if empty:
                 assert direct["not"] == {}
             else:
@@ -118,13 +123,21 @@ class SchemaIdentityForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Refresh whole-leaf membership and only one range occurrence's n."""
-        empty = env.md.get("empty_containers")
+        empty = (
+            env.parameters is not None
+            and env.parameters.lookup("general.ext.empty_containers").value
+        )
         data = identity_input()
         return {
             ("sequence",): () if empty else (data["sequence"],),
             ("fixed",): () if empty else (data["fixed"],),
             ("mapping",): () if empty else (data["mapping"],),
-            ("restricted", "n"): (3,) if env.md.get("three_only") else (2,),
+            ("restricted", "n"): (3,)
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.three_only").value
+            )
+            else (2,),
         }
 
 
@@ -180,7 +193,7 @@ def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
 def test_container_discriminator_identity_and_retained_discriminator_identity_refresh() -> (
     None
 ):
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     state = FormState(FormInput(SchemaIdentityForm, identity_input()))
     before = state.input.data
     for empty, three_only in (
@@ -189,7 +202,7 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
         (False, True),
         (False, False),
     ):
-        env.md.update({"empty_containers": empty, "three_only": three_only})
+        env = captured_ext_env(empty_containers=empty, three_only=three_only)
         schema = SchemaIdentityForm.input_schema(env)
         fields = schema_object(schema["properties"])
         observed = identity_snapshot(schema)
@@ -281,7 +294,7 @@ class TypedTagCollisionForm(FormModel):
 
 
 def test_discriminator_identity_keeps_numeric_and_string_tags_distinct() -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     schema = TypedTagCollisionForm.input_schema(env)
     fields = schema_object(schema["properties"])
     branches = schema_object(fields["branch"])["oneOf"]
@@ -329,7 +342,7 @@ class InvalidJsonChoiceForm(FormModel):
 def test_skipped_discriminator_choice_keeps_normal_field_and_identity(
     model: type[OmittedChoiceForm | InvalidJsonChoiceForm],
 ) -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     schema = model.input_schema(env)
     fields = schema_object(schema["properties"])
     branch = schema_object(fields["branch"])
@@ -368,9 +381,19 @@ class RetainedChoiceWithChoices(NumericAliasBranch):
     @classmethod
     def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Read empty or singleton amount choices from the captured environment."""
-        if env.md.get("empty_amounts", False):
+        if (
+            env.parameters is not None
+            and env.parameters.lookup("general.ext.empty_amounts").value
+        ):
             return {("amount",): ()}
-        return {("amount",): (9.0,) if env.md.get("nine_only", False) else (7.0,)}
+        return {
+            ("amount",): (9.0,)
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.nine_only").value
+            )
+            else (7.0,)
+        }
 
 
 type AliasTags = Literal[1, 2]
@@ -408,7 +431,7 @@ class UnionTagForm(FormModel):
 def test_literal_tag_declaration_keeps_schema_and_result_agreement(
     model: type[AliasTagForm | UnionTagForm],
 ) -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     state = FormState(FormInput(model, {"branch": {"kind": 2, "amount": 7.0}}))
     before = state.input.data
     for empty, nine_only in (
@@ -417,7 +440,7 @@ def test_literal_tag_declaration_keeps_schema_and_result_agreement(
         (False, True),
         (False, False),
     ):
-        env.md.update({"empty_amounts": empty, "nine_only": nine_only})
+        env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
         schema = model.input_schema(env)
         fields = schema_object(schema["properties"])
         identities = identity_values(schema_object(fields["branch"]))
@@ -525,7 +548,7 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
         | InvalidMiddleOwnerForm
     ],
 ) -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     state = FormState(FormInput(model, {"branch": {"kind": 2, "amount": 7.0}}))
     before = state.input.data
     string_state = FormState(
@@ -538,7 +561,7 @@ def test_skipped_choice_keeps_branch_ownership_through_choices_refresh(
         (False, True),
         (False, False),
     ):
-        env.md.update({"empty_amounts": empty, "nine_only": nine_only})
+        env = captured_ext_env(empty_amounts=empty, nine_only=nine_only)
         schema = model.input_schema(env)
         fields = schema_object(schema["properties"])
         identities = identity_values(schema_object(fields["branch"]))

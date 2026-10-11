@@ -33,7 +33,7 @@ from dataclasses import dataclass
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -113,7 +113,7 @@ class PipelinePanelWidget(QWidget):
     """The dispersive single-flow analysis panel."""
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
-        from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+        from qtpy.QtCore import QTimer
 
         super().__init__(parent)
         self._ctrl = ctrl
@@ -266,8 +266,8 @@ class PipelinePanelWidget(QWidget):
 
     def _build_g_slider(self):
         """The g slider: 0..200 MHz in 1 MHz ticks (default 50). Live-refreshes dots."""
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QSlider
 
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(_G_MIN_MHZ, _G_MAX_MHZ)  # 1 tick = 1 MHz
@@ -279,8 +279,8 @@ class PipelinePanelWidget(QWidget):
         """The r_f slider: a FIXED 0..RF_TICKS tick range across the data's freq span,
         so its precision is always (freq span)/RF_TICKS. The GHz value is mapped from
         the tick (see _rf_ghz); the span/default are set in _init_tune_view."""
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
-        from qtpy.QtWidgets import QSlider  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
+        from qtpy.QtWidgets import QSlider
 
         self._rf_lo_ghz = 5.0  # data freq span, set in _init_tune_view
         self._rf_hi_ghz = 6.0
@@ -292,7 +292,7 @@ class PipelinePanelWidget(QWidget):
 
     def _build_figure_tabs(self) -> QWidget:
         """The shared tabbed figure area: Preprocess / Tune."""
-        from qtpy.QtWidgets import QTabWidget  # type: ignore[attr-defined]
+        from qtpy.QtWidgets import QTabWidget
 
         self._tabs = QTabWidget()
 
@@ -336,7 +336,7 @@ class PipelinePanelWidget(QWidget):
         # Non-blocking dialog: exec() would freeze the Qt event loop and stall the
         # read-only control socket, so open() the dialog and act on its result via
         # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
 
         dialog = ProjectDialog(
             self._ctrl.state.project,
@@ -386,7 +386,7 @@ class PipelinePanelWidget(QWidget):
         # Non-blocking dialog: exec() would freeze the Qt event loop and stall the
         # read-only control socket, so open() the dialog and act on its result via
         # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
-        from qtpy.QtCore import Qt  # type: ignore[attr-defined]
+        from qtpy.QtCore import Qt
 
         from .load_dialog import LoadOnetoneDialog
         from .paths import raw_onetone_dir

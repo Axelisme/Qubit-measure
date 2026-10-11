@@ -57,7 +57,7 @@ class TypedAcquireMixin(AcquireMixin):
     """
 
     def get_raw(self) -> list[NDArray[np.int64]] | None:
-        return super().get_raw()  # type: ignore
+        return super().get_raw()
 
     def get_time_axis(
         self, ro_index: int, length_only: bool = False
@@ -74,28 +74,28 @@ class TypedAcquireMixin(AcquireMixin):
     ) -> list[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
-    def _average_buf(  # type: ignore
+    def _average_buf(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         d_reps: list[NDArray[np.float64]],
         length_norm: bool = True,
         remove_offset: bool = True,
     ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
-            d_reps,  # type: ignore
+            d_reps,  # pyright: ignore[reportArgumentType, reportReturnType]
             length_norm=length_norm,
             remove_offset=remove_offset,
         )
 
-    def _process_accumulated(  # type: ignore
+    def _process_accumulated(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, acc_buf: list[NDArray[np.float64]]
     ) -> list[NDArray[np.float64]]:
-        return super()._process_accumulated(acc_buf)  # type: ignore
+        return super()._process_accumulated(acc_buf)  # pyright: ignore[reportReturnType]
 
     def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
-        return super().acquire(*args, **kwargs)  # type: ignore
+        return super().acquire(*args, **kwargs)  # pyright: ignore[reportReturnType]
 
     def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
-        return super().acquire_decimated(*args, **kwargs)  # type: ignore
+        return super().acquire_decimated(*args, **kwargs)  # pyright: ignore[reportReturnType]
 
     def _completed_round_count(self) -> int:
         rounds_buf = self.rounds_buf
@@ -110,7 +110,7 @@ class EarlyStopMixin(TypedAcquireMixin):
         extra_args.update(
             cancel_flag=cancel_flag if cancel_flag is not None else _LocalCancelFlag()
         )
-        return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
         self, *args, cancel_flag: CancelFlagProtocol | None = None, **kwargs
@@ -119,7 +119,7 @@ class EarlyStopMixin(TypedAcquireMixin):
         extra_args.update(
             cancel_flag=cancel_flag if cancel_flag is not None else _LocalCancelFlag()
         )
-        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)  # type: ignore
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
     def finish_round(self) -> bool:
         assert self.acquire_params is not None
@@ -364,10 +364,10 @@ class SingleShotMixin(TypedAcquireMixin):
         remove_offset: bool,
     ) -> list[NDArray[np.float64]]:
         shots = []
-        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
+        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # pyright: ignore[reportAttributeAccessIssue]
             avg = acc_buf[i_ch] / ro["length"]
             if remove_offset:
-                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # type: ignore
+                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # pyright: ignore[reportAttributeAccessIssue]
                 avg -= offset
             g_shot, e_shot, _ = classify_shots(
                 avg.dot([1, 1j]), g_center, e_center, ge_radius
@@ -409,7 +409,7 @@ class TrackerMixin(TypedAcquireMixin):
                     "Tracker is not implemented for thresholded data"
                 )
 
-            ro_chs: dict = self.ro_chs  # type: ignore
+            ro_chs: dict = self.ro_chs  # pyright: ignore[reportAttributeAccessIssue, reportMissingTypeArgument]
 
             if len(trackers) != len(self.acc_buf):
                 raise ValueError(
@@ -461,7 +461,7 @@ class RoundHookMixin(TypedAcquireMixin):
             )
             return self._summarize_accumulated(rounds_buf)
 
-        n_ro_chs = len(self.ro_chs)  # type: ignore
+        n_ro_chs = len(self.ro_chs)  # pyright: ignore[reportAttributeAccessIssue]
 
         assert self.rounds_buf is not None
         if self._inc_sum_state is None:  # first round

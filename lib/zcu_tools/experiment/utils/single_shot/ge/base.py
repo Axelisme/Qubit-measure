@@ -102,8 +102,8 @@ def hist(
         plt_params = dict(
             x=0.5 * (bins[1:] + bins[:-1]), bins=bins, range=xlims, alpha=0.5
         )
-        ax.hist(color="b", weights=ng, label="g", **plt_params)  # type: ignore
-        ax.hist(color="r", weights=ne, label="e", **plt_params)  # type: ignore
+        ax.hist(color="b", weights=ng, label="g", **plt_params)  # pyright: ignore[reportArgumentType]
+        ax.hist(color="r", weights=ne, label="e", **plt_params)  # pyright: ignore[reportArgumentType]
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
@@ -116,8 +116,7 @@ def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
     # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
     if (tp + fn) > (tn + fp):
         return (tp + fn) / (tp + tn + fp + fn)
-    else:
-        return (tn + fp) / (tp + tn + fp + fn)
+    return (tn + fp) / (tp + tn + fp + fn)
 
 
 def calc_fidelity(

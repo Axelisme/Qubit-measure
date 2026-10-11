@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard
 
 from .hw_semantics import ADDR_REG, STATUS_REG, TIMED_BASE_REG, USR_TIME_REG
 from .labels import Label, LabelRef
@@ -34,28 +34,28 @@ from .operands import (
 )
 
 CondCode = Literal["Z", "S", "NZ", "NS"]
-_VALID_COND_CODES = frozenset({"Z", "S", "NZ", "NS"})
+_VALID_COND_CODES: frozenset[CondCode] = frozenset({"Z", "S", "NZ", "NS"})
 
 TimeCOp = Literal["inc_ref", "set_ref", "updt", "rst"]
-_VALID_TIME_COPS = frozenset({"inc_ref", "set_ref", "updt", "rst"})
+_VALID_TIME_COPS: frozenset[TimeCOp] = frozenset({"inc_ref", "set_ref", "updt", "rst"})
 
 FlagCOp = Literal["set", "clr", "inv"]
-_VALID_FLAG_COPS = frozenset({"set", "clr", "inv"})
+_VALID_FLAG_COPS: frozenset[FlagCOp] = frozenset({"set", "clr", "inv"})
 
 WaitCOp = Literal["time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"]
-_VALID_WAIT_COPS = frozenset(
+_VALID_WAIT_COPS: frozenset[WaitCOp] = frozenset(
     {"time", "port_dt", "div_rdy", "div_dt", "qpa_rdy", "qpa_dt"}
 )
 
 ClearCOp = Literal["arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"]
-_VALID_CLEAR_COPS = frozenset(
+_VALID_CLEAR_COPS: frozenset[ClearCOp] = frozenset(
     {"arith", "div", "qnet", "qcom", "qpa", "qpb", "port", "all"}
 )
 
 NetCOp = Literal[
     "set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"
 ]
-_VALID_NET_COPS = frozenset(
+_VALID_NET_COPS: frozenset[NetCOp] = frozenset(
     {"set_net", "sync_net", "updt_offset", "set_dt", "get_dt", "set_flag", "get_flag"}
 )
 
@@ -70,7 +70,7 @@ ComCOp = Literal[
     "set_word_1",
     "set_word_2",
 ]
-_VALID_COM_COPS = frozenset(
+_VALID_COM_COPS: frozenset[ComCOp] = frozenset(
     {
         "set_flag",
         "sync",
@@ -85,20 +85,26 @@ _VALID_COM_COPS = frozenset(
 )
 
 ArithCOp = Literal["T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"]
-_VALID_ARITH_COPS = frozenset({"T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"})
+_VALID_ARITH_COPS: frozenset[ArithCOp] = frozenset(
+    {"T", "TP", "TM", "PT", "PTP", "PTM", "MT", "MTP", "MTM"}
+)
 
 TrigSrc = Literal["set", "clr"]
-_VALID_TRIG_SRCS = frozenset({"set", "clr"})
+_VALID_TRIG_SRCS: frozenset[TrigSrc] = frozenset({"set", "clr"})
 
 PACOp = Literal["PA", "PB"]
-_VALID_PA_CMDS = frozenset({"PA", "PB"})
+_VALID_PA_CMDS: frozenset[PACOp] = frozenset({"PA", "PB"})
 
 ComFlagVal = Literal["0", "1"]
-_VALID_COM_FLAG_VALS = frozenset({"0", "1"})
+_VALID_COM_FLAG_VALS: frozenset[ComFlagVal] = frozenset({"0", "1"})
 
 
-def _require_literal(val: str, field: str, valid: frozenset[str]) -> str:
-    if val not in valid:
+def _is_valid_literal[T: str](val: str, valid: frozenset[T]) -> TypeGuard[T]:
+    return val in valid
+
+
+def _require_literal[T: str](val: str, field: str, valid: frozenset[T]) -> T:
+    if not _is_valid_literal(val, valid):
         raise ValueError(
             f"{field}: {val!r} is not valid, expected one of {sorted(valid)}"
         )
@@ -108,11 +114,11 @@ def _require_literal(val: str, field: str, valid: frozenset[str]) -> str:
 def _parse_cond_code(val: str | None) -> CondCode | None:
     if val is None:
         return None
-    if val not in _VALID_COND_CODES:
+    if not _is_valid_literal(val, _VALID_COND_CODES):
         raise ValueError(
             f"IF: {val!r} is not a valid condition code, expected one of {sorted(_VALID_COND_CODES)}"
         )
-    return val  # type: ignore[return-value]
+    return val
 
 
 def _require_register(val: str, field: str) -> Register:
@@ -248,7 +254,7 @@ def _parse_dport_src_keyword(val: Any) -> DportSrc:
     raw = str(val)
     if raw not in ("imm", "reg"):
         raise ValueError(f"DPORT_WR.SRC must be 'imm' or 'reg', got {raw!r}")
-    return raw  # type: ignore[return-value]
+    return raw
 
 
 def _parse_dport_data_field(val: Any, src: DportSrc) -> Register | ImmValue:
@@ -448,7 +454,7 @@ class TimeInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TimeInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "TIME.C_OP", _VALID_TIME_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "TIME.C_OP", _VALID_TIME_COPS),
             lit=_parse_optional_immediate(d, "LIT", "TIME.LIT"),
             r1=_parse_optional_register(d, "R1", "TIME.R1"),
         )
@@ -830,7 +836,7 @@ DmemSrc = Literal["imm", "op"]
 def _parse_dmem_src_keyword(val: str) -> DmemSrc:
     if val not in ("imm", "op"):
         raise ValueError(f"DMEM_WR.SRC must be 'imm' or 'op', got {val!r}")
-    return val  # type: ignore[return-value]
+    return val
 
 
 @dataclass(frozen=True)
@@ -1046,7 +1052,7 @@ class TrigInst(BaseInst):
     def from_dict(cls, d: dict[str, Any]) -> TrigInst:
         return cls(
             dst=_parse_port_dst(str(d["DST"])),
-            src=_require_literal(str(d["SRC"]), "TRIG.SRC", _VALID_TRIG_SRCS),  # type: ignore[arg-type]
+            src=_require_literal(str(d["SRC"]), "TRIG.SRC", _VALID_TRIG_SRCS),
             time=_parse_optional_time(d, "TIME", "TRIG.TIME"),
         )
 
@@ -1137,7 +1143,7 @@ class FlagInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FlagInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "FLAG.C_OP", _VALID_FLAG_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "FLAG.C_OP", _VALID_FLAG_COPS),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1161,7 +1167,7 @@ class ArithInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ArithInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "ARITH.C_OP", _VALID_ARITH_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "ARITH.C_OP", _VALID_ARITH_COPS),
             r1=_parse_optional_register(d, "R1", "ARITH.R1"),
             r2=_parse_optional_register(d, "R2", "ARITH.R2"),
             r3=_parse_optional_register(d, "R3", "ARITH.R3"),
@@ -1246,7 +1252,7 @@ class NetInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> NetInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "NET.C_OP", _VALID_NET_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "NET.C_OP", _VALID_NET_COPS),
             r1=_parse_optional_register(d, "R1", "NET.R1"),
             r2=_parse_optional_register(d, "R2", "NET.R2"),
             r3=_parse_optional_register(d, "R3", "NET.R3"),
@@ -1287,8 +1293,10 @@ class ComInst(BaseInst):
         r1 = None
         if "R1" in d:
             r1_raw = d["R1"]
-            if isinstance(r1_raw, str) and r1_raw in _VALID_COM_FLAG_VALS:
-                flag_val = r1_raw  # type: ignore[assignment]
+            if isinstance(r1_raw, str) and _is_valid_literal(
+                r1_raw, _VALID_COM_FLAG_VALS
+            ):
+                flag_val = r1_raw
             else:
                 r1 = parse_register(r1_raw)
                 if r1 is None:
@@ -1297,7 +1305,7 @@ class ComInst(BaseInst):
                     )
 
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "COM.C_OP", _VALID_COM_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "COM.C_OP", _VALID_COM_COPS),
             r1=r1,
             flag_val=flag_val,
             lit=_parse_optional_immediate(d, "LIT", "COM.LIT"),
@@ -1340,7 +1348,7 @@ class CustomPeripheralInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> CustomPeripheralInst:
         return cls(
-            cmd=_require_literal(str(d["CMD"]), "PA/PB.CMD", _VALID_PA_CMDS),  # type: ignore[arg-type]
+            cmd=_require_literal(str(d["CMD"]), "PA/PB.CMD", _VALID_PA_CMDS),
             c_op=int(d["C_OP"]),
             r1=_parse_optional_register(d, "R1", f"{d['CMD']}.R1"),
             r2=_parse_optional_register(d, "R2", f"{d['CMD']}.R2"),
@@ -1381,7 +1389,7 @@ class ClearInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ClearInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "CLEAR.C_OP", _VALID_CLEAR_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "CLEAR.C_OP", _VALID_CLEAR_COPS),
         )
 
     @property
@@ -1407,7 +1415,7 @@ class WaitInst(BaseInst):
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WaitInst:
         return cls(
-            c_op=_require_literal(str(d["C_OP"]), "WAIT.C_OP", _VALID_WAIT_COPS),  # type: ignore[arg-type]
+            c_op=_require_literal(str(d["C_OP"]), "WAIT.C_OP", _VALID_WAIT_COPS),
             time=_parse_optional_time(d, "TIME", "WAIT.TIME"),
             addr=_parse_optional_addr(d, "ADDR", "WAIT.ADDR"),
         )

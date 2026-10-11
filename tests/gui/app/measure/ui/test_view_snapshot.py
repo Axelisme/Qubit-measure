@@ -73,7 +73,7 @@ def _make_snapshot_shell(
 
 def _snapshot(shell: Any) -> ViewSnapshot:
     """Invoke the real get_view_snapshot on the duck-typed shell."""
-    return MainWindow.get_view_snapshot(shell)  # type: ignore[arg-type]
+    return MainWindow.get_view_snapshot(shell)
 
 
 # ---------------------------------------------------------------------------

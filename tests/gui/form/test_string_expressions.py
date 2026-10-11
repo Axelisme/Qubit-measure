@@ -277,6 +277,57 @@ def test_single_model_selector_restore_drops_expression_and_retains_ordinary_tag
     assert result.branch.kind == "first" and result.branch.name == "saved"
 
 
+class ContainerSelectorForm(FormModel):
+    """Containers keep tagged models as whole leaves during restore."""
+
+    items: list[Annotated[FirstSelector, Field(discriminator="kind")]]
+    pair: tuple[Annotated[FirstSelector, Field(discriminator="kind")], ...]
+    by_name: Mapping[str, Annotated[FirstSelector, Field(discriminator="kind")]]
+    note: str = "unchanged"
+
+
+@pytest.mark.parametrize(
+    ("field", "saved", "ordinary"),
+    [
+        (
+            "items",
+            [{"kind": {"expr": "$device"}, "name": "saved"}],
+            [{"kind": "first", "name": {"expr": "$device"}}],
+        ),
+        (
+            "pair",
+            [{"kind": {"expr": "$device"}, "name": "saved"}],
+            [{"kind": "first", "name": {"expr": "$device"}}],
+        ),
+        (
+            "by_name",
+            {"rack.left": {"kind": {"expr": "$device"}, "name": "saved"}},
+            {"rack.left": {"kind": "first", "name": {"expr": "$device"}}},
+        ),
+    ],
+    ids=["list", "tuple", "typed-mapping"],
+)
+def test_container_selector_restore_drops_expression_whole_leaf(
+    name_env: FormEnv, field: str, saved: JsonValue, ordinary: JsonValue
+) -> None:
+    before: dict[str, JsonValue] = {
+        "items": [{"kind": "first", "name": "initial"}],
+        "pair": [{"kind": "first", "name": "initial"}],
+        "by_name": {"rack.left": {"kind": "first", "name": "initial"}},
+        "note": "unchanged",
+    }
+    state = FormState(FormInput(ContainerSelectorForm, before))
+    assert state.write_compatible({field: saved}, name_env) == ((field,),)
+    assert state.input.data == before
+    assert state.base.data == before
+
+    # Ordinary selectors and value expressions still restore as a whole leaf.
+    assert state.write_compatible({field: ordinary}, name_env) == ()
+    assert state.input.data == {**before, field: ordinary}
+    assert state.base.data == before
+    assert isinstance(state.result(name_env), ContainerSelectorForm)
+
+
 class ScalarEnvelopeForm(FormModel):
     """Malformed envelopes retain field-specific input diagnostics."""
 

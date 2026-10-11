@@ -24,7 +24,8 @@ from zcu_tools.gui.form import (
     field_error,
 )
 from zcu_tools.gui.widgets.form import FormEditor
-from zcu_tools.resources.context import MetaDict
+
+from tests.gui._form_context import captured_ext_env
 
 
 class StaticBranch(FormModel):
@@ -50,7 +51,14 @@ class AlternateBranch(FormModel):
         return {
             "kind": "alternate",
             "shared": 9.0,
-            "required": previous.get("required", env.md.get("seed", 4.0)),
+            "required": previous.get(
+                "required",
+                (
+                    env.parameters.value("general.ext.seed")
+                    if env.parameters is not None
+                    else 4.0
+                ),
+            ),
         }
 
 
@@ -87,7 +95,12 @@ class SampleForm(FormModel):
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Restrict mode according to the context provided by the host."""
         return {
-            ("mode",): ("alpha", "beta") if env.md.get("allow_beta") else ("alpha",)
+            ("mode",): ("alpha", "beta")
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.allow_beta").value
+            )
+            else ("alpha",)
         }
 
     @model_validator(mode="after")
@@ -98,11 +111,20 @@ class SampleForm(FormModel):
         return self
 
 
-def environment(seed: float = 4.0, *, allow_beta: bool = False) -> FormEnv:
+def environment(
+    seed: float = 4.0,
+    *,
+    allow_beta: bool = False,
+    empty_choices: bool = False,
+    empty_tags: bool = False,
+) -> FormEnv:
     """Build an isolated memory-only host context with numeric seed and choices."""
-    md = MetaDict()
-    md.update({"seed": seed, "allow_beta": allow_beta})
-    return FormEnv(md)
+    return captured_ext_env(
+        seed=seed,
+        allow_beta=allow_beta,
+        empty_choices=empty_choices,
+        empty_tags=empty_tags,
+    )
 
 
 @pytest.fixture
@@ -150,8 +172,8 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
 
     mode = combo(editor, "form.mode.amount")
     mode.setCurrentIndex(mode.findData("expr"))
-    line(editor, "amount").setText("seed / 2")
-    assert state.input.data["amount"] == {"expr": "seed / 2"}
+    line(editor, "amount").setText("general.ext.seed / 2")
+    assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 2.0
@@ -238,9 +260,9 @@ def test_integer_expression_and_direct_complex_keep_their_input_forms(
     views.append(editor)
     mode = combo(editor, "form.mode.count")
     mode.setCurrentIndex(mode.findData("expr"))
-    line(editor, "count").setText("seed + 1")
+    line(editor, "count").setText("general.ext.seed + 1")
     line(editor, "amplitude").setText("1+2j")
-    assert state.input.data["count"] == {"expr": "seed + 1"}
+    assert state.input.data["count"] == {"expr": "general.ext.seed + 1"}
     assert state.input.data["amplitude"] == {"__complex__": [1.0, 2.0]}
     result = state.result(env)
     assert isinstance(result, SampleForm)
@@ -322,7 +344,9 @@ def test_whole_sequence_and_mapping_text_support_replacement_and_clear(
     editor = FormEditor(state, env)
     views.append(editor)
     line(editor, "samples").setText("[2, 3]")
-    line(editor, "offsets").setText('{"rack.left": {"expr": "seed"}, "remove": 1}')
+    line(editor, "offsets").setText(
+        '{"rack.left": {"expr": "general.ext.seed"}, "remove": 1}'
+    )
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.samples == (2.0, 3.0)
@@ -365,7 +389,10 @@ def test_refresh_changes_choices_and_evaluation_without_writing_state(
     state = FormState(
         FormInput(
             SampleForm,
-            {**SampleForm.default_input(initial).data, "amount": {"expr": "seed"}},
+            {
+                **SampleForm.default_input(initial).data,
+                "amount": {"expr": "general.ext.seed"},
+            },
         )
     )
     editor = FormEditor(state, initial)
@@ -474,8 +501,8 @@ def test_numeric_choices_switch_between_direct_selection_and_expression(
     mode.setCurrentIndex(mode.findData("expr"))
     text = editor.findChild(QLineEdit, "form.input.amount")
     assert isinstance(text, QLineEdit)
-    text.setText("seed / 2")
-    assert state.input.data["amount"] == {"expr": "seed / 2"}
+    text.setText("general.ext.seed / 2")
+    assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     assert editor.errors() is None
     mode.setCurrentIndex(mode.findData("direct"))
     assert state.input.data["amount"] == 2.0
@@ -529,7 +556,9 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     views: list[QWidget], path: str, direct: float | int
 ) -> None:
     env = environment()
-    state = FormState(FormInput(NullableNumericForm, {path: {"expr": "seed"}}))
+    state = FormState(
+        FormInput(NullableNumericForm, {path: {"expr": "general.ext.seed"}})
+    )
     editor = FormEditor(state, env)
     views.append(editor)
     text = editor.findChild(QLineEdit, f"form.input.{path}")
@@ -537,7 +566,7 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert isinstance(text, QLineEdit)
     assert isinstance(mode, QComboBox)
     assert mode.currentData() == "expr"
-    assert text.text() == "seed"
+    assert text.text() == "general.ext.seed"
     mode.setCurrentIndex(mode.findData("direct"))
     text.setText(str(direct))
     assert state.input.data[path] == direct
@@ -550,8 +579,8 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert state.input.data[path] is None
     assert editor.local_parse_errors() is None
     mode.setCurrentIndex(mode.findData("expr"))
-    text.setText("seed + 1")
-    assert state.input.data[path] == {"expr": "seed + 1"}
+    text.setText("general.ext.seed + 1")
+    assert state.input.data[path] == {"expr": "general.ext.seed + 1"}
     notices: list[int] = []
     state.subscribe(lambda: notices.append(1))
     before = state.input.data
@@ -559,7 +588,7 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     editor.refresh(refreshed)
     assert state.input.data == before
     assert notices == []
-    assert text.text() == "seed + 1"
+    assert text.text() == "general.ext.seed + 1"
     result = state.result(refreshed)
     assert isinstance(result, NullableNumericForm)
     assert getattr(result, path) == 9
@@ -578,7 +607,10 @@ class EmptyChoiceForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Use only host-captured data to publish legal option sets."""
-        empty = env.md.get("empty_choices")
+        empty = (
+            env.parameters is not None
+            and env.parameters.lookup("general.ext.empty_choices").value
+        )
         return {
             ("literal",): () if empty else ("alpha", "beta"),
             ("text",): () if empty else ("alpha", "beta"),
@@ -596,8 +628,7 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
     notices: list[int] = []
     state.subscribe(lambda: notices.append(1))
     before = state.input.data
-    empty = environment()
-    empty.md.update({"empty_choices": True})
+    empty = environment(empty_choices=True)
     for captured, count in ((env, 2), (empty, 0), (env, 2), (empty, 0)):
         editor.refresh(captured)
         for path in ("literal", "text", "number"):
@@ -618,15 +649,15 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
     mode.setCurrentIndex(mode.findData("expr"))
     text = editor.findChild(QLineEdit, "form.input.number")
     assert isinstance(text, QLineEdit)
-    text.setText("seed / 2")
-    assert state.input.data["number"] == {"expr": "seed / 2"}
+    text.setText("general.ext.seed / 2")
+    assert state.input.data["number"] == {"expr": "general.ext.seed / 2"}
     assert editor.local_parse_errors() is None
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
     assert ("number",) in errors.messages
     editor.refresh(env)
     assert editor.errors() is None
-    assert text.text() == "seed / 2"
+    assert text.text() == "general.ext.seed / 2"
 
 
 class MultiTagBranch(FormModel):
@@ -713,7 +744,14 @@ class SingleDiscriminatorChoicesForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Permit only a, or no tags, from the captured context."""
-        return {("branch", "kind"): () if env.md.get("empty_tags") else ("a",)}
+        return {
+            ("branch", "kind"): ()
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.empty_tags").value
+            )
+            else ("a",)
+        }
 
 
 class MultiDiscriminatorChoicesForm(FormModel):
@@ -724,7 +762,14 @@ class MultiDiscriminatorChoicesForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Permit only a, or no tags, from the captured context."""
-        return {("branch", "kind"): () if env.md.get("empty_tags") else ("a",)}
+        return {
+            ("branch", "kind"): ()
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.empty_tags").value
+            )
+            else ("a",)
+        }
 
 
 @pytest.mark.parametrize(
@@ -736,8 +781,7 @@ def test_discriminator_choices_refresh_keeps_intrinsic_active_branch(
     | type[MultiDiscriminatorChoicesForm],
 ) -> None:
     env = environment()
-    empty = environment()
-    empty.md.update({"empty_tags": True})
+    empty = environment(empty_tags=True)
     state = FormState(
         FormInput(form_type, {"branch": {"kind": "a", "shared": 6.0, "a_only": 7.0}})
     )

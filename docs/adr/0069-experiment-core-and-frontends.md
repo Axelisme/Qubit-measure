@@ -1,14 +1,15 @@
-# 實驗核心、前端包裝與具名圖形產物
+# ADR-0069 — 實驗核心、前端包裝與具名圖形產物
 
-**狀態：** 69 個核心、相關 caller 與共用依賴已在本 task 分支完成實作，舊自訂 pyplot routing backend 已退場。修正候選已完成集中軟體驗證及雙軸審查。正式接受以 task 的逐列證據與裁決紀錄為準，landing 另需使用者授權。本文仍是 ADR 草案，不代表持久分支已採用，也不取代現行 [實驗 workflow](../0062-experiment-workflow.md)、[保存](../0063-persistence-ownership.md)、[cfg](../0065-cfg-editing.md)、[operation](../0066-operation-lifecycle.md) 與 [GUI](../0067-gui-application.md) 契約。
+**狀態：** accepted。
+**關聯：** [[0062]] 的實驗 workflow、[[0063]] 的保存、[[0065]] 的 cfg、[[0066]] 的 operation、[[0067]] 的 GUI。
 
 ## 問題
 
-本次重整處理核心與前端責任混用的問題。舊 v2 實驗 class 同時提供 Notebook 的 last_result 便利行為、量測、分析與保存，GUI adapter 再補表單、參數轉換與統一介面。Notebook 呼叫習慣牽動核心契約，GUI 因而必須傳遞 cfg 外參數。Figure、數值分析與前端生命週期也由同一層處理。
+本篇處理核心與前端責任混用的問題。原本的 v2 實驗 class 同時提供 Notebook 的 last_result 便利行為、量測、分析與保存，GUI adapter 再補表單、參數轉換與統一介面。Notebook 呼叫習慣牽動核心契約，GUI 因而必須傳遞 cfg 外參數。Figure、數值分析與前端生命週期也由同一層處理。
 
 只改用函式、拆 package 或增加宣告式 definition，不能解決這些責任問題。目標是先分開核心與前端，保留使用者直接撰寫 Python 和原生 Matplotlib 的能力。
 
-## 核准目標
+## 決策
 
 ### 核心與前端
 
@@ -63,7 +64,7 @@ plots.adopt("diagnostic", external_fig)
 
 Adapter／Notebook 分析工具掌握操作或 session 使用期，共用 plots 處理圖形機制。操作中的 Plots 提供建圖、liveplot、adopt 與 host 接合；完成成果使用另一個純具名 Figure 容器，不將 Plots 本身當作 AnalysisRecord.figures。純容器不提供建圖、接管、liveplot 或 host commands。
 
-Presentation owner 保留明確的呈現使用期與 release 責任，不能複製 mapping 後丟失所有權。跨存活 owner 接管仍拒絕。停止 producer、最後 refresh、釋放呈現与保留可保存的原生 Figure 分開處理。替換目前引用不關閉使用者持有的舊圖，release 後原生 artist 操作與 savefig 仍可使用。
+Presentation owner 保留明確的呈現使用期與 release 責任，不能複製 mapping 後丟失所有權。跨存活 owner 接管仍拒絕。停止 producer、最後 refresh、釋放呈現與保留可保存的原生 Figure 分開處理。替換目前引用不關閉使用者持有的舊圖，release 後原生 artist 操作與 savefig 仍可使用。
 
 圖已登記不表示操作成功。Core、host finish 或必要收尾失敗時不提交新成功 record，失敗診斷圖不得混入上一筆成功分析。
 
@@ -89,9 +90,9 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 保留 explicit catalog、v2／v2_gui 分離，以及單檔／package 並存。框架不要求固定內部檔名，不靠掃描或 import 副作用發現實驗。
 
-最終範圍是所有實驗及其 Notebook／GUI caller，不以現有 GUI catalog 為上限。先以一般 T1、singleshot/ge、onetone/flux_dep 驗證同步、post 與互動分析，再分批遷移其餘實驗及必要的共用 helper。
+範圍是所有實驗及其 Notebook／GUI caller，不以 GUI catalog 為上限。一般 T1、singleshot/ge、onetone/flux_dep 分別代表同步、post 與互動分析三種生命週期。
 
-過渡期間允許尚未遷移的實驗因舊契約而報錯，不為了保持它們可用而加入 pyplot 相容層。報錯須對應到未遷移項目，不能忽略已遷移路徑的 regression，也不能把過渡狀態當成最終交付。這不授權重寫 executor 或動畫框架，既有 acquisition、排程與硬體鎖機制保持。
+所有實驗與 caller 都使用這套核心與前端契約，不保留 pyplot 相容層或舊協議 fallback。Executor、動畫框架、acquisition、排程與硬體鎖機制不在本篇範圍。
 
 ## 顯式 cfg 與裝置環境
 
@@ -114,11 +115,9 @@ GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_c
 - 共用 NotebookAdapter 減少同步實驗的重複 wrapper，caller 直接使用核心 typed config／options。互動分析維持前端工具，不將 widget／session 協調塞進共用 Adapter。
 - 不呈現仍建圖，保留實作一致性與保存能力，接受建圖及 artist 更新成本。
 - 不以單一同步方法統一互動 session；通用繪圖不保證自動提供互動輸入。
-- 接受未遷移實驗在中間階段報錯，避免維護第二套繪圖或分析協議；代價是必須逐項追蹤遷移與驗證，不能只用三個標準實驗通過推定整批完成。
+- 不保留 pyplot 相容層或第二套分析協議；代價是每個實驗與 caller 都必須直接使用 explicit factory、typed config／options 與 records。
 
-## 七項核准政策與驗證接縫
-
-下列政策與完整 caller 遷移已在本 task 分支實作。末節保留接線與驗證義務，正式接受仍須逐項對照證據，不能只憑政策核准或底層能力通過推定。
+## 七項政策
 
 ### G1：一般圖與 liveplot
 
@@ -154,38 +153,20 @@ Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 pre
 
 同步分析的不呈現繪圖模式維持不變。它不是無頭互動工作流。
 
-### G7：未遷移 adapters
+### G7：GUI adapters
 
-GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另要求通用終態 options。三個標準實驗的 concrete adapters 先接入新核心，其他實驗與 adapters 隨後分期遷移，不要求每個中間階段都維持舊 caller 可用。Interactive plugin／frontend 使用 session-owned 圖集合，不探測新舊簽名，不新增反射或雙協議 fallback。
+GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另要求通用終態 options。Interactive plugin／frontend 使用 session-owned 圖集合，不探測新舊簽名，不新增反射或雙協議 fallback。
 
-完整清單須包含未出現在 GUI catalog 的實驗、組合量測 caller 與必要 helper。共用基底、fake 和支援框架需另外分類，不以 class 數量代替公開實驗清單。每項都需對應遷移範圍與驗證證據。
+### 不使用自訂 pyplot routing backend
 
-### 舊自訂 backend 退場
+實驗與 GUI caller（包括 measure 與 fluxdep search）都經 explicit factory／host 建圖，專案沒有自訂的 pyplot routing backend、routing scope 或其設定。這不是移除 Matplotlib rendering：原生 Figure／Axes、Qt canvas、Agg 與 ipympl 仍負責實際繪製。共享 runtime 保留 backend 選擇、host 初始化、shutdown handling、mathtext lock／prewarm、容器、owner scheduling、attach／detach 與 rendering 初始化。
 
-三個標準實驗與其餘實驗／GUI caller 接入 explicit factory／host 後，移除專案自訂的 pyplot routing backend，以及只服務它的 routing／scope 和設定。不以離屏 pyplot scope 延長舊核心的使用期。
+## 公開入口
 
-退場包含共享 backend 的相關 GUI caller，例如 measure 與 fluxdep search，不能只刪除 backend 檔案而留下必要路徑未接線。這不是移除 Matplotlib rendering：原生 Figure／Axes、Qt canvas、Agg 與 ipympl 仍負責實際繪製。
-
-共享 runtime 的 backend 選擇、host 初始化、shutdown handling 與 mathtext lock／prewarm 要分別核對。移除舊路由職責，保留或整理仍必要的容器、owner scheduling、attach／detach 及 rendering 初始化。
-
-## 已實作的公開入口與驗證邊界
-
-- [Experiment](../../../lib/zcu_tools/experiment/README.md) 說明 RunRecord／AnalysisRecord、nullable cfg、RunContext 與 default／grouped persistence。核心不再保存前一次結果。
-- [Notebook](../../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析可省略 source，獨立互動工具仍接明確來源；Done／Cancel 與晚到成果保留各自來源。
-- [GUI plotting](../../../lib/zcu_tools/gui/plotting/README.md) 說明原生 Figure 與 Qt presentation 的不同生命週期。Plots.finish 完成最後刷新，Plots.release 只釋放呈現。NamedFigures 保留完成後的原生圖。
+- [Experiment](../../lib/zcu_tools/experiment/README.md) 說明 RunRecord／AnalysisRecord、nullable cfg、RunContext 與 default／grouped persistence。核心不再保存前一次結果。
+- [Notebook](../../lib/zcu_tools/notebook/README.md) 說明 NotebookAdapter、GEPostAnalyzer 與 FluxDepAnalyzer。同步分析可省略 source，獨立互動工具仍接明確來源；Done／Cancel 與晚到成果保留各自來源。
+- [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md) 說明原生 Figure 與 Qt presentation 的不同生命週期。Plots.finish 完成最後刷新，Plots.release 只釋放呈現。NamedFigures 保留完成後的原生圖。
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。ArtifactTracker 記錄每張圖是否曾成功保存，SaveService 捕捉本次保存來源與目的地。Save All 選尚未保存的成果，個別失敗不撤銷先前成功項。
-- [Session](../../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
+- [Session](../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager owner 與 Use Simulate Env coordinator。一般 SoC 連線不建立 FakeDevice，coordinator 先完成真實裝置斷線，再發布已綁定來源的 mock 環境。
 
-三個參考實驗已有各自的軟體接受紀錄，其餘核心與 callers 已完成遷移。全 task 的 Standards／Spec 審查指出的 Notebook 失敗提交、grouped persistence 接線及 typed analysis 缺口已修正。R04 修正後的兩軸審查沒有新增 findings，報告本身不等於正式接受或 landing 授權。
-
-2026-10-02 的 R04 修正候選通過集中行為測試，結果為 7435 passed、7 skipped。這是 Notebook 環境柯里化與 StopSignal helper 修訂前的結果，不代替後續候選驗證。7 項因缺少 fluxonium_1.h5 未執行。全 repo type／lint 仍有既有診斷，不能以行為測試通過宣稱所有檢查全綠。
-
-本次未操作硬體，也未重跑所有 Notebook cells 或 FFmpeg。既有 VSCode 60-frame 人工觀察只覆蓋當時的探針與版本。Standalone [liveplot](../../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於新的 Plots host。
-
-## 轉正為現況的條件
-
-先完成三個標準實驗的 Notebook／GUI 接線與 G1–G7 契約驗證，再以完整清單逐項確認其他實驗及必要 caller 已遷移。以公開 seam 驗證 cfg snapshot、typed analysis、primary／post 來源、互動 Done／Cancel、具名多圖與保存失敗；以直接審閱確認責任、依賴與匯出。
-
-舊自訂 backend 退場須有適用 GUI caller 的行為證據。刪除路由與專用測試後，仍須驗證新 host 的呈現、刷新、失敗與釋放行為；不新增「舊檔案不存在」的測試，也不以刪檔結果作為替代成功的證明。
-
-不得用一般 T1 通過推定 interactive 或 post-analysis 已驗收。Notebook inline／widget 顯示與 Qt thread 接合需有對應觀察，不以數值測試代替。驗證完成後才將已落實部分寫入現行 ADR 與 module README。
+Standalone [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 保留自己的 backend 與 close 契約，不等同於 Plots host。

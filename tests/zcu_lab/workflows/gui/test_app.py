@@ -62,28 +62,28 @@ def qapp() -> QApplication:
 @pytest.fixture
 def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
     before = registry_state()
-    component_registry.register("qubit/workflow-app-test", QubitSchema)
-    component_registry.register("resonator/workflow-app-test", ResonatorSchema)
     try:
-        role_registry.get("qubit")
-    except ValueError:
-        role_registry.register("qubit", RoleSpec("qubit/*"))
-    installed = registry_state()
-    behavior = WorkflowsGuiBehavior(project_root=str(tmp_path))
-    try:
-        yield behavior
-    finally:
-        # Every test assembles before reaching assertions; retain workers through
-        # public shutdown before allowing Qt objects to be released.
-        if hasattr(behavior, "window"):
-            behavior.window.close()
-            behavior.shutdown()
-            behavior.window.deleteLater()
-            qapp.processEvents()
+        component_registry.register("qubit/workflow-app-test", QubitSchema)
+        component_registry.register("resonator/workflow-app-test", ResonatorSchema)
         try:
-            assert registry_state() == installed, "app test polluted definitions"
+            role_registry.get("qubit")
+        except ValueError:
+            role_registry.register("qubit", RoleSpec("qubit/*"))
+        installed = registry_state()
+        behavior = WorkflowsGuiBehavior(project_root=str(tmp_path))
+        try:
+            yield behavior
         finally:
-            restore_registry(before)
+            # Retain workers through public shutdown before releasing Qt objects.
+            # Cleanup failures propagate; the outer finally still restores registries.
+            if hasattr(behavior, "window"):
+                behavior.window.close()
+                behavior.shutdown()
+                behavior.window.deleteLater()
+                qapp.processEvents()
+            assert registry_state() == installed, "app test polluted definitions"
+    finally:
+        restore_registry(before)
 
 
 def button(window: T1WorkflowWindow, name: str) -> QPushButton:

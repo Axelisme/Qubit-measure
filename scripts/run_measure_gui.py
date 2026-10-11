@@ -60,16 +60,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _build_measure_catalogs():
     """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
-    from zcu_tools.gui.app.measure.catalog_loader import (
-        SourceExperimentCatalogLoader,
-        SourcePackage,
-    )
+    from zcu_tools.gui.app.measure.catalog_loader import SourceExperimentCatalogLoader
 
     # Composition root: wire the user-owned experiment attachments
     # into the GUI framework. The behavior receives a factory, so these imports
     # happen after runtime logging and matplotlib policy setup.
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+    from zcu_tools.gui.catalog_loader import SourcePackage
     from zcu_tools.resources.entry.registry import component_registry
 
     from zcu_lab.definitions import register_all

@@ -71,12 +71,11 @@ INC_REG_IMM_MAX: int = (1 << 20) - 1
 
 
 def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
-    if not isinstance(inst, RegWriteInst):
-        return None
-    if inst.src != SrcKeyword.OP or not isinstance(inst.op, AluExpr):
-        return None
     if (
-        inst.uf
+        not isinstance(inst, RegWriteInst)
+        or inst.src != SrcKeyword.OP
+        or not isinstance(inst.op, AluExpr)
+        or inst.uf
         or inst.if_cond is not None
         or inst.wr is not None
         or inst.label is not None
@@ -85,14 +84,14 @@ def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
         return None
 
     op = inst.op
-    if op.op not in (AluOp.ADD, AluOp.SUB):
-        return None
-    if not isinstance(op.rhs, Immediate):
+    if (
+        op.op not in (AluOp.ADD, AluOp.SUB)
+        or not isinstance(op.rhs, Immediate)
+        or op.lhs != inst.dst
+    ):
         return None
 
     lhs = op.lhs
-    if lhs != inst.dst:
-        return None
 
     # Only optimize general-purpose user registers (r0, r1, ...).
     # System registers (sN) and wave registers (wN/r_wave) are excluded for safety,
@@ -114,6 +113,16 @@ def _is_const_increment(inst: BaseInst) -> tuple[str, int] | None:
 def _make_increment_inst(reg: str, val: int) -> RegWriteInst:
     op = AluExpr(Register(reg), AluOp.ADD, Immediate(val))
     return RegWriteInst(dst=Register(reg), src=SrcKeyword.OP, op=op)
+
+
+def _flush_pending_increments(
+    pending: dict[str, int], result: list[BaseInst], regs: list[str]
+) -> None:
+    """Emit selected pending increments in register order, omitting zero totals."""
+    for reg in regs:
+        val = pending.pop(reg, 0)
+        if val != 0:
+            result.append(_make_increment_inst(reg, val))
 
 
 class IncRegMergePass(BlockChunkPass):
@@ -143,10 +152,7 @@ class IncRegMergePass(BlockChunkPass):
         for inst in block.insts:
             if self._is_increment_motion_barrier(inst):
                 # Flush ALL pending before unsafe instruction
-                for reg, val in pending.items():
-                    if val != 0:
-                        result.append(_make_increment_inst(reg, val))
-                pending.clear()
+                _flush_pending_increments(pending, result, list(pending))
                 result.append(inst)
                 continue
 
@@ -157,9 +163,7 @@ class IncRegMergePass(BlockChunkPass):
                 if abs(new_total) > INC_REG_IMM_MAX:
                     # Flush the old accumulation before it overflows the
                     # 24-bit signed immediate field, then start fresh.
-                    old = pending.pop(reg, 0)
-                    if old != 0:
-                        result.append(_make_increment_inst(reg, old))
+                    _flush_pending_increments(pending, result, [reg])
                     if abs(val) > INC_REG_IMM_MAX:
                         # Single step already exceeds the limit; emit as-is.
                         result.append(inst)
@@ -173,18 +177,13 @@ class IncRegMergePass(BlockChunkPass):
 
                 # Flush pending increments if their register (or any alias of
                 # it) is read or written by this instruction.
-                for reg in list(pending.keys()):
-                    if reg in reads or reg in writes:
-                        val = pending.pop(reg)
-                        if val != 0:
-                            result.append(_make_increment_inst(reg, val))
+                touched = [reg for reg in pending if reg in reads or reg in writes]
+                _flush_pending_increments(pending, result, touched)
 
                 result.append(inst)
 
         # Flush remaining at the end of the block
-        for reg, val in pending.items():
-            if val != 0:
-                result.append(_make_increment_inst(reg, val))
+        _flush_pending_increments(pending, result, list(pending))
 
         block.insts = result
 
@@ -202,6 +201,4 @@ class IncRegMergePass(BlockChunkPass):
             and inst.r1 is not None
         ):
             return False
-        if isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg():
-            return False
-        return True
+        return not (isinstance(inst, RegWriteInst) and not inst.dst.is_volatile_reg())

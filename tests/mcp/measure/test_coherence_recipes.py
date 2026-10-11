@@ -12,7 +12,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 
 from ._recipe_actual_support import cfg_sweep, cfg_value
-from ._recipe_support import PNG, LookbackGui, scalar, section
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar, section
 from ._support import MeasureClient, full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -81,6 +81,7 @@ class CoherenceGui(LookbackGui):
         tree["modules"]["children"]["pi2_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": pi2_ref,
             "error": None,
             "children": {"freq": scalar(6100.0)},
@@ -89,6 +90,7 @@ class CoherenceGui(LookbackGui):
             length={
                 "kind": "sweep",
                 "valid": True,
+                "readonly": False,
                 "inputs": {
                     key: scalar(value)["input"]
                     for key, value in {"start": 0.04, "stop": 60.0, "expts": 61}.items()
@@ -98,11 +100,13 @@ class CoherenceGui(LookbackGui):
         self.publication["tree"]["children"]["modules"]["children"]["pi_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": pi_ref,
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
 
+        publish_reference_locks(self.publication["tree"])
         self.defaults = deepcopy(self.publication)
 
     def _edit(self, params):

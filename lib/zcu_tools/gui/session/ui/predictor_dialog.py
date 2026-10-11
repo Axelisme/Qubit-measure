@@ -266,7 +266,7 @@ class PredictorDialog(QDialog):
             device_combo.setMinimumWidth(160)
             device_combo.setMinimumContentsLength(16)
             device_combo.setSizeAdjustPolicy(
-                QComboBox.AdjustToMinimumContentsLengthWithIcon  # type: ignore[attr-defined]
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
             self._value_controls_row.addWidget(device_combo)
@@ -314,15 +314,9 @@ class PredictorDialog(QDialog):
         header = self._table.horizontalHeader()
         if header is not None:
             header.setStretchLastSection(True)
-        self._table.setSelectionBehavior(
-            QAbstractItemView.SelectRows  # type: ignore[attr-defined]
-        )
-        self._table.setSelectionMode(
-            QAbstractItemView.ExtendedSelection  # type: ignore[attr-defined]
-        )
-        self._table.setEditTriggers(
-            QTableWidget.NoEditTriggers  # type: ignore[attr-defined]
-        )
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         transitions_layout.addWidget(self._table)
 

@@ -147,8 +147,8 @@ _VLEN_STR = h5py.special_dtype(vlen=str)
 
 def _decode(value: Any) -> Any:
     """Decode hdf5 bytes/arrays to python str (mirrors SR_HDF5.decodeAttribute)."""
-    if isinstance(value, bytes):
-        s = value.decode("utf-8")
+    if isinstance(value, (bytes, str)):
+        s = value.decode("utf-8") if isinstance(value, bytes) else value
         return None if s == "NoneValue" else s
     if isinstance(value, np.ndarray):
         if value.dtype.type is np.bytes_:
@@ -160,8 +160,6 @@ def _decode(value: Any) -> Any:
         return value
     if isinstance(value, np.bool_):
         return bool(value)
-    if isinstance(value, str):
-        return None if value == "NoneValue" else value
     return value
 
 
@@ -452,8 +450,8 @@ def _write_uniform_log_group(
     _write_config(target, axis_list, log_channels)
     if write_tags:
         _write_tags(target, as_tag_list(ld.tags), ld.project, ld.user)
-    _write_data_group(
-        target, axis_list, log_channels, step_dims, z_arr, n_entry, n_x, ts_rel
+    _write_multi_channel_data_group(
+        target, axis_list, log_channels, step_dims, [z_arr], n_entry, n_x, ts_rel
     )
 
 
@@ -742,6 +740,7 @@ def _write_config(
     f,
     step_channels,
     log_channels,
+    *,
     log_vector=False,
     trace_x_name="Index",
     trace_x_unit="",
@@ -876,20 +875,6 @@ def _write_tags(f, tags, project, user):
         g.attrs["Tags"] = _str_array(tags)
     else:
         g.attrs["Tags"] = np.array([], dtype=float)
-
-
-def _write_data_group(f, axis_list, log_channels, step_dims, z, n_entry, n_x, ts_rel):
-    """Write ``Data/`` for one complex scalar log channel."""
-    _write_multi_channel_data_group(
-        f,
-        axis_list,
-        log_channels,
-        step_dims,
-        [z],
-        n_entry,
-        n_x,
-        ts_rel,
-    )
 
 
 def _write_multi_channel_data_group(
@@ -1279,10 +1264,11 @@ def _read_uniform_multi_channel_log(
     axes: list[tuple[str, str, np.ndarray]] = []
     outer_strides = np.cumprod([1, *step_dims[1:-1]])
     for k, name in enumerate(step_names):
-        if k == 0:
-            values = data[:, 0, 0]
-        else:
-            values = data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
+        values = (
+            data[:, 0, 0]
+            if k == 0
+            else data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
+        )
         axes.append((name, units.get(name, ""), np.asarray(values)))
 
     expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
