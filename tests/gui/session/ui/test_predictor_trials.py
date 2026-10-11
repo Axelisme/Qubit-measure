@@ -229,3 +229,35 @@ def test_dialog_file_load_only_prefills_local_parameters(qapp, tmp_path: Path) -
         assert path.read_bytes() == before
     finally:
         dialog.close()
+
+
+def test_dialog_cache_restores_transmon_and_fluxonium_trials(
+    qapp, tmp_path: Path
+) -> None:
+    from zcu_tools.simulate.transmon import TransmonParams
+
+    port = PredictorControlFacet(PredictorService())
+    trial = TransmonParams(EJmax=20.0, EC=0.3, d=0.0)
+    dialog = PredictorDialog(port)
+    try:
+        dialog.enable_parameter_cache(cache_dir=tmp_path)
+        dialog.set_parameters(trial)
+        assert dialog.parameters() == trial
+        with pytest.raises(ValueError, match="flux_half, flux_period, flux_bias"):
+            dialog.predict_frequency(0.0)
+    finally:
+        dialog.close()
+    reopened = PredictorDialog(port)
+    try:
+        reopened.enable_parameter_cache(cache_dir=tmp_path)
+        assert reopened.parameters() == trial
+        assert reopened.capture_persisted_state().model == "transmon"
+        reopened.set_parameters(FluxoniumParams(EJ=4.1))
+    finally:
+        reopened.close()
+    fluxonium = PredictorDialog(port)
+    try:
+        fluxonium.enable_parameter_cache(cache_dir=tmp_path)
+        assert fluxonium.parameters() == FluxoniumParams(EJ=4.1)
+    finally:
+        fluxonium.close()

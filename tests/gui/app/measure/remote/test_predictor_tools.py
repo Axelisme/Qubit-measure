@@ -319,3 +319,27 @@ def test_mcp_rpc_preserves_read_only_sources_and_named_errors(
         assert controller.context_control.read_context().document() == before
     finally:
         bridge.disconnect()
+
+
+def test_transmon_direct_info_and_missing_prediction(simulator) -> None:
+    _, _, sock = simulator
+    direct = {"model": "transmon", "EJmax": 20.0, "d": 0.0}
+    reply = call(sock, "predictor.info", {"params": direct})
+    assert reply["ok"], reply
+    assert reply["result"] == {
+        "model": "transmon",
+        "params": {
+            "EJmax": 20.0,
+            "EC": None,
+            "d": 0.0,
+            "flux_half": None,
+            "flux_period": None,
+            "flux_bias": None,
+        },
+        "missing": ["EC", "flux_half", "flux_period", "flux_bias"],
+    }
+    failed = call(sock, "predictor.predict", {"params": direct, "device_value": 0.0})
+    assert failed["error"]["reason"] == "missing_predictor_params"
+    assert failed["error"]["data"]["missing"] == reply["result"]["missing"]
+    invalid = call(sock, "predictor.info", {"params": {**direct, "EL": 1.0}})
+    assert invalid["error"]["reason"] == "invalid_predictor_params"

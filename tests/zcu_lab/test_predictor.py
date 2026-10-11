@@ -75,3 +75,32 @@ def test_params_for_rejects_invalid_extension_bias(entry: ResultEntry) -> None:
     point.Q2.ext = {"flux_bias": "not numeric"}
     with pytest.raises(ValueError, match="flux_bias"):
         components.params_for(point.Q2)
+
+
+def test_transmon_prefill_uses_own_fields_and_preserves_missing_bias() -> None:
+    from zcu_tools.resources.entry.registry import ComponentRegistry
+
+    registry = ComponentRegistry()
+    components.register_all(registry)
+    model = registry.get("qubit/transmon").model_validate(
+        {
+            "kind": "qubit/transmon",
+            "EJmax": 20.0,
+            "EC": 0.3,
+            "d": 0.0,
+            "flux_half": 0.5,
+            "flux_period": 1.0,
+        }
+    )
+    before = model.model_dump()
+    params = components.params_for(model)
+    assert params.to_dict() == {
+        "EJmax": 20.0,
+        "EC": 0.3,
+        "d": 0.0,
+        "flux_half": 0.5,
+        "flux_period": 1.0,
+        "flux_bias": None,
+    }
+    assert params.missing() == ("flux_bias",)
+    assert model.model_dump() == before
