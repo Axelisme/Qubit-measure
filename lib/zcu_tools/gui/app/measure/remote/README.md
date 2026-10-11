@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12, explicit working-point selection, sample writeback, device setup, independent predictor and integrated versions
+**Last updated:** 2026-10-12, entry metadata in EMPTY and captured SavedPoint contracts
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -247,7 +247,15 @@ GUI owns observation and write tracking:
   `library` contain the complete working-unit native documents, including
   headers, registered component fields and provenance. The library contains
   persistent Specs; this read does not materialize references or open waveform
-  assets. A memory draft is readable; EMPTY and necessary source faults fail.
+  assets. EMPTY has parameters=None, so this parameter snapshot fails until a
+  point is explicitly selected or created; necessary source faults also fail.
+  Without an opened entry, entry metadata and source binding are absent. An
+  opened entry without a selected point is still EMPTY, but entry.info,
+  point.list and setup source binding remain readable. SoC, device and
+  independent predictor operations retain their own admission rules. Run,
+  writeback and current-point Inspect Set require a selected point at application
+  admission. Writeback retains its captured SavedPoint(E, A) after selecting B
+  in the same entry; a cross-entry destination is rejected.
   Complex numbers retain the `{__complex__: [real, imag]}` wire projection.
   Unsupported values, non-finite numbers and encoding failures reject the full
   read and establish no baseline. These replies may be large or sensitive.

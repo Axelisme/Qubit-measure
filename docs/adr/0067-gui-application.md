@@ -16,7 +16,7 @@ GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner �
 
 Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 
-可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 沒有參數；開啟 entry 後建立記憶體 DRAFT，選取 point 後使用 ACTIVE 的持久文件。SavedPoint 寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。DRAFT 只提交記憶體候選。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 和失效 DRAFT 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
+可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 的 parameters 是 None。未開 entry 時沒有 entry metadata 或 source binding；開啟 entry 後仍為 EMPTY，不自選 point，但可讀 entry metadata、point list 與 setup source binding。選取或建立 point 後才使用 ACTIVE 的持久文件。SoC、device 與獨立 predictor 不因沒有參數而停用。SavedPoint 是唯一參數寫入目標，寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。Parameter／library 寫入要求目前已有選取的 point。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
@@ -24,7 +24,7 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 全域有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_preset` 提供 Measure 初值，框架不宣告領域 preset，也不反向 import zcu_lab。使用者套件的唯一初值是 `ALIAS_PRESET`，flux_dev 空列不猜裝置或 cache。
 
-普通 `set_alias_rows` 只改 memory。Dialog Apply 先原子驗證整表，再由 entry owner 保存 `aliases.yaml`，成功後才安裝 memory 與發布 fact。EMPTY 只改 memory，失敗保舊表、舊檔與 draft。每次開 entry 有檔就載入，無檔重設 caller preset 並重新啟用第一份非空 point 的 primary 唯一候選初始化。Saved 空表與空列不自填，切 point 不重讀或換表。這不寫 preference、point、setup 或 ledger；保存分界見 [[0063]]。
+普通 `set_alias_rows` 只改 memory。Dialog Apply 先原子驗證整表，再由 entry owner 保存 `aliases.yaml`，成功後才安裝 memory 與發布 fact。未開 entry 時只改 memory，失敗保舊表、舊檔與 dialog draft。每次開 entry 有檔就載入，無檔重設 caller preset 並重新啟用第一份非空 point 的 primary 唯一候選初始化。Saved 空表與空列不自填，切 point 不重讀或換表。這不寫 preference、point、setup 或 ledger；保存分界見 [[0063]]。
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
 

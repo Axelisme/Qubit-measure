@@ -47,7 +47,7 @@ Run the registration cell once per kernel. Restart the kernel before repeating i
 
 ## Synthetic environment
 
-SimParams frequencies are GHz; pulse and component frequencies are MHz. Coherence and pulse lengths use microseconds. The simulated operating value is zero, at half flux for this model.
+SimParams frequencies are GHz; pulse and component frequencies are MHz. Coherence and pulse lengths use microseconds. The simulated operating value is zero, at half flux for this model. Bind that value explicitly with set_flux_source; an unbound mock uses reduced flux 1.0, not this operating point.
 
 ```python
 sim = SimParams(
@@ -59,6 +59,7 @@ sim = SimParams(
     poll_latency=0.0, seed=42,
 )
 soc, soccfg = make_mock_soc(n_gens=2, n_readouts=1, sim=sim)
+soc.set_flux_source(lambda: 0.0)
 device_manager = DeviceManager()
 nb_adapter = NotebookAdapter(
     soc=soc, soccfg=soccfg, device_manager=device_manager,
@@ -159,14 +160,13 @@ ml.module_keys()
 
 ## Cfg and run
 
-Capture a new library snapshot after edits or a point switch. CfgEnv does not refresh the library or evaluate parameter expressions. Read parameter values explicitly when building raw cfg.
+Capture a new library snapshot after edits or a point switch. CfgEnv does not refresh the library or evaluate parameter expressions. Read parameter values explicitly when building raw cfg. Omit the optional reset module to use T1Cfg's None default; make_cfg expects each supplied module to be a Spec or library key.
 
 ```python
 env = CfgEnv(ml=ml, device_manager=device_manager)
 cfg = make_cfg(
     {
         "modules": {
-            "reset": None,
             "pi_pulse": "Q1.pulses.pi",
             "readout": "R1.readout.measure",
         },

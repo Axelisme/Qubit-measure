@@ -183,7 +183,10 @@ class ContextService:
         alias syntax failures propagate, never falling back to the preset.
         Failure retains the old binding,
         not deleting an entry already created by resources. Success bumps the
-        context once and publishes a switch fact after installation.
+        context once and publishes a switch fact after installation. It clears
+        point selection and publishes EMPTY with parameters=None, while retaining
+        entry metadata, the point list and setup source binding. SoC, device and
+        independent predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
         saved_aliases = entry.load_aliases()
@@ -216,7 +219,10 @@ class ContextService:
         return info
 
     def get_source_binding(self) -> ContextSourceBinding | None:
-        """Return detached cached persistent sources, or None for EMPTY.
+        """Return detached cached persistent sources, or None without an opened entry.
+
+        An opened entry without a selected point is EMPTY with a setup source
+        binding; selecting a point adds its point/library sources.
 
         This internal source ID is for facts/refresh, never part of read targets.
         Query performs no I/O and does not select a point.
@@ -224,7 +230,11 @@ class ContextService:
         return deepcopy(self._source_binding)
 
     def get_entry_info(self) -> EntryInfo | None:
-        """Return the cached opened entry, or None for EMPTY; never refresh."""
+        """Return cached entry metadata, or None when no entry is opened.
+
+        An opened entry remains readable in EMPTY before point selection.
+        This query performs no I/O and never refreshes or selects a point.
+        """
         return deepcopy(self._entry_info)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
@@ -440,8 +450,9 @@ class ContextService:
         """Explicitly confirm authored rows, saving only when an entry is open.
 
         On the owner thread, validate syntax/order through AliasTable, then save
-        through the entry before installing memory and publishing changes. EMPTY
-        succeeds in memory only. InvalidInputError(alias_invalid) or storage I/O
+        through the entry before installing memory and publishing changes. Without
+        an opened entry it succeeds in memory only. An opened entry in EMPTY
+        still saves its table. InvalidInputError(alias_invalid) or storage I/O
         errors preserve old rows, versions and destination file; storage causes
         propagate unchanged. Identical rows still save but publish no event.
         Successful Apply disables default initialization. No ledger or point
@@ -493,8 +504,9 @@ class ContextService:
     ) -> JsonObject | None:
         """Read one run's latest entry JSONL sample without changing selection.
 
-        target validates the opened entry and existing selected-draft requirement;
-        sample history itself belongs to the entry, independent of point. The
+        target validates the opened entry identity, rejecting cross-entry targets;
+        no point selection or point-file read is required. Sample history itself
+        belongs to the entry, independent of point. The
         sample owner returns a detached complete JSON row or None if absent.
         Invalid component/run_id, corrupt history and I/O errors propagate. No
         dataframe projection, context publication or refresh is performed here.
@@ -514,13 +526,21 @@ class ContextService:
         Validate the opened entry and captured SavedPoint before append.
         ResultEntry.use_point validates its label, existence and point document;
         ValueError/FileNotFoundError and other load errors propagate before
-        append. SavedPoint parameter/library setters commit files; samples append to
-        entry JSONL immediately with the captured point label.
+        append. The executor appends accepted before invoking setters in item
+        order. Parameter/library setters require a currently selected point and
+        commit the captured point's files, not the selected point's files when
+        different. Samples need no selection and append to entry JSONL with the
+        captured point label. Thus a direct call without selection may append
+        accepted and then fail at a parameter/library item; sample-only can
+        succeed. Application GuardService admission rejects missing selection
+        before calling this entry point.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
         Return the accepted ID on success. WritebackApplyError exposes event_id,
         applied and original cause for item failures; append errors propagate
-        unchanged. No point creation, draft save, retry or rollback occurs.
+        unchanged. A same-entry selection change never redirects the target;
+        cross-entry targets fail before append. No point creation, retry or
+        rollback occurs.
         """
         self._owner.assert_owner()
         if not items:

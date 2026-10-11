@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，工作點選取、SavedPoint writeback、固定 Run capture 與獨立 predictor
+**Last updated:** 2026-10-12，entry EMPTY metadata、SavedPoint 寫入條件與 editor draft
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -819,7 +819,11 @@ Apply calls the replacement write interface, which validates and lowers before t
 single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
 the resulting selection. Collision, invalid, or lowering failures leave the live
 entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
-不改目的地；跨 entry 或失效 DRAFT 拒絕提交，保留 draft 供 Revert／Discard。
+不改 captured SavedPoint 目的地。提交要求目前已選取工作點，跨 entry 拒絕，
+保留 editor draft 供 Revert／Discard。開啟 entry 不自選 point，
+parameters=None、readiness=EMPTY。Entry metadata、point list 與 setup source
+binding 仍可讀。Run、WB 與目前 point 的 Inspect Set 停用並提示先選取或建立
+工作點。SoC、device 與獨立 predictor 保留各自能力。
 Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete

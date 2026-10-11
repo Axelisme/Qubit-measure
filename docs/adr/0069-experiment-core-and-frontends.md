@@ -98,9 +98,9 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 DeviceManager 的 registry、lock 與 close claims 屬於 instance，不提供預設 singleton。Notebook 與 GUI composition 持有或接收 manager；共享 driver 的 caller 共享同一 manager，不各自取得關閉權。既有 alias、close failure 與 driver lock 契約保留，不以 destructor 自動關閉，不把 disconnect 當作歸零或 RF off。
 
-Notebook 使用 `CfgEnv(md, ml, device_manager)` 集中借用資源。顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時取得當次 device snapshot，再組裝 typed cfg。讀取失敗直接報錯，不退回舊 snapshot，不執行 setup。md 目前只作資源引用，raw cfg 中的 `md.foo` 在建立 dict 時取值，不新增 expression 或延遲求值。
+Notebook 使用 `CfgEnv(ml, device_manager)` 借用固定 library snapshot 與 caller 的 DeviceManager。顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 以該 library 的 validation context 組裝 typed cfg，不讀取或設定 devices。參數值由 caller 在建立 raw cfg dict 時直接讀 point 或 roles，不交給 CfgEnv 解析 expression 或延遲求值。組裝失敗直接報錯，不 refresh 來源或退回舊 cfg。
 
-CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 md、ml 或 registry 管理權。底層 `assemble_experiment_cfg` 仍接顯式 snapshot，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新資訊時由使用者再次 make_cfg；driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
+CfgEnv 與 RunContext 分工不同。前者可跨次組裝重用；後者只有單次執行能力，不讓核心取得 point、library 或 registry 管理權。底層 `assemble_experiment_cfg` 接顯式 validation context，不讀硬體。Run 不重新組裝 cfg、不重連、不補裝置。需要新的參數或 library 資訊時，caller 明確讀取來源、重建 CfgEnv，再次呼叫 make_cfg。Driver mapping 不是資源 lease，也不凍結 driver 狀態。Notebook 初始化 cell 重跑就重建，不探查 namespace 或自動重用，舊連線仍由使用者明確關閉。GUI 的固定來源、CfgRef／revision 與 acceptance 不因 Notebook 入口而重新查詢硬體。
 
 GUI 的 Use Simulate Env 入口由獨立 coordinator 編排，不由一般 soc_changed 通知偷偷註冊 FakeDevice。通過既有互斥檢查後，先經 owner disconnect 已連線的真實 devices，FakeDevice 保留。全部成功才確認或建立 FakeDevice、註冊、將其即時數值 reader 綁定 MockSoc，再交給 SoC owner。既有有效 mock source 不重設；matching predictor 的配套亦由 coordinator 組裝。
 
