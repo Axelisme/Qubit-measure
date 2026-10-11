@@ -14,7 +14,11 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 if TYPE_CHECKING:
+    from zcu_tools.experiment.workflows.declaration import WorkflowStep
+
+    from zcu_lab.workflows.calibration import Calibrated
     from zcu_lab.workflows.gui.catalog import WorkflowCatalog
+    from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 
 class ReloadSource:
@@ -51,27 +55,19 @@ class ReloadSource:
         fields = "legacy: int = 4" if version == 1 else "new_field: int = 9"
         knobs = "legacy_knob: int = 5" if version == 1 else "new_knob: int = 10"
         (self.root / "declaration.py").write_text(
-            f"""from dataclasses import replace
-from datetime import timedelta
+            f"""from datetime import timedelta
 from zcu_tools.experiment.workflows import Done, workflow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, init_t1
-from zcu_lab.workflows.gui.catalog import build_catalog
+from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
+from zcu_lab.workflows.gui.attachment import WorkflowAttachment
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
-from zcu_lab.workflows.gui.panel import T1PlanPanel, T1TunablesPanel
 
 class Plan(T1PlanForm):
     {fields}
 
 class Knobs(T1TunablesForm):
     {knobs}
-
-class PlanPanel(T1PlanPanel):
-    def __init__(self, env, parent=None):
-        super().__init__(env, parent, model=Plan)
-
-class KnobsPanel(T1TunablesPanel):
-    pass
 
 @workflow("reload-v{version}", plan=T1Plan, tunables=T1Tunables, init=init_t1)
 def step(env, plan, tun, state):
@@ -82,9 +78,11 @@ def prepare(*, plan, data_root, records):
     raise ValueError("export-v{version}:" + str(plan.points))
 
 def build():
-    return replace(build_catalog(), step=step, plan_model=Plan,
-                   knobs_model=Knobs, plan_panel=PlanPanel,
-                   knobs_panel=KnobsPanel, prepare_export=prepare)
+    return WorkflowCatalog((WorkflowAttachment(
+        step=step, plan_model=Plan, knobs_model=Knobs,
+        plan_to_cfg=Plan.to_cfg, knobs_to_cfg=Knobs.to_cfg,
+        seed=calibrated_seed, prepare_export=prepare,
+    ),))
 {failure}
 """
         )
@@ -115,6 +113,73 @@ def build():
         for name in tuple(sys.modules):
             if name == "workflow_reload_fixture" or name.startswith(
                 "workflow_reload_fixture."
+            ):
+                del sys.modules[name]
+        importlib.invalidate_caches()
+
+
+class InjectedCatalog:
+    """Public constructor/loader injection for declared Window scenario collaborators.
+
+    The fixture owns a tiny isolated source namespace and current app catalog.
+    Scenario installation reloads the real Window through its configured public
+    SourceCatalogLoader; it never patches production callables or Controller.
+    """
+
+    def __init__(self, root: Path) -> None:
+        from zcu_lab.workflows.gui.catalog import build_catalog
+
+        self.root = root / "injected_workflow_source"
+        self.root.mkdir()
+        (self.root / "__init__.py").write_text("")
+        self.path = str(root)
+        sys.path.insert(0, self.path)
+        self.catalog = build_catalog()
+        self.loader = SourceCatalogLoader(
+            sources=(SourcePackage("injected_workflow_source", self.root),),
+            reload_modules=("injected_workflow_source",),
+            preserved_modules=(),
+            catalog_module="injected_workflow_source",
+            catalog_builder=self.build,
+        )
+
+    def build(self) -> WorkflowCatalog:
+        """Return the supplied typed pairing; native declarations remain real."""
+        return self.catalog
+
+    def install[S, R](
+        self,
+        step: WorkflowStep[T1Plan, T1Tunables, S, R, Calibrated],
+        window: T1WorkflowWindow,
+    ) -> None:
+        """Select a real declared scenario via public current-catalog reload."""
+        from zcu_lab.workflows.export import prepare_t1_fluxdep_export
+        from zcu_lab.workflows.gui.attachment import WorkflowAttachment
+        from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
+        from zcu_lab.workflows.gui.plan import T1PlanForm
+        from zcu_lab.workflows.gui.tunables import T1TunablesForm
+
+        self.catalog = WorkflowCatalog(
+            (
+                WorkflowAttachment(
+                    step=step,
+                    plan_model=T1PlanForm,
+                    knobs_model=T1TunablesForm,
+                    plan_to_cfg=T1PlanForm.to_cfg,
+                    knobs_to_cfg=T1TunablesForm.to_cfg,
+                    seed=calibrated_seed,
+                    prepare_export=prepare_t1_fluxdep_export,
+                ),
+            )
+        )
+        window.reload_source()
+
+    def close(self) -> None:
+        """Retire only owned source modules/path after the Window has drained."""
+        sys.path.remove(self.path)
+        for name in tuple(sys.modules):
+            if name == "injected_workflow_source" or name.startswith(
+                "injected_workflow_source."
             ):
                 del sys.modules[name]
         importlib.invalidate_caches()

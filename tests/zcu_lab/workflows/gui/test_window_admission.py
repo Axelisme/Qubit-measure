@@ -26,6 +26,8 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
+
 from ._window_scenarios import admission_canceller, install_admission_observer
 
 
@@ -34,14 +36,14 @@ from ._window_scenarios import admission_canceller, install_admission_observer
 @pytest.mark.parametrize("notification", ["progress", "gate"])
 def test_admission_notification_can_cancel_current_start(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     action: str,
     previous_start: bool,
     notification: str,
 ) -> None:
     window, harness, entry = run_attachment
     fixed = window.controller
-    calls = install_admission_observer(monkeypatch)
+    calls = install_admission_observer(window, catalog_source)
     if previous_start:
         assert isinstance(window.start("previous"), int)
         harness.complete_segment()
@@ -96,7 +98,7 @@ def test_admission_notification_can_cancel_current_start(
 
 def test_replacement_accepted_progress_uses_current_host_and_form_capture(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
     attempts: list[float] = []
@@ -117,7 +119,7 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
             return Next(tun.guess_us, 1)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("old"), int)
     harness.complete_segment()
     old = window.controller.binding
@@ -170,7 +172,7 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
 @pytest.mark.parametrize("previous_start", [False, True])
 def test_gate_registration_reentrant_start_preserves_outer_controller(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     previous_start: bool,
 ) -> None:
     window, harness, entry = run_attachment
@@ -188,7 +190,7 @@ def test_gate_registration_reentrant_start_preserves_outer_controller(
         yield from ()
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    catalog_source.install(observe, window)
     if previous_start:
         assert isinstance(window.start("previous"), int)
         window.stop("previous")

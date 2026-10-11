@@ -51,6 +51,7 @@ from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input, library_env
 from ._recording_transport import WindowTransport, WireRoute
+from ._reload_source import InjectedCatalog
 from ._sim_session import SimSession, connect_tools, wait_owner
 from ._window_support import RpcRequest
 
@@ -166,10 +167,21 @@ def sim_session(
 
 
 @pytest.fixture
+def catalog_source(tmp_path: Path) -> Iterator[InjectedCatalog]:
+    """Keep public catalog/loader injection isolated from other test modules."""
+    source = InjectedCatalog(tmp_path)
+    try:
+        yield source
+    finally:
+        source.close()
+
+
+@pytest.fixture
 def attachment(
     qapp: QApplication,
     tmp_path: Path,
     inputs: Inputs,
+    catalog_source: InjectedCatalog,
 ) -> Iterator[tuple[T1WorkflowWindow, StartHarness, ResultEntry]]:
     before = registry_state()
     kind = "qubit/workflow-window-test"
@@ -212,6 +224,8 @@ def attachment(
             harness.state,
             harness.services,
             harness.owner,
+            catalog=catalog_source.catalog,
+            loader=catalog_source.loader,
         )
         window.plan_panel.state.reset(inline_input(inputs))
         yield window, harness, entry
@@ -359,7 +373,7 @@ def mcp_tools(mcp_transport: WindowTransport, tmp_path: Path) -> Iterator[ToolTa
 @pytest.fixture
 def paused_tuning(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> list[tuple[int, float, int]]:
     """One committed step, followed by an owner-delivered paused step."""
     window, harness, _entry = run_attachment
@@ -381,7 +395,7 @@ def paused_tuning(
             yield from env.wait_until(env.started_at)
         return Next(tun.guess_us, state + 1)
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     token = window.start("tuning")
     assert isinstance(token, int)
     harness.complete_segment()

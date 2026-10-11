@@ -17,18 +17,21 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
+from zcu_tools.gui.form import FormModel
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui import window as window_module
-from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest
 
 
-def install_admission_observer(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def install_admission_observer(
+    window: T1WorkflowWindow, catalog_source: InjectedCatalog
+) -> list[str]:
     """Record init/step so cancellation before native acceptance proves neither ran."""
     calls: list[str] = []
 
@@ -44,15 +47,15 @@ def install_admission_observer(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         yield from ()
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    catalog_source.install(observe, window)
     return calls
 
 
 def admission_canceller(
     window: T1WorkflowWindow,
     action: str,
-    old: TunablesHost[T1TunablesForm, Calibrated] | None,
-    fixed: WorkflowController[T1TunablesForm, Calibrated],
+    old: TunablesHost[FormModel, Calibrated] | None,
+    fixed: WorkflowController[FormModel, Calibrated],
 ) -> tuple[
     Callable[[], None],
     list[bool],
@@ -89,7 +92,7 @@ def admission_canceller(
 
 
 def install_pause_plot_workflow(
-    window: T1WorkflowWindow, monkeypatch: pytest.MonkeyPatch
+    window: T1WorkflowWindow, catalog_source: InjectedCatalog
 ) -> tuple[list[float], list[int]]:
     """Pause after drawing; record fixed inputs and figure identity across Resume."""
     attempts: list[float] = []
@@ -121,12 +124,12 @@ def install_pause_plot_workflow(
             yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     return attempts, figures
 
 
 def install_reader_plot_workflow(
-    window: T1WorkflowWindow, monkeypatch: pytest.MonkeyPatch
+    window: T1WorkflowWindow, catalog_source: InjectedCatalog
 ) -> None:
     """Commit red then pause with blue so reads must expose the latest native plots."""
     attempts: list[int] = []
@@ -152,14 +155,14 @@ def install_reader_plot_workflow(
             yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
 
 
 def install_rpc_pause_workflow(
     window: T1WorkflowWindow,
     harness: StartHarness,
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> tuple[list[float], list[dict[str, object]]]:
     """Request Pause during a step and retain receipts and fixed input observations."""
     attempts: list[float] = []
@@ -184,12 +187,12 @@ def install_rpc_pause_workflow(
             yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     return attempts, receipts
 
 
 def install_close_fault_workflow(
-    window: T1WorkflowWindow, monkeypatch: pytest.MonkeyPatch
+    window: T1WorkflowWindow, catalog_source: InjectedCatalog
 ) -> None:
     """Leave a paused native run with live plots for close/Stop journal fault checks."""
 
@@ -212,7 +215,7 @@ def install_close_fault_workflow(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
 
 
 def assert_failed_stop_settled(
@@ -228,7 +231,7 @@ def assert_failed_stop_settled(
 
 
 def assert_failed_close_diagnostic(
-    controller: WorkflowController[T1TunablesForm, Calibrated],
+    controller: WorkflowController[FormModel, Calibrated],
     message: QLabel,
     journal: Path,
     caplog: pytest.LogCaptureFixture,

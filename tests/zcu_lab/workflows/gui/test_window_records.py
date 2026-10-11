@@ -25,6 +25,8 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
+
 from ._window_scenarios import (
     assert_figure_render_failure,
     install_reader_plot_workflow,
@@ -140,7 +142,7 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
 def test_rpc_records_running_empty_and_committed_native_summary(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = attachment
     observations: list[dict[str, object]] = []
@@ -159,7 +161,7 @@ def test_rpc_records_running_empty_and_committed_native_summary(
             return Next({"measurement": 2.5}, 1)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
     assert harness.background.error is None
@@ -184,6 +186,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     ending: str,
 ) -> None:
     window, harness, _entry = attachment
@@ -200,7 +203,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
 
     monkeypatch.setattr(window_module, "render_figure_png", render)
 
-    install_reader_plot_workflow(window, monkeypatch)
+    install_reader_plot_workflow(window, catalog_source)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
     assert harness.background.error is None

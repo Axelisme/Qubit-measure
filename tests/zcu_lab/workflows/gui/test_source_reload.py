@@ -9,9 +9,10 @@ from time import monotonic, sleep
 
 import pytest
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QComboBox, QLabel
 from zcu_tools.experiment.workflows import InvalidRunState
 from zcu_tools.gui.catalog_loader import CatalogReloadError
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.form import FormErrors, FormInput
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
@@ -86,6 +87,44 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert any(
         item == {"path": ["guess_us"], "value": 32.0} for item in knobs["values"]
     )
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_reload_removed_selection_uses_new_default_and_reports_both_names(
+    source: ReloadSource, version: int
+) -> None:
+    source.write(version)
+    window = source.open(StartHarness())
+    old_name = window.workflow_name
+    window.plan_panel.state.write(
+        {("pi_length_us",): {"expr": "1 / 4"}}, window.plan_panel.env
+    )
+    source.write(version + 1)
+    window.reload_source()
+    new_name = f"reload-v{version + 1}"
+    assert window.workflow_name == new_name and window.default_workflow_name == new_name
+    selector = window.findChild(QComboBox, "workflow.select")
+    assert selector is not None and selector.currentText() == new_name
+    message = window.findChild(QLabel, "workflow.run.message")
+    assert message is not None
+    assert old_name in message.text() and new_name in message.text()
+    assert window.capture_persisted_state().plan["pi_length_us"] == {"expr": "1 / 4"}
+    with pytest.raises(InvalidInputError, match="Unknown workflow"):
+        window.select_workflow(old_name)
+    with pytest.raises(InvalidInputError, match="Unknown workflow"):
+        window.start("unknown", name=old_name)
+    assert window.workflow_name == new_name
+
+
+def test_reload_retains_same_named_selection(source: ReloadSource) -> None:
+    window = source.open(StartHarness())
+    plan = window.plan_panel
+    source.write(1)
+    window.reload_source()
+    assert window.workflow_name == "reload-v1"
+    assert window.plan_panel is not plan
+    selector = window.findChild(QComboBox, "workflow.select")
+    assert selector is not None and selector.currentText() == "reload-v1"
 
 
 def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(

@@ -27,6 +27,8 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
+
 from ._window_scenarios import (
     assert_failed_close_diagnostic,
     assert_failed_stop_settled,
@@ -52,10 +54,10 @@ def test_close_pending_start_requests_stop_without_destroying_producer_host(
 
 def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
-    attempts, figures = install_pause_plot_workflow(window, monkeypatch)
+    attempts, figures = install_pause_plot_workflow(window, catalog_source)
     token = window.start("paused")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -97,7 +99,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
     window, harness, _entry = run_attachment
@@ -117,7 +119,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("register-window"), int)
     harness.complete_segment()
     active_controller = window.controller
@@ -160,7 +162,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
 
 def test_resume_stop_rejection_unlocks_window_without_a_producer(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
     attempts: list[str] = []
@@ -179,7 +181,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("reject-window"), int)
     harness.complete_segment()
 
@@ -212,7 +214,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_paused_window_stop_or_close_ends_run_without_another_worker(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
     window, harness, entry = run_attachment
@@ -230,7 +232,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("paused-stop"), int)
     harness.complete_segment()
     assert harness.background.work is None
@@ -264,7 +266,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
 
 def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
     native_errors: list[IsADirectoryError] = []
@@ -283,7 +285,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     token = window.start("failed-read")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -330,7 +332,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
 
 def test_prepare_forms_rejects_pending_and_paused_run(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
 
@@ -348,7 +350,7 @@ def test_prepare_forms_rejects_pending_and_paused_run(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     before = window.plan_panel
     assert isinstance(window.start("prepare-guard"), int)
     with pytest.raises(InvalidRunState):
@@ -387,7 +389,7 @@ def test_window_without_run_rejects_explicit_target(
 @pytest.mark.parametrize("phase", ["pending", "paused"])
 def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     phase: str,
 ) -> None:
     window, harness, entry = run_attachment
@@ -411,7 +413,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("run-A"), int)
     window.stop("run-A")
     harness.complete_segment()
@@ -464,7 +466,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
 @pytest.mark.parametrize("phase", ["paused", "active"])
 def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     escaped_qt_errors: list[BaseException],
     settlements: list[int],
     caplog: pytest.LogCaptureFixture,
@@ -472,7 +474,7 @@ def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
 ) -> None:
     window, harness, entry = run_attachment
 
-    install_close_fault_workflow(window, monkeypatch)
+    install_close_fault_workflow(window, catalog_source)
     token = window.start("close-fault")
     assert isinstance(token, int)
     harness.complete_segment()
