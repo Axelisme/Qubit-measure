@@ -8,11 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, Qt, QTimer
+from qtpy.QtCore import QEvent, QMetaObject, Qt, QTimer
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QGroupBox,
     QLineEdit,
     QListWidget,
@@ -115,6 +116,135 @@ def test_remote_gates_open_dialog_and_restores_its_fields(window):
     indicator(view).click()
     assert all(edit.isEnabled() for edit in edits)
     dialog.reject()
+
+
+@pytest.mark.parametrize("command", ["Project…", "Add…", "Export"])
+@pytest.mark.parametrize("close_action", ["cancel", "close"])
+def test_remote_modal_content_gated_but_cancel_and_close_work(
+    window, qapp, command, close_action
+):
+    view, ctrl = window
+    before = ctrl.state.project
+    button(view, command).click()
+    dialog = QApplication.activeModalWidget()
+    assert isinstance(dialog, QDialog)
+    assert dialog.isModal()
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert dialog.isEnabled(), "Remote must not disable the modal dialog itself"
+    assert all(not edit.isEnabled() for edit in dialog.findChildren(QLineEdit))
+    assert not button(dialog, "OK").isEnabled()
+    assert button(dialog, "Cancel").isEnabled()
+    if close_action == "cancel":
+        button(dialog, "Cancel").click()
+    else:
+        assert dialog.close()
+    qapp.processEvents()
+    assert QApplication.activeModalWidget() is None
+    assert ctrl.state.project == before
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+    indicator(view).click()
+    assert ctrl.control_identity.status().holder == "gui"
+    assert ctrl.control_identity.status().locked
+
+
+def choose_during_takeover(ctrl, path, activate):
+    """Complete a real static chooser after authority changes in its modal loop."""
+    errors = []
+    seen = []
+
+    def respond():
+        chooser = QApplication.activeModalWidget()
+        try:
+            assert isinstance(chooser, QFileDialog)
+            seen.append(chooser.windowTitle())
+            chooser.selectFile(str(path))
+            ctrl.control_identity.connect("a", "flux-agent", "owner")
+            QMetaObject.invokeMethod(
+                chooser, "accept", Qt.ConnectionType.DirectConnection
+            )
+        except Exception as exc:
+            errors.append(exc)
+            if isinstance(chooser, QDialog):
+                chooser.reject()
+
+    def abort():
+        chooser = QApplication.activeModalWidget()
+        errors.append(AssertionError("Static chooser did not finish within 2 seconds"))
+        if isinstance(chooser, QDialog):
+            chooser.reject()
+
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(abort)
+    timeout.start(2000)
+    QTimer.singleShot(0, respond)
+    activate()
+    timeout.stop()
+    if errors:
+        raise errors[0]
+    assert seen, "The action must present a real modal file chooser"
+
+
+@pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
+def test_chooser_return_after_takeover_does_not_edit_owner(window, tmp_path, owner):
+    view, ctrl = window
+    target = tmp_path / "chosen.hdf5"
+    if owner in ("result", "database"):
+        target = tmp_path
+    elif owner != "export":
+        target.touch()
+    if owner == "search":
+        button(view, "Analyze…").click()
+        panel = view.findChild(AnalyzePanelWidget)
+        assert panel is not None
+        panel.show_tab("search")
+        container = panel
+    else:
+        command = {"load": "Add…", "export": "Export"}.get(owner, "Project…")
+        button(view, command).click()
+        container = QApplication.activeModalWidget()
+        assert isinstance(container, QDialog)
+    edits = container.findChildren(QLineEdit)
+    before = [edit.text() for edit in edits]
+    browse_buttons = [
+        b for b in container.findChildren(QPushButton) if b.text() == "Browse…"
+    ]
+    browse = browse_buttons[1 if owner == "database" else 0]
+    choose_during_takeover(ctrl, target, browse.click)
+    assert [edit.text() for edit in edits] == before
+    assert target.exists() == (owner != "export")
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+    if isinstance(container, QDialog):
+        container.reject()
+
+
+def test_restore_chooser_takeover_preserves_collection(window, tmp_path):
+    view, ctrl = window
+    target = tmp_path / "spectrums.hdf5"
+    ctrl.export_spectrums(filepath=str(target), mode="w")
+    before = ctrl.list_spectrums()
+    active = ctrl.state.active_spectrum
+    choose_during_takeover(ctrl, target, button(view, "Restore").click)
+    assert ctrl.list_spectrums() == before
+    assert ctrl.state.active_spectrum == active
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+
+
+@pytest.mark.parametrize("command", ["Project…", "Export"])
+def test_modal_accept_after_takeover_has_no_publication(window, tmp_path, command):
+    view, ctrl = window
+    before = ctrl.state.project
+    target = tmp_path / "not-published.hdf5"
+    button(view, command).click()
+    dialog = QApplication.activeModalWidget()
+    assert isinstance(dialog, QDialog)
+    edits = dialog.findChildren(QLineEdit)
+    edits[0].setText(str(target) if command == "Export" else "not-published")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    dialog.accept()
+    assert ctrl.state.project == before
+    assert not target.exists()
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
 
 
 def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
