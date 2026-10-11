@@ -129,7 +129,9 @@ def test_unmounted_interactive_frontend_stops_authority_projection(
     assert widget.read_only_changes == [False]
 
 
-@pytest.mark.parametrize("retirement", ["close_tab", "window_close", "runtime_shutdown"])
+@pytest.mark.parametrize(
+    "retirement", ["close_tab", "window_close", "runtime_shutdown"]
+)
 def test_retired_view_stops_authority_projection(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
     retirement: str,
@@ -171,7 +173,12 @@ def test_retired_view_stops_authority_projection(
 def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
     """Exercise real Qt process exit without mutating the suite's QApplication."""
     completed = subprocess.run(
-        [sys.executable, "-m", "tests.gui.app.measure.ui._quit_authority", str(tmp_path)],
+        [
+            sys.executable,
+            "-m",
+            "tests.gui.app.measure.ui._quit_authority",
+            str(tmp_path),
+        ],
         capture_output=True,
         text=True,
         check=False,

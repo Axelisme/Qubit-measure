@@ -86,7 +86,7 @@ def main(project_root: Path) -> int:
 if __name__ == "__main__":
     try:
         code = main(Path(sys.argv[1]))
-    except Exception:
+    except (RuntimeError, TypeError, ValueError, AttributeError, KeyError, OSError):
         # Report setup errors instead of invoking the GUI's blocking error box.
         traceback.print_exc()
         code = 2

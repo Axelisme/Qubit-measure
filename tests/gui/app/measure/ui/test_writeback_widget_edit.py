@@ -177,7 +177,9 @@ def test_edit_md_item_parses_complex_value(qapp, widget_factory, control_factory
         dialog.close()
 
 
-def test_edit_md_item_rejects_unparseable_complex(qapp, widget_factory, control_factory):
+def test_edit_md_item_rejects_unparseable_complex(
+    qapp, widget_factory, control_factory
+):
     """An unparseable complex input fast-fails and leaves the original value."""
     item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
@@ -204,7 +206,9 @@ def test_edit_md_item_rejects_unparseable_complex(qapp, widget_factory, control_
         dialog.close()
 
 
-def test_edit_cfg_item_reports_draft_resolution_failure(qapp, widget_factory, control_factory):
+def test_edit_cfg_item_reports_draft_resolution_failure(
+    qapp, widget_factory, control_factory
+):
     item = ModuleWriteback(
         target_name="readout_rf", description="A module", edit_schema=MagicMock()
     )
