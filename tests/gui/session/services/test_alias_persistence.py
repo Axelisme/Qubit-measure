@@ -131,16 +131,19 @@ def test_bad_file_preserves_old_binding_and_aliases(
 
 
 def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) -> None:
-    from zcu_tools.resources.entry.aliases import EntryAliases
-
     first = entry_at(tmp_path, "one")
     second = entry_at(tmp_path, "two")
     context = service()
     context.install_entry(first)
     context.apply_alias_rows(AUTHORED)
-    assert first.load_aliases() == EntryAliases(
-        aliases={"driver": "Q1", "sense": "$driver.sense", "spare": ""}
-    )
+    assert (first.result_path / "aliases.yaml").is_file()
+    saved = first.load_aliases()
+    assert saved is not None
+    assert list(saved.aliases.items()) == [
+        ("driver", "Q1"),
+        ("sense", "$driver.sense"),
+        ("spare", ""),
+    ]
     context.set_alias_rows((AliasRow("transient", "Q1"),))
     reopened = ResultEntry.open(
         "one", result_root=tmp_path / "result", database_root=tmp_path / "Database"
@@ -150,7 +153,9 @@ def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) ->
     assert fresh.get_alias_rows() == AUTHORED
     fresh.install_entry(second)
     fresh.apply_alias_rows(())
-    assert second.load_aliases() == EntryAliases(aliases={})
+    empty = second.load_aliases()
+    assert empty is not None
+    assert empty.aliases == {}
     fresh.install_entry(reopened)
     assert fresh.get_alias_rows() == AUTHORED
     fresh.install_entry(second)
@@ -229,4 +234,4 @@ def test_temporary_capture_and_historical_storage_stay_fixed(tmp_path: Path) -> 
     context.install_entry(entry_at(tmp_path, "two"))
     assert capture.value("$driver.rate") == 4300.0
     assert context.capture_storage(capture) == storage
-    assert storage.entry_id == entry.entry_id
+    assert str(storage.entry_id) == entry.entry_id
