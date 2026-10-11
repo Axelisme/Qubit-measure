@@ -423,6 +423,11 @@ class MainWindow(QMainWindow):
             return
         if self._ctrl.context_control.get_entry_info() is None:
             self._empty_hint.setText("Open or create an entry in Setup… to begin.")
+        elif self._ctrl.get_session_env().parameters is None:
+            # An opened entry selects no point; experiments need one to run.
+            self._empty_hint.setText(
+                "Select or create a working point in Setup… to run experiments."
+            )
         else:
             self._empty_hint.setText("Use New Tab to start an experiment.")
         self._tab_area.setCurrentWidget(self._empty_hint)
