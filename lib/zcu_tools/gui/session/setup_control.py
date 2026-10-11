@@ -67,6 +67,10 @@ class SetupControlPort(Protocol):
         """Read cached opened entry identity/paths, or None."""
         ...
 
+    def current_point_label(self) -> str | None:
+        """Read the selected saved point label, or None when none is selected; no I/O."""
+        ...
+
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         """Read cached point descriptions; True explicitly refreshes through owner."""
         ...
@@ -130,6 +134,9 @@ class SetupControlFacet(SetupControlPort):
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()
+
+    def current_point_label(self) -> str | None:
+        return self._context.current_point_label()
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)

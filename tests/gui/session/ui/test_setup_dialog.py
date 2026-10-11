@@ -541,7 +541,8 @@ def test_working_point_cached_none_keeps_previous_suggestion(
 
 def point_texts(dialog: SetupDialog) -> list[str]:
     listing = point_list(dialog)
-    return [listing.item(row).text() for row in range(listing.count())]
+    items = [listing.item(row) for row in range(listing.count())]
+    return [item.text() for item in items if item is not None]
 
 
 def current_point_text(dialog: SetupDialog) -> str | None:

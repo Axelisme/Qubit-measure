@@ -208,6 +208,17 @@ class ContextService:
         """Return the cached opened entry, or None for EMPTY; never refresh."""
         return deepcopy(self._entry_info)
 
+    def current_point_label(self) -> str | None:
+        """Return the selected SavedPoint label from published parameters.
+
+        None means no saved point is selected (EMPTY or an entry draft).
+        Query performs no I/O and never selects a point.
+        """
+        parameters = self._state.session_env.parameters
+        if parameters is None or not isinstance(parameters.target, SavedPoint):
+            return None
+        return parameters.target.point
+
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         """Return cached label/descriptions, empty without an opened entry.
 
