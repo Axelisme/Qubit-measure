@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-11，caller-owned alias preset 與 session runner／progress
+**Last updated:** 2026-10-11，caller-owned alias preset、session infrastructure 與 reference modes
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -614,12 +614,14 @@ the search window editable. Sweep editors render as two balanced label+input
 columns per row, so start/stop or center/span share the available width evenly
 inside a full-width form row.
 
-Linked module / waveform reference fields preserve their embedded value snapshot
-when the library key is missing. The field stays library-keyed and invalid so
-re-adding the same key relinks it, while persistence can still serialize the snapshot without consulting
-`ModuleLibrary`. Restored overridden refs whose key is missing can instead
-retain their overridden inline input without depending on the old key. Nested linked
-references keep their own dependencies; explicit relink restores this layer's dependency.
+Module and pulse waveform references directly select library names in ref mode.
+Ref contents follow library publication and remain readonly. The cfg owner's
+`convert_reference_to_inline` copies the valid published actual values into the
+same shape, recursively freezing nested refs and expressions. Inline values no
+longer depend on the old library or aliases. Missing/Invalid refs cannot convert;
+re-adding the missing key restores ref mode. Optional None remains disabled.
+The shared Qt header preserves shape/library/None selection and adds the explicit
+conversion button. Run acceptance still fixes actual values; slot writeback is unchanged.
 
 Adapter cfg authoring lives in the user experiment package as a context-free
 `MeasureCfgDefinition`. A single `MeasureCfgBuilder` declaration fixes static shape,

@@ -36,7 +36,9 @@ Tab 建立時資源已可 headless 編輯。Qt attach／detach 只管理 view �
 
 Source owner 發布本地來源及版本。解析使用固定 `CfgResolution`，不輪詢硬體或做外部 I/O。Device lookup 使用已發布 cache。Source 更新先準備並安裝所有受影響 cfg 的 publication，再通知；某個 cfg 解析故障不撤銷其他資源或 source 的更新。
 
-Linked reference 隨固定來源更新這層內容。Override 解除這層對原 key 的依賴，保留自身 shape 與 input，nested linked reference、expression 及 asset 依賴仍各自存在。明確 relink 才重新建立來源依賴。Expression 保留文字與動態依賴，refresh 更新解析結果；resolve-once direct value 不重讀來源。
+Reference 只有 inline 與 ref 模式。Ref 隨固定來源更新內容，子欄位唯讀。選填 None 保留停用。`convert_reference_to_inline` 在 cfg owner 從目前有效 publication 複製相同 shape 的實際值，nested ref 與 Eval 遞迴凍結，之後不跟隨 library 或 alias。Missing、Invalid 與 Unavailable ref 以 `CfgInputError INVALID_VALUE` 拒絕，不複製過時 cache。Qt 的轉換按鈕只呼叫此操作，remote 及 recipe 讀取同一個 mode/readonly 投影，不另做解析或複製。
+
+Ref leaf、不完整 aggregate 及空 `{}` edit 以 `READONLY` 拒絕。完整且不含 `__ref` 的 shape payload 是明確 inline replacement，不是複製當前值。同 payload 的 `__ref` 加 children 混合兩種意圖，以 `INVALID_VALUE` 原子拒絕。普通 Custom shape-switch 保留下面的繼承契約，不執行遞迴凍結。Inline 內的 expression 仍保留動態依賴，refresh 更新結果；轉換產生的 direct value 不重讀來源。
 
 `gui.session.expression` 共用 simpleeval 的受限數學引擎。Cfg expression 中 `$` 標記的引用在當次寫入以已發布來源捕捉，再以 typed literal 取代該位置，未標記引用保持動態。捕捉失敗整批拒絕，不保存待未來解析的 `$`。它仍保存 expression，不新增 capture 持久型別。精確語法與錯誤邊界見 [resource contract](draft/cfg-resource-contract.md)。
 

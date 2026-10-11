@@ -639,11 +639,7 @@ def _validate_static_reference(
             f"Config field '{full_path}' must be an enabled module/waveform "
             f"ref, got {type(node_value).__name__}"
         )
-    if (
-        not node_value.is_overridden
-        and not node_value.value.fields
-        and node_value.error is None
-    ):
+    if not node_value.value.fields and node_value.error is None:
         try:
             custom_label = parse_custom_reference_key(node_value.chosen_key)
         except ValueError as exc:

@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, typed unsafe point label rejection
+**Last updated:** 2026-10-11, typed point label rejection and reference modes
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -325,10 +325,13 @@ blocks manual edits, reset, replacement and close on that tab; source publicatio
 and edits to other tabs remain allowed. Close becomes available after termination.
 
 `editor.get` and `editor.new` retain the independent draft tree with dotted paths.
-Nodes contain kind/path/label/valid. Sections and active references have named
+Nodes contain kind/path/label/valid/readonly. Sections and active references have named
 children, including locked literals. Scalar/literal input and sweep inputs retain
 mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
-cached shape label, error, override flag, and choices. Reads do not resolve sources.
+cached shape label, error, mode inline/ref or null when disabled, and choices.
+Ref descendants are readonly; library selection creates ref rather than an override.
+The local cfg owner exposes explicit inline conversion, without a new RPC endpoint.
+Reads do not resolve sources.
 Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
 complex numbers use the shared reversible tag, with no string fallback.
 

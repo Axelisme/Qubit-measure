@@ -60,6 +60,12 @@ class CallbackList:
 
 
 class CfgField(ABC):
+    """Binding-owned cached value and validity, with an inherited readonly lock.
+
+    Ref descendants reject user setters with CfgInputError READONLY. Source
+    refresh remains available; only the binding owner configures ancestor locks.
+    """
+
     spec: CfgNodeSpec
 
     def __init__(self, spec: CfgNodeSpec) -> None:
@@ -68,6 +74,9 @@ class CfgField(ABC):
         self.on_validity_changed = CallbackList()
         self._valid = True
         self._closed = False
+        self.readonly = (
+            False  # Inherited ref lock; independent of the spec's editability.
+        )
 
     @abstractmethod
     def get_value(self) -> object: ...
@@ -102,6 +111,22 @@ class CfgField(ABC):
         self._closed = True
         self.on_change.clear()
         self.on_validity_changed.clear()
+
+    def set_readonly(self, *, readonly: bool) -> None:
+        """Set an owner-imposed ref ancestor lock, without changing spec locks.
+
+        Binding composition uses this when constructing/refreshing subtrees.
+        Frontends must not change this lock; they submit edits or conversion.
+        """
+        self._require_open()
+        self.readonly = readonly
+
+    def _require_writable(self) -> None:
+        from ..resource import CfgInputError, CfgInputReason
+
+        self._require_open()
+        if self.readonly:
+            raise CfgInputError(CfgInputReason.READONLY, "ref contents are readonly")
 
     def _require_open(self) -> None:
         if self._closed:
@@ -140,7 +165,7 @@ class ScalarField(CfgField):
         return self._value
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         if isinstance(value, (DirectValue, EvalValue)):
             new_value: ScalarValue = value
         else:
@@ -155,8 +180,8 @@ class ScalarField(CfgField):
     def prepare_agent_value(
         self, value: ScalarValue
     ) -> tuple[ScalarValue, Callable[[], None]]:
-        """Preflight an endpoint and return its single-use, immediate commit."""
-        self._require_open()
+        """Preflight a writable endpoint and return its single-use, immediate commit."""
+        self._require_writable()
         if isinstance(value, EvalValue):
             prepared = self._resolved_eval_value(value)
         else:
@@ -167,7 +192,7 @@ class ScalarField(CfgField):
 
         def commit() -> None:
             nonlocal committed
-            self._require_open()
+            self._require_writable()
             if committed or self._value != previous:
                 raise RuntimeError("stale prepared scalar value")
             committed = True
@@ -186,7 +211,7 @@ class ScalarField(CfgField):
 
     def set_text(self, text: str) -> None:
         """Store direct input text and its parse result, including invalid input."""
-        self._require_open()
+        self._require_writable()
         self.set_value(parse_scalar_text(self.spec, text))
 
     def available_options(self) -> tuple[object, ...] | None:
@@ -283,7 +308,7 @@ class LiteralField(CfgField):
         return DirectValue(self.spec.value)
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         del value
 
 
@@ -376,6 +401,12 @@ class SweepField(CfgField):
         self.stop_field.on_validity_changed.connect(self._on_child_validity_changed)
         self._refresh_validity()
 
+    def set_readonly(self, *, readonly: bool) -> None:
+        """Apply the ref ancestor lock to the range and both edge controls."""
+        super().set_readonly(readonly=readonly)
+        self.start_field.set_readonly(readonly=readonly)
+        self.stop_field.set_readonly(readonly=readonly)
+
     def get_value(self) -> SweepValue:
         self._require_open()
         return SweepValue(
@@ -387,7 +418,7 @@ class SweepField(CfgField):
         )
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         if not isinstance(value, SweepValue):
             raise TypeError(
                 f"SweepField expects SweepValue, got {type(value).__name__}"
@@ -396,7 +427,7 @@ class SweepField(CfgField):
 
     def set_agent_value(self, request: Mapping[str, object]) -> SweepValue:
         """Resolve and validate a whole-sweep request before one committed update."""
-        self._require_open()
+        self._require_writable()
         _agent_request_keys(request, {"start", "stop"})
         if not self.spec.editable:
             raise ValueError("whole sweep is locked")
@@ -416,7 +447,7 @@ class SweepField(CfgField):
         return self.get_value()
 
     def set_text(self, edge: Literal["expts", "step"], text: str) -> None:
-        self._require_open()
+        self._require_writable()
         if edge == "expts":
             edit = SweepEditor.update_expts
             type_ = int
@@ -552,6 +583,11 @@ class CenteredSweepField(CfgField):
         self.center_field.on_validity_changed.connect(self._on_child_validity_changed)
         self._refresh_validity()
 
+    def set_readonly(self, *, readonly: bool) -> None:
+        """Apply the ref ancestor lock to the range and its center control."""
+        super().set_readonly(readonly=readonly)
+        self.center_field.set_readonly(readonly=readonly)
+
     def get_value(self) -> CenteredSweepValue:
         self._require_open()
         return CenteredSweepValue(
@@ -563,7 +599,7 @@ class CenteredSweepField(CfgField):
         )
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         if not isinstance(value, CenteredSweepValue):
             raise TypeError(
                 "CenteredSweepField expects CenteredSweepValue, "
@@ -575,7 +611,7 @@ class CenteredSweepField(CfgField):
 
     def set_agent_value(self, request: Mapping[str, object]) -> CenteredSweepValue:
         """Resolve and validate a centered sweep before one committed update."""
-        self._require_open()
+        self._require_writable()
         locked = self.spec.locked_center is not None or not self.spec.center_editable
         _agent_request_keys(request, {"span"} if locked else {"center", "span"})
         if not self.spec.editable:
@@ -606,7 +642,7 @@ class CenteredSweepField(CfgField):
         return self.get_value()
 
     def set_text(self, edge: Literal["span", "expts", "step"], text: str) -> None:
-        self._require_open()
+        self._require_writable()
         type_ = float
         if edge == "span":
             edit = CenteredSweepEditor.update_span
@@ -808,7 +844,7 @@ class SectionField(CfgField):
         return CfgSectionValue(fields)
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         if not isinstance(value, CfgSectionValue):
             raise TypeError(
                 f"SectionField expects CfgSectionValue, got {type(value).__name__}"
@@ -826,6 +862,12 @@ class SectionField(CfgField):
         self._refresh_validity()
         if self.get_value() != previous_value:
             self.on_change.emit()
+
+    def set_readonly(self, *, readonly: bool) -> None:
+        """Propagate a ref ancestor lock to this section and all descendants."""
+        super().set_readonly(readonly=readonly)
+        for child in self.fields.values():
+            child.set_readonly(readonly=readonly)
 
     def _preflight(self, value: CfgSectionValue) -> None:
         """Validate the complete update against an isolated candidate tree."""
@@ -903,10 +945,8 @@ def validate_section_keys(
         elif isinstance(child_spec, ReferenceSpec) and isinstance(
             child_value, ReferenceValue
         ):
-            if (
-                not child_value.is_overridden
-                and not child_value.value.fields
-                and not is_custom_reference_key(child_value.chosen_key)
+            if not child_value.value.fields and not is_custom_reference_key(
+                child_value.chosen_key
             ):
                 # The reference binding can await its catalog shape.
                 continue

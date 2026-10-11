@@ -498,7 +498,7 @@ class TreeCfgWidget(QWidget):
             self._add_section_children(ref_item, singleton, singleton_path, depth + 1)
         else:
             self._add_section_children(ref_item, sub, path, depth + 1)
-        if field.spec.optional and not field.is_enabled:
+        if (field.spec.optional and not field.is_enabled) or sub.readonly:
             stack: list[QTreeWidgetItem] = [ref_item]
             while stack:
                 cur = stack.pop()
@@ -989,10 +989,14 @@ class TreeCfgWidget(QWidget):
                                     effective = False
                                     break
                                 # Optional-reference gate for ancestors only
-                                if (
-                                    isinstance(anc_field, ReferenceField)
-                                    and anc_field.spec.optional
-                                    and not anc_field.is_enabled
+                                if isinstance(anc_field, ReferenceField) and (
+                                    (
+                                        anc_field.spec.optional
+                                        and not anc_field.is_enabled
+                                    )
+                                    or not is_custom_reference_key(
+                                        anc_field.get_chosen_key()
+                                    )
                                 ):
                                     effective = False
                                     break
