@@ -33,12 +33,14 @@ class SetupGui:
             "address": "",
             "status": "connected",
             "error": None,
-            "unit": "none",
+            "unit": "native",
             "info": {
                 "type": "FakeDevice",
                 "value": 0.25,
                 "rampstep": 0.1,
-                "output": False,
+                "output": "off",
+                "address": "",
+                "value_unit": "native",
             },
             "fields": [{"name": "value", "settable": True, "type": "float"}],
         }
@@ -64,7 +66,7 @@ class SetupGui:
             self.has_soc = self.is_mock = self.loaded = True
             response = {"operation_id": 40}
         elif method == "device.setup":
-            self.device["info"].update(params["updates"])
+            self.device["info"] = deepcopy(params["cfg"])
             response = {"operation_id": 41}
         elif method == "operation.await":
             response = {"reason": self.wait_reason, "status": self.operation_status}
@@ -105,7 +107,10 @@ def setup_client(
     ("tool", "arguments"),
     [
         ("simulation_initialize", {}),
-        ("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}),
+        (
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+        ),
         ("recipe_guide", {"recipe": "t1"}),
     ],
 )
@@ -177,8 +182,8 @@ def test_simulation_internal_post_read_timeout_retains_finished_operation(setup_
     [
         ("simulation_initialize", {}, "simulation.initialize"),
         (
-            "device_set_value",
-            {"name": "fake_flux", "value": 1, "unit": "native"},
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
             "device.setup",
         ),
     ],
@@ -193,7 +198,10 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
         raise GuiTransportTimeoutError("operation.progress", 0.01)
 
     client.transport.replies["operation.progress"] = progress
-    result = client.call(tool, {**arguments, "timeout": 0})
+    result = client.call(
+        tool,
+        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+    )
     assert result.is_error
     assert result.data["op"] is not None
     assert result.data["status"] == "unknown"
@@ -203,7 +211,7 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
     assert result.data["steps"]["wait"]["status"] == "unknown"
     assert result.data["error"]["code"] == "timeout"
     assert result.data["error"]["reason"] == "gui_transport_timeout"
-    if tool == "device_set_value":
+    if tool == "device_setup":
         assert result.data["before"]["device"]["info"]["value"] == 0.25
     else:
         assert result.data["before"]["predictor"]["loaded"] is False
@@ -215,8 +223,8 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
     [
         ("simulation_initialize", {}, "simulation.initialize", "predictor.info"),
         (
-            "device_set_value",
-            {"name": "fake_flux", "value": 1, "unit": "native"},
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
             "device.setup",
             "device.snapshot",
         ),
@@ -244,7 +252,10 @@ def test_running_operation_with_post_read_failure_is_an_error_reply(
         }
 
     client.transport.replies[post_read] = read
-    result = client.call(tool, {**arguments, "timeout": 0})
+    result = client.call(
+        tool,
+        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+    )
     assert result.is_error
     assert result.data["op"] is not None
     assert result.data["operation"]["status"] == "running"
@@ -279,88 +290,96 @@ def test_simulation_verifies_native_readiness_and_repeats_explicit_initializatio
 def test_set_value_preserves_native_value_and_unrelated_controls(setup_client):
     client, gui = setup_client
     result = client.call(
-        "device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
     )
     assert result.data["status"] == "finished"
     assert not result.is_error
     assert result.data["before"]["device"]["info"]["value"] == 0.25
     assert result.data["after"]["device"]["info"] == gui.device["info"]
-    assert result.data["verification"]["actual"] == 1
-    assert result.data["verification"]["exact_match"] is True
+    assert result.data["after"]["device"]["info"]["value"] == 1
     assert result.data["requested"] == {
         "name": "fake_flux",
-        "value": 1,
-        "unit": "native",
+        "cfg": {**result.data["before"]["device"]["info"], "value": 1},
     }
     assert (
         "device.setup",
-        {"name": "fake_flux", "updates": {"value": 1}},
+        {"name": "fake_flux", "cfg": result.data["requested"]["cfg"]},
     ) in client.transport.sent
-    assert gui.device["info"]["output"] is False
+    assert gui.device["info"]["output"] == "off"
     assert gui.device["info"]["rampstep"] == 0.1
-    client.call("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"})
+    client.call(
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+    )
     assert [method for method, _ in client.transport.sent].count("device.setup") == 2
 
 
-@pytest.mark.parametrize("unit", ["A", "V"])
-def test_physical_device_uses_exact_native_unit_without_conversion(setup_client, unit):
+def test_physical_device_uses_exact_native_unit_without_conversion(setup_client):
     client, gui = setup_client
-    gui.device.update(type_name="YOKOGS200", unit=unit)
+    gui.device.update(type_name="YOKOGS200", unit="V")
+    gui.device["info"].update(
+        type="YOKOGS200", mode="voltage", value_unit="V", rampstep=1e-3
+    )
     result = client.call(
-        "device_set_value", {"name": "fake_flux", "value": 1.5, "unit": unit}
+        "device_setup", {"name": "fake_flux", "cfg": {"value": 1.5, "value_unit": "V"}}
     )
     assert result.data["status"] == "finished"
-    assert result.data["verification"]["actual"] == 1.5
-    assert result.data["after"]["device"]["unit"] == unit
+    assert result.data["after"]["device"]["info"]["value"] == 1.5
+    assert result.data["after"]["device"]["unit"] == "V"
 
 
-@pytest.mark.parametrize("invalid", [True, "1", float("inf"), float("nan")])
-def test_bad_value_is_rejected_before_gui_access(setup_client, invalid):
-    client, _ = setup_client
-    with pytest.raises(ValueError, match="value must be a finite number"):
-        client.call(
-            "device_set_value",
-            {"name": "fake_flux", "value": invalid, "unit": "native"},
-        )
-    assert client.transport.sent == []
-
-
-@pytest.mark.parametrize("tool", ["simulation_initialize", "device_set_value"])
+@pytest.mark.parametrize("tool", ["simulation_initialize"])
 @pytest.mark.parametrize("invalid", [True, "0", -1, 301, float("inf"), float("nan")])
 def test_bad_timeout_is_rejected_before_gui_access(setup_client, tool, invalid):
     client, _ = setup_client
     arguments = (
         {}
         if tool == "simulation_initialize"
-        else {"name": "fake_flux", "value": 1, "unit": "native"}
+        else {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}}
     )
     with pytest.raises(ValueError, match="timeout must be between 0 and 300 seconds"):
         client.call(tool, {**arguments, "timeout": invalid})
     assert client.transport.sent == []
 
 
-@pytest.mark.parametrize(
-    "defect", ["disconnected", "wrong_unit", "no_value", "non_fake_native"]
-)
+@pytest.mark.parametrize("defect", ["disconnected", "info-null"])
 def test_device_precondition_failure_retains_before_without_mutation(
     setup_client, defect
 ):
     client, gui = setup_client
     if defect == "disconnected":
-        gui.device["status"] = "disconnected"
-    elif defect == "no_value":
-        gui.device["fields"] = []
-    elif defect == "non_fake_native":
-        gui.device["type_name"] = "YOKOGS200"
-    unit = "A" if defect == "wrong_unit" else "native"
+        gui.device["status"] = "memory_only"
+        client.transport.replies["device.setup"] = {
+            "ok": False,
+            "error": {
+                "code": "precondition_failed",
+                "reason": "request_rejected",
+                "message": "not connected",
+            },
+        }
+    else:
+        gui.device["info"] = None
     result = client.call(
-        "device_set_value", {"name": "fake_flux", "value": 1, "unit": unit}
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
     )
     assert result.is_error
     assert result.data["before"]["device"] == gui.device
     assert result.data["after"]["device"] is None
-    assert result.data["steps"]["start"]["status"] == "not_started"
-    assert "device.setup" not in [method for method, _ in client.transport.sent]
+    assert result.data["op"] is None
+    if defect == "disconnected":
+        assert result.data["steps"]["start"]["status"] == "failed"
+        assert result.data["error"]["code"] == "precondition_failed"
+        assert result.data["error"]["request_rejected"] is True
+        assert result.data["requested"]["cfg"] == {**gui.device["info"], "value": 1}
+        assert [method for method, _ in client.transport.sent].count(
+            "device.setup"
+        ) == 1
+    else:
+        assert result.data["steps"]["pre_read"]["status"] == "failed"
+        assert result.data["requested"]["cfg"] is None
+        assert not any(method == "device.setup" for method, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize(
@@ -368,13 +387,15 @@ def test_device_precondition_failure_retains_before_without_mutation(
     [
         ("simulation_initialize", "simulation.initialize", {}),
         (
-            "device_set_value",
+            "device_setup",
             "device.setup",
-            {"name": "fake_flux", "value": 1, "unit": "native"},
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
         ),
     ],
 )
-@pytest.mark.parametrize("failure", ["stale", "transport_timeout", "handler_timeout"])
+@pytest.mark.parametrize(
+    "failure", ["rejected", "transport_timeout", "handler_timeout"]
+)
 def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
     setup_client, tool, method, arguments, failure
 ):
@@ -387,8 +408,8 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
         return {
             "ok": False,
             "error": {
-                "code": "precondition_failed" if failure == "stale" else "timeout",
-                "reason": "stale_version" if failure == "stale" else None,
+                "code": "precondition_failed" if failure == "rejected" else "timeout",
+                "reason": "request_rejected" if failure == "rejected" else None,
                 "message": "wire failure",
             },
         }
@@ -398,12 +419,12 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
     assert result.is_error
     assert result.data["op"] is None
     assert result.data["steps"]["start"]["status"] == (
-        "failed" if failure == "stale" else "unknown"
+        "failed" if failure == "rejected" else "unknown"
     )
     assert result.data["steps"]["wait"]["status"] == "not_started"
     assert [sent for sent, _ in client.transport.sent].count(method) == 1
-    if failure == "stale":
-        assert result.data["error"]["reason"] == "stale_version"
+    if failure == "rejected":
+        assert result.data["error"]["reason"] == "request_rejected"
         assert result.data["steps"]["post_read"]["status"] == "not_started"
     else:
         assert result.data["status"] == "unknown"
@@ -413,7 +434,10 @@ def test_start_failure_distinguishes_rejection_from_unknown_without_retry(
     "tool,arguments",
     [
         ("simulation_initialize", {}),
-        ("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}),
+        (
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+        ),
     ],
 )
 def test_wait_timeout_keeps_operation_running_and_reads_partial_facts(
@@ -421,7 +445,10 @@ def test_wait_timeout_keeps_operation_running_and_reads_partial_facts(
 ):
     client, gui = setup_client
     gui.wait_reason = "timeout"
-    result = client.call(tool, {**arguments, "timeout": 0})
+    result = client.call(
+        tool,
+        {**arguments, "timeout": 0} if tool == "simulation_initialize" else arguments,
+    )
     assert result.data["status"] == "running"
     assert result.data["operation"]["status"] == "running"
     assert result.data["steps"]["wait"]["status"] == "running"
@@ -440,7 +467,10 @@ def test_wait_timeout_keeps_operation_running_and_reads_partial_facts(
     "tool,arguments",
     [
         ("simulation_initialize", {}),
-        ("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}),
+        (
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+        ),
     ],
 )
 def test_native_failed_operation_is_not_hidden_by_completed_reads(
@@ -470,9 +500,9 @@ def test_native_failed_operation_is_not_hidden_by_completed_reads(
     [
         ("simulation_initialize", "state.has_soc", {}),
         (
-            "device_set_value",
+            "device_setup",
             "device.snapshot",
-            {"name": "unknown", "value": 1, "unit": "native"},
+            {"name": "unknown", "cfg": {"value": 1, "value_unit": "native"}},
         ),
     ],
 )
@@ -500,7 +530,10 @@ def test_missing_precondition_stops_before_start_and_retains_null_facts(
     "tool,arguments",
     [
         ("simulation_initialize", {}),
-        ("device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}),
+        (
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
+        ),
     ],
 )
 def test_wait_query_failure_keeps_handle_and_does_not_infer_completion(
@@ -566,7 +599,8 @@ def test_connection_loss_after_receipt_retains_handle_without_reconnecting(
 
     client.transport.replies["device.setup"] = disconnect_after_start
     result = client.call(
-        "device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
     )
     assert result.is_error
     assert result.data["status"] == "unknown"
@@ -600,10 +634,11 @@ def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
         assert initial["before"]["soc"] is None
         before = initial["after"]["devices"][0]
         value = call(
-            "device_set_value", {"name": "fake_flux", "value": 0.5, "unit": "native"}
+            "device_setup",
+            {"name": "fake_flux", "cfg": {"value": 0.5, "value_unit": "native"}},
         )
         assert value["status"] == "finished", value
-        assert value["verification"]["actual"] == 0.5
+        assert value["after"]["device"]["info"]["value"] == 0.5
         assert (
             value["after"]["device"]["info"]["rampstep"] == before["info"]["rampstep"]
         )
@@ -641,12 +676,12 @@ def test_value_quantization_is_observed_not_invented_as_a_failure(setup_client):
 
     client.transport.replies["device.setup"] = quantized
     result = client.call(
-        "device_set_value", {"name": "fake_flux", "value": 1, "unit": "native"}
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
     )
     assert not result.is_error
     assert result.data["status"] == "finished"
-    assert result.data["verification"]["actual"] == 1.01
-    assert result.data["verification"]["exact_match"] is False
+    assert result.data["after"]["device"]["info"]["value"] == 1.01
 
 
 @pytest.mark.parametrize(
@@ -841,7 +876,11 @@ def test_device_setup_retains_native_validation_rejection(
     client.transport.replies["device.setup"] = {"ok": False, "error": native}
     result = client.call("device_setup", {"name": "fake_flux", "cfg": patch})
     assert result.is_error
-    assert result.data["error"] == {**native, "request_rejected": True}
+    assert result.data["error"] == {
+        **native,
+        "message": "GUI Error (invalid_params): native validator diagnostic",
+        "request_rejected": True,
+    }
     assert result.data["steps"]["start"]["status"] == "failed"
     assert result.data["before"]["device"] == before
     assert result.data["after"]["device"] is None

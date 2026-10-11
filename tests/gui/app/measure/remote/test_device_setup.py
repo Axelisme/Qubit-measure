@@ -39,7 +39,9 @@ def submit(
     return method.handler(SetupAdapter(dev), params)
 
 
-def accept(dev: RecordingDeviceControl, cfg: dict[str, object]) -> Mapping[str, object]:
+def accept(
+    dev: RecordingDeviceControl, cfg: Mapping[str, object]
+) -> Mapping[str, object]:
     try:
         return submit(dev, cfg)
     except RemoteError as exc:
