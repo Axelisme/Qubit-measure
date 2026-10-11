@@ -158,3 +158,16 @@ def test_endpoint_raw_input_is_not_parsed_by_presentation(editor: RangeEditor):
     line.setText("1e-1")
     assert editor.resource.observe().status is CfgStatus.VALID
     assert editor.resource.observe().ref.revision == 2
+
+
+def test_expression_edge_tooltip_shows_full_expression(editor: RangeEditor):
+    edge = "center" if isinstance(editor.widget, CenteredSweepInputWidget) else "start"
+    editor.resource.edit(
+        editor.resource.observe().ref.revision,
+        (CfgEdit(("range", edge), EvalValue("offset")),),
+    )
+    line = editor.widget.findChildren(ScalarInputWidget)[0].findChild(QLineEdit)
+    assert line is not None
+    assert line.toolTip() == "offset"
+    line.setText("offset * 2")
+    assert line.toolTip() == "offset * 2"
