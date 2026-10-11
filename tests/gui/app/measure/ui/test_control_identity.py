@@ -25,9 +25,13 @@ from qtpy.QtWidgets import (
     QTreeWidget,
 )
 from zcu_tools.cfg_model import waveform_spec_from_raw
+from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    LoadDataRequest,
     RunRequest,
     SessionEnv,
 )
@@ -60,9 +64,9 @@ from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
-from tests.gui.app.measure.ui.test_load_cfg_backfill import LoadAdapter
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
@@ -79,6 +83,29 @@ class StoppableAdapter(OldAdapter):
         if not context.cancel_signal.event.wait(5):
             raise RuntimeError("test run was not stopped")
         return object()
+
+
+class ModalRuntimeCfg(ExpCfgModel):
+    knob: int = 42
+
+
+@dataclass
+class ModalLoadResult:
+    data_path: str
+
+
+class ModalLoadAdapter(OldAdapter):
+    """Legal native owner contract, without file parsing or acquisition."""
+
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
+
+    def load(
+        self, req: LoadDataRequest
+    ) -> tuple[RunRecord[ModalRuntimeCfg, ModalLoadResult], RunMetadata]:
+        return (
+            RunRecord(cfg=ModalRuntimeCfg(), result=ModalLoadResult(req.data_path)),
+            historical_metadata(),
+        )
 
 
 class UiController(Controller):
@@ -126,7 +153,7 @@ def control_ui(
 ) -> Iterator[ControlUi]:
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
-    registry.register("loadable", LoadAdapter)
+    registry.register("loadable", ModalLoadAdapter)
     loader = Loader()
     loader.candidate.register("stoppable", StoppableAdapter)
     ctrl = UiController(
@@ -413,7 +440,7 @@ def modal_action(
                 visited.append(expected)
                 schedule()
                 interact(dialog)
-            except Exception as exc:
+            except AssertionError as exc:
                 errors.append(exc)
                 if isinstance(dialog, QDialog):
                     dialog.reject()
