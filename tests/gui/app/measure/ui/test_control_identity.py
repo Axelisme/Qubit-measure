@@ -66,7 +66,7 @@ from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-from zcu_tools.resources.entry import document_value
+from zcu_tools.resources.entry import component_registry, document_value
 from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
@@ -75,6 +75,8 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
+from tests.resources.entry.fakes import registry_state, restore_registry
+from zcu_lab.components import ResonatorSchema
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
@@ -155,9 +157,38 @@ def button(widget, text: str) -> QPushButton:
     return next(b for b in widget.findChildren(QPushButton) if b.text() == text)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def component_registry_guard() -> Iterator[None]:
+    incoming = registry_state()
+    yield
+    assert registry_state() == incoming, (
+        "Control UI module polluted component/role state"
+    )
+
+
+@pytest.fixture
+def registered_resonator(component_registry_guard) -> Iterator[None]:
+    incoming = registry_state()
+    try:
+        if "resonator" in component_registry.kinds():
+            component_registry.unregister("resonator")
+        component_registry.register("resonator", ResonatorSchema)
+        registered = registry_state()
+        yield
+        assert registry_state() == registered, (
+            "Control UI test polluted component/role state"
+        )
+    finally:
+        restore_registry(incoming)
+        assert registry_state() == incoming, "Component/role restoration failed"
+
+
 @pytest.fixture
 def control_ui(
-    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+    qapp: QApplication,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    registered_resonator,
 ) -> Iterator[ControlUi]:
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
