@@ -67,6 +67,9 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPrevie
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,7 @@ class MainWindow(QMainWindow):
         *,
         interactive_runner: BackgroundRunner | None = None,
         search_runner: BackgroundRunner | None = None,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
         """Mount views and retain app-owned interactive/search Qt runners.
 
@@ -91,6 +95,8 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self._ctrl = ctrl
+        self._dialogs = dialog_presenter or QtDialogPresenter()
+        self._edit_gate = RemoteEditGate(ctrl.control_identity, self)
         self._interactive_runner = interactive_runner
         self._search_runner = search_runner
         if search_runner is not None:
@@ -116,6 +122,7 @@ class MainWindow(QMainWindow):
 
         # Left panel: collection management above the list, global actions below.
         left = QVBoxLayout()
+        left.addWidget(ControlIndicator(self._ctrl.control_identity, self))
 
         # Above the list: add a raw spectrum / remove this one.
         # Project (chip / qubit names) — drives the default export layout.
@@ -182,6 +189,16 @@ class MainWindow(QMainWindow):
         splitter.setSizes([280, 820])
         root.addWidget(splitter)
         self.setCentralWidget(central)
+        for control in (
+            self._project_btn,
+            self._add_btn,
+            self._remove_btn,
+            self._list,
+            self._reload_btn,
+            self._export_btn,
+            self._analyze_btn,
+        ):
+            self._edit_gate.bind(control)
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
@@ -338,6 +355,13 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is not None:
             self._analyze_panel.detach()
         self._current_editor = widget
+        if isinstance(
+            widget,
+            (LinePickerWidget, OneToneWidget, FindPointsWidget, ResultPreviewWidget),
+        ):
+            self._edit_gate.watch(
+                lambda editable: widget.set_editable(editable=editable), lifetime=widget
+            )
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
@@ -436,7 +460,11 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
+        self._edit_gate.bind(dialog)
+
         def _on_accepted() -> None:
+            if self._ctrl.control_identity.status().holder != "gui":
+                return
             req = dialog.result_request()
             if req is None:
                 return
@@ -470,7 +498,7 @@ class MainWindow(QMainWindow):
             processed_spectrum_dir(self._ctrl.state.project),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
         )
-        if not filepath:
+        if not filepath or self._ctrl.control_identity.status().holder != "gui":
             return
         try:
             names = self._ctrl.load_processed_spectrums(filepath)
@@ -511,8 +539,11 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
+        self._edit_gate.bind(dialog)
+
         def _on_accepted() -> None:
-            self._ctrl.setup_project(dialog.result_project())
+            if self._ctrl.control_identity.status().holder == "gui":
+                self._ctrl.setup_project(dialog.result_project())
 
         dialog.accepted.connect(_on_accepted)
         # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
@@ -533,7 +564,11 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
+        self._edit_gate.bind(dialog)
+
         def _on_accepted() -> None:
+            if self._ctrl.control_identity.status().holder != "gui":
+                return
             path = dialog.export_path()
             if path is None:
                 return
@@ -577,6 +612,16 @@ class MainWindow(QMainWindow):
         Keep subscriptions, figures and Qt owners alive on drain refusal.
         A later close attempt can finish once the runner and search owner drain.
         """
+        status = self._ctrl.control_identity.status()
+        if status.holder != "gui" and not self._dialogs.confirm(
+            self,
+            "Close remote-controlled window?",
+            f"{status.holder.removeprefix('rpc:')} controls this window. Close and cancel pending work?",
+            default=False,
+        ):
+            if a0 is not None:
+                a0.ignore()
+            return
         self._ctrl.search.begin_close()
         search_drained = self._search_runner is None or self._search_runner.quiesce()
         # Startup notifications can reenter close before any worker is submitted.
@@ -597,4 +642,5 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
             self._analyze_panel.dispose()
+        self._edit_gate.dispose()
         super().closeEvent(a0)

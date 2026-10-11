@@ -62,6 +62,7 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
@@ -126,6 +127,7 @@ class AnalyzePanelWidget(QWidget):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
+        self._edit_gate = RemoteEditGate(ctrl.control_identity, self)
         self._bus_subs = EventSubscriptions()
         self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
@@ -149,6 +151,10 @@ class AnalyzePanelWidget(QWidget):
             else None
         )
         self._refresh_search()
+        self._edit_gate.watch(
+            lambda editable: self._set_tab_availability(editable=editable),
+            lifetime=self,
+        )
         # MainWindow explicitly activates this singleton on every Analyze click.
 
     # --- construction ----------------------------------------------------
@@ -202,6 +208,9 @@ class AnalyzePanelWidget(QWidget):
             context, on_apply=self._ctrl.interactive.apply_cross_selection
         )
         self._filter_widget = selector
+        self._edit_gate.watch(
+            lambda editable: selector.set_editable(editable=editable), lifetime=selector
+        )
         self._filter_layout.addWidget(selector)
 
     # --- Search tab ------------------------------------------------------
@@ -234,6 +243,7 @@ class AnalyzePanelWidget(QWidget):
     def _build_search_form(self) -> QGroupBox:
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
+        self._edit_gate.bind(form_box)
 
         self._db_edit = QLineEdit()
         browse = QPushButton("Browse…")
@@ -441,7 +451,22 @@ class AnalyzePanelWidget(QWidget):
             self._filter_widget = None
         self._filter_context_id = None
 
+    def _set_tab_availability(self, *, editable: bool) -> None:
+        # Entering Filter opens input; leaving it cancels input. Search/Show
+        # switching without Filter input is pure viewing and remains available.
+        bar = self._tabs.tabBar()
+        if bar is None:
+            raise RuntimeError("Analyze tabs have no tab bar")
+        bar.setEnabled(editable or self.current_tab != "filter")
+        self._tabs.setTabEnabled(0, editable or self.current_tab == "filter")
+        # QTabWidget handles Ctrl+Tab itself, even with a disabled tab bar.
+        for index in (1, 2):
+            self._tabs.setTabEnabled(index, editable or self.current_tab != "filter")
+
     def _on_tab_changed(self, index: int) -> None:
+        self._set_tab_availability(
+            editable=self._ctrl.control_identity.status().holder == "gui"
+        )
         if self._tabs.tabText(index) == "Filter":
             self._refresh_filter_tab()
         else:
@@ -619,6 +644,7 @@ class AnalyzePanelWidget(QWidget):
 
     def dispose(self) -> None:
         """Release subscriptions and presentation after app search has drained."""
+        self._edit_gate.dispose()
         self._bus_subs.unsubscribe_all()
         if self._progress_dispose is not None:
             self._progress_dispose()
