@@ -20,6 +20,7 @@ from math import isfinite
 from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
+from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -48,6 +49,82 @@ RecipeParameter = RecipeScalar | list[RecipeScalar]
 StepStatus = Literal["completed", "finished_early", "cancelled"]
 WritebackDecision = Literal["accepted", "skipped"]
 AnalysisStage = Literal["primary", "post"]
+
+
+class RecipeExpression(TypedDict):
+    """GUI expression input, forwarded unchanged rather than evaluated in MCP.
+
+    __expr is the expression text in the GUI's existing expression language.
+    The GUI owns parsing, source resolution and diagnostics, including blanks.
+    """
+
+    __expr: str
+
+
+@dataclass(frozen=True)
+class RecipeFieldEdit:
+    """One scalar field edit for RecipeTab.set_fields.
+
+    field is a dotted public scalar cfg path. value is a direct scalar/list or
+    RecipeExpression; None retains the current input, it does not write null.
+    source is a non-blank provenance label; retained inputs use gui_default.
+    """
+
+    field: str
+    value: RecipeParameter | RecipeExpression
+    source: str = "explicit"
+
+
+@dataclass(frozen=True)
+class RecipeInputState:
+    """Detached GUI input, without parsing expressions or decoding tagged values.
+
+    mode identifies direct input or expression text. raw is the original GUI
+    input, resolved is its cached value (possibly None). error is the resolution
+    diagnostic and validation_error is the owner validation diagnostic; each is
+    text or None. YAML containers are owned copies, not live cfg data.
+    """
+
+    mode: Literal["direct", "expression"]
+    raw: YamlValue
+    resolved: YamlValue
+    error: str | None
+    validation_error: str | None
+
+
+@dataclass(frozen=True)
+class RecipeFieldState:
+    """Detached last-publication cfg field, including invalid inputs.
+
+    kind is the GUI node kind; valid is its cached validity, not fresh validation.
+    children names its immediate children in owner order, not full paths.
+    reference/error are the chosen key and diagnostic for reference nodes only.
+    input is populated for scalar/literal nodes only. inputs maps owner-named
+    sweep/centered_sweep controls to their states; otherwise it is empty.
+    Inapplicable children/reference/error/input are empty tuple/None.
+    Returned containers may be changed without changing the tab publication.
+    """
+
+    kind: Literal[
+        "section", "reference", "scalar", "literal", "sweep", "centered_sweep"
+    ]
+    valid: bool
+    children: tuple[str, ...] = ()
+    reference: str | None = None
+    error: str | None = None
+    input: RecipeInputState | None = None
+    inputs: Mapping[str, RecipeInputState] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RecipeDeviceState:
+    """Detached cached device coordinate metadata, not live driver information.
+
+    unit is the snapshot's raw YAML/JSON unit value, including None or tagged
+    containers. No connected/settable/type/unit policy or conversion is applied.
+    """
+
+    unit: YamlValue
 
 
 class RecipePropertySchema(TypedDict):
@@ -497,6 +574,95 @@ def _cfg_object(value: object) -> dict[str, object]:
     return result
 
 
+def _wire_value(value: object) -> YamlValue:
+    """Copy the JSON/YAML representation, retaining opaque tagged objects."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return [_wire_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _wire_value(item) for key, item in _cfg_object(value).items()}
+    raise GuiRpcError("Invalid GUI value", reason="incompatible_wire")
+
+
+def _wire_text(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise GuiRpcError("Invalid GUI text", reason="incompatible_wire")
+
+
+def _input_state(value: object) -> RecipeInputState:
+    node = _cfg_object(value)
+    mode = node.get("mode")
+    if (
+        mode not in ("direct", "expression")
+        or "raw" not in node
+        or "resolved" not in node
+    ):
+        raise GuiRpcError("Invalid GUI input state", reason="incompatible_wire")
+    return RecipeInputState(
+        mode="direct" if mode == "direct" else "expression",
+        raw=_wire_value(node["raw"]),
+        resolved=_wire_value(node["resolved"]),
+        error=_wire_text(node.get("error")),
+        validation_error=_wire_text(node.get("validation_error")),
+    )
+
+
+def _field_state(node: dict[str, object]) -> RecipeFieldState:
+    kind = node.get("kind")
+    valid = node.get("valid")
+    if not isinstance(valid, bool):
+        raise GuiRpcError("Invalid GUI field validity", reason="incompatible_wire")
+    if kind == "section" or kind == "reference":
+        return RecipeFieldState(
+            kind="section" if kind == "section" else "reference",
+            valid=valid,
+            children=tuple(_cfg_object(node.get("children", {}))),
+            reference=_wire_text(node.get("ref")) if kind == "reference" else None,
+            error=_wire_text(node.get("error")) if kind == "reference" else None,
+        )
+    if kind == "scalar" or kind == "literal":
+        return RecipeFieldState(
+            kind="scalar" if kind == "scalar" else "literal",
+            valid=valid,
+            input=_input_state(node.get("input")),
+        )
+    if kind == "sweep" or kind == "centered_sweep":
+        return RecipeFieldState(
+            kind="sweep" if kind == "sweep" else "centered_sweep",
+            valid=valid,
+            inputs={
+                key: _input_state(value)
+                for key, value in _cfg_object(node.get("inputs")).items()
+            },
+        )
+    raise GuiRpcError("Invalid GUI field kind", reason="incompatible_wire")
+
+
+def _is_expression(value: object) -> bool:
+    """Recognize only the existing one-key expression wire carrier."""
+    return (
+        isinstance(value, dict)
+        and set(value) == {"__expr"}
+        and isinstance(value["__expr"], str)
+    )
+
+
+def _check_edit_value(value: object) -> None:
+    if (
+        value is None
+        or isinstance(value, (str, bool, int, float))
+        or _is_expression(value)
+    ):
+        return
+    if isinstance(value, list) and all(
+        item is None or isinstance(item, (str, bool, int, float)) for item in value
+    ):
+        return
+    raise ValueError("value must be a scalar, scalar list or RecipeExpression")
+
+
 def _field_path(name: str) -> list[str]:
     if not name or any(not part or part != part.strip() for part in name.split(".")):
         raise ValueError("field must be a non-empty dotted cfg field name")
@@ -770,6 +936,61 @@ class RecipeTab:
             )
             self._binding.publication = _cfg_object(reply)
 
+    def read_value(self, path: str) -> YamlValue:
+        """Read one non-blank logical leaf from current sources with this tab's aliases.
+
+        path is a parameter path such as $custom.threshold or Q1.ext.seed, not an
+        arithmetic formula. Missing and explicit null both return None. Each call
+        uses tab.parameter_read, returning a detached value without changing cfg,
+        provenance or Run state or refreshing context/operation guards. Source,
+        alias and fixed-connection failures propagate without fallback or retry.
+        ValueError rejects blank paths; malformed wire raises incompatible_wire.
+        """
+        if not path or not path.strip():
+            raise ValueError("path must be a non-empty logical leaf path")
+        return _wire_value(self._calibration(path))
+
+    def read_library_root(self, reference: str | None) -> str | None:
+        """Ask the source owner for reference's canonical library module root.
+
+        None returns None without an RPC. Other references must be non-blank;
+        custom/missing modules return None, never a client-guessed root. Queries
+        use the fixed connection and copied aliases, not context.snapshot. Cfg,
+        provenance and Run state are unchanged. Source/connection errors propagate
+        without fallback/retry; malformed root replies raise incompatible_wire.
+        """
+        if reference is not None and (not reference or not reference.strip()):
+            raise ValueError("reference must be a non-empty module reference")
+        return self._library_reference(reference)
+
+    def read_field(self, field: str) -> RecipeFieldState:
+        """Read a detached field from the last successful cfg publication, without RPC.
+
+        field is a non-empty dotted public cfg path. Invalid fields retain their
+        cached inputs and diagnostics. Later successful edits or alias previews
+        replace the tab's publication but do not change previously returned states.
+        Failed edits do not refresh it. Unknown/malformed paths raise ValueError;
+        malformed wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
+        """
+        return _field_state(self._node(field))
+
+    def read_device(self, name: str) -> RecipeDeviceState:
+        """Read name's cached device.snapshot once on the fixed GUI connection.
+
+        name is a non-blank registered device name. This does not connect, setup,
+        poll hardware, change cfg/provenance, or interpret/convert units. Missing
+        unit or malformed wire raises GuiRpcError(incompatible_wire). Owner errors
+        (including unknown devices) and connection failures propagate, without
+        reconnect or retry. ValueError rejects blank names before dispatch.
+        """
+        if not name or not name.strip():
+            raise ValueError("device name must be non-empty")
+        reply = self._binding.tools.send_gui_rpc("device.snapshot", {"name": name})
+        snapshot = _cfg_object(reply.get("snapshot"))
+        if "unit" not in snapshot:
+            raise GuiRpcError("Missing device unit", reason="incompatible_wire")
+        return RecipeDeviceState(unit=_wire_value(snapshot["unit"]))
+
     def _calibration(self, path: str) -> object:
         """Read one requested role path, retaining missing/null as unusable values."""
         reply = self._binding.tools.send_gui_rpc(
@@ -781,7 +1002,7 @@ class RecipeTab:
                 **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
-        return _cfg_object(reply["values"]).get(path)
+        return _cfg_object(reply.get("values")).get(path)
 
     def _library_reference(self, reference: str | None) -> str | None:
         """Resolve a canonical module root using current sources and named aliases."""
@@ -796,7 +1017,10 @@ class RecipeTab:
                 **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
-        root = _cfg_object(reply["modules"])[reference]
+        modules = _cfg_object(reply.get("modules"))
+        if reference not in modules:
+            raise GuiRpcError("Missing module lookup reply", reason="incompatible_wire")
+        root = modules[reference]
         if root is not None and not isinstance(root, str):
             raise GuiRpcError("Invalid module lookup reply", reason="incompatible_wire")
         return root
@@ -881,32 +1105,67 @@ class RecipeTab:
             raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
         self._binding.origins[field] = "disabled"
 
-    def set(
-        self, field: str, value: RecipeParameter | None, *, source: str = "explicit"
-    ) -> None:
-        """Set a scalar cfg field; None keeps its GUI default and records that source.
+    def set_fields(self, edits: Sequence[RecipeFieldEdit]) -> None:
+        """Prepare scalar edits together and dispatch at most one tab.edit_cfg.
 
-        Reject unknown/non-scalar fields locally. The GUI validates supplied values;
-        a returned field error raises GuiRpcError without retrying the edit.
-        source is a non-empty provenance label for supplied values (for example
-        their tool parameter name); None values always retain gui_default.
+        edits is an ordered sequence of dotted scalar paths, direct/expression
+        inputs and non-blank provenance labels. None values retain current inputs
+        and record gui_default. Empty/default-only batches send no edit. Validate
+        every path, scalar kind, carrier and label before any mutation; local
+        errors raise ValueError. Expressions go unchanged to the GUI owner.
+        Supplied values share the retained cfg ref and one returned revision.
+        Check their returned validity/diagnostics before recording sources; invalid
+        replies raise GuiRpcError(invalid_cfg) but retain the returned publication.
+        GUI/connection failures propagate without refresh, retry or rollback;
+        this method adds no atomicity guarantee beyond the existing GUI protocol.
         """
-        if not source or not source.strip():
-            raise ValueError("source must be a non-empty provenance label")
-        node = self._node(field)
-        if node["kind"] != "scalar":
-            raise ValueError(f"Not a scalar cfg field: {field}")
-        if value is not None:
-            self._edit([{"path": _field_path(field), "value": value}])
-            node = self._node(field)
-            state = _cfg_object(node["input"])
-            if (
-                not node.get("valid")
-                or state.get("error")
-                or state.get("validation_error")
-            ):
-                raise GuiRpcError(f"Invalid {field} value", reason="invalid_cfg")
-        self._binding.origins[field] = source if value is not None else "gui_default"
+        planned = tuple(edits)
+        wire: list[_CfgEdit] = []
+        for edit in planned:
+            if not edit.source or not edit.source.strip():
+                raise ValueError("source must be a non-empty provenance label")
+            node = self._node(edit.field)
+            if node["kind"] != "scalar":
+                raise ValueError(f"Not a scalar cfg field: {edit.field}")
+            _check_edit_value(edit.value)
+            if edit.value is not None:
+                wire.append(
+                    {"path": _field_path(edit.field), "value": deepcopy(edit.value)}
+                )
+        self._edit(wire)
+        for edit in planned:
+            if edit.value is not None:
+                node = self._node(edit.field)
+                state = _cfg_object(node["input"])
+                if (
+                    not node.get("valid")
+                    or state.get("error")
+                    or state.get("validation_error")
+                ):
+                    raise GuiRpcError(
+                        f"Invalid {edit.field} value", reason="invalid_cfg"
+                    )
+        for edit in planned:
+            self._binding.origins[edit.field] = (
+                edit.source if edit.value is not None else "gui_default"
+            )
+
+    def set(
+        self,
+        field: str,
+        value: RecipeParameter | RecipeExpression,
+        *,
+        source: str = "explicit",
+    ) -> None:
+        """Set one dotted scalar field to a direct input or GUI expression carrier.
+
+        None keeps its current input and records gui_default. source is a non-blank
+        provenance label for supplied values. Unknown/non-scalar fields and invalid
+        carriers/labels raise ValueError before dispatch. The GUI parses expressions
+        and validates values; returned errors raise GuiRpcError(invalid_cfg) without
+        retry or rollback. Retain the returned publication and its revision.
+        """
+        self.set_fields((RecipeFieldEdit(field, value, source),))
 
     def _frequency_fields(self, field: str) -> tuple[list[str], str | None]:
         """Resolve scalar/readout-root fields and the enclosing library reference."""
@@ -1231,14 +1490,16 @@ class RecipeTab:
         self,
         field: str,
         *,
-        start: float | None = None,
-        stop: float | None = None,
+        start: float | RecipeExpression | None = None,
+        stop: float | RecipeExpression | None = None,
         expts: int | None = None,
         sources: SweepSources | None = None,
     ) -> None:
         """Edit only supplied sweep fields in their native unit; retain omitted ones.
 
-        Supplied endpoints must be finite and not boolean. expts is an integer
+        Supplied numeric endpoints must be finite and not boolean; RecipeExpression
+        endpoints pass unchanged to the GUI for parsing/resolution/validation.
+        expts is an integer
         of at least 2; None retains the GUI count. sources optionally labels
         start/stop/expts separately in the Run capture; all three non-empty labels
         are required. Omitted values always retain gui_default provenance.
@@ -1258,7 +1519,11 @@ class RecipeTab:
             )
         _check_points(expts)
         for endpoint in (start, stop):
-            if endpoint is not None and not _finite_frequency(endpoint):
+            if (
+                endpoint is not None
+                and not _is_expression(endpoint)
+                and not _finite_frequency(endpoint)
+            ):
                 raise ValueError("sweep endpoints must be finite and not boolean")
         values: dict[str, object] = {}
         for key, value in (("start", start), ("stop", stop), ("expts", expts)):

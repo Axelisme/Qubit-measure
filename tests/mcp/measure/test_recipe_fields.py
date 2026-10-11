@@ -101,10 +101,10 @@ def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
         snapshot = tab.run().snapshot()
         assert snapshot is not None
         assert (
-            snapshot.actual["fields"]["modules.readout.pulse_cfg.freq"]["source"]
+            snapshot.actual["fields"]["modules.readout.pulse_cfg.freq"].get("source")
             == "caller_low"
         )
-        assert snapshot.actual["fields"]["rounds"]["source"] == "gui_default"
+        assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"
 
 
 @pytest.mark.parametrize(
@@ -118,7 +118,7 @@ def test_batch_preflight_rejects_all_before_first_edit(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cfg field|source"):
             tab.set_fields(
                 [
                     recipe.RecipeFieldEdit("rounds", 7, "valid"),

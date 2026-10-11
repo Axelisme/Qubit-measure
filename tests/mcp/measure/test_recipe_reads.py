@@ -169,7 +169,7 @@ def test_read_field_uses_last_successful_publication(tmp_path: Path) -> None:
             },
         }
         before = len(client.transport.sent)
-        with pytest.raises(GuiRpcError):
+        with pytest.raises(GuiRpcError, match="stale cfg"):
             tab.set("rounds", 9)
         assert tab.read_field("rounds") == current
         assert [method for method, _ in client.transport.sent[before:]] == [
@@ -184,7 +184,7 @@ def test_read_field_rejects_unknown_paths_without_rpc(
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="field"):
             tab.read_field(field)
         assert len(client.transport.sent) == before
 
@@ -220,7 +220,7 @@ def test_read_device_rejects_blank_name_without_rpc(tmp_path: Path, name: str) -
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="device name must be non-empty"):
             tab.read_device(name)
         assert len(client.transport.sent) == before
 
@@ -232,9 +232,7 @@ def test_source_reads_reject_blank_request_without_rpc(
     with recipe_client(tmp_path, LookbackGui()) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = len(client.transport.sent)
-        with pytest.raises(ValueError):
-            if method == "read_value":
-                tab.read_value(" ")
-            else:
-                tab.read_library_root(" ")
+        read = tab.read_value if method == "read_value" else tab.read_library_root
+        with pytest.raises(ValueError, match="must be a non-empty"):
+            read(" ")
         assert len(client.transport.sent) == before
