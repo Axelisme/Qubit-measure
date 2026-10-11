@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -258,6 +259,78 @@ def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> Non
     output = BytesIO()
     figure.savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+    plots.release()
+
+
+def test_worker_draw_presents_on_first_success_and_keeps_other_figures_pending(
+    qapp: QApplication,
+    hosts: tuple[list[QStackedWidget], list[FigureContainer], list[QtPlotHost]],
+    tmp_path: Path,
+) -> None:
+    stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    owner_id = threading.get_ident()
+    output = tmp_path / "summary.png"
+
+    def draw(figure: Figure) -> None:
+        assert threading.get_ident() == owner_id
+        assert get_figure_container(figure) is None
+        figure.axes[0].plot([0.0, 1.0], [2.0, 3.0])
+
+    def redraw(figure: Figure) -> None:
+        assert threading.get_ident() == owner_id
+        assert get_figure_container(figure) is containers[0]
+        figure.clear()
+        figure.subplots().plot([0.0, 1.0], [4.0, 5.0])
+
+    def work() -> int:
+        figure, _ = plots.subplots("summary")
+        pending, _ = plots.subplots("pending")
+        plots.draw("summary", draw)
+        assert adapters[0].call(lambda: get_figure_container(figure)) is containers[0]
+        plots.draw("summary", redraw)
+        assert adapters[0].call(lambda: stacks[0].count()) == 2
+        assert adapters[0].call(lambda: get_figure_container(pending)) is None
+        plots.save("summary", output)
+        plots.finish()
+        return threading.get_ident()
+
+    assert _run_worker(qapp, work) != owner_id
+    assert stacks[0].count() == 3
+    assert get_figure_container(plots["pending"]) is containers[0]
+    np.testing.assert_array_equal(plots["summary"].axes[0].lines[0].get_ydata(), [4, 5])
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    plots.release()
+    assert stacks[0].count() == 1
+
+
+def test_worker_failed_draw_does_not_present_or_rollback(
+    qapp: QApplication,
+    hosts: tuple[list[QStackedWidget], list[FigureContainer], list[QtPlotHost]],
+) -> None:
+    stacks, _containers, adapters = hosts
+    plots = Plots(adapters[0])
+    owner_id = threading.get_ident()
+    cause = ValueError("partial drawing")
+
+    def fail(figure: Figure) -> None:
+        assert threading.get_ident() == owner_id
+        figure.axes[0].set_title("partial")
+        raise cause
+
+    def work() -> int:
+        figure, _ = plots.subplots("diagnostic")
+        with pytest.raises(ValueError, match="partial drawing") as caught:
+            plots.draw("diagnostic", fail)
+        assert caught.value is cause
+        assert adapters[0].call(lambda: get_figure_container(figure)) is None
+        assert adapters[0].call(lambda: stacks[0].count()) == 1
+        plots.finish(present=False)
+        return threading.get_ident()
+
+    assert _run_worker(qapp, work) != owner_id
+    assert plots["diagnostic"].axes[0].get_title() == "partial"
+    assert get_figure_container(plots["diagnostic"]) is None
     plots.release()
 
 

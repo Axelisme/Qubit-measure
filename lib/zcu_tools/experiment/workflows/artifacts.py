@@ -24,7 +24,6 @@ from .journal import (
     RunStarted,
 )
 from .models import (
-    Capability,
     CommittedRecord,
     Completed,
     Lifecycle,
@@ -38,7 +37,7 @@ from .ports import Clock
 class RunManifest:
     """Run entry document, not a checkpoint or point-record store.
 
-    identity/workflow/plan/initial_tunables/requires/roots retain startup
+    identity/workflow/plan/initial_tunables/roots retain startup
     provenance. roots and journal are absolute paths; journal locates JSONL.
     started_at is the original UTC start;
     updated_at is the last lifecycle change, ended_at is None until terminal.
@@ -50,7 +49,6 @@ class RunManifest:
     workflow: str
     plan: JsonValue
     initial_tunables: JsonValue
-    requires: tuple[Capability, ...]
     roots: RunPaths
     journal: Path
     started_at: datetime
@@ -142,7 +140,6 @@ class RunArtifacts:
             workflow=metadata.workflow,
             plan=metadata.plan,
             initial_tunables=metadata.tunables,
-            requires=metadata.requires,
             roots=roots,
             journal=self.journal_path,
             started_at=metadata.started_at,
@@ -163,7 +160,6 @@ class RunArtifacts:
                 workflow=metadata.workflow,
                 plan=metadata.plan,
                 tunables=metadata.tunables,
-                requires=metadata.requires,
                 roots=roots,
                 started_at=metadata.started_at,
             )

@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
 from ..stop_signal import ScheduleOutcomeError, StopSignal
 from .artifacts import IterationArtifacts, RunArtifacts
@@ -19,6 +20,7 @@ from .effects import RunEffect, dispatch_effect
 from .encoding import encode_record
 from .env import Displays, InitEnv, WorkflowEnv
 from .journal import (
+    DeviceSetup,
     ExperimentFailed,
     IterationStarted,
     Paused,
@@ -52,7 +54,7 @@ from .models import (
     TunableChange,
     TunablesSnapshot,
 )
-from .ports import DeviceSnapshot, EnginePorts
+from .ports import EnginePorts
 from .run import Run
 from .tunables import TunableValues
 
@@ -84,7 +86,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._definition = definition
         self._ports = ports
         self._lock = lock
-        self._displays = Displays(ports.plots, ports.progress)
+        self._displays = Displays(ports.progress)
         self._displays_closed = False
         self._lifecycle: Lifecycle = "running"
         self._reason: str | None = None
@@ -101,23 +103,27 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         self._state: S
 
     def start(
-        self, plan: P, tunables: T, paths: RunPaths, identity: RunIdentity
+        self,
+        plan: P,
+        tunables: T,
+        paths: RunPaths,
+        identity: RunIdentity,
     ) -> None:
-        """Validate detached inputs/capabilities before creating startup files.
+        """Validate detached inputs before creating startup files.
 
-        Missing requirements and invalid model/path/provenance inputs propagate.
+        Invalid model/path/provenance inputs propagate.
         init is not called. Partial I/O artifacts are retained on failure.
         """
-        for capability in self._definition.requires:
-            if getattr(self._ports, capability) is None:
-                raise MissingCapability(capability)
         self._plan = deepcopy(
             self._definition.plan.model_validate(
                 plan.model_dump(mode="python"), by_name=True, by_alias=False
             )
         )
         self._tunables = TunableValues(
-            self._definition.tunables, tunables, self._lock, self._append_tunables
+            self._definition.tunables,
+            tunables,
+            self._lock,
+            self._append_tunables,
         )
         self._identity = deepcopy(identity)
         self._started_at = self._ports.clock.now()
@@ -128,7 +134,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._plan.model_dump(mode="json", by_alias=False, warnings="error")
             ),
             tunables=self._tunables.snapshot().values,
-            requires=self._definition.requires,
             roots=paths,
             started_at=self._started_at,
         )
@@ -209,7 +214,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 )
             )
         env = WorkflowEnv(
-            self._started_at, self._ports.context, iteration.files_dir, self._displays
+            self._started_at, self._ports, iteration.files_dir, self._displays
         )
         generator = self._definition.step(
             env, deepcopy(self._plan), captured.model, deepcopy(self._state)
@@ -230,7 +235,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             except (Exception, KeyboardInterrupt):
                 _logger.exception("Workflow shutdown also failed")
             raise
-        self._displays.refresh()
         if isinstance(outcome, Next):
             self._commit(outcome)
         else:
@@ -252,16 +256,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._end(lifecycle, reason)
 
     def _close_step(self, generator: Step[S, R]) -> None:
-        """Close the producer and refresh its final artists, preserving close errors."""
-        try:
-            generator.close()
-        except BaseException:
-            try:
-                self._displays.refresh()
-            except (Exception, KeyboardInterrupt):
-                _logger.exception("Final display refresh also failed")
-            raise
-        self._displays.refresh()
+        """Close a discarded producer; its cleanup errors propagate unchanged."""
+        generator.close()
 
     def _drive(self, generator: Step[S, R]) -> Next[R, S] | Done | Aborted:
         while True:
@@ -275,7 +271,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     ) from None
                 return outcome
             self._check_cancel()
-            self._displays.refresh()
             # Effect exits handle pure cancellation. A genuine Schedule Failed
             # reaches workflow code even when a control request arrived with it.
             dispatch_effect(effect, self)
@@ -371,15 +366,20 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         iteration, _ = self._current_iteration()
         self._run_no += 1
         try:
+            devices = self._ports.devices
+            if devices is None:
+                raise MissingCapability("devices")
+            device_snapshot = devices.capture_snapshot()
             run = Run(
                 request.cfg,
                 signal,
                 soc=self._ports.soc,
                 soccfg=self._ports.soccfg,
-                devices=self._ports.devices,
+                devices=devices,
+                device_snapshot=device_snapshot,
             )
             if request.live is not None:
-                run.bind_live(request.live, self._ports.plots)
+                run.bind_live(request.live)
             try:
                 result = request.experiment(run)
             except ScheduleOutcomeError as error:
@@ -443,13 +443,14 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
         )
         return Failed(reason)
 
-    def set_device(self, name: str, value: float) -> None:
-        """Apply an absolute setpoint through the device port and current signal."""
+    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> None:
+        """Forward complete settings with the active signal and journal the cfg."""
         signal = self._new_signal()
         try:
             if self._ports.devices is None:
                 raise MissingCapability("devices")
-            self._ports.devices.set_value(name, value, signal)
+            self._ports.devices.setup_device(name, cfg, signal)
+            self._artifacts.append(DeviceSetup(name, cfg))
             self._check_cancel()
         finally:
             self._clear_signal(signal)
@@ -483,14 +484,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             raise
         return self.status()
 
-    def resume(self, devices: DeviceSnapshot) -> RunStatus:
-        """Resume only after paused segment return, with detached provenance."""
+    def resume(self) -> RunStatus:
+        """Resume only after paused segment return under the retained lease."""
         if self._lifecycle != "paused" or self._executing:
             raise InvalidRunState("resume", self._lifecycle)
         try:
-            self._artifacts.append(
-                Resumed(self._commit_seq, self._tunables.revision, deepcopy(devices))
-            )
+            self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
             self._artifacts.set_lifecycle("running")
             self._lifecycle = "running"
         except Exception as error:

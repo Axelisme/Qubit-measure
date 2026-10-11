@@ -9,18 +9,19 @@ from threading import Event
 
 import pytest
 from pydantic import ValidationError
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
     Actor,
-    DeviceSnapshot,
     Done,
     Effect,
     Engine,
     EnginePorts,
     InitEnv,
     InvalidRunState,
-    MissingCapability,
     Next,
     RevisionConflict,
+    Run,
     RunIdentity,
     RunMismatch,
     RunPaths,
@@ -31,7 +32,7 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 
-from ._engine_fakes import START, Plan, RecordingBar, Rig, State, Tunables
+from ._engine_fakes import START, Cfg, Plan, RecordingBar, Rig, State, Tunables
 
 
 @pytest.fixture
@@ -93,8 +94,6 @@ def start_replacement(rig: Rig) -> RunStatus:
         "replacement",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=rig.init,
     )(replacement)
     return rig.engine.start(
@@ -102,7 +101,17 @@ def start_replacement(rig: Rig) -> RunStatus:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity(
+            "new",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
 
 
@@ -178,6 +187,49 @@ def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> N
         (1, 8),
     ]
     assert rig.kinds().index("tunables_changed") < rig.kinds().index("step_committed")
+    event = next(event for event in rig.events() if event["kind"] == "tunables_changed")
+    assert (event["revision_before"], event["revision_after"]) == (0, 1)
+    changes = event["changes"]
+    assert isinstance(changes, list)
+    assert len(changes) == 1
+    change = changes[0]
+    assert isinstance(change, dict)
+    assert (change["path"], change["old"], change["new"]) == ("value", 1, 8)
+
+
+def test_resume_without_device_input_keeps_commits_and_latest_revision(
+    rig: Rig,
+) -> None:
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == plan.count:
+            return Done()
+        env.pbar("points", plan.count).set_progress(state.index)
+        yield from env.wait_until(START)
+        state.index += 1
+        if state.index == 1:
+            rig.engine.pause("run")
+        return Next(tun.value, state)
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "paused"
+    records = rig.engine.records("run")
+    assert len(records) == 1 and records[0].revision == 0
+    rig.engine.update_tunables(
+        "run",
+        (TunableChange("value", 3),),
+        expected_revision=0,
+        actor=Actor("user", "test"),
+    )
+    with pytest.raises(RunMismatch):
+        rig.engine.resume("old")
+    assert rig.engine.resume("run").lifecycle == "running"
+    assert rig.engine.records("run") == records
+    assert len(rig.bars) == 1 and not rig.bars[0].closed
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert [record.revision for record in rig.engine.records("run")] == [0, 1]
+    assert rig.initialized == [START] and rig.bars[0].closed
 
 
 def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> None:
@@ -216,7 +268,7 @@ def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> No
         actor=Actor("user", "test"),
     )
     rig.clock.on_wait = None
-    assert rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+    assert rig.engine.resume("run").lifecycle == "running"
     final = rig.engine.execute("run")
     assert final.lifecycle == "done"
     assert final.call_seq == 4
@@ -254,7 +306,7 @@ def test_next_return_is_committed_before_pending_control(
     assert rig.engine.records("run")[0].call_seq == 1
     assert "step_discarded" not in rig.kinds()
     if control == "pause":
-        rig.engine.resume("run", devices=DeviceSnapshot(()))
+        rig.engine.resume("run")
         assert rig.engine.execute("run").lifecycle == "done"
         assert [record.call_seq for record in rig.engine.records("run")] == [1, 2]
 
@@ -287,7 +339,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
             with pytest.raises(InvalidRunState):
                 rig.engine.execute("run")
             with pytest.raises(InvalidRunState):
-                rig.engine.resume("run", devices=DeviceSnapshot(()))
+                rig.engine.resume("run")
             assert rig.engine.stop("run").lifecycle == "stopping"
             assert rig.engine.stop("run").lifecycle == "stopping"
             with pytest.raises(InvalidRunState):
@@ -320,7 +372,7 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
     def reject_takeover() -> None:
         attempts.append("resume")
         with pytest.raises(InvalidRunState):
-            rig.engine.resume("run", devices=DeviceSnapshot(()))
+            rig.engine.resume("run")
         with pytest.raises(InvalidRunState):
             rig.engine.execute("run")
 
@@ -356,7 +408,7 @@ def test_final_capture_rejects_resume_until_paused_segment_returns(
         expected_revision=0,
         actor=Actor("user", "test"),
     )
-    assert rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
+    assert rig.engine.resume("run").lifecycle == "running"
     resumed = rig.engine.execute("run")
     assert (resumed.lifecycle, resumed.call_seq, resumed.revision) == ("paused", 2, 1)
     assert attempts == ["resume", "resume"]
@@ -460,9 +512,7 @@ def test_final_capture_failure_releases_reservation_and_preserves_producer_cause
         error = event["error"]
         assert isinstance(error, dict) and error["message"] == "producer failed"
     if ending == "pause":
-        assert (
-            rig.engine.resume("run", devices=DeviceSnapshot(())).lifecycle == "running"
-        )
+        assert rig.engine.resume("run").lifecycle == "running"
         rig.engine.stop("run")
         assert rig.engine.execute("run").lifecycle == "stopped"
     else:
@@ -541,7 +591,7 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
     with pytest.raises(InvalidRunState):
         rig.start(points)
     with pytest.raises(InvalidRunState):
-        rig.engine.resume("run", devices=DeviceSnapshot(()))
+        rig.engine.resume("run")
     rig.engine.execute("run")
     with pytest.raises(InvalidRunState):
         rig.engine.execute("run")
@@ -559,8 +609,6 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         "replacement",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=rig.init,
     )(replacement)
     rig.engine.start(
@@ -568,41 +616,24 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity("new", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity(
+            "new",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     with pytest.raises(RunMismatch):
         rig.engine.records("run")
     assert rig.engine.execute("new").committed_seq == 1
 
 
-def test_start_revalidates_constructed_model_and_requires_before_creating_paths(
-    rig: Rig,
-) -> None:
-    def requires_soc(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
-
-    declared = workflow(
-        "requires-soc",
-        plan=Plan,
-        tunables=Tunables,
-        state=State,
-        record=int,
-        init=rig.init,
-        requires=("soc",),
-    )(requires_soc)
-    with pytest.raises(MissingCapability, match="soc"):
-        rig.engine.start(
-            declared,
-            plan=Plan(),
-            tunables=Tunables(),
-            paths=rig.paths,
-            identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
-        )
-    assert not rig.paths.metadata_root.exists()
-    assert rig.engine.status() is None
-
+def test_start_revalidates_constructed_model_before_creating_paths(rig: Rig) -> None:
     def fresh(
         env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
     ) -> Step[State, int]:
@@ -611,6 +642,82 @@ def test_start_revalidates_constructed_model_and_requires_before_creating_paths(
     with pytest.raises(ValidationError):
         rig.start(fresh, plan=Plan.model_construct(count=-1, values=[]))
     assert not rig.paths.data_root.exists()
+
+
+def test_scalar_state_and_inferred_record_type_commit_normally(rig: Rig) -> None:
+    def init(_env: InitEnv[int], _plan: Plan) -> int:
+        return 0
+
+    @workflow("scalar-state", plan=Plan, tunables=Tunables, init=init)
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: int
+    ) -> Step[int, str]:
+        if state == plan.count:
+            return Done()
+        yield from env.wait_until(START)
+        return Next(f"point-{state}", state + 1)
+
+    rig.engine.start(
+        step,
+        plan=Plan(count=2),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
+    )
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "done", status.reason
+    assert [record.encoded_record.value for record in rig.engine.records("run")] == [
+        "point-0",
+        "point-1",
+    ]
+
+
+@pytest.mark.parametrize("port", ["soc", "devices"])
+def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -> None:
+    def needs_soc(run: Run[Cfg]) -> int:
+        _ = run.soc
+        return 1
+
+    def step(
+        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
+    ) -> Step[State, int]:
+        if port == "soc":
+            yield from env.run(needs_soc, Cfg(), save=lambda _source, _path: None)
+        else:
+            yield from env.setup_device(
+                "flux", FakeDeviceInfo(address="memory", value=1.0)
+            )
+        return Done()
+
+    rig.engine = Engine(
+        EnginePorts(
+            rig.plots,
+            rig.progress,
+            rig.clock,
+            context=7,
+            devices=rig.devices if port == "soc" else None,
+        )
+    )
+    rig.start(step)
+    assert rig.initialized == []
+    status = rig.engine.status()
+    assert status is not None and status.lifecycle == "running"
+    status = rig.engine.execute("run")
+    assert status.lifecycle == "failed"
+    assert f"Missing workflow capability: {port}" in str(status.reason)
+    assert rig.engine.records("run") == ()
+    assert rig.devices.values == []
+    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
 
 
 def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
@@ -626,8 +733,6 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         "bad-init",
         plan=Plan,
         tunables=Tunables,
-        state=State,
-        record=int,
         init=broken_init,
     )(step)
     rig.engine.start(
@@ -635,7 +740,17 @@ def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
         plan=Plan(),
         tunables=Tunables(),
         paths=rig.paths,
-        identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
+        identity=RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     status = rig.engine.execute("run")
     assert status.lifecycle == "failed"

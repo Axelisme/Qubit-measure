@@ -12,6 +12,7 @@ from typing import (
     runtime_checkable,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
@@ -32,6 +33,7 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
     BackgroundExecutor,
     DeviceMemoryInfo,
     DeviceRegistryPort,
@@ -640,6 +642,49 @@ class DeviceService:
         """Borrow the registered drivers without transferring lifecycle ownership."""
         return dict(self._registry.get_all_devices())
 
+    def capture_live_native_device_info(self) -> dict[str, DeviceInfo]:
+        """Synchronously read every registered connected driver for provenance.
+
+        Call on the session owner thread. Read each device once through
+        get_device_info, which owns mutation checks and State cache refresh.
+        Return detached native DeviceInfo models in registry order; no connected
+        devices returns an empty mapping. Missing reads, unsupported native info
+        and read exceptions raise RuntimeError naming the failing device. Never
+        substitute cached info or retry. Earlier successful reads may already
+        have refreshed State when a later read fails; there is no rollback.
+        Driver I/O can block, and a ramp can expose an intermediate value.
+        """
+        captured: dict[str, DeviceInfo] = {}
+        for name in self.get_connected_devices():
+            try:
+                info = self.get_device_info(name)
+            except Exception as error:
+                raise RuntimeError(f"Device {name!r} live read failed") from error
+            if not isinstance(info, DeviceInfo):
+                raise RuntimeError(f"Device {name!r} has no native live info")
+            captured[name] = info.model_copy(deep=True)
+        return captured
+
+    def capture_native_device_info(self) -> dict[str, DeviceInfo]:
+        """Capture ordered native info for live registered devices without I/O.
+
+        Call on the session owner thread. Values come only from State's cached
+        info, not driver get_info or a poll. Remembered-only devices are absent.
+        Missing info or a cached model outside the native DeviceInfo union raises
+        ValueError instead of silently omitting a live device. Return detached
+        native models for FormEnv and startup DeviceSnapshot; drivers and their
+        lifecycle remain session-owned. No setup or hardware read occurs.
+        """
+        captured: dict[str, DeviceInfo] = {}
+        for device in self._state.list_devices():
+            if not device.is_live():
+                continue
+            info = device.info
+            if not isinstance(info, DeviceInfo):
+                raise ValueError(f"Device {device.name!r} has no native cached info")
+            captured[device.name] = info.model_copy(deep=True)
+        return captured
+
     def list_device_snapshots(self) -> tuple[DeviceSnapshot, ...]:
         return tuple(self._project(dev) for dev in self._state.list_devices())
 
@@ -792,7 +837,8 @@ class DeviceService:
         allowed: setup/ramp code owns the write lock, while ``get_info`` is a
         best-effort current-value read. A single read that fails (timeout / no
         response / driver gone) is logged and swallowed so the next tick still
-        runs — this is the best-effort core, not a Fast-Fail path.
+        runs — this is the best-effort core, not a Fast-Fail path. Terminal
+        executor admission rejection also skips the tick without scheduling I/O.
         """
         if not self._can_poll_device_info(name):
             return
@@ -815,12 +861,16 @@ class DeviceService:
             # poller keeps ticking.
             logger.debug("device poll read failed: name=%r error=%s", name, exc)
 
-        self._bg.submit(
-            read_work,
-            run_in_pool=True,
-            on_done=on_read,
-            on_error=on_read_failed,
-        )
+        try:
+            self._bg.submit(
+                read_work,
+                run_in_pool=True,
+                on_done=on_read,
+                on_error=on_read_failed,
+            )
+        except BackgroundAdmissionClosedError:
+            # Terminal shutdown makes further polling unnecessary.
+            return
 
     def _can_poll_device_info(self, name: str) -> bool:
         """Return whether ``poll_device_info`` may live-read this device now.

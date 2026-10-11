@@ -10,6 +10,9 @@ from pathlib import Path
 from threading import RLock
 
 import pytest
+from pydantic import TypeAdapter
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
@@ -36,7 +39,6 @@ from zcu_tools.experiment.workflows.models import (
     RunIdentity,
     RunPaths,
 )
-from zcu_tools.experiment.workflows.ports import DeviceSnapshot
 
 
 class ManualClock:
@@ -61,12 +63,19 @@ def clock() -> ManualClock:
 def metadata(tmp_path: Path, clock: ManualClock) -> RunMetadata:
     return RunMetadata(
         identity=RunIdentity(
-            "id-not-the-directory-slug", DeviceSnapshot(()), "test-host"
+            "id-not-the-directory-slug",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="test-host",
+            ),
         ),
         workflow="storage-contract",
         plan={"targets": [1, 2]},
         tunables={"reps": 2},
-        requires=(),
         roots=RunPaths(tmp_path / "metadata-slug", tmp_path / "data-slug"),
         started_at=clock.now(),
     )
@@ -121,6 +130,38 @@ def test_start_documents_are_detached_and_use_identity_not_slug(
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["plan"] == {
         "targets": [1, 2]
     }
+
+
+@pytest.mark.parametrize("native_capture", [False, True])
+def test_start_preserves_native_provenance_in_manifest_and_journal(
+    tmp_path: Path, metadata: RunMetadata, clock: ManualClock, *, native_capture: bool
+) -> None:
+    provenance = (
+        capture_software_provenance(source_directory=tmp_path)
+        if native_capture
+        else SoftwareProvenance(
+            software_versions={"test-package": "1.2.3"},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname=None,
+        )
+    )
+    startup = replace(
+        metadata, identity=replace(metadata.identity, provenance=provenance)
+    )
+    artifacts = RunArtifacts(startup, clock, RLock())
+    manifest = json.loads(
+        (artifacts.paths.metadata_root / "manifest.json").read_text(encoding="utf-8")
+    )
+    event = json.loads(
+        artifacts.journal_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    expected = TypeAdapter(SoftwareProvenance).dump_python(provenance, mode="json")
+    assert manifest["identity"]["provenance"] == expected
+    assert event["identity"]["provenance"] == expected
+    assert event["identity"] == manifest["identity"]
 
 
 def test_relative_unicode_roots_remain_absolute_after_cwd_changes(
@@ -211,7 +252,7 @@ def test_journal_round_trips_all_outcomes_in_append_order(
         TunablesChanged(Actor("agent", "協作者"), 0, 1, (ChangedValue("reps", 2, 3),)),
         PauseRequested(clock.now(), 1),
         Paused(1, 1),
-        Resumed(1, 1, DeviceSnapshot(())),
+        Resumed(1, 1),
         StopRequested(clock.now(), 1),
         RunEnded("failed", "original cause", 1, 1),
     )

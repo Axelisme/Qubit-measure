@@ -111,9 +111,11 @@ class OperationSpec:
       errors. Receives (BgResult, SettleFn); the policy performs domain side-
       effects (State writes, signals) and calls settle exactly once.
     - ``on_opened``: optional owner-thread hook receiving the newly opened
-      token after lease registration, before progress notification or submit. Use it to
-      latch domain admission/current activity. A hook failure settles failed,
-      cleans opened resources, and propagates like any startup failure.
+      token before lease registration, progress notification or submit. With an
+      exclusion request, only commit owner state here; do not notify listeners
+      or invoke reentrant UI callbacks before the lease is registered. Without
+      exclusion, an analysis owner may also publish its current activity.
+      A hook failure settles failed, cleans opened resources, and propagates.
     """
 
     exclusion: ExclusionRequest | None
@@ -157,7 +159,7 @@ class OperationRunner:
         Steps (in order):
         1. ``ensure_can_start`` (if exclusion) — fast-fail on conflict.
         2. ``handles.create(cancel_hook)`` — mint the token.
-        3. gate.register (if exclusion), then on_opened(token) (if configured).
+        3. on_opened(token) (if configured), then gate.register (if exclusion).
         4. ``progress.make_factory`` (if wants_progress) — mint the pbar factory.
         5. Build the call-once settle closure and submit to bg.
 
@@ -182,6 +184,8 @@ class OperationRunner:
 
         settle = self._make_settle(spec, token)
         try:
+            if spec.on_opened is not None:
+                spec.on_opened(token)
             if spec.exclusion is not None and self._gate is not None:
                 self._gate.register(
                     token,
@@ -191,8 +195,6 @@ class OperationRunner:
                     note=spec.exclusion.note,
                     resource_id=spec.exclusion.resource_id,
                 )
-            if spec.on_opened is not None:
-                spec.on_opened(token)
             factory = (
                 self._progress.make_factory(token, spec.owner_id)
                 if spec.wants_progress and self._progress is not None
@@ -203,35 +205,87 @@ class OperationRunner:
                 run_in_pool=spec.run_in_pool,
                 on_done=lambda r: self._deliver_terminal(
                     token,
-                    spec,
+                    spec.on_terminal,
                     settle,
                     BgResult(ok=True, result=r, error=None),
                 ),
                 on_error=lambda e: self._deliver_terminal(
                     token,
-                    spec,
+                    spec.on_terminal,
                     settle,
                     BgResult(ok=False, result=NO_RESULT, error=e),
                 ),
             )
         except Exception:
-            # submit failed synchronously: unwind every resource opened above.
+            # Startup failed synchronously: unwind every resource opened above.
             settle(OperationOutcome("failed", "operation failed to start"))
             raise
 
         return token
 
+    def continue_operation[R](
+        self,
+        token: int,
+        *,
+        work: Callable[[], R],
+        run_in_pool: bool,
+        on_terminal: Callable[[BgResult, SettleFn], None],
+        settle: SettleFn,
+    ) -> int:
+        """Submit another producer for an idle, unsettled operation on its owner.
+
+        token is the handle returned by begin. The policy must wait for the
+        previous producer's owner delivery and retain its original settle
+        closure without calling it. work captures the retained run resources;
+        it receives no new progress factory. run_in_pool selects the executor's
+        shared pool or dedicated thread, as in begin. on_terminal receives the
+        returned BgResult and this same settle closure under the handle's
+        original event origin. It may retain ownership again or settle once.
+
+        Return token unchanged. Do not create a handle, check/register a new
+        lease, replace cancellation, or allocate/discard progress. Unknown or
+        evicted tokens raise KeyError; already settled tokens raise RuntimeError
+        before submission. A synchronous submit error propagates unchanged and
+        leaves ownership intact so the domain can retry or terminate. Worker
+        errors reach on_terminal. An escaping terminal callback is logged and
+        settles failed using the supplied closure. No hardware rollback occurs.
+
+        The domain owns producer exclusivity and verifies that settle belongs
+        to token; this mechanism does not add a producer registry or policy.
+        """
+        if self._handles.known_outcome(token) is not None:
+            raise RuntimeError(f"operation token is already settled: {token}")
+
+        # Submission failure leaves the retained resources for the domain owner.
+        self._bg.submit(
+            work,
+            run_in_pool=run_in_pool,
+            on_done=lambda r: self._deliver_terminal(
+                token,
+                on_terminal,
+                settle,
+                BgResult(ok=True, result=r, error=None),
+            ),
+            on_error=lambda e: self._deliver_terminal(
+                token,
+                on_terminal,
+                settle,
+                BgResult(ok=False, result=NO_RESULT, error=e),
+            ),
+        )
+        return token
+
     def _deliver_terminal(
         self,
         token: int,
-        spec: OperationSpec,
+        on_terminal: Callable[[BgResult, SettleFn], None],
         settle: SettleFn,
         bg: BgResult,
     ) -> None:
         """Run the policy terminal callback without letting it escape Qt delivery."""
         with self._bus.origin(self._handles.event_origin(token)):
             try:
-                spec.on_terminal(bg, settle)
+                on_terminal(bg, settle)
             except Exception as exc:
                 logger.exception("operation terminal callback failed")
                 settle(OperationOutcome("failed", str(exc)))

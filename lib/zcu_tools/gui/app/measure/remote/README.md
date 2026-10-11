@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12, sample writeback projections, device setup and reference modes
+**Last updated:** 2026-10-12, sample writeback projections, device setup, reference modes and integrated version metadata
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -154,7 +154,7 @@ The launch/connect note reports three numbers:
 
 - `WIRE_VERSION = 96`: GUI RPC contract. MCP pins and compares this value.
 - `GUI_VERSION = 128`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 113`: MCP bridge code revision. The bridge displays this value.
+- `MCP_VERSION = 114`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
