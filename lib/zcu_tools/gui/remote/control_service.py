@@ -24,8 +24,10 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from zcu_tools.gui.control_identity import ControlIdentity, ControlIdentityError
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin, EventSubscriptions
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
     RemoteError,
@@ -55,7 +57,14 @@ def _store_expected_error(
 ) -> None:
     """Store generic expected projection, containing projection bugs as controller errors."""
     try:
-        holder["remote_error"] = remote_error_from_expected(exc)
+        error = remote_error_from_expected(exc)
+        if isinstance(exc, ControlIdentityError):
+            error.data = {
+                "holder": exc.status.holder,
+                "locked": exc.status.locked,
+                "online": exc.status.online,
+            }
+        holder["remote_error"] = error
     except Exception as projection_exc:  # projection safety boundary
         logger.exception(
             "%s expected-error projection raised: %s", origin, projection_exc
@@ -109,6 +118,7 @@ class RemoteControlServiceBase:
         method_registry: Mapping[str, BoundMethod],
         event_serializers: Mapping[Any, Serializer],
         wire_event_name: Callable[[Any], str],
+        control_identity: ControlIdentity | None = None,
         resource_versions: Callable[[], Mapping[str, int]] | None = None,
         observation_policies: Mapping[str, ResourceObservationPolicy] | None = None,
     ) -> None:
@@ -120,7 +130,11 @@ class RemoteControlServiceBase:
         event_serializers and wire_event_name project subscribed domain events.
         resource_versions returns a complete current key-to-version snapshot on
         the owner thread; observation_policies declares every registry method.
-        Omit both for an app without resource observations. Supplying only one,
+        control_identity is the application's optional write-authority owner;
+        omit it for observe-only apps. When supplied, unmarked methods require
+        the calling socket's holder identity, and off-main methods must declare
+        readonly=True. Control initialization and transitions share owner turns.
+        Omit both observation inputs for an app without resource observations. Supplying only one,
         mismatched method keys, or an off-main observation raises ValueError.
         Construction opens no socket; start() begins serving requests.
         """
@@ -133,8 +147,20 @@ class RemoteControlServiceBase:
                 policy.validate_owner_thread(
                     off_main_thread=method_registry[method].off_main_thread
                 )
+        if control_identity is not None:
+            for method, entry in method_registry.items():
+                if entry.off_main_thread and not entry.readonly:
+                    raise ValueError(
+                        f"off-owner control method must be readonly: {method}"
+                    )
+        self.control_identity = control_identity
         self._resource_versions = resource_versions
         self._observation_policies = dict(observation_policies or {})
+        if control_identity is not None:
+            # Control management observes no business resource versions.
+            self._observation_policies.update(
+                dict.fromkeys(CONTROL_METHOD_SPECS, ResourceObservationPolicy())
+            )
         self.ctrl = controller
         self._opts = opts
         self._wire_version = wire_version
@@ -184,7 +210,8 @@ class RemoteControlServiceBase:
     def _guard(
         self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
     ) -> None:
-        """Reject missing or stale declared resources before the owner handler."""
+        """Check authority, then missing/stale resources before the owner handler."""
+        self._check_control(ctx, method)
         if self._resource_versions is None:
             return
         deps = self._observation_policies[method].guard_deps
@@ -386,7 +413,14 @@ class RemoteControlServiceBase:
         self._owner_scheduler.post(self._on_client_count_changed)
 
     def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
-        self._on_client_close_extra(_ctx(link), on_owner_thread=on_owner_thread)
+        ctx = _ctx(link)
+        self._on_client_close_extra(ctx, on_owner_thread=on_owner_thread)
+        control = self.control_identity
+        if control is not None:
+            if on_owner_thread:
+                control.disconnect(ctx.client_id)
+            else:
+                self._owner_scheduler.post(lambda: control.disconnect(ctx.client_id))
         # Notify the owner on both IO-thread drops and owner-thread stops.
         if on_owner_thread:
             self._on_client_count_changed()
@@ -424,6 +458,13 @@ class RemoteControlServiceBase:
         if self._route_extra(link, req):
             return
         spec = self._method_registry.get(req.method)
+        if self.control_identity is not None and req.method in CONTROL_METHOD_SPECS:
+            spec = BoundMethod(
+                handler=lambda _adapter, params: self._control_command(
+                    _ctx(link), req.method, params
+                ),
+                spec=CONTROL_METHOD_SPECS[req.method],
+            )
         if spec is None:
             self._endpoint.reply_error(
                 link,
@@ -442,6 +483,41 @@ class RemoteControlServiceBase:
         self._dispatch_on_owner(
             link, req.id, req.method, spec, handler_params, request_params=req.params
         )
+
+    def _check_control(self, ctx: SubscriptionCtx, method: str) -> None:
+        if (
+            self.control_identity is None
+            or method in CONTROL_METHOD_SPECS
+            or method == "rpc.catalog"
+        ):
+            return
+        if not self._method_registry[method].readonly:
+            self.control_identity.require_holder(ctx.client_id)
+
+    def _control_command(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> dict[str, object]:
+        control = self.control_identity
+        assert control is not None
+        if method == "control.connect":
+            label, mode = params["label"], params["mode"]
+            if not isinstance(label, str) or mode not in ("owner", "readonly"):
+                raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid control identity")
+            if mode == "owner":
+                control.connect(ctx.client_id, label, "owner")
+            else:
+                control.connect(ctx.client_id, label, "readonly")
+        elif method == "control.acquire":
+            control.acquire(ctx.client_id)
+        elif method == "control.release":
+            control.release(ctx.client_id)
+        status = control.status()
+        return {
+            "holder": status.holder,
+            "locked": status.locked,
+            "online": status.online,
+            "me": control.is_holder(ctx.client_id),
+        }
 
     # ------------------------------------------------------------------
     # events.* state-owning handlers

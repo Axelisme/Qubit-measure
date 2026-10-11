@@ -28,6 +28,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the current project info (chip_name, qub_name, result_dir, "
         "database_path).",
+        readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
@@ -46,12 +47,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
         "Completion includes zero points; point_count reports available data.",
+        readonly=True,
     ),
     "spectrum.snapshot": MethodSpec(
         5.0,
         "Read the complete editable spectrum projection for a literal name. "
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
         params=(ParamSpec("name", JsonType.STRING),),
+        readonly=True,
     ),
     "spectrum.load": MethodSpec(
         30.0,
@@ -102,17 +105,20 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the complete published joint-cloud selection mask and native "
         "normalized min_distance. Null mask means all points, not a live Session.",
+        readonly=True,
     ),
     "selection.pointcloud": MethodSpec(
         5.0,
         "Derive the joint (flux, freq) point cloud assembled from every "
         "spectrum's selected points. Returns {fluxs:[...], freqs:[...]}.",
+        readonly=True,
     ),
     # Live interactive state is not a full published-resource observation.
     "interactive.read": MethodSpec(
         30.0,
         "Inspect the live context without opening input or changing display. "
         "Returns state and native PNG, or null when inactive; no guard is refreshed.",
+        readonly=True,
     ),
     "spectrum.interactive.open": MethodSpec(
         30.0,
@@ -158,6 +164,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
         "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        readonly=True,
     ),
     "fit.set_params": MethodSpec(
         5.0,
@@ -188,6 +195,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "omitted token reads the latest GUI/agent activity, or null before "
         "any search. Unknown tokens are rejected; no observations are updated.",
         params=(ParamSpec("token", JsonType.INTEGER, required=False),),
+        readonly=True,
     ),
     "operation.cancel": MethodSpec(
         5.0,
@@ -206,6 +214,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ParamSpec("timeout", JsonType.NUMBER, required=False, default=10.0),
         ),
         off_main_thread=True,
+        readonly=True,
     ),
     "export.spectrums": MethodSpec(
         30.0,
@@ -229,11 +238,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Resource version table (optimistic-concurrency guard baseline). Full
     # snapshot is bookkeeping, not a full editable read. Only GUI shared
     # dispatch owns per-connection seen; MCP must not infer observations here.
-    "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
+    "resources.versions": MethodSpec(
+        5.0, "Snapshot of all resource versions", readonly=True
+    ),
     # State readiness (fan-out at MCP into one fluxdep_state_check reply).
     "state.check": MethodSpec(
         5.0,
         "Read readiness flags at once: {has_project, spectrum_count, has_active}.",
+        readonly=True,
     ),
 }
 

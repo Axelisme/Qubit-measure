@@ -112,6 +112,8 @@ class RouteHarness:
         link = ClientLink(f"client-{len(self.links)}", token_required=False)
         self.service.on_client_open(link)
         self.links.append(link)
+        reply = self.request(link, "control.connect")
+        assert reply["ok"], reply
         return link
 
     def request(self, link: ClientLink, method: str, **params: object) -> RouteReply:

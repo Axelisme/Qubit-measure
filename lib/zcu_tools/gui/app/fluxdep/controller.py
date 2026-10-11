@@ -41,6 +41,7 @@ from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, Sear
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.controller_base import BaseController
 from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.project import ProjectInfo
@@ -73,6 +74,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         project_root is optional export/path context, not an input-data location.
         """
         super().__init__(state, bus if bus is not None else EventBus(), project_root)
+        self.control_identity = ControlIdentity()
         self._load = LoadService(state)
         self._alignment = AlignmentService(state)
         self._points = PointsService(state)

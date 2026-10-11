@@ -73,6 +73,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
                 optional_integer("operation_id"),
             ),
+            readonly=True,
         ),
     ),
     method_entry(

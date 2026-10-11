@@ -104,6 +104,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
                 ),
             ),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=("editor:{editor_id}",), reveals_without=("prefix",)

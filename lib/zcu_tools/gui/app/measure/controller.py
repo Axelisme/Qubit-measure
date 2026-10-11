@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.cfg.resource import CfgRef
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -252,6 +253,7 @@ class Controller(SessionControllerMixin):
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
     ) -> None:
+        self.control_identity = ControlIdentity()
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
         # under. The entry script injects the repo root (Path(__file__).parent...)

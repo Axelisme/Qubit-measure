@@ -152,6 +152,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "reported settable=false). Use this RPC before rpc_call on "
             "device.setup. The device must be connected.",
             (required_string("name", "Device name"),),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -178,6 +179,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "name. 'handle' here is a GUI-local id, not the MCP op. Use "
             "status() to obtain MCP handles before wait(op). 'kind' is "
             "device_connect / device_disconnect / device_setup.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -191,6 +193,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(same status vocabulary as device.snapshot and "
             "device.active_operations). 'memory_only' means remembered but not "
             "live (no driver).",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(reveals=("devices:__set__",)),
     ),
@@ -207,6 +210,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "'status' uses the same vocabulary as device.list. An unknown device "
             "name raises INVALID_PARAMS.",
             (required_string("name", "Device name"),),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(reveals=("device:{name}",)),
     ),

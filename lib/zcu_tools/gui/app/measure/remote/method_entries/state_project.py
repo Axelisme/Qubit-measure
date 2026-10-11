@@ -16,6 +16,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -25,6 +26,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -34,6 +36,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -43,6 +46,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -52,6 +56,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read active hardware exclusion leases with kind, origin, note, and age.",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -75,6 +80,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "include_cfg", default=False, desc="Include the full ~2 KB QICK cfg"
                 ),
             ),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=("soc",), reveals_when_nonempty=("include_cfg",)
@@ -86,6 +92,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Snapshot of all resource versions",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

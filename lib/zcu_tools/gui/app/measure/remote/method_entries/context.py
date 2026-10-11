@@ -40,6 +40,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "List context labels",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -48,6 +49,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Active context label",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -74,6 +76,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ParamSpec("summaries", JsonType.BOOLEAN, required=False, default=False),
                 optional_string("path"),
             ),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=("context",), reveals_without=("summaries", "path")
@@ -88,6 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{values: [{key, type, owner, description}]}. These are escape-hatch "
             "resolve-once sources for rare defaults and agent reads; prefer typed "
             "RPCs when a stable API exists.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -106,6 +110,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "type", "Optional expected type: int, float, str, or bool"
                 ),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -202,6 +207,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
             "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
             "'bath_reset'); 'default_name' is the suggested entry name.",
+            readonly=True,
         ),
     ),
     method_entry(

@@ -43,6 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
             off_main_thread=True,
+            readonly=True,
         ),
     ),
 )

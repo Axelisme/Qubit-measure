@@ -66,6 +66,33 @@ Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
   wire-version mismatch.
 - Loopback without token means any same-user local process can control the GUI.
 
+## Control identity initialization
+
+After `wire.version` and optional `auth`, send `control.connect` with
+`{label: "agent", mode: "owner"}` (both values default as shown). Before this
+command a socket is an observer: explicit readonly methods and `rpc.catalog`
+are available, business writes return `not_holder`, and acquire/release return
+`readonly_connection`. Initialization fixes label and mode for that socket.
+An identical repeat is inert; a different label or mode returns `invalid_params`.
+Reconnect to change identity. Label is a trusted LAN identity, not a credential.
+
+Owner mode auto-acquires only unlocked Local. Readonly never acquires, even
+with the holder's label. `control.status`, `control.connect`, `control.acquire`
+and `control.release` return `{holder, locked, online, me}`. Local is always
+online; Remote is online while any initialized socket has its label. `me` is
+true only for an owner-mode holder. Disconnect does not release authority or
+cancel accepted operations. Acquire refuses `control_locked`, `control_held`
+(another label online), or `readonly_connection`. Release requires the holder
+and returns unlocked Local. GUI reclaim returns locked Local.
+
+Unmarked methods require holder at owner-loop execution, before domain effects
+and existing resource guards. `tab.interact` remains unmarked, including reads.
+A `not_holder` error includes `{holder, locked, online}`. `operation.await` is
+readonly; a new holder can cancel accepted work. Subscription methods only
+change connection-local observation subscriptions and remain available to
+observers. Measure and Fluxdep share this authority; Dispersive stays readonly.
+Seen/cfg guards remain during this implementation stage.
+
 ## Dispatch And Threads
 
 Normal handlers run on the State owner thread through the injected `OwnerScheduler`.

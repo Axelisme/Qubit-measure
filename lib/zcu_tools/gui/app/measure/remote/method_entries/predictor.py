@@ -83,6 +83,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 default_integer("from_level", 0, "From level"),
                 default_integer("to_level", 1, "To level"),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -115,6 +116,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the current predictor's installed model. Returns {loaded: false} "
             "when none is loaded, else {loaded: true, path, flux_bias, flux_half, "
             "flux_period, EJ, EC, EL} (path is null for an in-memory install).",
+            readonly=True,
         ),
     ),
 )

@@ -92,6 +92,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Current running tab",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

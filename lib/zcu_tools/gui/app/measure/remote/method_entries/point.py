@@ -16,6 +16,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Refresh and return {entries: [name, ...]} from the result entry owner. "
             "Does not open an entry or reveal context content. Read errors propagate.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -26,6 +27,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Return {entry}: null before opening, otherwise entry_id/name/"
             "result_path/database_path from the cached owner identity. "
             "Metadata only; establishes no full-context observation.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -64,6 +66,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Return {entry, points}: entry is null or entry_id/name/result_path/"
             "database_path; points contains label/description. Refresh persisted "
             "metadata; read failures propagate. Does not reveal context content.",
+            readonly=True,
         ),
     ),
     method_entry(

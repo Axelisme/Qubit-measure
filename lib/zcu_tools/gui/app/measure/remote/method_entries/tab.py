@@ -88,6 +88,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the tab the USER is focused on (a collaboration cue, NOT your operation "
             "target); running_tab_id is the tab currently running (or null when "
             "nothing is running).",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -101,6 +102,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "preview separately for proposal contents. The all-tabs summary is "
             "only an index and does not refresh a per-tab guard baseline.",
             (optional_string("tab_id", "Tab to inspect; omit for all tabs"),),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=(
@@ -136,6 +138,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     description="Temporary alias-name to component-name overrides; None and {} mean no override",
                 ),
             ),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(),
     ),
@@ -162,6 +165,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
                 ParamSpec("expected", JsonType.OBJECT),
             ),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(),
     ),

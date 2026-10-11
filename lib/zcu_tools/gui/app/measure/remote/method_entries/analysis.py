@@ -37,6 +37,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "operation_id requires that operation's result and also returns complete "
             "operation_state, establishing the same observations as tab.snapshot.",
             (required_string("tab_id"), optional_integer("operation_id")),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=(
@@ -58,6 +59,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read primary analyze params as {analyze_params, definitions}. Values "
             "are null before a result exists; definitions come from the live adapter.",
             (required_string("tab_id"),),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -127,6 +129,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Optional operation_id requires that operation's result and also returns complete "
             "operation_state, establishing the same observations as tab.snapshot.",
             (required_string("tab_id"), optional_integer("operation_id")),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
             reveals=(
@@ -148,6 +151,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read post-analysis params as {post_analyze_params, definitions}. Values "
             "are null before post analysis; definitions come from the live adapter.",
             (required_string("tab_id"),),
+            readonly=True,
         ),
     ),
     method_entry(

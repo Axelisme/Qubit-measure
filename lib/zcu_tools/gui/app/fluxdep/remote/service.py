@@ -59,6 +59,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             gui_version=GUI_VERSION,
             server_name="FluxDepRemoteServer",
             method_registry=METHOD_REGISTRY,
+            control_identity=controller.control_identity,
             event_serializers=EVENT_SERIALIZERS,
             wire_event_name=wire_event_name,
             resource_versions=self._resource_snapshot,
