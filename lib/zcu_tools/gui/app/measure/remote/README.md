@@ -249,8 +249,11 @@ The wire surface is grouped by ownership:
   segment rule is authoritative for context validation. Shared dispatch projects
   the typed input failure for other unsafe labels as `invalid_params`, with reason
   `point_label_invalid` and no structured data. Rejection preserves selection,
-  files, ledger and versions. Duplicate destinations, missing sources and other
-  resource failures retain their existing classification.
+  files, ledger and versions. Missing sources and other resource failures retain
+  their existing classification. Existing destination labels also return
+  `invalid_params`, with the entry owner's exists message and
+  no structured data. Setup and clone collision rejection preserve selection,
+  filesystem, ledger and versions. Other I/O is not classified as invalid input.
 - `context.*`：published parameter capture, snapshot and point-label queries through
   `ContextControlPort`. Library editing and template create/list use the app controller;
   `editor.*` provides independent library-entry drafts.

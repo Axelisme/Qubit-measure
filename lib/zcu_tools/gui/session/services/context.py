@@ -44,7 +44,12 @@ from zcu_tools.resources.context.library import (
     ModuleLibrary,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry import snapshot, source_path, validate_path_segment
+from zcu_tools.resources.entry import (
+    DestinationExistsError,
+    snapshot,
+    source_path,
+    validate_path_segment,
+)
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -220,9 +225,11 @@ class ContextService:
         and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
         label raises InvalidInputError(point_label_invalid) before source reads or
         writes, preserving binding, files, ledger and versions. Label safety follows
-        the entry owner's single path component rule. Other resource errors
-        propagate. Post-creation binding failure raises PointBindingError from
-        its cause, retaining the point and old binding without retry/deletion.
+        the entry owner's single path component rule. An existing destination
+        raises InvalidInputError with the entry owner's FileExistsError message,
+        preserving the same state. Other resource errors propagate. Post-creation
+        binding failure raises PointBindingError from its cause, retaining the
+        point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
@@ -237,12 +244,15 @@ class ContextService:
             if request.clone_from is not None
             else None
         )
-        point = entry.new_point(
-            request.label,
-            clone_from=clone,
-            description=request.description,
-            origin=request.origin.origin,
-        )
+        try:
+            point = entry.new_point(
+                request.label,
+                clone_from=clone,
+                description=request.description,
+                origin=request.origin.origin,
+            )
+        except DestinationExistsError as exc:
+            raise InvalidInputError(str(exc)) from exc
         try:
             parameters, library, sources, info = self._prepare_point(
                 entry, request.label, point

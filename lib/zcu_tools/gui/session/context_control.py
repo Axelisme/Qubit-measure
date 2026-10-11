@@ -172,6 +172,8 @@ class ContextControlPort(Protocol):
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup/clone and select, preserving attribution/errors.
 
+        Existing destination raises InvalidInputError with the entry owner's
+        exists message before writes, preserving binding, files and versions.
         Unsafe label raises InvalidInputError(point_label_invalid) before source
         reads or writes, preserving selection, files, ledger and versions.
         The entry owner defines safe single path segments. Other resource errors

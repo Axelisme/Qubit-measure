@@ -2,6 +2,7 @@
 
 from ._path_segments import validate_path_segment
 from .errors import (
+    DestinationExistsError,
     MissingReferenceError,
     RenameRecoveryError,
     RoleResolutionError,
