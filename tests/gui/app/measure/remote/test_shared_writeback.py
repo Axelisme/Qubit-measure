@@ -9,7 +9,7 @@ from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot, CfgEdit, CfgEditResult, CfgEditorPort, TabSnapshot,
 )
-from zcu_tools.gui.app.measure.services.writeback import WritebackDraft, WritebackService
+from zcu_tools.gui.app.measure.services.writeback import WritebackDraft, WritebackEdit, WritebackService
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -97,6 +97,9 @@ class WritebackHarness:
     def apply_writeback_for_pane(self, tab_id: str, pane: str, *, item_ids: tuple[str, ...] | None = None):
         return self.service.apply_draft(self.draft, item_ids=item_ids)
 
+    def write_writeback_for_pane(self, tab_id: str, pane: str, changes: tuple[WritebackEdit, ...]):
+        return self.service.write_draft(self.draft, changes)
+
 
 def context_at(tmp_path: Path, *, rejecting: bool = False) -> tuple[ResultEntry, ContextService]:
     entry = ResultEntry.create("entry", result_root=tmp_path / "results", database_root=tmp_path / "database")
@@ -107,6 +110,40 @@ def context_at(tmp_path: Path, *, rejecting: bool = False) -> tuple[ResultEntry,
     context.install_entry(entry)
     context.use_point(PointUseRequest("a"))
     return entry, context
+
+
+def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point(tmp_path: Path) -> None:
+    entry, context = context_at(tmp_path)
+    context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
+    service = WritebackService(NoCfgEditors(), ContextControlFacet(context=context))
+    draft = service.create_draft(
+        [proposals.SampleWriteback("Q1", "sample", proposed_value={"t1_us": 20.09})],
+        parameters=context.read_context(), experiment_name="test/t1", run_id="run-fixed",
+        device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
+    )
+    entry.new_point("b")
+    context.use_point(PointUseRequest("b"))
+    harness = WritebackHarness(context, service, draft)
+    params = {"tab_id": "tab", "subtab_id": "analysis", "write": [{"id": "sample-1"}]}
+    first = dispatch_handler(harness, "tab.writeback_write", params)
+    row = entry.samples("Q1").latest("run-fixed")
+    assert row is not None
+    assert first == {"written": [{"id": "sample-1", "kind": "sample", "target": "Q1",
+                                  "before": None, "after": row}]}
+    assert row == {"t1_us": 20.09, "dev_value": 0.00125, "dev_unit": "A",
+                   "run_id": "run-fixed", "point": "a", "at": row["at"],
+                   "source": entry.ledger.events()[-1].id}
+    entry.samples("Q1").append(run_id="run-fixed", point="a", t1_us=35.0)
+    latest = entry.samples("Q1").latest("run-fixed")
+    second = dispatch_handler(harness, "tab.writeback_write", params)
+    updated = entry.samples("Q1").latest("run-fixed")
+    assert updated is not None
+    assert second == {"written": [{"id": "sample-1", "kind": "sample", "target": "Q1",
+                                   "before": latest, "after": updated}]}
+    assert updated == row | {"at": updated["at"], "source": entry.ledger.events()[-1].id}
+    assert updated["source"] != row["source"]
+    assert context.read_context().target.point == "b"
+    assert service.get_all_applied(draft) == {"sample-1": True}
 
 
 def test_sample_preview_selection_and_apply_use_run_device_snapshot(tmp_path: Path) -> None:
