@@ -15,7 +15,11 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 
-from tests.gui.app.fluxdep.remote._route_harness import ImmediateOwnerScheduler, RouteHarness, RouteReply
+from tests.gui.app.fluxdep.remote._route_harness import (
+    ImmediateOwnerScheduler,
+    RouteHarness,
+    RouteReply,
+)
 from tests.gui.app.fluxdep.remote._search_harness import PumpedRouteHarness
 
 
@@ -48,16 +52,17 @@ def control_rpc(tmp_path: Path) -> Iterator[RouteHarness]:
 def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     link = raw_client(h)
     original = result(h.request(link, "project.info"))
     reply = h.request(link, "project.setup", chip_name="changed", qub_name="q")
     reason(reply, "not_holder")
     assert not reply["ok"]
-    assert reply["error"]["data"] == {
-        "holder": "gui", "locked": False, "online": True
-    }
+    assert reply["error"]["data"] == {"holder": "gui", "locked": False, "online": True}
     assert result(h.request(link, "project.info")) == original
     for method in ("control.acquire", "control.release"):
         reason(h.request(link, method), "readonly_connection")
@@ -66,12 +71,18 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
 def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     link = raw_client(h)
     remote = {"holder": "rpc:agent", "locked": False, "online": True, "me": True}
     assert result(h.request(link, "control.connect")) == remote
-    assert result(h.request(link, "control.connect", label="agent", mode="owner")) == remote
+    assert (
+        result(h.request(link, "control.connect", label="agent", mode="owner"))
+        == remote
+    )
     for params in ({"label": "other"}, {"mode": "readonly"}):
         reply = h.request(link, "control.connect", **params)
         assert not reply["ok"]
@@ -85,7 +96,10 @@ def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
 def test_online_holder_same_label_and_offline_takeover(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     a, same, b = raw_client(h), raw_client(h), raw_client(h)
     result(h.request(a, "control.connect", label="A"))
@@ -97,21 +111,30 @@ def test_online_holder_same_label_and_offline_takeover(control_rpc):
     assert result(h.request(b, "control.status"))["online"] is True
     h.disconnect(same)
     assert result(h.request(b, "control.status")) == {
-        "holder": "rpc:A", "locked": False, "online": False, "me": False
+        "holder": "rpc:A",
+        "locked": False,
+        "online": False,
+        "me": False,
     }
     assert result(h.request(b, "control.acquire"))["holder"] == "rpc:B"
     h.disconnect(b)
     reconnect = raw_client(h)
     assert result(h.request(reconnect, "control.connect", label="B"))["me"] is True
     assert result(h.request(reconnect, "control.release")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
 
 
 def test_gui_lock_reclaim_unlock_and_watch_share_rpc_projection(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     a, b = raw_client(h), raw_client(h)
     owner = h.ctrl.control_identity
@@ -136,13 +159,24 @@ def test_gui_lock_reclaim_unlock_and_watch_share_rpc_projection(control_rpc):
 def test_readonly_same_label_never_writes_or_acquires(control_rpc):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     a, reader = raw_client(h), raw_client(h)
     result(h.request(a, "control.connect", label="same"))
-    assert result(h.request(reader, "control.connect", label="same", mode="readonly"))["me"] is False
+    assert (
+        result(h.request(reader, "control.connect", label="same", mode="readonly"))[
+            "me"
+        ]
+        is False
+    )
     original = result(h.request(reader, "project.info"))
-    reason(h.request(reader, "project.setup", chip_name="bad", qub_name="bad"), "not_holder")
+    reason(
+        h.request(reader, "project.setup", chip_name="bad", qub_name="bad"),
+        "not_holder",
+    )
     assert result(h.request(reader, "project.info")) == original
     for method in ("control.acquire", "control.release"):
         reason(h.request(reader, method), "readonly_connection")
@@ -163,17 +197,25 @@ def test_queued_write_checks_current_holder_at_execution(tmp_path):
         h.close()
 
 
-def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(control_rpc):
+def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(
+    control_rpc,
+):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
-        "holder": "gui", "locked": False, "online": True, "me": False
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
     }
     handles = OperationHandles()
     token = 0
 
     def start(_adapter: object, _params: Mapping[str, object]) -> dict[str, object]:
         nonlocal token
-        token = handles.create(cancel_hook=lambda: handles.settle(token, OperationOutcome("cancelled")), origin=EventOrigin(kind="user"))
+        token = handles.create(
+            cancel_hook=lambda: handles.settle(token, OperationOutcome("cancelled")),
+            origin=EventOrigin(kind="user"),
+        )
         return {"token": token}
 
     def cancel(_adapter: object, _params: Mapping[str, object]) -> dict[str, object]:
@@ -182,20 +224,34 @@ def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(
 
     def wait(_adapter: object, _params: Mapping[str, object]) -> dict[str, object]:
         outcome = handles.await_known_outcome(token, 0)
-        return {"reason": outcome.reason, "status": outcome.outcome.status if outcome.outcome else None}
+        return {
+            "reason": outcome.reason,
+            "status": outcome.outcome.status if outcome.outcome else None,
+        }
 
     service = RemoteControlServiceBase(
-        SimpleNamespace(bus=BaseEventBus()), ControlOptions(port=0),
+        SimpleNamespace(bus=BaseEventBus()),
+        ControlOptions(port=0),
         owner_scheduler=ImmediateOwnerScheduler(),
-        wire_version=1, gui_version=1, server_name="ControlOperationTest",
+        wire_version=1,
+        gui_version=1,
+        server_name="ControlOperationTest",
         method_registry=build_method_registry(
-            {"operation.start": start, "operation.cancel": cancel, "operation.await": wait},
+            {
+                "operation.start": start,
+                "operation.cancel": cancel,
+                "operation.await": wait,
+            },
             {
                 "operation.start": MethodSpec(1, "Start accepted operation"),
                 "operation.cancel": MethodSpec(1, "Cancel accepted operation"),
-                "operation.await": MethodSpec(1, "Wait", readonly=True, off_main_thread=True),
+                "operation.await": MethodSpec(
+                    1, "Wait", readonly=True, off_main_thread=True
+                ),
             },
-        ), event_serializers={}, wire_event_name=str,
+        ),
+        event_serializers={},
+        wire_event_name=str,
         control_identity=h.ctrl.control_identity,
     )
     a, b, reader = [ClientLink("operation", token_required=False) for _ in range(3)]
@@ -214,6 +270,9 @@ def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(
     assert rpc(reader, "operation.await")["result"]["reason"] == "timeout"
     assert rpc(b, "control.connect", label="B")["ok"]
     assert rpc(b, "operation.cancel")["ok"]
-    assert rpc(reader, "operation.await")["result"] == {"reason": "completed", "status": "cancelled"}
+    assert rpc(reader, "operation.await")["result"] == {
+        "reason": "completed",
+        "status": "cancelled",
+    }
     for link in (b, reader):
         service.on_client_close(link, on_owner_thread=True)
