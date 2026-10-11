@@ -580,8 +580,7 @@ class WritebackService:
         nothing. On item failure, mark the successful prefix applied and re-raise
         the original cause unchanged, retaining accepted evidence and writes.
         Empty selection is a no-op without context. Nonempty writes require a
-        captured SavedPoint in its still-open entry; EntryDraft is rejected by
-        the context owner before append. GUI defaults
+        captured SavedPoint in its still-open entry. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
         Accepted payload and every destination provenance use draft.run_id;

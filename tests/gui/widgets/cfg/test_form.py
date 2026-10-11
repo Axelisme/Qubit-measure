@@ -26,6 +26,7 @@ from zcu_tools.gui.cfg.binding import SectionField
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._form_support import (
     attach_draft,
     scalar_field,
@@ -247,9 +248,8 @@ def test_scalar_widget_minimum_width_reduced(qapp):
 def test_scalar_widget_unresolved_eval_can_switch_back_to_direct(qapp, ctrl):
     from qtpy.QtWidgets import QLineEdit
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
 
-    ctrl.get_current_md.return_value = MetaDict()
+    ctrl.read_context.return_value = parameter_capture()
     field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),

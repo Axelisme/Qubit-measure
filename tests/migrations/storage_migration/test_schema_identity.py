@@ -19,7 +19,8 @@ from zcu_tools.datafile import (
     load_run_data,
     write_labber,
 )
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     LegacyRunEvidence,
     MigrationInputError,
     MigrationMapping,
@@ -27,8 +28,7 @@ from zcu_tools.resources.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
-
-from tests.resources.storage_migration.fakes import (
+from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
     validate_cfg,

@@ -1,7 +1,5 @@
-"""Named experiment work contexts and metadata stores."""
+"""Point-local typed module library."""
 
 from .library import LibrarySnapshot, ModuleLibrary
-from .manager import ContextManager
-from .metadict import MetaDict
 
-__all__ = ["ContextManager", "LibrarySnapshot", "MetaDict", "ModuleLibrary"]
+__all__ = ["LibrarySnapshot", "ModuleLibrary"]

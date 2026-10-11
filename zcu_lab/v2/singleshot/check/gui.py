@@ -59,7 +59,7 @@ class CheckAdapter(
         ),
         expects_md=(
             "REQUIRES the single-shot discrimination calibration in the "
-            "MetaDict for ANALYSIS — run 'singleshot/ge' first and apply its "
+            "parameter context for ANALYSIS — run 'singleshot/ge' first and apply its "
             "writeback so 'g_center' / 'e_center' / 'ge_radius' are present; "
             "the analyze classifies the scatter against them and fast-fails if "
             "any is missing. Also reads 't1' to set the relax delay; 'q_f' / "

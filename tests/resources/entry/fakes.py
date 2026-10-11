@@ -1,7 +1,7 @@
 """Local schemas for container behavior, independent of lab definitions."""
 
 from copy import deepcopy
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.format_version import YamlMap
@@ -66,6 +66,44 @@ class Booster(Connected):
 
 class Supply(Connected):
     level: Number = None
+
+
+class ProfiledChannel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ch: int = Field(ge=0, strict=True, description="Channel index.")
+
+
+class ProfiledRouting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    main: ProfiledChannel | None = None
+    bias: ProfiledChannel | None = Field(default=None, description="Bias line.")
+
+
+class Profiled(ComponentSchema):
+    """Schema-projection fake: nested groups, required, unit, description, choices.
+
+    Not registered by register_fakes; tests register it under their own kind.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(description="Required label.")
+    routing: ProfiledRouting = Field(default_factory=ProfiledRouting)
+    rate: float | None = Field(
+        default=None,
+        strict=True,
+        allow_inf_nan=False,
+        json_schema_extra={"unit": "MHz"},
+        description="Sample rate.",
+    )
+    width: Number = None
+    mode: Literal["A", "V"] | None = None
+    enabled: bool | None = None
+    count: int | None = Field(default=None, strict=True)
+    tags: dict[str, str] = Field(default_factory=dict)
+    ext: YamlMap = Field(default_factory=dict)
+    points: list[float] | None = None
 
 
 def register_fakes() -> None:

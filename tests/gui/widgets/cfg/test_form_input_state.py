@@ -239,9 +239,8 @@ def test_scalar_widget_eval_mode_shows_resolved_ghost(qapp, ctrl):
 def test_scalar_widget_eval_mode_recovers_from_unresolved_expression(qapp, ctrl):
     from qtpy.QtGui import QColor, QPalette
     from zcu_tools.gui.widgets.cfg.fields import ScalarWidget
-    from zcu_tools.resources.context import MetaDict
 
-    ctrl.get_current_md.return_value = MetaDict()
+    ctrl.read_context.return_value = parameter_capture()
     field = scalar_field(
         ctrl,
         ScalarSpec(label="Freq", type=float),

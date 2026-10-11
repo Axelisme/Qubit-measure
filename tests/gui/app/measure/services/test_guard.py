@@ -59,7 +59,12 @@ def _make_state(
     soccfg = MagicMock() if soc_attached else None
     state = State(
         SessionEnv(
-            parameters=parameter_capture(), soc=soc, soccfg=soccfg, readiness=readiness
+            parameters=parameter_capture()
+            if readiness is ContextReadiness.ACTIVE
+            else None,
+            soc=soc,
+            soccfg=soccfg,
+            readiness=readiness,
         )
     )
     tab_id = "tab-1"
@@ -241,7 +246,7 @@ def test_run_inputs_translates_adapter_preflight_error() -> None:
     assert exc.value.__cause__ is preflight_error
 
 
-@pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY, ContextReadiness.DRAFT])
+@pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY])
 def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     state, tab_id = _make_state(readiness=readiness)
     guard = _make_guard(state)
@@ -324,7 +329,7 @@ def test_check_save_rejected_without_run_result():
 
 
 # ---------------------------------------------------------------------------
-# Load check (allows DRAFT, no SoC/result requirement)
+# Load check (no live context or SoC/result requirement)
 # ---------------------------------------------------------------------------
 
 
@@ -344,7 +349,7 @@ def test_check_load_issued_without_live_context_dependency_without_soc_or_result
 
 
 # ---------------------------------------------------------------------------
-# Analyze check (allows DRAFT)
+# Analyze check (no live context dependency)
 # ---------------------------------------------------------------------------
 
 
@@ -367,18 +372,23 @@ def test_check_analyze_rejected_without_run_result():
 
 
 # ---------------------------------------------------------------------------
-# Writeback check (allows DRAFT)
+# Writeback check (requires a selected point)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("readiness", list(ContextReadiness))
-def test_check_writeback_issued_without_live_context_dependency_and_analyze(
+def test_check_writeback_requires_selected_point_and_analyze(
     readiness: ContextReadiness,
 ):
     state, tab_id = _make_state(readiness=readiness)
     guard = _make_guard(state)
 
-    assert guard.check_writeback(tab_id) is None
+    if readiness is ContextReadiness.EMPTY:
+        with pytest.raises(GuardError) as caught:
+            guard.check_writeback(tab_id)
+        assert caught.value.reason_code == "no_context"
+    else:
+        assert guard.check_writeback(tab_id) is None
 
 
 def test_check_writeback_rejected_without_analyze_result():

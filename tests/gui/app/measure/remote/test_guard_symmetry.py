@@ -73,9 +73,9 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
         raise remote_error_from_expected(exc) from exc
 
 
-def test_run_start_draft_context_symmetry(qapp):
-    """DRAFT context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
-    ctrl = _make_controller(ContextReadiness.DRAFT)
+def test_run_start_unselected_context_symmetry(qapp):
+    """Unselected context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
+    ctrl = _make_controller(ContextReadiness.EMPTY)
     tab_id = ctrl.new_tab("fake")
 
     # UI path

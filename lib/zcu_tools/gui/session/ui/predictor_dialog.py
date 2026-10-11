@@ -177,6 +177,8 @@ class PredictorDialog(QDialog):
         self.setWindowTitle("Predictor")
         self.setMinimumWidth(1000)
         self.setMinimumHeight(480)
+        # Open tall enough that the transition table shows several rows.
+        self.resize(1000, 700)
 
         # Mutable list of currently tracked (from, to) transition pairs.
         # Modified only by _add_transition / _delete_transition / _on_remove_selected.
@@ -223,9 +225,8 @@ class PredictorDialog(QDialog):
         self._component_load_btn = QPushButton("Load component")
         self._component_load_btn.clicked.connect(self._on_load_component_clicked)
         component_row.addWidget(self._component_load_btn)
-        component_holder = QWidget()
-        component_holder.setLayout(component_row)
-        model_form.addRow("Component:", component_holder)
+        # Same as the params.json row: a holder widget's margins squeeze the row.
+        model_form.addRow("Component:", component_row)
 
         self._params_path_edit = QLineEdit()
         self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
@@ -237,9 +238,9 @@ class PredictorDialog(QDialog):
         self._browse_btn = QPushButton("Browse")
         self._browse_btn.clicked.connect(self._on_browse_file)
         params_path_row.addWidget(self._browse_btn)
-        params_path_holder = QWidget()
-        params_path_holder.setLayout(params_path_row)
-        model_form.addRow("params.json:", params_path_holder)
+        # Add the row layout directly: a holder widget's default layout margins
+        # squeezed the edit and buttons to a few pixels inside the form row.
+        model_form.addRow("params.json:", params_path_row)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
         # ranges + many decimals allow exploration. The params classes own physics
@@ -385,6 +386,7 @@ class PredictorDialog(QDialog):
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
+        self._status_label.setObjectName("predictor_status")
         left_layout.addWidget(self._status_label)
 
         # ── Remove + Close on one horizontal row (saves vertical space) ────

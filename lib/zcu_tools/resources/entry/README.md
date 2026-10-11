@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-12，共用 accepted 流程與 entry alias persistence
+**Last updated:** 2026-10-12，component kind 欄位投影；工作點為唯一參數寫入目標
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -24,8 +24,6 @@ Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(doc
 
 `manual_update(document, path, value, stderr=...)` 複製完整記憶體 point，重用 view 的欄位驗證與 manual 來源規則，不建立 store、讀檔或查 ledger。`accept_source(edit, path, provenance=...)` 在已準備的 draft 值上附加本地來源，處理 container leaves 並清除 clone 標記，不重跑值的 validator 或 model hook。來源驗證失敗不改 draft。兩個能力都以 package function 提供，不保留新的元件名稱。
 
-`ResultEntry.updated_point` 使用相同欄位規則準備隔離的記憶體候選，明確來源沿本 entry 的 ledger 驗證。`validate_library` 委派 library owner 檢查記憶體文件及本地來源。這兩個入口不建立 point/store、不保存或追加事件，manual 不讀 ledger。
-
 PointView 的公開 constructor 必須提供 result_root 與 database_root，加上 source、entry_id，在建構時一次捕捉完整來源身分。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
 
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result／Database roots 的 PointView。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。每筆來源記錄標示本次直接來源工作點。成功重新接受欄位會清除該路徑與子欄位的 cloned_from，即使值相同。
@@ -41,6 +39,8 @@ PointView 的公開 constructor 必須提供 result_root 與 database_root，加
 Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗不占用名稱，unregister 後可明確替換。`kinds()` 回傳隔離的註冊順序 tuple，不驗證 model 或執行 factory。
 
 ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、extra 策略、defaults、field validators、model validators 與 post-init hooks。Ext、wiring 與 module 都不是框架特例。Forbid model 的錯字由 Pydantic 拒絕，allow model 的額外欄位可讀寫及 set／meta。沒有值且 default 為 None 的欄位讀取報 AttributeError。
+
+`component_field_specs(kind)` 依宣告順序深度優先投影 kind 的 pydantic 欄位，供編輯器使用。每個 FieldSpec 帶 segments、value_kind、required、choices、unit 與 description；巢狀 model 先列 group 再列子欄位，`kind` 不列。投影只讀 class 宣告，不讀值、不建 defaults、不跑 validator 或 I/O。未知 kind 報 UnknownKindError。頂層 text 欄位的 key 若等於沒有 via 的已註冊角色名稱，`reference_role` 填該角色；`role_candidates(document, role)` 依文件順序列出 kind 符合角色 pattern 的元件，供引用欄位的下拉選單使用。這沿用角色解析的既有慣例，不是引用標記，也不檢查目標是否存在。
 
 新增元件保留已產生的 defaults，避免 reload 或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。框架不檢查 canonical 或冪等，不替定義者修復 validator。
 

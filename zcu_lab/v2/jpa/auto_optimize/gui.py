@@ -103,7 +103,7 @@ class JpaAutoOptimizeAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
-            "and pump power into three separate MetaDict drafts — "
+            "and pump power into three separate parameter context drafts — "
             "'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' "
             "(dBm) — so you can accept, cancel or retarget each one "
             "independently. Nothing is written without your acceptance, "
@@ -132,13 +132,6 @@ class JpaAutoOptimizeAdapter(
         )
         return (
             MeasureCfgBuilder()
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
@@ -154,6 +147,13 @@ class JpaAutoOptimizeAdapter(
                 label="JPA flux device",
                 default=literal(EvalValue("$flux_dev")),
                 required=False,
+            )
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
             )
             .sweep(
                 "jpa_flux",

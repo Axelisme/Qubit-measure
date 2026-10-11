@@ -38,7 +38,7 @@ class ProjectionAdapter(FakeAdapter):
         raise AssertionError("This view contract must not start a Run")
 
 
-def test_existing_tab_tracks_empty_draft_and_active_source(
+def test_existing_tab_tracks_unselected_and_active_source(
     qapp, tmp_path, monkeypatch
 ) -> None:
     background = BackgroundRunner()
@@ -72,9 +72,9 @@ def test_existing_tab_tracks_empty_draft_and_active_source(
         ctrl.setup_control.new_entry(EntryRequest("entry"))
         interaction = ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
-        assert interaction.has_context
+        assert not interaction.has_context
         assert not interaction.has_active_context
-        assert window.get_view_snapshot()["point_label"] == "Draft (in-memory)"
+        assert window.get_view_snapshot()["point_label"] == "No point selected"
         for label in ("first", "second"):
             ctrl.setup_control.new_point(
                 PointCreateRequest(label, "", CommandOrigin("gui"))
@@ -92,5 +92,67 @@ def test_existing_tab_tracks_empty_draft_and_active_source(
         assert background.quiesce()
         for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tab_id)
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
+    qapp, tmp_path, monkeypatch
+) -> None:
+    from qtpy.QtWidgets import QLabel
+
+    background = BackgroundRunner()
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
+        lambda: background,
+    )
+    registry = Registry()
+    registry.register("fake", ProjectionAdapter)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        registry,
+        None,
+        BaseEventBus(),
+        progress_transport=DirectProgressTransport(),
+        project_root=str(tmp_path),
+    )
+    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    ctrl.add_view(window)
+    window.show()
+    qapp.processEvents()
+    try:
+        hint = window.findChild(QLabel, "empty_tabs_hint")
+        tabs = window.findChild(QTabWidget)
+        assert hint is not None and tabs is not None
+        assert hint.isVisibleTo(window) and not tabs.isVisibleTo(window)
+        without_entry = hint.text()
+        ctrl.setup_control.new_entry(EntryRequest("entry"))
+        qapp.processEvents()
+        assert hint.isVisibleTo(window)
+        without_point = hint.text()
+        assert without_point and without_point != without_entry
+        ctrl.setup_control.new_point(
+            PointCreateRequest("first", "", CommandOrigin("gui"))
+        )
+        qapp.processEvents()
+        with_point = hint.text()
+        assert with_point and with_point not in (without_entry, without_point)
+        ctrl.setup_control.open_entry(EntryRequest("entry"))
+        qapp.processEvents()
+        assert hint.text() == without_point
+        ctrl.setup_control.use_point(PointUseRequest("first"))
+        qapp.processEvents()
+        assert hint.text() == with_point
+        tab_id = ctrl.tab_control.new_tab("fake")
+        qapp.processEvents()
+        assert tabs.isVisibleTo(window) and not hint.isVisibleTo(window)
+        ctrl.tab_control.close_tab(tab_id)
+        qapp.processEvents()
+        assert hint.isVisibleTo(window) and not tabs.isVisibleTo(window)
+    finally:
+        assert background.quiesce()
+        for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
+            ctrl.tab_control.close_tab(tab_id)
+        window.close()
         window.deleteLater()
         qapp.processEvents()

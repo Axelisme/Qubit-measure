@@ -93,6 +93,10 @@ class RoleRegistry:
         """Remove a declaration; missing names raise KeyError."""
         del self._roles[name]
 
+    def names(self) -> tuple[str, ...]:
+        """Return registered role names in registration order; no validation."""
+        return tuple(self._roles)
+
     def get(self, name: str) -> RoleSpec:
         """Return a registered declaration; unknown names raise ValueError."""
         try:

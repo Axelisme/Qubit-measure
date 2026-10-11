@@ -71,7 +71,7 @@ def editor(qapp: QApplication, request) -> Iterator[RangeEditor]:
         lambda: schema,
         resolution=lambda: CfgResolution(
             (),
-            lambda expression: {"offset": 3.0}[expression],
+            lambda expression: {"offset": 3.0, "offset * 2": 6.0}[expression],
             lambda source_id: (),
             NoReferences(),
             lambda _: 0,
@@ -150,3 +150,15 @@ def test_endpoint_raw_input_is_not_parsed_by_presentation(editor: RangeEditor):
     assert line.text() == "1e-"
     line.setText("1e-1")
     assert editor.resource.observe().status is CfgStatus.VALID
+
+
+def test_expression_edge_tooltip_shows_full_expression(editor: RangeEditor):
+    edge = "center" if isinstance(editor.widget, CenteredSweepInputWidget) else "start"
+    editor.resource.edit(
+        (CfgEdit(("range", edge), EvalValue("offset")),),
+    )
+    line = editor.widget.findChildren(ScalarInputWidget)[0].findChild(QLineEdit)
+    assert line is not None
+    assert line.toolTip() == "offset"
+    line.setText("offset * 2")
+    assert line.toolTip() == "offset * 2"

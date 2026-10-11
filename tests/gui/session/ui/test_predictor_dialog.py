@@ -1127,3 +1127,27 @@ def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
     dialog = PredictorDialog(ctrl)
 
     assert "oops" in dialog._status_label.text()
+
+
+def test_predictor_params_row_keeps_full_control_height(qapp):
+    from qtpy.QtWidgets import QLineEdit
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=False))
+    dialog.show()
+    qapp.processEvents()
+    try:
+        edit = next(
+            e
+            for e in dialog.findChildren(QLineEdit)
+            if "params.json" in e.placeholderText()
+        )
+        row = [edit] + [
+            b
+            for b in dialog.findChildren(QPushButton)
+            if b.text() in ("Load", "Browse", "Load component")
+        ]
+        assert len(row) == 4
+        for widget in row:
+            assert widget.height() >= widget.sizeHint().height()
+    finally:
+        dialog.close()

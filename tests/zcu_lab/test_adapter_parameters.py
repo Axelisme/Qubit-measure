@@ -29,8 +29,8 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
     PointUseRequest,
+    SavedPoint,
 )
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -183,7 +183,7 @@ def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterCo
                 }
             )
         ),
-        target=EntryDraft(entry_id="contract-entry"),
+        target=SavedPoint(entry_id="contract-entry", point="working"),
         roles=None,
     )
 

@@ -44,7 +44,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "reference. Removed '.sweep.<edge>' / '.value.<child>' aliases are "
             "rejected without mutation and the error gives the replacement. "
             "'value' is a JSON scalar, or an md-reference expression as "
-            '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against MetaDict at '
+            '{"__kind":"eval","expr":"r_f - 0.1"} (resolved against parameter context at '
             "commit), or a registered value source as "
             '{"__kind":"value_ref","key":"device.flux.value","type":"float"} '
             "(resolved immediately at set time and stored as a direct scalar; discover "
@@ -111,7 +111,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             10.0,
             "Save the editing session (from rpc_call on editor.new) as a ModuleLibrary "
             "module/waveform: lower the session (eval expressions resolved against "
-            "MetaDict to concrete numbers) and register it into the ModuleLibrary "
+            "parameter context to concrete numbers) and register it into the ModuleLibrary "
             "under 'name'. This is NOT 'apply a tab cfg edit' — tab cfg edits are "
             "already live (WYSIWYG); this persists the draft as a named ml entry. "
             "Returns {}. On success the session is destroyed; on validation failure "

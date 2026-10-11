@@ -41,7 +41,6 @@ from zcu_tools.gui.widgets.cfg import (
     FieldDecorationProvider,
 )
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
-from zcu_tools.resources.context import MetaDict
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._tree_support import click_row, tree_item, tree_widget
@@ -52,7 +51,7 @@ from zcu_lab.components import QubitSchema, ResonatorSchema
 def ctrl() -> MagicMock:
     controller = MagicMock()
     controller.get_bus.return_value = EventBus()
-    controller.get_current_md.return_value = MetaDict()
+    controller.read_context.return_value = parameter_capture()
     controller.get_current_ml.return_value = MagicMock()
     controller.get_current_ml.return_value.modules = {}
     controller.get_current_ml.return_value.waveforms = {}

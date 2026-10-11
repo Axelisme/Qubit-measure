@@ -1,10 +1,10 @@
-# `zcu_tools.resources.storage_migration` 離線遷移
+# `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-07，Legacy evidence owner、native 2.0 與 point-local typed library 轉換
+**Last updated:** 2026-10-11，離線工具移至 root migrations
 
 本 package 組合 legacy result／Database 與新參數條目。正常 runtime loader 不使用它。公開入口是 `migrate_storage` 與 `load_run_evidence`，型別從 package root 匯入。
 
-- 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。Lib 不 import `zcu_lab`、experiment 或舊資源容器。
+- 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。本 package 不 import `zcu_lab`、experiment 或舊資源容器。`lib` 不 import `migrations`。
 - Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
 - Parameters 與 data 可分開執行。第二部分明確 resume 同一 manifest，不合併任意既有條目。完成的 setup／point 仍可編輯；resume 驗證當前文件，不恢復舊值。
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
@@ -19,4 +19,4 @@
 
 `state.py` 集中 report／manifest encoding 與 copy、native、move 共用的 publication recovery。ModuleLibrary 的單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery，需取得清理授權後刪目的地重跑。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
-`tools/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於 `zcu_lab`，沒有動態 discovery 或新 runtime registry。Parameters 模式不執行 data 搬移或來源刪除。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../../../docs/storage-migration.md)。
+`migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於 `zcu_lab`，沒有動態 discovery 或新 runtime registry。Parameters 模式不執行 data 搬移或來源刪除。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../docs/storage-migration.md)。

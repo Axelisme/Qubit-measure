@@ -25,6 +25,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "complete actual destination values. Kinds are md|module|waveform; "
             "cross-kind names may coincide. Empty write is a no-op. Explicit null "
             "value sets an md value to null; omission keeps its proposal. "
+            "Requires a selected working point; writes retain the captured SavedPoint destination. "
             "Context apply retains existing failure semantics, not cross-file atomicity.",
             (
                 required_string("tab_id"),
@@ -127,7 +128,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "
             "context_version is the bumped 'context' resource version after apply; "
-            "destination_context is the active SessionEnv projection at reply time.",
+            "destination_context is the active SessionEnv projection at reply time. "
+            "Requires a selected working point but always writes to the draft's captured SavedPoint.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),

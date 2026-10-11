@@ -74,7 +74,7 @@ class RoOptAutoAdapter(
             "length one axis at a time."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' / 'best_ro_freq' — "
+            "Reads from the parameter context (all optional): 'r_f' / 'best_ro_freq' — "
             "resonator / chosen readout frequency centring the freq search "
             "(~4000–8000 MHz); 'rf_w' — linewidth, scaling the freq search "
             "range (~5–50 MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; "
@@ -89,7 +89,7 @@ class RoOptAutoAdapter(
         ),
         typical_writeback=(
             "Proposes the optimizer's best readout frequency, gain and length "
-            "into MetaDict 'best_ro_freq' (MHz), 'best_ro_gain' (a.u.) and "
+            "into parameter context 'best_ro_freq' (MHz), 'best_ro_gain' (a.u.) and "
             "'best_ro_length' (us). When a cfg snapshot with pulse readout is "
             "available, also proposes ModuleLibrary 'readout_dpm'."
         ),

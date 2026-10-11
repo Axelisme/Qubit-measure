@@ -118,7 +118,7 @@ class JpaFluxAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA flux device value into "
-            "MetaDict 'best_jpa_flux' as a draft — it never writes it back "
+            "parameter context 'best_jpa_flux' as a draft — it never writes it back "
             "without your acceptance, never commands the device from the "
             "writeback, and never touches 'cur_jpa_A'."
         ),
@@ -134,13 +134,6 @@ class JpaFluxAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
@@ -150,6 +143,13 @@ class JpaFluxAdapter(
                 label="JPA flux device",
                 default=literal(EvalValue("$flux_dev")),
                 required=False,
+            )
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
             )
             .sweep(
                 "jpa_flux",

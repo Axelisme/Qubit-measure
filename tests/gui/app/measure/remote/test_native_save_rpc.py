@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -89,14 +90,27 @@ def native_save_rpc(
             qapp.processEvents()
 
 
-@pytest.mark.parametrize("draft_capture", [False, True])
+def install_unbound_saved_capture(session: NativeSaveSession) -> None:
+    """Keep the selected point's fixed names and values without storage capability."""
+    captured = session.state.session_env.parameters
+    assert captured is not None
+    unbound = ParameterContext(
+        point=captured.document(),
+        library=captured.library,
+        target=captured.target,
+        roles=captured.roles,
+    )
+    session.state.set_context(replace(session.state.session_env, parameters=unbound))
+
+
+@pytest.mark.parametrize("unbound_capture", [False, True])
 @pytest.mark.parametrize("analysis_failure", [False, True])
 def test_native_load_rpc_retains_history_on_analysis_partial_failure(
     tmp_path: Path,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
     analysis_failure: bool,
-    draft_capture: bool,
+    unbound_capture: bool,
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
@@ -106,8 +120,8 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         stored = load_run_data(path)
         events = session.entry.ledger.events()
         tab = session.state.get_tab("tab")
-        if draft_capture:
-            assert call(sock, "entry.open", {"name": "original"})["ok"] is True
+        if unbound_capture:
+            install_unbound_saved_capture(session)
             captured = session.state.session_env.parameters
             assert captured is not None and captured.storage is None
         if analysis_failure:
@@ -122,7 +136,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             )
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
 
-        if not draft_capture:
+        if not unbound_capture:
             session.state.set_context(
                 replace(session.state.session_env, parameters=None)
             )
@@ -164,20 +178,20 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         assert rejected["ok"] is False
         assert rejected["error"]["reason"] == "result_superseded"
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["result"] == before
-        if draft_capture:
+        if unbound_capture:
             assert tab.run.parameters is not None
             assert tab.run.storage is None
             assert tab.artifacts.snapshot() == ()
         assert session.entry.ledger.events() == events
 
 
-@pytest.mark.parametrize("draft_capture", [False, True])
+@pytest.mark.parametrize("unbound_capture", [False, True])
 @pytest.mark.parametrize("analysis_failure", [False, True])
 def test_native_open_file_rpc_retains_history_after_explicit_context_read(
     tmp_path: Path,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
-    draft_capture: bool,
+    unbound_capture: bool,
     analysis_failure: bool,
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
@@ -188,8 +202,8 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         history = load_run_data(path).metadata
         events = session.entry.ledger.events()
         session.state.set_active_tab("tab")
-        if draft_capture:
-            assert call(sock, "entry.open", {"name": "original"})["ok"] is True
+        if unbound_capture:
+            install_unbound_saved_capture(session)
         if analysis_failure:
 
             def unavailable(
@@ -223,24 +237,24 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
-        assert (tab.run.storage is None) is draft_capture
-        if draft_capture:
+        assert (tab.run.storage is None) is unbound_capture
+        if unbound_capture:
             assert tab.artifacts.snapshot() == ()
         assert session.state.active_tab_id == new_id
         assert session.entry.ledger.events() == events
 
 
-@pytest.mark.parametrize("draft_capture", [False, True])
+@pytest.mark.parametrize("unbound_capture", [False, True])
 def test_unreadable_native_open_file_restores_previous_tab_and_focus(
-    tmp_path: Path, qapp: QApplication, draft_capture: bool
+    tmp_path: Path, qapp: QApplication, unbound_capture: bool
 ) -> None:
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.state.set_active_tab("tab")
         previous = session.state.get_tab("tab").run
         before = session.state.list_tab_ids()
         events = session.entry.ledger.events()
-        if draft_capture:
-            session.context.install_entry(session.entry)
+        if unbound_capture:
+            install_unbound_saved_capture(session)
         assert call(sock, "context.snapshot", {})["ok"] is True
 
         reply = call(

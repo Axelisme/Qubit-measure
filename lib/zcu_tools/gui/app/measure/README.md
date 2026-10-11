@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，holder admission、固定 capture、SavedPoint writeback 與獨立 predictor
+**Last updated:** 2026-10-12，holder admission、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -19,7 +19,7 @@ Run 框架在 hardware lease 後、adapter.run 前讀取全部已連線 device �
 Native Save 寫入既有 `/device`，不查 live hardware；實際 sweep 值由 cfg 與 persisted axes 記錄。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
-但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
+但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
 Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果供 Save。
 不重試、回滾或釋放已發布的結果資源。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
@@ -350,10 +350,9 @@ Key ownership rules:
   request coercion與structured/domain-special wire policy，不擁有分類registry。
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0068）。
-- `ContextService` 擁有參數容器與 point-local library 的提交。SavedPoint 經
-  resources owner 單檔交易，成功後才發布目前 binding 的投影、版本與 fact。
-  DRAFT 只改記憶體，同 entry 的非選取 point 寫入不改目前 selection。
-  Library structure change 以固定 ParameterContext lower，不讀後來的 alias 表。
+- `ContextService` owns GUI parameter and ModuleLibrary commands. It validates
+  candidates and commits through the resource owners before publishing changed
+  facts and bumping `context`; failures do not publish a candidate.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns the implemented domain checks. Qt and remote controls
@@ -442,7 +441,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    cfg-editor machinery before commit. `WritebackService.create_draft` captures
    the destination ParameterContext and its fixed role names. Preview facts
    expose the actual destination, latest stored current value and complete proposal.
-   ParameterWriteback rows show values and stderr with static schema unit labels
+   Scalar parameter rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
@@ -582,7 +581,7 @@ CfgResource 擁有 input、resolution、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
-`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 或失效的 DRAFT 拒絕寫入。失敗保留可編輯的 session。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 拒絕寫入。失敗保留可編輯的 session。
 
 獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
 並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
@@ -837,7 +836,11 @@ Apply calls the replacement write interface, which validates and lowers before t
 single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
 the resulting selection. Collision, invalid, or lowering failures leave the live
 entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
-不改目的地；跨 entry 或失效 DRAFT 拒絕提交，保留 draft 供 Revert／Discard。
+不改 captured SavedPoint 目的地。提交要求目前已選取工作點，跨 entry 拒絕，
+保留 editor draft 供 Revert／Discard。開啟 entry 不自選 point，
+parameters=None、readiness=EMPTY。Entry metadata、point list 與 setup source
+binding 仍可讀。Run、WB 與目前 point 的 Inspect Set 停用並提示先選取或建立
+工作點。SoC、device 與獨立 predictor 保留各自能力。
 Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
 reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
 New remains a retained non-blocking template catalog dialog; the Modules tree Delete
@@ -906,8 +909,8 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   The library editor supplies an unlowered schema and fixed ParameterContext.
   App-injected callbacks prepare the Spec before a single structure change.
 - `ContextService.apply_writeback` owns fixed-target admission, resource binding
-  and publication. It accepts only SavedPoint. A nonempty EntryDraft writeback
-  fails before append and asks the caller to select or create a working point.
+  and publication. It accepts only SavedPoint. Application admission requires a
+  selected working point before append; selection does not replace the captured destination.
   `WritebackService` lowers selected proposals to concrete resource items in
   proposal order, not grouped by kind. The shared executor appends accepted,
   commits each item and stops at the first failure. The context publishes each
@@ -960,3 +963,5 @@ receives their catalogs by injection and never imports the user package.
   `mcp/measure/README.md`.
 - GUI tests that own `BackgroundRunner` call `quiesce()` before `deleteLater()` or
   process teardown.
+
+Entry New／Open 不建立參數環境，也不自選既有 point。Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI 停用操作並提示，application 也拒絕未選取狀態。重新 Open 同 entry 清除 selection，WB 必須再次選取任一 point 才能提交，但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。

@@ -71,9 +71,16 @@ def app(qapp, tmp_path):
         catalog_loader=Loader(),
         project_root=str(tmp_path),
     )
-    from zcu_tools.gui.session.context_types import EntryRequest
+    from zcu_tools.gui.session.context_types import (
+        CommandOrigin,
+        EntryRequest,
+        PointCreateRequest,
+    )
 
     ctrl.setup_control.new_entry(EntryRequest("lab"))
+    ctrl.setup_control.new_point(
+        PointCreateRequest("working", "", CommandOrigin("gui"))
+    )
     window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
     ctrl.add_view(window)
     window.show()

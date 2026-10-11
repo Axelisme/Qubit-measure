@@ -24,8 +24,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Final
 
-# Repository Python includes the framework and the root user package.
-CHECKED_ROOTS: Final = ("lib", "zcu_lab", "tests", "scripts", "tools")
+# Repository Python includes the framework, user package, and offline migrations.
+CHECKED_ROOTS: Final = ("lib", "zcu_lab", "tests", "scripts", "tools", "migrations")
 
 # Generated or vendored trees. Nothing here is written by hand, so no check has
 # an opinion about it.

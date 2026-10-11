@@ -58,7 +58,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_aliases(
         assert application.result("context.active", {}) == {"label": None}
         assert application.result("context.labels", {}) == {"labels": []}
         info = application.open_entry()
-        assert_visible_snapshot(info.name, "Draft (in-memory)")
+        assert_visible_snapshot(info.name, "No point selected")
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
         context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
@@ -184,27 +184,6 @@ def test_context_notification_requery_reads_complete_native_capture(
     assert drive["style"] == "const" and drive["length"] == 1.0
 
 
-def test_snapshot_reads_the_memory_draft_and_unlocks_only_its_connection(
-    application: PointApplication,
-) -> None:
-    info = application.open_entry()
-    context = application.controller.context_control
-    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
-    result = application.result("context.snapshot", {})
-    assert result["target"] == {"kind": "entry_draft", "entry_id": info.entry_id}
-    # Empty edits are rejected by the handler.
-    params = {"kind": "module", "name": "unused", "edits": []}
-    admitted = application.rpc("context.ml_edit", params)
-    error = admitted["error"]
-    assert isinstance(error, dict)
-    assert error["code"] == ErrorCode.INVALID_PARAMS
-    context.set_parameter(context.read_context().target, "Q1.rate", 11.0)
-    application.result("context.snapshot", {})
-    refreshed = application.rpc("context.ml_edit", params)["error"]
-    assert isinstance(refreshed, dict)
-    assert refreshed["code"] == ErrorCode.INVALID_PARAMS
-
-
 def test_empty_snapshot_fails_without_unlocking_context(
     application: PointApplication,
 ) -> None:
@@ -222,6 +201,7 @@ def test_source_unavailable_snapshot_does_not_unlock_context(
     tmp_path: Path,
 ) -> None:
     application.open_entry()
+    application.result("point.new", {"label": "working"})
     captured = application.controller.context_control.read_context()
     fault = ContextSourceFault(
         document, tmp_path / f"{document}.yaml", "OSError", "source fault"
@@ -248,6 +228,7 @@ def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
     application: PointApplication, value: float
 ) -> None:
     application.open_entry()
+    application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.set_parameter(
         context.read_context().target, "general.ext.nested", {"values": [value]}
@@ -272,6 +253,7 @@ def snapshot_rows(value: object) -> list[dict[str, object]]:
 @pytest.fixture
 def browse_context(application: PointApplication) -> PointApplication:
     application.open_entry()
+    application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "S1"})
     context.add_component("S1", "fake/sensor", {"rate": 20.0})
@@ -308,6 +290,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
     component_registry.register("browse/array", ArrayComponent)
     try:
         application.open_entry()
+        application.result("point.new", {"label": "working"})
         captured = application.controller.context_control.read_context()
         point = captured.document()
         point = point.model_copy(
@@ -407,7 +390,7 @@ def test_snapshot_summary_keeps_scalars_and_complete_aliases(
         ),
         ("point.general.ext.browse.matrix.1", [3, 4]),
         ("point.components.Q1.rate", 10.0),
-        ("target.kind", "entry_draft"),
+        ("target.kind", "saved_point"),
         ("library.components", {}),
         ("aliases.1.resolved", "S1"),
     ],

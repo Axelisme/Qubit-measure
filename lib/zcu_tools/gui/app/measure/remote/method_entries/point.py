@@ -35,7 +35,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_entry_new",
         MethodSpec(
             10.0,
-            "Create a named entry and publish empty DRAFT without selecting a point "
+            "Create a named entry without selecting a point "
             "or touching hardware. Return entry_id/name/result_path/database_path. "
             "Name is one arbitrary resource-validated segment, not chip/qubit. "
             "Existing or invalid names fail without changing the binding. "
@@ -49,7 +49,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_entry_open",
         MethodSpec(
             10.0,
-            "Open an existing named entry and publish empty DRAFT without selecting "
+            "Open an existing named entry without selecting "
             "a point or touching hardware. Return entry_id/name/result_path/"
             "database_path. Invalid/missing entry or installation failure preserves "
             "the old binding; never creates an entry or retries.",
@@ -73,7 +73,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Create and select label in the currently opened entry; no_entry if none. Copies setup when "
-            "clone_from is omitted, otherwise a same-entry point; never DRAFT. "
+            "clone_from is omitted, otherwise a same-entry point; never unsaved session parameters. "
             "description defaults to empty and replaces seed/clone description. "
             "Returns {kind: 'saved_point', entry_id, point}. Binding failure retains "
             "the created point and old selection: point_binding_failed with "

@@ -19,7 +19,6 @@ from .schema import (
     resolve_sample_flux,
     validate_sample_table_v2,
 )
-from .table import SampleTable
 
 __all__ = [
     "JsonlSampleTable",
@@ -39,5 +38,4 @@ __all__ = [
     "migrate_sample_table_v2",
     "resolve_sample_flux",
     "validate_sample_table_v2",
-    "SampleTable",
 ]

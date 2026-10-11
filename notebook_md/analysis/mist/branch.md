@@ -1,146 +1,89 @@
+# Branch populations from a result entry
+
+This is an offline analysis example. It reads an existing new-format entry, typed `params.json` fits, and one point. It does not connect to instruments or accept values into the point. Run it only on a caller-selected analysis copy of the data.
+
+## Definitions and entry
+
+Register component definitions once per kernel. Restart the kernel before repeating registration. Opening requires an entry with setup, points, records, and its Database directory; it does not migrate old metadata files.
+
 ```python
-%load_ext autoreload
 from pathlib import Path
 
 import numpy as np
 
-%autoreload 2
-from zcu_tools.resources.context import MetaDict
+from zcu_lab.components import register_all
+from zcu_tools.notebook.analysis.mist.branch import plot_populations_over_photon
+from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.simulate import mA2flx
-from zcu_tools.notebook.analysis.mist.branch import (
-    plot_cn_over_flx,
-    plot_populations_over_photon,
-)
+from zcu_tools.simulate import value2flux
 from zcu_tools.simulate.fluxonium.branch.full_quantum import (
     calc_branch_population,
-    calc_branch_population_over_flux,
     make_hilbertspace,
 )
+
+register_all(component_registry)
+entry = ResultEntry.open(
+    "Q1",
+    result_root=Path("../../../analysis_copy/results/Q12_2D[5]"),
+    database_root=Path("../../../analysis_copy/Database/Q12_2D[5]"),
+)
 ```
 
-```python
-qub_name = "Q12_2D[5]/Q1"
+## Typed fits and point values
 
-result_dir = Path(f"../../../result/{qub_name}")
-
-result_dir.mkdir(parents=True, exist_ok=True)
-result_dir.joinpath("image", "branch").mkdir(parents=True, exist_ok=True)
-result_dir.joinpath("web", "branch").mkdir(parents=True, exist_ok=True)
-result_dir.joinpath("data", "branch").mkdir(parents=True, exist_ok=True)
-```
+The dispersive fit is required for this example. No guessed coupling or resonator frequency replaces a missing fit. Energies, resonator frequency, and coupling from params.json are GHz.
 
 ```python
-params_file = QubitParams(result_dir / "params.json", readonly=True)
+params_file = QubitParams(entry.result_path / "params.json", readonly=True)
 fit = params_file.require_fluxdep_fit()
 dispersive = params_file.get_dispersive_fit()
+if dispersive is None:
+    raise ValueError("This branch analysis requires a dispersive fit")
 
-params = fit.params
-mA_c = fit.flux_half
-period = fit.flux_period
-allows = fit.plot_transitions
-
-print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
-
-if dispersive is not None:
-    g = dispersive.g
-    r_f = dispersive.bare_rf
-    print(f"g: {g} GHz, r_f: {r_f} GHz")
-elif "r_f" in allows:
-    r_f = allows["r_f"]
-    print(f"r_f: {r_f} GHz")
-```
-
-```python
-md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
-md
-```
-
-```python
-# params = (7.0, 1.1, 1.4)
-# r_f = 5.9
-# g = 0.1
-
-
-qub_dim = 20
-qub_cutoff = 50
-res_dim = 310
-
-photons = np.arange(0, res_dim - 10, dtype=np.float64)
-```
-
-# Single
-
-```python
-# flx = 0.8312
-flx = mA2flx(md.cur_A, md.mA_c, 2 * abs(md.mA_e - md.mA_c))
-flx
-```
-
-```python
-branchs = list(range(15))
-
-hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)
-populations_over_flx = calc_branch_population(hilbertspace, branchs, upto=photons[-1])
-```
-
-```python
-fig = plot_populations_over_photon(branchs, photons, populations_over_flx)
-
-fig.write_html(f"{result_dir}/web/branch/populations_at_phi{flx:.1f}.html")
-fig.write_image(f"{result_dir}/image/branch/populations_at_phi{flx:.1f}.png")
-fig.show()
-```
-
-# Sweep flux
-
-```python
-flxs = np.linspace(0, 0.5, 5)
-branchs = [0, 1]
-```
-
-```python
-populations_over_flx = calc_branch_population_over_flux(
-    flxs,
-    params,
-    r_f,
-    qub_dim,
-    qub_cutoff,
-    res_dim,
-    g,
-    upto=photons[-1],
-    branchs=branchs,
-    batch_size=30,
+point_label = "1.800mA"
+point = entry.use_point(point_label)
+roles = point.resolve(["qubit", "resonator"], focus="Q1")
+flux = value2flux(
+    point.general.ext.flux_value,
+    roles.qubit.flux_half,
+    roles.qubit.flux_period,
 )
 ```
 
+The three flux inputs must use the same explicit `general.ext.flux_unit`. Point reads use a cached snapshot, and the container does not convert current or voltage. The label is only a directory name; it is not parsed as a current.
+
+## Calculate and export one branch plot
+
+`upto` is the number of photon states, an integer, not the last float coordinate. The resonator dimension must cover that range. These cutoffs are example analysis choices; check convergence before interpreting the result.
+
 ```python
+branches = [0, 1]
+n_photons = 40
+photons = np.arange(n_photons, dtype=np.float64)
+
+hilbertspace = make_hilbertspace(
+    params=fit.params,
+    r_f=dispersive.bare_rf,
+    g=dispersive.g,
+    qub_dim=8,
+    qub_cutoff=40,
+    res_dim=50,
+    flux=flux,
+)
+populations = calc_branch_population(hilbertspace, branches, upto=n_photons)
+figure = plot_populations_over_photon(branches, photons, populations)
+figure.show()
+```
+
+```python
+output_dir = entry.result_path / "points" / point_label / "analysis_exports"
+output_dir.mkdir(parents=True, exist_ok=True)
+figure.write_html(output_dir / "branch_populations.html")
 np.savez_compressed(
-    f"../../result/{qub_name}/branch/populations_over_flx.npz",
-    flxs=flxs,
-    branchs=branchs,
+    output_dir / "branch_populations.npz",
     photons=photons,
-    populations_over_flx=populations_over_flx,
+    populations=np.stack([populations[branch] for branch in branches]),
 )
 ```
 
-```python
-data = np.load(f"../../result/{qub_name}/branch/populations_over_flx.npz")
-flxs = data["flxs"]
-photons = data["photons"]
-populations_over_flx = data["populations_over_flx"]
-```
-
-```python
-fig = plot_cn_over_flx(
-    flxs, photons, populations_over_flx, critical_levels={0: 2, 1: 3}
-)
-
-fig.write_html(f"../../result/{qub_name}/web/branch/cn_over_flx.html")
-fig.write_image(f"../../result/{qub_name}/image/branch/cn_over_flx.png")
-fig.show()
-```
-
-```python
-
-```
+These are explicit analysis exports, not a saved acquisition or accepted calibration. No acquired, saved, or accepted event is manufactured for this calculation. The former flux sweeps and Floquet/TLS exploration cells are retired; this notebook keeps one typed-input analysis route.

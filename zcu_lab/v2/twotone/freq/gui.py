@@ -114,7 +114,7 @@ class FreqAdapter(
             "that flux."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
             "the sweep centre (~2000–6000 MHz); 'qf_w' — qubit linewidth, "
             "setting the half-span as 1.5*qf_w (~1–50 MHz); 'qub_ch' — "
             "qubit-drive channel; 'r_f' — resonator frequency for the readout "

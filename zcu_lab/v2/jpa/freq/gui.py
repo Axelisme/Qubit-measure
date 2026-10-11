@@ -93,7 +93,7 @@ class JpaFreqAdapter(
             "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
-            "Proposes the signal-maximizing JPA pump frequency into MetaDict "
+            "Proposes the signal-maximizing JPA pump frequency into parameter context "
             "'best_jpa_freq' (MHz) as a draft — it never writes it back without "
             "your acceptance and never touches 'cur_jpa_A'."
         ),

@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QApplication,
@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
@@ -158,7 +159,16 @@ class MainWindow(QMainWindow):
         tab_bar.tabMoved.connect(self._on_tab_moved)
         self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self._tabs.currentChanged.connect(self._on_current_tab_changed)
-        main_layout.addWidget(self._tabs, stretch=1)
+        # While no experiment tab is open, the area tells the user the next step.
+        self._empty_hint = QLabel("")
+        self._empty_hint.setObjectName("empty_tabs_hint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setStyleSheet("color: gray;")
+        self._tab_area = QStackedWidget()
+        self._tab_area.addWidget(self._empty_hint)
+        self._tab_area.addWidget(self._tabs)
+        main_layout.addWidget(self._tab_area, stretch=1)
+        self._refresh_empty_hint()
 
         # --- status bar ---
         self._status_bar = QStatusBar()
@@ -257,6 +267,7 @@ class MainWindow(QMainWindow):
         self._tab_widgets[tab_id] = tab_w
         self._tabs.addTab(tab_w, tab_label)
         self._tabs.setCurrentWidget(tab_w)
+        self._refresh_empty_hint()
 
         # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
@@ -278,6 +289,7 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 self._tabs.removeTab(index)
             tab_w.deleteLater()
+        self._refresh_empty_hint()
 
     def select_tab_widget(self, tab_id: str) -> None:
         self._tabs.setCurrentWidget(self._tab_widgets[tab_id])
@@ -439,7 +451,7 @@ class MainWindow(QMainWindow):
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
 
-        Show the SavedPoint name, "Draft (in-memory)", or "No point selected".
+        Show the SavedPoint name or "No point selected".
         Refresh tab interaction state without changing titles or result panes.
         """
         entry = self._ctrl.context_control.get_entry_info()
@@ -454,9 +466,6 @@ class MainWindow(QMainWindow):
         if isinstance(target, SavedPoint):
             self._point_label.setText(target.point)
             self._point_label.setStyleSheet("")
-        elif parameters is not None:
-            self._point_label.setText("Draft (in-memory)")
-            self._point_label.setStyleSheet("color: blue;")
         else:
             self._point_label.setText("No point selected")
             self._point_label.setStyleSheet(
@@ -465,6 +474,22 @@ class MainWindow(QMainWindow):
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
+        self._refresh_empty_hint()
+
+    def _refresh_empty_hint(self) -> None:
+        if self._tabs.count() > 0:
+            self._tab_area.setCurrentWidget(self._tabs)
+            return
+        if self._ctrl.context_control.get_entry_info() is None:
+            self._empty_hint.setText("Open or create an entry in Setup… to begin.")
+        elif self._ctrl.context_control.current_point_label() is None:
+            # An opened entry selects no point; experiments need one to run.
+            self._empty_hint.setText(
+                "Select or create a working point in Setup… to run experiments."
+            )
+        else:
+            self._empty_hint.setText("Use New Tab to start an experiment.")
+        self._tab_area.setCurrentWidget(self._empty_hint)
 
     def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)

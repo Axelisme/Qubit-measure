@@ -68,8 +68,9 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v113: bounded partial device_setup over complete Info device.setup RPC.
 # v114: integration revision above the base's device_setup release.
 # v115: read-only predictor inputs and readiness without an installed predictor.
-# v116: holder/ref-free cfg integrated above the predictor release.
-MCP_VERSION = 116
+# v116: explicit working-point selection and saved writeback destinations.
+# v117: holder/ref-free cfg integrated above the working-point and UI releases.
+MCP_VERSION = 117
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

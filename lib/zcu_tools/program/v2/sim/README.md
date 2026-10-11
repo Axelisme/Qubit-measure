@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-09，native arb path、worker GIL yield 與 hardware-clock time quantization
+**Last updated:** 2026-10-11，現行參數容器名稱
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -75,7 +75,7 @@ into each point's S21 blend — the fluxonium eigensolve behind `resonator_freqs
 (the dominant cost) never runs per point.  Identical physical parameters at the
 same reduced flux also reuse a small process-local hot cache for the expensive
 `predict_freq` / dressed-resonator prediction.  The cache key is the explicit
-`SimParams` physics/alignment plus reduced flux; it never falls back to `MetaDict`
+`SimParams` physics/alignment plus reduced flux; it never falls back to `parameter context`
 or moves the mock operating flux to a convenience point.  The cache is valid only
 because the flux is fixed *for that acquire*; a per-point operating flux would have
 to move that call back into the loop.

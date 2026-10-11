@@ -13,7 +13,11 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.gui.cfg.resource import CfgResource
-from zcu_tools.gui.session.context_types import EntryRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import OldAdapter
@@ -50,6 +54,9 @@ class FileAdapter(OldAdapter):
 def app(qapp):
     fx = Fixture(empty_project=True)
     fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+    fx.ctrl.setup_control.new_point(
+        PointCreateRequest("working", "", CommandOrigin("gui"))
+    )
     fx.registry.register("file", FileAdapter)
     fx.start()
     sock = open_client(fx.service.port)

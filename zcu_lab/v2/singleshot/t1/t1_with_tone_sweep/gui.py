@@ -220,7 +220,7 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
         ),
         expects_md=(
             "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. Optionally reads 'confusion_matrix' "
             "(readout correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
@@ -265,7 +265,7 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
         ),
         expects_md=(
             "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. Optionally reads 'confusion_matrix' "
             "(readout correction) at analyze time; 't1' to seed the length sweep stop; "

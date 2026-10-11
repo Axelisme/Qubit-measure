@@ -105,7 +105,7 @@ class JpaPowerAdapter(
             "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
-            "Proposes the signal-maximizing JPA pump power into MetaDict "
+            "Proposes the signal-maximizing JPA pump power into parameter context "
             "'best_jpa_power' (dBm) as a draft — it never writes it back "
             "without your acceptance, never commands a device from the "
             "writeback, and never touches 'cur_jpa_A'."

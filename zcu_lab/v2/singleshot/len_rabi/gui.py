@@ -79,7 +79,7 @@ class SsLenRabiAdapter(
         ),
         expects_md=(
             "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
+            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
             "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
             "calibration fails before hardware. These values support live classification; "
             "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_len' "

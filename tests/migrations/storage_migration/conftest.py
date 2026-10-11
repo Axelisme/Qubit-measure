@@ -7,14 +7,14 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import AxisSchema, DataVariable, VariableSchema
 from zcu_tools.resources.entry import component_registry
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     KeyRule,
     MigrationMapping,
     MigrationRequest,
 )
-
+from tests.migrations.storage_migration.fakes import SyntheticProbe
 from tests.resources.entry.fakes import registry_state
-from tests.resources.storage_migration.fakes import SyntheticProbe
 
 
 @pytest.fixture(scope="module")
