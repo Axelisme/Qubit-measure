@@ -93,6 +93,14 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         restore_registry(before)
 
 
+@pytest.fixture
+def saved_session(session: WritebackSession) -> WritebackSession:
+    session.entry.new_point("saved")
+    session.control.use_point(PointUseRequest("saved"))
+    session.control.add_component("Q1", "fake/drive/a", {})
+    return session
+
+
 @pytest.mark.parametrize("save_before_accept", [False, True])
 def test_accepted_retains_run_identity_with_or_without_save(
     tmp_path: Path, qapp: QApplication, save_before_accept: bool
@@ -359,8 +367,9 @@ def test_post_rejects_incompatible_primary_draft_before_submission(
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(
-    session: WritebackSession,
+    saved_session: WritebackSession,
 ) -> None:
+    session = saved_session
     initial = session.control.read_context()
     session.control.set_parameter(initial.target, "general.ext.flux_value", 1.0)
     captured = session.control.read_context()
@@ -392,8 +401,9 @@ def test_writeback_lowers_waveform_expression_from_creation_capture(
 
 
 def test_append_failure_leaves_parameter_untouched(
-    session: WritebackSession, monkeypatch
+    saved_session: WritebackSession, monkeypatch
 ) -> None:
+    session = saved_session
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Value", proposed_value=2.0)],
@@ -534,9 +544,10 @@ def test_receipt_reads_actual_role_target_after_point_change(
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
 def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
-    session: WritebackSession,
+    saved_session: WritebackSession,
     kind: str,
 ) -> None:
+    session = saved_session
     initial = session.control.read_context()
     session.control.set_parameter(initial.target, "general.ext.flux_value", 0.2)
     captured = session.control.read_context()
@@ -590,8 +601,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
 
 
 def test_each_parameter_write_preserves_its_own_stderr(
-    session: WritebackSession,
+    saved_session: WritebackSession,
 ) -> None:
+    session = saved_session
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [

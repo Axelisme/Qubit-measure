@@ -553,15 +553,21 @@ def test_selected_draft_writeback_requires_saved_point_without_side_effects(
     events: list[object] = []
     session.bus.subscribe(MdChangedPayload, events.append)
     session.bus.subscribe(MlChangedPayload, events.append)
-    with pytest.raises(FailedPreconditionError, match="select or create a working point") as caught:
+    with pytest.raises(
+        FailedPreconditionError, match="select or create a working point"
+    ) as caught:
         session.control.apply_writeback(
             capture.target,
             (
                 writeback.ParameterWriteback("general.description", "must not commit"),
-                writeback.WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
+                writeback.WaveformWriteback(
+                    "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+                ),
                 writeback.SampleWriteback("Q1", {"t1_us": 20.09}),
             ),
-            evidence=writeback.WritebackEvidence(kind="test/draft", origin="gui", run_id="run-1"),
+            evidence=writeback.WritebackEvidence(
+                kind="test/draft", origin="gui", run_id="run-1"
+            ),
         )
     assert caught.value.reason_code == "storage_unavailable"
     assert session.entry.ledger.events() == ()
@@ -597,28 +603,56 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
     assert session.entry.ledger.events() == before
 
 
-def test_saved_point_samples_persist_and_replace_latest_run_row(session: _Session) -> None:
+def test_saved_point_samples_persist_and_replace_latest_run_row(
+    session: _Session,
+) -> None:
     from zcu_tools.resources.entry import writeback
 
     target = _select(session, "a")
-    event_id = session.control.apply_writeback(target, (
-        writeback.SampleWriteback("Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}),
-        writeback.ParameterWriteback("general.description", "draft value"),
-    ), evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
+    event_id = session.control.apply_writeback(
+        target,
+        (
+            writeback.SampleWriteback(
+                "Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}
+            ),
+            writeback.ParameterWriteback("general.description", "draft value"),
+        ),
+        evidence=writeback.WritebackEvidence(
+            kind="test/sample", origin="gui", run_id="run-1"
+        ),
+    )
     event = session.entry.ledger.get(event_id).event
     row = session.entry.samples("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
-    expected = {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native", "run_id": "run-1",
-                "point": "a", "at": row["at"], "source": event_id}
+    expected = {
+        "t1_us": 20.09,
+        "dev_value": 0.125,
+        "dev_unit": "native",
+        "run_id": "run-1",
+        "point": "a",
+        "at": row["at"],
+        "source": event_id,
+    }
     assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
     assert session.control.read_sample(target, "Q1", "run-1") == expected
     assert session.control.read_sample(target, "Q1", "missing") is None
-    second_id = session.control.apply_writeback(session.control.read_context().target,
+    second_id = session.control.apply_writeback(
+        session.control.read_context().target,
         (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
-        evidence=writeback.WritebackEvidence(kind="test/sample", origin="gui", run_id="run-1"))
+        evidence=writeback.WritebackEvidence(
+            kind="test/sample", origin="gui", run_id="run-1"
+        ),
+    )
     second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
-    assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(session.entry.ledger.get(second_id).event.at)
-    assert session.control.read_sample(session.control.read_context().target, "Q1", "run-1") == {
-        "t1_us": 31.7, "run_id": "run-1", "point": "a",
-        "at": second_row["at"], "source": second_id,
+    assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(
+        session.entry.ledger.get(second_id).event.at
+    )
+    assert session.control.read_sample(
+        session.control.read_context().target, "Q1", "run-1"
+    ) == {
+        "t1_us": 31.7,
+        "run_id": "run-1",
+        "point": "a",
+        "at": second_row["at"],
+        "source": second_id,
     }
