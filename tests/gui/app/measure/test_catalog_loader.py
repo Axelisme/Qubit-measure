@@ -526,6 +526,7 @@ def leaf_catalog(
 ) -> Iterator[CatalogFixture]:
     """Use a core/gui leaf, fixed shared types and startup-only roles."""
     import_timing = getattr(request, "param", None)
+    # The control never explicitly imports mist, unlike both capture timings.
     root = tmp_path / "loader_leaf"
     files = {
         "__init__.py": "",
@@ -562,6 +563,8 @@ def leaf_catalog(
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(content), encoding="utf-8")
+    if import_timing == "reload_owned_namespace":
+        (root / "v2/family/demo/__init__.py").unlink()
     monkeypatch.syspath_prepend(str(tmp_path))
     try:
         original = importlib.import_module("loader_leaf.v2.family.demo.core")
@@ -589,7 +592,14 @@ def leaf_catalog(
 
 
 @pytest.mark.parametrize(
-    "leaf_catalog", ["before_capture", "after_capture"], indirect=True
+    "leaf_catalog",
+    [
+        "never_explicit_import",
+        "before_capture",
+        "after_capture",
+        "reload_owned_namespace",
+    ],
+    indirect=True,
 )
 def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types(
     leaf_catalog: CatalogFixture,
@@ -610,7 +620,10 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
         plan = leaf_catalog.loader.prepare()
     except CatalogReloadError as exc:
         pytest.fail(f"Preflight rejected an unchanged fixed framework: {exc}")
-    registry = leaf_catalog.loader.load(plan)
+    try:
+        registry = leaf_catalog.loader.load(plan)
+    except CatalogReloadError as exc:
+        pytest.fail(f"Reload rejected existing source packages: {exc}")
     adapter = registry.create("demo")
     core = importlib.import_module("loader_leaf.v2.family.demo.core")
     assert adapter.guide().behavior == "v2"
