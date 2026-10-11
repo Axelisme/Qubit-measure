@@ -552,7 +552,9 @@ class ContextService:
         Validate the opened entry and target before append. EntryDraft raises
         FailedPreconditionError(storage_unavailable), requiring the caller to
         select or create a working point. No event or value is written for it.
-        SavedPoint parameter/library setters commit files; samples append to
+        SavedPoint labels and existence are checked by ResultEntry.use_point;
+        its ValueError/FileNotFoundError and other load errors propagate before
+        append. SavedPoint parameter/library setters commit files; samples append to
         entry JSONL immediately with the captured point label.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
@@ -569,6 +571,7 @@ class ContextService:
                 "Please select or create a working point before applying writeback",
                 reason_code="storage_unavailable",
             )
+        entry.use_point(target.point)
         return apply_writeback(
             items,
             target=_ContextWritebackTarget(self, target, entry),

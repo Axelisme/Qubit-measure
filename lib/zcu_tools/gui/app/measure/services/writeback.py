@@ -461,11 +461,7 @@ class WritebackService:
                 )
             values[item.session_id] = WritebackValues(
                 actual_path=path,
-                current=(
-                    self._write.read_sample(parameters.target, path, draft.run_id)
-                    if isinstance(item, SampleWriteback) and draft.run_id is not None
-                    else _destination_value(item, current, path)
-                ),
+                current=self._read_destination_value(draft, item, current, path),
                 proposed=proposed,
                 unit=(
                     document_unit(current.document(), path)
@@ -474,6 +470,19 @@ class WritebackService:
                 ),
             )
         return values
+
+    def _read_destination_value(
+        self,
+        draft: WritebackDraft,
+        item: WritebackItem,
+        current: ParameterContext,
+        path: str,
+    ) -> object:
+        """Read one captured destination consistently for preview and receipts."""
+        if isinstance(item, SampleWriteback) and draft.run_id is not None:
+            parameters = self._require_parameters(draft)
+            return self._write.read_sample(parameters.target, path, draft.run_id)
+        return _destination_value(item, current, path)
 
     @staticmethod
     def _require_parameters(draft: WritebackDraft) -> ParameterContext:
@@ -694,11 +703,7 @@ class WritebackService:
         paths = [_destination_path(item, parameters) for item in items]
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         before = [
-            (
-                self._write.read_sample(parameters.target, path, draft.run_id)
-                if isinstance(item, SampleWriteback) and draft.run_id is not None
-                else _destination_value(item, current, path)
-            )
+            self._read_destination_value(draft, item, current, path)
             for item, path in zip(items, paths, strict=True)
         ]
         self.apply_draft(draft, item_ids=ids, origin=origin)
@@ -717,11 +722,7 @@ class WritebackService:
                 ),
                 target=path,
                 before=previous,
-                after=(
-                    self._write.read_sample(parameters.target, path, draft.run_id)
-                    if isinstance(item, SampleWriteback) and draft.run_id is not None
-                    else _destination_value(item, after, path)
-                ),
+                after=self._read_destination_value(draft, item, after, path),
             )
             for item, path, previous in zip(items, paths, before, strict=True)
         ]

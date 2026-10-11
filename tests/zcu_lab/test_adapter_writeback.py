@@ -302,6 +302,7 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
         draft.teardown()
 
 
+# These cases verify the explicitly requested adapter sample writeback contract.
 @pytest.mark.parametrize(
     ("name", "fields", "unit"),
     [
@@ -396,6 +397,7 @@ def test_fixed_bias_adapter_accepts_sample_from_run_capture(
         draft.teardown()
 
 
+# These cases verify the explicitly requested missing-capture contract.
 @pytest.mark.parametrize(
     "name", ["twotone/t1", "twotone/t2ramsey", "twotone/t2echo", "twotone/freq"]
 )

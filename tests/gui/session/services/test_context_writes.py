@@ -649,6 +649,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     selected = _select(session, "a")
     capture = session.control.read_context()
     points = session.entry.list_points()
+    point_before = snapshot(session.entry.use_point("a")).model_dump(mode="json")
     version = session.state.version.get("context")
     target = SavedPoint(entry_id=session.entry.entry_id, point=label)
 
@@ -668,7 +669,9 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     assert current.target == selected
     assert current.document() == capture.document()
     assert current.library.document() == capture.library.document()
-    assert snapshot(session.entry.use_point("a")) == capture.document()
+    assert (
+        snapshot(session.entry.use_point("a")).model_dump(mode="json") == point_before
+    )
     assert session.state.version.get("context") == version
 
 

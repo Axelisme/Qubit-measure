@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -25,6 +26,7 @@ from zcu_tools.resources.qubit_params import (
     QubitParams,
 )
 from zcu_tools.resources.sample_table import (
+    JsonlSampleTable,
     SampleFluxFrame,
     SampleTableV2Error,
 )
@@ -70,7 +72,7 @@ def _y_values(trace: Scatter) -> NDArray[np.float64]:
 
 @pytest.fixture
 def result_dir(tmp_path, monkeypatch) -> str:
-    """Minimal result dir (params.json + no samples.jsonl yet) with fake physics."""
+    """Minimal parameter directory with fake physics."""
     result = tmp_path / "q1"
     result.mkdir()
     params_file = QubitParams(result / "params.json")
@@ -109,12 +111,18 @@ def result_dir(tmp_path, monkeypatch) -> str:
     return str(result)
 
 
-def _write_sample_jsonl(result_dir: str, rows: list[dict[str, object]]) -> None:
-    _write_sample_frame(result_dir, pd.DataFrame(rows))
+@pytest.fixture
+def samples(tmp_path: Path) -> JsonlSampleTable:
+    return JsonlSampleTable(tmp_path / "caller-samples.jsonl")
 
 
-def _write_sample_frame(result_dir: str, frame: pd.DataFrame) -> None:
-    import os
+def _write_sample_jsonl(
+    samples: JsonlSampleTable, rows: list[dict[str, object]]
+) -> None:
+    _write_sample_frame(samples, pd.DataFrame(rows))
+
+
+def _write_sample_frame(samples: JsonlSampleTable, frame: pd.DataFrame) -> None:
 
     frame = frame.copy()
     frame["run_id"] = [f"run-{index}" for index in range(len(frame))]
@@ -124,7 +132,7 @@ def _write_sample_frame(result_dir: str, frame: pd.DataFrame) -> None:
     if "dev_value" not in frame:
         frame["dev_value"] = 0.0
         frame["dev_unit"] = "A"
-    path = os.path.join(result_dir, "samples.jsonl")
+    path = samples.path
     if frame.empty:
         with open(path, "w", encoding="utf-8"):
             pass
@@ -132,9 +140,11 @@ def _write_sample_frame(result_dir: str, frame: pd.DataFrame) -> None:
         frame.to_json(path, orient="records", lines=True)
 
 
-def test_selects_row_by_explicit_flux(result_dir: str) -> None:
+def test_selects_row_by_explicit_flux(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "t1_us": 11.0},
             {"dev_value": 0.5, "dev_unit": "A", "flux": 0.5, "t1_us": 22.0},
@@ -142,7 +152,7 @@ def test_selects_row_by_explicit_flux(result_dir: str) -> None:
         ],
     )
     fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     trace = _actual_t1_trace(fig)
     assert _y_values(trace)[0] == 22.0
@@ -152,9 +162,11 @@ def test_selects_row_by_explicit_flux(result_dir: str) -> None:
     assert _y_values(predicted[0])[0] == 0.5
 
 
-def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
+def test_selects_row_by_row_frame_derived_flux(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {
                 "dev_value": 0.0,
@@ -180,14 +192,16 @@ def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
         ],
     )
     fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
-def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
+def test_selects_row_by_declared_fallback_frame(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {"dev_value": 0.3, "dev_unit": "A", "t1_us": 11.0},
             {"dev_value": 0.5, "dev_unit": "A", "t1_us": 22.0},
@@ -199,17 +213,20 @@ def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
         result_dir,
         _NOISE_CHANNELS,
         Temp=0.05,
+        samples=samples,
         fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0),
     )
 
     assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
-def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
+def test_cross_unit_rows_compare_in_flux_domain_only(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     # The V row is flux-nearest (0.5) although its dev_value (3.0 V) is far from
     # the A row values; direct dev_value comparison across units would pick row0.
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {
                 "dev_value": 0.49,
@@ -228,14 +245,16 @@ def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
         ],
     )
     fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     assert _y_values(_actual_t1_trace(fig))[0] == 22.0
 
 
-def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> None:
+def test_unresolved_rows_fail_with_indexes_before_physics(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "t1_us": 11.0},
             {"dev_value": 0.6, "dev_unit": "A", "t1_us": 22.0},  # no frame
@@ -244,14 +263,16 @@ def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> No
     fig = _new_fig()
 
     with pytest.raises(SampleTableV2Error, match=r"row\(s\) \[1\]"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     assert _PHYSICS_CALLS["physics"] == 0
 
 
-def test_fallback_frame_unit_mismatch_is_unresolved(result_dir: str) -> None:
+def test_fallback_frame_unit_mismatch_is_unresolved(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [{"dev_value": 0.5, "dev_unit": "A", "t1_us": 11.0}],
     )
     fig = _new_fig()
@@ -262,13 +283,16 @@ def test_fallback_frame_unit_mismatch_is_unresolved(result_dir: str) -> None:
             result_dir,
             _NOISE_CHANNELS,
             Temp=0.05,
+            samples=samples,
             fallback_frame=SampleFluxFrame("V", flux_int=0.0, flux_period=1.0),
         )
 
 
-def test_legacy_coordinate_column_fails_before_physics(result_dir: str) -> None:
+def test_legacy_coordinate_column_fails_before_physics(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     _write_sample_jsonl(
-        result_dir,
+        samples,
         [
             {"calibrated mA": 0.3, "freq_mhz": 4000.0, "t1_us": 11.0},
         ],
@@ -276,20 +300,22 @@ def test_legacy_coordinate_column_fails_before_physics(result_dir: str) -> None:
     fig = _new_fig()
 
     with pytest.raises(SampleTableV2Error, match="calibrated mA"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     assert _PHYSICS_CALLS["physics"] == 0
 
 
-def test_empty_table_fails_before_physics(result_dir: str) -> None:
+def test_empty_table_fails_before_physics(
+    result_dir: str, samples: JsonlSampleTable
+) -> None:
     # Empty JSONL table: validation must fail before physics.
     _write_sample_frame(
-        result_dir, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
+        samples, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
     )
     fig = _new_fig()
 
     with pytest.raises(SampleTableV2Error, match="empty"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
+        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
     assert _PHYSICS_CALLS["physics"] == 0
 
