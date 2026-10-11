@@ -8,7 +8,7 @@ the physical converter port, the sample rate and the maximum pulse / buffer leng
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, NotRequired, Protocol, TypedDict
 
 
 class SocCfgLike(Protocol):
@@ -88,7 +88,18 @@ def _port_label(name: str, offset: int) -> str:
     return f"{block}_{tile + offset}"
 
 
-def _gen_pulse_len(gen: dict) -> str:
+class _GeneratorMemory(TypedDict):
+    maxlen: NotRequired[int]
+    samps_per_clk: int
+    f_fabric: float
+
+
+class _ReadoutMemory(TypedDict):
+    buf_maxlen: int
+    f_output: float
+
+
+def _gen_pulse_len(gen: _GeneratorMemory) -> str:
     """Envelope-memory length of a generator, as "<samples> smp (<us> us)".
 
     Returns "-" for generators without an envelope memory (e.g. muxed/const gens).
@@ -100,7 +111,7 @@ def _gen_pulse_len(gen: dict) -> str:
     return f"{maxlen} smp ({us:.3f} us)"
 
 
-def _readout_buf_len(ro: dict) -> str:
+def _readout_buf_len(ro: _ReadoutMemory) -> str:
     """Decimated buffer length of a readout, as "<samples> smp (<us> us)"."""
     maxlen = ro["buf_maxlen"]
     us = maxlen / ro["f_output"]

@@ -63,11 +63,7 @@ def display_reference_combo(
         if library_keys:
             combo.insertSeparator(combo.count())
             for name in library_keys:
-                if value is not None and name == current and value.is_overridden:
-                    combo.addItem(f"Lib: {name} (modified)", name)
-                    combo.addItem(f"Revert to Lib: {name}", name)
-                else:
-                    combo.addItem(f"Lib: {name}", name)
+                combo.addItem(f"Lib: {name}", name)
         if value is None and spec.optional:
             combo.setCurrentIndex(0)
         elif current is not None:

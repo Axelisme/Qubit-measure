@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 from collections import OrderedDict
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
@@ -43,8 +44,8 @@ class PulseRegistry:
         return len(self._pulses)
 
     def calc_name(self, cfg: PulseCfg) -> str:
-        def sort_dict(d: dict) -> dict:
-            sorted_dict = OrderedDict()
+        def sort_dict(d: Mapping[str, object]) -> OrderedDict[str, object]:
+            sorted_dict: OrderedDict[str, object] = OrderedDict()
             for key in sorted(d.keys()):
                 value = d[key]
                 if isinstance(value, QickParam):
