@@ -1,9 +1,11 @@
 """Independent dialog trial parameters never alter a component or source file."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.context import ContextService
@@ -90,6 +92,120 @@ def test_dialog_trial_calibration_leaves_real_point_unchanged(
         if added:
             component_registry.unregister("qubit/fluxonium")
         assert component_registry.kinds() == before_kinds
+
+
+@pytest.fixture
+def component_context(tmp_path: Path):
+    """Provide a real point with a complete and an incomplete qubit."""
+    added = "qubit/fluxonium" not in component_registry.kinds()
+    if added:
+        component_registry.register("qubit/fluxonium", components.QubitSchema)
+    try:
+        entry = ResultEntry.create(
+            "prefill",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        for name, el in (("Q1", 0.5), ("Q2", None)):
+            entry.setup.add_component(
+                name,
+                kind="qubit/fluxonium",
+                EJ=5.0,
+                EC=1.0,
+                EL=el,
+                flux_half=0.0,
+                flux_period=1.0,
+                ext={"flux_bias": 0.0},
+            )
+        context = ContextService(
+            SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+            BaseEventBus(),
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
+        context.install_entry(entry)
+        context.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
+        context.set_alias_rows((AliasRow("qubit", "Q2"),))
+        yield context
+    finally:
+        if added:
+            component_registry.unregister("qubit/fluxonium")
+
+
+def test_dialog_component_prefill_defaults_to_alias_and_stays_detached(
+    qapp, component_context: ContextService
+) -> None:
+    context = component_context
+    query = PredictorService(context, components.params_for)
+    before = context.read_context().document()
+    dialog = PredictorDialog(
+        PredictorControlFacet(query),
+        parameter_provider=context.read_context,
+        params=FluxoniumParams(),
+    )
+    try:
+        assert dialog.selected_component() == "Q2"
+        dialog.load_component()
+        assert dialog.parameters() == FluxoniumParams(5.0, 1.0, None, 0.0, 1.0, 0.0)
+        assert dialog.parameters().missing() == ("EL",)
+        with pytest.raises(ValueError, match="Missing parameters: EL"):
+            dialog.predict_frequency(0.1)
+        dialog.set_parameters(replace(dialog.parameters(), EL=0.5))
+        frequency = dialog.predict_frequency(0.1)
+        bias = dialog.calibrate(0.101, frequency)
+        assert bias == pytest.approx(-0.001, abs=1e-4)
+        # Loading again reads the current component, not edited dialog parameters.
+        dialog.load_component("Q1")
+        assert dialog.parameters().flux_bias == 0.0
+        assert context.read_context().document() == before
+        assert query.params_for_qubit("Q2").EL is None
+    finally:
+        dialog.close()
+
+
+def test_dialog_incomplete_parameters_preserve_unknown_affine_inputs(qapp) -> None:
+    params = FluxoniumParams(EJ=5.0, EC=1.0, EL=0.5)
+    dialog = PredictorDialog(PredictorControlFacet(PredictorService()))
+    try:
+        dialog.set_parameters(params)
+        assert dialog.parameters() == params
+        with pytest.raises(ValueError, match="flux_half, flux_period, flux_bias"):
+            dialog.predict_frequency(0.1)
+        dialog.set_parameters(
+            replace(params, flux_half=0.0, flux_period=1.0, flux_bias=0.0)
+        )
+        assert dialog.predict_frequency(0.1) == pytest.approx(
+            1707.3748654723192, abs=1e-7
+        )
+    finally:
+        dialog.close()
+
+
+def test_dialog_cache_restores_partial_trial_without_changing_component(
+    qapp, tmp_path: Path, component_context: ContextService
+) -> None:
+    context = component_context
+    query = PredictorService(context, components.params_for)
+    before = context.read_context().document()
+    kwargs = dict(cache_parameters=True, cache_dir=tmp_path / "cache")
+    dialog = PredictorDialog(
+        PredictorControlFacet(query), parameter_provider=context.read_context, **kwargs
+    )
+    try:
+        dialog.load_component()
+        dialog.set_parameters(replace(dialog.parameters(), flux_bias=0.012))
+        saved = dialog.parameters()
+    finally:
+        dialog.close()
+    reopened = PredictorDialog(
+        PredictorControlFacet(query), parameter_provider=context.read_context, **kwargs
+    )
+    try:
+        assert reopened.parameters() == saved
+        assert reopened.parameters().missing() == ("EL",)
+        assert context.read_context().document() == before
+        assert query.params_for_qubit("Q2").flux_bias == 0.0
+    finally:
+        reopened.close()
 
 
 def test_dialog_file_load_only_prefills_local_parameters(qapp, tmp_path: Path) -> None:
