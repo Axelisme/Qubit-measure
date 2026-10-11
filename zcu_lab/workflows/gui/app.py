@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import ClassVar
 
+import zcu_tools
 from zcu_tools.device.manager import DeviceManager
+from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpec
@@ -22,6 +24,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from zcu_lab import ALIAS_PRESET
 
+from .catalog import build_catalog
 from .persistence import (
     WorkflowInputCodec,
     WorkflowInputRestoreReport,
@@ -109,10 +112,34 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
             device_registry=self._devices,
             alias_rows=ALIAS_PRESET,
         )
+        loader = SourceCatalogLoader(
+            sources=(
+                SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
+                SourcePackage("zcu_lab", Path(__file__).resolve().parents[2]),
+            ),
+            reload_modules=("zcu_lab.workflows",),
+            preserved_modules=tuple(
+                f"zcu_lab.workflows.gui.{name}"
+                for name in (
+                    "app",
+                    "window",
+                    "remote",
+                    "remote_methods",
+                    "catalog",
+                    "persistence",
+                    "tuning_panel",
+                    "_form_io",
+                )
+            ),
+            catalog_module="zcu_lab.workflows.gui.plan",
+            catalog_builder=build_catalog,
+        )
         self.window = T1WorkflowWindow(
             self.state,
             self.services,
             self._owner,
+            catalog=build_catalog(),
+            loader=loader,
             on_close=self._close,
         )
         self._caretaker = SingleFileCaretaker(
