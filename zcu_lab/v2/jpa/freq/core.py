@@ -125,7 +125,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                         trackers=[tracker],
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FreqResult(freqs=jpa_freqs, signals=signals)
 

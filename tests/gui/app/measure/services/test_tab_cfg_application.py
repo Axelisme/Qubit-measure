@@ -53,7 +53,6 @@ from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import (
     ComponentSchema,
-    RoleResolutionError,
     component_registry,
 )
 
@@ -594,7 +593,9 @@ def test_run_control_rejects_unresolvable_target_before_execution(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    observed = cfg.observe()
+    observed = cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
+    )
     rows = services.context.get_alias_rows()
     executions: list[RunInputs] = []
 
@@ -605,13 +606,36 @@ def test_run_control_rejects_unresolvable_target_before_execution(
         return 99
 
     monkeypatch.setattr(RunService, "start_run", receive_run)
-    with pytest.raises(RoleResolutionError):
+    with pytest.raises(CfgPreconditionError) as caught:
         services.run_analyze_control.start_run(
             tab_id, observed.ref, aliases={"qubit": "missing"}
         )
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     assert executions == []
     assert cfg.observe() == observed
     assert services.context.get_alias_rows() == rows
+
+
+def test_unbound_alias_publishes_invalid_cfg_with_named_diagnostic(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    tab_id = services.tab.new_tab("global-source")
+    cfg = state.get_tab(tab_id).cfg
+    cfg.edit(
+        cfg.observe().ref.revision, (CfgEdit(("gain",), EvalValue("$qubit.gain")),)
+    )
+
+    services.context.set_alias_rows((AliasRow("qubit", ""),))
+
+    observed = cfg.observe()
+    assert observed.status is CfgStatus.INVALID
+    assert any(
+        diagnostic.path == ("gain",)
+        and "qubit" in diagnostic.message
+        and "Alias is not bound" in diagnostic.message
+        for diagnostic in observed.diagnostics
+    )
 
 
 @pytest.mark.parametrize("fail_submit", [False, True])

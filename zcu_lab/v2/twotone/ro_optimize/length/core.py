@@ -141,7 +141,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
                         **(acquire_kwargs or {}),
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return LengthResult(lengths, signals)
 

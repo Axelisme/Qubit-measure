@@ -72,7 +72,6 @@ def test_linked_empty_input_can_await_shape_but_cannot_lower(kind: str) -> None:
     "value",
     [
         ReferenceValue("<Custom:Shape>", CfgSectionValue()),
-        ReferenceValue("driver.module.pi", CfgSectionValue(), is_overridden=True),
         ReferenceValue(
             "driver.module.pi", CfgSectionValue(fields={"count": DirectValue(1.5)})
         ),

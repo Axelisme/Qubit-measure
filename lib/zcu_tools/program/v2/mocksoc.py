@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .sim.engine import SimEngine
 
 
-def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
+def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict[str, object]:
     """Build a minimal but structurally-valid QickConfig dict for testing.
 
     Uses axis_signal_gen_v6 generators (no mixer, HAS_MIXER=False, SAMPS_PER_CLK=16)
@@ -61,7 +61,7 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
     _RO_F_DDS = _RO_FS / _RO_DECIMATION
     _RO_F_OUTPUT = _RO_FS / (_RO_DECIMATION * 8)
 
-    def _gen(dac: str, ch_idx: int) -> dict:
+    def _gen(dac: str, ch_idx: int) -> dict[str, object]:
         return {
             "type": "axis_signal_gen_v6",
             "dac": dac,
@@ -84,7 +84,7 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict:
             "tproc_ch": ch_idx,
         }
 
-    def _readout(adc: str, ch_idx: int) -> dict:
+    def _readout(adc: str, ch_idx: int) -> dict[str, object]:
         return {
             "type": "axis_readout_v2",
             "ro_type": "axis_readout_v2",
@@ -181,7 +181,9 @@ class MockQickSoc(QickConfig):
 
     _BIG_COUNT = 2**31 - 1
 
-    def __init__(self, cfg_dict: dict, sim: SimParams | None = None) -> None:
+    def __init__(
+        self, cfg_dict: dict[str, object], sim: SimParams | None = None
+    ) -> None:
         super().__init__(cfg_dict)
         self._cfg_dict = cfg_dict
         self._readout_state = None

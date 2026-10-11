@@ -5,10 +5,6 @@ from zcu_lab.v2._support.measure.analyze_results import (
     run_figure_only_analyze,
 )
 from zcu_lab.v2._support.measure.defaults.helpers import make_trig_offset
-from zcu_lab.v2._support.measure.defaults.module_defaults import (
-    NamedModuleValue,
-    select_named_module_value,
-)
 from zcu_lab.v2._support.measure.defaults.role_factories import (
     ROLE_FACTORIES,
     RoleFactorySpec,
@@ -75,8 +71,6 @@ __all__ = [
     "ROLE_FACTORIES",
     "RoleFactorySpec",
     # Module defaults (low-level)
-    "NamedModuleValue",
-    "select_named_module_value",
     "make_trig_offset",
     # Spec helpers
     "make_pulse_readout_module_spec",
