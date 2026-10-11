@@ -3,7 +3,7 @@
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.datafile import load_run_data
-from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.device.fake import FakeDevice
 from zcu_tools.gui.form import FormEnv, FormInput
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -57,7 +57,7 @@ def test_manual_export_keeps_accepted_origin_after_source_and_selection_change(
     value = native.metadata.device_snapshot["flux"]["value"]
     driver = harness.services.device.get_connected_devices()["flux"]
     assert isinstance(driver, FakeDevice)
-    driver.setup(FakeDeviceInfo(address="none", value=777), progress=False)
+    driver.set_value(777)
     entry.new_point("later")
     harness.services.context.use_point(PointUseRequest("later"))
     window.select_workflow("overnight")

@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue
 from zcu_tools.datafile import (
     CfgSnapshot,
     DataVariable,
@@ -38,6 +38,12 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingDevices,
 )
 from zcu_lab.workflows.calibration import Calibrated
+
+
+class SampleTunables(BaseModel):
+    """Empty ordinary knobs satisfying the native declaration contract."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @dataclass(frozen=True)
@@ -98,9 +104,9 @@ def sample_engine[P: BaseModel, R](
     def init(_env: InitEnv[Calibrated], _plan: P) -> int:
         return 0
 
-    @workflow("samples", plan=type(plan), tunables=BaseModel, init=init)
+    @workflow("samples", plan=type(plan), tunables=SampleTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: P, tun: BaseModel, state: int
+        env: WorkflowEnv[Calibrated], plan: P, tun: SampleTunables, state: int
     ) -> Step[int, R]:
         del plan, tun
         if state == 3:
@@ -118,7 +124,7 @@ def sample_engine[P: BaseModel, R](
     engine.start(
         step,
         plan=plan,
-        tunables=BaseModel(),
+        tunables=SampleTunables(),
         paths=paths,
         identity=RunIdentity("sample-run", native_metadata().provenance),
     )
