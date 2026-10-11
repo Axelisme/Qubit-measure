@@ -1,7 +1,7 @@
 """In-memory MCP requests through the public library stdio loop."""
 
 import json
-from io import StringIO
+from io import BytesIO, TextIOWrapper
 from typing import Any
 
 from zcu_tools.mcp.core.stdio_server import McpServerConfig, ToolTable, run_stdio_loop
@@ -17,11 +17,18 @@ def invoke_stdio(
         "method": "tools/call",
         "params": {"name": name, "arguments": arguments},
     }
-    output = StringIO()
-    run_stdio_loop(
-        config,
-        tools,
-        input_stream=StringIO(json.dumps(request) + "\n"),
-        output_stream=output,
-    )
-    return json.loads(output.getvalue())
+    with (
+        TextIOWrapper(
+            BytesIO((json.dumps(request) + "\n").encode("utf-8")), encoding="utf-8"
+        ) as incoming,
+        TextIOWrapper(BytesIO(), encoding="utf-8") as outgoing,
+    ):
+        run_stdio_loop(
+            config,
+            tools,
+            input_stream=incoming,
+            output_stream=outgoing,
+        )
+        outgoing.flush()
+        outgoing.seek(0)
+        return json.load(outgoing)
