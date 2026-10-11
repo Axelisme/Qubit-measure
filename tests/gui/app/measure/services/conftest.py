@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
@@ -50,7 +50,7 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
             library=LibrarySnapshot(
                 ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
             ),
-            target=EntryDraft(entry_id="entry"),
+            target=SavedPoint(entry_id="entry", point="working"),
             roles=None,
         )
         declarations = {"source_qubit": RoleSpec("run-source/qubit")}

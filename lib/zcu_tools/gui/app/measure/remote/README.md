@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12, sample writeback projections, complete device setup, reference modes, independent predictor sources and integrated version metadata
+**Last updated:** 2026-10-12, entry metadata in EMPTY and captured SavedPoint contracts
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -152,9 +152,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 97`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 129`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 115`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 98`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 130`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 116`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -243,11 +243,19 @@ GUI owns observation and write tracking:
   return invalid input naming the first bad segment. There is no escaping or
   domain-path alias. Only omission of both optional parameters establishes seen;
   explicit `summaries=false` or an empty `path` cannot refresh the guard.
-  `target` is the existing `entry_draft` or `saved_point` locator. `point` and
+  `target` is the `saved_point` locator. `point` and
   `library` contain the complete working-unit native documents, including
   headers, registered component fields and provenance. The library contains
   persistent Specs; this read does not materialize references or open waveform
-  assets. A memory draft is readable; EMPTY and necessary source faults fail.
+  assets. EMPTY has parameters=None, so this parameter snapshot fails until a
+  point is explicitly selected or created; necessary source faults also fail.
+  Without an opened entry, entry metadata and source binding are absent. An
+  opened entry without a selected point is still EMPTY, but entry.info,
+  point.list and setup source binding remain readable. SoC, device and
+  independent predictor operations retain their own admission rules. Run,
+  writeback and current-point Inspect Set require a selected point at application
+  admission. Writeback retains its captured SavedPoint(E, A) after selecting B
+  in the same entry; a cross-entry destination is rejected.
   Complex numbers retain the `{__complex__: [real, imag]}` wire projection.
   Unsupported values, non-finite numbers and encoding failures reject the full
   read and establish no baseline. These replies may be large or sensitive.
@@ -280,7 +288,7 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 
 The wire surface is grouped by ownership:
 
-- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
+- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布 entry metadata，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
 - `point.list/new/use`：saved points in the opened entry. `point.new` rejects unsafe
   destination labels before source reads or writes, for setup seeds and clones
   alike. Empty strings fail the existing required-string wire validation with
@@ -298,6 +306,7 @@ The wire surface is grouped by ownership:
   `ContextControlPort`. `context.snapshot` returns native `{target, point, library, aliases}`
   from the current fixed projection, not a historical Run's parameters. Callers do not use
   old flattened md keys or an ml runtime index. Library editing and template create/list use the app controller;
+  delete/rename accept concrete three-segment keys and preserve owner errors;
   `editor.*` provides independent library-entry drafts.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
@@ -442,3 +451,5 @@ resources.
 
 The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
 exiting MCP disconnects without closing the GUI.
+
+Entry open/new leaves point selection empty. Select or create a working point before Run, WB or current-point Inspect writes. Unselected application commands fail with existing failed-precondition categories; wire rejection retains the existing dispatch policy. Selection admits WB but never replaces its captured SavedPoint destination. Cfg/editor drafts and WB proposal previews remain available under their own contracts.

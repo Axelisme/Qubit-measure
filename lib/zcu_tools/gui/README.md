@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，entry alias 表、shared session owner、workflows 獨立 app 與 terminal admission
+**Last updated:** 2026-10-12，現行參數容器、entry alias 表、shared session owner 與 workflows app
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,

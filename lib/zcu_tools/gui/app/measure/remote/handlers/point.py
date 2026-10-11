@@ -65,7 +65,7 @@ def h_entry_info(
 def h_entry_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PointEntry:
-    """Create required string name through SetupControlPort and publish DRAFT.
+    """Create required string name through SetupControlPort and leave point unselected.
 
     Return the exact EntryInfo fields with path strings. Invalid wire types
     raise INVALID_PARAMS. Owner name/existence/I/O errors propagate and preserve
@@ -82,7 +82,7 @@ def h_entry_new(
 def h_entry_open(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PointEntry:
-    """Open required string name through SetupControlPort and publish DRAFT.
+    """Open required string name through SetupControlPort and leave point unselected.
 
     Return the exact EntryInfo fields with path strings. Invalid wire types
     raise INVALID_PARAMS. Owner invalid/missing/I/O/install errors propagate and
@@ -159,7 +159,7 @@ def h_point_new(
 
     Required label is a string. description defaults to empty text,
     explicitly replacing seed/clone metadata. clone_from is None or a same-entry
-    label; None copies setup, never the unbound DRAFT.
+    label; None copies setup, only a saved point.
     Return the SavedPoint destination. Malformed wire input is INVALID_PARAMS.
     Unsafe destination labels raise the owner's typed input error, projected by
     shared dispatch as INVALID_PARAMS with reason point_label_invalid. Setup and

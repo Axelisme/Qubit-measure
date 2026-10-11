@@ -100,7 +100,7 @@ class FakeFreqAdapter(
             "writeback flow so you can rehearse the analysis offline."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'r_f' — resonator "
+            "Reads from the parameter context (all optional): 'r_f' — resonator "
             "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
             "used to set the sweep span and a loaded-Q guess (~0.1–5 MHz); "
             "'res_ch' / 'ro_ch' — drive / readout channel indices; 'timeFly' "
@@ -113,7 +113,7 @@ class FakeFreqAdapter(
         ),
         typical_writeback=(
             "Proposes the fitted resonator frequency and linewidth back into "
-            "MetaDict 'r_f' / 'rf_w'. The readout module / waveform are left "
+            "parameter context 'r_f' / 'rf_w'. The readout module / waveform are left "
             "to the user — a frequency fit alone does not justify rewriting "
             "the whole readout config."
         ),

@@ -13,7 +13,7 @@ the port is keyed by the kind's wire string so a session service can name a
 session kind without the gate's full vocabulary leaking here (ADR-0066, decision
 3 of the session-core extraction).
 
-More driven-adapter ports (driver factory / project IO / progress transport) join
+More driven-adapter ports (driver factory / progress transport) join
 this module as the session services move in.
 """
 
@@ -30,7 +30,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import ParameterContext, SessionEnv
+    from zcu_tools.gui.session.types import ParameterContext
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
     from zcu_tools.resources.entry import ResultEntry
 
@@ -250,31 +250,6 @@ class RememberedDevicePort(Protocol):
 
 
 @runtime_checkable
-class ProjectIOPort(Protocol):
-    """Experiment-project file I/O as used by ``ContextService``.
-
-    Implemented by ``IOManager`` (which wraps ``ContextManager``). This is the
-    file-backed project / flux-context store; the service never touches
-    ``ContextManager`` directly.
-    """
-
-    @property
-    def has_project(self) -> bool: ...
-    def setup(self, result_dir: str) -> None: ...
-    def list_contexts(self) -> list[str]: ...
-    def get_active_label(self) -> str | None: ...
-    def use_context(self, label: str, base_ctx: SessionEnv) -> SessionEnv: ...
-    def new_context(
-        self,
-        base_ctx: SessionEnv,
-        value: float | None = None,
-        unit: str = "none",
-        clone_from: str | None = None,
-        label: str | None = None,
-    ) -> SessionEnv: ...
-
-
-@runtime_checkable
 class ContextReadPort(Protocol):
     """Fixed parameter capture, without file I/O or writable resource handles."""
 
@@ -298,11 +273,11 @@ class ProjectContextPort(Protocol):
     """Prepared entry installation, used by ProjectSettingsService.
 
     Resources owns name/file validation; the session context owner publishes
-    DRAFT only after preparing all of the entry's required sources/cache.
+    entry metadata only after preparing all of the entry's required sources/cache.
     """
 
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
-        """Install a resource-validated entry as DRAFT without selecting a point.
+        """Install a resource-validated entry without selecting a point.
 
         Return owner entry identity/paths. Preparation failure leaves the prior
         binding installed and propagates its cause; no resource rollback occurs.

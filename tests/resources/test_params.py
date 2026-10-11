@@ -406,6 +406,37 @@ def test_t1_curve_fit_rejects_inactive_metadata_on_write(tmp_path) -> None:
         )
 
 
+def test_raw_write_atomically_replaces_complete_json(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    params.replace_raw({"future_section": {"label": "old"}})
+    old_version = tmp_path / "previous.json"
+    old_version.hardlink_to(path)
+
+    params.replace_raw({"future_section": {"label": "新", "values": [1, 2, 3]}})
+
+    assert QubitParams(path, readonly=True).to_raw() == {
+        "future_section": {"label": "新", "values": [1, 2, 3]}
+    }
+    assert json.loads(old_version.read_text(encoding="utf-8")) == {
+        "future_section": {"label": "old"}
+    }
+
+
+def test_raw_serialization_failure_preserves_persisted_json(tmp_path) -> None:
+    path = tmp_path / "params.json"
+    params = QubitParams(path)
+    original = {"future_section": {"label": "old", "values": [1, 2, 3]}}
+    params.replace_raw(original)
+    original_text = path.read_text(encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        params.replace_raw({"future_section": {"values": {1, 2, 3}}})
+
+    assert path.read_text(encoding="utf-8") == original_text
+    assert QubitParams(path, readonly=True).to_raw() == original
+
+
 def test_missing_file_fast_fails_on_read(tmp_path) -> None:
     with pytest.raises(FileNotFoundError):
         QubitParams(tmp_path / "missing.json").require_fluxdep_fit()

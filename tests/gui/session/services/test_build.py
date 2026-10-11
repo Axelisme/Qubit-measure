@@ -7,7 +7,6 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    EntryDraft,
     EntryRequest,
     PointCreateRequest,
 )
@@ -62,10 +61,8 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
 
     entry = services.setup_control.new_entry(EntryRequest("entry"))
 
-    assert state.session_env.readiness is ContextReadiness.DRAFT
-    assert services.context_control.read_context().target == EntryDraft(
-        entry_id=entry.entry_id
-    )
+    assert state.session_env.readiness is ContextReadiness.EMPTY
+    assert state.session_env.parameters is None
     assert services.setup_control.get_entry_info() == entry
 
     target = services.setup_control.new_point(

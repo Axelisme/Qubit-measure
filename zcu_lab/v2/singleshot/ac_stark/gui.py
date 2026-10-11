@@ -48,7 +48,7 @@ from zcu_lab.v2.singleshot.ac_stark.core import (
 )
 
 # Domain analysis returns a numeric coefficient and publishes its named fit. The AC-Stark
-# coefficient is written back to the MetaDict (key ``ac_stark_coeff``, matching
+# coefficient is written back to the parameter context (key ``ac_stark_coeff``, matching
 # single_qubit.md:3329) — it is the photon-number-per-gain² calibration the
 # downstream MIST experiments read as ``ac_coeff``.
 SsAcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
@@ -138,7 +138,7 @@ class SsAcStarkAdapter(
             "and init pulse start disabled."
         ),
         typical_writeback=(
-            "Proposes the fitted AC-Stark coefficient into MetaDict "
+            "Proposes the fitted AC-Stark coefficient into parameter context "
             "'ac_stark_coeff' (photon number per gain²); the MIST experiments "
             "read it to rescale their x-axis to photon number."
         ),

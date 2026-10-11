@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-11，reset ext seed 與 Run-tested finisher
+**Last updated:** 2026-10-11，參數容器 guide 名稱
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -72,7 +72,7 @@ deferred defaults使用小型typed Seed vocabulary：raw/literal、`md`、`scale
 少數具名range factory與單一純函式`custom` escape hatch。recipe只在fresh cfg建立時解析；restore與
 使用者編輯不reseed。不得掃描任意library name或依field name猜domain數值。
 
-Adapter defaults 以 notebook bring-up seed 與目前 MetaDict 校準值共同定義：有可信 md 時保持
+Adapter defaults 以 notebook bring-up seed 與目前 parameter context 校準值共同定義：有可信 md 時保持
 md-linked expression，缺校準時退回保守 notebook seed；guide prose 需描述這個 operator-facing
 fallback policy，而不是臆測固定硬體值。
 
@@ -175,8 +175,8 @@ twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`
 
 twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；writeback
 產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`
-仍是 MetaDict scalar；當來源 RunRecord 的 `source.cfg` 非 None 且三個 best 值可由本次
-analyze result 加上 current MetaDict 補齊且皆為 finite number 時，adapter 同時提出
+仍是 parameter context scalar；當來源 RunRecord 的 `source.cfg` 非 None 且三個 best 值可由本次
+analyze result 加上 current parameter context 補齊且皆為 finite number 時，adapter 同時提出
 ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
 readout role proposal；缺值或 non-finite 值只略過 module writeback。
 `readout_dpm` 以 `source.cfg.modules.readout` 作為 template，將 readout
@@ -184,7 +184,7 @@ pulse/readout 頻率設為 `best_ro_freq`、pulse gain 設為 `best_ro_gain`、p
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
 ADC readout length 設為 `best_ro_length`。
 
-`onetone/freq` analyze 仍寫回 MetaDict `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
+`onetone/freq` analyze 仍寫回 parameter context `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
 `source.cfg` 非 None 且 `source.cfg.modules.readout` 是 pulse readout 時，adapter 也提出
 ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
 readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
@@ -199,7 +199,7 @@ raw-complex refinement；未啟用項固定為零。若 Hanger fit 的 `Qi=None`
 `qi_status` 呈現診斷，不將它當成數字，也不因 derived Qi 不可解釋就否決整個 fit。
 
 `onetone/freq` 的 electrical-delay analyze policy 提供 `auto` / `calibrated` / `manual`。
-`auto` 優先讀取 MetaDict 中與本次 pulse generator/readout channel 相符的
+`auto` 優先讀取 parameter context 中與本次 pulse generator/readout channel 相符的
 `res_edelay_calibration` prior，缺少時以 bounded adaptive global search 建立 branch；`calibrated`
 要求相符 prior，`manual` 要求 finite seed。prior/manual 都只固定 branch，後續仍作 local
 refinement。只有實際參與 fitting（移除首尾點後）的 nonuniform grid 能自行辨識 absolute
@@ -208,7 +208,7 @@ branch；uniform grid 若沒有可信 seed，不會把 local alias 提案寫成 
 `res_edelay_calibration = {edelay, res_ch, ro_ch}` 保存，讓 delay 與 route identity 的選取
 all-or-none。只有可辨識 pulse route 的 run snapshot，且有可信 seed 或 fitting grid 為 nonuniform，
 才提出此 writeback。沒有 cfg snapshot 的舊資料仍可分析，不提出無 route 的 calibration。
-worker 提出 proposal，`ContextService` 在 preview/apply 後負責 MetaDict 寫入。
+worker 提出 proposal，`ContextService` 在 preview/apply 後負責 parameter context 寫入。
 GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；若已明確固定
 `edelay`，不重新搜尋 branch。
 

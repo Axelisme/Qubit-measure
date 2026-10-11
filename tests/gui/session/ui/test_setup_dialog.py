@@ -178,7 +178,7 @@ def test_entry_show_and_reopen_prefill_without_changing_active_point(
     assert state.session_env.soccfg is None
 
 
-def test_entry_new_arbitrary_name_displays_owner_paths_and_empty_draft(
+def test_entry_new_arbitrary_name_displays_owner_paths_without_point(
     entry_dialog: tuple[SetupDialog, Controller, State],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,24 +195,24 @@ def test_entry_new_arbitrary_name_displays_owner_paths_and_empty_draft(
     labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert str(info.result_path) in labels
     assert str(info.database_path) in labels
-    assert state.session_env.readiness == ContextReadiness.DRAFT
-    assert controller.context_control.read_context().document().components == {}
+    assert state.session_env.readiness == ContextReadiness.EMPTY
+    assert state.session_env.parameters is None
     assert controller.setup_control.list_points() == ()
     assert state.session_env.soc is None
     assert controller.device_control.list_devices() == []
 
 
-def test_entry_open_republishes_draft_without_selecting_a_point(
+def test_entry_open_does_not_select_a_point(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    selected = controller.setup_control.new_point(
+    controller.setup_control.new_point(
         PointCreateRequest("bias", "", CommandOrigin("gui"))
     )
     entry_selector(dialog).setCurrentText("remembered")
     entry_button(dialog, "Open").click()
-    assert state.session_env.readiness == ContextReadiness.DRAFT
-    assert controller.context_control.read_context().target != selected
+    assert state.session_env.readiness == ContextReadiness.EMPTY
+    assert state.session_env.parameters is None
     assert controller.setup_control.list_points()[0].label == "bias"
 
 
@@ -248,7 +248,7 @@ def test_entry_cancel_new_keeps_binding(
     monkeypatch.setattr(QInputDialog, "getText", cancelled)
     entry_button(dialog, "New entry…").click()
     assert controller.setup_control.get_entry_info() == before
-    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert state.session_env.readiness == ContextReadiness.EMPTY
 
 
 def test_entry_owner_switch_updates_visible_identity_and_paths(
@@ -260,7 +260,7 @@ def test_entry_owner_switch_updates_visible_identity_and_paths(
     labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert str(info.result_path) in labels
     assert str(info.database_path) in labels
-    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert state.session_env.readiness == ContextReadiness.EMPTY
     assert state.session_env.soc is None
 
 
@@ -344,17 +344,15 @@ def test_working_point_create_clones_source_and_replaces_description(
     assert state.session_env.readiness == ContextReadiness.ACTIVE
 
 
-def test_working_point_empty_create_does_not_clone_memory_draft(
+def test_working_point_empty_create_uses_setup_seed(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    draft = controller.context_control.read_context().target
-    controller.context_control.set_parameter(draft, "general.ext.flux_value", 0.88)
+    assert state.session_env.parameters is None
     assert point_combo(dialog, "clone_from").currentText() == "(empty)"
     point_field(dialog, "point_label").setText("fresh")
     entry_button(dialog, "Create").click()
     capture = controller.context_control.read_context()
-    assert capture.target != draft
     assert not capture.lookup("general.ext.flux_value").present
     assert capture.document().general.description == ""
     assert capture.document().components == {}
@@ -428,20 +426,20 @@ def test_working_points_follow_entry_changes_and_reopen_without_selecting(
     listing = point_list(dialog)
     assert listing.count() == 0
     assert point_combo(dialog, "clone_from").count() == 1
-    new_point = controller.setup_control.new_point(
+    controller.setup_control.new_point(
         PointCreateRequest("new", "other entry", CommandOrigin("gui"))
     )
     controller.setup_control.open_entry(EntryRequest("other"))
-    draft = controller.context_control.read_context().target
+    before = controller.get_session_env()
     dialog.hide()
     dialog.show()
     qapp.processEvents()
     assert listing.count() == 1
     item = listing.item(0)
     assert item is not None and "other entry" in item.text()
-    assert controller.context_control.read_context().target == draft
-    assert draft != new_point
-    assert state.session_env.readiness == ContextReadiness.DRAFT
+    assert controller.get_session_env() == before
+    assert before.parameters is None
+    assert state.session_env.readiness == ContextReadiness.EMPTY
 
 
 def test_working_point_create_without_entry_shows_owner_failure(

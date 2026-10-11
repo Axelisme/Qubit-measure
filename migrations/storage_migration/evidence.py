@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-
 from zcu_tools.datafile import JsonObject, json_values_equal
 
 from .errors import MigrationInputError

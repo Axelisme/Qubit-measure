@@ -1,9 +1,16 @@
 # Notebook 用途入口
 
-`notebook_md/` 收錄 Jupytext Markdown 格式的 Notebook 內容。依工作目的選擇主題，不必為每份 Notebook 尋找同名的 Python helper。這裡不決定 Markdown 與 ipynb 的生成來源，也不承諾同步腳本是正式發布程序。
+`notebook_md/` 收錄 Jupytext Markdown 格式的 Notebook。Notebook 記錄輸入、探索步驟與結果解讀；支援程式的 README 說明可呼叫的介面和限制。
 
-- 量測與實驗流程：[`single_qubit.md`](single_qubit.md) 包含單量子位量測設定。硬體連接、輸出及執行條件以各 Notebook 及 [實驗套件](../lib/zcu_tools/experiment/v2/README.md)的說明為準。
-- 結果分析：[`analysis/`](analysis/) 放分析與擬合 Notebook，包括 flux-dependence 和 T1/T2 主題；Fluxonium 擬合工具的契約見 [fluxdep README](../lib/zcu_tools/notebook/analysis/fluxdep/README.md)。
-- 電路設計：[`circuit_design/`](circuit_design/) 收錄設計用 Notebook，與量測流程分開。相關程式見 [circuit design README](../lib/zcu_tools/notebook/circuit_design/README.md)。
+- [`single_qubit.md`](single_qubit.md) 示範完整的 entry、point、roles、library、cfg、run、analyze、save_run 與 accept 流程。它使用合成參數與模擬 SoC，不連接硬體，輸出寫入 caller 指定的 demo roots。原本的個別實驗探索 cells 已退休。
+- [`analysis/mist/branch.md`](analysis/mist/branch.md) 示範從既有 entry 與 typed fits 讀取一個 point，計算與匯出 branch populations。它不產生 acquisition 或接受校正值。
+- [`analysis/`](analysis/) 另有 flux-dependence、T1/T2 等主題；Fluxonium 擬合工具的契約見 [fluxdep README](../lib/zcu_tools/notebook/analysis/fluxdep/README.md)。
+- [`circuit_design/`](circuit_design/) 收錄電路設計 Notebook。相關程式見 [circuit design README](../lib/zcu_tools/notebook/circuit_design/README.md)。
 
-Notebook 記錄探索步驟、輸入與結果解讀；支援程式的 README 說明可呼叫的介面和限制。一個主題可以有多份 Notebook，沒有必要逐檔對應同名程式。同步操作及覆寫風險見 [scripts/README.md](../scripts/README.md#資料作業)。
+參數範例先在 kernel 顯式執行 `zcu_lab.components.register_all(component_registry)`，再開啟條目與 point。重跑 bootstrap 前重新啟動 kernel，重複註冊會報錯。Existing-data 範例要求已完成離線遷移，不讀舊的 `exps/` 或 `meta_info.json`。Result 與 Database roots 分別傳入，entry 名稱與 point label 都只能是一個路徑段。範例的 Q1、R1 是元件名稱，不是由 entry 名稱推導的身分。
+
+Point 的 flux_value、flux_half 與 flux_period 必須使用相同的顯式 flux_unit。容器不換算數值。新 run 的保存與接受契約見 [Notebook owner](../lib/zcu_tools/notebook/README.md)。
+
+重複或實驗專用的 `test.md`、`develope.md` 與 `analysis/mist/branch_floquet.md` 已退休。前者的環境與實驗接線由 single_qubit 範例取代；後兩者的模擬探索不再提供逐 cell 範例，branch 範例只保留一條離線分析路徑。計算能力仍由原有 simulate、analysis 與使用者實驗套件提供。
+
+Markdown 與 ipynb 的生成來源不由本入口決定，同步與覆寫風險見 [scripts/README.md](../scripts/README.md#資料作業)。

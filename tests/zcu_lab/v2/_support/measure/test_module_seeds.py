@@ -34,7 +34,7 @@ from zcu_tools.gui.cfg.resource import (
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
+    SavedPoint,
 )
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
@@ -124,7 +124,7 @@ def _environment(
     parameters = ParameterContext(
         point=point,
         library=library,
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=RoleBinding(
             "Q1",
             {"qubit": RoleSpec("seed/module_owner")},
@@ -371,7 +371,7 @@ def _readout_environment(
                     components={"Q1": ComponentLibrary(readout={"cal": readout})},
                 )
             ),
-            target=EntryDraft(entry_id="entry"),
+            target=SavedPoint(entry_id="entry", point="working"),
             roles=RoleBinding(
                 "Q1",
                 {"readout": RoleSpec("seed/module_owner")},

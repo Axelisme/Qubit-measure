@@ -10,9 +10,9 @@ status: accepted
 
 ## 脈絡
 
-measure adapter 的 cfg 同時需要 static shape、module role、locked leaf、MetaDict-linked scalar、
+measure adapter 的 cfg 同時需要 static shape、module role、locked leaf、參數路徑-linked scalar、
 ModuleLibrary adoption、sweep 與 fallback。若作者分別維護 spec 與 default value 兩棵宣告，field
-order、lock value、role shape 與 fallback 很容易漂移；但把 role、MetaDict 或 ModuleLibrary policy
+order、lock value、role shape 與 fallback 很容易漂移；但把 role、參數路徑或 ModuleLibrary policy
 下沉到 shared cfg core，又會破壞 app-independent boundary。
 
 adapter 是 user-maintained experiment flow。authoring surface 必須由上到下可讀，讓 field type、
@@ -34,7 +34,7 @@ def cfg_definition(cls) -> MeasureCfgDefinition:
         .reset("reset", optional=True)
         .pulse("pi_pulse", role_id="pi_pulse", label="Pi Pulse")
         .readout("readout")
-        .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+        .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0))
         .sweep("length", label="Delay (us)", default=...)
         .reps(1000)
         .rounds(100)
@@ -57,8 +57,8 @@ measure domain 以 `Seed[T]` 表達「definition 現在描述來源，fresh cfg 
 vocabulary 維持最小：
 
 - `literal(value)`：authoring-time snapshot；raw default 由 builder 自動 lift；
-- `md(key, fallback, expr?)`：有 MetaDict key 時保留 live `EvalValue`，否則使用明文 fallback；
-- `scaled_md(key, factor, fallback_value)`：明確區分 missing 時的最終值；
+- `path_seed(path, fallback, expr?)`：保留 canonical `$alias.path` 或 concrete/general 路徑的 `EvalValue`，不在 seed 建立時讀取來源；
+- `scaled_path_seed(path, factor, fallback_value)`：保留倍率與路徑的 expression。兩者的 fallback 參數不替代缺少的 scalar calibration；缺少 alias 或值在 resolution 時顯示 Invalid；
 - `value_source(key, target_type, fallback?)`：透過 [[0037]] 的 read-only lookup resolve once；
 - `custom(resolve, description)`：低頻純 context lookup escape hatch；
 - `SweepDefault`：只組裝 typed sweep edges，不引入另一套 resolver algebra。
@@ -85,14 +85,14 @@ module declaration 同地保存 `role_id`、initialization、`blank_overrides`�
 - `locked` 把 static leaf變成 `LiteralSpec`；不得與 override path重疊，materialization由 shared
   assembler 對齊 literal value。
 
-role alias priority、shape 與 md-linked seed的 SSOT仍是 [[0009]] 的 `ROLE_TABLE` / `ROLE_FACTORIES`。
+role alias priority、shape 與參數路徑 seed 的 SSOT仍是 [[0009]] 的 `ROLE_TABLE` / `ROLE_FACTORIES`。
 builder只消費這份資料，不掃描任意 library name，也不複製 role policy。
 
 ### 4. shared assembler 只共用 mechanics
 
 `zcu_tools.gui.cfg.CfgSchemaAssembler` 同步宣告 paired Spec/Value tree，負責 duplicate/parent conflict、
 default wrapping、choice binding、locked alignment、deep-copy snapshot與 one-shot build。它不認識
-`SessionEnv`、Seed、role、MetaDict、ModuleLibrary、logical key或 generation policy（[[0045]]）。
+`SessionEnv`、Seed、role、參數容器、ModuleLibrary、logical key 或 generation policy（[[0045]]）。
 
 measure definition在 instantiate 後把 resolved defaults交給 assembler；autoflux
 `NodeSchemaBuilder`也使用同一 mechanics，但保留自己的 logical path、generation與section label policy。

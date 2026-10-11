@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject
-from zcu_tools.resources.storage_migration import MigrationInputError, load_run_evidence
+
+from migrations.storage_migration import MigrationInputError, load_run_evidence
 
 
 def evidence_document(*, entry_update: JsonObject | None = None) -> JsonObject:

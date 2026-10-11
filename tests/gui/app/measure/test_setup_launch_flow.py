@@ -10,7 +10,8 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
     AppPersistedState,
     PersistedStartup,
 )
-from zcu_tools.gui.session.context_types import EntryDraft, SavedPoint
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -140,10 +141,14 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         assert control.get_source_binding() == binding
         assert "chip-b" not in _field_texts(_reopen_setup(app, qapp))
 
-        # A new entry publishes DRAFT; Setup shows the new entry name.
+        # A new entry publishes metadata without selecting a point; Setup shows its name.
         changed = app.invoke(
             "rpc_call", {"method": "entry.new", "params": {"name": "chip-b"}}
         )
         assert changed["name"] == "chip-b"
-        assert control.read_context().target == EntryDraft(entry_id=changed["entry_id"])
+        info = control.get_entry_info()
+        assert info is not None and info.entry_id == changed["entry_id"]
+        with pytest.raises(FailedPreconditionError) as caught:
+            control.read_context()
+        assert caught.value.reason_code == "no_context"
         assert {"chip-b"} <= _field_texts(_reopen_setup(app, qapp))

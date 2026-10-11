@@ -42,7 +42,7 @@ def test_project_context_preserves_injected_value_lookup(tmp_path) -> None:
         )
     )
     assert state.session_env.values is registry
-    assert state.session_env.readiness is ContextReadiness.DRAFT
+    assert state.session_env.readiness is ContextReadiness.EMPTY
 
 
 def test_use_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) -> None:

@@ -13,7 +13,6 @@ from zcu_tools.datafile import (
     RunSnapshot,
     decode_labber_comment,
     json_values_equal,
-    load_legacy_labber_payload,
     load_run_data,
     save_run_data,
 )
@@ -23,6 +22,8 @@ from zcu_tools.resources.entry import (
     SaveLayout,
     new_run_id,
 )
+
+from migrations.legacy_labber import load_legacy_labber_payload
 
 from .errors import MigrationInputError
 from .evidence import has_legacy_expression, parse_utc_time

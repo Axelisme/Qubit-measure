@@ -86,7 +86,7 @@ class RabiCheckAdapter(
             "Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'q_f' / 'qub_ch' — "
+            "Reads from the parameter context (all optional): 'q_f' / 'qub_ch' — "
             "qubit frequency and channel, seeding rabi_pulse and tested_reset "
             "defaults; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' "
             "— resonator / readout defaults."

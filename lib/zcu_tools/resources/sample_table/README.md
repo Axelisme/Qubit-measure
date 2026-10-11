@@ -8,23 +8,11 @@
 
 `append` 要求 `run_id`。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 
-`export_csv(path, overwrite=False)` 只匯出最新列，不輸出 pandas index；既有目的檔預設拒絕覆寫。自身來源 JSONL 永遠拒絕作為目的地，包含 symlink 或 hardlink，不因 overwrite 放行；只保護自身 source，不掃描其他檔案。JSONL 與 CSV 匯出不提供跨檔交易、多 writer 協調或 crash recovery。舊 CSV API 保留給尚未遷移的 caller，不作 JSONL 的 fallback。
-
-## 舊 CSV `SampleTable`（`table.py`）
-
-`SampleTable` 是保留給尚未遷移 caller 的 CSV API，以 pandas DataFrame 儲存量測樣品紀錄。它不固定 schema，欄位由 caller 約定，與 JSONL 讀取 API 分開。`extend_samples()` 追加到既有 CSV；重建檔案由 caller 明確安排。
-
-```python
-st = SampleTable("samples.csv")  # 也接受 pathlib.Path
-st.add_sample(dev_value=1.23e-3, dev_unit="A", flux=0.25, T1=50e-6)
-df = st.get_samples()
-```
-
-**方法**：`add_sample(**kwargs)`、`extend_samples(**kwargs)`（批次）、`update_sample(idx, **kwargs)`、`get_samples()`。
+`export_csv(path, overwrite=False)` 只匯出最新列，不輸出 pandas index；既有目的檔預設拒絕覆寫。自身來源 JSONL 永遠拒絕作為目的地，包含 symlink 或 hardlink，不因 overwrite 放行；只保護自身 source，不掃描其他檔案。JSONL 與 CSV 匯出不提供跨檔交易、多 writer 協調或 crash recovery。舊 CSV 的讀取與轉換由 root `migrations/` 提供，不作 JSONL 的 fallback。
 
 ## SampleTable v2 協定（`schema.py`）
 
-v2 定義 flat coordinate 契約。Generic `SampleTable` 不固定 schema，也不自動轉換既有 CSV。呼叫端明確使用 `validate_sample_table_v2`、`resolve_sample_flux` 或純轉換函式時，才套用座標規則。Notebook 的 T1/T2 workflow、SampleMerge、fluxdep utils 與 design search 使用此契約。座標欄位為 `flux`、`dev_value`、`dev_unit`、`flux_int`、`flux_period`（`SAMPLE_COORDINATE_COLUMNS`）。
+v2 定義 flat coordinate 契約。JSONL 儲存層不固定量測欄位 schema，也不自動轉換既有 CSV。呼叫端明確使用 `validate_sample_table_v2`、`resolve_sample_flux` 或純轉換函式時，才套用座標規則。Notebook 的 T1/T2 workflow、SampleMerge、fluxdep utils 與 design search 使用此契約。座標欄位為 `flux`、`dev_value`、`dev_unit`、`flux_int`、`flux_period`（`SAMPLE_COORDINATE_COLUMNS`）。
 
 **驗證（`validate_sample_table_v2`）**：`dev_value`/`dev_unit` 必填，unit 為 A/V/native；coordinate 只接受 real numeric（拒絕 datetime/timedelta、boolean、complex），required value 必須 finite；`flux` 可空、只接受有限值或 null；`flux_int`/`flux_period` 成對出現，每 row 兩者同為有限或同為 null，period 必須 > 0；拒絕 legacy 別名欄位（`calibrated mA`、`calibrated A`、`Flux`、`flux_bias`）、重複欄位與孤立 frame 欄位。
 

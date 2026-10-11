@@ -2,7 +2,6 @@
 
 from collections.abc import Generator
 from dataclasses import dataclass, replace
-from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -34,7 +33,7 @@ from zcu_tools.gui.app.measure.services.writeback import (
 )
 from zcu_tools.gui.cfg import CfgSchema, EvalValue
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -82,7 +81,9 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
             bus,
             bind_assets=ArbWaveformDatabase.info_at,
         )
+        entry.new_point("working")
         context.install_entry(entry)
+        context.use_point(PointUseRequest("working"))
         control = ContextControlFacet(context=context)
         control.add_component("Q1", "fake/drive/a", {})
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
@@ -665,32 +666,6 @@ def test_empty_draft_reads_and_writes_without_context(
     assert session.service.write_draft(draft, ()) == []
     assert session.service.apply_draft(draft)["applied_ids"] == []
     assert session.entry.ledger.events() == ()
-
-
-@pytest.mark.parametrize("operation", ["preview", "write"])
-def test_stale_draft_target_is_not_replaced_by_selected_point(
-    session: WritebackSession,
-    operation: str,
-) -> None:
-    captured = session.control.read_context()
-    draft = session.service.create_draft(
-        [ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2)],
-        parameters=captured,
-        experiment_name="test/writeback",
-    )
-    session.entry.new_point("a")
-    selected = session.control.use_point(PointUseRequest("a"))
-    events = session.entry.ledger.events()
-    perform = (
-        partial(session.service.preview_values, draft)
-        if operation == "preview"
-        else partial(session.service.write_draft, draft, (WritebackEdit("param-1"),))
-    )
-    with pytest.raises(FailedPreconditionError) as caught:
-        perform()
-    assert caught.value.reason_code == "draft_not_selected"
-    assert session.control.read_context().target == selected
-    assert session.entry.ledger.events() == events
 
 
 def test_preview_proposed_data_is_isolated_at_validation_boundary(

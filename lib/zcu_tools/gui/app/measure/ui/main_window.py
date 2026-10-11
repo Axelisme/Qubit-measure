@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
 
-        Show the SavedPoint name, "Draft (in-memory)", or "No point selected".
+        Show the SavedPoint name or "No point selected".
         Refresh tab interaction state without changing titles or result panes.
         """
         entry = self._ctrl.context_control.get_entry_info()
@@ -395,9 +395,6 @@ class MainWindow(QMainWindow):
         if isinstance(target, SavedPoint):
             self._point_label.setText(target.point)
             self._point_label.setStyleSheet("")
-        elif parameters is not None:
-            self._point_label.setText("Draft (in-memory)")
-            self._point_label.setStyleSheet("color: blue;")
         else:
             self._point_label.setText("No point selected")
             self._point_label.setStyleSheet(

@@ -671,9 +671,6 @@ class Controller(SessionControllerMixin):
     def has_context(self) -> bool:
         return self._ctx_svc.has_context()
 
-    def has_draft_context(self) -> bool:
-        return self._ctx_svc.has_draft_context()
-
     def has_active_context(self) -> bool:
         return self._ctx_svc.is_active_context()
 

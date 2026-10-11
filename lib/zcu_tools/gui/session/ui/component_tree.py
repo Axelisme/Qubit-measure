@@ -79,11 +79,14 @@ class ComponentTreeWidget(QWidget):
         self._tree.clear()
         self._row_values.clear()
         self._apply_btn.setEnabled(False)
+        self._add_btn.setEnabled(False)
         try:
             document = self._control.inspect_document(setup=self._is_setup())
         except FailedPreconditionError as exc:
             self._error.setText(str(exc))
             return
+        self._error.clear()
+        self._add_btn.setEnabled(True)
         roots = {
             name: QTreeWidgetItem(self._tree, [name, component.kind])
             for name, component in document.components.items()
@@ -158,9 +161,9 @@ class ComponentTreeWidget(QWidget):
         self._kind = QComboBox()
         self._kind.addItems(list(component_registry.kinds()))
         row.addWidget(self._kind)
-        add = QPushButton("Add")
-        add.clicked.connect(self._on_add)
-        row.addWidget(add)
+        self._add_btn = QPushButton("Add")
+        self._add_btn.clicked.connect(self._on_add)
+        row.addWidget(self._add_btn)
         layout.addLayout(row)
         self._fields = QFormLayout()
         layout.addLayout(self._fields)

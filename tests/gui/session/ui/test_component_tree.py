@@ -7,6 +7,7 @@ import pytest
 from qtpy.QtWidgets import QLabel, QTreeWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -41,7 +42,9 @@ def component_widget(
             BaseEventBus(),
             bind_assets=ArbWaveformDatabase.info_at,
         )
+        entry.new_point("working")
         service.install_entry(entry)
+        service.use_point(PointUseRequest("working"))
         control = ContextControlFacet(context=service)
         widget = ComponentTreeWidget(control)
         yield widget, control

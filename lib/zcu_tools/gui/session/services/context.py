@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,7 +15,6 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSource,
     ContextSourceBinding,
-    EntryDraft,
     EntryInfo,
     LibraryChange,
     PointBindingError,
@@ -38,11 +37,8 @@ from zcu_tools.gui.session.value_lookup import (
     resolve_value_ref,
 )
 from zcu_tools.resources.context.library import (
-    MODULE_LIBRARY_FORMAT,
-    MODULE_LIBRARY_VERSION,
     LibrarySnapshot,
     ModuleLibrary,
-    ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry import (
     DestinationExistsError,
@@ -54,10 +50,7 @@ from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.ledger_models import JsonObject, JsonValue
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
-    PARAMETER_FORMAT,
-    PARAMETER_VERSION,
     PointDocument,
-    PointGeneral,
     SetupDocument,
 )
 from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
@@ -181,7 +174,7 @@ class ContextService:
             state.set_context(replace(state.session_env, values=self._values))
 
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
-        """Prepare an opened entry and atomically publish an empty DRAFT.
+        """Prepare an opened entry and atomically publish metadata without selecting a point.
 
         Prepare setup, the complete point-description cache, and entry-scoped
         assets and saved aliases before replacing any binding. A missing alias
@@ -190,7 +183,10 @@ class ContextService:
         alias syntax failures propagate, never falling back to the preset.
         Failure retains the old binding,
         not deleting an entry already created by resources. Success bumps the
-        context once and publishes a switch fact after installation.
+        context once and publishes a switch fact after installation. It clears
+        point selection and publishes EMPTY with parameters=None, while retaining
+        entry metadata, the point list and setup source binding. SoC, device and
+        independent predictor capabilities remain with their own owners.
         """
         self._owner.assert_owner()
         saved_aliases = entry.load_aliases()
@@ -203,23 +199,7 @@ class ContextService:
         )
         setup = entry.setup
         points = self._load_points(entry)
-        assets = self._bind_assets(entry.database_path / "arb_waveforms")
-        parameters = ParameterContext(
-            point=PointDocument(
-                format=PARAMETER_FORMAT,
-                format_version=f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
-                general=PointGeneral(created_at=datetime.now(timezone.utc).isoformat()),
-            ),
-            library=LibrarySnapshot(
-                ModuleLibraryDocument(
-                    format=MODULE_LIBRARY_FORMAT,
-                    format_version=f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
-                ),
-                assets=assets,
-            ),
-            target=EntryDraft(entry_id=entry.entry_id),
-            roles=None,
-        )
+        self._bind_assets(entry.database_path / "arb_waveforms")
         info = EntryInfo(
             entry.entry_id,
             entry.result_path.name,
@@ -235,11 +215,14 @@ class ContextService:
         self._points = points
         self._aliases = aliases
         self._aliases_initialized = saved_aliases is not None
-        self._publish(parameters, sources, ContextReadiness.DRAFT, active_label="")
+        self._publish(None, sources, ContextReadiness.EMPTY, active_label="")
         return info
 
     def get_source_binding(self) -> ContextSourceBinding | None:
-        """Return detached cached persistent sources, or None for EMPTY.
+        """Return detached cached persistent sources, or None without an opened entry.
+
+        An opened entry without a selected point is EMPTY with a setup source
+        binding; selecting a point adds its point/library sources.
 
         This internal source ID is for facts/refresh, never part of read targets.
         Query performs no I/O and does not select a point.
@@ -247,7 +230,11 @@ class ContextService:
         return deepcopy(self._source_binding)
 
     def get_entry_info(self) -> EntryInfo | None:
-        """Return the cached opened entry, or None for EMPTY; never refresh."""
+        """Return cached entry metadata, or None when no entry is opened.
+
+        An opened entry remains readable in EMPTY before point selection.
+        This query performs no I/O and never refreshes or selects a point.
+        """
         return deepcopy(self._entry_info)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
@@ -282,7 +269,7 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        and origin unchanged to ResultEntry.new_point. An unsafe
         label raises InvalidInputError(point_label_invalid) before source reads or
         writes, preserving binding, files, ledger and versions. Label safety follows
         the entry owner's single path component rule. An existing destination
@@ -343,7 +330,7 @@ class ContextService:
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        selected saved point. No entry/context raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         self._owner.assert_owner()
@@ -361,7 +348,7 @@ class ContextService:
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        current DRAFT in memory or ACTIVE point in one resource transaction.
+        selected saved point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. Setup edits never change existing points or captures.
@@ -378,17 +365,12 @@ class ContextService:
             self._setup.add_component(name, kind=kind, **fields)
             return
         parameters = self._published_parameters()
-        if isinstance(parameters.target, EntryDraft):
-            document = self._entry.updated_component(
-                parameters.document(), name, kind, fields
+        if self._point is None:
+            raise FailedPreconditionError(
+                "Select or create a working point first", reason_code="no_context"
             )
-        else:
-            if self._point is None:
-                raise FailedPreconditionError(
-                    "No point is selected", reason_code="no_context"
-                )
-            self._point.add_component(name, kind=kind, **fields)
-            document = snapshot(self._point)
+        self._point.add_component(name, kind=kind, **fields)
+        document = snapshot(self._point)
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -434,7 +416,7 @@ class ContextService:
         parameters = self._state.session_env.parameters
         if parameters is None:
             raise FailedPreconditionError(
-                "No parameter context is installed", reason_code="no_context"
+                "Select or create a working point first", reason_code="no_context"
             )
         table = self._aliases
         for alias, component in (aliases or {}).items():
@@ -468,8 +450,9 @@ class ContextService:
         """Explicitly confirm authored rows, saving only when an entry is open.
 
         On the owner thread, validate syntax/order through AliasTable, then save
-        through the entry before installing memory and publishing changes. EMPTY
-        succeeds in memory only. InvalidInputError(alias_invalid) or storage I/O
+        through the entry before installing memory and publishing changes. Without
+        an opened entry it succeeds in memory only. An opened entry in EMPTY
+        still saves its table. InvalidInputError(alias_invalid) or storage I/O
         errors preserve old rows, versions and destination file; storage causes
         propagate unchanged. Identical rows still save but publish no event.
         Successful Apply disables default initialization. No ledger or point
@@ -487,7 +470,7 @@ class ContextService:
         """Return historical storage for a fixed capture on the owner sequence.
 
         Current entry and point are not read. Source faults propagate;
-        draft/unbound captures raise FailedPreconditionError(storage_unavailable).
+        unbound captures raise FailedPreconditionError(storage_unavailable).
         No refresh, file write, output reservation or ledger append occurs.
         """
         self._owner.assert_owner()
@@ -499,22 +482,12 @@ class ContextService:
         """Read current values at a fixed target without changing selection.
 
         SavedPoint opens independent point/library views in the currently opened
-        entry and may perform file I/O. EntryDraft reads the published memory
-        draft and requires that draft to remain selected. Supplied role names
-        stay fixed. Cross-entry, stale draft, missing point, schema, source and
+        entry and may perform file I/O. Supplied role names
+        stay fixed. Cross-entry, missing point, schema, source and
         I/O failures propagate. This read publishes no versions or events.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
-        if isinstance(target, EntryDraft):
-            parameters = self._published_parameters()
-            return ParameterContext(
-                point=parameters.document(),
-                library=parameters.library,
-                target=target,
-                roles=roles,
-                storage=parameters.storage,
-            )
         point = entry.use_point(target.point)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)
@@ -531,8 +504,9 @@ class ContextService:
     ) -> JsonObject | None:
         """Read one run's latest entry JSONL sample without changing selection.
 
-        target validates the opened entry and existing selected-draft requirement;
-        sample history itself belongs to the entry, independent of point. The
+        target validates the opened entry identity, rejecting cross-entry targets;
+        no point selection or point-file read is required. Sample history itself
+        belongs to the entry, independent of point. The
         sample owner returns a detached complete JSON row or None if absent.
         Invalid component/run_id, corrupt history and I/O errors propagate. No
         dataframe projection, context publication or refresh is performed here.
@@ -549,28 +523,29 @@ class ContextService:
     ) -> str:
         """Accept nonempty ordered concrete writes at a fixed SavedPoint.
 
-        Validate the opened entry and target before append. EntryDraft raises
-        FailedPreconditionError(storage_unavailable), requiring the caller to
-        select or create a working point. No event or value is written for it.
-        SavedPoint labels and existence are checked by ResultEntry.use_point;
-        its ValueError/FileNotFoundError and other load errors propagate before
-        append. SavedPoint parameter/library setters commit files; samples append to
-        entry JSONL immediately with the captured point label.
+        Validate the opened entry and captured SavedPoint before append.
+        ResultEntry.use_point validates its label, existence and point document;
+        ValueError/FileNotFoundError and other load errors propagate before
+        append. The executor appends accepted before invoking setters in item
+        order. Parameter/library setters require a currently selected point and
+        commit the captured point's files, not the selected point's files when
+        different. Samples need no selection and append to entry JSONL with the
+        captured point label. Thus a direct call without selection may append
+        accepted and then fail at a parameter/library item; sample-only can
+        succeed. Application GuardService admission rejects missing selection
+        before calling this entry point.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
         Return the accepted ID on success. WritebackApplyError exposes event_id,
         applied and original cause for item failures; append errors propagate
-        unchanged. No point creation, draft save, retry or rollback occurs.
+        unchanged. A same-entry selection change never redirects the target;
+        cross-entry targets fail before append. No point creation, retry or
+        rollback occurs.
         """
         self._owner.assert_owner()
         if not items:
             raise ValueError("writeback items must be nonempty")
         entry = self._require_write_target(target)
-        if not isinstance(target, SavedPoint):
-            raise FailedPreconditionError(
-                "Please select or create a working point before applying writeback",
-                reason_code="storage_unavailable",
-            )
         entry.use_point(target.point)
         return apply_writeback(
             items,
@@ -590,37 +565,31 @@ class ContextService:
 
         Use the captured target, not the current selection. SavedPoint writes
         one point file in the opened entry; a nonselected point stays unselected.
-        EntryDraft requires that entry's current memory-only DRAFT and writes
-        no point file. Omitted source records manual provenance; explicit source
+        Omitted source records manual provenance; explicit source
         is validated against this entry's ledger. Success publishes only when
         writing the selected target, after resource commit/validation.
-        Cross-entry, stale DRAFT, path/schema/source, conflict and I/O failures
+        Cross-entry, missing selection, path/schema/source, conflict and I/O failures
         propagate without publishing a candidate. No retry or batch receipt.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
-        if isinstance(target, EntryDraft):
-            document = entry.updated_point(
-                parameters.document(), path, value, source=source
-            )
-        else:
-            point = (
-                self._point
-                if target == parameters.target and self._point is not None
-                else entry.use_point(target.point)
-            )
-            with point.edit() as draft:
-                draft.set(path, value, provenance=source)
-            document = snapshot(point)
-            self._points = tuple(
-                replace(info, description=document.general.description or "")
-                if info.label == target.point
-                else info
-                for info in self._points
-            )
-            if target != parameters.target:
-                return
+        point = (
+            self._point
+            if target == parameters.target and self._point is not None
+            else entry.use_point(target.point)
+        )
+        with point.edit() as draft:
+            draft.set(path, value, provenance=source)
+        document = snapshot(point)
+        self._points = tuple(
+            replace(info, description=document.general.description or "")
+            if info.label == target.point
+            else info
+            for info in self._points
+        )
+        if target != parameters.target:
+            return
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -649,22 +618,18 @@ class ContextService:
         """Write a validated ModuleSpec at a concrete library root.
 
         Target/publication/source/error rules match set_parameter. SavedPoint
-        uses one library transaction; DRAFT replaces an isolated memory library.
+        uses one library transaction.
         No lowering, materialization, accepted event production or batch receipt.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
-        if isinstance(target, EntryDraft):
-            library = parameters.library.replaced_module(path, value, provenance=source)
-            entry.validate_library(library.document())
-        else:
-            handle = self._write_library(entry, target, parameters)
-            with handle.edit() as draft:
-                draft.set_module(path, value, provenance=source)
-            if target != parameters.target:
-                return
-            library = handle.snapshot()
+        handle = self._write_library(entry, target, parameters)
+        with handle.edit() as draft:
+            draft.set_module(path, value, provenance=source)
+        if target != parameters.target:
+            return
+        library = handle.snapshot()
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -692,18 +657,12 @@ class ContextService:
         self._owner.assert_owner()
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
-        if isinstance(target, EntryDraft):
-            library = parameters.library.replaced_waveform(
-                path, value, provenance=source
-            )
-            entry.validate_library(library.document())
-        else:
-            handle = self._write_library(entry, target, parameters)
-            with handle.edit() as draft:
-                draft.set_waveform(path, value, provenance=source)
-            if target != parameters.target:
-                return
-            library = handle.snapshot()
+        handle = self._write_library(entry, target, parameters)
+        with handle.edit() as draft:
+            draft.set_waveform(path, value, provenance=source)
+        if target != parameters.target:
+            return
+        library = handle.snapshot()
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -730,37 +689,27 @@ class ContextService:
         App callbacks lower only put/replace schemas, without writing resources.
         Rename moves Spec and sources; delete does not cascade references.
         Replace checks source/destination and commits relocation plus value in
-        one library transaction. Draft is memory-only and must remain selected.
+        one library transaction.
         Same-entry nonselected SavedPoint writes do not select or publish.
-        Cross-entry/stale draft/lowering/schema/source/conflict/I/O failures
+        Cross-entry/missing selection/lowering/schema/source/conflict/I/O failures
         propagate, leaving this command uncommitted and publishing no events.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(parameters.target)
         selected = self._published_parameters()
-        if isinstance(parameters.target, EntryDraft):
-            library = self._library_change_candidate(
-                selected.library,
+        handle = self._write_library(entry, parameters.target, selected)
+        with handle.edit() as draft:
+            candidate = self._library_change_candidate(
+                draft.snapshot(),
                 parameters,
                 change,
                 lower_module=lower_module,
                 lower_waveform=lower_waveform,
             )
-            entry.validate_library(library.document())
-        else:
-            handle = self._write_library(entry, parameters.target, selected)
-            with handle.edit() as draft:
-                candidate = self._library_change_candidate(
-                    draft.snapshot(),
-                    parameters,
-                    change,
-                    lower_module=lower_module,
-                    lower_waveform=lower_waveform,
-                )
-                draft.replace_contents(candidate)
-            if parameters.target != selected.target:
-                return
-            library = handle.snapshot()
+            draft.replace_contents(candidate)
+        if parameters.target != selected.target:
+            return
+        library = handle.snapshot()
         self._publish_write(
             ParameterContext(
                 point=selected.document(),
@@ -825,20 +774,16 @@ class ContextService:
         return entry
 
     def _require_write_target(self, target: ContextTarget) -> ResultEntry:
-        """Reject cross-entry and stale memory targets before opening a resource."""
-        entry = self._require_entry(target.entry_id)
-        if isinstance(target, EntryDraft) and not self.has_draft_context():
-            raise FailedPreconditionError(
-                "The entry's memory DRAFT is no longer selected",
-                reason_code="draft_not_selected",
-            )
-        return entry
+        """Reject cross-entry targets before opening a resource."""
+        return self._require_entry(target.entry_id)
 
     def _published_parameters(self) -> ParameterContext:
         """Read the carrier without requiring unrelated selected-source data."""
         parameters = self._state.session_env.parameters
         if parameters is None:
-            raise RuntimeError("Opened entry has no parameter projection")
+            raise FailedPreconditionError(
+                "Select or create a working point first", reason_code="no_context"
+            )
         return parameters
 
     def _write_library(
@@ -936,7 +881,7 @@ class ContextService:
     ) -> None:
         components = parameters.document().components if parameters is not None else {}
         self._initialize_aliases(components)
-        if parameters is None:
+        if not sources:
             self._source_binding = None
         else:
             self._binding_id += 1
@@ -967,12 +912,8 @@ class ContextService:
         return self._state.session_env
 
     def has_context(self) -> bool:
-        """Return whether any DRAFT/ACTIVE parameter environment is published."""
+        """Return whether a saved working point environment is published."""
         return self._state.session_env.has_context()
-
-    def has_draft_context(self) -> bool:
-        """Return whether the published environment is memory-only DRAFT."""
-        return self._state.session_env.is_draft()
 
     def is_active_context(self) -> bool:
         """Return whether the published environment targets a persisted point."""

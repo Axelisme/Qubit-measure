@@ -31,7 +31,8 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
     try:
         invoke("connect", {"port": fx.service.port})
         entry = invoke("rpc_call", {"method": "entry.new", "params": {"name": "q"}})
-        assert selection(invoke) == {"active": None, "labels": []}
+        assert invoke("rpc_call", {"method": "point.list"})["points"] == []
+        assert fx.ctrl.get_session_env().parameters is None
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "base", "clone_from": None}},

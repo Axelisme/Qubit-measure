@@ -11,7 +11,7 @@ from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, RunRequest, Sessio
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import (
@@ -87,7 +87,10 @@ def _lowered_cfg(
         )
     )
     parameters = ParameterContext(
-        point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
+        point=point,
+        library=library,
+        target=SavedPoint(entry_id="entry", point="working"),
+        roles=None,
     ).bind_aliases(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
     )
