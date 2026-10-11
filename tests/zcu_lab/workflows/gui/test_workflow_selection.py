@@ -92,7 +92,10 @@ def test_explicit_unknown_mcp_start_keeps_selection_and_drafts(
     window.select_workflow("overnight")
     before = window.capture_persisted_state()
     with pytest.raises(RuntimeError, match="invalid_params.*unknown_workflow"):
-        sim_session.call("start", {"run_id": "unknown", "name": "missing-workflow"})
+        sim_session.call(
+            "start",
+            {"run_id": "unknown", "name": "missing-workflow", "plan": [], "tunables": []},
+        )
     assert window.workflow_name == "overnight"
     assert window.capture_persisted_state() == before
     assert window.controller.run_id is None
