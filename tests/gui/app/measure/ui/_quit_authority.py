@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 from pathlib import Path
 
 from matplotlib.figure import Figure
@@ -71,6 +72,7 @@ def main(project_root: Path) -> int:
     app.exec()
     ctrl.control_identity.connect("agent", "after-real-qt-exit", "owner")
     late_projection = frontend.read_only_changes != [False]
+    ctrl.abort_shutdown()
     ctrl.tab_control.close_tab(tab_id)
     window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -82,4 +84,10 @@ def main(project_root: Path) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(Path(sys.argv[1])))
+    try:
+        code = main(Path(sys.argv[1]))
+    except Exception:
+        # Report setup errors instead of invoking the GUI's blocking error box.
+        traceback.print_exc()
+        code = 2
+    raise SystemExit(code)
