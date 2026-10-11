@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow run and form ownership
 
-**Last updated:** 2026-10-11，共用 alias preset 與 SessionServices 組裝
+**Last updated:** 2026-10-11，共用 alias preset 與字串 expression 接線邊界
 
 WorkflowController stays fixed for its Window's lifetime. Each Start supplies EnginePorts and a pending TunablesHost. One private run state concentrates the binding, native acceptance, token, producer phase and retained Runner settlement. Replacement waits for terminal cleanup. Native Engine status and artifacts remain authoritative; the operation token is only a receipt.
 
@@ -12,4 +12,4 @@ Concrete T1WorkflowWindow and T1TuningPanel stay in zcu_lab. Window supplies per
 
 The independent workflows app is connected through the shared GUI runtime. Its Window borrows runner and progress from the same SessionServices and retains optional Qt parent embedding. The user-owned app injects zcu_lab.ALIAS_PRESET through build_session_services' generic alias_rows parameter. Session owns the editable table; preset import does not load the experiment catalog. Prepare forms uses read_context() for a fixed alias capture, without declaring roles or checking kind.
 
-Concrete records/PNG RPC and MCP forwarding are connected. The same Window exposes form schema/read and call-local batch preview without a persistent editing state. Bare device-alias evaluation and the T1 flux_dev expression default still await b4 29. S4 source reload and U7 input save/restore are not implemented. Base 09 final validation, complete integration gates and user CP-B acceptance remain separate requirements. These connections do not complete ticket 04 or authorize hardware use.
+Concrete records/PNG RPC and MCP forwarding are connected. The same Window exposes form schema/read and call-local batch preview without a persistent editing state. The public evaluator now resolves bare device aliases, but FormState does not yet decode string expressions. The T1 flux_dev expression default remains unfinished. S4 source reload and U7 input save/restore are not implemented. Base 09 final validation, complete integration gates and user CP-B acceptance remain separate requirements. These connections do not complete ticket 04 or authorize hardware use.

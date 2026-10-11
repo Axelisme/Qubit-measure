@@ -621,7 +621,7 @@ def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
 def progress_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[int], list[int]]:
-    """Observe the explicit D44 factory/discard contract using the real service."""
+    """Observe the run-lifetime factory/discard contract using the real service."""
     created: list[int] = []
     discarded: list[int] = []
     make_factory = ProgressService.make_factory

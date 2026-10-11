@@ -72,7 +72,7 @@ deepcopy 隔離可變資料，使定義者可以直接修改 state 副本。代�
 
 每次實驗明確給 saver，保持函式物件介面與 cfg／Result 型別配對。代價是 helper 需多寫一個 keyword，不引入 Experiment wrapper 或全域註冊。
 
-D10 已核准所有 effect helper 使用 `yield from`，讓 Python 型別系統保留各 experiment 的回傳型別。engine 在入口拒絕非 effect 的 yield 值並提示正確寫法。plots、pbar 與資料存取仍直接呼叫。
+所有 effect helper 使用 `yield from`，讓 Python 型別系統保留各 experiment 的回傳型別。engine 在入口拒絕非 effect 的 yield 值並提示正確寫法。plots、pbar 與資料存取仍直接呼叫。
 
 D9 依失敗來源分流。Schedule 捕捉的 Exception 回 Failed，journal 保存例外型別、訊息與 traceback；Schedule 外例外使 run failed；KeyboardInterrupt 視為宿主 Stop。SoC 在 acquire 內斷線可以逐步 Failed，直到 Schedule 外操作拋出例外才停，符合 R3。不建立斷線例外分類表。
 
