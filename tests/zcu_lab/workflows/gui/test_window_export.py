@@ -10,7 +10,7 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
-from ._window_support import WindowTransport
+from ._recording_transport import WindowTransport
 
 
 def test_terminal_export_action_and_mcp_share_native_paths_and_ledger(
