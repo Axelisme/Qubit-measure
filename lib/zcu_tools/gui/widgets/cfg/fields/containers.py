@@ -163,18 +163,16 @@ class ReferenceInputWidget(QWidget):
         self._value = value
         self._library_keys = library_keys
         self._valid = valid
-        self._convert.setEnabled(
-            valid
-            and value is not None
-            and not is_custom_reference_key(value.chosen_key)
-            and self._convert_action is not None
-        )
+        # Only a library ref has anything to convert, so inline/None hides the action.
+        is_ref = value is not None and not is_custom_reference_key(value.chosen_key)
+        self._convert.setVisible(is_ref)
+        self._convert.setEnabled(is_ref and valid and self._convert_action is not None)
         display_reference_combo(self._combo, self._spec, value, library_keys)
         display_missing_hint(self._missing_ref_hint, value)
         display_reference_validity(self._combo, valid=valid)
 
     def set_convert_action(self, action: Callable[[], object]) -> None:
-        """Bind an owner conversion command; ignore its result, enable only for valid refs."""
+        """Bind an owner conversion command; show it for refs, enable only for valid refs."""
         self._convert_action = action
         self.display(self._value, library_keys=self._library_keys, valid=self._valid)
 
