@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-11，現行參數容器與舊接線退休
+**Last updated:** 2026-10-11，工作點選取與命令 admission
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -16,7 +16,7 @@ Worker 在 acquisition 前捕捉 software provenance，完成後補 finished_at�
 當次已捕捉的 device settings 投影成 JSON metadata，native Save 寫入 `/device`，不查 live hardware。
 可提交的 native 結果先由 State 一次發布結果與 `RunPaneState.metadata`，
 再在 terminal 追加 acquired。Origin 沿發起命令的 GUI／MCP，沒有 Save 也追加事件，
-但不建立 run 資料夾。Draft、未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
+但不建立 run 資料夾。未綁定或沒有 storage 時不造事件，terminal 明確記錄診斷。
 Ledger 失敗使 operation failed 並記錄 ERROR，但保留已發布的結果供 Save。
 不重試、回滾或釋放已發布的結果資源。Save request 取用這份歷史
 metadata，不從當前來源重抓，也不以存檔時間冒充量測時間。未宣告 native evidence
@@ -529,7 +529,7 @@ CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
-`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 或失效的 DRAFT 拒絕寫入。失敗保留可編輯的 session。
+`CfgEditorService` 保留 library、inspect 和 writeback 的獨立 draft，不發布 tab cfg。Library editor 保存開啟時的 ParameterContext，並透過 `apply_library_change` 在原 target 提交結構操作。同一 entry 的 point 切換不會改寫目的地；跨 entry 拒絕寫入。失敗保留可編輯的 session。
 
 獨立 library／inspect／writeback 的 CfgEditor 在 app seam 解碼 `ValueRef`，
 並依序操作 draft binding target。這個 draft batch 保留 fail-fast/non-atomic 行為，
@@ -884,3 +884,5 @@ receives their catalogs by injection and never imports the user package.
   `mcp/measure/README.md`.
 - GUI tests that own `BackgroundRunner` call `quiesce()` before `deleteLater()` or
   process teardown.
+
+Entry New／Open 不建立參數環境，也不自選既有 point。Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI 停用操作並提示，application 也拒絕未選取狀態。重新 Open 同 entry 清除 selection，WB 必須再次選取任一 point 才能提交，但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。

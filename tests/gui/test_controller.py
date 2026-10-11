@@ -574,13 +574,13 @@ def test_start_run_while_device_setup_active_raises(cf):
     cf.ctrl._operation_gate.release(1)
 
 
-def test_draft_context_rejects_real_run(cf):
+def test_unselected_context_rejects_real_run(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
             cf.state.session_env,
             active_label="",
-            readiness=ContextReadiness.DRAFT,
+            readiness=ContextReadiness.EMPTY,
         )
     )
 
@@ -596,7 +596,9 @@ class _LoadedAnalyzeParams:
     threshold: float
 
 
-def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyze(cf):
+def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_analyze(
+    cf,
+):
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
@@ -604,7 +606,7 @@ def test_load_tab_result_allows_draft_context_without_soc_and_initializes_analyz
             soc=None,
             soccfg=None,
             active_label="",
-            readiness=ContextReadiness.DRAFT,
+            readiness=ContextReadiness.EMPTY,
         )
     )
     loaded = object()

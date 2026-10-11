@@ -333,7 +333,7 @@ class CfgEditorService:
     stale dependency on a gone session reads version 0). Library sessions retain
     their creation ParameterContext: expressions and writes use its fixed
     roles, values and target. Switching same-entry points does not retarget;
-    crossing entries or leaving a memory DRAFT makes the write fail.
+    crossing entries makes the write fail.
 
     These drafts belong to library, inspect and writeback flows. Tab cfg is
     owned independently by CfgResource and is never mirrored here.
@@ -578,7 +578,7 @@ class CfgEditorService:
         """Put the complete draft at a concrete root in its captured destination.
 
         Lowering/write failure retains the editor. Success tears it down.
-        Seeded sessions cannot commit; cross-entry or stale-DRAFT errors propagate.
+        Seeded sessions cannot commit; cross-entry errors propagate.
         A same-entry point switch does not retarget the command.
         """
         session = self._require(editor_id)

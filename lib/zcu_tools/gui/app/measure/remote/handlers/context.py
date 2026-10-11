@@ -59,7 +59,7 @@ def h_context_labels(
 def h_context_active(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Return the published saved-point label, or None for EMPTY/DRAFT.
+    """Return the published saved-point label, or None before point selection.
 
     Reads only the cached parameter target. Component focus and tab role changes
     cannot change this session-level source identity. No refresh or I/O occurs.

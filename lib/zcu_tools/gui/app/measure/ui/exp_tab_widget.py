@@ -1111,10 +1111,8 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip("Tab is busy")
             elif state.global_run_active:
                 self.run_btn.setToolTip("Another tab is running")
-            elif not state.has_context:
-                self.run_btn.setToolTip("No experiment context")
             elif not state.has_active_context:
-                self.run_btn.setToolTip("Select or create a file-backed context")
+                self.run_btn.setToolTip("Select or create a working point first")
             elif capabilities.requires_soc and not state.has_soc:
                 self.run_btn.setToolTip("No SoC connection")
             elif not cfg_valid:
@@ -1144,6 +1142,9 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.setEnabled(
                 idle and state.has_context and state.has_analyze_result
             )
+            self.writeback_widget.setToolTip(
+                "" if state.has_context else "Select or create a working point first"
+            )
         # Post pane controls (only if present)
         if self._has_post:
             post_enabled = idle and state.has_analyze_result
@@ -1152,6 +1153,9 @@ class ExpTabWidget(QWidget):
             self._post_gate_label.setVisible(not state.has_analyze_result)
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
+            )
+            self.post_writeback_widget.setToolTip(
+                "" if state.has_context else "Select or create a working point first"
             )
         # The center renders the shared draft and State-owned artifact status.
         if snapshot.save is None:

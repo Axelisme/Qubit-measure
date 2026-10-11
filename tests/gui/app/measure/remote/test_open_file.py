@@ -48,7 +48,7 @@ class FileAdapter(OldAdapter):
 def app(qapp):
     fx = Fixture(empty_project=True)
     fx.state.set_context(
-        replace(fx.state.session_env, readiness=ContextReadiness.DRAFT)
+        replace(fx.state.session_env, readiness=ContextReadiness.EMPTY)
     )
     fx.registry.register("file", FileAdapter)
     fx.start()

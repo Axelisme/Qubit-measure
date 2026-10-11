@@ -720,7 +720,7 @@ def test_tab_run_rejects_missing_active_context_without_starting(
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.new_tab("fake")
     fx.state.set_context(
-        replace(fx.state.session_env, readiness=ContextReadiness.DRAFT)
+        replace(fx.state.session_env, readiness=ContextReadiness.EMPTY)
     )
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:

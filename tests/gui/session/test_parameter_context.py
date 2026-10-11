@@ -10,7 +10,6 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
     SavedPoint,
 )
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
@@ -246,7 +245,7 @@ def test_partial_capture_reports_unbound_role_only_when_read(
     context = ParameterContext(
         point=point,
         library=library,
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
     )
     assert context.value("capture_sensor.rate") == 6500.0
@@ -257,17 +256,6 @@ def test_partial_capture_reports_unbound_role_only_when_read(
         context.value("capture_driver.rate")
     with pytest.raises(RoleResolutionError, match="capture_driver.*not bound"):
         context.library_key("capture_driver.module.x180")
-
-
-def test_draft_projection_keeps_its_entry_target(
-    source: tuple[PointDocument, LibrarySnapshot],
-) -> None:
-    point, library = source
-    context = ParameterContext(
-        point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
-    )
-    assert context.target == EntryDraft(entry_id="entry")
-    assert context.value("Q1.rate") == 4300.0
 
 
 def test_metadata_routes_to_real_point_or_library_source(
