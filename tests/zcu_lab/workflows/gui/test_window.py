@@ -3417,3 +3417,77 @@ def test_rpc_running_stop_retains_lease_until_owner_delivery(
         and terminal["operation_id"] is None
     )
     assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+
+
+def test_terminal_export_action_and_mcp_share_native_paths_and_ledger(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    mcp_tools: ToolTable,
+    mcp_transport: WindowTransport,
+) -> None:
+    """Export is explicit and each frontend reports its own output attempts."""
+    import os
+
+    from zcu_tools.datafile import DataVariable, load_grouped_labber_data, load_run_data
+    from zcu_tools.resources.entry import SavedPayload
+
+    window, harness, entry = attachment
+    run_id = "20261006T010000Z-a1b2c3"
+    window.plan_panel.state.write(
+        {("fluxes", "kind"): "list", ("fluxes", "values"): [1.0]}, FormEnv()
+    )
+    window.tunables_panel.state.reset(
+        FormInput(
+            T1TunablesForm,
+            {"cal": {"span_mhz": 2.0, "rabi_start_factor": 0.125}, "rounds": 2},
+        )
+    )
+    assert isinstance(window.start(run_id), int)
+    with pytest.raises(RuntimeError):
+        window.export_fluxdep(run_id)
+    harness.complete_segment()
+    assert window.controller.status() is not None
+    assert window.controller.status().lifecycle == "done"
+    merged = entry.database_path / "workflows" / run_id / "merged.h5"
+    assert not merged.exists(), "terminal delivery must not automatically export"
+    button = window.findChild(QPushButton, "workflow.run.export_fluxdep")
+    assert button is not None and button.isEnabled()
+    button.click()
+    native = load_run_data(merged)
+    assert native.metadata.snapshot.point == "source"
+    assert native.payload.variables[DataVariable("signal")].z.shape[0] == 1
+    message = window.findChild(QLabel, "workflow.run.message")
+    assert (
+        message is not None
+        and "saved" in message.text()
+        and str(merged) in message.text()
+    )
+    events = [event for event in entry.ledger.events() if event.kind == "saved"]
+    assert len(events) == 1 and events[0].origin == "gui"
+    first_payload = events[0].payload
+    assert isinstance(first_payload, SavedPayload)
+    before = len(mcp_transport.requests)
+    exported = mcp_tools["workflows_workflow_export_fluxdep"]["handler"](
+        {"run_id": run_id}
+    )
+    assert len(mcp_transport.requests) == before + 1
+    assert exported["run_id"] == run_id and exported["ledger_error"] is None
+    assert [item["status"] for item in exported["outputs"]] == ["saved", "saved"]
+    second_payload = entry.ledger.events()[-1].payload
+    assert isinstance(second_payload, SavedPayload)
+    assert entry.ledger.events()[-1].origin == "mcp"
+    assert (
+        second_payload.labber_path
+        and second_payload.labber_path != first_payload.labber_path
+    )
+    labber = load_grouped_labber_data(second_payload.labber_path)
+    for key, original in native.payload.variables.items():
+        import numpy as np
+
+        np.testing.assert_array_equal(labber.variables[key].z, original.z)
+    with pytest.raises(RuntimeError, match="run_mismatch"):
+        mcp_tools["workflows_workflow_export_fluxdep"]["handler"]({"run_id": "stale"})
+    screenshot = os.environ.get("WORKFLOW_EXPORT_SCREENSHOT")
+    if screenshot:
+        window.resize(900, 1000)
+        window.ensurePolished()
+        assert window.grab().save(screenshot)
