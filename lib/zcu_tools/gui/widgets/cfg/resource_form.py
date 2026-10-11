@@ -142,10 +142,10 @@ class ResourceCfgFormWidget(QWidget):
         layout.addWidget(self._error)
         self.setFont(self._tree.font())
         self._tree.itemExpanded.connect(
-            lambda item: self._remember_expanded(item, True)
+            lambda item: self._remember_expanded(item, expanded=True)
         )
         self._tree.itemCollapsed.connect(
-            lambda item: self._remember_expanded(item, False)
+            lambda item: self._remember_expanded(item, expanded=False)
         )
 
     def attach(self, editor: CfgEditing) -> None:
@@ -254,7 +254,7 @@ class ResourceCfgFormWidget(QWidget):
             for path, parent, node in _visible_rows(observation.tree)
         )
 
-    def _remember_expanded(self, item: QTreeWidgetItem, expanded: bool) -> None:  # noqa: FBT001 - Qt signal
+    def _remember_expanded(self, item: QTreeWidgetItem, *, expanded: bool) -> None:
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(path, tuple):
             self._expanded[path] = expanded
@@ -285,6 +285,7 @@ class ResourceCfgFormWidget(QWidget):
                 self._rows[path] = item
                 control = self._make_input(path, node)
                 if control is not None:
+                    control.setEnabled(not node.readonly)
                     control.setObjectName("cfgInput:" + ".".join(path))
                     self._inputs[path] = control
                     self._tree.setItemWidget(item, 1, control)
@@ -339,7 +340,7 @@ class ResourceCfgFormWidget(QWidget):
         if isinstance(spec, ReferenceSpec):
             if not isinstance(value, (ReferenceValue, type(None))):
                 raise TypeError(f"Reference at {path!r} has no reference value")
-            return ReferenceInputWidget(
+            widget = ReferenceInputWidget(
                 spec,
                 value,
                 library_keys=reference_library_keys(node),
@@ -348,6 +349,8 @@ class ResourceCfgFormWidget(QWidget):
                     path, selected, generation
                 ),
             )
+            widget.set_convert_action(lambda: self._convert_reference(path, generation))
+            return widget
         if isinstance(spec, CfgSectionSpec):
             return None
         raise TypeError(f"No cfg input renderer for {type(spec).__name__} at {path!r}")
@@ -359,6 +362,13 @@ class ResourceCfgFormWidget(QWidget):
             path,
             generation,
             lambda editor, revision: editor.edit(revision, (CfgEdit(path, value),)),
+        )
+
+    def _convert_reference(self, path: CfgPath, generation: int) -> None:
+        self._submit(
+            path,
+            generation,
+            lambda editor, revision: editor.convert_reference_to_inline(revision, path),
         )
 
     def _select_reference(
@@ -420,6 +430,8 @@ class ResourceCfgFormWidget(QWidget):
         for path, _, node in _visible_rows(published.tree):
             self._color_item(self._rows[path], node)
             widget = self._inputs.get(path)
+            if widget is not None:
+                widget.setEnabled(not node.readonly)
             if isinstance(widget, ScalarInputWidget):
                 if not isinstance(node.value, (DirectValue, EvalValue)):
                     raise TypeError(f"Scalar input at {path!r} has no scalar value")

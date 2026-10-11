@@ -26,8 +26,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.project import ProjectInfo
 
-logger = logging.getLogger(__name__)
-
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
 # re-exported so ``state.VersionTable`` stays resolvable. fluxdep's key set
 # (project / selection / spectrum:<name> / spectrums:__set__ / fit) is
@@ -35,6 +33,8 @@ logger = logging.getLogger(__name__)
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,  # (re-export)
 )
+
+logger = logging.getLogger(__name__)
 
 SpecType = Literal["OneTone", "TwoTone"]
 

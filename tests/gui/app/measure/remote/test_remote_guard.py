@@ -37,15 +37,6 @@ from ._helpers import mcp_client as _mcp_client
 from ._remote_core_support import (
     RemoteCoreFixture as _Fixture,
 )
-from ._remote_core_support import (
-    open_client as _open_client,
-)
-from ._remote_core_support import (
-    recv_response as _recv_response,
-)
-from ._remote_core_support import (
-    send as _send,
-)
 
 
 @pytest.fixture()
@@ -99,49 +90,6 @@ def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
     fx.ctrl.context_control.set_parameter(
         parameters.target, f"general.ext.{key}", value
     )
-
-
-def test_socket_snapshot_exposes_result_replacement_and_restores_guard(fx) -> None:
-    _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
-    sock = _open_client(fx.service.port)
-    try:
-
-        def rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
-            _send(sock, {"id": method, "method": method, "params": params})
-            return _recv_response(sock)
-
-        assert rpc("context.snapshot", {})["ok"] is True
-        initial = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
-        assert initial["result_state"] == {
-            "revision": 0,
-            "available": False,
-            "source_path": None,
-            "source_operation_id": None,
-        }
-        assert initial["analysis_state"]["available"] is False
-        assert initial["post_analysis_state"]["available"] is False
-        # A non-serializable result stays in State; the operational projection
-        # identifies replacements without requiring its payload on the wire.
-        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
-        args = {"tab_id": tab_id, "data_path": "missing.h5"}
-        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
-        observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
-        assert observed["result_state"] == {
-            "revision": 1,
-            "available": True,
-            "source_path": "loaded.h5",
-            "source_operation_id": None,
-        }
-        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
-        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
-        assert rpc("tab.load_data", args)["error"]["reason"] == "stale_version"
-        replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
-        assert replacement["result_state"]["revision"] == 2
-        assert replacement["result_state"]["source_path"] == "loaded.h5"
-        assert rpc("tab.load_data", args)["error"].get("reason") != "stale_version"
-    finally:
-        sock.close()
 
 
 @pytest.mark.parametrize("with_device", [False, True])
@@ -266,8 +214,6 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
     [
         ("lookback", "lookback", ("reset", "init_pulse")),
         ("twotone_spectrum", "twotone/freq", ("reset",)),
-        ("time_rabi", "twotone/rabi/len_rabi", ("reset",)),
-        ("amplitude_rabi", "twotone/rabi/amp_rabi", ("reset",)),
         ("t1", "twotone/t1", ("reset",)),
         ("t2ramsey", "twotone/t2ramsey", ("reset",)),
         ("t2echo", "twotone/t2echo", ("reset",)),

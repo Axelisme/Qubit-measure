@@ -110,7 +110,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
                 sched.set_stop()
             else:
                 signals_buffer.set(raw_shots_to_signal(program))
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         shots = np.arange(cfg.shots, dtype=np.int64)
         return CheckResult(shots=shots, signals=signals)

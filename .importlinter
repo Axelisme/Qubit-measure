@@ -233,7 +233,7 @@ ignore_imports =
     # Debt: predict takes numeric parameters from its caller (backlog).
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
-# D213: stateless shared core does not depend on domain/runtime owners.
+# Stateless shared core does not depend on domain/runtime owners.
 [importlinter:contract:core-utils-only]
 name = C19: the shared core depends only on utils
 type = forbidden

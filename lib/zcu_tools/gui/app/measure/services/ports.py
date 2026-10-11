@@ -200,10 +200,8 @@ class TabLifecyclePort(Protocol):
         self,
         adapter_name: str,
         from_dict: TabSnapshot | None = None,
-        *,
-        target: str | None = None,
     ) -> str:
-        """Create a fixed-capture tab; target binds its first declared role."""
+        """Create or restore a tab using the current session sources."""
         ...
 
     def close_tab(self, tab_id: str) -> None: ...

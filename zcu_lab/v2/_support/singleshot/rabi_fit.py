@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from math import log
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 from iminuit import Minuit
@@ -552,14 +552,14 @@ def _mixture_populations(
     populations = np.empty((counts.shape[0], 3), dtype=np.float64)
     for index, row in enumerate(counts):
 
-        def objective(p_e: float) -> float:
+        def objective(p_e: float, row: NDArray[np.int64] = row) -> float:
             probabilities = (1.0 - p_e) * qg + p_e * qe
             probabilities = np.clip(probabilities, np.finfo(float).tiny, None)
             return float(-np.sum(row * np.log(probabilities)))
 
-        optimum = cast(
-            OptimizeResult,
-            minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded"),
+        # The bounded method returns OptimizeResult; custom methods widen the inferred type.
+        optimum: OptimizeResult = minimize_scalar(
+            objective, bounds=(0.0, 1.0), method="bounded"
         )
         p_e = float(optimum.x) if optimum.success else np.nan
         populations[index] = (1.0 - p_e, p_e, 0.0)
@@ -586,14 +586,12 @@ def _confusion_matrix(
         condition = float(np.linalg.cond(matrix_at(radius)))
         return condition if np.isfinite(condition) else _PENALTY
 
-    optimum = cast(
-        OptimizeResult,
-        minimize_scalar(
-            objective,
-            bounds=(max_radius * 1e-6, max_radius),
-            method="bounded",
-            options={"xatol": max(max_radius * 1e-8, 1e-12)},
-        ),
+    # The bounded method returns OptimizeResult; custom methods widen the inferred type.
+    optimum: OptimizeResult = minimize_scalar(
+        objective,
+        bounds=(max_radius * 1e-6, max_radius),
+        method="bounded",
+        options={"xatol": max(max_radius * 1e-8, 1e-12)},
     )
     radius = float(optimum.x)
     if not optimum.success or not np.isfinite(radius):

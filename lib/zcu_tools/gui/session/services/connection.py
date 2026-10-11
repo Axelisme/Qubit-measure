@@ -6,8 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-logger = logging.getLogger(__name__)
-
 from zcu_tools.gui.session.events import ConnectionFinishedPayload, SocChangedPayload
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -25,6 +23,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.program.v2.mocksoc import MockQickSoc
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ class SoCConnectionService:
 
         is_mock = isinstance(req, ConnectMockRequest)
 
-        def work(factory: Any) -> tuple[SocHandle, SocCfgHandle]:
+        def work(_factory: object) -> tuple[SocHandle, SocCfgHandle]:
             # factory is None (wants_progress=False). Both branches run off-main via
             # the executor and publish one typed completion fact on the owner thread.
             return self._run_connect_work(req)

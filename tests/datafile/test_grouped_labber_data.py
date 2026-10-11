@@ -61,9 +61,12 @@ def test_grouped_roundtrip_with_metadata_and_attrs(tmp_path):
 
     assert written == str(path) + ".hdf5"
     with h5py.File(written, "r") as f:
-        version_attr = cast(SupportsInt, f.attrs["zcu_tools.grouped_dataset_version"])
-        variables_attr = cast(Iterable[str], f.attrs["zcu_tools.dataset_roles"])
-        channels_attr = cast(Iterable[str], f.attrs["zcu_tools.dataset_role_channels"])
+        version_attr = f.attrs["zcu_tools.grouped_dataset_version"]
+        variables_attr = f.attrs["zcu_tools.dataset_roles"]
+        channels_attr = f.attrs["zcu_tools.dataset_role_channels"]
+        assert isinstance(version_attr, SupportsInt)
+        assert isinstance(variables_attr, Iterable)
+        assert isinstance(channels_attr, Iterable)
         assert int(version_attr) == 2
         assert list(variables_attr) == ["signal", "reference"]
         assert list(channels_attr) == ["Signal", "Reference"]

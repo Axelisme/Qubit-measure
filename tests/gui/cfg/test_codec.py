@@ -328,7 +328,6 @@ def test_waveform_ref_roundtrip():
     assert isinstance(wf, ReferenceValue)
     assert wf.chosen_key == "Gaussian"
     assert wf.value.fields["width"] == DirectValue(value=50.0)
-    assert wf.is_overridden is False
 
 
 def test_reference_discriminator_single_allowed_needs_no_literal() -> None:
@@ -561,36 +560,6 @@ def test_enabled_module_ref_roundtrip():
     assert reset.value.fields["gain"] == DirectValue(0.3)
 
 
-def test_waveform_ref_preserves_override():
-    inner_spec = CfgSectionSpec(
-        fields={"width": ScalarSpec(label="Width", type=float)},
-        label="Gaussian",
-    )
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "wf": ReferenceSpec(
-                    kind="waveform", allowed=[inner_spec], label="Waveform"
-                )
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "wf": ReferenceValue(
-                    chosen_key="Gaussian",
-                    value=CfgSectionValue(fields={"width": DirectValue(value=50.0)}),
-                    is_overridden=True,
-                ),
-            }
-        ),
-    )
-
-    restored = raw_to_schema(_empty(schema.spec), schema_to_raw(schema))
-    wf = restored.value.fields["wf"]
-    assert isinstance(wf, ReferenceValue)
-    assert wf.is_overridden is True
-
-
 def _multi_shape_module_spec() -> ReferenceSpec:
     """A two-shape module ref (direct vs pulse readout), discriminated by ``type``
     — mirrors ``make_readout_module_spec``'s [direct, pulse] allowed order."""
@@ -684,7 +653,6 @@ def test_linked_multi_shape_ref_restores_when_literal_leaf_omitted():
         "readout": {
             "__kind": "module_ref",
             "chosen_key": "missing_lib_readout",
-            "is_overridden": False,
             "value": {"gain": {"__kind": "direct", "value": 0.4}},
         }
     }
@@ -706,7 +674,6 @@ def test_linked_ref_unknown_discriminator_fails_fast():
         "readout": {
             "__kind": "module_ref",
             "chosen_key": "my_lib_readout",
-            "is_overridden": False,
             "value": {"type": {"__kind": "direct", "value": "readout/bogus"}},
         }
     }

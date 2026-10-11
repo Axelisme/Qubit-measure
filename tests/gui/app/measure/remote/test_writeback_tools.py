@@ -144,7 +144,8 @@ def test_preview_serializes_parameter_and_module():
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item_list = list(res["items"])  # type: ignore[call-overload]
+    item_list = res["items"]
+    assert isinstance(item_list, list)
     items = {it["id"]: it for it in item_list}
 
     md = items["param-1"]
@@ -302,7 +303,9 @@ def test_set_delegates_to_writeback_control_without_ctrl_fallback():
         {"tab_id": "t", "subtab_id": "analysis", "id": "param-1", "selected": False},
     )
 
-    assert res["item"]["id"] == "param-1"  # type: ignore[index]
+    item = res["item"]
+    assert isinstance(item, dict)
+    assert item["id"] == "param-1"
     writeback_control.has_tab.assert_called_once_with("t")
     writeback_control.set_writeback_item_for_pane.assert_called_once_with(
         "t", "analysis", "param-1", selected=False
@@ -351,7 +354,9 @@ def test_set_edits_parameter_item():
     assert kwargs["selected"] is False
     assert kwargs["proposed_value"] == 6015.0
     # The reply echoes the (re-read) edited item.
-    assert res["item"]["id"] == "param-1"  # type: ignore[index]
+    item = res["item"]
+    assert isinstance(item, dict)
+    assert item["id"] == "param-1"
 
 
 def test_set_module_cfg_edits_facet():

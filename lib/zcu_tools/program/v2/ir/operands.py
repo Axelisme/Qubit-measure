@@ -491,6 +491,11 @@ def parse_value(
     if isinstance(val, int):
         return ImmValue(value=val)
 
+    return _parse_string_value(val)
+
+
+def _parse_string_value(val: str) -> ValueType:
+    """Parse stripped text as immediate, register, bare integer, or register name."""
     val_s = val.strip()
     imm = parse_immediate(val_s)
     if imm is not None:

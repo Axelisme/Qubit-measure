@@ -4,9 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from .library import ModuleLibrary
-from .metadict import MetaDict
-
 _UNIT_RANGES: dict[str, tuple[tuple[str, float, float], ...]] = {
     "A": (
         ("mA", 100e-3, 1e3),  # 100 mA
@@ -46,80 +43,6 @@ class ContextManager:
             for d in self.exp_dir.iterdir()
             if d.is_dir() and (d / "meta_info.json").exists()
         )
-
-    def new_flux(
-        self,
-        value: float | None = None,
-        clone_from: tuple[ModuleLibrary, MetaDict] | str | None = None,
-        label: str | None = None,
-        unit: Literal["A", "V", "K", "none"] = "none",
-    ) -> tuple[ModuleLibrary, MetaDict]:
-        if label is None:
-            label = self._auto_label(value, unit)
-
-        flux_dir = self.exp_dir / label
-        if (flux_dir / "meta_info.json").exists():
-            raise FileExistsError(
-                f"Context '{label}' already exists. "
-                "Use use_flux() to load it, or provide a different label."
-            )
-
-        source: tuple[ModuleLibrary, MetaDict] | None
-        if isinstance(clone_from, str):
-            src_folder = self.exp_dir / clone_from
-            if not (src_folder / "meta_info.json").is_file():
-                raise FileNotFoundError(
-                    f"Source context '{clone_from}' not found. Available: {self.list_contexts()}"
-                )
-            if not (src_folder / "module_cfg.yaml").is_file():
-                raise FileNotFoundError(
-                    f"Source context '{clone_from}' has no module_cfg.yaml"
-                )
-            source = (
-                ModuleLibrary(src_folder / "module_cfg.yaml", readonly=True),
-                MetaDict(src_folder / "meta_info.json", readonly=True),
-            )
-        else:
-            source = clone_from
-
-        # The destination must be ours to clean up; an incomplete existing
-        # directory may contain user files even when meta_info.json is absent.
-        flux_dir.mkdir(parents=True)
-        try:
-            if source is not None:
-                ml, md = source
-                ml = ml.clone(dst_path=flux_dir / "module_cfg.yaml")
-                md = md.clone(dst_path=flux_dir / "meta_info.json")
-            else:
-                ml = ModuleLibrary(flux_dir / "module_cfg.yaml")
-                md = MetaDict(flux_dir / "meta_info.json")
-            ml.dump()
-            md.dump()
-        except Exception:
-            (flux_dir / "module_cfg.yaml").unlink(missing_ok=True)
-            (flux_dir / "meta_info.json").unlink(missing_ok=True)
-            flux_dir.rmdir()
-            raise
-
-        self._label = label
-        return ml, md
-
-    def use_flux(
-        self, label: str, readonly: bool = False
-    ) -> tuple[ModuleLibrary, MetaDict]:
-        flux_dir = self.exp_dir / label
-        if not (flux_dir / "meta_info.json").exists():
-            raise FileNotFoundError(
-                f"Folder '{label}' not found. Available: {self.list_contexts()}"
-            )
-        if not (flux_dir / "module_cfg.yaml").is_file():
-            raise FileNotFoundError(f"Context '{label}' has no module_cfg.yaml")
-
-        ml = ModuleLibrary(flux_dir / "module_cfg.yaml", readonly=readonly)
-        md = MetaDict(flux_dir / "meta_info.json", readonly=readonly)
-
-        self._label = label
-        return ml, md
 
     @property
     def label(self) -> str:
