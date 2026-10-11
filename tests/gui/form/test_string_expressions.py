@@ -239,7 +239,8 @@ def test_single_model_selector_rejects_expression_without_evaluating_tag(
     )
     invalid = FormState(FormInput(SingleSelectorForm, envelope)).result(env)
     assert isinstance(invalid, FormErrors)
-    assert ("branch", "kind") in invalid.messages
+    assert ("branch",) in invalid.messages
+    assert "kind" in invalid.messages[("branch",)]
 
 
 class ScalarEnvelopeForm(FormModel):
