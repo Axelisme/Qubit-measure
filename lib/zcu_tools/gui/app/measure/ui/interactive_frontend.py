@@ -21,6 +21,10 @@ class InteractiveFrontendEnv(Protocol):
 class InteractiveFrontend(QWidget):
     """Only the presentation/lifecycle capabilities the generic View may use."""
 
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Gate plugin edits without disabling the figure's viewing interactions."""
+        raise NotImplementedError
+
     @property
     def figure(self) -> Figure:
         raise NotImplementedError

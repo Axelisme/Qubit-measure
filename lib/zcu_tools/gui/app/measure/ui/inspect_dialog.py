@@ -36,6 +36,7 @@ from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enh
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled, watch_control
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -195,6 +196,7 @@ class InspectDialog(InspectDialogBase):
         # concrete app controller for measure-only CfgEditor and role-catalog
         # commands that deliberately stay outside session core.
         self._app_ctrl = ctrl
+        self._read_only = False
         self._new_ml_dialog: _MlCreateDialog | None = None
         self._ml_editor_owner = f"inspect-ml-{uuid.uuid4().hex[:8]}"
         self._ml_editor_id: str | None = None
@@ -208,6 +210,18 @@ class InspectDialog(InspectDialogBase):
         self._ml_refresh_pending = False
         super().__init__(ctrl.context_control, bus, parent=parent)
         self.finished.connect(self._on_finished)
+        watch_control(
+            self,
+            ctrl.control_identity,
+            lambda status: self.set_read_only(read_only=status.holder != "gui"),
+        )
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Disable editing while retaining module/parameter inspection."""
+        self._read_only = read_only
+        self._component_tree.set_read_only(read_only=read_only)
+        self._create_btn.setEnabled(not read_only)
+        self._update_ml_editor_controls()
 
     def _build_md_tab(self) -> QWidget:
         """Use the session component-tree editor for measure parameters."""
@@ -507,15 +521,18 @@ class InspectDialog(InspectDialogBase):
             return True
 
     def _update_ml_editor_controls(self) -> None:
-        has_editor = self._ml_editor_id is not None
+        has_editor = self._ml_editor_id is not None and not self._read_only
         dirty = self._ml_has_changes()
         valid = has_editor and self._ml_form_widget.is_valid()
         has_name = bool(self._ml_name_edit.text().strip())
+        self._ml_form_widget.set_editing_enabled(has_editor)
         self._ml_name_edit.setEnabled(has_editor)
         self._ml_revert_btn.setEnabled(has_editor and dirty)
         self._ml_apply_btn.setEnabled(has_editor and dirty and valid and has_name)
         self._ml_status_label.setText("Unsaved" if dirty else "Saved")
-        self._del_ml_btn.setEnabled(self._current_ml_item_data() is not None)
+        self._del_ml_btn.setEnabled(
+            not self._read_only and self._current_ml_item_data() is not None
+        )
 
     def _on_ml_name_edited(self, _text: str) -> None:
         self._ml_dirty_hint = True
@@ -529,6 +546,8 @@ class InspectDialog(InspectDialogBase):
         self._update_ml_editor_controls()
 
     def _on_ml_revert_clicked(self) -> None:
+        if self._read_only:
+            return
         data = self._ml_selected_data
         if data is None:
             return
@@ -538,6 +557,8 @@ class InspectDialog(InspectDialogBase):
         self._flush_pending_ml_refresh()
 
     def _on_ml_apply_clicked(self) -> None:
+        if self._read_only:
+            return
         self._apply_ml_draft(select_result=True)
 
     def _apply_ml_draft(self, *, select_result: bool) -> bool:
@@ -577,6 +598,8 @@ class InspectDialog(InspectDialogBase):
         return True
 
     def _resolve_dirty_ml(self, *, select_result: bool) -> bool:
+        if self._read_only:
+            return True
         if not self._ml_has_changes():
             return True
         answer = QMessageBox.question(
@@ -596,6 +619,8 @@ class InspectDialog(InspectDialogBase):
         return False
 
     def _on_delete_ml_clicked(self) -> None:
+        if self._read_only:
+            return
         data = self._current_ml_item_data()
         if data is None:
             return
@@ -605,6 +630,8 @@ class InspectDialog(InspectDialogBase):
         self._delete_ml_entry(data, confirm=True)
 
     def _on_ml_delete_requested(self) -> None:
+        if self._read_only:
+            return
         data = self._current_ml_item_data()
         if data is None:
             return
@@ -649,6 +676,8 @@ class InspectDialog(InspectDialogBase):
         opener(DialogName.ARB_WAVEFORM)
 
     def _on_create_clicked(self) -> None:
+        if self._read_only:
+            return
         existing = self._new_ml_dialog
         if existing is not None:
             try:
@@ -661,6 +690,7 @@ class InspectDialog(InspectDialogBase):
                 self._new_ml_dialog = None
 
         dialog = _MlCreateDialog(self._app_ctrl, parent=self)
+        bind_control_enabled(dialog, self._app_ctrl.control_identity)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         self._new_ml_dialog = dialog
         dialog.finished.connect(
