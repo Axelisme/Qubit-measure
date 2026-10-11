@@ -3,7 +3,6 @@
 from collections.abc import Callable
 
 import pytest
-from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLabel, QPushButton, QStackedWidget
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -28,6 +27,13 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._window_scenarios import (
+    assert_failed_close_diagnostic,
+    assert_failed_stop_settled,
+    install_close_fault_workflow,
+    install_pause_plot_workflow,
+)
+
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
@@ -49,36 +55,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     window, harness, entry = run_attachment
-    attempts: list[float] = []
-    figures: list[int] = []
-
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
-        return None
-
-    @workflow("pause-window", plan=T1Plan, tunables=T1Tunables, init=init)
-    def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
-    ) -> Step[None, int]:
-        del plan, tun, state
-        attempts.append(env.context.pi_length_us)
-
-        def draw(figure: Figure) -> None:
-            figures.append(id(figure))
-            figure.clear()
-            figure.subplots().plot([0, 1], [len(attempts), len(attempts)])
-
-        if len(attempts) == 1:
-            env.plots.subplots("live")
-        env.plots.draw("live", draw)
-        bar = env.pbar("work", 2)
-        bar.set_progress(len(attempts))
-        bar.refresh()
-        if len(attempts) == 1:
-            window.pause("paused")
-            yield from env.wait_until(env.started_at)
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    attempts, figures = install_pause_plot_workflow(window, monkeypatch)
     token = window.start("paused")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -495,26 +472,7 @@ def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
 ) -> None:
     window, harness, entry = run_attachment
 
-    @workflow(
-        "close-fault", plan=T1Plan, tunables=T1Tunables, init=lambda _env, _plan: None
-    )
-    def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
-    ) -> Step[None, int]:
-        del plan, tun, state
-        env.plots.subplots("live")
-
-        def draw(figure: Figure) -> None:
-            figure.clear()
-            figure.subplots().plot([0, 1], [0, 1])
-
-        env.plots.draw("live", draw)
-        env.pbar("work", 2).refresh()
-        window.pause("close-fault")
-        yield from env.wait_until(env.started_at)
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    install_close_fault_workflow(window, monkeypatch)
     token = window.start("close-fault")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -540,16 +498,7 @@ def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
         closed = window.close()
         assert escaped_qt_errors == []
         assert not closed
-        status = controller.status()
-        assert status is not None and status.lifecycle == "failed"
-        assert str(journal) in message.text() and str(journal) in caplog.text
-        assert any(
-            record.name == "zcu_lab.workflows.gui.window"
-            and record.exc_info is not None
-            and isinstance(record.exc_info[1], IsADirectoryError)
-            and record.exc_info[1].filename == str(journal)
-            for record in caplog.records
-        )
+        assert_failed_close_diagnostic(controller, message, journal, caplog)
         if phase == "active":
             assert controller.has_pending_segment and controller.binding is panel.host
             assert stack.count() == 2 and stack.currentWidget() is canvas
@@ -570,12 +519,7 @@ def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
         assert harness.gate.snapshot() and settlements == []
         assert stack.count() == 2 and stack.currentWidget() is canvas
         harness.background.deliver()
-    outcome = harness.handles.known_outcome(token)
-    assert outcome is not None and outcome.status == "failed"
-    assert outcome.error is not None and str(journal) in outcome.error
-    assert settlements == [token]
-    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert_failed_stop_settled(harness, token, journal, settlements)
     assert not controller.has_pending_segment
     assert window.close() and window.close()
     assert stack.count() == 1

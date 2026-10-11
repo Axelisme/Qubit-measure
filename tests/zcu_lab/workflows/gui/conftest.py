@@ -1,17 +1,35 @@
 """Real Qt/native simulator ownership for workflow integration contracts."""
 
+import json
+import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from time import monotonic
+from types import TracebackType
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.device import DeviceInfo
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.workflows import (
+    Done,
+    InitEnv,
+    Next,
+    Step,
+    WorkflowEnv,
+    workflow,
+)
 from zcu_tools.gui.remote.control_service import ControlOptions
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import (
     ResultEntry,
     RoleSpec,
@@ -19,14 +37,21 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 
+from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
+from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
+from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab.workflows.mcp import build_workflow_tools
+from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input, library_env
 from ._sim_session import SimSession, connect_tools, wait_owner
+from ._window_support import RpcRequest, WindowTransport, WireRoute
 
 
 @pytest.fixture(scope="session")
@@ -135,57 +160,6 @@ def sim_session(
     finally:
         inputs.soc.set_flux_source(None)
         adapter.stop()
-
-
-import json
-import sys
-from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from pathlib import Path
-from time import monotonic
-from types import TracebackType
-
-import pytest
-from qtpy.QtWidgets import QApplication
-from zcu_tools.device import DeviceInfo
-from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.experiment.workflows import (
-    Done,
-    InitEnv,
-    Next,
-    Step,
-    WorkflowEnv,
-    workflow,
-)
-from zcu_tools.gui.remote.control_service import ControlOptions
-from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.gui.remote.wire import Request
-from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.operation_handles import OperationOutcome
-from zcu_tools.gui.session.services.device import ConnectDeviceRequest
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
-from zcu_tools.mcp.core.stdio_server import ToolTable
-from zcu_tools.resources.entry import (
-    ResultEntry,
-    RoleSpec,
-    component_registry,
-    role_registry,
-)
-
-from tests.gui.app.workflows._start_fakes import StartHarness
-from tests.resources.entry.fakes import registry_state, restore_registry
-from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.components import QubitSchema
-from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.mcp import build_workflow_tools
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
-
-from ._plan_inputs import inline_input, library_env
-from ._window_support import RpcRequest, WindowTransport, WireRoute
 
 
 @pytest.fixture

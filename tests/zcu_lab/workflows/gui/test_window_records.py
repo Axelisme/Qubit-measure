@@ -25,6 +25,10 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._window_scenarios import (
+    assert_figure_render_failure,
+    install_reader_plot_workflow,
+)
 from ._window_support import RpcRequest
 
 
@@ -187,7 +191,6 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     owner_id = get_ident()
     renders: list[int] = []
     figures: list[Figure] = []
-    attempts: list[int] = []
 
     def render(figure: Figure) -> bytes:
         assert figure.get_facecolor() == (0.0, 0.0, 1.0, 1.0)
@@ -197,28 +200,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
 
     monkeypatch.setattr(window_module, "render_figure_png", render)
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
-        return 0
-
-    @workflow("read-plots", plan=T1Plan, tunables=T1Tunables, init=init)
-    def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
-    ) -> Step[int, int]:
-        del plan, tun
-        attempts.append(state)
-        if state == 0:
-            env.plots.subplots("live")
-            env.plots.subplots("reference")
-            env.plots.draw("live", lambda figure: figure.set_facecolor("red"))
-            yield from ()
-            return Next(1, 1)
-        env.plots.draw("live", lambda figure: figure.set_facecolor("blue"))
-        if len(attempts) == 2:
-            window.pause("reader")
-            yield from env.wait_until(env.started_at)
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    install_reader_plot_workflow(window, monkeypatch)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
     assert harness.background.error is None
@@ -243,16 +225,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     assert (error["code"], error["reason"]) == ("invalid_params", "unknown_figure")
     assert len(renders) == 2
 
-    def failed_render(_figure: Figure) -> bytes:
-        raise RuntimeError("Renderer failed")
-
-    monkeypatch.setattr(window_module, "render_figure_png", failed_render)
-    failed = rpc("workflow.figure", {"run_id": "reader", "name": "live"})
-    error = failed["error"]
-    assert failed["ok"] is False and isinstance(error, dict)
-    assert error["code"] == "controller_error" and error["message"] == "Renderer failed"
-    with pytest.raises(RuntimeError, match="Renderer failed"):
-        window.figure_png("reader", "live")
+    assert_figure_render_failure(window, rpc, monkeypatch)
     assert harness.gate.snapshot()
     monkeypatch.setattr(window_module, "render_figure_png", render)
     assert rpc("workflow." + ending, {"run_id": "reader"})["ok"] is True

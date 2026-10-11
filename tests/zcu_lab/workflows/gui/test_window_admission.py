@@ -26,6 +26,8 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._window_scenarios import admission_canceller, install_admission_observer
+
 
 @pytest.mark.parametrize("action", ["stop", "close"])
 @pytest.mark.parametrize("previous_start", [False, True])
@@ -39,21 +41,7 @@ def test_admission_notification_can_cancel_current_start(
 ) -> None:
     window, harness, entry = run_attachment
     fixed = window.controller
-    calls: list[str] = []
-
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
-        calls.append("init")
-
-    @workflow("admission-observer", plan=T1Plan, tunables=T1Tunables, init=init)
-    def observe(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
-    ) -> Step[None, int]:
-        del env, plan, tun, state
-        calls.append("step")
-        yield from ()
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    calls = install_admission_observer(monkeypatch)
     if previous_start:
         assert isinstance(window.start("previous"), int)
         harness.complete_segment()
@@ -63,30 +51,9 @@ def test_admission_notification_can_cancel_current_start(
     if old is not None:
         old.state.write({("guess_us",): 87.0}, old.env)
     old_input = None if old is None else old.state.input.data
-    close_results: list[bool] = []
-    observed: list[tuple[str | None, int | None, bool, bool]] = []
-    errors: list[str] = []
-
-    def cancel_on_notification() -> None:
-        binding = window.controller.binding
-        observed.append(
-            (
-                window.controller.run_id,
-                window.controller.operation_id,
-                window.controller is fixed,
-                binding is not None and binding is not old and binding.engine is None,
-            )
-        )
-        try:
-            window.apply_tunables(
-                "notification", {("guess_us",): 55.0}, actor=Actor("agent", "rpc")
-            )
-        except RuntimeError as error:
-            errors.append(str(error))
-        if action == "close":
-            close_results.append(window.close())
-        else:
-            window.stop("notification")
+    cancel_on_notification, close_results, observed, errors = admission_canceller(
+        window, action, old, fixed
+    )
 
     def cancel_on_register(payload: GateChangedPayload) -> None:
         if payload.active:

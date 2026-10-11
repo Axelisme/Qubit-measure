@@ -24,6 +24,7 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._window_scenarios import install_rpc_pause_workflow
 from ._window_support import RpcRequest
 
 
@@ -110,29 +111,7 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     window, harness, entry = attachment
-    attempts: list[float] = []
-    receipts: list[dict[str, object]] = []
-
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
-        return None
-
-    @workflow("rpc-pause", plan=T1Plan, tunables=T1Tunables, init=init)
-    def step(
-        env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
-        state: None,
-    ) -> Step[None, int]:
-        del plan, tun, state
-        attempts.append(env.context.pi_length_us)
-        env.pbar("rpc-work", 2).set_progress(len(attempts))
-        if len(attempts) == 1:
-            receipts.append(rpc("workflow.pause", {"run_id": "rpc-run"}))
-            assert harness.gate.snapshot()
-            yield from env.wait_until(env.started_at)
-        return Done()
-
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    attempts, receipts = install_rpc_pause_workflow(window, harness, rpc, monkeypatch)
     token = window.start("rpc-run")
     assert isinstance(token, int)
     harness.complete_segment()
