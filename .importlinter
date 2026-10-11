@@ -286,6 +286,17 @@ source_modules =
 forbidden_modules =
     zcu_lab
 
+# ADR-0062: fluxdep science policy stays independent of frontend driving adapters.
+[importlinter:contract:workflow-export-science-no-frontends]
+name = Fluxdep payload policy does not import frontend owners
+type = forbidden
+source_modules =
+    zcu_lab.workflows.export
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+
 # D75: experiment cores remain independent of all GUI attachments and helpers.
 [importlinter:contract:user-core-no-gui]
 name = C15: user experiment cores do not depend on the GUI

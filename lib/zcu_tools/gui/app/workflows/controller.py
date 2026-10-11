@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from threading import RLock
 from typing import TYPE_CHECKING, Literal
 
@@ -23,6 +24,7 @@ from zcu_tools.experiment.workflows import (
     TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.declaration import WorkflowStep
+from zcu_tools.experiment.workflows.exporting import FluxdepExportReport
 from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -32,7 +34,9 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
+from zcu_tools.resources.entry import Origin, SaveLayout
 
+from .exporting import FluxdepExportBinding, FluxdepExportRequest, export_fluxdep_run
 from .tunables import TunablesHost
 
 if TYPE_CHECKING:
@@ -54,6 +58,7 @@ class _Run[F: FormModel, C]:
     engine: Engine[C] | None = None
     settle: SettleFn | None = None
     native_error: Exception | None = None
+    export_binding: FluxdepExportBinding | None = None
 
 
 class WorkflowController[F: FormModel, C]:
@@ -139,6 +144,7 @@ class WorkflowController[F: FormModel, C]:
         identity: RunIdentity,
         ports: EnginePorts[C],
         binding: TunablesHost[F, C],
+        export_binding: FluxdepExportBinding | None = None,
     ) -> int:
         """Publish prepared binding and submit native startup once via Runner.
 
@@ -154,6 +160,9 @@ class WorkflowController[F: FormModel, C]:
         no native files. Stop before worker startup does not create a native run.
         Startup errors retain partial files and deliver the original error.
         The returned token is a receipt, not native acceptance or completion.
+        export_binding optionally captures this run's fixed fluxdep export inputs;
+        its identity must match Start. None leaves export explicitly unsupported.
+        Terminal delivery only captures its UTC finished_at, never writes exports.
         """
         with self._lock:
             if self._run is not None and self._run.phase != "terminal":
@@ -165,7 +174,12 @@ class WorkflowController[F: FormModel, C]:
                 raise RunMismatch(identity.run_id, binding.run_id)
             if binding.engine is not None:
                 raise RuntimeError("Start requires a pending tunables binding")
-            run = _Run(binding)
+            if (
+                export_binding is not None
+                and export_binding.snapshot.identity != identity
+            ):
+                raise ValueError("Export binding identity must match Start identity")
+            run = _Run(binding, export_binding=export_binding)
             self._run = run
 
         def opened(token: int) -> None:
@@ -246,6 +260,13 @@ class WorkflowController[F: FormModel, C]:
         run.phase = "finishing"
         run.settle(outcome)
         run.phase = "terminal"
+        if run.export_binding is not None:
+            run.export_binding = replace(
+                run.export_binding,
+                snapshot=replace(
+                    run.export_binding.snapshot, finished_at=datetime.now(UTC)
+                ),
+            )
         self._notify(status, error)
 
     def _delivered(self, run: _Run[F, C], bg: BgResult, settle: SettleFn) -> None:
@@ -261,6 +282,47 @@ class WorkflowController[F: FormModel, C]:
         """Return current accepted native status; None means no acceptance."""
         engine = self.engine
         return None if engine is None else engine.status()
+
+    def export_fluxdep(
+        self, run_id: str, *, origin: Origin = "gui"
+    ) -> FluxdepExportReport:
+        """Export the current terminal run from its fixed Start binding.
+
+        Call on the host owner thread after native acceptance. Target mismatch
+        raises RunMismatch; pending acceptance raises RuntimeError, absent science
+        binding raises ValueError, and nonterminal raises InvalidRunState. Each
+        call injects a new SaveLayout from captured entry directories and UTC save
+        time. File/ledger failures are reported independently; no native lifecycle,
+        form draft, hardware resource or operation handle is changed. The report
+        has native/Labber paths and diagnostics, plus a separate ledger_error.
+        """
+        self.require_run_id(run_id)
+        run = self._run
+        if run is None or run.engine is None:
+            raise RuntimeError("Export requires an accepted native run")
+        binding = run.export_binding
+        if binding is None:
+            raise ValueError("Workflow has no fluxdep export binding")
+        saved_at = datetime.now(UTC)
+        layout = SaveLayout(
+            result_path=binding.result_path,
+            database_path=binding.database_path,
+            run_id=run_id,
+            point=binding.snapshot.snapshot.point,
+            saved_at=saved_at,
+        )
+        return export_fluxdep_run(
+            run_id,
+            engine=run.engine,
+            request=FluxdepExportRequest(
+                snapshot=binding.snapshot,
+                prepare=binding.prepare,
+                layout=layout,
+                ledger=binding.ledger,
+                origin=origin,
+                saved_at=saved_at,
+            ),
+        )
 
     def require_run_id(self, run_id: str) -> None:
         """Reject absent/stale target with RunMismatch before any side effect."""

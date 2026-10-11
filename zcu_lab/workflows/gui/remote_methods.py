@@ -3,8 +3,8 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-WIRE_VERSION = 1
-GUI_VERSION = 1
+WIRE_VERSION = 2
+GUI_VERSION = 2
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -111,6 +111,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "workflow.resume": MethodSpec(
         5.0,
         "Submit Resume of run_id; operation_id is a pending segment token.",
+        params=(_RUN_ID,),
+    ),
+    "workflow.export_fluxdep": MethodSpec(
+        30.0,
+        "Explicit terminal export: replace merged.h5, create a new Labber file and report independent failures.",
         params=(_RUN_ID,),
     ),
     "workflow.stop": MethodSpec(
