@@ -12,7 +12,6 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
-    EntryDraft,
     EntryInfo,
     PointBindingError,
     PointCreateRequest,
@@ -174,6 +173,7 @@ def test_first_component_publication_initializes_the_alias_default(
     context: ContextService, tmp_path: Path
 ) -> None:
     context.install_entry(_entry(tmp_path))
+    context.new_point(_new_request("working"))
     context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
     context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
@@ -335,7 +335,6 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     context: ContextService,
 ) -> None:
     assert not context.has_context()
-    assert not context.has_draft_context()
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
@@ -362,18 +361,11 @@ def test_entry_commands_without_entry_fail_explicitly(
     assert error.value.reason_code == "no_entry"
 
 
-def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabilities(
+def test_install_entry_preserves_nonparameter_capabilities_without_selecting_point(
     tmp_path: Path,
 ) -> None:
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-    predictor = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
     context = ContextService(
-        SessionState(
-            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
-        ),
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
         alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
@@ -385,13 +377,10 @@ def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabili
     assert info.entry_id == entry.entry_id
     assert info.result_path == entry.result_path
     assert info.database_path == entry.database_path
-    assert current.readiness is ContextReadiness.DRAFT
+    assert current.readiness is ContextReadiness.EMPTY
     assert current.soc is old.soc and current.values is old.values
-    assert current.predictor is predictor
-    assert current.parameters is not None
-    assert current.parameters.roles is None
-    assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
-    assert context.read_context().document().components == {}
+    assert current.parameters is None
+    assert not context.has_context()
     assert context.list_points() == ()
 
 
@@ -425,11 +414,11 @@ def test_cross_entry_ledger_rejects_before_changing_binding(
     entry = _entry(tmp_path)
     other = _entry(tmp_path, "other")
     context.install_entry(entry)
-    before = context.read_context().target
+    before = context.get_session_env()
     with pytest.raises(FailedPreconditionError) as error:
         _entry_command(context, "ledger", other.entry_id)
     assert error.value.reason_code == "entry_not_open"
-    assert context.read_context().target == before
+    assert context.get_session_env() == before
     assert entry.list_points() == [] and other.list_points() == []
 
 
@@ -461,7 +450,7 @@ def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -
         context.install_entry(other)
     info = context.get_entry_info()
     assert info is not None and info.entry_id == first.entry_id
-    assert context.read_context().target == EntryDraft(entry_id=first.entry_id)
+    assert context.get_session_env().parameters is None
     assert assets.paths[-1] == other.database_path / "arb_waveforms"
 
 
@@ -606,7 +595,7 @@ def test_created_point_binding_failure_retains_point_and_previous_binding(
     assert error.value.entry_id == entry.entry_id and error.value.label == "retained"
     assert isinstance(error.value.__cause__, OSError)
     assert entry.list_points() == ["retained"]
-    assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
+    assert context.get_session_env().parameters is None
 
 
 def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
@@ -617,6 +606,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     context.install_entry(entry)
     ledger = context.entry_ledger(entry.entry_id)
     assert ledger.events() == before
+    context.new_point(_new_request("working"))
     context.read_context()
     assert entry.ledger.events() == before
 
@@ -642,7 +632,7 @@ def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
     other = _entry(tmp_path, "other")
     other.new_point("source")
     context.install_entry(entry)
-    before = context.read_context().target
+    before = context.get_session_env()
     before_events = entry.ledger.events()
     other_events = other.ledger.events()
 
@@ -653,7 +643,7 @@ def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
     assert other.list_points() == ["source"]
     assert entry.ledger.events() == before_events
     assert other.ledger.events() == other_events
-    assert context.read_context().target == before
+    assert context.get_session_env() == before
 
 
 def test_publication_facts_observe_installed_state_and_one_context_bump(
@@ -694,15 +684,13 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                 assert env.parameters is None and entry_info is None and sources is None
                 continue
             assert entry_info == info
-            assert env.parameters is not None
-            expected = (
-                EntryDraft(entry_id=info.entry_id)
-                if version == 1
-                else SavedPoint(
+            if version == 1:
+                assert env.parameters is None
+            else:
+                assert env.parameters is not None
+                assert env.parameters.target == SavedPoint(
                     entry_id=info.entry_id, point="first" if version == 2 else "second"
                 )
-            )
-            assert env.parameters.target == expected
             assert sources is not None and sources.sources
             assert env.result_dir == str(info.result_path)
             assert env.database_path == str(info.database_path)
@@ -710,7 +698,7 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                 "" if version == 1 else "first" if version == 2 else "second"
             )
             assert env.readiness is (
-                ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
+                ContextReadiness.EMPTY if version == 1 else ContextReadiness.ACTIVE
             )
     finally:
         subscription.unsubscribe()

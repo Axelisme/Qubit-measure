@@ -197,7 +197,7 @@ class RunService:
         if op.storage is None:
             logger.warning(
                 "Acquired omitted: tab_id=%r has no saved-point storage "
-                "(draft, unbound, missing storage or no native evidence)",
+                "(unbound, missing storage or no native evidence)",
                 op.tab_id,
             )
             return

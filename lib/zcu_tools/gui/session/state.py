@@ -93,7 +93,7 @@ class DeviceState:
 # concurrently-added device is detected, which a per-member glob cannot reveal.
 DEVICE_SET_VERSION_KEY = "devices:__set__"
 
-DEFAULT_LEFT_PANEL_WIDTH = 500
+DEFAULT_LEFT_PANEL_WIDTH = 560
 
 
 @dataclass

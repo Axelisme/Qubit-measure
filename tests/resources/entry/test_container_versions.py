@@ -149,19 +149,6 @@ def test_refresh_minor_rejects_forbidden_data_without_publishing(
         with pytest.raises(ValidationError, match="future"):
             entry.use_point("a")
     assert path.read_bytes() == bad_bytes
-    if isinstance(cached, PointDocument):
-        candidate = cached.model_copy(deep=True)
-        candidate.format_version = "1.7"
-        before = candidate.model_dump()
-        with pytest.raises(ValidationError, match="future"):
-            entry.updated_component(candidate, "S2", strict_kind, {"future": 17})
-        with pytest.raises(ValidationError, match="future"):
-            entry.updated_point(candidate, "S1.timing", {"delay": 1.2, "future": 17})
-        with pytest.raises(ValidationError):
-            entry.updated_point(candidate, "S1.rate", -1.0)
-        assert candidate.model_dump() == before
-        assert snapshot(view) == cached
-        assert path.read_bytes() == bad_bytes
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])

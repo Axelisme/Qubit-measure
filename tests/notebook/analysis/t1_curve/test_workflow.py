@@ -52,14 +52,18 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
     )
     pd.DataFrame(
         {
+            "run_id": ["run-1"],
+            "point": [None],
+            "at": ["2026-10-10T00:00:00Z"],
+            "source": ["manual"],
             "dev_value": [0.0],
             "dev_unit": ["A"],
             "flux_int": [0.5],
             "flux_period": [1.0],
-            "Freq (MHz)": [350.0],
-            "T1 (us)": [40.0],
+            "freq_mhz": [350.0],
+            "t1_us": [40.0],
         }
-    ).to_csv(tmp_path / "samples.csv", index=False)
+    ).to_json(tmp_path / "samples.jsonl", orient="records", lines=True)
 
     ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
 
@@ -91,14 +95,18 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
     )
     pd.DataFrame(
         {
+            "run_id": ["run-1"],
+            "point": [None],
+            "at": ["2026-10-10T00:00:00Z"],
+            "source": ["manual"],
             "dev_value": [0.0],
             "dev_unit": ["A"],
             "flux_int": [0.5],
             "flux_period": [1.0],
-            "Freq (MHz)": [350.0],
-            "T1 (us)": [40.0],
+            "freq_mhz": [350.0],
+            "t1_us": [40.0],
         }
-    ).to_csv(tmp_path / "samples.csv", index=False)
+    ).to_json(tmp_path / "samples.jsonl", orient="records", lines=True)
 
     ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
     purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
@@ -115,8 +123,8 @@ def test_calibrate_t1_flux_filters_finite_rows_and_records_provenance() -> None:
             "dev_unit": ["A", "A", "A"],
             "flux_int": [0.5, 0.5, 0.5],
             "flux_period": [1.0, 1.0, 1.0],
-            "Freq (MHz)": [350.0, 360.0, 370.0],
-            "T1 (us)": [40.0, np.nan, 42.0],
+            "freq_mhz": [350.0, 360.0, 370.0],
+            "t1_us": [40.0, np.nan, 42.0],
         }
     )
     context = _synthetic_context(samples)
@@ -139,9 +147,9 @@ def test_prepare_t1_curve_data_default_keeps_nan_error_points(
             "dev_unit": ["A", "A"],
             "flux_int": [0.5, 0.5],
             "flux_period": [1.0, 1.0],
-            "Freq (MHz)": [350.0, 360.0],
-            "T1 (us)": [40.0, 41.0],
-            "T1err (us)": [np.nan, 0.2],
+            "freq_mhz": [350.0, 360.0],
+            "t1_us": [40.0, 41.0],
+            "t1_err_us": [np.nan, 0.2],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -313,12 +321,16 @@ def test_calculate_purcell_t1_limit_reuses_lru_cache(
     workflow.clear_t1_purcell_cache()
     samples = pd.DataFrame(
         {
+            "run_id": ["run-1"],
+            "point": [None],
+            "at": ["2026-10-10T00:00:00Z"],
+            "source": ["manual"],
             "dev_value": [0.0],
             "dev_unit": ["A"],
             "flux_int": [0.5],
             "flux_period": [1.0],
-            "Freq (MHz)": [350.0],
-            "T1 (us)": [40.0],
+            "freq_mhz": [350.0],
+            "t1_us": [40.0],
         }
     )
     context = _synthetic_context(samples)
@@ -1030,7 +1042,7 @@ def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
     context = T1CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t1_curve",
-        samples_filename="samples.csv",
+        samples_filename="samples.jsonl",
         params=(3.4, 0.9, 0.6),
         flux_half=0.0,
         flux_int=0.5,
@@ -1069,9 +1081,9 @@ def _synthetic_prepared_data() -> T1PreparedData:
             "dev_unit": ["A", "A", "A"],
             "flux_int": [0.5, 0.5, 0.5],
             "flux_period": [1.0, 1.0, 1.0],
-            "Freq (MHz)": curve.f01_mhz,
-            "T1 (us)": 1e-3 * curve.T1_ns,
-            "T1err (us)": 1e-3 * curve.T1err_ns,
+            "freq_mhz": curve.f01_mhz,
+            "t1_us": 1e-3 * curve.T1_ns,
+            "t1_err_us": 1e-3 * curve.T1err_ns,
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -1097,8 +1109,8 @@ def test_calibrate_t1_flux_resolution_provenance_covers_three_sources() -> None:
             "flux": [0.5, np.nan, np.nan],
             "flux_int": [np.nan, 0.5, np.nan],
             "flux_period": [np.nan, 1.0, np.nan],
-            "Freq (MHz)": [350.0, 351.0, 352.0],
-            "T1 (us)": [40.0, 41.0, 42.0],
+            "freq_mhz": [350.0, 351.0, 352.0],
+            "t1_us": [40.0, 41.0, 42.0],
         }
     )
     cal = calibrate_t1_flux(_synthetic_context(samples))
@@ -1117,8 +1129,8 @@ def test_t1_unresolved_flux_rows_fail_fast() -> None:
         {
             "dev_value": [0.0, 0.01],
             "dev_unit": ["V", "V"],
-            "Freq (MHz)": [np.nan, np.nan],
-            "T1 (us)": [40.0, 41.0],
+            "freq_mhz": [np.nan, np.nan],
+            "t1_us": [40.0, 41.0],
         }
     )
     context = _synthetic_context(samples)
@@ -1135,9 +1147,9 @@ def test_t1_rows_with_null_freq_reach_analysis_with_model_f01() -> None:
             "flux": [0.5, np.nan, np.nan],
             "flux_int": [np.nan, 0.5, np.nan],
             "flux_period": [np.nan, 1.0, np.nan],
-            "Freq (MHz)": [np.nan, np.nan, np.nan],
-            "T1 (us)": [40.0, 41.0, 42.0],
-            "T1err (us)": [0.5, 0.5, 0.5],
+            "freq_mhz": [np.nan, np.nan, np.nan],
+            "t1_us": [40.0, 41.0, 42.0],
+            "t1_err_us": [0.5, 0.5, 0.5],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -1166,9 +1178,9 @@ def test_t1_explicit_rows_are_not_auto_corrected(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [40.0, 42.0],
-            "T1err (us)": [0.5, 0.5],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [40.0, 42.0],
+            "t1_err_us": [0.5, 0.5],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -1213,9 +1225,9 @@ def test_t1_integer_equivalent_branches_align_to_same_flux(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [40.0, 42.0],
-            "T1err (us)": [0.5, 0.5],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [40.0, 42.0],
+            "t1_err_us": [0.5, 0.5],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -1251,12 +1263,16 @@ def test_t1_integer_equivalent_branches_align_to_same_flux(
 def test_t1_invalid_analysis_window_fails_fast() -> None:
     samples = pd.DataFrame(
         {
+            "run_id": ["run-1"],
+            "point": [None],
+            "at": ["2026-10-10T00:00:00Z"],
+            "source": ["manual"],
             "dev_value": [0.0],
             "dev_unit": ["A"],
             "flux_int": [0.5],
             "flux_period": [1.0],
-            "Freq (MHz)": [np.nan],
-            "T1 (us)": [40.0],
+            "freq_mhz": [np.nan],
+            "t1_us": [40.0],
         }
     )
     calibration = _synthetic_calibration(samples)
@@ -1277,9 +1293,9 @@ def test_t1_correction_disabled_preserves_raw_flux_and_reports_disabled(
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
             "flux_period": [np.nan, 1.0],
-            "Freq (MHz)": [350.0, 351.0],
-            "T1 (us)": [40.0, 42.0],
-            "T1err (us)": [0.5, 0.5],
+            "freq_mhz": [350.0, 351.0],
+            "t1_us": [40.0, 42.0],
+            "t1_err_us": [0.5, 0.5],
         }
     )
     calibration = _synthetic_calibration(samples)

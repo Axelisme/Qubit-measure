@@ -51,7 +51,6 @@ def _frontend(qapp):
         run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
         analyze_params=object(),
         parameters=None,
-        predictor=None,
     )
     plots = Plots(NonPresentingHost())
     plugin = make_flux_pick_plugin(

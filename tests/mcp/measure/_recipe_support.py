@@ -7,7 +7,7 @@ from typing import Any
 
 from zcu_tools.gui.cfg.reference_key import is_custom_reference_key
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -139,8 +139,8 @@ class LookbackGui:
 
         The recording parameter-read wire below deliberately retains malformed
         values for caller rejection coverage; it does not claim native admission.
-        Formula evaluation uses the native expression owner; bare aliases return
-        their resolved names rather than numbers.
+        Formula evaluation, unlike that wire, uses the real scalar expression owner.
+        Bare aliases return resolved names; arithmetic returns numeric values.
         Direct native model construction requires no process-global registry.
         """
         resonator = ResonatorSchema.model_validate(
@@ -176,7 +176,7 @@ class LookbackGui:
                     format_version="1.0",
                 )
             ),
-            target=EntryDraft(entry_id="recipe-entry"),
+            target=SavedPoint(entry_id="recipe-entry", point="working"),
             roles=None,
         ).bind_aliases((AliasRow("resonator", "R1"), AliasRow("qubit", "Q1")), {})
         return evaluate_scalar_expr(expression, parameters)

@@ -1,7 +1,7 @@
 """Explicit entry composition and remembered session settings.
 
 Entry commands use ResultEntry with injected roots before asking the context
-owner to publish DRAFT. Memento capture/restore only projects preferences and
+owner to leave point unselected. Memento capture/restore only projects preferences and
 remembered devices; it never opens an entry or connects hardware.
 """
 
@@ -182,7 +182,7 @@ class ProjectSettingsService:
         return self._entry_names
 
     def open_entry(self, request: EntryRequest) -> EntryInfo:
-        """Open a resource-validated entry and install DRAFT without hardware.
+        """Open and install a resource-validated entry without selecting a point or touching hardware.
 
         Only successful installation remembers the entry name and updates cache.
         Resource/installation errors propagate, preserving previous preferences.
@@ -196,7 +196,7 @@ class ProjectSettingsService:
         return self._install_entry(entry)
 
     def new_entry(self, request: EntryRequest) -> EntryInfo:
-        """Create and install an entry as DRAFT, without selecting a point.
+        """Create and install an entry without selecting a point.
 
         Resource errors propagate. Installation failure retains the created
         entry and raises RuntimeError from its cause, naming Open as recovery.

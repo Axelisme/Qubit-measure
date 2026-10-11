@@ -10,7 +10,7 @@ from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, RunRequest, Sessio
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_resolved_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -64,7 +64,7 @@ def test_allxy_default_form_lowers_to_core_cfg() -> None:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=None,
     ).bind_aliases(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
@@ -114,7 +114,6 @@ def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
                 record,
                 AllXYAnalyzeParams(fit_ge=fit_ge),
                 parameters=None,
-                predictor=None,
             ),
             plots=plots,
         )

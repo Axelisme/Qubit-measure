@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
-from math import isfinite
 from pathlib import Path
 from typing import Generic, TypeVar
 from uuid import uuid4
@@ -12,6 +11,7 @@ from uuid import uuid4
 from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 
+from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
 from zcu_tools.datafile import AnalysisDocument, RunMetadata, RunSnapshot
 from zcu_tools.experiment import (
     AcquisitionEvidence,
@@ -30,17 +30,22 @@ from zcu_tools.experiment.run_saving import (
     save_artifacts,
 )
 from zcu_tools.resources.entry import (
-    AcceptedPayload,
-    AcceptedWrite,
     AcquiredPayload,
     ArtifactKey,
     JsonObject,
     JsonValue,
     LedgerEvent,
+    ModuleWriteback,
+    ParameterWriteback,
     PointView,
-    Provenance,
+    PointWritebackTarget,
     RoleView,
+    SampleWriteback,
     SaveLayout,
+    WaveformWriteback,
+    WritebackEvidence,
+    WritebackItem,
+    apply_writeback,
     capture_point_storage,
     resolve_path,
     snapshot,
@@ -213,73 +218,66 @@ class SavedRun(Generic[CfgT, ResultT]):
 
     def accept(
         self,
-        values: Mapping[str, JsonValue | tuple[JsonValue, float | None]],
         *,
-        kind: str,
-        analysis_params: JsonObject | None = None,
+        parameter: Mapping[
+            str, JsonValue | complex | tuple[JsonValue | complex, float | None]
+        ]
+        | None = None,
+        module: Mapping[str, ModuleSpec] | None = None,
+        waveform: Mapping[str, WaveformSpec] | None = None,
+        samples: Mapping[str, JsonObject] | None = None,
     ) -> str:
-        """Append accepted evidence, then commit values to this run's bound point.
+        """Accept results into this run's captured point, library and samples.
 
-        values maps ordinary dotted point paths to working-unit JSON values, or
-        (value, stderr) pairs. stderr is finite and non-negative; None is unknown.
-        Expand role prefixes with the names captured by save_run. kind must be a
-        nonempty string, values nonempty, and analysis_params a strict JSON object
-        or None. Store supplied analysis_params as the event's analysis_summary.
+        parameter maps dotted point paths to working-unit JSON/complex values
+        or (value, stderr) pairs; stderr is finite, non-negative or None for
+        unknown. module and waveform map library keys to named persistent Specs,
+        not raw dictionaries. Parameter and library paths expand only their
+        first segment using this run's captured roles. At least one mapping
+        must be nonempty.
+        samples maps concrete component names (not role aliases) to JSON field
+        dictionaries. Device fields and units are optional and preserved as
+        provided; the caller owns their consistency. Only run_id, point, UTC at
+        and source are set automatically, overriding these keys if supplied.
+        No live aliases, device state or cfg are consulted for sample values.
 
-        Append a typed accepted event with this run_id before point.edit/set.
-        Write each value and its provenance in one point edit; do not prevalidate
-        a candidate or promise a cross-file transaction. Return the event id only
-        after successful commit. Input, ledger, schema, custom validation,
-        conflict and I/O errors propagate unchanged. A failed point edit may
-        leave an unreferenced accepted event; there is no retry or recovery.
+        Append one accepted event, then apply parameter, module, waveform and
+        samples in that order, preserving each mapping's iteration order.
+        Each item commits separately. An item failure raises WritebackApplyError
+        with event_id/applied and the original cause; ledger append fails unchanged.
+        The first failure stops later writes; prior successful items
+        and the event remain. No cross-item rollback or retry is provided.
+        Provenance kind is this run's experiment name, never caller-supplied.
+        Return the accepted event ID after all items succeed.
         """
-        kind = TypeAdapter(str).validate_python(kind, strict=True)
-        if not kind.strip():
-            raise ValueError("kind must be nonempty")
-        if not values:
-            raise ValueError("values must be nonempty")
+        if not parameter and not module and not waveform and not samples:
+            raise ValueError("accept requires at least one nonempty mapping")
         document = snapshot(self._point)
-        writes: list[tuple[AcceptedWrite, float | None]] = []
-        for path, item in values.items():
+        items: list[WritebackItem] = []
+        for path, item in (parameter or {}).items():
             if isinstance(item, tuple):
                 value, stderr = item
             else:
                 value, stderr = item, None
-            if stderr is not None:
-                stderr = TypeAdapter(float).validate_python(stderr, strict=True)
-                if not isfinite(stderr) or stderr < 0:
-                    raise ValueError("stderr must be finite and non-negative, or None")
-            actual_path = resolve_path(
-                document, path, roles=self._metadata.snapshot.roles
-            )
-            writes.append((AcceptedWrite(path=actual_path, value=value), stderr))
-        event = LedgerEvent(
-            id=str(uuid4()),
-            kind="accepted",
-            at=datetime.now(UTC).isoformat(),
-            entry_id=str(self._storage.entry_id),
-            origin="notebook",
-            payload=AcceptedPayload(
-                writes=tuple(write for write, _ in writes),
-                analysis_summary=analysis_params if analysis_params is not None else {},
+            actual_path = resolve_path(document, path, roles=self._storage.roles)
+            items.append(ParameterWriteback(actual_path, value, stderr))
+        for path, spec in (module or {}).items():
+            actual_path = resolve_path(document, path, roles=self._storage.roles)
+            items.append(ModuleWriteback(actual_path, spec))
+        for path, spec in (waveform or {}).items():
+            actual_path = resolve_path(document, path, roles=self._storage.roles)
+            items.append(WaveformWriteback(actual_path, spec))
+        for component, fields in (samples or {}).items():
+            items.append(SampleWriteback(component, fields))
+        return apply_writeback(
+            tuple(items),
+            target=PointWritebackTarget(self._point, self._storage),
+            evidence=WritebackEvidence(
+                kind=self._metadata.experiment,
                 run_id=self.run_id,
+                origin="notebook",
             ),
         )
-        self._storage.ledger.append(event)
-        with self._point.edit() as draft:
-            for write, stderr in writes:
-                draft.set(
-                    write.path,
-                    write.value,
-                    provenance=Provenance(
-                        source=event.id,
-                        kind=kind,
-                        run_id=self.run_id,
-                        at=event.at,
-                        stderr=stderr,
-                    ),
-                )
-        return event.id
 
     def _artifacts(self) -> tuple[SaveArtifact, ...]:
         artifacts = [

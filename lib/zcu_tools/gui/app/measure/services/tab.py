@@ -26,6 +26,7 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
+from .writeback import WritebackDraft
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ class TabService:
                 result=tab.analysis.result,
                 figures=tab.analysis.plots,
                 writeback_items=analysis_items,
+                unavailable_reasons=(
+                    tab.analysis.writeback_draft.unavailable_reasons
+                    if isinstance(tab.analysis.writeback_draft, WritebackDraft)
+                    else ()
+                ),
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
                 source_operation_id=tab.analysis.source_operation_id,
                 result_params=tab.analysis.result_params,
@@ -180,6 +186,11 @@ class TabService:
                 result=tab.post_analysis.result,
                 figures=tab.post_analysis.plots,
                 writeback_items=post_items,
+                unavailable_reasons=(
+                    tab.post_analysis.writeback_draft.unavailable_reasons
+                    if isinstance(tab.post_analysis.writeback_draft, WritebackDraft)
+                    else ()
+                ),
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
                 source_operation_id=tab.post_analysis.source_operation_id,
                 result_params=tab.post_analysis.result_params,

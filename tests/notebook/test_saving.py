@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import h5py
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg, DirectReadoutCfg, PulseSpec
 from zcu_tools.datafile import (
     AnalysisDocument,
     SoftwareProvenance,
@@ -39,6 +40,7 @@ from zcu_tools.resources.entry import (
     role_registry,
     snapshot,
     source_path,
+    writeback,
 )
 from zcu_tools.resources.entry.schema import PointDocument
 
@@ -617,18 +619,15 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert load_run_data(native).metadata.snapshot.roles == {"notebook_target": "D1"}
     assert acquired_payload(ledger).roles == {"notebook_target": "D1"}
     event_id = saved.accept(
-        {
+        parameter={
             "notebook_target.rate": (1250.0, stderr),
             "general.description": "accepted fit",
         },
-        kind="frequency",
-        analysis_params={"skip": 2},
     )
     event = ledger.get(event_id).event
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id == saved.run_id
-    assert event.payload.analysis_summary == {"skip": 2}
     assert [(write.path, write.value) for write in event.payload.writes] == [
         ("D1.rate", 1250.0),
         ("general.description", "accepted fit"),
@@ -641,7 +640,7 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert metadata is not None
     assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
         event_id,
-        "frequency",
+        "test/saving",
         saved.run_id,
         event.at,
     )
@@ -659,14 +658,13 @@ def test_accept_preserves_json_containers_and_unknown_stderr(
     source = exp.run(SavingCfg())
     saved = exp.save_run(point, source=source)
     event_id = saved.accept(
-        {"general.ext": ({"series": [1, 2], "optional": None}, None)}, kind="fit"
+        parameter={"general.ext": ({"series": [1, 2], "optional": None}, None)}
     )
     point.refresh()
     assert point.general.ext.series == [1, 2]
     assert point.general.ext.optional is None
     event = ledger.get(event_id).event
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.analysis_summary == {}
     assert event.payload.writes[0].value == {"series": [1, 2], "optional": None}
     metadata = point.meta("general.ext.series")
     assert metadata is not None
@@ -689,7 +687,7 @@ def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
     other_point = entry.new_point("other", description="untouched")
     next_source = exp.run(SavingCfg(gain=3.0))
     next_saved = exp.save_run(other_point, source=next_source)
-    event_id = saved.accept({"notebook_target.rate": 1500.0}, kind="frequency")
+    event_id = saved.accept(parameter={"notebook_target.rate": 1500.0})
     assert accept_point.D1.rate == 1500.0
     assert accept_point.D2.rate == 2000.0
     assert other_point.description == "untouched"
@@ -700,23 +698,20 @@ def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
 
 
 @pytest.mark.parametrize(
-    ("values", "kind", "message"),
+    ("values", "message"),
     [
-        ({}, "fit", "values"),
-        ({"general.description": "fit"}, "", "kind"),
-        ({"general.description": "fit"}, "   ", "kind"),
-        ({"general.flux_value": float("nan")}, "fit", "strict JSON"),
-        ({"general.flux_value": float("inf")}, "fit", "strict JSON"),
-        ({"general.flux_value": (1.0, -0.1)}, "fit", "stderr"),
-        ({"general.flux_value": (1.0, float("nan"))}, "fit", "stderr"),
-        ({"general.flux_value": (1.0, float("inf"))}, "fit", "stderr"),
+        ({}, "nonempty"),
+        ({"general.ext.flux_value": float("nan")}, "strict JSON"),
+        ({"general.ext.flux_value": float("inf")}, "strict JSON"),
+        ({"general.ext.flux_value": (1.0, -0.1)}, "stderr"),
+        ({"general.ext.flux_value": (1.0, float("nan"))}, "stderr"),
+        ({"general.ext.flux_value": (1.0, float("inf"))}, "stderr"),
     ],
 )
 def test_accept_rejects_invalid_input_without_point_writes(
     point: PointView,
     ledger: RecordsLedger,
     values: Mapping[str, JsonValue | tuple[JsonValue, float | None]],
-    kind: str,
     message: str,
 ) -> None:
     exp = experiment()
@@ -725,35 +720,49 @@ def test_accept_rejects_invalid_input_without_point_writes(
     before = ledger.events()
     before_point = snapshot(point)
     with pytest.raises(ValueError, match=message):
-        saved.accept(values, kind=kind)
+        saved.accept(parameter=values)
     assert ledger.events() == before
     assert point.description == "save-time context"
     assert snapshot(point) == before_point
 
 
-def test_accept_schema_failure_keeps_event_and_rolls_back_point_edit(
+def test_accept_schema_failure_keeps_event_and_prior_writes_and_stops(
     accept_point: PointView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(accept_point, source=source)
     before_source = accept_point.meta("D1.rate")
-    before_point = snapshot(accept_point)
-    with pytest.raises(ValueError, match="rate"):
+    with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
-            {"general.description": "candidate", "D1.rate": "not a number"},
-            kind="frequency",
+            parameter={
+                "general.description": "candidate",
+                "D1.rate": "not a number",
+                "D2.rate": 3000.0,
+            },
+            module={"D1.pulses.pi": pulse_spec()},
         )
     event = ledger.events()[-1]
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id == saved.run_id
-    assert event.payload.writes[-1].value == "not a number"
+    assert event.payload.writes[1].value == "not a number"
+    assert caught.value.event_id == event.id
+    assert caught.value.applied == 1
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "rate" in str(caught.value.__cause__)
     accept_point.refresh()
-    assert accept_point.description == "save-time context"
+    assert accept_point.description == "candidate"
     assert accept_point.D1.rate == 1000.0
+    assert accept_point.D2.rate == 2000.0
     assert accept_point.meta("D1.rate") == before_source
-    assert snapshot(accept_point) == before_point
+    binding = capture_point_storage(accept_point)
+    entry = ResultEntry.open(
+        binding.entry_name,
+        result_root=binding.result_path.parent,
+        database_root=binding.database_path.parent,
+    )
+    assert entry.module_library(binding.point).snapshot().module_keys() == ()
 
 
 def test_accept_commit_validator_error_propagates_and_keeps_event(
@@ -781,9 +790,11 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     source = exp.run(SavingCfg())
     saved = exp.save_run(bound, source=source)
     before_point = snapshot(bound)
-    with pytest.raises(RuntimeError, match="point validation rejected") as caught:
-        saved.accept({"general.description": "candidate"}, kind="fit")
-    assert caught.value is failure
+    with pytest.raises(writeback.WritebackApplyError) as caught:
+        saved.accept(parameter={"general.description": "candidate"})
+    assert caught.value.__cause__ is failure
+    assert caught.value.applied == 0
+    assert caught.value.event_id == ledger.events()[-1].id
     assert ledger.events()[-1].kind == "accepted"
     bound.refresh()
     assert bound.description == "save-time context"
@@ -791,46 +802,151 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
 
 
 def test_accept_ledger_error_propagates_without_point_writes(
-    point: PointView, ledger: RecordsLedger, monkeypatch: pytest.MonkeyPatch
+    point: PointView, tmp_path: Path
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(point, source=source)
-    before = ledger.events()
     before_point = snapshot(point)
-    original = RecordsLedger.append
-    failure = OSError("accepted ledger unavailable")
-
-    def reject_accepted(
-        self: RecordsLedger, event: LedgerEvent, *, record: JsonObject | None = None
-    ) -> None:
-        if event.kind == "accepted":
-            raise failure
-        original(self, event, record=record)
-
-    monkeypatch.setattr(RecordsLedger, "append", reject_accepted)
-    with pytest.raises(OSError, match="accepted ledger unavailable") as caught:
-        saved.accept({"general.description": "candidate"}, kind="fit")
-    assert caught.value is failure
-    assert ledger.events() == before
+    path = tmp_path / "results" / "entry" / "records" / "ledger.jsonl"
+    path.unlink()
+    path.mkdir()
+    with pytest.raises(IsADirectoryError):
+        saved.accept(parameter={"general.description": "candidate"})
     point.refresh()
     assert point.description == "save-time context"
     assert snapshot(point) == before_point
 
 
-def test_accept_rejects_non_json_analysis_parameters(
-    point: PointView, ledger: RecordsLedger
+def pulse_spec(*, gain: float = 0.25) -> PulseSpec:
+    return PulseSpec(
+        ch=0, nqz=1, freq=100.0, gain=gain, waveform=ConstWaveformCfg(length=0.05)
+    )
+
+
+def test_accept_writes_parameter_module_waveform_with_one_event(
+    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
-    saved = exp.save_run(point, source=source)
-    before = ledger.events()
-    before_point = snapshot(point)
-    with pytest.raises(ValueError, match="strict JSON"):
-        saved.accept(
-            {"general.description": "candidate"},
-            kind="fit",
-            analysis_params={"skip": float("nan")},
+    saved = exp.save_run(
+        accept_point,
+        source=source,
+        roles=accept_point.resolve(("notebook_target",), notebook_target="D1"),
+    )
+    # Later role resolutions and acquisitions cannot retarget the saved handle.
+    accept_point.resolve(("notebook_target",), notebook_target="D2")
+    exp.run(SavingCfg(gain=2.0))
+    pulse = pulse_spec()
+    waveform = ConstWaveformCfg(length=0.075)
+    before = len(ledger.events())
+    event_id = saved.accept(
+        parameter={"notebook_target.rate": (1500.0, 0.5)},
+        module={"notebook_target.pulses.pi": pulse},
+        waveform={"notebook_target.waveforms.base": waveform},
+    )
+    assert len(ledger.events()) == before + 1
+    event = ledger.get(event_id).event
+    assert isinstance(event.payload, AcceptedPayload)
+    assert [(w.path, w.value) for w in event.payload.writes] == [
+        ("D1.rate", 1500.0),
+        ("D1.pulses.pi", pulse.to_dict()),
+        ("D1.waveforms.base", waveform.to_dict()),
+    ]
+    assert event.origin == "notebook"
+    assert event.payload.run_id == saved.run_id
+    assert event.payload.source is None
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    library = entry.module_library("sweet").snapshot()
+    assert library.module_spec("D1.pulses.pi") == pulse
+    assert library.waveform_spec("D1.waveforms.base") == waveform
+    assert accept_point.D1.rate == 1500.0
+    for metadata in (
+        accept_point.meta("D1.rate"),
+        library.meta("D1.pulses.pi.gain"),
+        library.meta("D1.waveforms.base.length"),
+    ):
+        assert metadata is not None
+        assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
+            event_id,
+            "test/saving",
+            saved.run_id,
+            event.at,
         )
+    module_meta = library.meta("D1.pulses.pi.gain")
+    rate_meta = accept_point.meta("D1.rate")
+    assert module_meta is not None and module_meta.stderr is None
+    assert rate_meta is not None and rate_meta.stderr == 0.5
+
+
+@pytest.mark.parametrize("family", ["module", "waveform"])
+def test_accept_library_only_is_nonempty(
+    accept_point: PointView, tmp_path: Path, family: str
+) -> None:
+    exp = experiment()
+    saved = exp.save_run(accept_point, source=exp.run(SavingCfg()))
+    if family == "module":
+        saved.accept(module={"D1.pulses.pi": pulse_spec()})
+    else:
+        saved.accept(waveform={"D1.waveforms.base": ConstWaveformCfg(length=0.1)})
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    library = entry.module_library("sweet").snapshot()
+    if family == "module":
+        assert library.module_keys() == ("D1.pulses.pi",)
+    else:
+        assert library.waveform_keys() == ("D1.waveforms.base",)
+
+
+def test_accept_library_failure_keeps_prior_commits_and_stops(
+    accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    saved = exp.save_run(accept_point, source=exp.run(SavingCfg()))
+    before = len(ledger.events())
+    with pytest.raises(writeback.WritebackApplyError) as caught:
+        saved.accept(
+            parameter={"D1.rate": 1700.0},
+            module={
+                "D1.pulses.good": pulse_spec(),
+                "D1.pulses.bad": DirectReadoutCfg(
+                    ro_ch=0, ro_length=0.1, ro_freq=100.0
+                ),
+                "D1.pulses.later": pulse_spec(gain=0.5),
+            },
+            waveform={"D1.waveforms.later": ConstWaveformCfg(length=0.1)},
+        )
+    assert len(ledger.events()) == before + 1
+    accept_point.refresh()
+    assert accept_point.D1.rate == 1700.0
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    library = entry.module_library("sweet").snapshot()
+    assert library.module_keys() == ("D1.pulses.good",)
+    assert caught.value.event_id == ledger.events()[-1].id
+    assert caught.value.applied == 2
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert "Wrong module family" in str(caught.value.__cause__)
+    assert library.waveform_keys() == ()
+    rate_meta = accept_point.meta("D1.rate")
+    module_meta = library.meta("D1.pulses.good.gain")
+    assert rate_meta is not None and rate_meta.source == ledger.events()[-1].id
+    assert module_meta is not None and module_meta.source == ledger.events()[-1].id
+
+
+def test_accept_rejects_empty_writeback_before_ledger(
+    point: PointView, ledger: RecordsLedger
+) -> None:
+    exp = experiment()
+    saved = exp.save_run(point, source=exp.run(SavingCfg()))
+    before = ledger.events()
+    with pytest.raises(ValueError, match="nonempty"):
+        saved.accept()
+    with pytest.raises(ValueError, match="nonempty"):
+        saved.accept(parameter={}, module={}, waveform={}, samples={})
     assert ledger.events() == before
-    assert snapshot(point) == before_point
+    assert point.description == "save-time context"

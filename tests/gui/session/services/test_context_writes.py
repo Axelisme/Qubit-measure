@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -16,7 +17,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
-    EntryDraft,
     PointUseRequest,
     SavedPoint,
 )
@@ -146,24 +146,13 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert events == []
 
 
-def test_read_target_draft_rejects_replaced_memory_context(session: _Session) -> None:
-    draft = session.control.read_context().target
-    session.control.set_parameter(draft, "general.ext.flux_value", 0.2)
-    assert session.control.read_target(draft).value("general.ext.flux_value") == 0.2
-    selected = _select(session, "a")
-    with pytest.raises(FailedPreconditionError) as error:
-        session.control.read_target(draft)
-    assert error.value.reason_code == "draft_not_selected"
-    assert session.control.read_context().target == selected
-
-
 def test_read_target_rejects_other_entries(session: _Session) -> None:
     target = SavedPoint(entry_id="other", point="a")
-    before = session.control.read_context()
+    before = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(target)
     assert error.value.reason_code == "entry_not_open"
-    assert session.control.read_context().document() == before.document()
+    assert session.state.session_env == before
 
 
 def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
@@ -184,7 +173,6 @@ def _source(entry: ResultEntry) -> Provenance:
             origin="gui",
             payload=AcceptedPayload(
                 writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
-                analysis_summary={},
             ),
         )
     )
@@ -204,12 +192,11 @@ def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 @pytest.mark.parametrize("explicit_source", [False, True], ids=["manual", "accepted"])
 def test_target_setters_preserve_source_and_old_capture(
-    session: _Session, kind: Kind, saved: bool, explicit_source: bool
+    session: _Session, kind: Kind, explicit_source: bool
 ) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     capture = session.control.read_context()
     old_document = capture.document()
     old_library = capture.library.document()
@@ -228,12 +215,7 @@ def test_target_setters_preserve_source_and_old_capture(
     assert current.document().general.created_at == created_at
     assert capture.document() == old_document
     assert capture.library.document() == old_library
-    if saved:
-        assert isinstance(target, SavedPoint)
-        assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
-    else:
-        assert session.entry.list_points() == []
-        assert list((session.entry.result_path / "points").iterdir()) == []
+    assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -263,49 +245,28 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_cross_entry_target_rejected_before_any_write(
-    session: _Session, tmp_path: Path, kind: Kind, saved: bool
+    session: _Session, tmp_path: Path, kind: Kind
 ) -> None:
-    old_target = (
-        _select(session, "a") if saved else session.control.read_context().target
-    )
+    old_target = _select(session, "a")
     other = ResultEntry.create(
         "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
     session.service.install_entry(other)
-    current = session.control.read_context()
+    current = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         _write(session.control, old_target, kind, 0.2)
     assert error.value.reason_code == "entry_not_open"
-    assert session.control.read_context().document() == current.document()
-    assert session.entry.list_points() == (["a"] if saved else [])
+    assert session.state.session_env == current
+    assert session.entry.list_points() == ["a"]
     assert other.list_points() == []
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_saved_selection_rejects_old_draft_without_retargeting(
+def test_invalid_source_keeps_projection_and_version(
     session: _Session, kind: Kind
 ) -> None:
-    draft = session.control.read_context().target
-    assert isinstance(draft, EntryDraft)
     target = _select(session, "a")
-    capture = session.control.read_context()
-    with pytest.raises(FailedPreconditionError):
-        _write(session.control, draft, kind, 0.2)
-    assert session.control.read_context().target == target
-    assert session.control.read_context().document() == capture.document()
-    assert (
-        session.control.read_context().library.document() == capture.library.document()
-    )
-
-
-@pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
-def test_invalid_source_keeps_projection_and_version(
-    session: _Session, kind: Kind, saved: bool
-) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
     capture = session.control.read_context()
     version = session.state.version.get("context")
     bad = Provenance(str(uuid4()), "fit", None, AT, 0.01)
@@ -319,11 +280,8 @@ def test_invalid_source_keeps_projection_and_version(
     assert session.state.version.get("context") == version
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
-def test_invalid_parameter_schema_is_not_published(
-    session: _Session, saved: bool
-) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+def test_invalid_parameter_schema_is_not_published(session: _Session) -> None:
+    target = _select(session, "a")
     capture = session.control.read_context()
     with pytest.raises(ValidationError, match="created_at"):
         session.control.set_parameter(target, "general.created_at", "bad-time")
@@ -362,15 +320,11 @@ def test_current_write_notifies_after_installation_without_switching_binding(
     assert session.control.get_source_binding() == binding
 
 
-@pytest.mark.parametrize("selected", ["point", "draft"])
 def test_detached_description_write_updates_cache_without_changing_selected_source(
-    session: _Session, selected: Literal["point", "draft"]
+    session: _Session,
 ) -> None:
     first = _select(session, "a")
-    if selected == "point":
-        _select(session, "b")
-    else:
-        session.service.install_entry(session.entry)
+    _select(session, "b")
     before = session.control.read_context()
     version = session.state.version.get("context")
     binding = session.control.get_source_binding()
@@ -461,11 +415,12 @@ def test_missing_saved_point_is_not_created_by_setter(
     session: _Session,
     kind: Kind,
 ) -> None:
+    _select(session, "selected")
     target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
     capture = session.control.read_context()
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
-    assert session.entry.list_points() == []
+    assert session.entry.list_points() == ["selected"]
     assert session.control.read_context().document() == capture.document()
     assert (
         session.control.read_context().library.document() == capture.library.document()
@@ -473,13 +428,11 @@ def test_missing_saved_point_is_not_created_by_setter(
 
 
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_wrong_path_or_library_partition_keeps_publication(
     session: _Session,
     kind: Kind,
-    saved: bool,
 ) -> None:
-    target = _select(session, "a") if saved else session.control.read_context().target
+    target = _select(session, "a")
     capture = session.control.read_context()
     path = {
         "parameter": "unknown.field",
@@ -492,3 +445,196 @@ def test_wrong_path_or_library_partition_keeps_publication(
     assert (
         session.control.read_context().library.document() == capture.library.document()
     )
+
+
+def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
+    session: _Session,
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a")
+    events: list[object] = []
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    before = session.state.version.get("context")
+    with pytest.raises(writeback.WritebackApplyError) as caught:
+        session.control.apply_writeback(
+            target,
+            (
+                writeback.WaveformWriteback(
+                    "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+                ),
+                writeback.ParameterWriteback("general.description", "retained", 0.2),
+                writeback.ParameterWriteback("general.description", 42),
+                writeback.ParameterWriteback("general.ext.later", 3.0),
+            ),
+            evidence=writeback.WritebackEvidence(
+                kind="test/ordered", origin="gui", run_id="run-1"
+            ),
+        )
+    error = caught.value
+    assert error.applied == 2
+    assert isinstance(error.__cause__, ValueError)
+    event = session.entry.ledger.get(error.event_id).event
+    assert event.kind == "accepted"
+    current = session.control.read_target(target)
+    assert current.value("general.description") == "retained"
+    assert not current.lookup("general.ext.later").present
+    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
+        length=0.1
+    )
+    meta = current.meta("general.description")
+    assert meta is not None
+    assert (meta.source, meta.kind, meta.run_id, meta.stderr) == (
+        error.event_id,
+        "test/ordered",
+        "run-1",
+        0.2,
+    )
+    assert [type(item) for item in events] == [MlChangedPayload, MdChangedPayload]
+    assert session.state.version.get("context") == before + 2
+    assert session.entry.use_point("a").description == "retained"
+
+
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+@pytest.mark.parametrize("stderr", [-0.1, float("inf")])
+def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
+    session: _Session, kind: str, stderr: float
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a")
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+    waveform = ConstWaveformCfg(length=0.1)
+    item = (
+        writeback.ModuleWriteback(
+            "Q1.pulses.pi",
+            PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=waveform),
+            stderr=stderr,
+        )
+        if kind == "module"
+        else writeback.WaveformWriteback("Q1.waveforms.base", waveform, stderr=stderr)
+    )
+    with pytest.raises(ValueError, match="stderr"):
+        session.control.apply_writeback(
+            target,
+            (item,),
+            evidence=writeback.WritebackEvidence(kind="test/uncertainty", origin="gui"),
+        )
+    assert session.entry.ledger.events() == ()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
+    )
+    assert session.state.version.get("context") == version
+
+
+def test_shared_writeback_entry_uses_detached_saved_target(
+    session: _Session,
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    first = _select(session, "a")
+    second = _select(session, "b")
+    version = session.state.version.get("context")
+    item = writeback.ParameterWriteback("general.description", "detached")
+    evidence = writeback.WritebackEvidence(kind="test/fixed", origin="mcp")
+    event_id = session.control.apply_writeback(first, (item,), evidence=evidence)
+    assert session.entry.use_point("a").description == "detached"
+    assert session.control.read_context().target == second
+    assert session.state.version.get("context") == version
+    assert session.entry.ledger.get(event_id).event.origin == "mcp"
+
+
+@pytest.mark.parametrize(
+    ("label", "error_type"),
+    [("missing", FileNotFoundError), ("../outside", ValueError)],
+    ids=["missing", "invalid-label"],
+)
+def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
+    session: _Session, label: str, error_type: type[Exception]
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    selected = _select(session, "a")
+    capture = session.control.read_context()
+    points = session.entry.list_points()
+    point_before = snapshot(session.entry.use_point("a")).model_dump(mode="json")
+    version = session.state.version.get("context")
+    target = SavedPoint(entry_id=session.entry.entry_id, point=label)
+
+    with pytest.raises(error_type):
+        session.service.apply_writeback(
+            target,
+            (writeback.SampleWriteback("Q1", {"t1_us": 50}),),
+            evidence=writeback.WritebackEvidence(
+                kind="test/sample", origin="gui", run_id="run-1"
+            ),
+        )
+
+    assert session.entry.ledger.events() == ()
+    assert session.entry.samples("Q1").read().empty
+    assert session.entry.list_points() == points
+    current = session.control.read_context()
+    assert current.target == selected
+    assert current.document() == capture.document()
+    assert current.library.document() == capture.library.document()
+    assert (
+        snapshot(session.entry.use_point("a")).model_dump(mode="json") == point_before
+    )
+    assert session.state.version.get("context") == version
+
+
+def test_saved_point_samples_persist_and_replace_latest_run_row(
+    session: _Session,
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a")
+    event_id = session.control.apply_writeback(
+        target,
+        (
+            writeback.SampleWriteback(
+                "Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}
+            ),
+            writeback.ParameterWriteback("general.description", "draft value"),
+        ),
+        evidence=writeback.WritebackEvidence(
+            kind="test/sample", origin="gui", run_id="run-1"
+        ),
+    )
+    event = session.entry.ledger.get(event_id).event
+    row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
+    expected = {
+        "t1_us": 20.09,
+        "dev_value": 0.125,
+        "dev_unit": "native",
+        "run_id": "run-1",
+        "point": "a",
+        "at": row["at"],
+        "source": event_id,
+    }
+    assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
+    assert session.control.read_sample(target, "Q1", "run-1") == expected
+    assert session.control.read_sample(target, "Q1", "missing") is None
+    second_id = session.control.apply_writeback(
+        session.control.read_context().target,
+        (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
+        evidence=writeback.WritebackEvidence(
+            kind="test/sample", origin="gui", run_id="run-1"
+        ),
+    )
+    second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(
+        session.entry.ledger.get(second_id).event.at
+    )
+    assert session.control.read_sample(
+        session.control.read_context().target, "Q1", "run-1"
+    ) == {
+        "t1_us": 31.7,
+        "run_id": "run-1",
+        "point": "a",
+        "at": second_row["at"],
+        "source": second_id,
+    }

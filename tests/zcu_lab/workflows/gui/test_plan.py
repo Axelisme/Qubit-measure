@@ -11,7 +11,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import ModularProgramV2, SweepCfg
@@ -57,8 +57,9 @@ def captured_pi_env(inputs: Inputs) -> Iterator[FormEnv]:
                 }
             ),
             library=library,
-            target=EntryDraft(entry_id="entry"),
+            target=SavedPoint(entry_id="entry", point="synthetic"),
             roles=None,
+            storage=None,
         )
         parameters = parameters.bind_aliases(
             (AliasRow("qubit", "Q1"),), {"qubit": RoleSpec(kind)}

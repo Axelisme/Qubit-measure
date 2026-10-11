@@ -163,7 +163,6 @@ def test_accept_source_attaches_staged_value_without_rerunning_model_hooks(
                 origin="notebook",
                 payload=AcceptedPayload(
                     writes=(AcceptedWrite(path="N1.wiring.delay", value=0.4),),
-                    analysis_summary={},
                 ),
             )
             entry.ledger.append(event)

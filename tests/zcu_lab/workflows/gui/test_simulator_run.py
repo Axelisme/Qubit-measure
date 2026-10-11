@@ -3,13 +3,12 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
-from threading import get_ident
+from threading import Event, get_ident
 
 import numpy as np
 import pytest
-from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QApplication
-from zcu_tools.device.fake import FakeDevice
+from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import CommittedRecord, TunablesSnapshot
 from zcu_tools.gui.form import FormEnv
@@ -224,6 +223,41 @@ def assert_persisted_records(
     assert_native_files(session, roots.database, records)
 
 
+def hold_control_setpoints(
+    device: FakeDevice,
+    pause_value: float,
+    stop_value: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Event, Event]:
+    """Install one-shot setup holds and return Pause/Stop entry notifications.
+
+    The first setup at each selected value waits for its native cancellation
+    event before forwarding to the real driver. Repeated setups run normally.
+    Missing cancellation events or absent owner requests fail within five seconds.
+    Monkeypatch restores the public setup method when the test finishes.
+    """
+    pause_entered, stop_entered = Event(), Event()
+    gates = {pause_value: pause_entered, stop_value: stop_entered}
+    original_setup = device.setup
+
+    def setup_at_controlled_setpoint(
+        cfg: FakeDeviceInfo,
+        *,
+        progress: bool = True,
+        stop_event: Event | None = None,
+    ) -> None:
+        """Hold once at a selected value, then forward unchanged setup arguments."""
+        gate = gates.get(cfg.value)
+        if gate is not None and not gate.is_set():
+            assert stop_event is not None
+            gate.set()
+            assert stop_event.wait(5), "owner did not cancel the in-flight setup"
+        original_setup(cfg, progress=progress, stop_event=stop_event)
+
+    monkeypatch.setattr(device, "setup", setup_at_controlled_setpoint)
+    return pause_entered, stop_entered
+
+
 @pytest.mark.parametrize("starter", ["gui", "mcp"])
 def test_native_pause_apply_resume_stop_retains_records_and_exact_entry_roots(
     sim_session: SimSession,
@@ -243,46 +277,43 @@ def test_native_pause_apply_resume_stop_retains_records_and_exact_entry_roots(
             and service.active_operation_token("monitor") is None
         ),
     )
+    flux = service.get_connected_devices()["flux"]
+    assert isinstance(flux, FakeDevice)
+    pause_entered, stop_entered = hold_control_setpoints(
+        flux, inputs.flux_value + 0.01, inputs.flux_value + 0.02, monkeypatch
+    )
     run_id = "native-" + starter
     token = start_native(session, inputs, starter, run_id)
-    commands: list[str] = []
-    timer = QTimer()
-    timer.setInterval(1)
-
-    def control_at_next_step() -> None:
-        status = controller.status()
-        if status is None or status.lifecycle != "running":
-            return
-        if status.committed_seq == 1 and not commands:
-            commands.append("pause")
-            if starter == "gui":
-                session.call("pause", {"run_id": run_id})
-            else:
-                window.pause(run_id)
-        elif status.committed_seq == 2 and commands == ["pause", "resume"]:
-            commands.append("stop")
-            if starter == "gui":
-                window.stop(run_id)
-            else:
-                session.call("stop", {"run_id": run_id})
-
-    timer.timeout.connect(control_at_next_step)
-    timer.start()
-    try:
-        wait_owner(
-            qapp,
-            lambda: (
-                (status := controller.status()) is not None
-                and status.lifecycle == "paused"
-            ),
-        )
-        wait_owner(qapp, lambda: not controller.has_pending_segment)
-        prior = assert_paused_ownership(session, run_id, token)
-        apply_and_resume(session, starter, run_id, token, monkeypatch)
-        commands.append("resume")
-        wait_owner(qapp, lambda: controller.operation_id is None)
-    finally:
-        timer.stop()
+    wait_owner(qapp, pause_entered.is_set)
+    status = controller.status()
+    assert status is not None and status.lifecycle == "running"
+    assert status.call_seq == 2 and status.committed_seq == 1
+    # A commit alone permits a boundary Pause with no discarded call. Enter the
+    # next device effect first so the strict call-sequence gap proves discard.
+    if starter == "gui":
+        session.call("pause", {"run_id": run_id})
+    else:
+        window.pause(run_id)
+    wait_owner(
+        qapp,
+        lambda: (
+            (status := controller.status()) is not None and status.lifecycle == "paused"
+        ),
+    )
+    wait_owner(qapp, lambda: not controller.has_pending_segment)
+    prior = assert_paused_ownership(session, run_id, token)
+    apply_and_resume(session, starter, run_id, token, monkeypatch)
+    # Hold the final setpoint too: owner delivery cannot race all the way to Done
+    # while the test is observing the second committed record before Stop.
+    wait_owner(qapp, stop_entered.is_set)
+    status = controller.status()
+    assert status is not None and status.lifecycle == "running"
+    assert status.call_seq == 4 and status.committed_seq == 2
+    if starter == "gui":
+        window.stop(run_id)
+    else:
+        session.call("stop", {"run_id": run_id})
+    wait_owner(qapp, lambda: controller.operation_id is None)
     assert_persisted_records(session, run_id, prior)
     names = window.figure_names(run_id)
     assert session.call("figures", {"run_id": run_id}) == {

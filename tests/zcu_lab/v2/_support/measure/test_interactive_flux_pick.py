@@ -14,7 +14,7 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -69,7 +69,9 @@ def flux_parameters() -> Generator[FluxParameters]:
                         format_version="1.0",
                     )
                 ),
-                target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+                target=SavedPoint(
+                    entry_id="00000000-0000-0000-0000-000000000001", point="working"
+                ),
                 roles=RoleBinding("Q1", {"qubit": RoleSpec(kind)}, {"qubit": "Q1"}),
             )
 
@@ -102,7 +104,6 @@ def _current_plugin(
                 run_result=result,
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             force_magnitude=True,
             plots=plots,
@@ -113,7 +114,6 @@ def _current_plugin(
             run_result=RunRecord[FreqFluxCfg, FreqFluxResult](cfg=None, result=result),
             analyze_params=FluxPickParams(),
             parameters=parameters,
-            predictor=None,
         ),
         plots=plots,
     )
@@ -197,7 +197,6 @@ def _request(
         run_result=FreqFluxResult(values=devs, freqs=freqs, signals=signals),
         analyze_params=FluxPickParams(),
         parameters=parameters,
-        predictor=None,
     )
 
 
@@ -285,7 +284,6 @@ def test_both_adapters_seed_projection_and_publish_named_result_figure(
                 ),
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             plots=plots,
         )
@@ -297,7 +295,6 @@ def test_both_adapters_seed_projection_and_publish_named_result_figure(
                 ),
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             plots=plots,
         )

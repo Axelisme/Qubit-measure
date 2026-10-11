@@ -18,9 +18,6 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.session.services.predictor_from_sim import (
-    build_predictor_from_simparams,
-)
 from zcu_tools.gui.session.services.simulated_environment import (
     FAKE_FLUX_DEVICE_NAME,
     FAKE_FLUX_INITIAL_VALUE,
@@ -105,9 +102,7 @@ def _set_value(ctrl: Controller, value: float) -> None:
     )
 
 
-def test_environment_publishes_bound_source_and_matching_predictor(
-    ctrl: Controller, state: State
-) -> None:
+def test_environment_publishes_bound_source(ctrl: Controller, state: State) -> None:
     _start(ctrl)
     assert _reader(state)() == FAKE_FLUX_INITIAL_VALUE
     snapshot = ctrl.device_control.get_device_snapshot(FAKE_FLUX_DEVICE_NAME)
@@ -115,12 +110,6 @@ def test_environment_publishes_bound_source_and_matching_predictor(
     assert ctrl.get_device_unit(FAKE_FLUX_DEVICE_NAME) == "native"
     soc = state.session_env.soc
     assert isinstance(soc, MockQickSoc) and soc.sim_params is not None
-    predictor = state.session_env.predictor
-    assert predictor is not None
-    reference = build_predictor_from_simparams(soc.sim_params)
-    assert predictor.predict_freq(FAKE_FLUX_INITIAL_VALUE) == pytest.approx(
-        reference.predict_freq(FAKE_FLUX_INITIAL_VALUE), abs=1e-6
-    )
 
 
 def test_repeated_entry_preserves_resources_and_current_value(

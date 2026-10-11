@@ -601,7 +601,7 @@ class ExpTabWidget(QWidget):
         guide = self._ctrl.get_adapter_guide(adapter_name)
         sections = [
             ("Behavior", guide.get("behavior", "")),
-            ("Expects (MetaDict)", guide.get("expects_md", "")),
+            ("Expects (parameter context)", guide.get("expects_md", "")),
             ("Expects (ModuleLibrary)", guide.get("expects_ml", "")),
             ("Typical writeback", guide.get("typical_writeback", "")),
             ("Recommended", guide.get("recommended", "")),
@@ -768,8 +768,14 @@ class ExpTabWidget(QWidget):
             if items
             else {}
         )
-        self.writeback_widget.populate(items, values)
-        self.writeback_section.setVisible(len(items) > 0)
+        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
+        reasons = (
+            snapshot.analysis.unavailable_reasons
+            if snapshot.analysis is not None
+            else ()
+        )
+        self.writeback_widget.populate(items, values, unavailable_reasons=reasons)
+        self.writeback_section.setVisible(bool(items or reasons))
 
     def update_post_writeback_items(self, items: list[WritebackItem]) -> None:
         self._require_post()
@@ -780,8 +786,14 @@ class ExpTabWidget(QWidget):
             if items
             else {}
         )
-        self.post_writeback_widget.populate(items, values)
-        self.post_writeback_section.setVisible(len(items) > 0)
+        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
+        reasons = (
+            snapshot.post_analysis.unavailable_reasons
+            if snapshot.post_analysis is not None
+            else ()
+        )
+        self.post_writeback_widget.populate(items, values, unavailable_reasons=reasons)
+        self.post_writeback_section.setVisible(bool(items or reasons))
 
     def get_comment(self) -> str:
         return self._save_center.get_comment()
@@ -1111,10 +1123,8 @@ class ExpTabWidget(QWidget):
                 self.run_btn.setToolTip("Tab is busy")
             elif state.global_run_active:
                 self.run_btn.setToolTip("Another tab is running")
-            elif not state.has_context:
-                self.run_btn.setToolTip("No experiment context")
             elif not state.has_active_context:
-                self.run_btn.setToolTip("Select or create a file-backed context")
+                self.run_btn.setToolTip("Select or create a working point first")
             elif capabilities.requires_soc and not state.has_soc:
                 self.run_btn.setToolTip("No SoC connection")
             elif not cfg_valid:
@@ -1144,6 +1154,9 @@ class ExpTabWidget(QWidget):
             self.writeback_widget.setEnabled(
                 idle and state.has_context and state.has_analyze_result
             )
+            self.writeback_widget.setToolTip(
+                "" if state.has_context else "Select or create a working point first"
+            )
         # Post pane controls (only if present)
         if self._has_post:
             post_enabled = idle and state.has_analyze_result
@@ -1152,6 +1165,9 @@ class ExpTabWidget(QWidget):
             self._post_gate_label.setVisible(not state.has_analyze_result)
             self.post_writeback_widget.setEnabled(
                 idle and state.has_context and state.has_post_analyze_result
+            )
+            self.post_writeback_widget.setToolTip(
+                "" if state.has_context else "Select or create a working point first"
             )
         # The center renders the shared draft and State-owned artifact status.
         if snapshot.save is None:

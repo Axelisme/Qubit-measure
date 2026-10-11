@@ -2,14 +2,12 @@
 
 from collections.abc import Generator
 from dataclasses import dataclass, replace
-from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ModuleWriteback,
@@ -35,13 +33,12 @@ from zcu_tools.gui.app.measure.services.writeback import (
 )
 from zcu_tools.gui.cfg import CfgSchema, EvalValue
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    ContextTarget,
     PointUseRequest,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
@@ -53,7 +50,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
-from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -85,17 +81,25 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
             bus,
             bind_assets=ArbWaveformDatabase.info_at,
         )
+        entry.new_point("working")
         context.install_entry(entry)
+        context.use_point(PointUseRequest("working"))
         control = ContextControlFacet(context=context)
         control.add_component("Q1", "fake/drive/a", {})
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(
-            editor, write_port=control, entry_ledger=context.entry_ledger
-        )
+        service = WritebackService(editor, write_port=control)
         yield WritebackSession(entry, control, service)
         assert registry_state() == installed
     finally:
         restore_registry(before)
+
+
+@pytest.fixture
+def saved_session(session: WritebackSession) -> WritebackSession:
+    session.entry.new_point("saved")
+    session.control.use_point(PointUseRequest("saved"))
+    session.control.add_component("Q1", "fake/drive/a", {})
+    return session
 
 
 @pytest.mark.parametrize("save_before_accept", [False, True])
@@ -107,9 +111,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        service = WritebackService(
-            editor, write_port=control, entry_ledger=native.context.entry_ledger
-        )
+        service = WritebackService(editor, write_port=control)
         tab = native.state.get_tab("tab")
         captured = control.read_context()
         assert tab.run.metadata is not None
@@ -118,6 +120,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
             [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
             parameters=captured,
             run_id=source_run_id,
+            experiment_name="test/writeback",
         )
         if save_before_accept:
             native.save()
@@ -187,9 +190,7 @@ def test_analysis_draft_uses_start_run_identity(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        writeback = WritebackService(
-            editor, write_port=control, entry_ledger=native.context.entry_ledger
-        )
+        writeback = WritebackService(editor, write_port=control)
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
         )
@@ -265,13 +266,16 @@ def test_post_analysis_draft_retains_primary_identity(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        writeback = WritebackService(
-            editor, write_port=control, entry_ledger=native.context.entry_ledger
-        )
+        writeback = WritebackService(editor, write_port=control)
         primary_draft = (
             None
             if source == "without_primary_draft"
-            else writeback.create_draft([], parameters=captured, run_id=expected)
+            else writeback.create_draft(
+                [],
+                parameters=captured,
+                run_id=expected,
+                experiment_name="test/writeback",
+            )
         )
         primary_result = PaneSummary()
         native.state.update_tab_analyze(
@@ -364,8 +368,9 @@ def test_post_rejects_incompatible_primary_draft_before_submission(
 
 
 def test_writeback_lowers_waveform_expression_from_creation_capture(
-    session: WritebackSession,
+    saved_session: WritebackSession,
 ) -> None:
+    session = saved_session
     initial = session.control.read_context()
     session.control.set_parameter(initial.target, "general.ext.flux_value", 1.0)
     captured = session.control.read_context()
@@ -382,6 +387,7 @@ def test_writeback_lowers_waveform_expression_from_creation_capture(
             )
         ],
         parameters=captured,
+        experiment_name="test/writeback",
     )
     session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
     session.service.apply_draft(draft)
@@ -396,12 +402,14 @@ def test_writeback_lowers_waveform_expression_from_creation_capture(
 
 
 def test_append_failure_leaves_parameter_untouched(
-    session: WritebackSession, monkeypatch
+    saved_session: WritebackSession, monkeypatch
 ) -> None:
+    session = saved_session
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Value", proposed_value=2.0)],
         parameters=captured,
+        experiment_name="test/writeback",
     )
 
     def fail_append(self: RecordsLedger, event: LedgerEvent, **_kwargs: object) -> None:
@@ -412,54 +420,6 @@ def test_append_failure_leaves_parameter_untouched(
         session.service.apply_draft(draft)
     assert not session.control.read_context().lookup("general.ext.flux_value").present
     assert session.entry.ledger.events() == ()
-
-
-def test_setter_failure_retains_accepted_and_successful_prefix(
-    session: WritebackSession, monkeypatch
-) -> None:
-    captured = session.control.read_context()
-    draft = session.service.create_draft(
-        [
-            ParameterWriteback("general.ext.flux_value", "First", proposed_value=2.0),
-            ParameterWriteback(
-                "general.description", "Failed", proposed_value="changed"
-            ),
-            ParameterWriteback(
-                "general.ext.flux_unit", "Not started", proposed_value="mA"
-            ),
-        ],
-        parameters=captured,
-        run_id="original-run",
-    )
-    original = session.control.set_parameter
-
-    def fail_second(
-        target: ContextTarget,
-        path: str,
-        value: YamlValue,
-        *,
-        source: Provenance | None = None,
-    ) -> None:
-        # Accepted evidence must exist before even the first setter.
-        assert session.entry.ledger.events()[-1].kind == "accepted"
-        if path == "general.description":
-            raise OSError("point unavailable")
-        original(target, path, value, source=source)
-
-    monkeypatch.setattr(session.control, "set_parameter", fail_second)
-    with pytest.raises(OSError, match="point unavailable"):
-        session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
-    current = session.control.read_context()
-    assert current.value("general.ext.flux_value") == 2.0
-    assert not current.lookup("general.description").present
-    assert not current.lookup("general.ext.flux_unit").present
-    event = session.entry.ledger.events()[-1]
-    assert event.kind == "accepted" and event.origin == "mcp"
-    assert isinstance(event.payload, AcceptedPayload) and len(event.payload.writes) == 3
-    assert event.payload.run_id == "original-run"
-    source = current.meta("general.ext.flux_value")
-    assert source is not None and source.source == event.id
-    assert source.run_id == "original-run"
 
 
 def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
@@ -493,6 +453,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
             ),
         ],
         parameters=captured,
+        experiment_name="test/writeback",
     )
     session.control.set_parameter(
         first, "Q1.ext.readout_cal.g_center", {"__complex__": [0.6, 0.1]}
@@ -556,6 +517,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
         [ParameterWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
         run_id="original-run",
+        experiment_name="test/writeback",
     )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
@@ -583,9 +545,10 @@ def test_receipt_reads_actual_role_target_after_point_change(
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
 def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
-    session: WritebackSession,
+    saved_session: WritebackSession,
     kind: str,
 ) -> None:
+    session = saved_session
     initial = session.control.read_context()
     session.control.set_parameter(initial.target, "general.ext.flux_value", 0.2)
     captured = session.control.read_context()
@@ -618,7 +581,10 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
         )
         item_id, field = "wf-1", "length"
     draft = session.service.create_draft(
-        [item], parameters=captured, run_id="original-run"
+        [item],
+        parameters=captured,
+        run_id="original-run",
+        experiment_name="test/writeback",
     )
     session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
@@ -636,8 +602,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
 
 
 def test_each_parameter_write_preserves_its_own_stderr(
-    session: WritebackSession,
+    saved_session: WritebackSession,
 ) -> None:
+    session = saved_session
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
@@ -648,6 +615,7 @@ def test_each_parameter_write_preserves_its_own_stderr(
             ParameterWriteback("Q1.coherence", "Unknown error", proposed_value=5.0),
         ],
         parameters=captured,
+        experiment_name="test/writeback",
     )
     session.service.apply_draft(draft)
     current = session.control.read_context()
@@ -680,6 +648,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
             ParameterWriteback("Q1.rate", "Direct", proposed_value=0.3),
         ],
         parameters=captured,
+        experiment_name="test/writeback",
     )
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         session.service.apply_draft(draft)
@@ -690,36 +659,13 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
 def test_empty_draft_reads_and_writes_without_context(
     session: WritebackSession,
 ) -> None:
-    draft = session.service.create_draft([], parameters=None)
+    draft = session.service.create_draft(
+        [], parameters=None, experiment_name="test/writeback"
+    )
     assert session.service.preview_values(draft) == {}
     assert session.service.write_draft(draft, ()) == []
     assert session.service.apply_draft(draft)["applied_ids"] == []
     assert session.entry.ledger.events() == ()
-
-
-@pytest.mark.parametrize("operation", ["preview", "write"])
-def test_stale_draft_target_is_not_replaced_by_selected_point(
-    session: WritebackSession,
-    operation: str,
-) -> None:
-    captured = session.control.read_context()
-    draft = session.service.create_draft(
-        [ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2)],
-        parameters=captured,
-    )
-    session.entry.new_point("a")
-    selected = session.control.use_point(PointUseRequest("a"))
-    events = session.entry.ledger.events()
-    perform = (
-        partial(session.service.preview_values, draft)
-        if operation == "preview"
-        else partial(session.service.write_draft, draft, (WritebackEdit("param-1"),))
-    )
-    with pytest.raises(FailedPreconditionError) as caught:
-        perform()
-    assert caught.value.reason_code == "draft_not_selected"
-    assert session.control.read_context().target == selected
-    assert session.entry.ledger.events() == events
 
 
 def test_preview_proposed_data_is_isolated_at_validation_boundary(
@@ -728,6 +674,7 @@ def test_preview_proposed_data_is_isolated_at_validation_boundary(
     draft = session.service.create_draft(
         [ParameterWriteback("Q1.ext.samples", "Samples", proposed_value=[1, 2])],
         parameters=session.control.read_context(),
+        experiment_name="test/writeback",
     )
     preview = session.service.preview_values(draft)["param-1"]
     assert preview.current is None and preview.proposed == [1, 2]

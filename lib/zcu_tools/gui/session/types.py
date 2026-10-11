@@ -2,11 +2,11 @@
 
 These are the session-core value types every measurement-session app speaks in:
 the minimal ``SocHandle`` / ``SocCfgHandle`` surfaces a connected QICK board
-exposes, and ``SessionEnv`` (the active md/ml/soc/project bundle) + its
+exposes, and ``SessionEnv`` (the published parameters/soc/project bundle) + its
 ``ContextReadiness`` lifecycle. They carry no experiment cfg-tree coupling
 (``CfgSchema``, the Spec/Value trees, ``RunRequest``/analyze/writeback types stay
-in the adapter layer), so they sit below the apps in ``gui/session`` and are
-import-clean (only TYPE_CHECKING references to MetaDict/ModuleLibrary/predictor).
+in the adapter layer), so they sit below the apps in ``gui/session``. Their
+session-core imports provide parameter captures and cached value lookup.
 
 The adapter package re-exports ``SessionEnv`` / ``ContextReadiness`` /
 ``SocHandle`` / ``SocCfgHandle`` because ``ExpAdapterProtocol``'s own signatures
@@ -19,14 +19,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 from zcu_tools.gui.session.parameters import ParameterContext as ParameterContext
 from zcu_tools.gui.session.parameters import RoleBinding as RoleBinding
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
-
-if TYPE_CHECKING:
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
 class SocProtocol(Protocol):
@@ -64,10 +61,13 @@ SocCfgHandle: TypeAlias = SocCfgProtocol
 
 
 class ContextReadiness(Enum):
-    """Lifecycle readiness for operations that need a persisted context."""
+    """Working-point readiness, independent of entry metadata availability.
+
+    EMPTY means no saved point is selected, including after entry open/new.
+    ACTIVE means a saved point parameter environment is published.
+    """
 
     EMPTY = "empty"
-    DRAFT = "draft"
     ACTIVE = "active"
 
 
@@ -76,7 +76,7 @@ class SessionEnv:
     """Published parameters plus independent live session capabilities.
 
     parameters is None for EMPTY, otherwise a fixed capture without consumer
-    roles targeting EntryDraft or SavedPoint. soc/soccfg and predictor remain
+    roles targeting SavedPoint. soc/soccfg remain
     live capabilities, not Run evidence. Names and paths are cached session
     metadata; active_label is empty before point selection. readiness gates
     ACTIVE-only Run/save. values reads the published value-source cache.
@@ -92,18 +92,14 @@ class SessionEnv:
     result_dir: str = ""
     database_path: str = ""
     active_label: str = ""
-    predictor: FluxoniumPredictor | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
     values: ValueLookup = field(default_factory=EmptyValueLookup)
 
     # -- readiness predicates (the context answers about itself) -----------
 
     def has_context(self) -> bool:
-        """Any valid context exists (in-memory DRAFT or file-backed ACTIVE)."""
+        """Return whether a saved working point is selected."""
         return self.readiness is not ContextReadiness.EMPTY
-
-    def is_draft(self) -> bool:
-        return self.readiness is ContextReadiness.DRAFT
 
     def is_active(self) -> bool:
         """File-backed context eligible for run and save."""

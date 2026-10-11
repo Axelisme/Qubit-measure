@@ -61,7 +61,7 @@ text-input enhancer與decoration provider ports；measure的ValueSource enhancer
 
 `gui.cfg` 不 import `gui.app.*`、`experiment.*`、Qt 或 `resources`。`CfgSchema` 不保存
 environment callback、resolver registration 或 app runtime dependency。`CfgSchemaAssembler`不
-理解role、Seed、MetaDict、ModuleLibrary、logical key、generation或app section label；consumer只可
+理解role、Seed、參數容器、ModuleLibrary、logical key、generation或app section label；consumer只可
 注入窄`section_labeler`，或先明確建立section。
 
 measure adapter package只暴露framework contract、request/result/writeback/analyze params與

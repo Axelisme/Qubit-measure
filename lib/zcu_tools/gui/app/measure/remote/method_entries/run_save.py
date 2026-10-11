@@ -15,6 +15,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Start the observed cfg inputs without ref refresh or substitution. "
+            "Requires an explicitly selected or newly created working point. "
             "Nonempty aliases maps names to concrete components for this Run only. None and {} accept cached cfg, "
             "resolving its cfg and evidence from the same current source capture; "
             "global aliases and tab publication do not change. Stale refs and "

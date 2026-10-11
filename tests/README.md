@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-11，實驗 device 契約與 Run snapshot 測試歸屬
+**Last updated:** 2026-10-11，離線遷移測試歸屬
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -10,7 +10,7 @@
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
 2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/`、
-   `tests/tools/` 和 `tests/zcu_lab/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
+   `tests/tools/`、`tests/zcu_lab/` 和 `tests/migrations/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
    Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
@@ -89,7 +89,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 `tests/experiment/v2/` 擁有通用 runtime 與工具；`tests/zcu_lab/` 擁有 registry-wide adapter 契約，
 `tests/zcu_lab/v2/` 保留共用 helpers、role defaults 與使用者要求的 D142 特例。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
-`tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。
+`tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。`tests/migrations/` 擁有 root `migrations/` 的離線轉換與 legacy reader 測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
 與同名的其他 registry 測試無關。需要定位檔案時以目前目錄及程式 owner 為準。
 

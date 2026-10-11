@@ -25,7 +25,6 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.remote.events import (
-    _ser_predictor_changed,
     _ser_run_finished,
     _ser_run_started,
     _ser_soc_changed,
@@ -43,7 +42,6 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PredictorChangedPayload,
     SocChangedPayload,
 )
 
@@ -84,7 +82,6 @@ _EXPECTED_WIRE_NAMES = frozenset(
         "run_started",
         "run_finished",
         # State-change event names
-        "predictor_changed",
         "device_changed",
         "device_setup_started",
         "device_setup_finished",
@@ -145,7 +142,6 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
                 "requery": ["tab.snapshot"],
             },
         ),
-        (PredictorChangedPayload(), {}),
         (
             DeviceChangedPayload(name="flux"),
             {"name": "flux", "requery": ["device.list"]},
@@ -176,7 +172,7 @@ def test_all_event_serializer_payload_shapes_are_locked() -> None:
         ),
     ]
 
-    assert len(cases) == len(EVENT_SERIALIZERS) == 15
+    assert len(cases) == len(EVENT_SERIALIZERS)
     for payload, expected in cases:
         assert EVENT_SERIALIZERS[type(payload)](payload) == expected
 
@@ -707,12 +703,6 @@ def test_ser_run_finished_cancelled():
     assert wire is not None
     assert wire["outcome"] == "cancelled"
     assert "error_message" not in wire
-
-
-def test_ser_predictor_changed_returns_empty_dict():
-    payload = PredictorChangedPayload()
-    wire = _ser_predictor_changed(payload)
-    assert wire == {}
 
 
 def test_ser_soc_changed_connected():

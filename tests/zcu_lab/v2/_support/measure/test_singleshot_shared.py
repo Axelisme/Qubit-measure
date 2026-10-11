@@ -6,7 +6,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import PostWritebackRequest, WritebackRequest
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -53,7 +53,7 @@ def calibration() -> ParameterContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=None,
     ).bind_aliases(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator")), {}
@@ -81,7 +81,9 @@ def test_classification_reads_applied_ge_calibration(session: WritebackSession) 
             )
         )
     )
-    draft = session.service.create_draft(proposals, parameters=captured)
+    draft = session.service.create_draft(
+        proposals, parameters=captured, experiment_name="singleshot/ge"
+    )
     try:
         session.service.apply_draft(draft)
         applied = session.context.read_context()

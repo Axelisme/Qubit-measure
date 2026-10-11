@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    SampleWriteback,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -113,7 +114,7 @@ class FreqAdapter(
             "that flux."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'q_f' — qubit frequency, "
+            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
             "the sweep centre (~2000–6000 MHz); 'qf_w' — qubit linewidth, "
             "setting the half-span as 1.5*qf_w (~1–50 MHz); 'qub_ch' — "
             "qubit-drive channel; 'r_f' — resonator frequency for the readout "
@@ -131,8 +132,9 @@ class FreqAdapter(
             "reset module (disabled when none exists)."
         ),
         typical_writeback=(
-            "Proposes the fitted qubit frequency into MetaDict 'q_f' and the "
-            "fitted linewidth (FWHM) into 'qf_w'. No ModuleLibrary writeback. "
+            "Proposes fitted qubit.freq and qubit.kappa (FWHM) in MHz. An "
+            "independent freq_mhz/freq_err_mhz sample uses the captured Run "
+            "bias when device evidence is available. No module writeback. "
             "Apply only after the agent/user verifies that the plotted feature "
             "is the intended qubit line."
         ),
@@ -213,8 +215,18 @@ class FreqAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[FreqRunResult, FreqAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose fitted qubit frequency parameters and a captured-component sample.
+
+        req supplies the source result and fixed Run context. Sample fields use
+        MHz and target the Run's resolved $qubit, never the live selection. Without
+        a parameter capture, retain parameter proposals only so loaded data can
+        still be analyzed; Apply rejects the missing capture. Unbound $qubit
+        with a capture raises RoleResolutionError. WritebackService supplies
+        bias coordinates or omits the sample with its existing public reason.
+        No write or device access occurs here; this Run leaves devices fixed.
+        """
         result = req.analyze_result
-        return [
+        items: list[WritebackItem] = [
             ParameterWriteback(
                 target_name="$qubit.freq",
                 description="Qubit frequency (MHz)",
@@ -226,6 +238,19 @@ class FreqAdapter(
                 proposed_value=result.fwhm,
             ),
         ]
+        parameters = req.ctx.parameters
+        if parameters is not None:
+            items.append(
+                SampleWriteback(
+                    target_name=parameters.resolve_path("$qubit"),
+                    description="Qubit frequency sample at the captured bias",
+                    proposed_value={
+                        "freq_mhz": result.freq,
+                        "freq_err_mhz": result.freq_err,
+                    },
+                )
+            )
+        return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_freq_{time.strftime('%m%d')}"

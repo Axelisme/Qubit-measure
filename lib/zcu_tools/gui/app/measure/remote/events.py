@@ -2,7 +2,7 @@
 
 Each entry in :data:`EVENT_SERIALIZERS` maps a ``Payload`` *type* to a function
 producing the JSON-friendly ``payload`` dict that goes on the wire. Live
-Python references (``MetaDict``, ``ModuleLibrary``, ``SocHandle``,
+Python references (``parameter context``, ``ModuleLibrary``, ``SocHandle``,
 ``DeviceSetupSnapshot``, ``BaseDeviceInfo``, ``FluxoniumPredictor``) are
 **never** sent — instead the wire payload carries a ``requery`` hint
 listing the RPC method(s) the client should call to obtain current state. The
@@ -42,7 +42,6 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PredictorChangedPayload,
     SocChangedPayload,
 )
 
@@ -91,13 +90,6 @@ def _ser_run_finished(payload: BasePayload) -> WirePayload:
     return out
 
 
-def _ser_predictor_changed(payload: BasePayload) -> WirePayload:
-    assert isinstance(payload, PredictorChangedPayload)
-    del payload
-    # No scalar field worth shipping; client should requery if needed.
-    return {}
-
-
 def _ser_device_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, DeviceChangedPayload)
     return {"name": payload.name, "requery": ["device.list"]}
@@ -119,7 +111,7 @@ def _ser_device_setup_finished(payload: BasePayload) -> WirePayload:
 
 def _ser_context_switched(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, ContextSwitchedPayload)
-    # MetaDict / ModuleLibrary are live; let the client requery.
+    # parameter context / ModuleLibrary are live; let the client requery.
     del payload
     return {"requery": ["context.active"]}
 
@@ -158,7 +150,6 @@ EVENT_SERIALIZERS: dict[type[BasePayload], EventSerializer] = {
     TabInteractionChangedPayload: _ser_tab_interaction_changed,
     RunStartedPayload: _ser_run_started,
     RunFinishedPayload: _ser_run_finished,
-    PredictorChangedPayload: _ser_predictor_changed,
     DeviceChangedPayload: _ser_device_changed,
     DeviceSetupStartedPayload: _ser_device_setup_started,
     DeviceSetupFinishedPayload: _ser_device_setup_finished,

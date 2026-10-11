@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-11，entry-authored alias table persistence
+**Last updated:** 2026-10-12，component kind 欄位投影；工作點為唯一參數寫入目標
 
 `ResultEntry` 組合明確傳入的 Result 與 Database 根目錄。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
@@ -24,8 +24,6 @@ Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(doc
 
 `manual_update(document, path, value, stderr=...)` 複製完整記憶體 point，重用 view 的欄位驗證與 manual 來源規則，不建立 store、讀檔或查 ledger。`accept_source(edit, path, provenance=...)` 在已準備的 draft 值上附加本地來源，處理 container leaves 並清除 clone 標記，不重跑值的 validator 或 model hook。來源驗證失敗不改 draft。兩個能力都以 package function 提供，不保留新的元件名稱。
 
-`ResultEntry.updated_point` 使用相同欄位規則準備隔離的記憶體候選，明確來源沿本 entry 的 ledger 驗證。`validate_library` 委派 library owner 檢查記憶體文件及本地來源。這兩個入口不建立 point/store、不保存或追加事件，manual 不讀 ledger。
-
 PointView 的公開 constructor 必須提供 result_root 與 database_root，加上 source、entry_id，在建構時一次捕捉完整來源身分。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
 
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result／Database roots 的 PointView。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。每筆來源記錄標示本次直接來源工作點。成功重新接受欄位會清除該路徑與子欄位的 cloned_from，即使值相同。
@@ -42,6 +40,8 @@ Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 Va
 
 ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、extra 策略、defaults、field validators、model validators 與 post-init hooks。Ext、wiring 與 module 都不是框架特例。Forbid model 的錯字由 Pydantic 拒絕，allow model 的額外欄位可讀寫及 set／meta。沒有值且 default 為 None 的欄位讀取報 AttributeError。
 
+`component_field_specs(kind)` 依宣告順序深度優先投影 kind 的 pydantic 欄位，供編輯器使用。每個 FieldSpec 帶 segments、value_kind、required、choices、unit 與 description；巢狀 model 先列 group 再列子欄位，`kind` 不列。投影只讀 class 宣告，不讀值、不建 defaults、不跑 validator 或 I/O。未知 kind 報 UnknownKindError。頂層 text 欄位的 key 若等於沒有 via 的已註冊角色名稱，`reference_role` 填該角色；`role_candidates(document, role)` 依文件順序列出 kind 符合角色 pattern 的元件，供引用欄位的下拉選單使用。這沿用角色解析的既有慣例，不是引用標記，也不檢查目標是否存在。
+
 新增元件保留已產生的 defaults，避免 reload 或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。框架不檢查 canonical 或冪等，不替定義者修復 validator。
 
 ## 視圖與來源
@@ -56,13 +56,21 @@ ResultEntry 管理的 store 在 use、refresh 與 edit 時也檢查遮蔽，失�
 
 `edit_view.set(..., provenance=...)` 透過 RecordsLedger.get 驗證來源的本地事件與附檔。非 manual source 必須是本條目同 ID、同 entry_id 的合法事件。未知 ID 轉成 ValueError 並保留 KeyError cause；格式與 I/O 錯誤傳播。Manual 不讀 ledger。
 
+## 樣本歷史
+
+`ResultEntry.samples(component)` 以安全單一路徑段綁定 `samples/<component>.jsonl`，不讀元件 schema、不解析角色，也不建立檔案。`JsonlSampleTable` 擁有只追加的行、每個 run 的最新整行讀取與明示 CSV 匯出；欄位、來源與失敗契約見 [sample table owner](../sample_table/README.md)。
+
 ## Records ledger
 
 `ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。它不推導 run，也不產生 acquire、save 或 accept 領域事件。Caller 提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
 每次讀取與追加都持同一 resolved path 的 sidecar lock，不使用 cache。新事件只寫 1.0；較新 1.x 行可讀，原行與未知欄位保持不變。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。讀取不跳過損壞行。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
+`ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，來源沿既有 manual 契約，不連回分析事件。
+
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與來源。Point commit 失敗時 accepted 可以保留，值與來源仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
+
+`writeback` 提供共用 parameter／module／waveform／sample 項目與 `apply_writeback`。SampleWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source；dev 欄位選填，原值與 caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含實驗名稱、run_id、origin 與可選 source。流程追加一筆 accepted 後沿項目順序各自提交，首錯停止。項目失敗拋 `WritebackApplyError(event_id, applied)`，原始錯誤為 cause，前項與事件保留。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨項交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開 setters 並發布成功前綴；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
@@ -103,4 +111,4 @@ Explicit 的 None 明確不綁該角色，不改用焦點或 via；讀取時指�
 
 `rename_entry` 移動兩個目錄，不改檔案內容。第二次移動失敗時復原第一次。復原也失敗時，RenameRecoveryError 回報兩個路徑與原始 I/O 原因，不承諾跨檔掉電保證。
 
-Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService、Notebook 與 GUI／MCP 消費這些能力；acquired、saved 和 accepted 的 producer 各由前端 acquisition、共用 saver 與接受結果的 owner 負責，entry 不代做流程編排。
+Entry／point 提供隔離的 publication 與 read binding。ResultEntry.list_names 只列含 setup.yaml 的直屬目錄，不解析文件或尋找 legacy 參數。ContextService 與 Notebook 沿公開 capability 讀寫 entry；GUI／MCP accept 由 context owner 接共用 writeback，不私取 point handles。

@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，shared source catalog loading 與 workflow admission
+**Last updated:** 2026-10-12，shared source catalogs、entry alias 表與 workflow admission
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import shutil
+from collections.abc import Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,17 +15,24 @@ from uuid import uuid4
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
-from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
 from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
 from .errors import DestinationExistsError, RenameRecoveryError
 from .ledger import RecordsLedger
-from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
+from .ledger_models import (
+    AnalyzedPayload,
+    ImportPayload,
+    JsonObject,
+    LedgerEvent,
+    Origin,
+    validate_origin,
+)
 from .points import PointView
-from .provenance import Provenance, ProvenanceData, validate_source
+from .provenance import ProvenanceData, validate_source
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -32,10 +40,9 @@ from .schema import (
     SetupDocument,
     is_forward_minor,
 )
+from .storage import bind_sample_table
 from .views import (
     SetupView,
-    add_component_to_draft,
-    prepare_point_update,
     validate_view_components,
 )
 
@@ -163,60 +170,54 @@ class ResultEntry:
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
 
-    def updated_point(
+    def record_analysis(
         self,
-        document: PointDocument,
-        path: str,
-        value: YamlValue,
+        analysis_kind: str,
         *,
-        source: Provenance | None = None,
-    ) -> PointDocument:
-        """Return an isolated working-unit point candidate for a memory command.
+        run_ids: Sequence[str],
+        summary: JsonObject,
+        record: JsonObject | None = None,
+    ) -> str:
+        """Append cross-run analysis evidence and return its new UUID string.
 
-        path is a concrete component/general dotted field, without role expansion.
-        Reuse the view's field/schema validation. Omitted source is manual;
-        explicit Provenance is validated against this entry's actual ledger and
-        clears clone origin on accepted leaves. Preserve unmodified fields and
-        created_at. Input/schema/source failures leave inputs unchanged.
-        No point/store/file creation, notification or event append. Manual does
-        not read a ledger; explicit event sources may read local ledger evidence.
+        analysis_kind is the caller's method name. run_ids contains input run
+        identifiers in caller order, may be empty, and is not resolved against
+        run data. summary and optional record are strict JSON objects with
+        finite numbers; their contents have no framework-defined schema.
+
+        The analyzed event uses this entry's UUID, current UTC time and notebook
+        origin. A non-None record (including {}) is attached as records/<id>.json.
+        The returned ID can be read with ledger.get(id). No values are written;
+        callers use ordinary point or setup edits for manual value provenance.
+
+        Payload validation and RecordsLedger I/O/validation errors propagate
+        unchanged. The ledger owns locking and publication; failure may leave
+        an orphan attachment or partial tail, with no rollback or recovery.
         """
-        return prepare_point_update(
-            document,
-            path,
-            value,
-            source=source,
-            ledger=self._result_path / "records/ledger.jsonl",
+        event = LedgerEvent(
+            id=str(uuid4()),
+            kind="analyzed",
+            at=datetime.now(timezone.utc).isoformat(),
             entry_id=self.entry_id,
+            origin="notebook",
+            payload=AnalyzedPayload(
+                analysis_kind=analysis_kind,
+                run_ids=tuple(run_ids),
+                summary=summary,
+            ),
         )
+        self.ledger.append(event, record=record)
+        return event.id
 
-    def updated_component(
-        self, document: PointDocument, name: str, kind: str, fields: YamlMap
-    ) -> PointDocument:
-        """Return a memory point with one added registered component.
+    def samples(self, component: str) -> JsonlSampleTable:
+        """Bind this component's append-only sample history without touching disk.
 
-        fields contains working-unit YAML values. Reuse the resource's ordinary
-        add-component name/kind/schema/default/provenance rules. No point is
-        created, read or saved, and inputs are unchanged on success or failure.
-        Invalid name, duplicate, unknown kind or invalid fields propagate.
+        component is a safe single path segment, not a role alias. Rows live at
+        result_path/samples/<component>.jsonl; no component schema or ledger is
+        read. Unsafe names and symlinks escaping this entry raise ValueError.
+        The returned table owns append, latest-per-run read and CSV export.
         """
-        candidate = document.model_copy(deep=True)
-        add_component_to_draft(
-            candidate, name, kind, fields, self._result_path / "setup.yaml"
-        )
-        return candidate
-
-    def validate_library(self, document: ModuleLibraryDocument) -> None:
-        """Validate a memory library's keys/Specs/sources against this entry.
-
-        Delegate the existing library document validation without mutation,
-        materialization, asset access, YAML I/O or event production. Manual
-        sources do not read ledger evidence. Invalid keys/schema/sources raise;
-        explicit local event sources retain ledger/attachment/I/O failures.
-        """
-        document.validate_content(
-            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
-        )
+        return bind_sample_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.

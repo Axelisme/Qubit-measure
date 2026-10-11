@@ -237,7 +237,6 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     writeback = WritebackService(
         editor,
         write_port=control,
-        entry_ledger=session.context.entry_ledger,
     )
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
@@ -352,6 +351,18 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     assert session.entry.ledger.events() == events
 
 
+def assert_empty_writeback_admission(
+    wb: WritebackControlFacet, *, selected: bool
+) -> None:
+    """An empty proposal still needs selection at the application boundary."""
+    if selected:
+        assert wb.apply_writeback_for_pane("tab", "analysis")["applied_ids"] == []
+    else:
+        with pytest.raises(FailedPreconditionError) as caught:
+            wb.apply_writeback_for_pane("tab", "analysis")
+        assert caught.value.reason_code == "no_context"
+
+
 @pytest.mark.parametrize("source", ["foreign", "empty", "pointless"])
 def test_native_load_without_readable_source_allows_context_free_analysis(
     role_load_session: NativeSaveSession,
@@ -389,9 +400,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     editor = CfgEditorService(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
-    writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
-    )
+    writeback = WritebackService(editor, write_port=control)
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
@@ -408,18 +417,20 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     assert draft.parameters is None and draft.run_id == session.metadata.run_id
     assert draft.items == ()
     events = session.entry.ledger.events()
-    assert wb.apply_writeback_for_pane("tab", "analysis")["applied_ids"] == []
+    assert_empty_writeback_admission(wb, selected=source != "empty")
     assert session.entry.ledger.events() == events
     writeback.teardown_draft(draft)
     rejected = writeback.create_draft(
         [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
         run_id=session.metadata.run_id,
+        experiment_name="test/writeback",
     )
     tab.analysis.writeback_draft = rejected
     selection = control.get_source_binding()
     try:
-        with pytest.raises(FailedPreconditionError, match="captured context"):
+        message = "working point" if source == "empty" else "captured context"
+        with pytest.raises(FailedPreconditionError, match=message):
             wb.apply_writeback_for_pane("tab", "analysis")
         assert session.entry.ledger.events() == events
         assert control.get_source_binding() == selection
@@ -440,14 +451,13 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
     editor = CfgEditorService(
         MagicMock(), control, MagicMock(), MagicMock(), session.bus
     )
-    writeback = WritebackService(
-        editor, write_port=control, entry_ledger=session.context.entry_ledger
-    )
+    writeback = WritebackService(editor, write_port=control)
     _, wb = _native_controls(session, writeback, control)
     draft = writeback.create_draft(
         [ParameterWriteback("$source_qubit.rate", "rate", 99.0)],
         parameters=parameters,
         run_id=session.metadata.run_id,
+        experiment_name="test/writeback",
     )
     session.state.update_tab_analyze("tab", PaneSummary(), None, writeback_draft=draft)
     other = ResultEntry.create(
@@ -714,7 +724,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
 
 
 @pytest.mark.parametrize("save_all", [False, True])
-def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
+def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
     tmp_path: Path, qapp: QApplication, save_all: bool
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
@@ -726,8 +736,7 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
         stored = load_run_data(path)
         session.context.install_entry(session.entry)
         control = ContextControlFacet(context=session.context)
-        draft = control.read_context()
-        assert draft.storage is None
+        assert session.state.session_env.parameters is None
         tab = session.state.get_tab("tab")
         before = {
             p.relative_to(tmp_path): p.read_bytes()
@@ -747,14 +756,13 @@ def test_draft_capture_load_retains_history_and_save_rejects_without_writes(
 
         assert outcome.result_type == "RunRecord"
         assert isinstance(tab.run.result, RunRecord)
-        assert tab.run.metadata == stored.metadata
+        metadata = tab.run.metadata
+        assert metadata is not None and metadata == stored.metadata
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
-        assert tab.run.parameters is not None
-        assert tab.run.parameters.target == SavedPoint(
-            entry_id=str(stored.metadata.snapshot.entry_id),
-            point="p",
-        )
+        assert tab.run.parameters is None
+        assert str(metadata.snapshot.entry_id) == session.entry.entry_id
+        assert metadata.snapshot.point == "p"
         assert tab.run.storage is None
         assert tab.analysis.result is None
         assert tab.post_analysis.result is None

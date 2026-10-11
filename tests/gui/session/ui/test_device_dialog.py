@@ -1021,3 +1021,45 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
     assert req.info.output == "on"  # choice field passes through as plain string
+
+
+def test_empty_device_list_shows_hint_and_drop_sits_under_list(qapp):
+    from qtpy.QtWidgets import QLabel, QListWidget, QPushButton
+
+    ctrl = _make_ctrl()
+    dialog = _make_dialog(ctrl)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        hint = dialog.findChild(QLabel, "devices_empty_hint")
+        assert hint is not None and hint.isVisibleTo(dialog)
+        listing = dialog.findChild(QListWidget)
+        drop = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Drop")
+        assert listing is not None
+        assert not drop.isEnabled()
+        list_box = listing.geometry()
+        drop_pos = drop.mapTo(dialog, drop.rect().topLeft())
+        list_pos = listing.mapTo(dialog, listing.rect().bottomLeft())
+        assert drop_pos.y() > list_pos.y()
+        assert drop_pos.x() < list_pos.x() + list_box.width()
+    finally:
+        dialog.close()
+
+
+def test_device_hint_hides_when_a_device_is_listed(qapp):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.device.fake import FakeDeviceInfo
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("fakedevice")]
+    ctrl.get_device_snapshot.return_value = _connected_snapshot(
+        "fakedevice", FakeDeviceInfo(address="none")
+    )
+    dialog = _make_dialog(ctrl)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        hint = dialog.findChild(QLabel, "devices_empty_hint")
+        assert hint is not None and not hint.isVisibleTo(dialog)
+    finally:
+        dialog.close()

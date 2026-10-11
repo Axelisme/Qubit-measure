@@ -1,7 +1,7 @@
 """Flat SampleTable v2 coordinate contract: schema, validation, resolution, migration.
 
-``SampleTable`` (``table.py``) stays schema-free; producers and consumers that opt
-into the v2 contract share the coordinate names, affine ``SampleFluxFrame``,
+Producers and consumers that opt into the v2 contract share the coordinate
+names, affine ``SampleFluxFrame``,
 ``validate_sample_table_v2`` and ``resolve_sample_flux`` from this module. The
 explicit legacy-unit migration seam (``migrate_sample_table_v2`` with
 ``LegacySampleFluxFrame``) is the only supported path for legacy A/mA/V/mV tables;
@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-DeviceValueUnit = Literal["A", "V"]
+DeviceValueUnit = Literal["A", "V", "native"]
 LegacyDeviceValueUnit = Literal["A", "mA", "V", "mV"]
 
 FLUX_COLUMN = "flux"
@@ -34,7 +34,7 @@ SAMPLE_COORDINATE_COLUMNS = (
     FLUX_PERIOD_COLUMN,
 )
 
-_DEVICE_VALUE_UNITS = frozenset({"A", "V"})
+_DEVICE_VALUE_UNITS = frozenset({"A", "V", "native"})
 _LEGACY_DEVICE_VALUE_UNITS = frozenset({"A", "mA", "V", "mV"})
 # Legacy coordinate aliases are not accepted v2 columns: a table that still
 # carries them is stale and must fail before mutation/analysis.
@@ -119,7 +119,11 @@ def _coerce_real_numeric_input(value: object, *, field: str) -> NDArray[np.float
 
 @dataclass(frozen=True, slots=True)
 class SampleFluxFrame:
-    """Device-value affine frame mapping base-SI ``dev_value`` to dimensionless flux."""
+    """Device-value affine frame mapping A/V/native ``dev_value`` to flux.
+
+    dev_unit declares the raw value unit (A, V or native); flux_int is the
+    zero-flux device value and flux_period is the positive device-value span
+    per flux quantum. Native values have no implied physical unit conversion."""
 
     dev_unit: DeviceValueUnit
     flux_int: float
@@ -128,7 +132,7 @@ class SampleFluxFrame:
     def __post_init__(self) -> None:
         if self.dev_unit not in _DEVICE_VALUE_UNITS:
             raise SampleTableV2Error(
-                f"unsupported device unit {self.dev_unit!r}; expected 'A' or 'V'",
+                f"unsupported device unit {self.dev_unit!r}; expected 'A', 'V' or 'native'",
                 reason="invalid_unit",
                 data={"unit": self.dev_unit},
             )
@@ -335,7 +339,7 @@ def validate_sample_table_v2(
     )
     if invalid_units:
         raise SampleTableV2Error(
-            f"dev_unit must be 'A' or 'V', found: {invalid_units}",
+            f"dev_unit must be 'A', 'V' or 'native', found: {invalid_units}",
             reason="invalid_unit",
             data={"units": invalid_units},
         )

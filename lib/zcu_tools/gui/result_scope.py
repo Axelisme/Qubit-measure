@@ -1,7 +1,8 @@
 """Result-scope discovery and params.json identity management.
 
 A result scope is the first-level project root for one chip/qubit pair: the
-directory that owns ``params.json`` and contains the ContextManager contexts.
+directory that owns ``params.json``. Result entries and working points have
+explicit identities managed by ``resources.entry``.
 This module is Qt-free; params.json parsing and migration policy lives in
 ``resources.qubit_params.QubitParams``.
 """

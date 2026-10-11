@@ -36,7 +36,6 @@ from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg as NativeArbWav
 from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg as NativeFlatTopWaveformCfg,
 )
-from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -310,8 +309,8 @@ def test_assemble_experiment_cfg_uses_ml_from_each_call() -> None:
 def test_make_cfg_uses_each_environment_library_and_overrides() -> None:
     manager = DeviceManager()
     raw: dict[str, ExperimentCfgValue] = {"modules": {"drive": "Q1.pulses.drive"}}
-    first = CfgEnv(md=MetaDict(), ml=_library(1000.0), device_manager=manager)
-    second = CfgEnv(md=MetaDict(), ml=_library(2000.0), device_manager=manager)
+    first = CfgEnv(ml=_library(1000.0), device_manager=manager)
+    second = CfgEnv(ml=_library(2000.0), device_manager=manager)
     cfg_a = make_cfg(raw, _PulseExperimentCfg, first)
     cfg_b = make_cfg(raw, _PulseExperimentCfg, second, overrides={"reps": 3})
     assert cfg_a.modules.drive.freq == pytest.approx(1000.0)
@@ -468,7 +467,7 @@ def test_make_cfg_preserves_role_names_without_hardware_reads(
         return info
 
     monkeypatch.setattr(device, "get_info", recording_info)
-    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    env = CfgEnv(ml=_library(), device_manager=manager)
     make_cfg({}, _DeviceOnlyCfg, env)
     assert reads == []
     raw: dict[str, ExperimentCfgValue] = {"dev": {"flux_dev": "flux_source"}}
@@ -485,7 +484,7 @@ def test_make_cfg_without_roles_does_not_inject_connected_settings() -> None:
     manager = DeviceManager()
     device = FakeDevice()
     manager.register_device("unrelated", device)
-    env = CfgEnv(md=MetaDict(), ml=_library(), device_manager=manager)
+    env = CfgEnv(ml=_library(), device_manager=manager)
     cfg = make_cfg({}, _DeviceOnlyCfg, env)
     assert cfg.dev is None
     assert device.get_value() == 0.0

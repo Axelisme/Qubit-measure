@@ -1,6 +1,6 @@
-"""Flux-first SampleMerge: merge v2 sample CSVs into one authoritative target frame.
+"""Flux-first SampleMerge: merge v2 JSONL samples into one authoritative target frame.
 
-Each source is a flat v2 CSV (``validate_sample_table_v2``). Per-row flux is
+Each source is a flat v2 JSONL (``validate_sample_table_v2``). Per-row flux is
 resolved through the shared provenance SSOT ``resolve_sample_flux`` (explicit
 ``flux`` -> row ``flux_int``/``flux_period`` frame -> caller-declared
 ``fallback_frame``), shifted by the caller's explicit integer branch offset,
@@ -9,7 +9,7 @@ model, and finally mapped to the target frame's device values. The merged
 output is a complete flat v2 coordinate: adjusted ``flux`` plus target
 ``dev_value``/``dev_unit``/``flux_int``/``flux_period``, followed by the
 caller-owned measurement columns. Units and integer branches are never
-inferred; source CSVs are never overwritten.
+inferred; source JSONL files are never overwritten.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from zcu_tools.resources.sample_table import (
     FLUX_PERIOD_COLUMN,
     SAMPLE_COORDINATE_COLUMNS,
     DeviceValueUnit,
+    JsonlSampleTable,
     SampleFluxFrame,
     SampleFluxResolution,
     resolve_sample_flux,
@@ -49,9 +50,9 @@ from .flux import predict_f01_mhz
 BatchFluxOffsetObjective = Literal["soft_l1", "median_abs", "mean_abs", "rms"]
 
 #: Exact caller-owned measurement column holding the observed f01 used by the
-#: optional batch flux offset fit and diagnostics. v2 CSVs carry no aliases;
+#: optional batch flux offset fit and diagnostics. v2 JSONL files carry no aliases;
 #: a missing column simply disables the batch fit (no inference).
-F01_FREQUENCY_COLUMN = "Freq (MHz)"
+F01_FREQUENCY_COLUMN = "freq_mhz"
 
 _FLUX_SOURCE_LABELS = ("explicit", "row-frame", "fallback-frame")
 
@@ -60,7 +61,7 @@ _FLUX_SOURCE_LABELS = ("explicit", "row-frame", "fallback-frame")
 class FluxFrame:
     """Analysis affine flux frame: f01 model params plus the v2 device frame.
 
-    Construction fast-fails on unsupported A/V ``dev_unit``, non-finite
+    Construction fast-fails on unsupported A/V/native ``dev_unit``, non-finite
     ``flux_int`` and non-positive/non-finite ``flux_period``; the f01 model
     ``params`` must be three finite floats. ``flux_from_dev_value`` /
     ``dev_value_from_flux`` provide the scalar/array round trip
@@ -103,7 +104,7 @@ class FluxFrame:
         """Build a frame from a result dir's ``fluxdep_fit``.
 
         ``dev_unit`` is required because the persisted params carry no unit
-        metadata; the caller declares the device's A/V unit explicitly.
+        metadata; the caller declares the device's A/V/native unit explicitly.
         """
         path = Path(result_dir)
         fit = QubitParams.for_result_dir(path, readonly=True).require_fluxdep_fit()
@@ -142,7 +143,7 @@ class FluxFrame:
 
 @dataclass(frozen=True, slots=True)
 class SampleSource:
-    """One v2 sample CSV feeding the merge.
+    """One v2 sample JSONL feeding the merge.
 
     ``fallback_frame`` resolves migrated rows that carry neither explicit
     ``flux`` nor a row frame (its unit must match the row ``dev_unit``).
@@ -235,7 +236,7 @@ def merge_sample_sources(
     ``integer_flux_offset`` -> optionally fit one small batch offset against
     the target f01 model -> map to the target frame's ``dev_value``. Units and
     integer branches are never inferred; unresolved rows fail fast with their
-    indexes. Source CSVs are never modified.
+    indexes. Source JSONL files are never modified.
 
     The returned ``merged`` table is a complete flat v2 coordinate
     (``flux``, ``dev_value``, ``dev_unit``, ``flux_int``, ``flux_period``)
@@ -250,7 +251,7 @@ def merge_sample_sources(
 
     for source in tuple(sources):
         source_path = Path(source.path)
-        raw = pd.read_csv(source_path, encoding="utf-8-sig")
+        raw = JsonlSampleTable(source_path).read()
         validate_sample_table_v2(raw, allow_empty=True)
         resolution = resolve_sample_flux(
             raw,
@@ -315,7 +316,7 @@ def write_merged_samples(
 ) -> Path:
     """Write the merged v2 table to a caller-owned path.
 
-    Refuses to overwrite any source CSV that fed the merge.
+    Refuses to overwrite any source JSONL that fed the merge.
     """
     output_path = Path(path)
     _require_distinct_from_sources(result, output_path)
@@ -332,7 +333,7 @@ def write_sample_merge_report(
 ) -> Path:
     """Write the merge diagnostics report to a caller-owned path.
 
-    Refuses to overwrite any source CSV that fed the merge.
+    Refuses to overwrite any source JSONL that fed the merge.
     """
     output_path = Path(path)
     _require_distinct_from_sources(result, output_path)
@@ -538,8 +539,16 @@ def _make_diagnostics_table(
             "fitted_flux_offset": batch.fitted_flux_offset,
             "batch_flux_offset": batch.fitted_flux_offset,
             "row_index": np.arange(len(raw), dtype=np.int64),
-            "dev_value": _float_column(raw, DEV_VALUE_COLUMN),
-            "dev_unit": raw[DEV_UNIT_COLUMN].astype(str).to_numpy(),
+            "dev_value": (
+                np.empty(0, dtype=np.float64)
+                if raw.empty
+                else _float_column(raw, DEV_VALUE_COLUMN)
+            ),
+            "dev_unit": (
+                np.empty(0, dtype=object)
+                if raw.empty
+                else raw[DEV_UNIT_COLUMN].astype(str).to_numpy()
+            ),
             "flux_resolved": flux_resolved,
             "flux": flux_final,
             "dev_value_target": dev_values,
@@ -591,10 +600,10 @@ def _summary_row(
 def _require_distinct_from_sources(
     result: SampleMergeResult, output_path: Path
 ) -> None:
-    """Raise before writing ``output_path`` if it equals any source CSV path.
+    """Raise before writing ``output_path`` if it equals any source JSONL path.
 
-    Source paths come from the per-source ``summary_table`` so that header-only
-    (zero-row) sources — which have no row diagnostics — are protected too.
+    Source paths come from the per-source ``summary_table`` so that empty
+    sources, which have no row diagnostics, are protected too.
     Row-level diagnostic paths are unioned in as defense in depth. Paths are
     resolved so exact/relative/symlink-equivalent spellings cannot bypass the
     check to the extent ``Path.resolve`` already supports.
@@ -610,7 +619,7 @@ def _require_distinct_from_sources(
             for value in result.diagnostics["source_path"].astype(str).unique()
         )
     if resolved_output in source_paths:
-        raise ValueError(f"refusing to overwrite source CSV {output_path}")
+        raise ValueError(f"refusing to overwrite source JSONL {output_path}")
 
 
 def _predict_residual_or_nan(

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Presentation helpers for non-scalar MetaDict values (S2)
+# Presentation helpers for non-scalar parameter context values (S2)
 # ---------------------------------------------------------------------------
 
 
@@ -203,7 +203,7 @@ class WritebackWidget(QWidget):
     - Draft-owned applied state projected as bold ``target*`` vs normal ``target``.
     - Centered Current → Proposed columns on a shared-background,
       continuous-boundary panel.
-    - Equal 56×26 Edit/Copy actions; non-scalar MetaDict values use bounded
+    - Equal 56×26 Edit/Copy actions; non-scalar parameter context values use bounded
       summaries, while small proposed matrices also show a read-only matrix view.
       Current values remain summary-only and Copy retains the proposed JSON.
     - Width breakpoint near 450 px: wide rows single-line, narrow rows
@@ -292,6 +292,8 @@ class WritebackWidget(QWidget):
         self,
         items: Sequence[WritebackItem],
         values: Mapping[str, WritebackValues],
+        *,
+        unavailable_reasons: tuple[str, ...] = (),
     ) -> None:
         """Render persistent items with service-owned captured preview facts.
 
@@ -337,6 +339,11 @@ class WritebackWidget(QWidget):
             self._rows_layout.addWidget(row)
             self._rows.append(row)
 
+        for reason in unavailable_reasons:
+            label = QLabel(reason)
+            label.setObjectName("writebackUnavailableReason")
+            label.setWordWrap(True)
+            self._rows_layout.addWidget(label)
         self._refresh_apply_enabled()
         self._update_responsive()
 

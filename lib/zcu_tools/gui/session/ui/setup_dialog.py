@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from qtpy.QtCore import Qt
-from qtpy.QtGui import QShowEvent
+from qtpy.QtCore import Qt, QUrl
+from qtpy.QtGui import QDesktopServices, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
@@ -44,6 +45,62 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _breakable(text: str) -> str:
+    """Return text with a zero-width space after each path separator.
+
+    Paths contain no spaces, so a word-wrapped QLabel could not break them and
+    would widen the dialog instead; the invisible break opportunities fix that.
+    """
+    return text.replace("/", "/\u200b").replace("\\", "\\\u200b")
+
+
+def _wrapping_label(object_name: str = "") -> QLabel:
+    """Return a selectable, word-wrapped label whose text never sets its width."""
+    label = QLabel("")
+    if object_name:
+        label.setObjectName(object_name)
+    label.setWordWrap(True)
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    # Minimum height: wrapped lines are never squeezed out by the layout.
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
+    return label
+
+
+class _ElidedPathLabel(QLabel):
+    """Show one filesystem path elided in the middle to the current width.
+
+    The last segment (the entry name) stays visible; the tooltip and path()
+    always hold the full path. An empty path clears the label.
+    """
+
+    def __init__(self, object_name: str) -> None:
+        super().__init__("")
+        self.setObjectName(object_name)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._path = ""
+
+    def path(self) -> str:
+        """Return the full path last given to set_path, or ''."""
+        return self._path
+
+    def set_path(self, path: str) -> None:
+        """Store path, show it in the tooltip and elide the visible text."""
+        self._path = path
+        self.setToolTip(path)
+        self._update_text()
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._update_text()
+
+    def _update_text(self) -> None:
+        self.setText(
+            self.fontMetrics().elidedText(
+                self._path, Qt.TextElideMode.ElideMiddle, max(self.width(), 0)
+            )
+        )
+
+
 @runtime_checkable
 class SocConfigProtocol(Protocol):
     """Protocol for QICK Soc configuration objects (dict-style field access)."""
@@ -56,9 +113,14 @@ class SetupDialog(QDialog):
 
     Showing/reopening only prefills cached preferences and queries; it does not
     open an entry or connect hardware. New/Open publish the owner binding and
-    display its paths. Working-point Switch/Create submit the exact label,
-    description and same-entry clone choice to the owner; failures remain
-    visible in the status label without retry. Track device only suggests an
+    display its paths, elided in the middle with the full path as tooltip and
+    an Open folder action. The working-point list shows labels only, marks the
+    current point with a bold "● " prefix and keeps the selection on it; the
+    selected point's description shows below the list. Switch/Create submit
+    the exact label, description and same-entry clone choice to the owner;
+    a successful Create clears the form. Failures remain visible in the
+    wrapped status label without retry; a missing result root is shown as a
+    hint because New entry creates it. Track device only suggests an
     editable label from cached value/unit, preserving manual edits and None.
     """
 
@@ -70,7 +132,7 @@ class SetupDialog(QDialog):
         super().__init__(parent)
         self._ctrl = controller
         self.setWindowTitle("Setup")
-        self.resize(900, 600)
+        self.resize(900, 680)
 
         root_layout = QVBoxLayout(self)
 
@@ -109,9 +171,16 @@ class SetupDialog(QDialog):
         open_entry_btn.clicked.connect(self._on_open_entry_clicked)
         entry_actions.addWidget(open_entry_btn)
         entry_form.addRow("", entry_actions)
-        self._entry_paths = QLabel("")
-        self._entry_paths.setWordWrap(True)
-        entry_form.addRow(self._entry_paths)
+        self._result_path = _ElidedPathLabel("result_path")
+        self._result_open = self._open_folder_button(self._result_path)
+        entry_form.addRow(
+            "Result:", self._path_row(self._result_path, self._result_open)
+        )
+        self._database_path = _ElidedPathLabel("database_path")
+        self._database_open = self._open_folder_button(self._database_path)
+        entry_form.addRow(
+            "Database:", self._path_row(self._database_path, self._database_open)
+        )
         left_layout.addWidget(entry_group)
 
         # context list
@@ -119,15 +188,24 @@ class SetupDialog(QDialog):
         ctx_layout = QVBoxLayout(ctx_group)
         self._ctx_list = QListWidget()
         self._ctx_list.setObjectName("working_points")
-        self._ctx_list.setMaximumHeight(120)
-        ctx_layout.addWidget(self._ctx_list)
+        self._ctx_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._ctx_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._ctx_list.currentItemChanged.connect(self._show_selected_description)
+        rows = self._ctx_list.fontMetrics().height() + 4
+        self._ctx_list.setMinimumHeight(4 * rows + 2 * self._ctx_list.frameWidth())
+        ctx_layout.addWidget(self._ctx_list, stretch=1)
+        self._point_descriptions: dict[str, str] = {}
+        self._selected_description = _wrapping_label("selected_point_description")
+        ctx_layout.addWidget(self._selected_description)
 
         switch_row = QHBoxLayout()
         self._switch_btn = QPushButton("Switch to selected")
         self._switch_btn.clicked.connect(self._on_switch_clicked)
         switch_row.addWidget(self._switch_btn)
         ctx_layout.addLayout(switch_row)
-        left_layout.addWidget(ctx_group)
+        left_layout.addWidget(ctx_group, stretch=1)
 
         # new context
         new_group = QGroupBox("New working point")
@@ -165,11 +243,6 @@ class SetupDialog(QDialog):
         left_layout.addWidget(new_group)
 
         # project status label
-        self._project_status = QLabel("")
-        self._project_status.setObjectName("setup_status")
-        left_layout.addWidget(self._project_status)
-
-        left_layout.addStretch()
         splitter.addWidget(left_widget)
 
         # ── Right panel: Connection ──────────────────────────────────────
@@ -181,6 +254,10 @@ class SetupDialog(QDialog):
         conn_form = QFormLayout(conn_group)
 
         self._ip_edit = QLineEdit("192.168.10.1")
+        # Keep any IPv4 address fully visible when the dialog is narrow.
+        self._ip_edit.setMinimumWidth(
+            self._ip_edit.fontMetrics().horizontalAdvance("255.255.255.255 ") + 12
+        )
         conn_form.addRow("IP address:", self._ip_edit)
 
         self._port_spin = QSpinBox()
@@ -201,7 +278,7 @@ class SetupDialog(QDialog):
         self._connect_btn.clicked.connect(self._on_connect_clicked)
         right_layout.addWidget(self._connect_btn)
 
-        self._conn_status = QLabel("")
+        self._conn_status = _wrapping_label()
         right_layout.addWidget(self._conn_status)
 
         # soccfg description — hidden until connection succeeds
@@ -219,6 +296,9 @@ class SetupDialog(QDialog):
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)  # type: ignore[attr-defined]
         btn_box.rejected.connect(self.reject)
+        # Full-width status keeps long project messages to as few lines as possible.
+        self._project_status = _wrapping_label("setup_status")
+        root_layout.addWidget(self._project_status)
         root_layout.addWidget(btn_box)
 
         # initialise
@@ -334,6 +414,12 @@ class SetupDialog(QDialog):
     def _refresh_entries(self, *, refresh: bool = False) -> None:
         try:
             names = self._ctrl.list_entries(refresh=refresh)
+        except FileNotFoundError as exc:
+            # A missing result root is the normal first-run state, not a failure.
+            root = exc.filename if exc.filename is not None else "the result root"
+            self._entry_combo.clear()
+            self._set_project_hint(f"No result entries yet. New entry… creates {root}")
+            return
         except Exception as exc:
             # Keep discovery failures visible without escaping the Qt callback.
             logger.exception("Failed to list result entries")
@@ -348,10 +434,28 @@ class SetupDialog(QDialog):
         if idx >= 0:
             self._entry_combo.setCurrentIndex(idx)
 
+    def _open_folder_button(self, label: _ElidedPathLabel) -> QPushButton:
+        """Return a disabled Open folder button that opens label's full path."""
+        button = QPushButton("Open folder")
+        button.setEnabled(False)
+        button.clicked.connect(lambda checked=False: self._open_folder(label.path()))
+        return button
+
+    @staticmethod
+    def _path_row(label: _ElidedPathLabel, button: QPushButton) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.addWidget(label, stretch=1)
+        row.addWidget(button)
+        return row
+
     def _show_entry_paths(self, info: EntryInfo) -> None:
-        self._entry_paths.setText(
-            f"Result: {info.result_path}\nDatabase: {info.database_path}"
-        )
+        self._result_path.set_path(str(info.result_path))
+        self._database_path.set_path(str(info.database_path))
+        self._result_open.setEnabled(True)
+        self._database_open.setEnabled(True)
+
+    def _open_folder(self, path: str) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _refresh_device_list(self) -> None:
         entries = self._ctrl.devices.list_devices()
@@ -395,21 +499,21 @@ class SetupDialog(QDialog):
         except Exception as exc:
             # Isolate the Qt callback; the owner preserves binding and recovery.
             logger.exception("Failed to create result entry")
-            self._set_project_status(str(exc), True)
+            self._set_project_status(str(exc), error=True)
             return
         self._entry_installed(info)
 
     def _on_open_entry_clicked(self) -> None:
         name = self._entry_combo.currentText()
         if not name:
-            self._set_project_status("Select an entry first", True)
+            self._set_project_status("Select an entry first", error=True)
             return
         try:
             info = self._ctrl.open_entry(EntryRequest(name))
         except Exception as exc:
             # Isolate the Qt callback without hiding the owner's failure.
             logger.exception("Failed to open result entry")
-            self._set_project_status(str(exc), True)
+            self._set_project_status(str(exc), error=True)
             return
         self._entry_installed(info)
 
@@ -456,22 +560,55 @@ class SetupDialog(QDialog):
             )
             return
         self._refresh_context_list()
+        self._clear_new_point_form()
         self._set_project_status(f"Created working point: {request.label}")
+
+    def _clear_new_point_form(self) -> None:
+        self._label_edit.clear()
+        self._label_edit.setModified(False)
+        self._description_edit.clear()
+        self._on_device_changed(self._device_combo.currentText())
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
         points = self._ctrl.list_points()
-        labels = [point.label for point in points]
+        current = self._ctrl.current_point_label()
+        self._point_descriptions = {p.label: p.description for p in points}
+        current_item: QListWidgetItem | None = None
         for point in points:
-            item = QListWidgetItem(f"{point.label} — {point.description}")
+            is_current = point.label == current
+            item = QListWidgetItem(f"● {point.label}" if is_current else point.label)
             item.setData(Qt.ItemDataRole.UserRole, point.label)
+            item.setToolTip(point.description)
+            if is_current:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                current_item = item
             self._ctx_list.addItem(item)
-        if self._ctx_list.count() > 0:
-            self._ctx_list.setCurrentRow(0)
-        self._refresh_clone_combo(labels)
+        if current_item is None:
+            self._ctx_list.setCurrentRow(-1)
+        else:
+            self._ctx_list.setCurrentItem(current_item)
+        self._show_selected_description(current_item, None)
+        self._refresh_clone_combo([point.label for point in points])
+
+    def _show_selected_description(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            self._selected_description.setText("")
+            return
+        description = self._point_descriptions[current.data(Qt.ItemDataRole.UserRole)]
+        if description:
+            self._selected_description.setText(f"Description: {description}")
+            self._selected_description.setStyleSheet("")
+        else:
+            self._selected_description.setText("No description")
+            self._selected_description.setStyleSheet("color: gray;")
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
-        # "(empty)" uses the owner's setup seed and empty library, not memory DRAFT.
+        # "(empty)" uses the owner's setup seed and empty library, not unsaved session parameters.
         prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()
@@ -482,10 +619,17 @@ class SetupDialog(QDialog):
         idx = self._clone_combo.findData(prev) if prev is not None else 0
         self._clone_combo.setCurrentIndex(max(idx, 0))
 
-    def _set_project_status(self, msg: str, error: bool = False) -> None:
-        self._project_status.setText(msg)
-        color = "red" if error else "green"
-        self._project_status.setStyleSheet(f"color: {color};")
+    def _set_project_status(self, msg: str, *, error: bool = False) -> None:
+        self._show_status(self._project_status, msg, "red" if error else "green")
+
+    def _set_project_hint(self, msg: str) -> None:
+        self._show_status(self._project_status, msg, "gray")
+
+    @staticmethod
+    def _show_status(label: QLabel, msg: str, color: str) -> None:
+        label.setText(_breakable(msg))
+        label.setToolTip(msg)
+        label.setStyleSheet(f"color: {color};")
 
     # ------------------------------------------------------------------
     # Connection panel handlers
@@ -551,7 +695,5 @@ class SetupDialog(QDialog):
         self._cfg_text.setPlainText(text)
         self._cfg_text.setVisible(True)
 
-    def _set_conn_status(self, msg: str, error: bool = False) -> None:
-        self._conn_status.setText(msg)
-        color = "red" if error else "green"
-        self._conn_status.setStyleSheet(f"color: {color};")
+    def _set_conn_status(self, msg: str, *, error: bool = False) -> None:
+        self._show_status(self._conn_status, msg, "red" if error else "green")

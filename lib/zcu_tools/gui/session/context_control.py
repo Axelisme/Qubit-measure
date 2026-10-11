@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
+    from zcu_tools.resources.entry.writeback import WritebackEvidence, WritebackItem
 
 
 class ContextControlPort(Protocol):
@@ -41,7 +43,7 @@ class ContextControlPort(Protocol):
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        selected saved point. No entry/context raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         ...
@@ -52,7 +54,7 @@ class ContextControlPort(Protocol):
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        current DRAFT in memory or ACTIVE point in one resource transaction.
+        selected saved point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. Setup edits never change existing points or captures.
@@ -84,7 +86,7 @@ class ContextControlPort(Protocol):
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical origin/roles on the owner thread without I/O.
 
-        Source faults propagate. Draft/unbound captures raise
+        Source faults propagate. Unbound captures raise
         FailedPreconditionError(storage_unavailable); current selection is ignored.
         """
         ...
@@ -94,10 +96,38 @@ class ContextControlPort(Protocol):
     ) -> ParameterContext:
         """Read current values at a fixed target without selecting it.
 
-        SavedPoint may read point/library files in the opened entry. EntryDraft
-        requires that memory draft to remain selected. Supplied roles stay fixed;
-        cross-entry, stale draft, missing point, schema and I/O errors propagate.
+        SavedPoint may read point/library files in the opened entry. Supplied roles stay fixed;
+        cross-entry, missing point, schema and I/O errors propagate.
         No versions or events are published.
+        """
+        ...
+
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
+        """Read the latest entry sample for a run through the sample owner.
+
+        No selection/publication changes occur. Target admission, unsafe names,
+        invalid run_id, corrupt history and I/O failures propagate. A missing row
+        returns None. SavedPoint reads entry JSONL history.
+        """
+        ...
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Accept at the fixed target through the context owner and shared loop.
+
+        Nonempty writes require a captured SavedPoint in the opened entry.
+        SavedPoint parameter/library values persist and samples append to entry
+        JSONL. Successful prefix writes publish before later failures. Item failure raises
+        WritebackApplyError with accepted event_id, applied count and original
+        cause. Target admission and ledger append errors propagate unchanged.
+        No implicit point creation, saving, rollback or retry is provided.
         """
         ...
 
@@ -112,9 +142,9 @@ class ContextControlPort(Protocol):
         """Write a concrete point/general path using the captured target.
 
         Runs on the owner thread. Omitted source is manual; explicit Provenance
-        uses this entry's ledger. Cross-entry/stale-DRAFT/schema/source/conflict/
-        I/O failures propagate. Nonselected SavedPoint writes do not select it;
-        DRAFT is memory-only. Success follows resource validation/commit.
+        uses this entry's ledger. Cross-entry/missing-selection/schema/source/conflict/
+        I/O failures propagate. Nonselected SavedPoint writes do not select it.
+        Success follows resource validation/commit.
         """
         ...
 
@@ -151,7 +181,7 @@ class ContextControlPort(Protocol):
         """Lower/commit one fixed-target structure command via ContextService.
 
         The supplied callbacks convert put/replace schemas using parameters;
-        rename/delete do not call them. Draft writes require selected DRAFT.
+        rename/delete do not call them. Writes require a selected working point.
         Detached SavedPoint writes do not select or publish. Invalid target,
         lowering/schema/source/conflict/I/O failures publish nothing.
         """
@@ -159,6 +189,10 @@ class ContextControlPort(Protocol):
 
     def get_entry_info(self) -> EntryInfo | None:
         """Read cached entry identity/paths, or None without an entry."""
+        ...
+
+    def current_point_label(self) -> str | None:
+        """Read the selected saved point label, or None when none is selected; no I/O."""
         ...
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
@@ -266,6 +300,22 @@ class ContextControlFacet(ContextControlPort):
         """Read a captured target using ContextControlPort's current-value policy."""
         return self._context.read_target(target, roles=roles)
 
+    def read_sample(
+        self, target: ContextTarget, component: str, run_id: str
+    ) -> JsonObject | None:
+        """Use the context owner's entry JSONL read contract."""
+        return self._context.read_sample(target, component, run_id)
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Use ContextControlPort's ordered acceptance and prefix contract."""
+        return self._context.apply_writeback(target, items, evidence=evidence)
+
     def set_parameter(
         self,
         target: ContextTarget,
@@ -314,6 +364,11 @@ class ContextControlFacet(ContextControlPort):
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()
+
+    def current_point_label(self) -> str | None:
+        # Published parameters exist only while a saved point is selected.
+        parameters = self._context.get_session_env().parameters
+        return None if parameters is None else parameters.target.point
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)

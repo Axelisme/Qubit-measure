@@ -26,7 +26,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read an adapter's human-facing orientation guide BEFORE running it: "
             "prose (not a contract) on {behavior, expects_md, expects_ml, "
             "typical_writeback, recommended} — what the experiment measures, what it "
-            "assumes is already in the MetaDict/ModuleLibrary, what a run tends to "
+            "assumes is already in the parameter context/ModuleLibrary, what a run tends to "
             "write back, and recommended analysis settings. How you actually use it "
             "is your call. Empty fields mean the adapter has no guide written yet.",
             (required_string("adapter_name", "Adapter to introspect"),),

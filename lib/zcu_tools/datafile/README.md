@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-12，固定 Run snapshot、device 單位與 heterogeneous workflow Labber 匯出
+**Last updated:** 2026-10-12，固定 Run snapshot、workflow Labber 匯出與離線 legacy reader 遷移
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -52,10 +52,6 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
 - `Axis`、`LabberPayload`、`LabberMetadata`、`LabberData` 描述單一
   inner-first axes 的 Labber dataset。
 - `DataVariable`、`GroupedLabberData` 描述 grouped Labber 衍生輸出：同一 Labber file 內含多個 variable payload，metadata 共用。正規 Experiment Data File 的 variable 分組由 native payload 表示。
-- `load_legacy_labber_payload` 是離線 migration 專用入口。Caller 提供
-  明確 disk schema；它使用 single 或 marker-qualified grouped reader，驗證
-  labels／units／shape 並轉換 numeric containers，不猜 variable identity 或單位。
-  正常 runtime loader 不呼叫這個入口。
 - `save_labber_data` / `load_labber_data` 處理 single-variable file。
 - `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
   grouped v2。所有 variables 必須共享完全相同的 inner-first axes、shape 與

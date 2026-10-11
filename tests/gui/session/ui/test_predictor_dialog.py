@@ -14,11 +14,11 @@ from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
     CalibrateFluxBiasResult,
+    PredictCurveRequest,
     PredictCurveResult,
+    PredictMatrixCurveRequest,
     PredictMatrixCurveResult,
     PredictorLoadError,
-    PredictorNotLoaded,
-    SetModelParamsRequest,
 )
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
@@ -36,6 +36,7 @@ from zcu_tools.gui.session.ui.predictor_dialog import (
     PredictorDialog,
     PredictorDialogState,
 )
+from zcu_tools.simulate.predictor import PredictorParams
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
@@ -96,16 +97,22 @@ def _make_ctrl(
     else:
         ctrl.get_predictor_info.return_value = None
 
-    def _freq_side(req):  # type: ignore[no-untyped-def]
+    def _freq_side(
+        params: PredictorParams, req: PredictCurveRequest
+    ) -> PredictCurveResult:
         return _make_freq_result(list(req.transitions))
 
-    def _mat_side(req):  # type: ignore[no-untyped-def]
+    def _mat_side(
+        params: PredictorParams, req: PredictMatrixCurveRequest
+    ) -> PredictMatrixCurveResult:
         return _make_mat_result(list(req.transitions))
 
     ctrl.predict_freq_curve.side_effect = _freq_side
     ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
-    ctrl.calibrate_flux_bias.return_value = CalibrateFluxBiasResult(flux_bias=0.125)
+    ctrl.calibrate_flux_bias.return_value = CalibrateFluxBiasResult(
+        flux_bias=0.125, frequency_mhz=4567.0, clamped=False
+    )
     ctrl.on_predictor_changed.return_value = MagicMock(name="unsubscribe_predictor")
     return ctrl
 
@@ -168,7 +175,6 @@ def test_live_mode_locks_model_marker_and_transition_controls(qapp):
         dialog._flux_half_spin,
         dialog._flux_period_spin,
         dialog._flux_bias_spin,
-        dialog._apply_btn,
         dialog._predict_value_spin,
         dialog._add_from_spin,
         dialog._add_to_spin,
@@ -184,12 +190,8 @@ def test_live_mode_locks_model_marker_and_transition_controls(qapp):
         assert not widget.isEnabled()
     assert all(not canvas._interaction_enabled for canvas in dialog._all_canvases)
 
-    dialog._on_apply_model_params()
-    ctrl.set_predictor_model_params.assert_not_called()
-
     dialog.set_live_mode(False)
 
-    assert dialog._apply_btn.isEnabled()
     assert dialog._predict_value_spin.isEnabled()
     assert dialog._device_read_btn is not None
     assert not dialog._device_read_btn.isEnabled()
@@ -226,113 +228,9 @@ def test_predictor_dialog_param_spinboxes_do_not_pad_trailing_zeros(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_init_populates_fields_from_info(qapp):
-    """With a predictor loaded at init, the six spinboxes reflect it."""
-    ctrl = _make_ctrl(
-        has_predictor=True,
-        path="/p.json",
-        ej=4.2,
-        ec=1.1,
-        el=0.7,
-        flux_half=0.3,
-        flux_period=0.8,
-        flux_bias=0.05,
-    )
-    dialog = PredictorDialog(ctrl)
-
-    assert dialog._ej_spin.value() == pytest.approx(4.2)
-    assert dialog._ec_spin.value() == pytest.approx(1.1)
-    assert dialog._el_spin.value() == pytest.approx(0.7)
-    assert dialog._flux_half_spin.value() == pytest.approx(0.3)
-    assert dialog._flux_period_spin.value() == pytest.approx(0.8)
-    assert dialog._flux_bias_spin.value() == pytest.approx(0.05)
-    assert dialog._params_path_edit.text() == "/p.json"
-
-
 # ---------------------------------------------------------------------------
 # Browse button — populates six fields AND auto-applies (installs)
 # ---------------------------------------------------------------------------
-
-
-def test_predictor_dialog_browse_populates_six_fields(qapp):
-    """Browse picks a file and populates EJ/EC/EL/flux_half/flux_period spinboxes."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-
-    fake_params = SetModelParamsRequest(
-        EJ=5.5, EC=1.3, EL=0.6, flux_half=0.4, flux_period=0.7
-    )
-    with (
-        patch(
-            "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
-            return_value=("/chosen/params.json", ""),
-        ),
-        patch(
-            "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
-            return_value=fake_params,
-        ),
-    ):
-        dialog._on_browse_file()
-
-    assert dialog._params_path_edit.text() == "/chosen/params.json"
-    assert dialog._ej_spin.value() == pytest.approx(5.5)
-    assert dialog._ec_spin.value() == pytest.approx(1.3)
-    assert dialog._el_spin.value() == pytest.approx(0.6)
-    assert dialog._flux_half_spin.value() == pytest.approx(0.4)
-    assert dialog._flux_period_spin.value() == pytest.approx(0.7)
-
-
-def test_predictor_dialog_browse_auto_applies(qapp):
-    """Browse must install the predictor (auto-apply) using the loaded fields."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-
-    fake_params = SetModelParamsRequest(
-        EJ=5.5, EC=1.3, EL=0.6, flux_half=0.4, flux_period=0.7
-    )
-    with (
-        patch(
-            "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
-            return_value=("/chosen/params.json", ""),
-        ),
-        patch(
-            "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
-            return_value=fake_params,
-        ),
-    ):
-        dialog._on_browse_file()
-
-    ctrl.set_predictor_model_params.assert_called_once()
-    (req,) = ctrl.set_predictor_model_params.call_args.args
-    assert isinstance(req, SetModelParamsRequest)
-    assert req.EJ == pytest.approx(5.5)
-    assert req.flux_period == pytest.approx(0.7)
-
-
-def test_predictor_dialog_browse_install_failure_keeps_fields_and_shows_error(qapp):
-    """A failed auto-apply (service error) keeps the fields populated, no crash."""
-    ctrl = _make_ctrl(has_predictor=False)
-    ctrl.set_predictor_model_params.side_effect = PredictorLoadError("bad model")
-    dialog = PredictorDialog(ctrl)
-
-    fake_params = SetModelParamsRequest(
-        EJ=5.5, EC=1.3, EL=0.6, flux_half=0.4, flux_period=0.7
-    )
-    with (
-        patch(
-            "zcu_tools.gui.session.ui.predictor_dialog.QFileDialog.getOpenFileName",
-            return_value=("/chosen/params.json", ""),
-        ),
-        patch(
-            "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
-            return_value=fake_params,
-        ),
-    ):
-        dialog._on_browse_file()
-
-    # Fields still populated despite the failed install.
-    assert dialog._ej_spin.value() == pytest.approx(5.5)
-    assert "bad model" in dialog._status_label.text()
 
 
 def test_predictor_dialog_browse_cancel_is_noop(qapp):
@@ -348,7 +246,6 @@ def test_predictor_dialog_browse_cancel_is_noop(qapp):
         dialog._on_browse_file()
 
     assert dialog._ej_spin.value() == before_ej
-    ctrl.set_predictor_model_params.assert_not_called()
 
 
 def test_predictor_dialog_browse_error_shown_in_status(qapp):
@@ -370,30 +267,6 @@ def test_predictor_dialog_browse_error_shown_in_status(qapp):
 
     assert "no fluxdep_fit" in dialog._status_label.text()
     # Read failure means no install attempt.
-    ctrl.set_predictor_model_params.assert_not_called()
-
-
-def test_predictor_dialog_typed_path_load_populates_and_applies(qapp):
-    """Typing a params.json path exercises the same load+auto-apply path as Browse."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-    dialog._params_path_edit.setText("/typed/params.json")
-
-    fake_params = SetModelParamsRequest(
-        EJ=6.0, EC=1.4, EL=0.8, flux_half=0.2, flux_period=0.9
-    )
-    with patch(
-        "zcu_tools.gui.session.services.predictor.read_fluxdep_fit_params",
-        return_value=fake_params,
-    ) as read_params:
-        dialog._on_load_path_clicked()
-
-    read_params.assert_called_once_with("/typed/params.json")
-    assert dialog._ej_spin.value() == pytest.approx(6.0)
-    ctrl.set_predictor_model_params.assert_called_once()
-    (req,) = ctrl.set_predictor_model_params.call_args.args
-    assert req.EJ == pytest.approx(6.0)
-    assert req.flux_period == pytest.approx(0.9)
 
 
 def test_predictor_dialog_typed_path_load_requires_path(qapp):
@@ -403,61 +276,11 @@ def test_predictor_dialog_typed_path_load_requires_path(qapp):
     dialog._on_load_path_clicked()
 
     assert "params.json path" in dialog._status_label.text()
-    ctrl.set_predictor_model_params.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
 # Apply button
 # ---------------------------------------------------------------------------
-
-
-def test_predictor_dialog_apply_installs_from_fields(qapp):
-    """Apply builds a SetModelParamsRequest from the fields and installs it."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-
-    dialog._ej_spin.setValue(4.0)
-    dialog._ec_spin.setValue(1.0)
-    dialog._el_spin.setValue(1.0)
-    dialog._flux_half_spin.setValue(0.25)
-    dialog._flux_period_spin.setValue(0.9)
-    dialog._flux_bias_spin.setValue(0.05)
-
-    dialog._on_apply_model_params()
-
-    ctrl.set_predictor_model_params.assert_called_once()
-    (req,) = ctrl.set_predictor_model_params.call_args.args
-    assert isinstance(req, SetModelParamsRequest)
-    assert req.EJ == pytest.approx(4.0)
-    assert req.EC == pytest.approx(1.0)
-    assert req.EL == pytest.approx(1.0)
-    assert req.flux_half == pytest.approx(0.25)
-    assert req.flux_period == pytest.approx(0.9)
-    assert req.flux_bias == pytest.approx(0.05)
-
-
-def test_predictor_dialog_apply_zero_period_guarded(qapp):
-    """flux_period == 0 must NOT install — the dialog fast-fails with a message."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-
-    dialog._flux_period_spin.setValue(0.0)
-    dialog._on_apply_model_params()
-
-    ctrl.set_predictor_model_params.assert_not_called()
-    assert "flux_period" in dialog._status_label.text()
-
-
-def test_predictor_dialog_apply_surfaces_service_error(qapp):
-    """A PredictorLoadError from the controller is shown in the status label."""
-    ctrl = _make_ctrl(has_predictor=False)
-    ctrl.set_predictor_model_params.side_effect = PredictorLoadError("bad model")
-    dialog = PredictorDialog(ctrl)
-
-    dialog._flux_period_spin.setValue(1.0)
-    dialog._on_apply_model_params()
-
-    assert "bad model" in dialog._status_label.text()
 
 
 # ---------------------------------------------------------------------------
@@ -508,29 +331,13 @@ def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
     _calibrate_button(dialog).click()
 
     ctrl.calibrate_flux_bias.assert_called_once()
-    (req,) = ctrl.calibrate_flux_bias.call_args.args
+    _params, req = ctrl.calibrate_flux_bias.call_args.args
     assert isinstance(req, CalibrateFluxBiasRequest)
     assert req.value == pytest.approx(0.25)
     assert req.frequency_mhz == pytest.approx(4567.0)
     assert req.transition == dialog._tracked[2]
     assert dialog._flux_bias_spin.value() == pytest.approx(0.125)
     assert "Calibrated flux_bias" in dialog._status_label.text()
-
-
-def test_predictor_dialog_calibrate_requires_loaded_predictor(qapp):
-    parameters = make_parameters({"frequency_mhz": 4567.0})
-
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl, parameter_provider=lambda: parameters)
-    _calibration_field(dialog).load_expression("general.ext.frequency_mhz")
-    dialog._table.selectRow(0)
-
-    assert not _calibrate_button(dialog).isEnabled()
-
-    _calibrate_button(dialog).click()
-
-    ctrl.calibrate_flux_bias.assert_not_called()
-    assert "Load a predictor" in _calibrate_button(dialog).toolTip()
 
 
 def test_predictor_dialog_calibrate_requires_single_selected_transition(qapp):
@@ -811,60 +618,12 @@ def test_predictor_dialog_selected_device_changed_applies_cached_value(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_active_label_inactive_when_no_predictor(qapp):
-    """With no predictor installed, the active label reads 'not installed'."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-    assert "not installed" in dialog._active_label.text()
-
-
-def test_predictor_dialog_active_label_active_when_predictor_loaded(qapp):
-    """With a predictor installed at init, the active label reads 'active'."""
-    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl)
-    assert "active" in dialog._active_label.text()
-
-
-def test_predictor_dialog_active_label_updates_on_apply(qapp):
-    """After a successful Apply the active label flips to 'active'."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-    assert "not installed" in dialog._active_label.text()
-
-    # Simulate the install making a predictor available afterwards.
-    ctrl.get_predictor_info.return_value = {
-        "path": None,
-        "flux_bias": 0.0,
-        "flux_half": 0.5,
-        "flux_period": 1.0,
-        "EJ": 4.0,
-        "EC": 1.0,
-        "EL": 1.0,
-    }
-    dialog._flux_period_spin.setValue(1.0)
-    dialog._on_apply_model_params()
-
-    assert "active" in dialog._active_label.text()
-
-
-def test_predictor_dialog_active_label_updates_on_clear_event(qapp):
-    """A cleared predictor event flips the active label back to 'not installed'."""
-    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl)
-    assert "active" in dialog._active_label.text()
-
-    ctrl.get_predictor_info.return_value = None
-    dialog._on_predictor_changed(object())
-
-    assert "not installed" in dialog._active_label.text()
-
-
 def test_predictor_dialog_default_predict_freq_curve_call(qapp):
     """With predictor loaded at init, predict_freq_curve is called with the 5 defaults."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
     PredictorDialog(ctrl)
     ctrl.predict_freq_curve.assert_called()
-    last_req = ctrl.predict_freq_curve.call_args.args[0]
+    last_req = ctrl.predict_freq_curve.call_args.args[1]
     assert set(last_req.transitions) == set(map(tuple, _DEFAULT_TRANSITIONS))
 
 
@@ -879,7 +638,7 @@ def test_predictor_dialog_default_predict_matrix_element_curve_call(qapp):
     PredictorDialog(ctrl)
     ctrl.predict_matrix_element_curve.assert_called()
     all_reqs = [
-        call.args[0] for call in ctrl.predict_matrix_element_curve.call_args_list
+        call.args[1] for call in ctrl.predict_matrix_element_curve.call_args_list
     ]
     full_default = set(map(tuple, _DEFAULT_TRANSITIONS))
     for op in ("n", "phi"):
@@ -894,14 +653,6 @@ def test_predictor_dialog_default_predict_matrix_element_curve_call(qapp):
         assert full_call is not None, f"No full-set curve call for operator {op!r}"
     # Both operators must appear and no others.
     assert {r.operator for r in all_reqs} == {"n", "phi"}
-
-
-def test_predictor_dialog_init_no_predictor_no_curve_call(qapp):
-    """With no predictor at init, neither curve function is called."""
-    ctrl = _make_ctrl(has_predictor=False)
-    PredictorDialog(ctrl)
-    ctrl.predict_freq_curve.assert_not_called()
-    ctrl.predict_matrix_element_curve.assert_not_called()
 
 
 def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
@@ -1239,25 +990,10 @@ def test_predictor_dialog_value_columns_fill_both_operators(qapp):
     dialog._update_value_columns()
 
     operators = {
-        call.args[0].operator
+        call.args[1].operator
         for call in ctrl.predict_matrix_element_curve.call_args_list
     }
     assert operators == {"n", "phi"}
-
-
-def test_predictor_dialog_columns_dash_when_not_loaded(qapp):
-    """predict_freq raising PredictorNotLoaded → all value columns show '—', no crash."""
-    ctrl = _make_ctrl(has_predictor=False)
-    ctrl.predict_freq.side_effect = PredictorNotLoaded("no predictor")
-    ctrl.predict_matrix_element_curve.side_effect = PredictorNotLoaded("no predictor")
-    dialog = PredictorDialog(ctrl)
-
-    dialog._update_value_columns()
-
-    for row in range(dialog._table.rowCount()):
-        for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
-            item = dialog._table.item(row, col)
-            assert item is not None and item.text() == "—"
 
 
 def test_predictor_dialog_value_column_runtime_error_is_logged(qapp, caplog):
@@ -1384,58 +1120,34 @@ def test_predictor_dialog_no_selection_calls_set_highlights_empty_all(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_on_predictor_changed_event_refreshes_curves(qapp):
-    """PredictorChangedPayload with a loaded predictor must call predict_freq_curve."""
-    ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl)
-    assert ctrl.predict_freq_curve.call_count == 0
-
-    ctrl.get_predictor_info.return_value = {
-        "path": "/new.json",
-        "flux_bias": 0.0,
-        "flux_half": 0.5,
-        "flux_period": 1.0,
-        "EJ": 4.0,
-        "EC": 1.0,
-        "EL": 1.0,
-    }
-    dialog._on_predictor_changed(object())
-
-    assert ctrl.predict_freq_curve.call_count >= 1
-    assert ctrl.predict_matrix_element_curve.call_count >= 1
-
-
-def test_predictor_dialog_on_predictor_changed_cleared_clears_all_canvases(qapp):
-    """Predictor event with no predictor must blank all canvases."""
-    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl)
-
-    ctrl.get_predictor_info.return_value = None
-    dialog._on_predictor_changed(object())
-
-    assert dialog._freq_canvas._marker_line is None
-    assert dialog._mat_n_canvas._marker_line is None
-    assert dialog._mat_phi_canvas._marker_line is None
-
-
-def test_predictor_dialog_on_predictor_changed_cleared_resets_all_columns(qapp):
-    """After a cleared predictor event, all f / |n| / |phi| cells show '—'."""
-    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl)
-
-    ctrl.get_predictor_info.return_value = None
-    dialog._on_predictor_changed(object())
-
-    for row in range(dialog._table.rowCount()):
-        for col in (_COL_FREQ, _COL_MAG_N, _COL_MAG_PHI):
-            item = dialog._table.item(row, col)
-            assert item is not None and item.text() == "—"
-
-
 def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
     """If predict_freq_curve raises, the error is shown in the status label."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    ctrl.predict_freq_curve.side_effect = PredictorNotLoaded("oops")
+    ctrl.predict_freq_curve.side_effect = ValueError("oops")
     dialog = PredictorDialog(ctrl)
 
     assert "oops" in dialog._status_label.text()
+
+
+def test_predictor_params_row_keeps_full_control_height(qapp):
+    from qtpy.QtWidgets import QLineEdit
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=False))
+    dialog.show()
+    qapp.processEvents()
+    try:
+        edit = next(
+            e
+            for e in dialog.findChildren(QLineEdit)
+            if "params.json" in e.placeholderText()
+        )
+        row = [edit] + [
+            b
+            for b in dialog.findChildren(QPushButton)
+            if b.text() in ("Load", "Browse", "Load component")
+        ]
+        assert len(row) == 4
+        for widget in row:
+            assert widget.height() >= widget.sizeHint().height()
+    finally:
+        dialog.close()
