@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QApplication,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QTreeWidget,
 )
 from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
@@ -595,6 +596,9 @@ def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(
     )
     button.click()
     assert entry.module_library("point").snapshot().document() == before.document()
+    tabs = dialog.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
     dialog.show()
     dialog.activateWindow()
     dialog.raise_()
