@@ -327,6 +327,10 @@ def leaves(
 
 
 def _compatible(info: FieldInfo, value: JsonValue) -> bool:
+    # Containers are whole leaves, but nested selectors still require ordinary tags.
+    tag = discriminator(info)
+    if tag is not None and isinstance(value, dict) and isinstance(value.get(tag), dict):
+        return False
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types

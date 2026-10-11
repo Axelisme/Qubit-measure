@@ -9,8 +9,8 @@ from time import monotonic
 
 from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.gui.remote.wire import Request, parse_request
-from zcu_tools.mcp.core.bridge import DeliverFn, McpBridge, MCPBridgeConfig, OnClosedFn
+from zcu_tools.gui.remote.wire import Request
+from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import ResultEntry
@@ -19,6 +19,8 @@ from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.mcp import build_workflow_tools
 
+from ._recording_transport import WindowTransport
+
 
 def wait_owner(qapp: QApplication, predicate: Callable[[], bool]) -> None:
     """Pump Qt until the public observation succeeds, or fail within 20 seconds."""
@@ -26,34 +28,6 @@ def wait_owner(qapp: QApplication, predicate: Callable[[], bool]) -> None:
     while not predicate():
         assert monotonic() < deadline, "Qt workflow observation did not settle"
         qapp.processEvents()
-
-
-class WindowTransport:
-    """Replace TCP only; preserve bridge IDs, wire parsing and owner RPC dispatch."""
-
-    def __init__(self, route: Callable[[Request], dict[str, object]]) -> None:
-        self.route = route
-        self.requests: list[Request] = []
-        self.deliver_reply: DeliverFn | None = None
-        self.is_open = True
-
-    def attach(
-        self, deliver_reply: DeliverFn, deliver_event: DeliverFn, on_closed: OnClosedFn
-    ) -> None:
-        """Bind bridge delivery; this substitute does not emit transport events."""
-        self.deliver_reply = deliver_reply
-
-    def send_line(self, payload: dict[str, object]) -> None:
-        """Dispatch the original request through the real remote adapter once."""
-        if not self.is_open or self.deliver_reply is None:
-            raise RuntimeError("Transport is not attached")
-        request = parse_request(json.loads(json.dumps(payload)))
-        self.requests.append(request)
-        self.deliver_reply(self.route(request))
-
-    def close(self) -> None:
-        """Disconnect MCP without cancelling the GUI run."""
-        self.is_open = False
 
 
 @dataclass

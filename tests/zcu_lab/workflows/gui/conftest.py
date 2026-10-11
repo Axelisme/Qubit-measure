@@ -50,8 +50,9 @@ from zcu_lab.workflows.mcp import build_workflow_tools
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input, library_env
+from ._recording_transport import WindowTransport, WireRoute
 from ._sim_session import SimSession, connect_tools, wait_owner
-from ._window_support import RpcRequest, WindowTransport, WireRoute
+from ._window_support import RpcRequest
 
 
 @pytest.fixture(scope="session")
