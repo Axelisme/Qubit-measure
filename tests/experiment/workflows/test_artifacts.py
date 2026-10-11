@@ -13,6 +13,7 @@ from threading import RLock
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
@@ -31,6 +32,7 @@ from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
 from zcu_tools.experiment.workflows.journal import (
     ChangedValue,
+    DeviceSetup,
     ExperimentFailed,
     IterationStarted,
     Paused,
@@ -360,6 +362,21 @@ def test_read_committed_records_rejects_complete_corrupt_lines(
     artifacts.journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(ValueError):
         artifact_io.read_committed_records(artifacts.paths.metadata_root)
+
+
+def test_read_committed_records_accepts_full_device_subclass_evidence(
+    artifacts: RunArtifacts,
+) -> None:
+    artifacts.append(
+        DeviceSetup("flux", FakeDeviceInfo(address="none", value=0.3, rampstep=1.0))
+    )
+    point = StepCommitted(1, 1, 0, encode_record({"t1_us": 30}), "iter/000001", ())
+    artifacts.append(point)
+    assert artifact_io.read_committed_records(artifacts.paths.metadata_root) == (
+        CommittedRecord(
+            1, 1, 0, point.encoded_record, point.iteration_dir, point.run_files
+        ),
+    )
 
 
 def test_read_committed_records_rejects_missing_and_empty_journals(
