@@ -54,9 +54,6 @@ def _execute[
     | T2EchoAcquisition,
 ](experiment: Callable[[Run[C]], R], cfg: C, soc: object, soccfg: QickConfig) -> None:
     run = Run(cfg, StopSignal(), soc=soc, soccfg=soccfg, device_snapshot={})
-    settings = run.device_setup
-    if settings is not None:
-        run.devices.setup(settings, run.cancel_signal)
     result = experiment(run)
     run.cancel_signal.raise_if_error()
     fit_metrics: dict[str, float] = {}
