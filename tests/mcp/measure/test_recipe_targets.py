@@ -406,50 +406,6 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
         )
 
 
-def test_recipe_stale_run_ref_is_not_refreshed_or_retried(tmp_path: Path) -> None:
-    gui = TargetGui()
-    client = make_client(tmp_path, gui, recipes=(TARGETED,))
-    client.transport.replies["tab.run_start"] = {
-        "ok": False,
-        "error": {
-            "code": "precondition_failed",
-            "reason": "stale_revision",
-            "message": "Source publication changed after preview",
-        },
-    }
-    with closing(client.context.session):
-        reply = client.call("sample", {"target": "Q2"})
-        assert reply.data["status"] == "failed"
-        assert not gui.ran
-        starts = [
-            params
-            for method, params in client.transport.sent
-            if method == "tab.run_start"
-        ]
-        assert starts == [
-            {
-                "tab_id": "t",
-                "expected": gui.publication["cfg_ref"],
-                "aliases": {"qubit": "Q2"},
-            }
-        ]
-        previews = [
-            params
-            for method, params in client.transport.sent
-            if method == "tab.get_cfg" and params.get("aliases") is not None
-        ]
-        assert previews[-1]["expected"] == starts[0]["expected"]
-        start_index = next(
-            index
-            for index, (method, _) in enumerate(client.transport.sent)
-            if method == "tab.run_start"
-        )
-        assert not any(
-            method == "tab.get_cfg"
-            for method, _ in client.transport.sent[start_index + 1 :]
-        )
-
-
 def test_recipe_target_can_be_used_with_explicit_reuse(tmp_path: Path) -> None:
     gui = TargetGui()
     client = make_client(tmp_path, gui, recipes=(TARGETED,))

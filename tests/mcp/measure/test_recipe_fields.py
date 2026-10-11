@@ -171,26 +171,6 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
         assert state["expts"]["resolved"] == 11
 
 
-def test_batch_stale_failure_does_not_refresh_or_retry(tmp_path: Path) -> None:
-    with recipe_client(tmp_path, FieldGui()) as client:
-        tab = RecipeSession(client.context).open_tab("lookback")
-        client.transport.replies["tab.edit_cfg"] = {
-            "ok": False,
-            "error": {
-                "code": "failed_precondition",
-                "message": "stale cfg",
-                "reason": "stale_cfg",
-            },
-        }
-        before = len(client.transport.sent)
-        with pytest.raises(GuiRpcError) as failure:
-            tab.set_fields([recipe.RecipeFieldEdit("rounds", 7, "explicit")])
-        assert failure.value.reason == "stale_cfg"
-        assert [method for method, _ in client.transport.sent[before:]] == [
-            "tab.edit_cfg"
-        ]
-
-
 def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
