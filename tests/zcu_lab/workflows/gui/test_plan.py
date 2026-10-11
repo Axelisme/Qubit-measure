@@ -14,7 +14,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import ModularProgramV2, SweepCfg
+from zcu_tools.program.v2.modules import ArbWaveformCfg, FlatTopWaveformCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import RoleSpec, component_registry
 from zcu_tools.resources.entry.schema import PointDocument
@@ -268,11 +269,48 @@ def test_pure_arb_drive_reports_length_rabi_limit_at_consuming_field(
     assert "unsupported" in result.messages[("qub_pulse",)]
 
 
+@pytest.fixture
+def captured_asset_env(tmp_path: Path) -> Iterator[FormEnv]:
+    """Capture source A, switch the repository to same-key B, then restore scope."""
+    # The repository has no public reset-to-uninitialized API; restore only
+    # this mutable scope in finally, while exercising its public capture API.
+    scope_attribute = "_database_path"
+    previous_scope = vars(ArbWaveformDatabase)[scope_attribute]
+    directory = tmp_path / "captured"
+    try:
+        ArbWaveformDatabase.init(directory)
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 0.1]),
+            idata=np.array([0.3, 0.3]),
+            qdata=np.array([0.4, 0.4]),
+        )
+        env = FormEnv(
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library", format_version="1.0"
+                ),
+                assets=ArbWaveformDatabase.bound_info(),
+            )
+        )
+        # Same key and duration, different I/Q: path/length alone cannot prove
+        # the native playback consumed the selected source.
+        ArbWaveformDatabase.init(tmp_path / "other")
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 0.1]),
+            idata=np.array([0.8, 0.8]),
+            qdata=np.array([0.1, 0.1]),
+        )
+        yield env
+    finally:
+        setattr(ArbWaveformDatabase, scope_attribute, previous_scope)
+
+
 @pytest.mark.parametrize("selection", ["drive_ramp", "readout", "readout_ramp"])
 def test_captured_asset_directory_reaches_native_acquisition_without_global_scope(
-    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+    inputs: Inputs, tmp_path: Path, captured_asset_env: FormEnv, selection: str
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     data = inline_input(inputs).data
     waveform = {"style": "arb", "data": "shape"}
     field = "qub_pulse" if selection.startswith("drive") else "readout"
@@ -291,58 +329,55 @@ def test_captured_asset_directory_reaches_native_acquisition_without_global_scop
     else:
         raw["pulse_cfg"]["waveform"] = shape
     data[field] = {"kind": "inline", "module": raw}
-    state = FormState(FormInput(T1PlanForm, data))
-    for name, duration in (("first", 0.05), ("second", 0.1)):
-        directory = tmp_path / name
-        directory.mkdir()
-        np.savez(
-            directory / "shape.npz",
-            time=np.array([0.0, duration / 2, duration]),
-            idata=np.array([0.0, 1.0, 0.0]),
-            qdata=np.zeros(3),
+    form = FormState(FormInput(T1PlanForm, data)).result(captured_asset_env)
+    assert isinstance(form, T1PlanForm)
+    plan = form.to_cfg(captured_asset_env, make_plan(inputs).snapshot)
+    assert isinstance(plan, T1Plan)
+    pulse = plan.qub_pulse if field == "qub_pulse" else plan.readout.pulse_cfg
+    native_waveform = pulse.waveform
+    # Public cfg serialization exposes the path consumed by native playback.
+    native = native_waveform.to_dict()
+    if selection.endswith("ramp"):
+        assert native["length"] == 1.0
+    asset = native["raise_waveform"] if selection.endswith("ramp") else native
+    assert isinstance(asset, dict)
+    assert asset["path"] == (tmp_path / "captured" / "shape.npz").resolve().as_posix()
+    cfg = FreqCfg(
+        reps=2,
+        rounds=1,
+        modules=FreqModuleCfg(qub_pulse=plan.qub_pulse, readout=plan.readout),
+        sweep=inputs.freq.sweep,
+    )
+    program = ModularProgramV2(
+        inputs.soccfg,
+        cfg,
+        modules=[plan.qub_pulse.build("drive"), plan.readout.build("readout")],
+    )
+    captured_waveform = (
+        native_waveform.raise_waveform
+        if isinstance(native_waveform, FlatTopWaveformCfg)
+        else native_waveform
+    )
+    assert isinstance(captured_waveform, ArbWaveformCfg)
+    idata, qdata = captured_waveform.build("captured").make_iqdata(
+        pulse.ch, program, even_length=selection.endswith("ramp")
+    )
+    assert idata.size > 0
+    np.testing.assert_allclose(idata / inputs.soccfg.get_maxv(pulse.ch), 0.3)
+    assert qdata is not None
+    np.testing.assert_allclose(qdata / inputs.soccfg.get_maxv(pulse.ch), 0.4)
+    plots = Plots(NonPresentingHost())
+    try:
+        result = FreqExp().run(
+            cfg,
+            context=RunContext(inputs.soc, inputs.soccfg, plots, {}, StopSignal()),
         )
-        env = FormEnv(
-            library=LibrarySnapshot(
-                ModuleLibraryDocument(
-                    format="zcu.module-library", format_version="1.0"
-                ),
-                assets=ArbWaveformDatabase.info_at(directory),
-            )
-        )
-        form = state.result(env)
-        assert isinstance(form, T1PlanForm)
-        plan = form.to_cfg(env, make_plan(inputs).snapshot)
-        assert isinstance(plan, T1Plan)
-        native_waveform = (
-            plan.qub_pulse.waveform
-            if field == "qub_pulse"
-            else plan.readout.pulse_cfg.waveform
-        )
-        # Public cfg serialization exposes the path consumed by native playback.
-        native = native_waveform.to_dict()
-        if selection.endswith("ramp"):
-            assert native["length"] == 1.0
-        asset = native["raise_waveform"] if selection.endswith("ramp") else native
-        assert isinstance(asset, dict)
-        assert asset["path"] == (directory / "shape.npz").resolve().as_posix()
-        cfg = FreqCfg(
-            reps=2,
-            rounds=1,
-            modules=FreqModuleCfg(qub_pulse=plan.qub_pulse, readout=plan.readout),
-            sweep=inputs.freq.sweep,
-        )
-        plots = Plots(NonPresentingHost())
-        try:
-            result = FreqExp().run(
-                cfg,
-                context=RunContext(inputs.soc, inputs.soccfg, plots, {}, StopSignal()),
-            )
-            assert result.signals.shape == result.freqs.shape
-            assert len(result.freqs) == inputs.freq.sweep.freq.expts
-            assert np.all(np.isfinite(result.signals))
-        finally:
-            plots.finish(present=False)
-            plots.release()
+        assert result.signals.shape == result.freqs.shape
+        assert len(result.freqs) == inputs.freq.sweep.freq.expts
+        assert np.all(np.isfinite(result.signals))
+    finally:
+        plots.finish(present=False)
+        plots.release()
 
 
 @pytest.mark.parametrize("unit", [None, "native", "A", "V"])
