@@ -211,3 +211,57 @@ def test_structural_selectors_reject_expression_envelopes(
     )
     result = FormState(FormInput(model, ordinary)).result(name_env)
     assert isinstance(result, model), result
+
+
+class SingleSelectorForm(FormModel):
+    """Even a single explicitly tagged model remains a structural selector."""
+
+    branch: Annotated[FirstSelector, Field(discriminator="kind")]
+
+
+def test_single_model_selector_rejects_expression_without_evaluating_tag(
+    name_env: FormEnv,
+) -> None:
+    ordinary: dict[str, JsonValue] = {
+        "branch": {"kind": "first", "name": {"expr": "$device"}}
+    }
+    state = FormState(FormInput(SingleSelectorForm, ordinary))
+    validator = Draft202012Validator(state.input_schema(name_env))
+    assert validator.is_valid(ordinary)
+    assert isinstance(state.result(name_env), SingleSelectorForm)
+    envelope: dict[str, JsonValue] = {
+        "branch": {"kind": {"expr": "$device"}, "name": "short"}
+    }
+    assert not validator.is_valid(envelope)
+    assert name_env.parameters is not None
+    env = FormEnv(
+        parameters=name_env.parameters.bind_aliases((AliasRow("device", "first"),), {})
+    )
+    invalid = FormState(FormInput(SingleSelectorForm, envelope)).result(env)
+    assert isinstance(invalid, FormErrors)
+    assert ("branch", "kind") in invalid.messages
+
+
+class ScalarEnvelopeForm(FormModel):
+    """Malformed envelopes retain field-specific input diagnostics."""
+
+    name: str = "literal"
+    amount: float = 1.0
+    phasor: complex = 1j
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("name", "String expression requires {expr: text}"),
+        ("amount", "Numeric expression requires {expr: text}"),
+        ("phasor", "Numeric expression requires {expr: text}"),
+    ],
+)
+def test_malformed_expression_errors_preserve_scalar_input_contract(
+    name_env: FormEnv, field: str, message: str
+) -> None:
+    state = FormState(FormInput(ScalarEnvelopeForm, {field: {"expr": 3}}))
+    errors = state.result(name_env)
+    assert isinstance(errors, FormErrors)
+    assert errors.messages[(field,)] == message
