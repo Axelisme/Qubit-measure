@@ -3,6 +3,7 @@
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox
 from zcu_tools.datafile import load_run_data
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.gui.form import FormErrors
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs
@@ -17,6 +18,11 @@ from ._sim_session import SimSession, wait_owner
 def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(sim_session: SimSession,qapp: QApplication,inputs: Inputs,name: str,starter: str) -> None:
     window=sim_session.app.window
     controller=window.controller
+    if name=="MIST_fluxdep":
+        context=sim_session.app.services.context
+        target=context.read_context().target
+        context.set_module(target,"Q1.pulses.mist",PulseSpec.model_validate(inputs.readout.modules.readout.pulse_cfg.model_dump(mode="python")))
+        window.prepare_forms()
     # Selection is observable through the real app: no secondary registry/engine.
     window.select_workflow(name)
     selector=window.findChild(QComboBox,"workflow.select")
@@ -43,8 +49,8 @@ def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(sim_session: S
         plan.extend([
             {"path":["gain_start"],"value":0.0},{"path":["gain_stop"],"value":1.0},{"path":["gain_points"],"value":3},
             {"path":["reset"],"value":None},
-            {"path":["mist_pulse","kind"],"value":"inline"},
-            {"path":["mist_pulse","module"],"value":inputs.readout.modules.readout.pulse_cfg.model_dump(mode="json")},
+            {"path":["mist_pulse","kind"],"value":"ref"},
+            {"path":["mist_pulse","name"],"value":"Q1.pulses.mist"},
         ])
     else:
         plan.append({"path":["points"],"value":101})
