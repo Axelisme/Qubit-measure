@@ -120,7 +120,6 @@ def local_source(files: tuple[Path, Path]) -> Provenance:
             origin="notebook",
             payload=AcceptedPayload(
                 writes=(AcceptedWrite(path="Q1.pulses.pi.gain", value=0.25),),
-                analysis_summary={},
             ),
         ),
         record={"summary": {"gain": 0.25}},

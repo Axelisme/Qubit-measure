@@ -146,9 +146,13 @@ class WritebackControlFacet:
         self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        result = self._writeback.apply_draft(draft, item_ids=item_ids)  # type: ignore[arg-type]
-        self._emit_draft_changed(tab_id)
-        return result
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        try:
+            return self._writeback.apply_draft(draft, item_ids=item_ids)
+        finally:
+            # The shared flow may have committed a successful prefix.
+            self._emit_draft_changed(tab_id)
 
     def write_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]

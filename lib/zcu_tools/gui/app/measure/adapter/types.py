@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from zcu_tools.datafile import RunMetadata
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -322,6 +323,20 @@ class ModuleWriteback(WritebackItem):
 class WaveformWriteback(WritebackItem):
     edit_schema: CfgSchema | None = None
     role_id: str | None = None
+
+
+@dataclass
+class SampleWriteback(WritebackItem):
+    """Propose producer-defined JSON fields for target_name, a concrete component.
+
+    Only adapters whose Run keeps the flux device fixed provide this proposal.
+    WritebackService adds dev_value/dev_unit from the Run's fixed $flux_dev and
+    device snapshot, replacing those fields if supplied here. Missing captured
+    device facts omit this item with a public reason. The sample can be selected
+    independently; it needs no cfg schema or editor session.
+    """
+
+    proposed_value: JsonObject
 
 
 @dataclass

@@ -18,7 +18,9 @@ Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 e
 
 可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 沒有參數；開啟 entry 後建立記憶體 DRAFT，選取 point 後使用 ACTIVE 的持久文件。SavedPoint 寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。DRAFT 只提交記憶體候選。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 和失效 DRAFT 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
 
-Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。WritebackService 則先以分析來源的固定 capture 解析全部選定的 `$alias.path` proposals，再追加 accepted，依序呼叫 ContextService 的 parameter／module／waveform setters。首個 setter 失敗停止，保留已成功寫入與 accepted 證據，不宣稱跨檔原子性或 rollback。
+Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
+
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。非空 EntryDraft writeback 在 append 前拒絕，提示先選或建立工作點，不寫記憶體或 point=null 樣本。Executor 追加 accepted 後逐項提交，首錯停止，保留成功前綴與事件，不提供跨檔 rollback 或 retry。Context owner 發布實際成功前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。每項 parameter／module／waveform 的 stderr 隨 accepted provenance 保存。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
 
 全域有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_preset` 提供 Measure 初值，框架不宣告領域 preset，也不反向 import zcu_lab。使用者套件的唯一初值是 `ALIAS_PRESET`，flux_dev 空列不猜裝置或 cache。
 
