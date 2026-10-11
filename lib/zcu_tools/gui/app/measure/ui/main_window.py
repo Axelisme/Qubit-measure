@@ -1159,6 +1159,10 @@ class MainWindow(QMainWindow):
         the Controller's shutdown coordinator. Shared by closeEvent (user) and
         request_shutdown (RPC)."""
         self._closing = True
+        # A nested Load exec/chooser may still be running during RPC shutdown.
+        # Finish it and retire its watches before deleting the window's children.
+        for dialog in self.findChildren(RunLoadDialog):
+            dialog.reject()
         self._cleanup_bus_subscriptions()
         self._ctrl.persist_all()
         # The application marks the plot host shutting down on aboutToQuit,
