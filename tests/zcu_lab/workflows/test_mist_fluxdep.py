@@ -171,7 +171,7 @@ def test_mist_map_uses_actual_native_gain_and_flux_coordinates(
         if axes.collections:
             mesh = axes.collections[0]
             assert isinstance(mesh, QuadMesh)
-            coordinates = mesh.get_coordinates()
+            coordinates = np.asarray(mesh.get_coordinates(), dtype=np.float64)
             gains = (coordinates[0, :-1, 0] + coordinates[0, 1:, 0]) / 2
             fluxes = (coordinates[:-1, 0, 1] + coordinates[1:, 0, 1]) / 2
             signals = np.asarray(mesh.get_array())
