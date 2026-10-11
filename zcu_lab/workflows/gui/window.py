@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -48,7 +49,6 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
-from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.session.persistence import PersistenceError
@@ -57,6 +57,7 @@ from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import (
@@ -68,6 +69,7 @@ from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from ._form_io import inspect_form_input, prepare_start_form
 from .catalog import WorkflowCatalog, build_catalog
+from .figures import WorkflowFigureViews
 from .forms import WorkflowForms
 from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 from .remote import FormInspectionReply, T1RemoteControlAdapter
@@ -130,7 +132,6 @@ class T1WorkflowWindow(QWidget):
             services.runner, "t1-workflow", on_finished=self._finished
         )
         self.tuning_panel: T1TuningPanel[FormModel, Calibrated] | None = None
-        self._plots: Plots | None = None
 
         env = (
             self._capture_env(self._services.device.capture_native_device_info())
@@ -165,6 +166,9 @@ class T1WorkflowWindow(QWidget):
         placeholder = QLabel("Workflow plots", stack)
         stack.addWidget(placeholder)
         self._plot_host = QtPlotHost(FigureContainer(stack, placeholder), owner)
+        self._figure_views = WorkflowFigureViews(
+            self._plot_host, self, self._open_trend_clicked
+        )
         self._layout = QVBoxLayout(self)
         self._init_source_controls()
         for widget in (
@@ -176,6 +180,7 @@ class T1WorkflowWindow(QWidget):
             self._resume_button,
             stop_button,
             self._export_button,
+            self._figure_views.open_button,
             self._message,
             stack,
         ):
@@ -578,11 +583,9 @@ class T1WorkflowWindow(QWidget):
         )
         identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
         export_binding = prepared.bind_export(storage, identity, roots)
-        if self._plots is not None:
-            self._plots.release()
         # Install presentation before synchronous admission listeners can reenter.
         self._close_tuning_panel()
-        self._plots = plots
+        self._figure_views.install_native(plots)
         try:
             token = prepared.submit(
                 self.controller,
@@ -593,10 +596,10 @@ class T1WorkflowWindow(QWidget):
                 export_binding,
             )
         except Exception:
-            plots.finish(present=False)
-            plots.release()
-            self._plots = None
+            self._figure_views.start_failed()
             raise
+        self._figure_views.start_succeeded()
+        self._figure_views.open_button.setEnabled(False)
         self.plan_panel.state.reset(submitted_plan)
         self.tunables_panel.state.reset(accepted_input)
         for editor in (self.plan_panel.editor, self.tunables_panel.editor):
@@ -701,43 +704,54 @@ class T1WorkflowWindow(QWidget):
         return inspect_form_input(state.input, env, batch, local, revision)
 
     def figure_names(self, run_id: str) -> tuple[str, ...]:
-        """List names from this run's Plots without rendering; call on Qt owner.
+        """List attached native run_id's figure names on the Qt owner, without rendering.
 
-        run_id must be the attached native identity. RunMismatch rejects absent
-        or stale targets first. Pending acceptance raises RuntimeError. Released
-        plots raise FailedPreconditionError(no_plots), never an empty success.
-        An accepted run without registered figures returns (). Terminal figures
-        stay readable until a new Start or close. No control/input/save effects.
+        Wrong/absent target raises RunMismatch; pending raises RuntimeError;
+        released plots raise FailedPreconditionError(no_plots). Accepted empty
+        plots return (). Terminal figures remain until Start/close, without effects.
         """
         controller = self.controller
         controller.require_run_id(run_id)
         if controller.engine is None:
             raise RuntimeError("Figures require an accepted run")
-        plots = self._plots
-        if plots is None:
-            raise FailedPreconditionError(
-                "Run plots have been released", reason_code="no_plots"
-            )
-        return tuple(plots)
+        return self._figure_views.native_names()
 
     def figure_png(self, run_id: str, name: str) -> bytes:
-        """Render the named current Figure as PNG at 640 x 480 on the Qt owner.
+        """Render native run_id's exact name at 640 x 480 on the Qt owner.
 
-        run_id follows figure_names target/acceptance/lifetime requirements.
-        name must be an exact registered name; unknown names raise KeyError.
-        Use the existing shared renderer; no saving, cache, canvas replacement or
-        artist-derived records. Renderer failures propagate without retry.
+        figure_names target/acceptance/lifetime errors apply; unknown name raises
+        KeyError. Shared rendering errors propagate, without retry/cache/save,
+        canvas replacement or artist-derived records. Offline views are excluded.
         """
         controller = self.controller
         controller.require_run_id(run_id)
         if controller.engine is None:
             raise RuntimeError("Figures require an accepted run")
-        plots = self._plots
-        if plots is None:
-            raise FailedPreconditionError(
-                "Run plots have been released", reason_code="no_plots"
-            )
-        return render_figure_png(plots[name])
+        return self._figure_views.native_png(name)
+
+    def open_overnight_trend(self, metadata_root: Path) -> NamedFigures:
+        """Open metadata_root/journal.jsonl as a read-only overnight named Figure mapping.
+
+        Qt owner and idle admission precede I/O; pending/active/paused runs reject.
+        Source/draw errors propagate without replacing the previous offline view;
+        draw is not transactional. Native Engine/RPC targets remain unchanged.
+        The offline view has no run/operation/RPC binding. Its presentation is
+        finished, then released at replacement/Start/close; returned Figures survive.
+        """
+        if get_ident() != self._thread:
+            raise RuntimeError("Trend opening requires the Window owner thread")
+        self._ensure_idle()
+        return self._figure_views.open(metadata_root)
+
+    def _open_trend_clicked(self) -> None:
+        directory = self._figure_views.choose_metadata_root()
+        if directory is None:
+            return
+        try:
+            self.open_overnight_trend(directory)
+        except Exception as error:
+            logger.exception("Overnight trend opening failed")
+            self._message.setText(str(error))
 
     def apply_tunables(
         self,
@@ -850,6 +864,14 @@ class T1WorkflowWindow(QWidget):
     def _refresh_run(self) -> None:
         controller = self.controller
         status = controller.status()
+        self._figure_views.open_button.setEnabled(
+            not controller.has_pending_segment
+            and controller.operation_id is None
+            and (
+                status is None
+                or status.lifecycle in {"done", "stopped", "failed", "aborted"}
+            )
+        )
         if status is None:
             self._export_button.setEnabled(False)
             return
@@ -857,6 +879,13 @@ class T1WorkflowWindow(QWidget):
             status.lifecycle in {"done", "stopped", "failed", "aborted"}
         )
         self._message.setText(status.lifecycle)
+        engine = controller.engine
+        if status.workflow == "overnight" and engine is not None:
+            try:
+                self._figure_views.refresh_native(engine.records(status.run_id))
+            except Exception as error:
+                logger.exception("Committed overnight trend rendering failed")
+                self._message.setText(str(error))
         self._pause_button.setEnabled(
             controller.operation_id is not None and status.lifecycle == "running"
         )
@@ -903,8 +932,7 @@ class T1WorkflowWindow(QWidget):
             self._message.setText(str(error))
         elif status is None:
             self._message.setText("Stopped before startup")
-        if self._plots is not None:
-            self._plots.finish()
+        self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:
         run_id = self.controller.run_id
@@ -990,9 +1018,7 @@ class T1WorkflowWindow(QWidget):
             return
         self.setup_dialog.close()
         self._poll.stop()
-        if self._plots is not None:
-            self._plots.release()
-            self._plots = None
+        self._figure_views.release()
         self.plan_panel.editor.detach()
         self.tunables_panel.editor.detach()
         if self.tuning_panel is not None:

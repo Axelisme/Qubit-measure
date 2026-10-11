@@ -8,3 +8,4 @@ from .overnight import (
     OvernightTunables,
     overnight,
 )
+from .trend import draw_overnight_trend, project_overnight_trend
