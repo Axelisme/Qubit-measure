@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from plotly.graph_objects import Scatter
+from plotly.graph_objects import Figure, Scatter
 from zcu_tools.notebook.analysis.design import search as S
 from zcu_tools.resources.qubit_params import (
     DispersiveFit,
@@ -31,10 +31,12 @@ _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
 _PHYSICS_CALLS = {"physics": 0}
 
 
-def _actual_t1_trace(fig) -> Scatter:
-    traces = [trace for trace in fig.data if trace.mode == "markers+text"]
+def _actual_t1_trace(fig: Figure) -> Scatter:
+    traces = list(fig.select_traces({"mode": "markers+text"}))
     assert len(traces) == 1
-    return traces[0]
+    trace = traces[0]
+    assert isinstance(trace, Scatter)
+    return trace
 
 
 @pytest.fixture
@@ -103,11 +105,12 @@ def test_selects_row_by_explicit_flux(result_dir: str) -> None:
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
     trace = _actual_t1_trace(fig)
-    assert float(trace.y[0]) == 22.0
+    assert np.asarray(trace.y, dtype=np.float64)[0] == 22.0
     # predicted point comes from the fake model, not from the table
-    predicted = [t for t in fig.data if t.mode == "markers"]
+    predicted = list(fig.select_traces({"mode": "markers"}))
     assert len(predicted) == 1
-    assert float(predicted[0].y[0]) == 0.5
+    assert isinstance(predicted[0], Scatter)
+    assert np.asarray(predicted[0].y, dtype=np.float64)[0] == 0.5
 
 
 def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
@@ -140,7 +143,7 @@ def test_selects_row_by_row_frame_derived_flux(result_dir: str) -> None:
     fig = _new_fig()
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
-    assert float(_actual_t1_trace(fig).y[0]) == 22.0
+    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
 
 
 def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
@@ -160,7 +163,7 @@ def test_selects_row_by_declared_fallback_frame(result_dir: str) -> None:
         fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0),
     )
 
-    assert float(_actual_t1_trace(fig).y[0]) == 22.0
+    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
 
 
 def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
@@ -188,7 +191,7 @@ def test_cross_unit_rows_compare_in_flux_domain_only(result_dir: str) -> None:
     fig = _new_fig()
     S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05)
 
-    assert float(_actual_t1_trace(fig).y[0]) == 22.0
+    assert np.asarray(_actual_t1_trace(fig).y, dtype=np.float64)[0] == 22.0
 
 
 def test_unresolved_rows_fail_with_indexes_before_physics(result_dir: str) -> None:
@@ -252,7 +255,5 @@ def test_empty_table_fails_before_physics(result_dir: str) -> None:
     assert _PHYSICS_CALLS["physics"] == 0
 
 
-def _new_fig():
-    import plotly.graph_objects as go
-
-    return go.Figure()
+def _new_fig() -> Figure:
+    return Figure()
