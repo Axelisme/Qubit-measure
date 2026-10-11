@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -95,7 +95,7 @@ def test_string_envelopes_share_schema_preview_result_and_restore(
     assert preview.errors is None
     path = ("section", "name") if field == "section" else (field,)
     assert preview.values[path] == ("yoko1" if field == "section" else expected)
-    saved = FormInput.from_json(NamesForm, state.input.to_json())
+    saved = FormInput.from_json(NamesForm, FormInput(NamesForm, authored).to_json())
     restored = FormState(NamesForm.default_input(name_env))
     assert restored.write_compatible(saved.data, name_env) == ()
     assert restored.input.data[field] == value
@@ -146,3 +146,38 @@ def test_string_expressions_obey_choices_and_pydantic_constraints(
     errors = state.result(short)
     assert isinstance(errors, FormErrors)
     assert "at least 2" in errors.messages[("name",)]
+
+
+class FirstSelector(FormModel):
+    """String and numeric intrinsic tags select the same structural branch."""
+
+    kind: Literal["first", 1] = "first"
+    name: str = "literal"
+
+
+class SecondSelector(FormModel):
+    """Another branch keeps its own string and numeric tag identity."""
+
+    kind: Literal["second", 2] = "second"
+    name: str = "literal"
+
+
+class SelectorForm(FormModel):
+    """Selectors remain ordinary tags while their value leaves allow Expr."""
+
+    branch: Annotated[FirstSelector | SecondSelector, Field(discriminator="kind")]
+
+
+@pytest.mark.parametrize("tag", ["first", "second", 1, 2])
+def test_structural_selectors_reject_expression_envelopes(
+    name_env: FormEnv, tag: JsonValue
+) -> None:
+    validator = Draft202012Validator(SelectorForm.input_schema(name_env))
+    assert validator.is_valid({"branch": {"kind": tag}})
+    assert not validator.is_valid({"branch": {"kind": {"expr": "$device"}}})
+    state = FormState(
+        FormInput(SelectorForm, {"branch": {"kind": tag, "name": {"expr": "$device"}}})
+    )
+    result = state.result(name_env)
+    assert isinstance(result, SelectorForm), result
+    assert result.branch.kind == tag and result.branch.name == "yoko1"

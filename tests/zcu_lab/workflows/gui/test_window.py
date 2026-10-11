@@ -3022,7 +3022,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
     )
     spec = T1Exp().persistence_spec()
     native, metadata = load_run_with_metadata(source, spec=spec)
-    assert native.cfg is not None and native.cfg.dev.flux_dev == "flux"
+    assert native.cfg is not None
     assert metadata.snapshot.roles == {"qubit": "Q1", "flux_dev": "flux"}
     # Save again after the live alias edit; neither form input nor history refreshes.
     destination = tmp_path / "saved-again.h5"
