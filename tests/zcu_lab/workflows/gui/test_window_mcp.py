@@ -27,7 +27,8 @@ from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
-from ._window_support import WindowTransport, start_plan_batch
+from ._recording_transport import WindowTransport
+from ._window_support import start_plan_batch
 
 
 @pytest.fixture
