@@ -28,6 +28,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
+from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg, FreqGainResult
@@ -165,6 +166,66 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
         true_activate_detune=cfg.detune,
         evidence=evidence,
     )
+
+
+@dataclass(frozen=True)
+class MISTAcquisition(PowerDepResult):
+    """Raw native MIST gain trace and acquisition/device evidence.
+
+    gains is the actual rounded dimensionless gain vector. signals is complex
+    IQ with the same shape. evidence contains fixed UTC acquisition boundaries,
+    software provenance and the Run snapshot, not derived fit/threshold facts.
+    """
+
+    evidence: AcquisitionEvidence
+
+
+def run_mist(run: Run[PowerDepCfg]) -> MISTAcquisition:
+    """Acquire reset, calibrated pi preparation, MIST gain pulse and readout.
+
+    Supply native PowerDepCfg: init_pulse is required here and represents the
+    calibrated pi pulse; probe_pulse is the fixed MIST disturbance waveform.
+    Native optional reset retains its meaning. gain SweepCfg is fixed by plan.
+    Return actual rounded gains and complex IQ/evidence with partial data on
+    cancellation. Missing preparation raises ValueError before acquisition;
+    native capability/compile/I/O errors propagate and Schedule failure remains
+    in Run.outcome. No fitting, device setup, plotting or saving occurs.
+    """
+    cfg = run.cfg
+    if cfg.modules.init_pulse is None:
+        raise ValueError("MIST acquisition requires a calibrated pi preparation")
+    soc, soccfg = run.soc, run.soccfg
+    gains = sweep2array(
+        cfg.sweep.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.modules.probe_pulse.ch}
+    )
+    buffer = run.buffer((len(gains),), axes=(gains,))
+    provenance = capture_software_provenance(context=None)
+    started_at = datetime.now(UTC)
+    run_id = new_run_id(started_at)
+    with run.schedule(buffer) as sched:
+        modules = sched.cfg.modules
+        gain_sweep = sched.cfg.sweep.gain
+        modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+        (
+            sched.prog_builder(soc, soccfg)
+            .add(
+                Reset("reset", modules.reset),
+                Pulse("pi_pulse", modules.init_pulse),
+                Pulse("mist_pulse", modules.probe_pulse),
+                Readout("readout", modules.readout),
+            )
+            .declare_sweep("gain", gain_sweep)
+            .build_and_acquire()
+        )
+    evidence = AcquisitionEvidence(
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        completion="stopped" if run.cancel_signal.is_set() else "complete",
+        provenance=provenance,
+        device_snapshot=run.device_snapshot,
+    )
+    return MISTAcquisition(gains, buffer.array, evidence)
 
 
 def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:

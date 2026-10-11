@@ -17,6 +17,11 @@ from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed
 
+from zcu_lab.v2.mist.power_dep.single_trace.core import (
+    PowerDepCfg,
+    PowerDepExp,
+    PowerDepResult,
+)
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiExp, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
@@ -37,12 +42,38 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
 )
 from zcu_lab.workflows.acquire import (
     FrequencyAcquisition,
+    MISTAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
     T1Acquisition,
     T2EchoAcquisition,
     T2RamseyAcquisition,
 )
+
+
+def save_mist(
+    source: Completed[PowerDepCfg, MISTAcquisition],
+    destination: Path,
+    *,
+    snapshot: RunSnapshot,
+) -> None:
+    """Write raw MIST gain trace with native mist/gain schema to exact path.
+
+    source owns actual gains/IQ/cfg and acquisition/device evidence; snapshot is
+    the historical Start entry/roles capture. Parent must exist and destination
+    must not. Native schema, collision and I/O errors propagate. This writer
+    does not transform IQ, fit thresholds, choose paths or recapture metadata.
+    """
+    record: RunRecord[PowerDepCfg, PowerDepResult] = RunRecord(
+        source.cfg, source.result
+    )
+    _save(
+        record,
+        destination,
+        spec=PowerDepExp().persistence_spec(),
+        snapshot=snapshot,
+        evidence=source.result.evidence,
+    )
 
 
 def save_t2ramsey(
