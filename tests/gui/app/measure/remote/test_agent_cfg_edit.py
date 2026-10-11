@@ -712,3 +712,26 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
         assert tree["children"]["gain"]["input"]["resolved"] == 0.25
     finally:
         sock.close()
+
+
+def test_holder_edits_resets_and_runs_current_cfg_without_ref(live_tab):
+    fixture, tab_id = live_tab
+    sock = open_client(fixture.service.port)
+    try:
+        observe_run_inputs(
+            fixture, tab_id, lambda method, params: call(sock, method, params)["result"]
+        )
+        edited = call(sock, "tab.edit_cfg", {
+            "tab_id": tab_id, "edits": [{"path": ["gain"], "value": 0.75}]
+        })
+        assert edited["ok"], edited
+        assert edited["result"]["tree"]["children"]["gain"]["input"]["resolved"] == 0.75
+        reset = call(sock, "tab.reset_cfg", {"tab_id": tab_id})
+        assert reset["ok"], reset
+        assert reset["result"]["tree"]["children"]["gain"]["input"]["resolved"] != 0.75
+        started = call(sock, "tab.run_start", {"tab_id": tab_id})
+        assert started["ok"], started
+        assert started["result"]["operation_id"]
+    finally:
+        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - drain worker before Qt teardown
+        sock.close()
