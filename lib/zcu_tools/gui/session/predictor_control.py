@@ -1,91 +1,65 @@
-"""Narrow predictor-control facet for shared UI and remote driving adapters."""
+"""Narrow read-only simulator control shared by dialog and remote adapters."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.events import PredictorChangedPayload
-
 if TYPE_CHECKING:
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+    from zcu_tools.simulate.predictor import PredictorParams
     from zcu_tools.gui.session.services.predictor import (
-        CalibrateFluxBiasRequest,
-        CalibrateFluxBiasResult,
-        LoadPredictorRequest,
-        PredictCurveRequest,
-        PredictCurveResult,
-        PredictFreqRequest,
-        PredictMatrixCurveRequest,
-        PredictMatrixCurveResult,
-        PredictorService,
-        SetModelParamsRequest,
+        CalibrateFluxBiasRequest, CalibrateFluxBiasResult,
+        PredictCurveRequest, PredictCurveResult, PredictFreqRequest,
+        PredictMatrixCurveRequest, PredictMatrixCurveResult, PredictorService,
     )
 
 
 class PredictorControlPort(Protocol):
-    """Predictor lifecycle/query/compute surface for shared consumers."""
+    """Side-effect-free queries; explicit parameters are required for computation.
 
-    def on_predictor_changed(
-        self, handler: Callable[[PredictorChangedPayload], None]
-    ) -> Callable[[], None]: ...
+    Units, shapes and failures are defined by the typed requests/results and
+    PredictorService. No query installs a model or reads dialog state/cache.
+    """
 
-    def load_predictor(self, req: LoadPredictorRequest) -> None: ...
-    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None: ...
-    def calibrate_flux_bias(
-        self, req: CalibrateFluxBiasRequest
-    ) -> CalibrateFluxBiasResult: ...
-    def clear_predictor(self) -> None: ...
-
-    def predict_freq(self, req: PredictFreqRequest) -> float: ...
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult: ...
-    def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult: ...
-    def get_predictor_info(self) -> dict | None: ...
+    def params_for_qubit(self, qubit: str) -> FluxoniumParams:
+        """Read current concrete component inputs; see PredictorService.params_for_qubit."""
+        ...
+    def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
+        """Query explicit parameters for MHz; see PredictorService.predict_freq."""
+        ...
+    def calibrate_flux_bias(self, params: PredictorParams, req: CalibrateFluxBiasRequest) -> CalibrateFluxBiasResult:
+        """Return candidate native bias only; see PredictorService.calibrate_flux_bias."""
+        ...
+    def predict_freq_curve(self, params: PredictorParams, req: PredictCurveRequest) -> PredictCurveResult:
+        """Query explicit parameters for MHz rows; see PredictorService.predict_freq_curve."""
+        ...
+    def predict_matrix_element_curve(self, params: PredictorParams, req: PredictMatrixCurveRequest) -> PredictMatrixCurveResult:
+        """Query optional matrix rows; see PredictorService.predict_matrix_element_curve."""
+        ...
 
 
 class PredictorControlFacet:
-    """Composite adapter over predictor service and event bus."""
+    """Forward typed queries to PredictorService; no state or event subscription."""
 
-    def __init__(
-        self,
-        *,
-        bus: BaseEventBus,
-        predictor: PredictorService,
-    ) -> None:
-        self._bus = bus
+    def __init__(self, predictor: PredictorService) -> None:
         self._predictor = predictor
 
-    def on_predictor_changed(
-        self, handler: Callable[[PredictorChangedPayload], None]
-    ) -> Callable[[], None]:
-        return self._bus.subscribe(PredictorChangedPayload, handler).unsubscribe
+    def params_for_qubit(self, qubit: str) -> FluxoniumParams:
+        """Read current concrete inputs; see PredictorService.params_for_qubit."""
+        return self._predictor.params_for_qubit(qubit)
 
-    def load_predictor(self, req: LoadPredictorRequest) -> None:
-        self._predictor.load_predictor(req)
+    def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
+        """Return MHz; see PredictorService.predict_freq."""
+        return self._predictor.predict_freq(params, req)
 
-    def set_predictor_model_params(self, req: SetModelParamsRequest) -> None:
-        self._predictor.set_model_params(req)
+    def calibrate_flux_bias(self, params: PredictorParams, req: CalibrateFluxBiasRequest) -> CalibrateFluxBiasResult:
+        """Return candidate native bias only; see PredictorService.calibrate_flux_bias."""
+        return self._predictor.calibrate_flux_bias(params, req)
 
-    def calibrate_flux_bias(
-        self, req: CalibrateFluxBiasRequest
-    ) -> CalibrateFluxBiasResult:
-        return self._predictor.calibrate_flux_bias(req)
+    def predict_freq_curve(self, params: PredictorParams, req: PredictCurveRequest) -> PredictCurveResult:
+        """Return MHz rows; see PredictorService.predict_freq_curve."""
+        return self._predictor.predict_freq_curve(params, req)
 
-    def clear_predictor(self) -> None:
-        self._predictor.clear_predictor()
-
-    def predict_freq(self, req: PredictFreqRequest) -> float:
-        return self._predictor.predict_freq(req)
-
-    def predict_freq_curve(self, req: PredictCurveRequest) -> PredictCurveResult:
-        return self._predictor.predict_freq_curve(req)
-
-    def predict_matrix_element_curve(
-        self, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult:
-        return self._predictor.predict_matrix_element_curve(req)
-
-    def get_predictor_info(self) -> dict | None:
-        return self._predictor.get_predictor_info()
+    def predict_matrix_element_curve(self, params: PredictorParams, req: PredictMatrixCurveRequest) -> PredictMatrixCurveResult:
+        """Return matrix rows; see PredictorService.predict_matrix_element_curve."""
+        return self._predictor.predict_matrix_element_curve(params, req)
