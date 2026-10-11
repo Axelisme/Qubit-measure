@@ -15,7 +15,7 @@ from ._recipe_support import LookbackGui, recipe_client, scalar
 
 def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_path):
     gui = LookbackGui()
-    gui.md["r_f"] = 6100.0
+    gui.md["$resonator.freq"] = 6100.0
     gui.publication["source_basis"] = [{"key": "r_f", "revision": "7"}]
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
@@ -43,10 +43,10 @@ def test_run_starts_immediately_with_detached_conditions_and_original_ref(tmp_pa
             "source": "disabled",
         }
         expected_frequency = scalar(6100.0)["input"]
-        expected_frequency.update(mode="expression", raw="r_f")
+        expected_frequency.update(mode="expression", raw="$resonator.freq")
         assert before.actual["fields"]["modules.readout.pulse_cfg.freq"] == {
             "value": 6100.0,
-            "source": "r_f",
+            "source": "$resonator.freq",
             "input": expected_frequency,
         }
         assert before.actual["source_basis"] == [{"key": "r_f", "revision": "7"}]

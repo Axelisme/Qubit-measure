@@ -1,11 +1,7 @@
-"""Shared helper for gated, per-experiment reset module writeback.
+"""Shared pulse-readout proposal mechanics and existing DPM calibration policy.
 
-Each reset calibration adapter proposes its final reset library module the same
-way: gate on whether every canonical calibration path is present, then
-build the module from *this* run's ``cfg_snapshot.modules.tested_reset`` template
-and overwrite fields from its fixed ParameterContext. Reset calibration runs
-are unordered and repeatable, so the proposal is keyed on completeness — not on
-being "the last step" — letting any run that has the full calibration emit it.
+Reset finishers live in their adapters and materialize the Run-tested cfg
+without reading calibration values from the capture.
 """
 
 from __future__ import annotations
@@ -23,26 +19,6 @@ from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-
-
-class _HasTestedReset(Protocol):
-    # Read-only property (not a bare attr) so the Protocol is covariant: a concrete
-    # ``modules`` whose ``tested_reset`` is a specific ResetCfg subtype still
-    # matches ``object`` (a mutable attr would be invariant and reject it).
-    @property
-    def tested_reset(self) -> object: ...
-
-
-class _HasModules(Protocol):
-    """Structural surface of any reset cfg snapshot: a ``modules.tested_reset``.
-
-    Every reset calibration cfg carries the run's tested reset under
-    ``modules.tested_reset``; this is the only attribute this helper reads, so the
-    Protocol stays as narrow as the access (no whole-cfg type dependency).
-    """
-
-    @property
-    def modules(self) -> _HasTestedReset: ...
 
 
 class _HasReadout(Protocol):
@@ -139,42 +115,3 @@ def readout_dpm_writeback_items(
         ),
         role_id="readout_dpm",
     )
-
-
-def reset_module_writeback_items(
-    ctx: SessionEnv,
-    cfg_snapshot: _HasModules | None,
-    *,
-    target: str,
-    field_md_map: Sequence[tuple[str, str]],
-    desc: str,
-) -> list[ModuleWriteback]:
-    """A gated ``ModuleWriteback`` proposing the calibrated reset library module.
-
-    ``field_md_map`` pairs fields inside ``tested_reset`` with canonical
-    parameter paths such as ``$qubit.module.sideband.pulse_cfg.freq``.
-    A missing capture, snapshot, null or absent calibration returns ``[]``.
-    Invalid sources, aliases and scalar values propagate without fallback.
-    The template remains this run's ``cfg_snapshot.modules.tested_reset``.
-    """
-    if cfg_snapshot is None or ctx.parameters is None:
-        return []
-    calibrated_fields: list[tuple[str, float]] = []
-    for field_path, parameter_path in field_md_map:
-        calibrated = optional_parameter_float(ctx.parameters, parameter_path)
-        if calibrated is None:
-            return []
-        calibrated_fields.append((field_path, calibrated))
-
-    tested_reset = cfg_snapshot.modules.tested_reset
-    spec, value = module_cfg_to_value(tested_reset)
-    for field_path, calibrated in calibrated_fields:
-        value.with_field(field_path, calibrated)
-
-    return [
-        ModuleWriteback(
-            target_name=target,
-            description=desc,
-            edit_schema=CfgSchema(spec=spec, value=value),
-        )
-    ]
