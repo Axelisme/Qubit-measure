@@ -1143,6 +1143,47 @@ def test_device_read_failure_rejects_run_before_core() -> None:
     assert not gate.has_active(OperationKind.RUN)
 
 
+def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    from zcu_tools.gui.session.aliases import AliasRow
+
+    with native_save_session(tmp_path, qapp) as session:
+        session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
+        captured = session.context.read_context()
+        state = session.state
+        adapter = SnapshotAdapter()
+        state.get_tab("tab").adapter = adapter
+        schema = CfgSchema(
+            CfgSectionSpec(fields={"dev": CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices")})}),
+            CfgSectionValue(fields={"dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})}),
+        )
+        state.get_tab("tab").cfg = make_cfg(schema, state=state)
+        service, _gate, background, handles = _make_run_service(state, devices={})
+        inputs = replace(
+            _make_inputs(state, "tab", adapter),
+            parameters=captured,
+            snapshot=replace(session.metadata.snapshot, roles=captured.capture_storage().roles),
+            experiment_tag=adapter.experiment_tag,
+        )
+        token = service.start_run(inputs, plots=_plots())
+        session.context.set_alias_rows((AliasRow("flux_dev", "yoko2"),))
+        background.run_work()
+        outcome = handles.poll(token)
+        assert outcome is not None and outcome.status == "finished"
+        result = state.get_tab("tab").run.result
+        assert isinstance(result, RunRecord)
+        assert result.cfg.dev == {"flux_dev": "yoko1"}
+        metadata = state.get_tab("tab").run.metadata
+        assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
+        report = session.save()
+        path = next(item.output.path for item in report.outputs if item.output.format == "data_h5")
+        restored = load_run_data(path)
+        assert restored.metadata.snapshot.roles["flux_dev"] == "yoko1"
+        assert restored.cfg["dev"] == {"flux_dev": "yoko1"}
+        assert session.context.read_context().value("$flux_dev") == "yoko2"
+
+
 def test_gui_save_uses_fixed_run_device_snapshot(
     tmp_path: Path, qapp: QApplication
 ) -> None:

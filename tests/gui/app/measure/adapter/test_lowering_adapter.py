@@ -27,6 +27,68 @@ from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter, CalibrationCfg
 
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
+from zcu_tools.gui.session.aliases import AliasRow
+
+from tests.gui.app.measure._cfg_fakes import PublishedHost, parameter_capture
+
+
+@pytest.fixture
+def device_name_schema() -> CfgSchema:
+    return CfgSchema(
+        CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices", required=True)}),
+        CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")}),
+    )
+
+
+def test_device_name_resource_refresh_preview_and_accept_share_fixed_sources(device_name_schema: CfgSchema) -> None:
+    base = parameter_capture()
+    first = base.bind_aliases((AliasRow("flux_dev", "yoko1"),), {})
+    state = State(SessionEnv(parameters=first, soc=None, soccfg=None))
+    bindings = MeasureCfgBindings(PublishedHost(state))
+    current = first
+
+    def resolution():
+        return bindings.snapshot((), captured_values={}, parameters=current)
+
+    resource = CfgResource(lambda: device_name_schema, resolution=resolution)
+    try:
+        observed = resource.observe()
+        assert observed.status is CfgStatus.VALID
+        assert resource.accept(observed.ref.revision).values == {"flux_dev": "yoko1"}
+        current = base.bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
+        preview = resource.preview(observed.ref.revision, resolution=resolution())
+        assert preview.tree.children["flux_dev"].value == EvalValue("$flux_dev", resolved="yoko2")
+        assert resource.observe() == observed
+        assert resource.accept(observed.ref.revision, resolution=resolution()).values == {"flux_dev": "yoko2"}
+        changed = resource.edit(observed.ref.revision, (CfgEdit(("flux_dev",), EvalValue("$flux_dev")),))
+        assert changed.status is CfgStatus.VALID
+        current = base.bind_aliases((AliasRow("flux_dev", "yoko3"),), {})
+        refreshed = resource.refresh(changed.ref.revision)
+        assert resource.accept(refreshed.ref.revision).values == {"flux_dev": "yoko3"}
+        assert resource.snapshot_inputs().value.fields["flux_dev"] == EvalValue("$flux_dev")
+        current = base.bind_aliases((AliasRow("flux_dev", ""),), {})
+        invalid = resource.refresh(refreshed.ref.revision)
+        assert invalid.status is CfgStatus.INVALID
+        assert any("flux_dev" in diagnostic.message for diagnostic in invalid.diagnostics)
+    finally:
+        resource.close()
+
+
+@pytest.mark.parametrize("parameters", [None, parameter_capture().bind_aliases((), {})])
+def test_name_lowering_never_uses_old_resolved_when_context_is_missing(parameters) -> None:
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str)}),
+        CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev", resolved="yoko1")}),
+    )
+    with pytest.raises(RuntimeError, match="flux_dev"):
+        schema_to_raw_dict(schema, parameters)
+    captured = parameter_capture().bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
+    assert schema_to_raw_dict(schema, captured) == {"flux_dev": "yoko2"}
+
+
 _PULSE = {
     "type": "pulse",
     "ch": 3,
