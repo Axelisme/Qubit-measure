@@ -385,7 +385,9 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.control_identity.status().holder == "gui"
     assert ui.controller.control_identity.status().locked
     assert (
-        ui.rpc("device.setup", name="bias", cfg={**cfg, "value": 0.0})["error"]["reason"]
+        ui.rpc("device.setup", name="bias", cfg={**cfg, "value": 0.0})["error"][
+            "reason"
+        ]
         == "not_holder"
     )
     wait_until(
