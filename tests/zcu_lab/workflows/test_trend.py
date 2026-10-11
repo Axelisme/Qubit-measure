@@ -115,10 +115,14 @@ def test_plot_updates_same_named_figure_without_fabricating_missing_values() -> 
     assert plots["overnight_trend"] is figure
     t1_axes, t2_axes = figure.axes
     np.testing.assert_allclose(
-        t1_axes.lines[0].get_ydata(), [30.0, np.nan, 31.0, np.nan], equal_nan=True
+        np.asarray(t1_axes.lines[0].get_ydata(), dtype=float),
+        [30.0, np.nan, 31.0, np.nan],
+        equal_nan=True,
     )
     np.testing.assert_allclose(
-        t2_axes.lines[0].get_ydata(), [40.0, 42.0, np.nan, 45.0], equal_nan=True
+        np.asarray(t2_axes.lines[0].get_ydata(), dtype=float),
+        [40.0, 42.0, np.nan, 45.0],
+        equal_nan=True,
     )
     assert "T1 fit rejected" in [text.get_text() for text in t1_axes.texts]
     assert "acquisition failed" in [text.get_text() for text in t2_axes.texts]

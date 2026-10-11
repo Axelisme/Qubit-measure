@@ -360,7 +360,15 @@ def test_read_committed_records_rejects_complete_corrupt_lines(
         del payload["encoded_record"]
     lines[1] = "broken JSON" if damage == "bad_json" else json.dumps(payload)
     artifacts.journal_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError):
+    diagnoses = {
+        "bad_json": "JSON",
+        "identity": "identity",
+        "sequence": "sequence",
+        "version": "format_version",
+        "path": "path",
+        "schema": "encoded_record",
+    }
+    with pytest.raises(ValueError, match=diagnoses[damage]):
         artifact_io.read_committed_records(artifacts.paths.metadata_root)
 
 
@@ -385,7 +393,7 @@ def test_read_committed_records_rejects_missing_and_empty_journals(
     with pytest.raises(FileNotFoundError):
         artifact_io.read_committed_records(tmp_path)
     (tmp_path / "journal.jsonl").touch()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="run_started"):
         artifact_io.read_committed_records(tmp_path)
 
 
