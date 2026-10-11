@@ -8,6 +8,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import FrequencySweepCalibration, set_frequency_sweep
+
 
 def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
@@ -46,9 +48,12 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
         reuse=reuse_tab_id,
     )
     tab.use_library("modules.readout", readout_ref)
-    tab.set_frequency_sweep(
+    set_frequency_sweep(
+        tab,
         "sweep.freq",
-        calibration="resonator",
+        calibration=FrequencySweepCalibration(
+            "$resonator.freq", "$resonator.kappa", 3.0
+        ),
         center_mhz=center_mhz,
         span_mhz=span_mhz,
         expts=points,
@@ -95,8 +100,6 @@ DEFINITION = RecipeDefinition(
     run=onetone_spectrum,
     adapter_name="onetone/freq",
     summary_parameters=(
-        SummaryParameter("center_mhz", "center_mhz", "MHz"),
-        SummaryParameter("span_mhz", "span_mhz", "MHz"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
         SummaryParameter("gain", "modules.readout.pulse_cfg.gain"),
         SummaryParameter("readout_ref", "modules.readout"),

@@ -10,6 +10,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...], shots: int | None
@@ -77,8 +79,11 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
     # Report both absent calibrations before any Run, as the existing tool does.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -88,7 +93,7 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
         missing.extend(error.missing)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set("shots", shots, source="shots")
+    tab.set("shots", shots, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":

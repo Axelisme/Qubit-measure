@@ -30,6 +30,8 @@ from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
+from zcu_lab.definitions import ALIAS_PRESET
+
 
 @pytest.fixture
 def state() -> State:
@@ -44,6 +46,7 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
         view = MagicMock()
         view.make_run_container.return_value = None
         controller = Controller(
+            alias_preset=ALIAS_PRESET,
             state=state,
             registry=Registry(),
             io_manager=IOManager(),
