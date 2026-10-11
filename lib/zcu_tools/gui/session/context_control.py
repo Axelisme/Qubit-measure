@@ -41,7 +41,7 @@ class ContextControlPort(Protocol):
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        selected saved point. No entry/context raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         ...
@@ -52,7 +52,7 @@ class ContextControlPort(Protocol):
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        current DRAFT in memory or ACTIVE point in one resource transaction.
+        selected saved point in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
         parameter change. Setup edits never change existing points or captures.
@@ -84,7 +84,7 @@ class ContextControlPort(Protocol):
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical origin/roles on the owner thread without I/O.
 
-        Source faults propagate. Draft/unbound captures raise
+        Source faults propagate. Unbound captures raise
         FailedPreconditionError(storage_unavailable); current selection is ignored.
         """
         ...
@@ -94,9 +94,8 @@ class ContextControlPort(Protocol):
     ) -> ParameterContext:
         """Read current values at a fixed target without selecting it.
 
-        SavedPoint may read point/library files in the opened entry. EntryDraft
-        requires that memory draft to remain selected. Supplied roles stay fixed;
-        cross-entry, stale draft, missing point, schema and I/O errors propagate.
+        SavedPoint may read point/library files in the opened entry. Supplied roles stay fixed;
+        cross-entry, missing point, schema and I/O errors propagate.
         No versions or events are published.
         """
         ...
@@ -112,9 +111,9 @@ class ContextControlPort(Protocol):
         """Write a concrete point/general path using the captured target.
 
         Runs on the owner thread. Omitted source is manual; explicit Provenance
-        uses this entry's ledger. Cross-entry/stale-DRAFT/schema/source/conflict/
-        I/O failures propagate. Nonselected SavedPoint writes do not select it;
-        DRAFT is memory-only. Success follows resource validation/commit.
+        uses this entry's ledger. Cross-entry/missing-selection/schema/source/conflict/
+        I/O failures propagate. Nonselected SavedPoint writes do not select it.
+        Success follows resource validation/commit.
         """
         ...
 
@@ -151,7 +150,7 @@ class ContextControlPort(Protocol):
         """Lower/commit one fixed-target structure command via ContextService.
 
         The supplied callbacks convert put/replace schemas using parameters;
-        rename/delete do not call them. Draft writes require selected DRAFT.
+        rename/delete do not call them. Writes require a selected working point.
         Detached SavedPoint writes do not select or publish. Invalid target,
         lowering/schema/source/conflict/I/O failures publish nothing.
         """

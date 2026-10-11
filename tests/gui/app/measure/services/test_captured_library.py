@@ -96,9 +96,8 @@ def _select(session: LibrarySession, name: str) -> None:
     session.control.use_point(PointUseRequest(name))
 
 
-def _seed(session: LibrarySession, *, saved: bool) -> ParameterContext:
-    if saved:
-        _select(session, "a")
+def _seed(session: LibrarySession) -> ParameterContext:
+    _select(session, "a")
     capture = session.control.read_context()
     session.control.set_parameter(capture.target, "general.ext.flux_value", 2.0)
     session.control.set_waveform(
@@ -110,7 +109,7 @@ def _seed(session: LibrarySession, *, saved: bool) -> ParameterContext:
 def test_editor_commit_after_point_switch_uses_original_target_and_values(
     session: LibrarySession,
 ) -> None:
-    first = _seed(session, saved=True)
+    first = _seed(session)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     session.editor.set_field(
         editor_id, "length", {"__kind": "eval", "expr": "general.ext.flux_value"}
@@ -132,11 +131,10 @@ def test_editor_commit_after_point_switch_uses_original_target_and_values(
         session.editor.get_draft(editor_id)
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_replace_relocates_and_publishes_one_complete_library(
-    session: LibrarySession, saved: bool
+    session: LibrarySession,
 ) -> None:
-    capture = _seed(session, saved=saved)
+    capture = _seed(session)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     session.editor.set_field(editor_id, "length", 3.0)
     version = session.state.version.get("context")
@@ -151,18 +149,16 @@ def test_replace_relocates_and_publishes_one_complete_library(
     assert capture.library.waveform_spec("Q1.waveforms.base").length == 1.0
     assert session.state.version.get("context") == version + 1
     assert len(events) == 1
-    if saved:
-        assert (
-            session.entry.module_library("a").snapshot().document()
-            == current.library.document()
-        )
+    assert (
+        session.entry.module_library("a").snapshot().document()
+        == current.library.document()
+    )
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_replace_collision_retains_draft_and_entire_library(
-    session: LibrarySession, saved: bool
+    session: LibrarySession,
 ) -> None:
-    capture = _seed(session, saved=saved)
+    capture = _seed(session)
     session.control.set_waveform(
         capture.target, "Q1.waveforms.occupied", ConstWaveformCfg(length=8.0)
     )
@@ -177,18 +173,16 @@ def test_replace_collision_retains_draft_and_entire_library(
         session.control.read_context().library.document() == before.library.document()
     )
     assert session.state.version.get("context") == version
-    if saved:
-        assert (
-            session.entry.module_library("a").snapshot().document()
-            == before.library.document()
-        )
+    assert (
+        session.entry.module_library("a").snapshot().document()
+        == before.library.document()
+    )
 
 
-@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
 def test_invalid_lowering_leaves_original_library_and_editor(
-    session: LibrarySession, saved: bool
+    session: LibrarySession,
 ) -> None:
-    _seed(session, saved=saved)
+    _seed(session)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     session.editor.set_field(editor_id, "length", {"__kind": "eval", "expr": "missing"})
     before = session.control.read_context()
@@ -198,33 +192,16 @@ def test_invalid_lowering_leaves_original_library_and_editor(
         session.control.read_context().library.document() == before.library.document()
     )
     session.editor.get_draft(editor_id)
-    if saved:
-        assert (
-            session.entry.module_library("a").snapshot().document()
-            == before.library.document()
-        )
-
-
-def test_memory_editor_rejects_selection_of_saved_point_and_remains_editable(
-    session: LibrarySession,
-) -> None:
-    _seed(session, saved=False)
-    editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
-    _select(session, "a")
-    before = session.control.read_context()
-    with pytest.raises(FailedPreconditionError) as error:
-        session.editor.commit(editor_id, "Q1.waveforms.new")
-    assert error.value.reason_code == "draft_not_selected"
     assert (
-        session.control.read_context().library.document() == before.library.document()
+        session.entry.module_library("a").snapshot().document()
+        == before.library.document()
     )
-    session.editor.set_field(editor_id, "length", 4.0)
 
 
 def test_editor_rejects_different_open_entry_without_writing_either(
     session: LibrarySession, tmp_path: Path
 ) -> None:
-    original = _seed(session, saved=True)
+    original = _seed(session)
     editor_id, _ = session.editor.open("waveform", from_name="Q1.waveforms.base")
     other = ResultEntry.create(
         "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
@@ -233,7 +210,8 @@ def test_editor_rejects_different_open_entry_without_writing_either(
     with pytest.raises(FailedPreconditionError) as error:
         session.editor.commit(editor_id, "Q1.waveforms.new")
     assert error.value.reason_code == "entry_not_open"
-    assert session.control.read_context().library.waveform_keys() == ()
+    assert session.state.session_env.parameters is None
+    assert other.list_points() == []
     assert (
         session.entry.module_library("a").snapshot().document()
         == original.library.document()
@@ -279,7 +257,7 @@ def test_detached_rename_then_delete_preserves_sources_without_materializing(
 def test_module_editor_lowers_values_and_children_from_capture(
     session: LibrarySession,
 ) -> None:
-    capture = _seed(session, saved=True)
+    capture = _seed(session)
     session.control.set_module(
         capture.target,
         "Q1.pulses.pi",
@@ -302,7 +280,7 @@ def test_module_editor_lowers_values_and_children_from_capture(
 
 
 def test_ordered_library_edit_keeps_successful_prefix(session: LibrarySession) -> None:
-    _seed(session, saved=True)
+    _seed(session)
     result = session.editor.edit_library(
         "waveform",
         "Q1.waveforms.base",

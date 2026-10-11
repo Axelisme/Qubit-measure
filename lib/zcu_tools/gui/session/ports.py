@@ -262,11 +262,11 @@ class ProjectContextPort(Protocol):
     """Prepared entry installation, used by ProjectSettingsService.
 
     Resources owns name/file validation; the session context owner publishes
-    DRAFT only after preparing all of the entry's required sources/cache.
+    entry metadata only after preparing all of the entry's required sources/cache.
     """
 
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
-        """Install a resource-validated entry as DRAFT without selecting a point.
+        """Install a resource-validated entry without selecting a point.
 
         Return owner entry identity/paths. Preparation failure leaves the prior
         binding installed and propagates its cause; no resource rollback occurs.

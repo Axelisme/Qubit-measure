@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
-    EntryDraft,
     EntryRequest,
     PointUseRequest,
     SavedPoint,
@@ -60,7 +59,7 @@ def entry_services(
 
 
 @pytest.mark.parametrize("command", ["new", "open"])
-def test_entry_commands_publish_draft_through_real_context_owner(
+def test_entry_commands_leave_point_unselected_through_real_context_owner(
     tmp_path: Path,
     entry_services: tuple[
         ProjectSettingsService, ContextService, SessionState, RememberedDevices
@@ -78,8 +77,8 @@ def test_entry_commands_publish_draft_through_real_context_owner(
     else:
         info = settings.new_entry(EntryRequest("entry"))
 
-    assert state.session_env.readiness is ContextReadiness.DRAFT
-    assert context.read_context().target == EntryDraft(entry_id=info.entry_id)
+    assert state.session_env.readiness is ContextReadiness.EMPTY
+    assert state.session_env.parameters is None
     assert context.get_entry_info() == info
     assert context.list_points() == ()
     assert info.result_path == tmp_path / "result" / "entry"

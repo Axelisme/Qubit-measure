@@ -16,7 +16,7 @@ from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -45,7 +45,7 @@ def parameters() -> Generator[ParameterContext]:
         yield ParameterContext(
             point=point,
             library=library,
-            target=EntryDraft(entry_id="entry"),
+            target=SavedPoint(entry_id="entry", point="working"),
             roles=RoleBinding(
                 None,
                 {"qubit": RoleSpec("lowering/driver")},

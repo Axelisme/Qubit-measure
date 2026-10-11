@@ -15,7 +15,6 @@ from uuid import uuid4
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
-from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
@@ -32,7 +31,7 @@ from .ledger_models import (
     validate_origin,
 )
 from .points import PointView
-from .provenance import Provenance, ProvenanceData, validate_source
+from .provenance import ProvenanceData, validate_source
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -42,8 +41,6 @@ from .schema import (
 )
 from .views import (
     SetupView,
-    add_component_to_draft,
-    prepare_point_update,
     validate_view_components,
 )
 
@@ -204,61 +201,6 @@ class ResultEntry:
         if not path.resolve().is_relative_to(self._result_path.resolve()):
             raise ValueError(f"{path}: samples escape their entry")
         return JsonlSampleTable(path)
-
-    def updated_point(
-        self,
-        document: PointDocument,
-        path: str,
-        value: YamlValue,
-        *,
-        source: Provenance | None = None,
-    ) -> PointDocument:
-        """Return an isolated working-unit point candidate for a memory command.
-
-        path is a concrete component/general dotted field, without role expansion.
-        Reuse the view's field/schema validation. Omitted source is manual;
-        explicit Provenance is validated against this entry's actual ledger and
-        clears clone origin on accepted leaves. Preserve unmodified fields and
-        created_at. Input/schema/source failures leave inputs unchanged.
-        No point/store/file creation, notification or event append. Manual does
-        not read a ledger; explicit event sources may read local ledger evidence.
-        """
-        return prepare_point_update(
-            document,
-            path,
-            value,
-            source=source,
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
-        )
-
-    def updated_component(
-        self, document: PointDocument, name: str, kind: str, fields: YamlMap
-    ) -> PointDocument:
-        """Return a memory point with one added registered component.
-
-        fields contains working-unit YAML values. Reuse the resource's ordinary
-        add-component name/kind/schema/default/provenance rules. No point is
-        created, read or saved, and inputs are unchanged on success or failure.
-        Invalid name, duplicate, unknown kind or invalid fields propagate.
-        """
-        candidate = document.model_copy(deep=True)
-        add_component_to_draft(
-            candidate, name, kind, fields, self._result_path / "setup.yaml"
-        )
-        return candidate
-
-    def validate_library(self, document: ModuleLibraryDocument) -> None:
-        """Validate a memory library's keys/Specs/sources against this entry.
-
-        Delegate the existing library document validation without mutation,
-        materialization, asset access, YAML I/O or event production. Manual
-        sources do not read ledger evidence. Invalid keys/schema/sources raise;
-        explicit local event sources retain ledger/attachment/I/O failures.
-        """
-        document.validate_content(
-            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
-        )
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.

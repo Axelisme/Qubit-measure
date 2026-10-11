@@ -91,9 +91,9 @@ def _dispatch(ctrl: Controller, method: str, params: dict) -> object:
         raise remote_error_from_expected(exc) from exc
 
 
-def test_run_start_draft_context_symmetry(qapp):
-    """DRAFT context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
-    ctrl = _make_controller(ContextReadiness.DRAFT)
+def test_run_start_unselected_context_symmetry(qapp):
+    """Unselected context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
+    ctrl = _make_controller(ContextReadiness.EMPTY)
     tab_id = ctrl.new_tab("fake")
 
     # UI path
@@ -114,8 +114,8 @@ def test_run_start_draft_context_symmetry(qapp):
     assert "active file-backed context" in excinfo.value.message
 
 
-def test_save_data_draft_context_symmetry(qapp):
-    ctrl = _make_controller(ContextReadiness.DRAFT)
+def test_save_data_unselected_context_symmetry(qapp):
+    ctrl = _make_controller(ContextReadiness.EMPTY)
     tab_id = ctrl.new_tab("fake")
 
     with pytest.raises(GuardError, match="active file-backed context"):
@@ -126,7 +126,7 @@ def test_save_data_draft_context_symmetry(qapp):
             ctrl, "tab.save_data", {"tab_id": tab_id, "data_path": "/tmp/data.h5"}
         )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
-    # DRAFT context fails the readiness guard before the run-result check.
+    # Unselected context fails the readiness guard before the run-result check.
     assert excinfo.value.reason == "no_active_context"
 
 

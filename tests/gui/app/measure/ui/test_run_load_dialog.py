@@ -108,7 +108,6 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     ctrl.get_bus.return_value = BaseEventBus()
     ctrl.active_operation_count.return_value = 0
     ctrl.get_active_context_label.return_value = None
-    ctrl.has_draft_context.return_value = False
     ctrl.has_project.return_value = False
     ctrl.context_control.get_alias_rows.return_value = ()
     ctrl.get_session_env.return_value = SessionEnv(

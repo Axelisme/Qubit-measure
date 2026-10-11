@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, point-local library delete/rename and retired parameter-attribute RPCs
+**Last updated:** 2026-10-11, explicit working-point selection and saved destinations
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -203,7 +203,7 @@ GUI owns observation and write tracking:
   return invalid input naming the first bad segment. There is no escaping or
   domain-path alias. Only omission of both optional parameters establishes seen;
   explicit `summaries=false` or an empty `path` cannot refresh the guard.
-  `target` is the existing `entry_draft` or `saved_point` locator. `point` and
+  `target` is the `saved_point` locator. `point` and
   `library` contain the complete working-unit native documents, including
   headers, registered component fields and provenance. The library contains
   persistent Specs; this read does not materialize references or open waveform
@@ -240,7 +240,7 @@ entry, saving a loaded Run uses its captured historical point, not the tab birth
 
 The wire surface is grouped by ownership:
 
-- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布空 DRAFT，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
+- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布 entry metadata，不產生參數環境、不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
 - `context.*`：fixed parameter-context reads and point-local ModuleLibrary operations
   through `ContextControlPort`; role-catalog create/list stays on the app controller.
   `context.ml_del_module`, `context.ml_del_waveform`, `context.ml_rename_module`
@@ -382,3 +382,5 @@ resources.
 
 The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
 exiting MCP disconnects without closing the GUI.
+
+Entry open/new leaves point selection empty. Select or create a working point before Run, WB or current-point Inspect writes. Unselected application commands fail with existing failed-precondition categories; wire rejection retains the existing dispatch policy. Selection admits WB but never replaces its captured SavedPoint destination. Cfg/editor drafts and WB proposal previews remain available under their own contracts.

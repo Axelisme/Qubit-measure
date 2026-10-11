@@ -59,7 +59,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read the published parameter context: {target, point, library, aliases}. "
             "aliases contains ordered {alias, value, resolved} rows; failed rows have "
             "resolved=null and error. All come from one fixed capture without kind checks. "
-            "target is the existing entry_draft or saved_point locator. "
+            "target is the existing saved_point locator. "
             "point and library are complete working-unit native documents, including "
             "components and provenance; library contains Specs without asset materialization. "
             "Complex numbers use {__complex__: [real, imag]}. May return large or sensitive data; "

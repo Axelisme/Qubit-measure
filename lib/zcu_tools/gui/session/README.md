@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11，現行參數容器與舊接線退休
+**Last updated:** 2026-10-11，工作點選取與保存目標
 
 # gui/session/ — 量測 session core
 
@@ -7,17 +7,17 @@ app保留帶領域context的錯誤文字與unsupported-target轉譯。
 
 measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 device + setup/device/inspect/predictor dialog）抽成共用層。對標 `gui/remote`、`gui/plotting`。每個 measurement-session app 注入自己的 app-local infra（gate + background）複用這層；session 模組**永不**反向 import `gui.app.*`。
 
-`ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟 entry 發布空的記憶體 DRAFT，選取或建立 point 後發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
+`ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟或建立 entry 只發布 metadata 和 point list，不自選 point。此時沒有參數環境，明確選取或建立 point 後才發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
-三個 target setter 經 resources owner 驗證值與來源。DRAFT 只替換記憶體，SavedPoint 使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
+三個 target setter 經 resources owner 驗證值與來源。SavedPoint 是唯一 target，使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
 
 ## Context、session environment 與 Run snapshot
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
-- **ParameterContext** 是隔離的 point/library/storage 投影，`EntryDraft` 與 `SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。歷史 fixed names 即使沒有 declarations，也必須指向來源 point 中存在的元件。
+- **ParameterContext** 是隔離的 point/library/storage 投影，`SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。歷史 fixed names 即使沒有 declarations，也必須指向來源 point 中存在的元件。
 - **Alias 瀏覽投影** 使用 `ParameterContext.resolved_aliases()`，回傳有序 `ResolvedAliasRow(alias, value, resolved, error)`。它保留 authored softlinks，對固定 point 使用既有 resolver，不沿用 consumer kind 限制。只有單列 `RoleResolutionError` 變成 resolved=None 與 error；source/readability 失敗仍拒絕整個讀取，不從 live 表或檔案补值。
 - **全域 alias 表** 由 `ContextService` 持有，只留在 session memory。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列，讀取才解析元件和 kind。App composition 宣告初值，第一份非空元件 snapshot 以 registry 的唯一候選填 primary row。此初值只初始化一次；明確提交表後不再覆蓋。`set_alias_rows` 安裝後才發布變更 fact。公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑；非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。
-- **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，DRAFT／ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
+- **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None，ACTIVE 持有無 consumer roles 的固定 `ParameterContext`。它不提供 md/ml 欄位；SoC、predictor 與 cached value sources 保持各自 owner。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
 ## 結構
@@ -107,8 +107,8 @@ introduced.
 - **app 注入 infra 經 port**：concrete `OperationGate`（衝突 policy，app-local）+ runtime-specific `BackgroundExecutor` 各自建；Qt composition 使用 `session/adapters/qt_background.py` 的 `BackgroundRunner`，headless composition 使用注入 `ManualOwnerScheduler` 的 `ThreadPoolBackgroundExecutor`。兩者都保留 shared-pool / dedicated-worker 語意，terminal callback 一律回 owner thread；具體 owner 可在 teardown 呼 `quiesce()` 等待 worker 與 terminal delivery。`tests/gui/session/test_headless_composition.py` 以subprocess阻擋Qt imports，穿過正式`build_session_services`與offline MockSoc success/cancel lifecycle，作為無`QApplication` composition的可執行邊界。`ProgressService`/`QtProgressTransport`/`QtShutdownDriver` 是共用 session service/adapter。session service 只依賴 `ExclusionGate`/`BackgroundExecutor`（只宣告 `submit`，`quiesce` 不進 port）/`ProgressHub` port。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
 - **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
-- **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。`ContextService` 擁有驗證、記憶體 DRAFT 與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或焦點。Measure Inspect 的 Parameters 使用元件樹；Modules 保留 app-owned cfg editor，dirty selection／close 仍須顯式 Apply、Discard 或 Cancel。Modules mutation caller 的新容器接線尚待整合。
-- **Entry binding**：GUI Setup 和 remote entry.new/open 使用同一個 ProjectSettingsService。EntryInfo 提供 UUID、任意目錄名稱與 result／database 絕對路徑。Open 只開既有 entry，New 明確建立。成功發布空 DRAFT，不自選 point、不碰硬體。失敗保留舊 binding；New 已建資源而安裝失敗時保留 entry，以 Open 恢復，不重試 New
+- **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或焦點。Measure Inspect 的 Parameters 使用元件樹；Modules 保留 app-owned cfg editor，dirty selection／close 仍須顯式 Apply、Discard 或 Cancel。Modules mutation caller 的新容器接線尚待整合。
+- **Entry binding**：GUI Setup 和 remote entry.new/open 使用同一個 ProjectSettingsService。EntryInfo 提供 UUID、任意目錄名稱與 result／database 絕對路徑。Open 只開既有 entry，New 明確建立。成功發布 entry metadata，不自選 point、不碰硬體。失敗保留舊 binding；New 已建資源而安裝失敗時保留 entry，以 Open 恢復，不重試 New
 - **Entry 與 point**：ResultEntry 擁有 entry roots、setup 與 points。ProjectSettingsService 只負責明確 open/new 與 preferences，ContextService 安裝 binding。Point 操作作用在目前 opened entry，不從 chip／qubit／resonator 推導身分
 - **operation callback 邊界**：`OperationRunner` terminal delivery 會 catch/log policy callback 例外並把 operation settle failed；`settle()` 的 progress discard / handle settle / exclusion release 各自 best-effort 執行，避免 progress UI 或 cleanup 例外讓 handle 永遠 pending。第二次呼叫同一 settle closure 會記 error 並 no-op，讓 double-terminal policy bug 可診斷但不破壞 cleanup idempotence。`ProgressService` owner listener 逐一隔離，壞 listener 不阻斷其他 view 或 terminal cleanup。
 - **import-clean leaf**（不得拉 Qt/matplotlib/gui.app.*，`tests/gui/test_shared_layer.py` 守）：types/events/operation_handles/ports/state/pbar_host/setup_control/context_control/device_control/predictor_control/progress_control。`adapters/` + `ui/*` + `services/*` 是 Qt/重，不列。
@@ -116,3 +116,5 @@ introduced.
 - **`SessionEnv.values`**：只攜帶 read-only `ValueLookup` facade，供 default generation / resolve-once 讀目前 session 投影；`ContextService.list_value_sources/read_value_source` 是 GUI/remote 共用查詢面，mutable `ValueRegistry` 只在 session composition root / source binder 內使用。`ValueSourceBinder` 以 owner-scoped replace/unregister 維護 `context.*` / `project.*` / `predictor.*` / `device.<name>.*`；named device source 包含 `device.<name>.name` 與 cached info（如 `value`/`status`），device provider 只讀 cached `DeviceState.info`、不 poll hardware，也不推導 active/flux 語義。`value_source_input.py` 把此查詢面包成可注入的 GUI token helper；它只替換輸入文字，不寫 cfg/md。`SessionEnv` 仍是 live environment facade，不是 snapshot。
 
 跨模組設計見 ADR-0067（shared session、event ownership、frontend 邊界、md／ml 寫入權威）、ADR-0065（cfg 編輯與 lowering）、ADR-0002（version table 與 off-main handler）、ADR-0066（operation handle、執行、取消、關閉與跨線程互動 channel）。
+
+Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。GUI 停用操作並提示下一步，application 入口以 failed precondition 拒絕。WB 的 selection 只允許開始命令，不替換候選的 captured SavedPoint 目的地。同 entry 選取另一個 point 後仍寫原 point；跨 entry 仍拒絕。Setup template 編輯獨立於目前 point，不修改既有 point。

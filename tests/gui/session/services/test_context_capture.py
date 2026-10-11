@@ -10,7 +10,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import EntryDraft, PointUseRequest
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import AliasesChangedPayload
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.services.context import ContextService
@@ -154,7 +154,7 @@ def test_alias_failures_name_requested_alias_without_concrete_fallback(
     assert error.value.role == alias
 
 
-def test_read_target_preserves_historical_names_in_saved_and_draft_reads(
+def test_read_target_preserves_historical_names_in_saved_reads(
     session: CaptureSession,
 ) -> None:
     control = session.control
@@ -169,14 +169,6 @@ def test_read_target_preserves_historical_names_in_saved_and_draft_reads(
     assert fixed.value("$sense.rate") == 6123.0
     control.use_point(PointUseRequest("second"))
     assert control.read_target(captured.target, roles=history).roles == history
-    session.service.install_entry(session.entry)
-    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0, "sense": "R1"})
-    control.add_component("R1", "fake/sensor", {"rate": 6123.0})
-    draft = control.read_context()
-    assert draft.target == EntryDraft(entry_id=session.entry.entry_id)
-    fixed_draft = control.read_target(draft.target, roles=history)
-    assert fixed_draft.roles == history
-    assert fixed_draft.value("$driver.rate") == 4300.0
 
 
 def test_empty_read_context_keeps_no_context_failure(session: CaptureSession) -> None:

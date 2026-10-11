@@ -10,7 +10,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
+    SavedPoint,
 )
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.program.v2.modules import PulseResetCfg
@@ -71,7 +71,7 @@ def reset_calibration() -> tuple[ParameterContext, ResetSnapshot]:
                 },
             )
         ),
-        target=EntryDraft(entry_id="entry"),
+        target=SavedPoint(entry_id="entry", point="working"),
         roles=None,
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
     template = PulseResetCfg.model_validate(raw).with_updates(

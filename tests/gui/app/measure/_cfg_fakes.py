@@ -9,7 +9,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg.model import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgResource
 from zcu_tools.gui.session.aliases import AliasTable
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -98,7 +98,10 @@ def parameter_capture(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         )
     return ParameterContext(
-        point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
+        point=point,
+        library=library,
+        target=SavedPoint(entry_id="entry", point="working"),
+        roles=None,
     )
 
 

@@ -61,7 +61,7 @@ class LoadAdapter(OldAdapter):
 
 @pytest.fixture
 def app(qapp):
-    state = State(replace(_make_empty_ctx(), readiness=ContextReadiness.DRAFT))
+    state = State(replace(_make_empty_ctx(), readiness=ContextReadiness.EMPTY))
     registry = Registry()
     registry.register("demo", LoadAdapter)
     ctrl = Controller(state, registry, None, BaseEventBus(), catalog_loader=Loader())

@@ -17,7 +17,7 @@ from zcu_tools.gui.cfg import (
     ScalarSpec,
 )
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -52,7 +52,7 @@ def captures() -> Generator[tuple[ParameterContext, ParameterContext]]:
             ParameterContext(
                 point=point,
                 library=library,
-                target=EntryDraft(entry_id="entry"),
+                target=SavedPoint(entry_id="entry", point="working"),
                 roles=RoleBinding(
                     None,
                     {"qubit": RoleSpec("capture/driver")},

@@ -471,7 +471,7 @@ class SetupDialog(QDialog):
         self._refresh_clone_combo(labels)
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
-        # "(empty)" uses the owner's setup seed and empty library, not memory DRAFT.
+        # "(empty)" uses the owner's setup seed and empty library, not unsaved session parameters.
         prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()

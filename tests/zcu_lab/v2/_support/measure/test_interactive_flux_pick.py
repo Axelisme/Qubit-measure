@@ -16,7 +16,7 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context import MetaDict, ModuleLibrary
@@ -72,7 +72,9 @@ def flux_parameters() -> Generator[FluxParameters]:
                         format_version="1.0",
                     )
                 ),
-                target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+                target=SavedPoint(
+                    entry_id="00000000-0000-0000-0000-000000000001", point="working"
+                ),
                 roles=RoleBinding("Q1", {"qubit": RoleSpec(kind)}, {"qubit": "Q1"}),
             )
 

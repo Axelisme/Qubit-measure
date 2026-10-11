@@ -20,7 +20,7 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
-    EntryDraft,
+    SavedPoint,
 )
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -165,7 +165,7 @@ def _source(*, calibrated: bool, null_calibrations: bool = False) -> ParameterCo
                 }
             )
         ),
-        target=EntryDraft(entry_id="contract-entry"),
+        target=SavedPoint(entry_id="contract-entry", point="working"),
         roles=None,
     )
 

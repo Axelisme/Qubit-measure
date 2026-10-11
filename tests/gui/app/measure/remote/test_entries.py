@@ -3,14 +3,14 @@
 from pathlib import Path
 
 import pytest
-from zcu_tools.gui.session.context_types import EntryDraft, EntryInfo, EntryRequest
+from zcu_tools.gui.session.context_types import EntryInfo, EntryRequest
 from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.resources.entry import ResultEntry
 
 from ._point_application import PointApplication
 
 
-def test_empty_entry_queries_and_explicit_new_publish_draft(
+def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     application: PointApplication, tmp_path: Path
 ) -> None:
     assert application.result("entry.info", {}) == {"entry": None}
@@ -27,10 +27,8 @@ def test_empty_entry_queries_and_explicit_new_publish_draft(
     }
     assert application.result("entry.info", {}) == {"entry": reply}
     assert application.result("entry.list", {}) == {"entries": ["cooldown-A"]}
-    assert application.state.session_env.readiness == ContextReadiness.DRAFT
-    capture = application.controller.context_control.read_context()
-    assert capture.target == EntryDraft(entry_id=info.entry_id)
-    assert capture.document().components == {}
+    assert application.state.session_env.readiness == ContextReadiness.EMPTY
+    assert application.state.session_env.parameters is None
     assert application.result("point.list", {}) == {"entry": reply, "points": []}
     assert application.state.session_env.soc is None
     assert application.state.session_env.soccfg is None
@@ -53,10 +51,8 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     }
     opened = application.result("entry.open", {"name": "arbitrary-name"})
     assert opened["entry_id"] == second.entry_id
-    assert application.state.session_env.readiness == ContextReadiness.DRAFT
-    assert application.controller.context_control.read_context().target == EntryDraft(
-        entry_id=second.entry_id
-    )
+    assert application.state.session_env.readiness == ContextReadiness.EMPTY
+    assert application.state.session_env.parameters is None
     selected = application.result("point.use", {"label": "existing"})
     assert selected == {
         "kind": "saved_point",
@@ -67,7 +63,7 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     assert created["entry_id"] == second.entry_id
     application.result("entry.open", {"name": "first"})
     assert application.result("entry.info", {}) == {"entry": first}
-    assert application.state.session_env.readiness == ContextReadiness.DRAFT
+    assert application.state.session_env.readiness == ContextReadiness.EMPTY
     assert application.result("point.list", {})["points"] == [
         {"label": "bias", "description": ""}
     ]
@@ -124,7 +120,7 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
     monkeypatch.setattr(ContextService, "install_entry", original)
     opened = application.result("entry.open", {"name": "retained"})
     assert opened["entry_id"] == retained.entry_id
-    assert application.state.session_env.readiness == ContextReadiness.DRAFT
+    assert application.state.session_env.readiness == ContextReadiness.EMPTY
 
 
 def test_discovery_io_error_is_not_reported_as_cached_success(

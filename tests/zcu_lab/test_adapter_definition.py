@@ -24,7 +24,7 @@ from zcu_tools.gui.cfg import CfgSectionSpec, EvalValue, SweepValue
 from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
 from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import (
@@ -252,7 +252,10 @@ def _ctx(*, rich: bool) -> SessionEnv:
         )
     )
     parameters = ParameterContext(
-        point=point, library=library, target=EntryDraft(entry_id="entry"), roles=None
+        point=point,
+        library=library,
+        target=SavedPoint(entry_id="entry", point="working"),
+        roles=None,
     ).bind_aliases(
         (
             AliasRow("qubit", "Q1"),
