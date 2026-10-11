@@ -29,8 +29,12 @@ PumpPower = Annotated[
 class WiringSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ch: int | None = Field(default=None, ge=0, strict=True)
-    ro_ch: int | None = Field(default=None, ge=0, strict=True)
+    ch: int | None = Field(
+        default=None, ge=0, strict=True, description="Generator (output) channel index."
+    )
+    ro_ch: int | None = Field(
+        default=None, ge=0, strict=True, description="Readout (ADC) channel index."
+    )
 
     @field_validator("ch", "ro_ch", mode="before")
     @classmethod
@@ -43,57 +47,94 @@ class WiringSchema(BaseModel):
 class ChannelSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    ch: int = Field(ge=0, strict=True)
+    ch: int = Field(ge=0, strict=True, description="Generator (output) channel index.")
 
 
 class QubitWiringSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    L01: ChannelSchema | None = None
-    L14: ChannelSchema | None = None
-    L45: ChannelSchema | None = None
-    L56: ChannelSchema | None = None
-    flux: ChannelSchema | None = None
+    L01: ChannelSchema | None = Field(
+        default=None, description="Drive line for the 0-1 transition."
+    )
+    L14: ChannelSchema | None = Field(
+        default=None, description="Drive line for the 1-4 transition."
+    )
+    L45: ChannelSchema | None = Field(
+        default=None, description="Drive line for the 4-5 transition."
+    )
+    L56: ChannelSchema | None = Field(
+        default=None, description="Drive line for the 5-6 transition."
+    )
+    flux: ChannelSchema | None = Field(default=None, description="Local flux line.")
 
 
 class BuiltinComponent(ComponentSchema):
     model_config = ConfigDict(extra="forbid")
 
-    ext: YamlMap = Field(default_factory=dict)
-    wiring: WiringSchema = Field(default_factory=WiringSchema)
-    module: dict[str, str] = Field(default_factory=dict)
+    ext: YamlMap = Field(
+        default_factory=dict, description="Extra values without a fixed schema."
+    )
+    wiring: WiringSchema = Field(
+        default_factory=WiringSchema, description="Hardware channel wiring."
+    )
+    module: dict[str, str] = Field(
+        default_factory=dict,
+        description="Module slots: slot name to a module library key.",
+    )
 
 
 class ResonatorSchema(BuiltinComponent):
-    freq: Frequency = None
-    kappa: Frequency = None
-    amplifier: str | None = None
+    freq: Frequency = Field(default=None, description="Resonator frequency.")
+    kappa: Frequency = Field(default=None, description="Resonator linewidth.")
+    amplifier: str | None = Field(
+        default=None, description="Name of the readout amplifier component."
+    )
 
 
 class QubitSchema(BuiltinComponent):
-    wiring: QubitWiringSchema = Field(default_factory=QubitWiringSchema)
-    freq: Frequency = None
-    kappa: Frequency = None
-    t1: Duration = None
-    t2r: Duration = None
-    t2e: Duration = None
-    EJ: Energy = None
-    EC: Energy = None
-    EL: Energy = None
+    wiring: QubitWiringSchema = Field(
+        default_factory=QubitWiringSchema,
+        description="Drive and flux lines per transition.",
+    )
+    freq: Frequency = Field(default=None, description="Qubit 0-1 transition frequency.")
+    kappa: Frequency = Field(default=None, description="Qubit transition linewidth.")
+    t1: Duration = Field(default=None, description="Energy relaxation time T1.")
+    t2r: Duration = Field(default=None, description="Ramsey dephasing time T2*.")
+    t2e: Duration = Field(default=None, description="Echo dephasing time T2E.")
+    EJ: Energy = Field(default=None, description="Josephson energy.")
+    EC: Energy = Field(default=None, description="Charging energy.")
+    EL: Energy = Field(default=None, description="Inductive energy.")
     # These three values belong to global flux, interpreted by general.ext.flux_unit.
-    flux_half: Flux = None
-    flux_period: Flux = None
-    flux_int: Flux = None
-    flux_unit: Literal["A", "V"] | None = None
-    resonator: str | None = None
-    flux_source: str | None = None
+    flux_half: Flux = Field(
+        default=None,
+        description="Global flux at the half flux quantum, in general.ext.flux_unit.",
+    )
+    flux_period: Flux = Field(
+        default=None,
+        description="Global flux span of one flux quantum, in general.ext.flux_unit.",
+    )
+    flux_int: Flux = Field(
+        default=None,
+        description="Global flux at an integer flux quantum, in general.ext.flux_unit.",
+    )
+    flux_unit: Literal["A", "V"] | None = Field(
+        default=None, description="Unit of the local flux bias: A or V."
+    )
+    resonator: str | None = Field(
+        default=None, description="Name of the readout resonator component."
+    )
+    flux_source: str | None = Field(
+        default=None, description="Name of the component that supplies flux bias."
+    )
 
 
 class JpaSchema(BuiltinComponent):
-    pump_freq: Frequency = None
-    pump_power: PumpPower = None
-    flux: Flux = None
-    flux_unit: Literal["A", "V"] | None = None
+    pump_freq: Frequency = Field(default=None, description="JPA pump frequency.")
+    pump_power: PumpPower = Field(default=None, description="JPA pump power.")
+    flux: Flux = Field(default=None, description="JPA flux bias, in flux_unit.")
+    flux_unit: Literal["A", "V"] | None = Field(
+        default=None, description="Unit of the JPA flux bias: A or V."
+    )
 
 
 def register_all(registry: ComponentRegistry) -> None:

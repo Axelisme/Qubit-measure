@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, get_args
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import TypeAdapter
-from qtpy.QtGui import QColor, QPalette
+from qtpy.QtCore import QAbstractItemModel, QModelIndex, Qt
+from qtpy.QtGui import QBrush, QColor, QKeySequence, QPalette, QShortcut
 from qtpy.QtWidgets import (
+    QAbstractItemDelegate,
+    QAbstractItemView,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -23,23 +32,63 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.resources.entry import component_registry, document_fields
+from zcu_tools.resources.entry import (
+    FieldValueKind,
+    Provenance,
+    component_field_specs,
+    component_registry,
+    document_fields,
+    document_meta,
+    document_value,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.gui.session.context_types import EntryInfo
+    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 logger = logging.getLogger(__name__)
+
+_FIELD, _VALUE, _UNIT, _SOURCE = range(4)
+_UNSET_TEXT = "(unset)"
+
+# A row key is the component name followed by the Field-column texts below it.
+type _RowKey = tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _EditTarget:
+    """What an in-place edit of one Value cell submits.
+
+    component names the owning component and segments the field path inside
+    it. value_kind selects the parsing rule for the submitted text. choices
+    are drop-down options; empty means a free-text editor. initial is the
+    editor's start text, "" for an unset field. write_depth is how many
+    leading segments the owner path addresses; the remaining segments nest
+    inside the written value because their ancestor is unset.
+    """
+
+    component: str
+    segments: tuple[str, ...]
+    value_kind: FieldValueKind
+    choices: tuple[str, ...]
+    initial: str
+    write_depth: int
 
 
 class ComponentTreeWidget(QWidget):
     """Inspect and edit registered components through ContextControlPort.
 
-    The widget owns presentation only. Tree rows show component names, kind,
-    fields and working-unit values. Missing required fields are red in the
-    creation form. References use ordinary text, not graph-aware pickers.
-    A setup/current selector controls editing destination. All writes use the
-    service, and errors remain visible without mutating the rejected document.
+    The widget owns presentation only. The tree has Field, Value, Unit and
+    Source columns. Each component row shows its kind; its children follow
+    component_field_specs(kind), so unset fields stay visible as an italic
+    gray "(unset)" and nested models expand into child rows. Document data
+    the schema does not declare follows the declared rows. Double-click or F2
+    opens an in-place editor on an editable Value cell: Enter or focus loss
+    submits, Esc cancels. All writes use the owner; errors stay visible in
+    red below the tree without changing the rejected document. A
+    setup/current selector controls the editing destination.
     """
 
     def __init__(
@@ -47,61 +96,76 @@ class ComponentTreeWidget(QWidget):
     ) -> None:
         """Bind the owner-thread control and render its current document.
 
-        EMPTY displays no editable rows. Creation chooses a registered kind and
-        collects required fields before Add. Field edits go through the source
-        owner; setup mode edits only the entry template.
+        Without an entry or parameter context the tree is empty, the owner's
+        message shows as a hint and Add is disabled. Creation chooses a
+        registered kind and collects required fields before Add. Field edits
+        go through the source owner; setup mode edits only the entry template.
         """
         super().__init__(parent)
         self._control = control
-        self._field_inputs: dict[str, tuple[QLineEdit, QLabel, bool, bool]] = {}
-        self._row_values: dict[str, YamlValue] = {}
+        self._field_inputs: dict[
+            str, tuple[QLineEdit, QLabel, bool, FieldValueKind]
+        ] = {}
+        self._edit_targets: dict[_RowKey, _EditTarget] = {}
+        self._expanded: dict[_RowKey, bool] = {}
         layout = QVBoxLayout(self)
         self._destination = QComboBox()
         self._destination.addItems(["Current point", "Setup template"])
         self._destination.currentIndexChanged.connect(self.refresh)
         layout.addWidget(self._destination)
-        self._tree = QTreeWidget()
-        self._tree.setObjectName("component_tree")
-        self._tree.setHeaderLabels(["Component / field", "Kind / value"])
-        self._tree.currentItemChanged.connect(self._on_selection)
-        layout.addWidget(self._tree)
+        self._tree = self._build_tree()
+        layout.addWidget(self._tree, stretch=1)
         self._error = QLabel()
         self._error.setObjectName("component_error")
         self._error.setWordWrap(True)
         self._mark_red(self._error)
         layout.addWidget(self._error)
+        self._hint = QLabel()
+        self._hint.setObjectName("component_hint")
+        self._hint.setWordWrap(True)
+        layout.addWidget(self._hint)
         self._build_creation(layout)
-        self._build_editing(layout)
         self.refresh()
 
     def refresh(self) -> None:
-        """Render the cached selected document; never implicitly refresh files."""
+        """Render the cached selected document; never implicitly refresh files.
+
+        Expanded rows and the current row survive a refresh. The error text is
+        cleared. FailedPreconditionError (no entry or no parameter context)
+        empties the tree, shows the owner's message as a hint and disables Add.
+        """
+        current = self._tree.currentItem()
+        selected = _row_key(current) if current is not None else None
         self._tree.clear()
-        self._row_values.clear()
-        self._apply_btn.setEnabled(False)
+        self._edit_targets.clear()
+        self._error.clear()
+        self._add_btn.setEnabled(False)
         try:
             document = self._control.inspect_document(setup=self._is_setup())
         except FailedPreconditionError as exc:
-            self._error.setText(str(exc))
+            self._show_hint(str(exc))
             return
-        roots = {
-            name: QTreeWidgetItem(self._tree, [name, component.kind])
-            for name, component in document.components.items()
-        }
-        for field in document_fields(document):
-            if field.segments[0] not in roots:
-                continue
-            item = QTreeWidgetItem(
-                roots[field.segments[0]],
-                [".".join(field.segments[1:]), str(field.value)],
+        self._show_hint("")
+        self._add_btn.setEnabled(True)
+        items: dict[_RowKey, QTreeWidgetItem] = {}
+        default_expanded: dict[_RowKey, bool] = {}
+        entry_info = self._control.get_entry_info()
+        for name, component in document.components.items():
+            root = QTreeWidgetItem(self._tree, [name, component.kind, "", ""])
+            items[(name,)] = root
+            default_expanded[(name,)] = True
+            self._render_declared(
+                document, name, component.kind, items, default_expanded, entry_info
             )
-            if field.editable_path is not None:
-                self._row_values[field.editable_path] = field.value
-                item.setToolTip(0, field.editable_path)
-            item.setToolTip(1, repr(field.provenance))
-        for root in roots.values():
-            root.setExpanded(True)
-        self._tree.resizeColumnToContents(0)
+            self._render_undeclared(document, name, component.kind, items, entry_info)
+        for key, item in items.items():
+            if item.childCount():
+                item.setExpanded(
+                    self._expanded.get(key, default_expanded.get(key, False))
+                )
+        if selected in items:
+            self._tree.setCurrentItem(items[selected])
+        self._tree.resizeColumnToContents(_FIELD)
 
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
@@ -149,6 +213,199 @@ class ComponentTreeWidget(QWidget):
         palette.setColor(QPalette.ColorRole.WindowText, QColor("red"))
         label.setPalette(palette)
 
+    def _show_hint(self, text: str) -> None:
+        self._hint.setText(text)
+        self._hint.setVisible(bool(text))
+
+    # ------------------------------------------------------------------
+    # Tree rendering
+    # ------------------------------------------------------------------
+
+    def _build_tree(self) -> QTreeWidget:
+        tree = QTreeWidget()
+        tree.setObjectName("component_tree")
+        tree.setHeaderLabels(["Field", "Value", "Unit", "Source"])
+        # Editing opens only on Value cells of editable rows, never on names.
+        tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        tree.setItemDelegateForColumn(
+            _VALUE, _ValueDelegate(self._edit_target, self._submit_edit, tree)
+        )
+        tree.itemDoubleClicked.connect(self._on_double_click)
+        tree.itemExpanded.connect(self._on_expanded)
+        tree.itemCollapsed.connect(self._on_collapsed)
+        shortcut = QShortcut(QKeySequence(Qt.Key.Key_F2), tree)
+        shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        shortcut.activated.connect(self._edit_current)
+        header = tree.header()
+        assert header is not None
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(_VALUE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_UNIT, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_SOURCE, QHeaderView.ResizeMode.ResizeToContents)
+        return tree
+
+    def _render_declared(
+        self,
+        document: SetupDocument | PointDocument,
+        name: str,
+        kind: str,
+        items: dict[_RowKey, QTreeWidgetItem],
+        default_expanded: dict[_RowKey, bool],
+        entry_info: EntryInfo | None,
+    ) -> None:
+        """Add one row per declared field below the component's root row."""
+        component_value = document_value(document, name)
+        for spec in component_field_specs(kind):
+            key = (name, *spec.segments)
+            present, value = _value_at(component_value, spec.segments)
+            item = QTreeWidgetItem(
+                items[key[:-1]], [spec.segments[-1], "", spec.unit or "", ""]
+            )
+            items[key] = item
+            path = ".".join(key)
+            tooltip = (
+                path if spec.description is None else f"{spec.description}\n{path}"
+            )
+            item.setToolTip(_FIELD, tooltip)
+            if spec.value_kind == "group":
+                default_expanded[key] = present
+                if not present:
+                    self._mark_unset(item)
+                continue
+            if present:
+                item.setText(_VALUE, _display(value))
+                self._show_source(item, document_meta(document, path), entry_info)
+            else:
+                self._mark_unset(item)
+            if _addressable(key):
+                self._add_target(
+                    item,
+                    _EditTarget(
+                        component=name,
+                        segments=spec.segments,
+                        value_kind=spec.value_kind,
+                        choices=_editor_choices(spec.value_kind, spec.choices),
+                        initial=_display(value) if present else "",
+                        write_depth=_write_depth(component_value, spec.segments),
+                    ),
+                )
+
+    def _render_undeclared(
+        self,
+        document: SetupDocument | PointDocument,
+        name: str,
+        kind: str,
+        items: dict[_RowKey, QTreeWidgetItem],
+        entry_info: EntryInfo | None,
+    ) -> None:
+        """Keep document data that the kind's schema does not declare visible."""
+        specs = component_field_specs(kind)
+        groups = {spec.segments for spec in specs if spec.value_kind == "group"}
+        leaves = {spec.segments for spec in specs if spec.value_kind != "group"}
+        for field in document_fields(document):
+            if field.segments[0] != name:
+                continue
+            relative = field.segments[1:]
+            prefixes = [relative[:count] for count in range(1, len(relative) + 1)]
+            if (
+                relative == ("kind",)
+                or relative in groups
+                or any(prefix in leaves for prefix in prefixes)
+            ):
+                continue
+            depth = max(
+                count
+                for count in range(len(relative))
+                if (name, *relative[:count]) in items
+            )
+            label = ".".join(relative[depth:])
+            item = QTreeWidgetItem(
+                items[(name, *relative[:depth])], [label, _display(field.value), "", ""]
+            )
+            items[(name, *relative[:depth], label)] = item
+            item.setToolTip(_FIELD, field.editable_path or ".".join(field.segments))
+            self._show_source(item, field.provenance, entry_info)
+            if field.editable_path is not None:
+                self._add_target(
+                    item,
+                    _EditTarget(
+                        component=name,
+                        segments=relative,
+                        value_kind="text" if isinstance(field.value, str) else "yaml",
+                        choices=(),
+                        initial=_display(field.value),
+                        write_depth=len(relative),
+                    ),
+                )
+
+    def _add_target(self, item: QTreeWidgetItem, target: _EditTarget) -> None:
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._edit_targets[_row_key(item)] = target
+
+    def _mark_unset(self, item: QTreeWidgetItem) -> None:
+        item.setText(_VALUE, _UNSET_TEXT)
+        font = item.font(_VALUE)
+        font.setItalic(True)
+        item.setFont(_VALUE, font)
+        gray = self._tree.palette().color(
+            QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
+        )
+        item.setForeground(_VALUE, QBrush(gray))
+
+    @staticmethod
+    def _show_source(
+        item: QTreeWidgetItem,
+        provenance: Provenance | None,
+        entry_info: EntryInfo | None,
+    ) -> None:
+        if provenance is None:
+            return
+        item.setText(_SOURCE, _source_summary(provenance, entry_info))
+        item.setToolTip(_SOURCE, _source_details(provenance))
+
+    # ------------------------------------------------------------------
+    # In-place editing
+    # ------------------------------------------------------------------
+
+    def _on_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
+        if _row_key(item) in self._edit_targets:
+            self._tree.editItem(item, _VALUE)
+
+    def _edit_current(self) -> None:
+        item = self._tree.currentItem()
+        if item is not None:
+            self._on_double_click(item, _VALUE)
+
+    def _on_expanded(self, item: QTreeWidgetItem) -> None:
+        self._expanded[_row_key(item)] = True
+
+    def _on_collapsed(self, item: QTreeWidgetItem) -> None:
+        self._expanded[_row_key(item)] = False
+
+    def _edit_target(self, index: QModelIndex) -> _EditTarget:
+        item = self._tree.itemFromIndex(index)
+        if item is None:
+            raise LookupError("Edited index has no tree row")
+        return self._edit_targets[_row_key(item)]
+
+    def _submit_edit(self, target: _EditTarget, raw: str) -> None:
+        if raw == target.initial:
+            return  # Unchanged text, including an unset row left empty, writes nothing.
+        try:
+            value: YamlValue = _parse_input(target.value_kind, raw)
+        except (ValueError, TypeError, yaml.YAMLError) as exc:
+            self._error.setText(str(exc))
+            return
+        for key in reversed(target.segments[target.write_depth :]):
+            nested: YamlMap = {key: value}
+            value = nested
+        path = ".".join((target.component, *target.segments[: target.write_depth]))
+        self.edit_parameter(path, value, setup=self._is_setup())
+
+    # ------------------------------------------------------------------
+    # Component creation
+    # ------------------------------------------------------------------
+
     def _build_creation(self, layout: QVBoxLayout) -> None:
         row = QHBoxLayout()
         row.addWidget(QLabel("New component:"))
@@ -158,9 +415,10 @@ class ComponentTreeWidget(QWidget):
         self._kind = QComboBox()
         self._kind.addItems(list(component_registry.kinds()))
         row.addWidget(self._kind)
-        add = QPushButton("Add")
-        add.clicked.connect(self._on_add)
-        row.addWidget(add)
+        self._add_btn = QPushButton("Add")
+        self._add_btn.setObjectName("component_add")
+        self._add_btn.clicked.connect(self._on_add)
+        row.addWidget(self._add_btn)
         layout.addLayout(row)
         self._fields = QFormLayout()
         layout.addLayout(self._fields)
@@ -174,26 +432,23 @@ class ComponentTreeWidget(QWidget):
         kind = self._kind.currentText()
         if not kind:
             return
-        model = component_registry.get(kind)
-        for name, field in model.model_fields.items():
-            if name == "kind":
-                continue
-            key = field.alias or name
-            required = field.is_required()
-            label = QLabel(f"{key}{' *' if required else ''}")
+        for spec in component_field_specs(kind):
+            if len(spec.segments) != 1:
+                continue  # Nested fields are entered as part of their group's YAML.
+            key = spec.segments[0]
+            label = QLabel(f"{key}{' *' if spec.required else ''}")
             edit = QLineEdit()
-            if required:
+            if spec.required:
                 self._mark_red(label)
                 edit.setPlaceholderText("Required")
             else:
                 edit.setPlaceholderText("Optional (schema default)")
-            is_text = field.annotation is str or str in get_args(field.annotation)
-            self._field_inputs[key] = (edit, label, required, is_text)
+            self._field_inputs[key] = (edit, label, spec.required, spec.value_kind)
             edit.textChanged.connect(self._update_required_labels)
             self._fields.addRow(label, edit)
 
     def _update_required_labels(self) -> None:
-        for edit, label, required, _is_text in self._field_inputs.values():
+        for edit, label, required, _value_kind in self._field_inputs.values():
             if required and not edit.text():
                 self._mark_red(label)
             else:
@@ -203,19 +458,13 @@ class ComponentTreeWidget(QWidget):
         fields: YamlMap = {}
         missing = []
         try:
-            for key, (edit, _label, required, is_text) in self._field_inputs.items():
+            for key, (edit, _label, required, value_kind) in self._field_inputs.items():
                 raw = edit.text()
                 if not raw:
                     if required:
                         missing.append(key)
                     continue
-                fields[key] = (
-                    raw
-                    if is_text
-                    else TypeAdapter(YamlValue).validate_python(
-                        yaml.safe_load(raw), strict=True
-                    )
-                )
+                fields[key] = _parse_input(value_kind, raw)
         except (ValueError, TypeError, yaml.YAMLError) as exc:
             self._error.setText(str(exc))
             return
@@ -227,53 +476,170 @@ class ComponentTreeWidget(QWidget):
             self._name.text(), self._kind.currentText(), fields, setup=self._is_setup()
         )
 
-    def _build_editing(self, layout: QVBoxLayout) -> None:
-        row = QHBoxLayout()
-        self._path = QLineEdit()
-        self._path.setReadOnly(True)
-        self._path.setPlaceholderText("Select a field to edit")
-        self._value = QLineEdit()
-        self._value.setPlaceholderText("Working-unit value")
-        self._apply_btn = QPushButton("Set field")
-        self._apply_btn.clicked.connect(self._on_edit)
-        for widget in (self._path, self._value, self._apply_btn):
-            row.addWidget(widget)
-        layout.addLayout(row)
 
-    def _on_selection(
-        self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None
+class _ValueDelegate(QStyledItemDelegate):
+    """Value-column editor that submits through the widget, never the item model.
+
+    Qt's delegate commits on Enter or focus loss and closes without a commit
+    on Esc. target(index) returns the edited row's _EditTarget; submit(target,
+    raw) receives the editor text. Only refresh rewrites the tree items, so a
+    rejected edit keeps showing the document value.
+    """
+
+    def __init__(
+        self,
+        target: Callable[[QModelIndex], _EditTarget],
+        submit: Callable[[_EditTarget, str], None],
+        parent: QWidget,
     ) -> None:
-        path = current.toolTip(0) if current is not None else ""
-        self._path.setText(path)
-        editable = path in self._row_values and not path.endswith(".kind")
-        self._apply_btn.setEnabled(editable)
-        self._value.setEnabled(editable)
-        if editable:
-            value = self._row_values[path]
-            self._value.setText(
-                value
-                if isinstance(value, str)
-                else yaml.safe_dump(value, default_flow_style=True)
-                .removesuffix("...\n")
-                .strip()
-            )
-        else:
-            self._value.clear()
+        super().__init__(parent)
+        self._target = target
+        self._submit = submit
 
-    def _on_edit(self) -> None:
-        path = self._path.text()
-        if path not in self._row_values:
-            return
-        raw = self._value.text()
-        try:
-            value = (
-                raw
-                if isinstance(self._row_values[path], str)
-                else TypeAdapter(YamlValue).validate_python(
-                    yaml.safe_load(raw), strict=True
-                )
-            )
-        except (ValueError, TypeError, yaml.YAMLError) as exc:
-            self._error.setText(str(exc))
-            return
-        self.edit_parameter(path, value, setup=self._is_setup())
+    def createEditor(
+        self, parent: QWidget | None, option: QStyleOptionViewItem, index: QModelIndex
+    ) -> QWidget | None:
+        del option
+        target = self._target(index)
+        if not target.choices:
+            editor = QLineEdit(parent)
+            editor.setText(target.initial)
+            return editor
+        combo = QComboBox(parent)
+        if not target.initial:
+            combo.addItem("")  # Blank start option: leaving it selected writes nothing.
+        combo.addItems(list(target.choices))
+        combo.setCurrentText(target.initial)
+        combo.activated.connect(lambda _row: self._finish(combo))
+        return combo
+
+    def setEditorData(self, editor: QWidget | None, index: QModelIndex) -> None:
+        # createEditor already chose the start text; the cell shows display text.
+        del editor, index
+
+    def setModelData(
+        self,
+        editor: QWidget | None,
+        model: QAbstractItemModel | None,
+        index: QModelIndex,
+    ) -> None:
+        del model
+        if isinstance(editor, QComboBox):
+            raw = editor.currentText()
+        elif isinstance(editor, QLineEdit):
+            raw = editor.text()
+        else:
+            raise TypeError(f"Unexpected Value editor {editor!r}")
+        self._submit(self._target(index), raw)
+
+    def _finish(self, combo: QComboBox) -> None:
+        self.commitData.emit(combo)
+        self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
+
+
+def _row_key(item: QTreeWidgetItem) -> _RowKey:
+    texts: list[str] = []
+    node: QTreeWidgetItem | None = item
+    while node is not None:
+        texts.append(node.text(_FIELD))
+        node = node.parent()
+    return tuple(reversed(texts))
+
+
+def _value_at(
+    component: YamlValue, segments: tuple[str, ...]
+) -> tuple[bool, YamlValue]:
+    """Return (present, value) for segments inside a logical component mapping.
+
+    Explicit null counts as present; a missing key or non-mapping ancestor
+    returns (False, None).
+    """
+    node = component
+    for segment in segments:
+        if not isinstance(node, dict) or segment not in node:
+            return False, None
+        node = node[segment]
+    return True, node
+
+
+def _write_depth(component: YamlValue, segments: tuple[str, ...]) -> int:
+    """Return how many leading segments an owner set path may address.
+
+    Owner paths need every ancestor to hold a mapping. The first missing or
+    null ancestor ends the path; the remaining segments nest inside the value.
+    """
+    node = component
+    for index, segment in enumerate(segments[:-1]):
+        node = node.get(segment) if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            return index + 1
+    return len(segments)
+
+
+def _addressable(key: _RowKey) -> bool:
+    # Dotted owner paths cannot name empty keys or keys containing a dot.
+    return all(part and "." not in part for part in key)
+
+
+def _editor_choices(
+    value_kind: FieldValueKind, choices: tuple[str, ...]
+) -> tuple[str, ...]:
+    if value_kind == "boolean":
+        return ("true", "false")
+    return choices
+
+
+def _parse_input(value_kind: FieldValueKind, raw: str) -> YamlValue:
+    """Text and choice fields keep the raw string; others parse as one YAML value."""
+    if value_kind in ("text", "choice"):
+        return raw
+    return TypeAdapter(YamlValue).validate_python(yaml.safe_load(raw), strict=True)
+
+
+def _display(value: YamlValue) -> str:
+    if isinstance(value, str):
+        return value
+    return yaml.safe_dump(value, default_flow_style=True).removesuffix("...\n").strip()
+
+
+def _source_summary(provenance: Provenance, entry_info: EntryInfo | None) -> str:
+    cloned = provenance.cloned_from
+    if cloned is not None:
+        same_entry = (
+            entry_info is not None and cloned["entry_id"] == entry_info.entry_id
+        )
+        origin = (
+            entry_info.name
+            if same_entry and entry_info is not None
+            else cloned["entry_id"][:8]
+        )
+        return f"cloned · {origin}/{cloned['point']}"
+    if provenance.source == "manual":
+        return f"manual · {_short_time(provenance.at)}"
+    if provenance.run_id is not None:
+        return f"run {provenance.run_id}"
+    return f"event {provenance.source}"
+
+
+def _source_details(provenance: Provenance) -> str:
+    lines = [f"source: {provenance.source}", f"at: {provenance.at}"]
+    if provenance.kind is not None:
+        lines.append(f"kind: {provenance.kind}")
+    if provenance.run_id is not None:
+        lines.append(f"run_id: {provenance.run_id}")
+    if provenance.stderr is not None:
+        lines.append(f"stderr: {provenance.stderr}")
+    if provenance.cloned_from is not None:
+        cloned = provenance.cloned_from
+        lines.append(f"cloned from: {cloned['entry_id']}/{cloned['point']}")
+    return "\n".join(lines)
+
+
+def _short_time(at: str) -> str:
+    try:
+        moment = datetime.fromisoformat(at)
+    except ValueError:
+        return (
+            at  # Sources keep caller timestamps verbatim; show an unparsable one as is.
+        )
+    return moment.astimezone().strftime("%m-%d %H:%M")

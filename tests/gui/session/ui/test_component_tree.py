@@ -202,9 +202,8 @@ def test_add_component_renders_tree(component_widget):
     widget, _control = component_widget
     assert widget.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     tree = _tree(widget)
-    assert any(
-        tree.topLevelItem(i).text(0) == "Q1" for i in range(tree.topLevelItemCount())
-    )
+    roots = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+    assert any(root is not None and root.text(0) == "Q1" for root in roots)
 
 
 def test_missing_required_field_displays_error_without_mutation(component_widget):
@@ -229,7 +228,8 @@ def test_tree_lists_every_schema_field_with_unit_and_description(component_widge
     root = _row(widget, "P1")
     # Kind appears once, on the component row, never as its own child row.
     assert root.text(VALUE) == "test/profiled"
-    assert all(root.child(i).text(FIELD) != "kind" for i in range(root.childCount()))
+    children = [root.child(i) for i in range(root.childCount())]
+    assert all(child is not None and child.text(FIELD) != "kind" for child in children)
 
     label, rate = _row(widget, "P1", "label"), _row(widget, "P1", "rate")
     assert label.text(VALUE) == "probe"

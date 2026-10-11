@@ -40,11 +40,24 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import QubitSchema, ResonatorSchema
+
+
+@pytest.fixture(autouse=True)
+def registered_lab_kinds() -> Generator[None]:
+    """Register the kinds _make_ml documents use; the component tree projects them."""
+    before = registry_state()
+    try:
+        component_registry.register("resonator", ResonatorSchema)
+        component_registry.register("qubit/transmon", QubitSchema)
+        yield
+    finally:
+        restore_registry(before)
 
 
 def _make_ml() -> ParameterContext:
