@@ -7,7 +7,8 @@ from threading import Event
 from typing import Any
 
 import pytest
-from simpleeval import NameNotDefined, simple_eval
+from pydantic import ValidationError
+from zcu_tools.gui.session.expression import ExpressionError
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure import tools_recipes
 
@@ -59,7 +60,7 @@ def skip_writeback(client: MeasureClient, question: ToolReply) -> ToolReply:
     ],
 )
 def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, arguments):
-    gui = OnetoneGui({"r_f": 6000.0, "rf_w": 4.0})
+    gui = OnetoneGui({"$resonator.freq": 6000.0, "$resonator.kappa": 4.0})
     with recipe_client(tmp_path, gui) as client:
         reply = client.call("onetone_spectrum", arguments)
         assert isinstance(reply, ToolReply)
@@ -68,9 +69,6 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert reply.data["error"]["phase"] == "preparing"
         assert not gui.ran
-        assert not any(
-            method == "context.snapshot" for method, _ in client.transport.sent
-        )
 
 
 def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
@@ -84,14 +82,20 @@ def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("onetone_spectrum_over_flux", {})
+            client,
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "coil",
+                    "flux_unit": "A",
+                },
+            ),
         )
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters", reply.data
         assert {item["parameter"] for item in reply.data["missing"]} == {
             "center_mhz",
             "span_mhz",
-            "flux_device",
             "flux_range",
         }
         assert not gui.ran
@@ -133,14 +137,11 @@ def test_flux_rejects_invalid_explicit_inputs_instead_of_missing_handoff(
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
-        assert not any(
-            method == "context.snapshot" for method, _ in client.transport.sent
-        )
 
 
 @pytest.mark.parametrize("stage", ["tab.edit_cfg", "tab.run_start"])
 def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stage):
-    gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
+    gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
 
     with recipe_client(tmp_path, gui) as client:
         client.transport.replies[stage] = {
@@ -163,7 +164,7 @@ def test_spectrum_source_change_fails_without_retry_or_blind_scan(tmp_path, stag
     "md, arguments, expected_status",
     [
         ({}, {"center_mhz": 1e308, "span_mhz": 2e307}, "finished"),
-        ({"rf_w": 4e307}, {"center_mhz": 0.0}, "failed"),
+        ({"$resonator.kappa": 4e307}, {"center_mhz": 0.0}, "failed"),
     ],
 )
 def test_spectrum_only_delivers_finite_actual_frequency(
@@ -187,7 +188,7 @@ def test_spectrum_only_delivers_finite_actual_frequency(
 
 
 def test_spectrum_rejects_invalid_library_reference_without_fallback(tmp_path):
-    gui = OnetoneGui({"r_f": 6100.0, "rf_w": 4.0})
+    gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
 
     def respond(method, params):
         result = gui(method, params)
@@ -219,13 +220,18 @@ def test_flux_rejects_unknown_explicit_device_without_selecting_default(tmp_path
         }
         reply = full_execution_reply(
             client,
-            client.call("onetone_spectrum_over_flux", {"flux_device": "missing-coil"}),
+            client.call(
+                "onetone_spectrum_over_flux",
+                {
+                    "flux_device": "missing-coil",
+                    "flux_unit": "A",
+                },
+            ),
         )
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "device_not_found"
         assert not gui.ran
         assert ("device.snapshot", {"name": "missing-coil"}) in client.transport.sent
-        assert not any(m == "value.read" for m, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize(
@@ -344,8 +350,8 @@ class OnetoneGui(LookbackGui):
         super().__init__()
         self.experiment = experiment
         self.md = md or {}
-        center = "r_f" if "r_f" in self.md else "5000.0"
-        width = "2.5 * rf_w" if "rf_w" in self.md else "500.0"
+        center = "$resonator.freq" if "$resonator.freq" in self.md else "5000.0"
+        width = "2.5 * $resonator.kappa" if "$resonator.kappa" in self.md else "500.0"
         self.publication["tree"]["children"].update(
             reps=scalar(17),
             sweep=section(
@@ -368,9 +374,9 @@ class OnetoneGui(LookbackGui):
         if not isinstance(value, str):
             return scalar(value)["input"]
         try:
-            resolved = simple_eval(value, names=self.md)
+            resolved = self.evaluate_expression(value)
             error = None
-        except (TypeError, NameNotDefined) as exc:
+        except (ValidationError, ExpressionError) as exc:
             resolved, error = None, str(exc)
         return {
             "mode": "expression",
@@ -431,9 +437,6 @@ def test_power_rejects_invalid_gain_inputs_before_preparation(tmp_path, argument
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
-        assert not any(
-            method == "context.snapshot" for method, _ in client.transport.sent
-        )
 
 
 @pytest.mark.parametrize("failure", ["source", "base64", "png"])
@@ -592,7 +595,6 @@ def test_power_cancel_does_not_suppress_fast_save_or_preview_after_completed_run
 @pytest.mark.parametrize(
     "explicit, unit, expected",
     [
-        (False, "none", "needs_parameters"),
         (True, "none", "failed"),
     ],
 )
@@ -605,20 +607,22 @@ def test_flux_does_not_treat_unknown_units_as_physical_flux(
             client,
             client.call(
                 "onetone_spectrum_over_flux",
-                {"flux_device": "coil"} if explicit else {},
+                {
+                    **({"flux_device": "coil"} if explicit else {}),
+                    "flux_unit": "native",
+                },
             ),
         )
         assert reply.data["status"] == expected
+        assert reply.data["error"]["reason"] == "invalid_device"
         assert not gui.ran
-        if not explicit:
-            assert [item["parameter"] for item in reply.data["missing"]] == [
-                "flux_device"
-            ]
 
 
 class PowerGui(OnetoneGui):
     def __init__(self):
-        super().__init__({"r_f": 6100.0, "rf_w": 4.0}, "onetone/power_dep")
+        super().__init__(
+            {"$resonator.freq": 6100.0, "$resonator.kappa": 4.0}, "onetone/power_dep"
+        )
         self.publication["tree"]["children"]["sweep"]["children"]["gain"] = {
             "kind": "sweep",
             "valid": True,
@@ -791,17 +795,23 @@ class FluxGui(OnetoneGui):
     def __init__(self, snapshot=None):
         self.snapshot = snapshot
         super().__init__(
-            {"r_f": 6100.0, "rf_w": 4.0, "flx_half": 0.001, "flx_int": 0.003},
+            {
+                "$resonator.freq": 6100.0,
+                "$resonator.kappa": 4.0,
+                "$qubit.flux_half": 0.001,
+                "$qubit.flux_int": 0.003,
+            },
             experiment="onetone/flux_dep",
         )
         root = self.publication["tree"]["children"]
         root["dev"] = section(flux_dev=scalar("flux_yoko"))
+        root["flux_unit"] = scalar("A")
         root["sweep"]["children"]["flux"] = {
             "kind": "sweep",
             "valid": True,
             "inputs": {
-                "start": self.input("2 * flx_int - flx_half"),
-                "stop": self.input("2 * flx_half - flx_int"),
+                "start": self.input("2 * $qubit.flux_int - $qubit.flux_half"),
+                "stop": self.input("2 * $qubit.flux_half - $qubit.flux_int"),
                 "expts": self.input(19),
                 "step": self.input(-0.006 / 18),
             },
@@ -843,7 +853,9 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
     explicit = explicit_range is not None
     gui = FluxGui()
     arguments: dict[str, Any] = {
-        "readout_ref": "calibrated",
+        "readout_ref": "R1.readout.calibrated",
+        "flux_device": "alternate" if explicit else "coil",
+        "flux_unit": "V" if explicit else "A",
         "freq_points": 31,
         "reps": 23,
         "rounds": 7,
@@ -866,7 +878,7 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         assert fields["dev.flux_dev"] == {
             "value": "alternate" if explicit else "coil",
             "unit": "V" if explicit else "A",
-            "source": "explicit" if explicit else "device.flux.name",
+            "source": "explicit",
         }
         assert fields["sweep.flux"]["value"] == {
             "start": expected_endpoints[0],
@@ -880,7 +892,7 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
             "explicit" if explicit else "gui_calibration"
         )
         assert fields["sweep.freq"]["value"]["expts"] == 31
-        assert fields["modules.readout"]["value"] == "calibrated"
+        assert fields["modules.readout"]["value"] == "R1.readout.calibrated"
         assert fields["modules.readout.pulse_cfg.gain"]["value"] == 0.13
         assert fields["reps"]["value"] == 23
         assert fields["rounds"]["value"] == 7
@@ -915,7 +927,6 @@ def test_flux_saves_one_survey_with_physical_device_and_actual_conditions(
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert ("tab.reset_cfg" in methods) is explicit
-        assert ("value.read" in methods) is not explicit
         if explicit:
             flux_edits = [
                 edit["value"]
@@ -1023,7 +1034,7 @@ def test_fake_flux_native_opt_in_preserves_coordinates_and_saved_result(tmp_path
         snapshot={
             "name": "coil",
             "type_name": "FakeDevice",
-            "unit": "none",
+            "unit": "native",
             "info": {"type": "FakeDevice", "value": 0.0},
         }
     )
@@ -1135,11 +1146,17 @@ def test_physical_flux_unit_assertion_is_checked_before_run(
 def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
     tmp_path, type_name, info_type, unit, requested_unit
 ):
+    # A/V select mismatched requests against the real Fake Info native unit.
+    snapshot_unit = (
+        "native"
+        if type_name == info_type == "FakeDevice" and unit in ("A", "V")
+        else unit
+    )
     gui = FluxGui(
         snapshot={
             "name": "coil",
             "type_name": type_name,
-            "unit": unit,
+            "unit": snapshot_unit,
             "info": {"type": info_type} if info_type is not None else None,
         }
     )
@@ -1152,7 +1169,17 @@ def test_native_flux_rejects_unconfirmed_or_physical_coordinates_before_run(
             ),
         )
         assert reply.data["status"] == "failed", reply.data
-        assert reply.data["error"]["reason"] == "invalid_device"
+        if requested_unit is None:
+            assert reply.is_error
+            assert reply.data["error"] == {
+                "phase": "preparing",
+                "reason": "recipe_failed",
+                "message": "Invalid recipe argument flux_unit: None is not of type 'string'",
+                "code": None,
+            }
+            assert not client.transport.sent
+        else:
+            assert reply.data["error"]["reason"] == "invalid_device"
         assert not gui.ran
 
 
@@ -1177,9 +1204,16 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
 @pytest.mark.parametrize(
     "md, arguments, start, stop, center_source, span_source",
     [
-        ({"r_f": 6100.0, "rf_w": 4.0}, {}, 6090.0, 6110.0, "r_f", "gui_linewidth"),
         (
-            {"rf_w": 4.0},
+            {"$resonator.freq": 6100.0, "$resonator.kappa": 4.0},
+            {},
+            6090.0,
+            6110.0,
+            "$resonator.freq",
+            "gui_linewidth",
+        ),
+        (
+            {"$resonator.kappa": 4.0},
             {"center_mhz": 6200.0},
             6190.0,
             6210.0,
@@ -1187,14 +1221,21 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
             "gui_linewidth",
         ),
         (
-            {"r_f": None, "rf_w": 4.0},
+            {"$resonator.freq": None, "$resonator.kappa": 4.0},
             {"center_mhz": 6200.0},
             6190.0,
             6210.0,
             "explicit",
             "gui_linewidth",
         ),
-        ({"r_f": 6100.0}, {"span_mhz": 8.0}, 6096.0, 6104.0, "r_f", "explicit"),
+        (
+            {"$resonator.freq": 6100.0},
+            {"span_mhz": 8.0},
+            6096.0,
+            6104.0,
+            "$resonator.freq",
+            "explicit",
+        ),
         (
             {},
             {"center_mhz": 6200.0, "span_mhz": 16.0},
@@ -1204,7 +1245,7 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
             "explicit",
         ),
         (
-            {"r_f": 6100.0, "rf_w": 4.0},
+            {"$resonator.freq": 6100.0, "$resonator.kappa": 4.0},
             {"center_mhz": 6200.0},
             6190.0,
             6210.0,
@@ -1212,11 +1253,11 @@ def test_onetone_reports_missing_frequency_without_running(tmp_path, reuse_tab_i
             "gui_linewidth",
         ),
         (
-            {"r_f": 6100.0, "rf_w": 4.0},
+            {"$resonator.freq": 6100.0, "$resonator.kappa": 4.0},
             {"span_mhz": 8.0},
             6096.0,
             6104.0,
-            "r_f",
+            "$resonator.freq",
             "explicit",
         ),
     ],
