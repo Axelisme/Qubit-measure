@@ -1,5 +1,6 @@
 """Fresh typed declarations through Window/FormState and bounded loader seams."""
 
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from zcu_tools.gui.catalog_loader import CatalogReloadError
 from zcu_tools.gui.form import FormErrors
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._reload_source import ReloadSource
@@ -94,3 +96,37 @@ def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
     # is now the only reason Start cannot run this source-free view.
     with pytest.raises(RuntimeError, match="parameter"):
         window.start("empty")
+
+
+def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    # Reload mutates Python's owned module cache. Restore originals after this
+    # integration observation so test selection/order never changes declarations.
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "zcu_lab.workflows" or name.startswith("zcu_lab.workflows.")
+    }
+    app = WorkflowsGuiBehavior(clean=True, cache_dir=tmp_path)
+    app.assemble(None)
+    state, services, controller = app.state, app.services, app.window.controller
+    try:
+        app.window.reload_source()
+        assert app.state is state and app.services is services
+        assert app.window.controller is controller
+        assert app.window.capture_persisted_state().knobs["guess_us"] == 20.0
+    finally:
+        app.window.close()
+        app.shutdown()
+        app.window.deleteLater()
+        qapp.processEvents()
+        for name in tuple(sys.modules):
+            if name == "zcu_lab.workflows" or name.startswith("zcu_lab.workflows."):
+                del sys.modules[name]
+        sys.modules.update(original)
+        for name, module in original.items():
+            parent, _, leaf = name.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], leaf, module)
