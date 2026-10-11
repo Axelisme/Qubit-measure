@@ -21,22 +21,24 @@ from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
 from ._sim_inputs import Inputs, make_plan, make_snapshot, seed_from_inputs
 
 
-def start_t2(inputs: Inputs, root: Path, kind: Literal["echo", "ramsey"], *, sweep_factor: float = 5.0) -> tuple[Engine[Calibrated], RecordingDevices, Plots]:
+def start_t2(inputs: Inputs, root: Path, kind: Literal["echo", "ramsey"], *, sweep_factor: float = 5.0, fine_fringe: bool = False) -> tuple[Engine[Calibrated], RecordingDevices, Plots]:
     """Run each shipped T2 declaration on independent simulator ports."""
     plan = workflows.T2Plan.model_validate(make_plan(inputs).model_dump(mode="python"))
+    if fine_fringe:
+        plan = plan.model_copy(update={"points": 101})
     cal = CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125)
     devices, plots = RecordingDevices(), Plots(NonPresentingHost())
     engine = Engine(EnginePorts(plots, RecordingBar, ManualClock(), context=seed_from_inputs(inputs), soc=inputs.soc, soccfg=inputs.soccfg, devices=devices))
     if kind == "echo":
         engine.start(workflows.t2echo_fluxdep, plan=plan, tunables=workflows.T2EchoTunables(cal=cal, rounds=2, sweep_factor=sweep_factor), paths=RunPaths(root / "metadata", root / "data"), identity=RunIdentity("workflow", SoftwareProvenance(software_versions={}, git_commit=None, git_dirty=None, qick_version=None, soc_fingerprint=None, hostname="offline")))
     else:
-        engine.start(workflows.t2ramsey_fluxdep, plan=plan, tunables=workflows.T2RamseyTunables(cal=cal, rounds=2, sweep_factor=sweep_factor, detune_ratio=0.1), paths=RunPaths(root / "metadata", root / "data"), identity=RunIdentity("workflow", SoftwareProvenance(software_versions={}, git_commit=None, git_dirty=None, qick_version=None, soc_fingerprint=None, hostname="offline")))
+        engine.start(workflows.t2ramsey_fluxdep, plan=plan, tunables=workflows.T2RamseyTunables(cal=cal, rounds=10 if fine_fringe else 2, sweep_factor=sweep_factor, detune_ratio=0.25 if fine_fringe else 0.1), paths=RunPaths(root / "metadata", root / "data"), identity=RunIdentity("workflow", SoftwareProvenance(software_versions={}, git_commit=None, git_dirty=None, qick_version=None, soc_fingerprint=None, hostname="offline")))
     return engine, devices, plots
 
 
 @pytest.mark.parametrize("kind", ["echo", "ramsey"])
 def test_t2_fluxdep_commits_two_native_points_with_fitted_pi2(inputs: Inputs, tmp_path: Path, kind: Literal["echo", "ramsey"]) -> None:
-    engine, devices, plots = start_t2(inputs, tmp_path, kind)
+    engine, devices, plots = start_t2(inputs, tmp_path, kind, fine_fringe=kind == "ramsey")
     status = engine.execute("workflow")
     assert status.lifecycle == "done", status.reason
     records = engine.records("workflow")
@@ -66,7 +68,7 @@ def test_t2_fluxdep_commits_two_native_points_with_fitted_pi2(inputs: Inputs, tm
             ramsey, metadata = load_run_with_metadata(final_path, spec=T2RamseyExp().persistence_spec())
             assert ramsey.cfg is not None
             drive = ramsey.cfg.modules.pi2_pulse
-            assert ramsey.cfg.detune == pytest.approx(0.1 / ramsey.cfg.sweep.length.step)
+            assert ramsey.cfg.detune == pytest.approx(0.25 / ramsey.cfg.sweep.length.step)
         assert isinstance(drive.waveform, ConstWaveformCfg)
         assert drive.waveform.length == pytest.approx(calibration["pi2_length_us"])
         assert drive.waveform.style == make_plan(inputs).qub_pulse.waveform.style
@@ -76,7 +78,7 @@ def test_t2_fluxdep_commits_two_native_points_with_fitted_pi2(inputs: Inputs, tm
     assert [e["encoded_record"]["value"] for e in events if e["kind"] == "step_committed"] == [r.encoded_record.value for r in records]
     assert f"t2{kind}/decay" in plots and f"t2{kind}/vs_flux" in plots
     assert plots[f"t2{kind}/decay"].axes[0].lines
-    assert len(plots[f"t2{kind}/vs_flux"].axes[0].collections[0].get_offsets()) == 2
+    assert np.asarray(plots[f"t2{kind}/vs_flux"].axes[0].collections[0].get_offsets()).shape == (2, 2)
 
 
 @pytest.mark.parametrize("kind", ["echo", "ramsey"])
