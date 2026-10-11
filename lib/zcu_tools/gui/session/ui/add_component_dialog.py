@@ -11,6 +11,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QShowEvent
 from qtpy.QtWidgets import (
     QComboBox,
+    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -34,10 +35,12 @@ from zcu_tools.resources.entry import (
     FieldSpec,
     component_field_specs,
     component_registry,
+    role_candidates,
 )
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 logger = logging.getLogger(__name__)
@@ -74,8 +77,10 @@ class AddComponentDialog(QDialog):
     of component_field_specs(kind): group fields are indented header rows
     with their fields below; each field shows its unit and its description as
     a tooltip. Choice and boolean fields use a drop-down whose blank first
-    entry means unset. Changing Kind rebuilds the fields. Required fields
-    that are still empty have red labels.
+    entry means unset. A role reference field (FieldSpec.reference_role)
+    drops down the destination document's components that match the role;
+    other text fields complete component names. Changing Kind rebuilds the
+    fields. Required fields that are still empty have red labels.
 
     Add sends only filled fields, nested by their segments, to
     control.add_component. Empty required fields block Add locally; every
@@ -189,6 +194,8 @@ class AddComponentDialog(QDialog):
         grid.setColumnStretch(1, 1)
         kind = self._kind.currentText()
         specs = component_field_specs(kind) if kind else ()
+        # Reference choices and name completion come from the destination document.
+        document = self._control.inspect_document(setup=self._setup)
         for row, spec in enumerate(specs):
             label = QLabel(spec.segments[-1])
             label.setObjectName(f"label:{'.'.join(spec.segments)}")
@@ -201,7 +208,7 @@ class AddComponentDialog(QDialog):
                 self._groups[spec.segments] = spec
                 grid.addWidget(label, row, 0, 1, 3)
                 continue
-            editor = self._editor(spec)
+            editor = self._editor(spec, document)
             unit = QLabel(spec.unit or "")
             unit.setObjectName(f"unit:{'.'.join(spec.segments)}")
             grid.addWidget(label, row, 0)
@@ -215,9 +222,14 @@ class AddComponentDialog(QDialog):
         if self.isVisible():
             self._fit_to_screen()
 
-    def _editor(self, spec: FieldSpec) -> QLineEdit | QComboBox:
+    def _editor(
+        self, spec: FieldSpec, document: SetupDocument | PointDocument
+    ) -> QLineEdit | QComboBox:
         path = ".".join(spec.segments)
-        choices = field_choices(spec.value_kind, spec.choices)
+        if spec.reference_role is not None:
+            choices = role_candidates(document, spec.reference_role)
+        else:
+            choices = field_choices(spec.value_kind, spec.choices)
         editor: QLineEdit | QComboBox
         if choices:
             editor = QComboBox()
@@ -227,6 +239,9 @@ class AddComponentDialog(QDialog):
         else:
             editor = QLineEdit()
             editor.textChanged.connect(self._update_required)
+            if spec.value_kind == "text" and document.components:
+                names = list(document.components)
+                editor.setCompleter(QCompleter(names, editor))
         editor.setObjectName(f"field:{path}")
         editor.setToolTip(_tooltip(spec))
         return editor

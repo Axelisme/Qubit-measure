@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from types import NoneType, UnionType
 from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from .registry import component_registry
+from .schema import PointDocument, SetupDocument
 
 type FieldValueKind = Literal[
     "text", "integer", "number", "boolean", "choice", "mapping", "group", "yaml"
@@ -43,6 +45,10 @@ class FieldSpec:
     unit: the working-unit label from json_schema_extra["unit"], or None when
         the field declares none. A missing unit does not mean dimensionless.
     description: the pydantic Field description, or None when undeclared.
+    reference_role: the registered role name when this is a top-level "text"
+        field whose key equals a role registered without a via path; such a
+        field names another component of that role's kind (see
+        role_candidates). None for every other field.
     """
 
     segments: tuple[str, ...]
@@ -51,6 +57,7 @@ class FieldSpec:
     choices: tuple[str, ...]
     unit: str | None
     description: str | None
+    reference_role: str | None
 
 
 def component_field_specs(kind: str) -> tuple[FieldSpec, ...]:
@@ -64,6 +71,32 @@ def component_field_specs(kind: str) -> tuple[FieldSpec, ...]:
     """
     model = component_registry.get(kind)
     return tuple(_project(model, (), (model,)))
+
+
+def role_candidates(
+    document: SetupDocument | PointDocument, role: str
+) -> tuple[str, ...]:
+    """Return document component names whose kind matches role's kind pattern.
+
+    Names keep document order. Unknown roles raise ValueError from the role
+    registry. Only the given document is read; no I/O or validation runs.
+    """
+    pattern = component_registry.roles.get(role).kind
+    return tuple(
+        name
+        for name, component in document.components.items()
+        if fnmatchcase(component.kind, pattern)
+    )
+
+
+def _reference_role(
+    prefix: tuple[str, ...], key: str, value_kind: FieldValueKind
+) -> str | None:
+    # Role resolution without via reads a top-level field named after the role.
+    roles = component_registry.roles
+    if prefix or value_kind != "text" or key not in roles.names():
+        return None
+    return key if roles.get(key).via is None else None
 
 
 def _project(
@@ -85,6 +118,7 @@ def _project(
             choices=_choices(annotation) if value_kind == "choice" else (),
             unit=_unit(field, segments),
             description=field.description,
+            reference_role=_reference_role(prefix, segments[-1], value_kind),
         )
         if nested is not None:
             yield from _project(nested, segments, (*expanding, nested))

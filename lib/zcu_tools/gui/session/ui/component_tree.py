@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (
     QAbstractItemDelegate,
     QAbstractItemView,
     QComboBox,
+    QCompleter,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -38,12 +39,14 @@ from zcu_tools.gui.session.ui.component_editing import (
     show_error,
 )
 from zcu_tools.resources.entry import (
+    FieldSpec,
     FieldValueKind,
     Provenance,
     component_field_specs,
     document_fields,
     document_meta,
     document_value,
+    role_candidates,
 )
 
 if TYPE_CHECKING:
@@ -67,16 +70,18 @@ class _EditTarget:
 
     component names the owning component and segments the field path inside
     it. value_kind selects the parsing rule for the submitted text. choices
-    are drop-down options; empty means a free-text editor. initial is the
-    editor's start text, "" for an unset field. write_depth is how many
-    leading segments the owner path addresses; the remaining segments nest
-    inside the written value because their ancestor is unset.
+    are drop-down options; empty means a free-text editor. completions are
+    component names a free-text editor offers while typing (empty for none).
+    initial is the editor's start text, "" for an unset field. write_depth is
+    how many leading segments the owner path addresses; the remaining
+    segments nest inside the written value because their ancestor is unset.
     """
 
     component: str
     segments: tuple[str, ...]
     value_kind: FieldValueKind
     choices: tuple[str, ...]
+    completions: tuple[str, ...]
     initial: str
     write_depth: int
 
@@ -90,7 +95,9 @@ class ComponentTreeWidget(QWidget):
     gray "(unset)" and nested models expand into child rows. Document data
     the schema does not declare follows the declared rows. Double-click or F2
     opens an in-place editor on an editable Value cell: Enter or focus loss
-    submits, Esc cancels. All writes use the owner; errors stay visible in
+    submits, Esc cancels. Choice, boolean and role reference fields edit
+    through a drop-down (references list the document's components matching
+    the role); other text fields complete component names. All writes use the owner; errors stay visible in
     red below the tree as "<field>: <message>", with the full owner text as
     the tooltip, without changing the rejected document. A setup/current
     selector controls the editing destination; "Add component…" opens an
@@ -315,7 +322,8 @@ class ComponentTreeWidget(QWidget):
                         component=name,
                         segments=spec.segments,
                         value_kind=spec.value_kind,
-                        choices=field_choices(spec.value_kind, spec.choices),
+                        choices=_edit_choices(document, spec),
+                        completions=_edit_completions(document, spec),
                         initial=_display(value) if present else "",
                         write_depth=_write_depth(component_value, spec.segments),
                     ),
@@ -364,6 +372,7 @@ class ComponentTreeWidget(QWidget):
                         segments=relative,
                         value_kind="text" if isinstance(field.value, str) else "yaml",
                         choices=(),
+                        completions=(),
                         initial=_display(field.value),
                         write_depth=len(relative),
                     ),
@@ -461,10 +470,14 @@ class _ValueDelegate(QStyledItemDelegate):
         if not target.choices:
             editor = QLineEdit(parent)
             editor.setText(target.initial)
+            if target.completions:
+                editor.setCompleter(QCompleter(list(target.completions), editor))
             return editor
         combo = QComboBox(parent)
         if not target.initial:
             combo.addItem("")  # Blank start option: leaving it selected writes nothing.
+        elif target.initial not in target.choices:
+            combo.addItem(target.initial)  # Keep a dangling reference selectable.
         combo.addItems(list(target.choices))
         combo.setCurrentText(target.initial)
         combo.activated.connect(lambda _row: self._finish(combo))
@@ -492,6 +505,24 @@ class _ValueDelegate(QStyledItemDelegate):
     def _finish(self, combo: QComboBox) -> None:
         self.commitData.emit(combo)
         self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
+
+
+def _edit_choices(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Drop-down options: matching components for a role reference, else declared."""
+    if spec.reference_role is not None:
+        return role_candidates(document, spec.reference_role)
+    return field_choices(spec.value_kind, spec.choices)
+
+
+def _edit_completions(
+    document: SetupDocument | PointDocument, spec: FieldSpec
+) -> tuple[str, ...]:
+    """Component names for free-text fields that may name another component."""
+    if spec.value_kind != "text" or spec.reference_role is not None:
+        return ()
+    return tuple(document.components)
 
 
 def _row_key(item: QTreeWidgetItem) -> _RowKey:

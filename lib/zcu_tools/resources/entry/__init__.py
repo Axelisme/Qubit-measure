@@ -39,7 +39,12 @@ from .save_layout import (
     workflow_roots,
 )
 from .schema import ComponentSchema
-from .schema_fields import FieldSpec, FieldValueKind, component_field_specs
+from .schema_fields import (
+    FieldSpec,
+    FieldValueKind,
+    component_field_specs,
+    role_candidates,
+)
 from .storage import PointStorageBinding, capture_point_storage
 from .views import (
     ComponentView,
