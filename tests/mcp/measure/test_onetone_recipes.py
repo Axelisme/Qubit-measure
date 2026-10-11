@@ -117,7 +117,7 @@ def test_resonator_recipes_write_numeric_calibrated_endpoints(
     if recipe == "onetone_spectrum_over_flux":
         gui = FluxGui()
     elif recipe == "onetone_spectrum_over_power":
-        gui = PowerGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
+        gui = PowerGui()
     else:
         gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
     with recipe_client(tmp_path, gui) as client:
@@ -149,6 +149,34 @@ def test_resonator_invalid_linewidth_stops_before_sweep_edit_or_run(tmp_path, wi
             for edit in params["edits"]
         )
         assert not gui.ran
+
+
+def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path):
+    gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
+    with recipe_client(tmp_path, gui) as client:
+        initial = client.call(
+            "onetone_spectrum", {"center_mhz": 6100.0, "span_mhz": 20.0}
+        )
+        assert initial.data["status"] == "awaiting_answer", initial.data
+        expected = {
+            "value": {"start": 6090.0, "stop": 6110.0, "expts": 41},
+            "source": {"start": "explicit", "stop": "explicit", "expts": "gui_default"},
+            "unit": "MHz",
+        }
+        before = list(client.transport.sent)
+        key = initial.data["execution"]
+        assert initial.data["actual"]["frequency_sweep"] == expected
+        assert (
+            client.call("status", {"execution": key})["actual"]["frequency_sweep"]
+            == expected
+        )
+        assert (
+            client.call("status", {"execution": key, "detail": "full"})["actual"][
+                "frequency_sweep"
+            ]
+            == expected
+        )
+        assert client.transport.sent == before
 
 
 def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):

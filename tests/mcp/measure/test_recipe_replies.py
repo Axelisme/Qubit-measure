@@ -12,6 +12,67 @@ from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
 
 
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        (
+            {
+                "frequency_mhz": 6020.0,
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+                "rounds": 7,
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+            },
+            {},
+        ),
+        (
+            {
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+            },
+            {
+                "frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "ro_frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "rounds": {"value": 3, "source": "gui_default"},
+            },
+        ),
+    ],
+    ids=["all-explicit", "calibration-and-default"],
+)
+def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
+    tmp_path, arguments, expected
+):
+    gui = LookbackGui()
+    gui.md["$resonator.freq"] = 6120.0
+    with recipe_client(tmp_path, gui) as client:
+        initial = client.call("lookback", arguments)
+        assert initial.data["status"] == "awaiting_answer", initial.data
+        key = initial.data["execution"]
+        before = list(client.transport.sent)
+        gui.md["$resonator.freq"] = 6300.0
+        for reply in (
+            initial.data,
+            client.call("status", {"execution": key}),
+            client.call("wait", {"execution": key, "timeout": 0}).data,
+            client.call("status", {"execution": key, "detail": "full"}),
+        ):
+            assert reply["actual"] == expected
+        assert client.transport.sent == before
+
+
 @pytest.mark.parametrize("outcome", ["awaiting_answer", "missing", "failed"])
 def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome):
     gui = LookbackGui()
