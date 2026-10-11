@@ -206,11 +206,11 @@ def test_overrun_restarts_interval_from_actual_start_without_catchup(
     from zcu_tools.experiment.stop_signal import StopSignal
 
     devices = RecordingDevices()
-    engine = start_overnight(inputs, tmp_path, devices)
+    engine = start_overnight(inputs, tmp_path, devices, interval=1.0)
 
     def overrun_first_pair(signal: StopSignal) -> None:
         if len(devices.values) == 1:
-            signal.event.wait(0.6)
+            signal.event.wait(2.1)
 
     devices.on_set = overrun_first_pair
     status = engine.execute("overnight")
@@ -218,11 +218,11 @@ def test_overrun_restarts_interval_from_actual_start_without_catchup(
     first, second, third = engine.records("overnight")
     assert (
         pair_time(second, "actual_start") - pair_time(first, "actual_start")
-    ).total_seconds() >= 0.6
+    ).total_seconds() >= 2.1
     # A fixed original-start grid would immediately run the third pair to catch up.
     assert (
         pair_time(third, "actual_start") - pair_time(second, "actual_start")
-    ).total_seconds() >= 0.25
+    ).total_seconds() >= 1.0
     assert (
         pair_time(third, "scheduled_start") - pair_time(second, "actual_start")
-    ).total_seconds() >= 0.25
+    ).total_seconds() >= 1.0
