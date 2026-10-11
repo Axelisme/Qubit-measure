@@ -20,6 +20,14 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 建立一條依賴時，先辨認互動：查詢走可用的狀態或 read contract，命令呼叫負責該行為的 owner，對已提交變化的反應訂閱 domain fact。Command 可以是單向的 owning-service 合作；不把「service 絕不互調」當成禁令，也不為每條邊建立 Protocol。窄 port 用在跨 owner 或 shared／app 邊界有隔離需求的地方。Port 和 EventBus 不會自動消除循環，仍要檢查誰發起、誰寫入、誰反應。組裝決定注入哪些模組；有界流程的 coordinator 可決定觸發、順序與分支，但仍透過 owner 的 commands／queries 工作，不直接取得它的寫入權威。Startup／mock setup 與 pane 反應是不同流程，不合成萬用 coordinator。
 
+## 獨立 predictor
+
+Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-analyze。
+`simulate` 擁有具名參數與中性 query 契約。使用者套件擁有 component→params_for 對應，
+app composition 顯式注入。Framework 不 import 使用者套件（C16）；simulate 不新增容器讀取依賴（C9）。
+Dialog 的試算參數是獨立 owner，不寫回元件。Service／remote 明確取得參數或具體元件名，
+不讀 dialog。Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+
 ## Adapter capability 與事件
 
 Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；load permit 與 LoadService 依 `load_data` 拒絕不支援的 load。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。Analyze permit 目前只查 context／run result，非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。

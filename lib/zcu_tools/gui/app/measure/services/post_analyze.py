@@ -108,7 +108,6 @@ class PostAnalyzeService(_StagedAnalyzeService):
             analyze_result=analyze_result,
             post_analyze_params=post_analyze_params_instance,
             parameters=ctx.parameters,
-            predictor=ctx.predictor,
         )
         logger.info(
             "start_post_analyze: tab_id=%r post_params_type=%s",

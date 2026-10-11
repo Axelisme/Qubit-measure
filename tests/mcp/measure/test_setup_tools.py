@@ -161,7 +161,7 @@ def test_simulation_internal_post_read_timeout_retains_finished_operation(setup_
     assert result.data["op"] is not None
     assert result.data["operation"]["status"] == "finished"
     assert result.data["before"]["soc"] is None
-    assert result.data["before"]["predictor"]["loaded"] is False
+    assert result.data["before"]["soc"] is None
     assert result.data["steps"]["start"]["status"] == "completed"
     assert result.data["steps"]["wait"]["status"] == "completed"
     assert result.data["steps"]["post_read"]["status"] == "failed"
@@ -206,14 +206,14 @@ def test_internal_progress_timeout_retains_setup_handle_and_before_facts(
     if tool == "device_set_value":
         assert result.data["before"]["device"]["info"]["value"] == 0.25
     else:
-        assert result.data["before"]["predictor"]["loaded"] is False
+        assert result.data["before"]["soc"] is None
     assert [method for method, _ in client.transport.sent].count(mutation) == 1
 
 
 @pytest.mark.parametrize(
     ("tool", "arguments", "mutation", "post_read"),
     [
-        ("simulation_initialize", {}, "simulation.initialize", "predictor.info"),
+        ("simulation_initialize", {}, "simulation.initialize", "device.snapshot"),
         (
             "device_set_value",
             {"name": "fake_flux", "value": 1, "unit": "native"},
@@ -526,14 +526,14 @@ def test_wait_query_failure_keeps_handle_and_does_not_infer_completion(
 
 
 def test_post_read_failure_keeps_native_success_and_already_read_prefix(setup_client):
-    client, _ = setup_client
+    client, _gui = setup_client
     reads = 0
 
-    def predictor(params):
+    def device_snapshot(params):
         nonlocal reads
         reads += 1
         if reads == 1:
-            return {"ok": True, "result": {"loaded": False}}
+            return {"ok": True, "result": {"snapshot": deepcopy(_gui.device)}}
         return {
             "ok": False,
             "error": {
@@ -543,14 +543,13 @@ def test_post_read_failure_keeps_native_success_and_already_read_prefix(setup_cl
             },
         }
 
-    client.transport.replies["predictor.info"] = predictor
+    client.transport.replies["device.snapshot"] = device_snapshot
     result = client.call("simulation_initialize", {})
     assert result.is_error
     assert result.data["status"] == "failed"
     assert result.data["operation"]["status"] == "finished"
     assert result.data["after"]["soc"]["is_mock"] is True
-    assert result.data["after"]["devices"][0]["name"] == "fake_flux"
-    assert result.data["after"]["predictor"] is None
+    assert result.data["after"]["devices"] == []
     assert result.data["steps"]["post_read"]["status"] == "failed"
 
 
@@ -619,7 +618,10 @@ def test_setup_workflows_use_real_gui_coordinator_and_device_owner(
 
 def test_simulation_ready_uses_soc_and_device_even_without_predictor(setup_client):
     client, _gui = setup_client
-    client.transport.replies["predictor.info"] = {"ok": True, "result": {"loaded": False}}
+    client.transport.replies["predictor.info"] = {
+        "ok": True,
+        "result": {"loaded": False},
+    }
     result = client.call("simulation_initialize", {})
     assert not result.is_error
     assert result.data["status"] == "finished"

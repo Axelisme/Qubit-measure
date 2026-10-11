@@ -8,22 +8,36 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
-    PredictorChangedPayload,
 )
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 def _state() -> State:
     return State(
         SessionEnv(
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=ParameterContext(
+                point=PointDocument(
+                    format="zcu.parameter-container",
+                    format_version="1.0",
+                    general=PointGeneral(created_at="2026-10-08T00:00:00Z"),
+                ),
+                library=LibrarySnapshot(
+                    ModuleLibraryDocument(
+                        format="zcu.module-library", format_version="1.0"
+                    )
+                ),
+                target=EntryDraft(entry_id="entry"),
+                roles=None,
+            ),
             soc=None,
             soccfg=None,
             chip_name="chip",
@@ -54,37 +68,9 @@ def test_context_sources_read_live_context_values() -> None:
     assert registry.get_as("project.result_dir", str) == "/result"
 
     state.set_context(dataclasses.replace(state.session_env, chip_name="chip2"))
-    bus.emit(ContextSwitchedPayload(md=state.session_env.md, ml=state.session_env.ml))
+    bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
 
     assert registry.get_as("context.chip_name", str) == "chip2"
-
-
-def test_predictor_sources_follow_predictor_lifecycle() -> None:
-    state = _state()
-    registry, bus, _ = _binder(state)
-
-    assert registry.get_as("predictor.loaded", bool) is False
-    with pytest.raises(MissingValue):
-        registry.get_as("predictor.EJ", float)
-
-    predictor = MagicMock()
-    predictor.params = (4.0, 1.0, 0.5)
-    predictor.flux_half = 0.25
-    predictor.flux_period = 0.5
-    predictor.flux_bias = -0.01
-    state.set_context(dataclasses.replace(state.session_env, predictor=predictor))
-    bus.emit(PredictorChangedPayload())
-
-    assert registry.get_as("predictor.loaded", bool) is True
-    assert registry.get_as("predictor.EJ", float) == pytest.approx(4.0)
-    assert registry.get_as("predictor.flux_bias", float) == pytest.approx(-0.01)
-
-    state.set_context(dataclasses.replace(state.session_env, predictor=None))
-    bus.emit(PredictorChangedPayload())
-
-    assert registry.get_as("predictor.loaded", bool) is False
-    with pytest.raises(MissingValue):
-        registry.get_as("predictor.EJ", float)
 
 
 def test_device_sources_read_cached_state_without_polling() -> None:

@@ -138,7 +138,7 @@ class MainWindow(QMainWindow):
         self._toolbar = MainWindowToolbar(self, parent=self)
         main_layout.addLayout(self._toolbar.layout)
 
-        # --- context / predictor status bar ---
+        # --- entry / point status bar ---
         main_layout.addLayout(self._build_context_bar())
 
         # --- tab widget ---
@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _build_context_bar(self) -> QHBoxLayout:
-        """Assemble the persistent entry/point/predictor controls."""
+        """Assemble the persistent entry/point controls."""
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Entry:"))
         self._entry_label = QLabel("No entry open")
@@ -172,10 +172,6 @@ class MainWindow(QMainWindow):
         self._point_label = QLabel("No point selected")
         self._point_label.setObjectName("current_point")
         ctx_bar.addWidget(self._point_label)
-        ctx_bar.addSpacing(24)
-        ctx_bar.addWidget(QLabel("Predictor:"))
-        self._predictor_label = QLabel("none")
-        ctx_bar.addWidget(self._predictor_label)
         ctx_bar.addStretch()
         return ctx_bar
 
@@ -410,16 +406,6 @@ class MainWindow(QMainWindow):
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
-
-    def refresh_predictor_panel(self) -> None:
-        info = self._ctrl.predictor_control.get_predictor_info()
-        if info is None:
-            self._predictor_label.setText("none")
-            self._predictor_label.setStyleSheet("")
-        else:
-            flux_bias = info["flux_bias"]
-            self._predictor_label.setText(f"loaded (flux_bias={flux_bias:.4g})")
-            self._predictor_label.setStyleSheet("color: green;")
 
     def make_run_container(self, tab_id: str) -> Any:
         tab_w = self._tab_widgets.get(tab_id)
@@ -920,9 +906,6 @@ class MainWindow(QMainWindow):
             "tab_ids": state_tab_ids,
             "entry_label": self._entry_label.text(),
             "point_label": self._point_label.text(),
-            "predictor_label": (
-                self._predictor_label.text() if self._predictor_label else ""
-            ),
             "status": self._status_bar.currentMessage() if self._status_bar else "",
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }

@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-09-27 — prediction owner
+**Last updated:** 2026-10-11 — named independent parameters
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -70,7 +70,9 @@ Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engin
 - `FluxoniumPrediction.bind_flux_axis(fluxs)` — 建 `FluxoniumPredictionSession`,axis copy 由 engine 持有,cache key 只含 `(g, bare_rf, return_dim)`;controller 在 params/axis 變化時重建 session。
 - `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,共用 engine affine 與一次 sweep 多 transition 的計算。
 
-### `predict.py` — `FluxoniumPredictor`
+### `predict.py` — `FluxoniumParams` 與 `FluxoniumPredictor`
+
+FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half／flux_period／flux_bias 用 native device units。missing() 列缺項；build_predictor() 只接受完整且有效的輸入，每次建立独立 model，不寫來源。
 
 應用層預測器,連接實驗電流/電壓值與理論模型。
 

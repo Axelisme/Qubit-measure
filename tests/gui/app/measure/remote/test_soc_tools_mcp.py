@@ -33,8 +33,8 @@ def test_soc_tools_observe_gui_connection_without_hardware(
         invoke(
             "rpc_call",
             {
-                "method": "project.apply",
-                "params": {"chip_name": "chip", "qub_name": "q", "res_name": "res"},
+                "method": "entry.new",
+                "params": {"name": "soc"},
             },
         )
         invoke(
@@ -56,17 +56,8 @@ def test_soc_tools_observe_gui_connection_without_hardware(
             "rpc_call", {"method": "soc.info", "params": {"include_cfg": True}}
         )
         assert full["cfg"]["gens"] and "fs" in full["cfg"]["gens"][0]
-        assert invoke(
-            "rpc_call",
-            {
-                "method": "context.new",
-                "params": {
-                    "label": "base",
-                    "bind_device": None,
-                    "clone_from": "current",
-                },
-            },
-        ) == {"label": "base", "has_active_context": True}
+        point = invoke("rpc_call", {"method": "point.new", "params": {"label": "base"}})
+        assert point["point"] == "base" and point["kind"] == "saved_point"
         assert invoke("status", {})["soc"] == {"connected": True, "mock": False}
     finally:
         bridge.disconnect()
@@ -106,8 +97,6 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     soc = fx.state.session_env.soc
     assert isinstance(soc, MockQickSoc)
     assert soc.flux_source is not None
-    predictor = fx.state.session_env.predictor
-    assert predictor is not None
     assert invoke("status", {})["soc"] == {"connected": True, "mock": True}
     for value in (0.001, 0.002):
         snapshot = invoke(
@@ -138,7 +127,6 @@ def test_simulation_initialize_binds_live_flux_and_reuses_gui_environment(
     again = invoke("rpc_call", {"method": "simulation.initialize"})
     assert invoke("wait", {"op": again["handle"], "timeout": 3})["status"] == "finished"
     assert fx.state.session_env.soc is soc
-    assert fx.state.session_env.predictor is predictor
     assert soc.flux_source() == pytest.approx(0.002)
 
 

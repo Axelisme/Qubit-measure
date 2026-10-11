@@ -34,7 +34,9 @@ class FluxoniumParams:
 
     def missing(self) -> tuple[str, ...]:
         """Return unknown field names in declaration order, without side effects."""
-        return tuple(field.name for field in fields(self) if getattr(self, field.name) is None)
+        return tuple(
+            field.name for field in fields(self) if getattr(self, field.name) is None
+        )
 
     def build_predictor(self) -> FluxoniumPredictor:
         """Build a fresh MHz-query model, without modifying these parameters.
@@ -48,9 +50,23 @@ class FluxoniumParams:
         ej, ec, el = self.EJ, self.EC, self.EL
         half, period, bias = self.flux_half, self.flux_period, self.flux_bias
         # Explicit narrowing also keeps the runtime contract valid under python -O.
-        if ej is None or ec is None or el is None or half is None or period is None or bias is None:
+        if (
+            ej is None
+            or ec is None
+            or el is None
+            or half is None
+            or period is None
+            or bias is None
+        ):
             raise ValueError("Missing parameters")
-        for name, value in (("EJ", ej), ("EC", ec), ("EL", el), ("flux_half", half), ("flux_period", period), ("flux_bias", bias)):
+        for name, value in (
+            ("EJ", ej),
+            ("EC", ec),
+            ("EL", el),
+            ("flux_half", half),
+            ("flux_period", period),
+            ("flux_bias", bias),
+        ):
             if not isfinite(value):
                 raise ValueError(f"{name} must be finite")
             if name in ("EJ", "EC", "EL") and value <= 0:
@@ -86,6 +102,7 @@ class FluxoniumPredictor:
 
     @property
     def params(self) -> tuple[float, float, float]:
+        """Josephson, charging and inductive energies (EJ, EC, EL), in GHz."""
         return self._engine.params
 
     @params.setter
@@ -94,6 +111,7 @@ class FluxoniumPredictor:
 
     @property
     def flux_half(self) -> float:
+        """Zero-bias native device value at half a flux quantum."""
         return self._engine.flux_half
 
     @flux_half.setter
@@ -102,6 +120,7 @@ class FluxoniumPredictor:
 
     @property
     def flux_period(self) -> float:
+        """Signed nonzero native device-value change for one flux quantum."""
         return self._engine.flux_period
 
     @flux_period.setter
@@ -110,6 +129,7 @@ class FluxoniumPredictor:
 
     @property
     def flux_bias(self) -> float:
+        """Additive native device-value correction; queries never change it."""
         return self._engine.flux_bias
 
     @flux_bias.setter
@@ -118,6 +138,12 @@ class FluxoniumPredictor:
 
     @classmethod
     def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
+        """Legacy read-only params.json construction with an explicit native bias.
+
+        result_path names an existing QubitParams JSON file. Missing/unreadable
+        files and missing fluxdep_fit errors propagate from that owner. No file
+        is modified. New component callers use FluxoniumParams instead.
+        """
         from zcu_tools.resources.qubit_params import QubitParams
 
         model = QubitParams(result_path, readonly=True).require_fluxonium_model(
@@ -126,11 +152,13 @@ class FluxoniumPredictor:
         return cls(model.params, model.flux_half, model.flux_period, model.flux_bias)
 
     def clone(self) -> FluxoniumPredictor:
+        """Return an independent instance with identical energies and affine inputs."""
         return FluxoniumPredictor(
             self.params, self.flux_half, self.flux_period, self.flux_bias
         )
 
     def value_to_flux(self, cur_value: float) -> float:
+        """Map a finite native value to flux quanta, without folding or mutation."""
         return self._engine.value_to_flux(cur_value)
 
     def _value_to_flux_array(
@@ -139,13 +167,14 @@ class FluxoniumPredictor:
         return self._engine.values_to_flux(cur_values)
 
     def flux_to_value(self, cur_flux: float) -> float:
+        """Invert the affine for finite flux quanta; return native device units."""
         return self._engine.flux_to_value(cur_flux)
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
     ) -> float:
         """
-        Calibrate the flux_half of the fluxonium qubit by a given current and frequency.
+        Compute an additive native device-value bias from one measured MHz frequency.
 
         This method finds a bias such that the predicted frequency matches cur_freq,
         and among all equivalent solutions (periodic and mirror symmetry), returns
@@ -156,7 +185,12 @@ class FluxoniumPredictor:
             cur_freq (float): Frequency in MHz.
             transition (tuple[int, int]): transition between which level
         Returns:
-            float: fitting bias value with minimum absolute value.
+            float: candidate native bias with minimum absolute value, not installed.
+
+        A failed or nonlocal root search warns with RuntimeWarning and uses the
+        current value as the fallback root. Numerical root failures also warn
+        and fall back; a returned bias alone does not prove a successful fit.
+        This query does not change any model parameters.
         """
 
         def freq_diff_func(value: float) -> float:
@@ -219,6 +253,7 @@ class FluxoniumPredictor:
         return min(candidate_biases, key=lambda b: abs(b))
 
     def update_bias(self, flux_bias: float) -> None:
+        """Replace this instance's additive native bias; no source or clone is changed."""
         self._engine = FluxoniumPrediction(
             self.params,
             flux_half=self.flux_half,
@@ -278,7 +313,13 @@ class FluxoniumPredictor:
         values: NDArray[np.float64],
         transitions: tuple[tuple[int, int], ...],
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Return flux coordinates and MHz rows for an ordered batch of transitions."""
+        """Return (fluxs, MHz frequencies), shaped (N,) and (T, N).
+
+        values is a finite 1-D native device-value grid. transitions is a nonempty
+        ordered tuple of nonnegative integer (from, to) levels with to >= from.
+        Rows/columns preserve request order and duplicates. Invalid transitions
+        raise ValueError; numerical errors propagate. Inputs/model are unchanged.
+        """
         return self._engine.predict_frequencies_mhz(values, transitions, cutoff=40)
 
     def predict_matrix_elements(
@@ -287,7 +328,13 @@ class FluxoniumPredictor:
         transitions: tuple[tuple[int, int], ...],
         operator: MatrixOperator,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Return magnitude rows, including transitions above level one."""
+        """Return (fluxs, magnitudes), shaped (N,) and (T, N), without mutation.
+
+        values is a finite 1-D native grid; fluxs are flux quanta. transitions is
+        nonempty with nonnegative integer levels and to >= from. n is charge,
+        phi is phase; dimensionless absolute rows include levels above one.
+        Invalid transitions/operators raise ValueError; numerical errors propagate.
+        """
         return self._engine.predict_matrix_elements(values, transitions, operator)
 
     def _predict_matrix_element(

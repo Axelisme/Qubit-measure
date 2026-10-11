@@ -105,7 +105,6 @@ def _current_plugin(
                 run_result=result,
                 analyze_params=FluxPickParams(),
                 parameters=parameters,
-                predictor=None,
             ),
             force_magnitude=True,
             plots=plots,
@@ -116,7 +115,6 @@ def _current_plugin(
             run_result=RunRecord[FreqFluxCfg, FreqFluxResult](cfg=None, result=result),
             analyze_params=FluxPickParams(),
             parameters=parameters,
-            predictor=None,
         ),
         plots=plots,
     )
@@ -197,7 +195,6 @@ def _request(md: MetaDict | None = None) -> AnalyzeRequest[Any, FluxPickParams]:
         analyze_params=FluxPickParams(),
         md=md if md is not None else MetaDict(),
         ml=ModuleLibrary(),
-        predictor=None,
     )
 
 

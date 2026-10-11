@@ -111,7 +111,6 @@ def test_zigzag_scan_analysis_reports_flattest_sweep_value(params, expected) -> 
                 params,
                 md=MagicMock(),
                 ml=MagicMock(),
-                predictor=None,
             ),
             plots=plots,
         )

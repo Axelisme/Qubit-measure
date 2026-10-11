@@ -206,7 +206,6 @@ def _start(fx, *, background=None):
             run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
             analyze_params=analyze_params,
             parameters=None,
-            predictor=None,
         ),
         force_magnitude=True,
         plots=plots,

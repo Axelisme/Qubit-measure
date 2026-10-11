@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
-from zcu_lab import components
+import zcu_lab.components as components
 
 
 @pytest.fixture
@@ -15,13 +15,28 @@ def entry(tmp_path: Path) -> Generator[ResultEntry]:
     before = component_registry.kinds()
     added = []
     try:
-        for kind, model in (("qubit/fluxonium", components.QubitSchema), ("resonator", components.ResonatorSchema)):
+        for kind, model in (
+            ("qubit/fluxonium", components.QubitSchema),
+            ("resonator", components.ResonatorSchema),
+        ):
             if kind not in before:
                 component_registry.register(kind, model)
                 added.append(kind)
         installed = component_registry.kinds()
-        result = ResultEntry.create("prefill", result_root=tmp_path / "result", database_root=tmp_path / "Database")
-        result.setup.add_component("Q2", kind="qubit/fluxonium", EJ=4.1, EC=1.2, flux_half=1.75, flux_period=3.5, ext={"flux_bias": 0.012})
+        result = ResultEntry.create(
+            "prefill",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        result.setup.add_component(
+            "Q2",
+            kind="qubit/fluxonium",
+            EJ=4.1,
+            EC=1.2,
+            flux_half=1.75,
+            flux_period=3.5,
+            ext={"flux_bias": 0.012},
+        )
         result.setup.add_component("R1", kind="resonator")
         yield result
         assert component_registry.kinds() == installed
@@ -31,7 +46,9 @@ def entry(tmp_path: Path) -> Generator[ResultEntry]:
         assert component_registry.kinds() == before
 
 
-def test_params_for_reads_partial_current_point_without_writing(entry: ResultEntry) -> None:
+def test_params_for_reads_partial_current_point_without_writing(
+    entry: ResultEntry,
+) -> None:
     point = entry.new_point("first")
     point.Q2.EJ = 4.3
     before = snapshot(point)
@@ -55,6 +72,6 @@ def test_params_for_rejects_unsupported_kind(entry: ResultEntry) -> None:
 
 def test_params_for_rejects_invalid_extension_bias(entry: ResultEntry) -> None:
     point = entry.new_point("first")
-    point.Q2.ext.flux_bias = "not numeric"
+    point.Q2.ext = {"flux_bias": "not numeric"}
     with pytest.raises(ValueError, match="flux_bias"):
         components.params_for(point.Q2)

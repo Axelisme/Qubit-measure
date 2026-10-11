@@ -66,7 +66,6 @@ def test_fake_adapter_full_flow():
             run_result=result,
             analyze_params=FakeAnalyzeParams(threshold=0.0),
             parameters=ctx.parameters,
-            predictor=getattr(ctx, "predictor", None),
         ),
         plots=analyze_plots,
     )

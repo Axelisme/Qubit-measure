@@ -80,7 +80,6 @@ def test_allxy_analysis_reports_fitted_errors(fit_ge: bool) -> None:
                 AllXYAnalyzeParams(fit_ge=fit_ge),
                 md=MagicMock(),
                 ml=MagicMock(),
-                predictor=None,
             ),
             plots=plots,
         )

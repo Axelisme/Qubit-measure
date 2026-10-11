@@ -82,7 +82,6 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             {**device, "connected": device["status"] == "connected"}
             for device in session.read_internal("device.list", {})["devices"]
         ],
-        "predictor": {"loaded": session.read_internal("predictor.info", {})["loaded"]},
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
         "executions": [

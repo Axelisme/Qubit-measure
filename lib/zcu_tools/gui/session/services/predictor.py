@@ -31,6 +31,7 @@ ParamsFor = Callable[[ComponentSchema | ComponentView], FluxoniumParams]
 @dataclass(frozen=True)
 class CalibrateFluxBiasRequest:
     """Measured native device value, MHz frequency and increasing level pair."""
+
     value: float
     frequency_mhz: float
     transition: tuple[int, int] = (0, 1)
@@ -39,12 +40,14 @@ class CalibrateFluxBiasRequest:
 @dataclass(frozen=True)
 class CalibrateFluxBiasResult:
     """Candidate additive flux_bias in native device units; not installed anywhere."""
+
     flux_bias: float
 
 
 @dataclass(frozen=True)
 class PredictFreqRequest:
     """Finite native device value and nonnegative integer (from, to) level pair."""
+
     value: float
     transition: tuple[int, int]
 
@@ -52,6 +55,7 @@ class PredictFreqRequest:
 @dataclass(frozen=True)
 class PredictCurveRequest:
     """Finite 1-D native values and nonempty ordered increasing/equal level pairs."""
+
     values: NDArray[np.float64]
     transitions: tuple[tuple[int, int], ...]
 
@@ -63,6 +67,7 @@ class PredictCurveResult:
     values and fluxs are (n_values,) native device values and flux quanta.
     freqs_mhz is (n_transitions, n_values), in MHz, in request row/column order.
     """
+
     labels: tuple[str, ...]
     values: NDArray[np.float64]
     fluxs: NDArray[np.float64]
@@ -72,6 +77,7 @@ class PredictCurveResult:
 @dataclass(frozen=True)
 class PredictMatrixCurveRequest:
     """Finite 1-D native values, ordered level pairs and charge n or phase phi."""
+
     values: NDArray[np.float64]
     transitions: tuple[tuple[int, int], ...]
     operator: Literal["n", "phi"]
@@ -84,6 +90,7 @@ class PredictMatrixCurveResult:
     values and fluxs are (n_values,) native values and flux quanta.
     mags is (n_transitions, n_values) dimensionless absolute matrix elements.
     """
+
     labels: tuple[str, ...]
     values: NDArray[np.float64]
     fluxs: NDArray[np.float64]
@@ -105,7 +112,9 @@ def read_fluxdep_fit_params(path: str) -> FluxoniumParams:
         model = QubitParams(path, readonly=True).require_fluxonium_model()
     except (OSError, QubitParamsError) as exc:
         raise PredictorLoadError(f"Failed to read params file: {exc}") from exc
-    return FluxoniumParams(model.EJ, model.EC, model.EL, model.flux_half, model.flux_period, 0.0)
+    return FluxoniumParams(
+        model.EJ, model.EC, model.EL, model.flux_half, model.flux_period, 0.0
+    )
 
 
 class PredictorService:
@@ -117,7 +126,11 @@ class PredictorService:
     leaves parameters, components, files and session versions unchanged.
     """
 
-    def __init__(self, context: ContextControlPort | None = None, params_for: ParamsFor | None = None) -> None:
+    def __init__(
+        self,
+        context: ContextControlPort | None = None,
+        params_for: ParamsFor | None = None,
+    ) -> None:
         self._context = context
         self._params_for = params_for
 
@@ -133,7 +146,9 @@ class PredictorService:
         if not qubit.isidentifier() or qubit.startswith("_"):
             raise ValueError(f"Invalid concrete qubit name: {qubit}")
         if self._context is None or self._params_for is None:
-            raise FailedPreconditionError("Component parameter prefill is not configured")
+            raise FailedPreconditionError(
+                "Component parameter prefill is not configured"
+            )
         document = self._context.read_context().document()
         if qubit not in document.components:
             raise ValueError(f"Unknown qubit component: {qubit}")
@@ -143,7 +158,9 @@ class PredictorService:
         """Return MHz for the explicit params/request; ValueError rejects missing/invalid inputs."""
         return params.build_predictor().predict_freq(req.value, req.transition)
 
-    def calibrate_flux_bias(self, params: PredictorParams, req: CalibrateFluxBiasRequest) -> CalibrateFluxBiasResult:
+    def calibrate_flux_bias(
+        self, params: PredictorParams, req: CalibrateFluxBiasRequest
+    ) -> CalibrateFluxBiasResult:
         """Return candidate native bias, never install or write it.
 
         Missing/invalid params raise ValueError. Non-increasing/negative levels
@@ -152,20 +169,35 @@ class PredictorService:
         """
         frm, to = req.transition
         if frm < 0 or to < 0 or frm >= to:
-            raise InvalidInputError(f"Transition from-level must be < to-level and >= 0, got {req.transition}", reason_code="invalid_transition")
-        return CalibrateFluxBiasResult(params.build_predictor().calculate_bias(req.value, req.frequency_mhz, req.transition))
+            raise InvalidInputError(
+                f"Transition from-level must be < to-level and >= 0, got {req.transition}",
+                reason_code="invalid_transition",
+            )
+        return CalibrateFluxBiasResult(
+            params.build_predictor().calculate_bias(
+                req.value, req.frequency_mhz, req.transition
+            )
+        )
 
-    def predict_freq_curve(self, params: PredictorParams, req: PredictCurveRequest) -> PredictCurveResult:
+    def predict_freq_curve(
+        self, params: PredictorParams, req: PredictCurveRequest
+    ) -> PredictCurveResult:
         """Return labeled MHz curves using the neutral batch model contract.
 
         Missing/invalid params or batch inputs raise ValueError. Engine failures
         propagate. Returned values are copied; the request arrays are not changed.
         """
         values = np.array(req.values, dtype=np.float64, copy=True)
-        fluxs, freqs = params.build_predictor().predict_frequencies_mhz(values, req.transitions)
-        return PredictCurveResult(tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, freqs)
+        fluxs, freqs = params.build_predictor().predict_frequencies_mhz(
+            values, req.transitions
+        )
+        return PredictCurveResult(
+            tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, freqs
+        )
 
-    def predict_matrix_element_curve(self, params: PredictorParams, req: PredictMatrixCurveRequest) -> PredictMatrixCurveResult:
+    def predict_matrix_element_curve(
+        self, params: PredictorParams, req: PredictMatrixCurveRequest
+    ) -> PredictMatrixCurveResult:
         """Return labeled dimensionless magnitudes for n/phi, including high levels.
 
         ValueError rejects missing/invalid inputs. A frequency-only model raises
@@ -175,5 +207,9 @@ class PredictorService:
         if not isinstance(model, MatrixPredictor):
             raise FailedPreconditionError("This model does not provide matrix elements")
         values = np.array(req.values, dtype=np.float64, copy=True)
-        fluxs, mags = model.predict_matrix_elements(values, req.transitions, req.operator)
-        return PredictMatrixCurveResult(tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, mags)
+        fluxs, mags = model.predict_matrix_elements(
+            values, req.transitions, req.operator
+        )
+        return PredictMatrixCurveResult(
+            tuple(f"{frm}→{to}" for frm, to in req.transitions), values, fluxs, mags
+        )

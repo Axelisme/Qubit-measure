@@ -16,7 +16,6 @@ from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PredictorChangedPayload,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -24,7 +23,7 @@ from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import PredictorService
+from zcu_tools.gui.session.services.predictor import ParamsFor, PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
@@ -131,6 +130,7 @@ def build_app_services(
     owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
+    params_for: ParamsFor | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -159,6 +159,7 @@ def build_app_services(
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
         alias_rows=(AliasRow("qubit", ""), AliasRow("resonator", "$qubit.resonator")),
+        params_for=params_for,
     )
     context = session.context
     device = session.device
@@ -199,7 +200,6 @@ def build_app_services(
         DeviceChangedPayload,
         MdChangedPayload,
         MlChangedPayload,
-        PredictorChangedPayload,
     ):
         bus.subscribe(event_type, refresh_tab_cfg)
     # Independent library/inspect/writeback drafts never publish tab cfg.

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-10, caller-owned aliases and temporary cfg preview
+**Last updated:** 2026-10-11, independent predictor and simulation readiness
 
 # `zcu_tools/mcp/measure/`
 
@@ -10,7 +10,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## Setup 工具
 
-`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。Ready 只核對 MockSoc 與 connected fake_flux，不依賴 predictor。全域 status 不讀或投影 installed predictor。
 
 `device_set_value(name, value, unit)` 先讀裝置 snapshot，只送 value 更新，再等待和核對 actual native value。它不更改 output、mode 或 rampstep。實體 unit 必須與 snapshot 相同。FakeDevice unit=none 只接受明確的 native，不換算工作座標。
 

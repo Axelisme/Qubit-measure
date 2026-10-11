@@ -139,7 +139,6 @@ def make_view() -> MagicMock:
             "active_tab_id": None,
             "tab_ids": [],
             "context_label": "ctx001",
-            "predictor_label": "none",
             "status": "Ready",
             "open_dialogs": [],
         }

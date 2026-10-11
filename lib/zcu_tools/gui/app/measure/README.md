@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，獨立 predictor 與 Analyze request 分界
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -29,7 +29,7 @@ Native Load 保留檔案 metadata。在相同 opened entry，Load 一次讀回�
 跨 entry、EMPTY 或無 point 時，Load 不提供分析來源，也不回退全域 alias。
 Context-free analysis 仍可用。Save storage 獨立固定在 Load request 時。
 Load 不新增 Run token 或量測歷史。
-純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。predictor 仍跨 tab 共享。
+純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。Analyze／Post-analyze 不攜帶 predictor。Predictor 是獨立查詢工具，不自動參與實驗。
 
 ## 局部設計與閱讀入口
 

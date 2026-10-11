@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.storage import PointStorageBinding
-    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
@@ -184,13 +183,11 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
     run_result is the selected run data. analyze_params holds adapter-specific
     inputs. parameters is the Run/Load result's fixed source, or None for pure
     calculation.
-    predictor is the operation-start model, or None when no model is loaded.
     """
 
     run_result: T_Result
     analyze_params: T_AnalyzeParams
     parameters: ParameterContext | None
-    predictor: FluxoniumPredictor | None
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +224,8 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
 
     run_result is the selected run data. analyze_result is the required primary
     analysis result. post_analyze_params are adapter-specific inputs. parameters is the Run/Load
-    result's fixed source, or None for pure calculation. predictor is the shared
-    operation-start model, or None when no model is loaded. Later tab bindings
+    result's fixed source, or None for pure calculation.
+    Later tab bindings
     and session edits do not replace these request inputs.
     """
 
@@ -236,7 +233,6 @@ class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]
     analyze_result: T_AnalyzeResult
     post_analyze_params: T_PostAnalyzeParams
     parameters: ParameterContext | None
-    predictor: FluxoniumPredictor | None
 
 
 @dataclass(frozen=True)

@@ -42,7 +42,6 @@ from zcu_tools.gui.session.events import (
     DeviceSetupStartedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PredictorChangedPayload,
     SocChangedPayload,
 )
 
@@ -89,13 +88,6 @@ def _ser_run_finished(payload: BasePayload) -> WirePayload:
     if payload.error_message is not None:
         out["error_message"] = payload.error_message
     return out
-
-
-def _ser_predictor_changed(payload: BasePayload) -> WirePayload:
-    assert isinstance(payload, PredictorChangedPayload)
-    del payload
-    # No scalar field worth shipping; client should requery if needed.
-    return {}
 
 
 def _ser_device_changed(payload: BasePayload) -> WirePayload:
@@ -158,7 +150,6 @@ EVENT_SERIALIZERS: dict[type[BasePayload], EventSerializer] = {
     TabInteractionChangedPayload: _ser_tab_interaction_changed,
     RunStartedPayload: _ser_run_started,
     RunFinishedPayload: _ser_run_finished,
-    PredictorChangedPayload: _ser_predictor_changed,
     DeviceChangedPayload: _ser_device_changed,
     DeviceSetupStartedPayload: _ser_device_setup_started,
     DeviceSetupFinishedPayload: _ser_device_setup_finished,

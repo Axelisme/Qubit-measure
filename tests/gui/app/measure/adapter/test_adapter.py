@@ -879,7 +879,6 @@ def test_base_adapter_analyze_raises_by_default():
         run_result=MagicMock(),
         analyze_params=NoAnalyzeParams(),
         parameters=None,
-        predictor=None,
     )
     with pytest.raises(NotImplementedError, match="analyze"):
         adapter.analyze(req, plots=Plots(NonPresentingHost()))

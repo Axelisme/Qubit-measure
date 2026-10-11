@@ -24,8 +24,19 @@ def test_complete_params_build_independent_mhz_model() -> None:
     assert params.build_predictor().flux_bias == 0.02
 
 
-@pytest.mark.parametrize("field,value", [("EJ", -1.0), ("EC", 0.0), ("EL", float("nan")), ("flux_period", 0.0), ("flux_bias", float("inf"))])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("EJ", -1.0),
+        ("EC", 0.0),
+        ("EL", float("nan")),
+        ("flux_period", 0.0),
+        ("flux_bias", float("inf")),
+    ],
+)
 def test_complete_params_reject_invalid_physics(field: str, value: float) -> None:
-    params = dataclasses.replace(predict.FluxoniumParams(4.0, 1.0, 0.5, 0.3, 0.8, 0.0), **{field: value})
+    params = dataclasses.replace(
+        predict.FluxoniumParams(4.0, 1.0, 0.5, 0.3, 0.8, 0.0), **{field: value}
+    )
     with pytest.raises(ValueError, match=field):
         params.build_predictor()

@@ -96,14 +96,9 @@ class _DeviceListReply(TypedDict):
     devices: list[_DeviceListEntry]
 
 
-class _PredictorSnapshot(TypedDict, total=False):
-    loaded: bool
-
-
 class _SimulationFacts(TypedDict):
     soc: _SocSnapshot | None
     devices: list[_DeviceSnapshot] | None
-    predictor: _PredictorSnapshot | None
 
 
 class _DeviceFacts(TypedDict):
@@ -191,7 +186,7 @@ def simulation_initialize(
     This tool does not connect hardware, apply a project or attach a GUI.
 
     Returns a ToolReply with op, native operation, four steps, before/after
-    SoC/device/predictor facts and verification.ready. Missing facts are null.
+    SoC/device facts and verification.ready. Missing facts are null.
     Invalid arguments raise ValueError before GUI access. Connection, query and
     mutation failures return an error reply with the known progress. Timeout
     does not cancel; running is not ready, and failed reads do not erase op.
@@ -200,8 +195,8 @@ def simulation_initialize(
     result: _SimulationResult = {
         **_initial_progress(),
         "tool": "simulation_initialize",
-        "before": {"soc": None, "devices": None, "predictor": None},
-        "after": {"soc": None, "devices": None, "predictor": None},
+        "before": {"soc": None, "devices": None},
+        "after": {"soc": None, "devices": None},
         "requested": {},
         "verification": None,
     }
@@ -411,14 +406,12 @@ def _read_simulation(
             **ctx.send_gui_rpc("device.snapshot", {"name": device["name"]})["snapshot"]
         )
         facts["devices"].append(snapshot)
-    facts["predictor"] = _PredictorSnapshot(**ctx.send_gui_rpc("predictor.info", {}))
 
 
 def _verify_simulation(result: _SimulationResult) -> None:
     facts = result["after"]
     soc = facts["soc"]
     devices = facts["devices"]
-    predictor = facts["predictor"]
     ready = (
         result["status"] == "finished"
         and soc is not None
@@ -430,8 +423,6 @@ def _verify_simulation(result: _SimulationResult) -> None:
             and device.get("status") == "connected"
             for device in devices
         )
-        and predictor is not None
-        and predictor.get("loaded") is True
     )
     result["verification"] = {"ready": ready}
     if result["status"] == "finished" and not ready:

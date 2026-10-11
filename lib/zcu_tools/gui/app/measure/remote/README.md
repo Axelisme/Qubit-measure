@@ -244,18 +244,9 @@ The wire surface is grouped by ownership:
 - `context.*`：MetaDict / ModuleLibrary / active context operations through
   `ContextControlPort`; role-catalog create/list stays on the app controller.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
-- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
+- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
-- `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
-  `PredictorControlPort`.
-- `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_artifacts`接受 `all` 或唯一的 `{section,name}` refs，保存完整 artifact，不接受 caller paths。`tab.save_data` 與 `tab.save_artifacts` 同步回傳原 Run 的 run_id，即使全部輸出失敗也保留同一 ID，以及本次完整 paths/status/error，不建立 Save operation id。`tab.snapshot` 投影已提交的 sections/member/output 狀態，不計畫新路徑。Run screenshot 讀 live FigureContainer；analysis/post screenshot 讀目前選中的具名圖。
-- `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
-- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
-- `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
-- `editor.*`：headless cfg-editor session lifecycle.
-- `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
-- `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
-- `value.*`：read-only session value lookup through `ContextControlPort`.
+- `predictor.predict`／`predictor.calibrate`／`predictor.info`：read-only simulator queries. This slice requires a concrete `qubit` name; independent parameter wire inputs are added in the MCP contract slice. Info returns named parameters and missing fields. Calibrate returns a candidate bias without writing the component or dialog. No installed model or load/set/clear commands.
 
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to

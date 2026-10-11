@@ -15,7 +15,6 @@ from zcu_tools.gui.session.services.connection import SoCConnectionError
 from zcu_tools.gui.session.services.device import DeviceRegistrationError
 from zcu_tools.gui.session.services.predictor import (
     PredictorLoadError,
-    PredictorNotLoaded,
 )
 from zcu_tools.gui.session.value_lookup import (
     DuplicateValueKey,
@@ -80,7 +79,6 @@ def test_plain_runtime_error_does_not_opt_in() -> None:
         LoadDataError("load", reason_code="invalid_data_file"),
         OperationConflictError("busy"),
         PredictorLoadError("bad predictor"),
-        PredictorNotLoaded("no predictor"),
     ],
 )
 def test_named_failed_precondition_errors_preserve_runtime_ancestry(

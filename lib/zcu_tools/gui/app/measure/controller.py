@@ -31,8 +31,8 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
+from zcu_tools.gui.session.services.predictor import ParamsFor
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import SessionEnv
 from .events.completion import (
@@ -169,7 +169,7 @@ class ViewSnapshot(TypedDict):
     entry_label is the visible entry name, or "No entry open".
     point_label is the visible SavedPoint label, "Draft (in-memory)", or
     "No point selected". It never derives from component focus.
-    predictor_label and status are the visible predictor and status-bar text.
+    status is the visible status-bar text.
     open_dialogs lists the named dialogs currently open, using wire names.
     """
 
@@ -177,7 +177,6 @@ class ViewSnapshot(TypedDict):
     tab_ids: list[str]
     entry_label: str
     point_label: str
-    predictor_label: str
     status: str
     open_dialogs: list[str]
 
@@ -251,6 +250,7 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
+        params_for: ParamsFor | None = None,
     ) -> None:
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
@@ -307,6 +307,7 @@ class Controller(SessionControllerMixin):
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
+            params_for=params_for,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -320,7 +321,6 @@ class Controller(SessionControllerMixin):
         self._dev_svc = services.device
         self._device_control = services.device_control
         self._soc_svc: SoCConnectionService = services.soc_connection
-        self._pred_svc = services.predictor
         self._predictor_control = services.predictor_control
         self._progress_control = services.progress_control
         self._ctx_svc = services.context
@@ -1137,9 +1137,6 @@ class Controller(SessionControllerMixin):
         so the post-connect side effects (State write, soc version bump,
         SocChangedPayload → FLUX-AWARE-MOCK provisioning) are identical."""
         self._soc_svc.connect_sync(req)
-
-    def get_predictor(self) -> FluxoniumPredictor | None:
-        return self._pred_svc.get_predictor()
 
     # ------------------------------------------------------------------
     # View query interface (TabService) — strict APIs; callers must check

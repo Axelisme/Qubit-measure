@@ -18,22 +18,17 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.gui.session.services.predictor_from_sim import (
-    build_predictor_from_simparams,
-)
 from zcu_tools.gui.session.services.simulated_environment import (
     FAKE_FLUX_DEVICE_NAME,
     FAKE_FLUX_INITIAL_VALUE,
 )
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import MockQickSoc
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 @pytest.fixture
 def state() -> State:
-    return State(SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None))
+    return State(SessionEnv(parameters=None, soc=None, soccfg=None))
 
 
 @pytest.fixture
@@ -46,7 +41,6 @@ def make_controller(qapp: object) -> Iterator[Callable[[State], Controller]]:
         controller = Controller(
             state=state,
             registry=Registry(),
-            io_manager=IOManager(),
             view=view,
             bus=BaseEventBus(),
         )
@@ -105,9 +99,7 @@ def _set_value(ctrl: Controller, value: float) -> None:
     )
 
 
-def test_environment_publishes_bound_source_and_matching_predictor(
-    ctrl: Controller, state: State
-) -> None:
+def test_environment_publishes_bound_source(ctrl: Controller, state: State) -> None:
     _start(ctrl)
     assert _reader(state)() == FAKE_FLUX_INITIAL_VALUE
     snapshot = ctrl.device_control.get_device_snapshot(FAKE_FLUX_DEVICE_NAME)
@@ -115,12 +107,6 @@ def test_environment_publishes_bound_source_and_matching_predictor(
     assert ctrl.get_device_unit(FAKE_FLUX_DEVICE_NAME) == "native"
     soc = state.session_env.soc
     assert isinstance(soc, MockQickSoc) and soc.sim_params is not None
-    predictor = state.session_env.predictor
-    assert predictor is not None
-    reference = build_predictor_from_simparams(soc.sim_params)
-    assert predictor.predict_freq(FAKE_FLUX_INITIAL_VALUE) == pytest.approx(
-        reference.predict_freq(FAKE_FLUX_INITIAL_VALUE), abs=1e-6
-    )
 
 
 def test_repeated_entry_preserves_resources_and_current_value(
@@ -159,9 +145,7 @@ def test_separate_controllers_do_not_share_device_registry(
     ctrl: Controller, state: State, make_controller: Callable[[State], Controller]
 ) -> None:
     _start(ctrl)
-    other_state = State(
-        SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    )
+    other_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     other = make_controller(other_state)
     _start(other)
     _set_value(ctrl, 0.25)

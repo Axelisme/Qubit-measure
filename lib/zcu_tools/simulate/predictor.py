@@ -15,7 +15,8 @@ class Predictor(Protocol):
     Flux coordinates are in flux quanta, not folded into a single period.
     Batch inputs are finite one-dimensional arrays; transitions are a nonempty
     ordered tuple of nonnegative integer (from, to) levels with to >= from.
-    Invalid shapes/transitions raise ValueError; numerical engine errors propagate.
+    Invalid transitions raise ValueError; numerical and array-shape failures
+    propagate from the selected engine.
     No query changes parameters or inputs, reads hardware or writes storage.
     """
 

@@ -123,7 +123,9 @@ def params_for(component: ComponentSchema | ComponentView) -> FluxoniumParams:
         EC=_optional_number(getattr(component, "EC", None), "EC"),
         EL=_optional_number(getattr(component, "EL", None), "EL"),
         flux_half=_optional_number(getattr(component, "flux_half", None), "flux_half"),
-        flux_period=_optional_number(getattr(component, "flux_period", None), "flux_period"),
+        flux_period=_optional_number(
+            getattr(component, "flux_period", None), "flux_period"
+        ),
         flux_bias=_optional_number(bias, "flux_bias"),
     )
 
@@ -131,7 +133,11 @@ def params_for(component: ComponentSchema | ComponentView) -> FluxoniumParams:
 def _optional_number(value: object, name: str) -> float | None:
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (float, int)) or not isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (float, int))
+        or not isfinite(value)
+    ):
         raise ValueError(f"{name} must be a finite number or None")
     return float(value)
 

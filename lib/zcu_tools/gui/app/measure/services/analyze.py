@@ -108,7 +108,6 @@ class AnalyzeService(_StagedAnalyzeService):
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,
             parameters=ctx.parameters,
-            predictor=ctx.predictor,
         )
         logger.info(
             "start_analyze: tab_id=%r analyze_params_type=%s",

@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, cast
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
-    PredictorChangedPayload,
 )
 from zcu_tools.gui.session.value_lookup import (
     ScalarValue,
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.state import DeviceState, SessionState
 
 _CONTEXT_OWNER = "context"
-_PREDICTOR_OWNER = "predictor"
 
 
 @dataclass(frozen=True)
@@ -57,7 +55,6 @@ class ValueSourceBinder:
         self._captures: dict[str, dict[str, ScalarValue]] = {}
 
         bus.subscribe(ContextSwitchedPayload, self._on_context_switched)
-        bus.subscribe(PredictorChangedPayload, self._on_predictor_changed)
         bus.subscribe(DeviceChangedPayload, self._on_device_changed)
 
         self.refresh_all()
@@ -96,16 +93,11 @@ class ValueSourceBinder:
 
     def refresh_all(self) -> None:
         self._refresh_context()
-        self._refresh_predictor()
         self._refresh_all_devices()
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
         self._refresh_context()
-
-    def _on_predictor_changed(self, payload: PredictorChangedPayload) -> None:
-        del payload
-        self._refresh_predictor()
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         if payload.name is None:
@@ -155,58 +147,6 @@ class ValueSourceBinder:
                 ),
             ],
         )
-
-    def _refresh_predictor(self) -> None:
-        specs: list[ValueProviderSpec[Any]] = [
-            ValueProviderSpec(
-                ValueKey("predictor.loaded", bool),
-                lambda: self._state.session_env.predictor is not None,
-                owner=_PREDICTOR_OWNER,
-                description="whether a Fluxonium predictor is loaded",
-            )
-        ]
-        if self._state.session_env.predictor is not None:
-            specs.extend(
-                [
-                    _float_source(
-                        "predictor.EJ",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_param(0),
-                        "loaded predictor EJ in GHz",
-                    ),
-                    _float_source(
-                        "predictor.EC",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_param(1),
-                        "loaded predictor EC in GHz",
-                    ),
-                    _float_source(
-                        "predictor.EL",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_param(2),
-                        "loaded predictor EL in GHz",
-                    ),
-                    _float_source(
-                        "predictor.flux_half",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_float("flux_half"),
-                        "predictor half-flux anchor in device-value units",
-                    ),
-                    _float_source(
-                        "predictor.flux_period",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_float("flux_period"),
-                        "predictor flux period in device-value units",
-                    ),
-                    _float_source(
-                        "predictor.flux_bias",
-                        _PREDICTOR_OWNER,
-                        lambda: self._predictor_float("flux_bias"),
-                        "predictor flux bias",
-                    ),
-                ]
-            )
-        self._publish_owner(_PREDICTOR_OWNER, specs)
 
     def _refresh_all_devices(self) -> None:
         live_names = {dev.name for dev in self._state.list_devices()}
@@ -290,18 +230,6 @@ class ValueSourceBinder:
         if not ctx.has_context():
             raise UnavailableValue(f"context.{attr}", "No experiment context")
         return str(getattr(ctx, attr))
-
-    def _predictor_param(self, index: int) -> float:
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise UnavailableValue("predictor.params", "No predictor loaded")
-        return float(predictor.params[index])
-
-    def _predictor_float(self, attr: str) -> float:
-        predictor = self._state.session_env.predictor
-        if predictor is None:
-            raise UnavailableValue(f"predictor.{attr}", "No predictor loaded")
-        return float(getattr(predictor, attr))
 
     def _device_status(self, name: str) -> str:
         return self._require_device(name).status.value

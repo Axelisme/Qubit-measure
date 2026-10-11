@@ -65,7 +65,6 @@ def _make_snapshot_shell(
         _tabs=tabs_stub,
         _entry_label=types.SimpleNamespace(text=lambda: "No entry open"),
         _point_label=types.SimpleNamespace(text=lambda: "No point selected"),
-        _predictor_label=None,
         _status_bar=None,
         list_open_dialogs=lambda: list(open_dialogs or []),
     )
@@ -203,7 +202,6 @@ def test_snapshot_contains_required_keys() -> None:
         "tab_ids",
         "entry_label",
         "point_label",
-        "predictor_label",
         "status",
         "open_dialogs",
     }

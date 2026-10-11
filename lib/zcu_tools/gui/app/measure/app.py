@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+    from zcu_tools.gui.session.services.predictor import ParamsFor
 
 RegistryFactory = Callable[
     [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]
@@ -40,7 +41,12 @@ def _make_empty_ctx() -> SessionEnv:
 
 
 class MeasureGuiBehavior(GuiRuntimeBehavior):
-    """measure-gui app wiring behind the shared GUI runtime."""
+    """measure-gui wiring; params_for optionally injects user-owned component prefill.
+
+    registry_factory supplies catalogs after runtime setup. clean skips preference
+    restore; project_root anchors entry roots. Predictor queries never depend on
+    dialog state. Assembly/source failures propagate without hidden retries.
+    """
 
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
         app_name="measure",
@@ -54,6 +60,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         *,
         clean: bool = False,
         project_root: str | None = None,
+        params_for: ParamsFor | None = None,
     ) -> None:
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
@@ -66,6 +73,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
         self._clean = clean
         self._project_root = project_root
+        self._params_for = params_for
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.measure.state import State
@@ -77,6 +85,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             self._template_catalog,
             self._project_root,
             catalog_loader=self._catalog_loader,
+            params_for=self._params_for,
         )
 
         adapter = None
@@ -134,6 +143,7 @@ def _build_window(
     project_root: str | None = None,
     *,
     catalog_loader: ExperimentCatalogLoader | None = None,
+    params_for: ParamsFor | None = None,
 ) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -151,6 +161,7 @@ def _build_window(
         bus=bus,
         project_root=project_root,
         catalog_loader=catalog_loader,
+        params_for=params_for,
     )
 
     window = MainWindow(ctrl)

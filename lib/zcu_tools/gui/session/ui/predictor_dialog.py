@@ -1,23 +1,7 @@
-"""PredictorDialog — load/define a FluxoniumPredictor and predict frequencies.
+"""Independent fluxonium simulator dialog; edits and calibration remain local.
 
-Two ways to supply model parameters:
-  1. Type or Browse a params.json, then Load → populates the editable spinboxes
-     AND auto-applies (installs the predictor); on install failure the fields are
-     still populated and the error is shown in the status.
-  2. Type or tweak the spinboxes directly, then Apply → builds+installs in-memory
-     via set_predictor_model_params.
-
-Layout: left control column (model params group / predictor-active status /
-tracked-transitions group / Remove+Close row) + right QTabWidget with three
-PredictorCurveCanvas tabs:
-  - "Frequency"  : f_ij transition-frequency curves (MHz)
-  - "|n|"        : |<i|n|j>|   matrix-element curves (dimensionless)
-  - "|phi|"      : |<i|phi|j>| matrix-element curves (dimensionless)
-
-A click-follow-click flux-position marker is bidirectionally coupled to the
-"Device value" spinbox.  Per-transition f / |n| / |phi| values are shown in the
-table and updated (debounced) while the marker follows the cursor.  Both matrix
-operators (n and phi) are always computed — there is no operator selector.
+The optional device control supplies values only. params.json loads are read-only
+prefill. No operation installs a model or writes a component or source file.
 """
 
 from __future__ import annotations
@@ -25,13 +9,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
-
-logger = logging.getLogger(__name__)
-
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -54,10 +35,12 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 if TYPE_CHECKING:
     from zcu_tools.device.base import BaseDeviceInfo
@@ -65,6 +48,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+
+logger = logging.getLogger(__name__)
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -81,7 +66,7 @@ _DEFAULT_TRANSITIONS: list[tuple[int, int]] = [
     (1, 3),
 ]
 
-# Default spinbox values when no predictor is installed.
+# Initial standalone trial values, not defaults for missing component inputs.
 _DEFAULT_EJ: float = 4.0
 _DEFAULT_EC: float = 1.0
 _DEFAULT_EL: float = 1.0
@@ -148,6 +133,7 @@ class PredictorDialog(QDialog):
         device: DeviceControlPort | None = None,
         parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
+        params: FluxoniumParams | None = None,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
@@ -181,8 +167,7 @@ class PredictorDialog(QDialog):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
-        # Load reads a typed/browsed params.json and auto-installs; Apply
-        # builds+installs directly via set_predictor_model_params.
+        # File loading only prefills independent trial parameters.
         model_group = QGroupBox("Model params")
         model_form = QFormLayout(model_group)
 
@@ -227,19 +212,7 @@ class PredictorDialog(QDialog):
             ),
         )
 
-        model_btn_row = QHBoxLayout()
-        self._apply_btn = QPushButton("Apply")
-        self._apply_btn.clicked.connect(self._on_apply_model_params)
-        model_btn_row.addWidget(self._apply_btn)
-        model_form.addRow("", model_btn_row)
-
         left_layout.addWidget(model_group)
-
-        # ── Predictor active/inactive indicator ───────────────────────────
-        # Simple presence indicator (active vs not installed), updated on
-        # install (Apply/Browse), on clear, and on predictor-changed events.
-        self._active_label = QLabel("")
-        left_layout.addWidget(self._active_label)
 
         # ── Tracked transitions group (predict controls + table + remove) ──
         transitions_group = QGroupBox("Tracked transitions")
@@ -266,7 +239,7 @@ class PredictorDialog(QDialog):
             device_combo.setMinimumWidth(160)
             device_combo.setMinimumContentsLength(16)
             device_combo.setSizeAdjustPolicy(
-                QComboBox.AdjustToMinimumContentsLengthWithIcon  # type: ignore[attr-defined]
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
             self._value_controls_row.addWidget(device_combo)
@@ -314,15 +287,9 @@ class PredictorDialog(QDialog):
         header = self._table.horizontalHeader()
         if header is not None:
             header.setStretchLastSection(True)
-        self._table.setSelectionBehavior(
-            QAbstractItemView.SelectRows  # type: ignore[attr-defined]
-        )
-        self._table.setSelectionMode(
-            QAbstractItemView.ExtendedSelection  # type: ignore[attr-defined]
-        )
-        self._table.setEditTriggers(
-            QTableWidget.NoEditTriggers  # type: ignore[attr-defined]
-        )
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         transitions_layout.addWidget(self._table)
 
@@ -424,15 +391,14 @@ class PredictorDialog(QDialog):
         self._refresh_device_selector()
 
         # Pre-fill with current predictor state.
-        self._sync_predictor_from_control(refresh_curves=True)
+        if params is not None:
+            self.set_parameters(params)
+        else:
+            self._refresh_curves()
         self._sync_live_mode_controls()
         self._params_path_edit.textChanged.connect(self._emit_state_changed)
         self._tab_widget.currentChanged.connect(self._emit_state_changed)
 
-        # Facet subscription for live predictor state updates.
-        self._unsubscribe_predictor_changed: Callable[[], None] | None = (
-            predictor.on_predictor_changed(self._on_predictor_changed)
-        )
         self._unsubscribe_device_changed: Callable[[], None] | None = (
             device.on_device_changed(self._on_device_changed)
             if device is not None
@@ -440,6 +406,74 @@ class PredictorDialog(QDialog):
         )
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
+
+    def parameters(self) -> FluxoniumParams:
+        """Return the current local trial: GHz energies and native affine inputs.
+
+        No source/session read or write occurs. This retained numeric UI exposes
+        all six fields; support for editing unknown fields belongs to the next
+        dialog slice. Invalid physical values are rejected when queried.
+        """
+        return FluxoniumParams(
+            self._ej_spin.value(),
+            self._ec_spin.value(),
+            self._el_spin.value(),
+            self._flux_half_spin.value(),
+            self._flux_period_spin.value(),
+            self._flux_bias_spin.value(),
+        )
+
+    def set_parameters(self, params: FluxoniumParams) -> None:
+        """Prefill this dialog from complete parameters, without changing their source.
+
+        This numeric UI cannot represent None; ValueError names missing/invalid
+        inputs before changing any field. No model is installed in the session.
+        """
+        model = params.build_predictor()
+        self._populate_model_fields(*model.params, model.flux_half, model.flux_period)
+        self._flux_bias_spin.setValue(model.flux_bias)
+        self._refresh_curves()
+        self._sync_calibration_button()
+
+    def predict_frequency(
+        self, value: float, transition: tuple[int, int] = (0, 1)
+    ) -> float:
+        """Return MHz from the current trial at a native device value; invalid inputs raise."""
+        from zcu_tools.gui.session.services.predictor import PredictFreqRequest
+
+        return self._pred.predict_freq(
+            self.parameters(), PredictFreqRequest(value, transition)
+        )
+
+    def calibrate(
+        self, value: float, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
+    ) -> float:
+        """Compute candidate native bias and update only this dialog's bias field.
+
+        Inputs are the measured native value, MHz frequency and increasing level
+        pair. Service validation errors propagate without edits; root failures
+        follow the model's RuntimeWarning/fallback semantics. No source is written.
+        """
+        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
+
+        result = self._pred.calibrate_flux_bias(
+            self.parameters(),
+            CalibrateFluxBiasRequest(value, frequency_mhz, transition),
+        )
+        self._flux_bias_spin.setValue(result.flux_bias)
+        self._sync_calibration_button()
+        return result.flux_bias
+
+    def load_parameters(self, path: str) -> None:
+        """Read an existing params.json into this local trial, never changing the file.
+
+        PredictorLoadError reports unreadable/missing fluxdep_fit; invalid inputs
+        raise ValueError without changing fields. See read_fluxdep_fit_params.
+        """
+        from zcu_tools.gui.session.services.predictor import read_fluxdep_fit_params
+
+        self.set_parameters(read_fluxdep_fit_params(path))
+        self._params_path_edit.setText(path)
 
     def capture_state(self) -> PredictorDialogState:
         """Return the persistent UI state only; live marker/device/cache state is excluded."""
@@ -450,7 +484,7 @@ class PredictorDialog(QDialog):
         )
 
     def restore_state(self, state: PredictorDialogState) -> None:
-        """Restore persistent UI state without touching the active predictor model."""
+        """Restore display preferences without changing the local trial parameters."""
         transitions = _normalize_tracked_transitions(state.tracked_transitions)
         tab_count = self._tab_widget.count()
         tab_index = max(0, min(int(state.tab_index), max(0, tab_count - 1)))
@@ -476,7 +510,7 @@ class PredictorDialog(QDialog):
             return
         super().reject()
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         if self._persistent_on_close:
             if a0 is not None:
                 a0.ignore()
@@ -484,13 +518,13 @@ class PredictorDialog(QDialog):
             return
         super().closeEvent(a0)
 
-    def showEvent(self, a0: QShowEvent | None) -> None:  # noqa: N802
+    def showEvent(self, a0: QShowEvent | None) -> None:
         if a0 is not None:
             super().showEvent(a0)
             if a0.spontaneous():
                 return
 
-        self._sync_predictor_from_control(refresh_curves=False)
+        self._sync_calibration_button()
         if self._live_mode:
             self._set_predict_value(
                 self._predict_value_spin.value(), update_status=False
@@ -511,14 +545,14 @@ class PredictorDialog(QDialog):
     def set_live_mode(self, enabled: bool, *, status: str | None = None) -> None:
         """Toggle app-driven live display mode.
 
-        Live mode is read-only: the active predictor model and marker are driven by
+        Live mode locks local trial fields and marker interaction, driven by
         the host app, while the user can still inspect the plot/table selection.
         """
         self._live_mode = bool(enabled)
         self._sync_live_mode_controls()
         if self._live_mode:
             self._debounce_timer.stop()
-            self._sync_predictor_from_control(refresh_curves=True)
+            self._refresh_curves()
             self._set_status(status or "Live predictor view", error=False)
         else:
             self._set_status(status or "Manual predictor control", error=False)
@@ -544,7 +578,6 @@ class PredictorDialog(QDialog):
             self._flux_half_spin,
             self._flux_period_spin,
             self._flux_bias_spin,
-            self._apply_btn,
             self._predict_value_spin,
             self._add_from_spin,
             self._add_to_spin,
@@ -572,11 +605,11 @@ class PredictorDialog(QDialog):
 
         Range is intentionally permissive so exploratory inputs (any positive
         energy ratio, arbitrary flux anchors) are accepted; the only hard guard
-        (flux_period != 0) lives in _on_apply_model_params, not here.
+        (flux_period != 0) belongs to FluxoniumParams validation.
         """
         spin = TrimDoubleSpinBox()
         spin.setRange(-1e6, 1e6)
-        spin.setDecimals(6)
+        spin.setDecimals(12)
         spin.setValue(default)
         return spin
 
@@ -613,34 +646,6 @@ class PredictorDialog(QDialog):
         self._flux_half_spin.setValue(flux_half)
         self._flux_period_spin.setValue(flux_period)
 
-    def _sync_predictor_from_control(self, *, refresh_curves: bool) -> None:
-        """Read the active predictor model into the fields and optional curves."""
-        info = self._pred.get_predictor_info()
-        if info is not None:
-            path = info.get("path")
-            if path:
-                self._params_path_edit.setText(str(path))
-            self._flux_bias_spin.setValue(info["flux_bias"])
-            self._flux_half = info["flux_half"]
-            self._flux_period = info["flux_period"]
-            self._populate_model_fields(
-                info["EJ"],
-                info["EC"],
-                info["EL"],
-                info["flux_half"],
-                info["flux_period"],
-            )
-            self._set_status("Currently loaded", error=False)
-            if refresh_curves:
-                self._refresh_curves()
-        else:
-            self._flux_half = None
-            self._flux_period = None
-            self._set_status("Not loaded", error=False)
-            self._clear_predictor_display()
-        self._update_active_label()
-        self._sync_calibration_button()
-
     def _clear_predictor_display(self) -> None:
         self._synced_xlim = None
         for canvas in self._all_canvases:
@@ -664,22 +669,11 @@ class PredictorDialog(QDialog):
           flux = (value + flux_bias - flux_half) / flux_period + 0.5
           value = (flux - 0.5) * flux_period + flux_half - flux_bias
         """
-        if self._flux_half is None or self._flux_period is None:
+        try:
+            model = self.parameters().build_predictor()
+        except ValueError:
             return None, None
-        info = self._pred.get_predictor_info()
-        if info is None:
-            return None, None
-        flux_bias = info["flux_bias"]
-        flux_half = self._flux_half
-        flux_period = self._flux_period
-
-        def value_to_flux(v: float) -> float:
-            return (v + flux_bias - flux_half) / flux_period + 0.5
-
-        def flux_to_value(f: float) -> float:
-            return (f - 0.5) * flux_period + flux_half - flux_bias
-
-        return value_to_flux, flux_to_value
+        return model.value_to_flux, model.flux_to_value
 
     # ------------------------------------------------------------------
     # Device-value selector helpers
@@ -916,8 +910,10 @@ class PredictorDialog(QDialog):
     def _calibration_block_status(self) -> tuple[str, bool] | None:
         if self._live_mode:
             return ("Live mode keeps calibration read-only.", False)
-        if self._pred.get_predictor_info() is None:
-            return ("Load a predictor before calibration.", True)
+        try:
+            self.parameters().build_predictor()
+        except ValueError as exc:
+            return (str(exc), True)
         selected = self._selected_transitions()
         if len(selected) != 1:
             return ("Select exactly one transition to calibrate.", True)
@@ -941,7 +937,6 @@ class PredictorDialog(QDialog):
         from zcu_tools.gui.session.services.predictor import (
             CalibrateFluxBiasRequest,
             PredictorLoadError,
-            PredictorNotLoaded,
         )
 
         frequency_mhz = self._resolve_calibration_frequency_mhz()
@@ -955,8 +950,8 @@ class PredictorDialog(QDialog):
             transition=selected[0],
         )
         try:
-            result = self._pred.calibrate_flux_bias(req)
-        except (PredictorLoadError, PredictorNotLoaded, ValueError) as exc:
+            result = self._pred.calibrate_flux_bias(self.parameters(), req)
+        except (PredictorLoadError, ValueError) as exc:
             self._set_status(str(exc), error=True)
             return
         self._flux_bias_spin.setValue(result.flux_bias)
@@ -973,7 +968,6 @@ class PredictorDialog(QDialog):
         """
         from zcu_tools.gui.session.services.predictor import (
             PredictFreqRequest,
-            PredictorNotLoaded,
         )
 
         marker_value = self._predict_value_spin.value()
@@ -982,10 +976,11 @@ class PredictorDialog(QDialog):
                 # Freq column: per-row scalar predict_freq (most accurate)
                 try:
                     freq = self._pred.predict_freq(
-                        PredictFreqRequest(value=marker_value, transition=transition)
+                        self.parameters(),
+                        PredictFreqRequest(value=marker_value, transition=transition),
                     )
                     freq_text = f"{freq:.4f}"
-                except (PredictorNotLoaded, ValueError):
+                except (FailedPreconditionError, ValueError):
                     freq_text = "—"
 
                 freq_item = self._table.item(row_idx, _COL_FREQ)
@@ -1017,24 +1012,24 @@ class PredictorDialog(QDialog):
                     item.setText(text)
 
     def _point_matrix_text(
-        self, value: float, transition: tuple[int, int], operator: str
+        self, value: float, transition: tuple[int, int], operator: Literal["n", "phi"]
     ) -> str:
         """|<i|operator|j>| at a single device value, formatted, or "—" on expected failure."""
         from zcu_tools.gui.session.services.predictor import (
             PredictMatrixCurveRequest,
-            PredictorNotLoaded,
         )
 
         try:
             mat_result = self._pred.predict_matrix_element_curve(
+                self.parameters(),
                 PredictMatrixCurveRequest(
                     values=np.array([value], dtype=np.float64),
                     transitions=(transition,),
-                    operator=operator,  # type: ignore[arg-type]
-                )
+                    operator=operator,
+                ),
             )
             return f"{mat_result.mags[0, 0]:.5f}"
-        except (PredictorNotLoaded, ValueError):
+        except (FailedPreconditionError, ValueError):
             return "—"
 
     # ------------------------------------------------------------------
@@ -1045,7 +1040,6 @@ class PredictorDialog(QDialog):
         """Recompute and redraw the freq curve and both matrix-element curves."""
         from zcu_tools.gui.session.services.predictor import (
             PredictCurveRequest,
-            PredictorNotLoaded,
         )
 
         if not self._tracked:
@@ -1070,7 +1064,8 @@ class PredictorDialog(QDialog):
         # ── Frequency curves ──────────────────────────────────────────────
         try:
             freq_result = self._pred.predict_freq_curve(
-                PredictCurveRequest(values=grid, transitions=tuple(self._tracked))
+                self.parameters(),
+                PredictCurveRequest(values=grid, transitions=tuple(self._tracked)),
             )
             self._last_freq_result = freq_result
             self._freq_canvas.render_curves(
@@ -1084,7 +1079,7 @@ class PredictorDialog(QDialog):
                 value_to_flux=value_to_flux,
                 flux_to_value=flux_to_value,
             )
-        except (PredictorNotLoaded, ValueError) as exc:
+        except (FailedPreconditionError, ValueError) as exc:
             self._set_status(str(exc), error=True)
             return
         except Exception as exc:
@@ -1121,7 +1116,7 @@ class PredictorDialog(QDialog):
 
     def _render_matrix_curve(
         self,
-        operator: str,
+        operator: Literal["n", "phi"],
         canvas: PredictorCurveCanvas,
         grid: np.ndarray,
         highlights: tuple[tuple[int, int], ...],
@@ -1136,18 +1131,18 @@ class PredictorDialog(QDialog):
         """
         from zcu_tools.gui.session.services.predictor import (
             PredictMatrixCurveRequest,
-            PredictorNotLoaded,
         )
 
         try:
             mat_result = self._pred.predict_matrix_element_curve(
+                self.parameters(),
                 PredictMatrixCurveRequest(
                     values=grid,
                     transitions=tuple(self._tracked),
-                    operator=operator,  # type: ignore[arg-type]
-                )
+                    operator=operator,
+                ),
             )
-        except (PredictorNotLoaded, ValueError) as exc:
+        except (FailedPreconditionError, ValueError) as exc:
             self._set_status(str(exc), error=True)
             return False
         except Exception as exc:
@@ -1323,7 +1318,7 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_load_path_clicked(self) -> None:
-        """Load the typed params.json path, populate fields, and auto-apply."""
+        """Read the typed params.json path into local fields only."""
         if self._live_mode:
             self._set_status("Live mode keeps model params read-only.", error=False)
             return
@@ -1336,10 +1331,7 @@ class PredictorDialog(QDialog):
     def _on_browse_file(self) -> None:
         """Pick a params.json, populate the typed path, then load it.
 
-        Loading first fills the model spinboxes from the file, then installs the
-        predictor via the same path as Apply.  If the install fails (e.g.
-        flux_period == 0 or a service error), the fields stay populated and the
-        error is shown in the status.
+        Reading changes only the local fields, never the source or session.
         """
         if self._live_mode:
             self._set_status("Live mode keeps model params read-only.", error=False)
@@ -1363,57 +1355,8 @@ class PredictorDialog(QDialog):
         except PredictorLoadError as exc:
             self._set_status(str(exc), error=True)
             return False
-        self._populate_model_fields(
-            params.EJ, params.EC, params.EL, params.flux_half, params.flux_period
-        )
-        logger.info("PredictorDialog: loaded params into fields from %r", path)
-        # Auto-apply: install immediately. Failure leaves fields populated and
-        # surfaces the error in the status (install path sets its own status).
-        return self._install_from_fields()
-
-    def _on_apply_model_params(self) -> None:
-        """Build+install a predictor from the current editable fields."""
-        if self._live_mode:
-            self._set_status("Live mode keeps model params read-only.", error=False)
-            return
-        self._install_from_fields()
-
-    def _install_from_fields(self) -> bool:
-        """Build+install a predictor from the current editable fields.
-
-        Shared install path for both Apply and Browse-auto-apply.  Only
-        flux_period == 0 is guarded (it makes the value<->flux affine singular);
-        everything else is allowed so trial ratios work.  The bus
-        PredictorChangedPayload that install emits drives the state refresh.
-        Returns True on success, False on a guarded/expected failure (status set).
-        """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictorLoadError,
-            SetModelParamsRequest,
-        )
-
-        flux_period = self._flux_period_spin.value()
-        if flux_period == 0.0:
-            self._set_status(
-                "flux_period must be non-zero (value↔flux mapping).", error=True
-            )
-            return False
-        req = SetModelParamsRequest(
-            EJ=self._ej_spin.value(),
-            EC=self._ec_spin.value(),
-            EL=self._el_spin.value(),
-            flux_half=self._flux_half_spin.value(),
-            flux_period=flux_period,
-            flux_bias=self._flux_bias_spin.value(),
-        )
-        try:
-            self._pred.set_predictor_model_params(req)
-        except PredictorLoadError as exc:
-            self._set_status(str(exc), error=True)
-            return False
-        self._set_status("Model params applied", error=False)
-        self._update_active_label()
-        logger.info("PredictorDialog: applied model params %r", req)
+        self.set_parameters(params)
+        self._set_status("Loaded parameters into simulator", error=False)
         return True
 
     # ------------------------------------------------------------------
@@ -1421,18 +1364,10 @@ class PredictorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _cleanup_subscriptions(self, *_args: object) -> None:
-        unsubscribe_predictor = self._unsubscribe_predictor_changed
-        if unsubscribe_predictor is not None:
-            self._unsubscribe_predictor_changed = None
-            unsubscribe_predictor()
         unsubscribe_device = self._unsubscribe_device_changed
         if unsubscribe_device is not None:
             self._unsubscribe_device_changed = None
             unsubscribe_device()
-
-    def _on_predictor_changed(self, payload: object) -> None:
-        del payload
-        self._sync_predictor_from_control(refresh_curves=True)
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         if not self.isVisible():
@@ -1455,17 +1390,3 @@ class PredictorDialog(QDialog):
         self._status_label.setText(msg)
         color = "red" if error else "green"
         self._status_label.setStyleSheet(f"color: {color};")
-
-    def _update_active_label(self) -> None:
-        """Reflect whether a predictor is currently installed (active/inactive).
-
-        Presence is derived from get_predictor_info (None ⇒ not installed). This
-        is a plain indicator, NOT a per-param read-back.
-        """
-        active = self._pred.get_predictor_info() is not None
-        if active:
-            self._active_label.setText("Predictor: active")
-            self._active_label.setStyleSheet("color: green;")
-        else:
-            self._active_label.setText("Predictor: not installed")
-            self._active_label.setStyleSheet("color: gray;")
