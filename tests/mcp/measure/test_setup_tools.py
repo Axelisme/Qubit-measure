@@ -699,3 +699,224 @@ def test_recipe_guide_retains_native_query_errors(setup_client, code, reason):
     assert getattr(error.value, "reason", None) == (
         "gui_handler_timeout" if code == "timeout" else reason
     )
+
+
+class CompleteSetupGui(SetupGui):
+    """Native full-cfg collaborator; the tool owns merge and wait orchestration."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.device["unit"] = "native"
+        self.device["info"].update(address="", output="off", value_unit="native")
+
+    def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        if method == "device.setup":
+            self.device["info"] = deepcopy(params["cfg"])
+            return {"operation_id": 41}
+        return super().__call__(method, params)
+
+
+@pytest.fixture
+def complete_setup_client(
+    tmp_path: Path, clients: list[MeasureClient]
+) -> tuple[MeasureClient, CompleteSetupGui]:
+    gui = CompleteSetupGui()
+    client = make_client(tmp_path, gui)
+    clients.append(client)
+    return client, gui
+
+
+def set_yoko(gui: CompleteSetupGui, mode: str) -> None:
+    gui.device.update(type_name="YOKOGS200", unit="A" if mode == "current" else "V")
+    gui.device["info"] = {
+        "type": "YOKOGS200",
+        "address": "",
+        "mode": mode,
+        "value_unit": gui.device["unit"],
+        "value": 0.001 if mode == "current" else 0.25,
+        "output": "off",
+        "rampstep": 1e-6 if mode == "current" else 1e-3,
+    }
+
+
+def setup_calls(client: MeasureClient) -> list[dict[str, Any]]:
+    return [
+        params for method, params in client.transport.sent if method == "device.setup"
+    ]
+
+
+@pytest.mark.parametrize("mode", ["current", "voltage"])
+def test_device_setup_yoko_value_requires_patch_unit_before_rpc(
+    complete_setup_client, mode
+):
+    client, gui = complete_setup_client
+    set_yoko(gui, mode)
+    before = deepcopy(gui.device)
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 0.001}})
+    assert result.is_error
+    assert "value_unit" in result.data["error"]["message"]
+    assert result.data["before"]["device"] == before
+    assert result.data["requested"] == {"name": "fake_flux", "cfg": None}
+    assert result.data["op"] is None
+    assert setup_calls(client) == []
+
+
+@pytest.mark.parametrize(
+    "kind,value,unit",
+    [("current", 0.001, "A"), ("voltage", 1.5, "V"), ("fake", 1, "native")],
+    ids=["current-A", "voltage-V", "fake-native"],
+)
+def test_device_setup_sends_complete_cfg_with_explicit_value_unit(
+    complete_setup_client, kind, value, unit
+):
+    client, gui = complete_setup_client
+    if kind != "fake":
+        set_yoko(gui, kind)
+    before = deepcopy(gui.device)
+    candidate = {**before["info"], "value": value, "value_unit": unit}
+    result = client.call(
+        "device_setup",
+        {"name": "fake_flux", "cfg": {"value": value, "value_unit": unit}},
+    )
+    assert not result.is_error
+    assert result.data["status"] == "finished"
+    assert setup_calls(client) == [{"name": "fake_flux", "cfg": candidate}]
+    assert result.data["requested"] == {"name": "fake_flux", "cfg": candidate}
+    assert result.data["before"]["device"] == before
+    assert result.data["after"]["device"]["info"] == candidate
+    gui.device["info"]["value"] = 7
+    assert result.data["before"]["device"] == before
+    assert result.data["after"]["device"]["info"] == candidate
+
+
+@pytest.mark.parametrize(
+    "patch", [{"output": "on"}, {"rampstep": 1e-6}], ids=["output", "rampstep"]
+)
+def test_device_setup_nonvalue_patch_needs_no_unit(complete_setup_client, patch):
+    client, gui = complete_setup_client
+    set_yoko(gui, "current")
+    candidate = {**gui.device["info"], **patch}
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": patch})
+    assert not result.is_error
+    assert setup_calls(client) == [{"name": "fake_flux", "cfg": candidate}]
+
+
+@pytest.mark.parametrize(
+    "kind,patch",
+    [
+        ("current", {"value": 0.001, "value_unit": "V"}),
+        ("fake", {"unknown": 2}),
+        ("fake", {"value_unit": "A"}),
+        ("rf", {"freq_Hz": "invalid"}),
+    ],
+    ids=[
+        "mode-unit-conflict",
+        "unknown-field",
+        "fake-invalid-unit",
+        "rf-invalid-frequency",
+    ],
+)
+def test_device_setup_retains_native_validation_rejection(
+    complete_setup_client, kind, patch
+):
+    client, gui = complete_setup_client
+    if kind == "current":
+        set_yoko(gui, kind)
+    elif kind == "rf":
+        gui.device.update(type_name="RohdeSchwarzSGS100A")
+        gui.device["info"] = {
+            "type": "RohdeSchwarzSGS100A",
+            "address": "",
+            "freq_Hz": 1e9,
+            "power_dBm": -120,
+            "output": "off",
+            "IQ": "off",
+        }
+    before = deepcopy(gui.device)
+    native = {
+        "code": "invalid_params",
+        "reason": "model_rejected",
+        "message": "native validator diagnostic",
+    }
+    client.transport.replies["device.setup"] = {"ok": False, "error": native}
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": patch})
+    assert result.is_error
+    assert result.data["error"] == {**native, "request_rejected": True}
+    assert result.data["steps"]["start"]["status"] == "failed"
+    assert result.data["before"]["device"] == before
+    assert result.data["after"]["device"] is None
+    assert result.data["op"] is None
+    assert setup_calls(client) == [
+        {"name": "fake_flux", "cfg": {**before["info"], **patch}}
+    ]
+
+
+@pytest.mark.parametrize("kind", ["rf-valid"])
+def test_device_setup_nonflux_cfg_uses_native_rpc_contract(complete_setup_client, kind):
+    client, gui = complete_setup_client
+    gui.device.update(type_name="RohdeSchwarzSGS100A")
+    gui.device["info"] = {
+        "type": "RohdeSchwarzSGS100A",
+        "address": "",
+        "freq_Hz": 1e9,
+        "power_dBm": -120,
+        "output": "off",
+        "IQ": "off",
+    }
+    candidate = {**gui.device["info"], "freq_Hz": 5e9, "power_dBm": 10}
+    result = client.call(
+        "device_setup", {"name": "fake_flux", "cfg": {"freq_Hz": 5e9, "power_dBm": 10}}
+    )
+    assert not result.is_error
+    assert result.data["after"]["device"]["info"] == candidate
+    assert setup_calls(client) == [{"name": "fake_flux", "cfg": candidate}]
+
+
+@pytest.mark.parametrize("outcome", ["finished", "failed", "cancelled"])
+def test_device_setup_reports_native_terminal_outcome_and_snapshots(
+    complete_setup_client, outcome
+):
+    client, gui = complete_setup_client
+    before = deepcopy(gui.device)
+    native = {"reason": "completed", "status": outcome, "feedback": {"native": [1, 2]}}
+    if outcome != "finished":
+        native["error"] = {"reason": "driver_outcome", "message": "partial ramp"}
+    client.transport.replies["operation.await"] = {"ok": True, "result": native}
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
+    assert result.data["status"] == outcome
+    assert result.is_error == (outcome != "finished")
+    assert result.data["operation"]["status"] == outcome
+    assert result.data["operation"]["feedback"] == native["feedback"]
+    if outcome != "finished":
+        assert result.data["operation"]["error"] == native["error"]
+    assert result.data["before"]["device"] == before
+    assert result.data["after"]["device"]["info"]["value"] == 1
+    assert result.data["steps"]["wait"]["status"] == "completed"
+
+
+@pytest.mark.parametrize("bound", [300], ids=["bounded-300"])
+def test_device_setup_timeout_retains_handle_without_cancellation(
+    complete_setup_client, bound
+):
+    client, gui = complete_setup_client
+    gui.wait_reason = "timeout"
+    result = client.call("device_setup", {"name": "fake_flux", "cfg": {"value": 1}})
+    assert not result.is_error
+    assert result.data["status"] == "running"
+    assert result.data["op"] is not None
+    assert result.data["steps"]["wait"]["status"] == "running"
+    waits = [
+        params
+        for method, params in client.transport.sent
+        if method == "operation.await"
+    ]
+    assert len(waits) == 1 and waits[0]["timeout"] == bound
+    assert result.data["operation"]["elapsed_s"] < 1
+    gui.wait_reason = "completed"
+    assert (
+        client.call("wait", {"op": result.data["op"], "timeout": 0})["status"]
+        == "finished"
+    )
+    assert [
+        method for method, _ in client.transport.sent if method.startswith("operation.")
+    ] == ["operation.await", "operation.progress", "operation.await"]
