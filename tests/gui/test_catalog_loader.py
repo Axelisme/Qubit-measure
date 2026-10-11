@@ -14,18 +14,26 @@ from types import ModuleType
 import pytest
 import zcu_tools
 from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
-from zcu_tools.gui.app.measure.catalog import CatalogReloadError
-from zcu_tools.gui.app.measure.catalog_loader import (
-    SourceExperimentCatalogLoader,
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.catalog_loader import (
+    CatalogReloadError,
+    SourceCatalogLoader,
     SourcePackage,
 )
-from zcu_tools.gui.app.measure.registry import Registry
+
+
+def build_registry(module: str) -> Registry:
+    """App-owned validation injected into the shared source loader."""
+    candidate = Registry()
+    importlib.import_module(module).register_all(candidate)
+    candidate.validate()
+    return candidate
 
 
 @dataclass
 class CatalogFixture:
     root: Path
-    loader: SourceExperimentCatalogLoader
+    loader: SourceCatalogLoader[Registry]
     original: ModuleType
 
     def write(self, relative: str, content: str) -> None:
@@ -86,7 +94,7 @@ def source_catalog(
     monkeypatch.syspath_prepend(str(tmp_path))
     original = importlib.import_module("reload_fixture.domain")
     importlib.import_module("reload_fixture.catalog")
-    loader = SourceExperimentCatalogLoader(
+    loader = SourceCatalogLoader(
         sources=(SourcePackage("reload_fixture", root),),
         reload_modules=(
             "reload_fixture.domain",
@@ -95,6 +103,7 @@ def source_catalog(
         ),
         preserved_modules=("reload_fixture.domain.fixed",),
         catalog_module="reload_fixture.catalog",
+        catalog_builder=lambda: build_registry("reload_fixture.catalog"),
     )
     try:
         yield CatalogFixture(root, loader, original)
@@ -416,7 +425,7 @@ def dual_catalog(
         original = importlib.import_module("loader_user.domain")
         fixed_module = importlib.import_module("loader_framework.core")
         importlib.import_module("loader_user.catalog")
-        loader = SourceExperimentCatalogLoader(
+        loader = SourceCatalogLoader(
             sources=(
                 SourcePackage("loader_framework", framework),
                 SourcePackage("loader_user", root),
@@ -424,6 +433,7 @@ def dual_catalog(
             reload_modules=("loader_user.domain", "loader_user.catalog"),
             preserved_modules=("loader_user.domain.fixed",),
             catalog_module="loader_user.catalog",
+            catalog_builder=lambda: build_registry("loader_user.catalog"),
         )
         yield DualCatalogFixture(
             CatalogFixture(root, loader, original), framework, fixed_module
@@ -572,7 +582,7 @@ def leaf_catalog(
         importlib.import_module("loader_leaf.definitions")
         if import_timing == "before_capture":
             importlib.import_module("zcu_tools.notebook.analysis.mist")
-        loader = SourceExperimentCatalogLoader(
+        loader = SourceCatalogLoader(
             sources=(
                 SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
                 SourcePackage("loader_leaf", root),
@@ -580,6 +590,7 @@ def leaf_catalog(
             reload_modules=("loader_leaf.v2", "loader_leaf.definitions"),
             preserved_modules=("loader_leaf.v2._support", "loader_leaf.roles"),
             catalog_module="loader_leaf.definitions",
+            catalog_builder=lambda: build_registry("loader_leaf.definitions"),
         )
         if import_timing == "after_capture":
             importlib.import_module("zcu_tools.notebook.analysis.mist")
@@ -756,19 +767,21 @@ def test_invalid_source_and_scope_declarations_fail_at_construction(
         root.mkdir()
         sources.append(SourcePackage(namespace, root))
     with pytest.raises(ValueError, match=message):
-        SourceExperimentCatalogLoader(
+        SourceCatalogLoader(
             sources=tuple(sources),
             reload_modules=reload_modules,
             preserved_modules=preserved_modules,
             catalog_module=catalog_module,
+            catalog_builder=lambda: Registry(),
         )
 
 
 def test_missing_source_root_fails_at_construction(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="existing directory"):
-        SourceExperimentCatalogLoader(
+        SourceCatalogLoader(
             sources=(SourcePackage("demo", tmp_path / "missing"),),
             reload_modules=("demo.catalog",),
             preserved_modules=(),
             catalog_module="demo.catalog",
+            catalog_builder=lambda: Registry(),
         )
