@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from qtpy.QtWidgets import QComboBox, QLineEdit
+from qtpy.QtWidgets import QComboBox, QLineEdit, QPushButton
 from zcu_tools.cfg_model import ModuleCfgFactory
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -139,6 +139,14 @@ def test_populate_module_ref_field_round_trip(qapp, ctrl):
         draft.close()
 
 
+def reference_frequency_line(form: CfgFormWidget) -> QLineEdit:
+    editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
+    assert editor is not None
+    entry = editor.findChild(QLineEdit)
+    assert entry is not None
+    return entry
+
+
 def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
     lib_spec, lib_value = module_cfg_to_value(
         ModuleCfgFactory.from_raw(
@@ -176,22 +184,16 @@ def test_module_ref_convert_then_edit_survives_refresh_and_reselect(qapp):
 
         tree_item(form, "mod").setExpanded(True)
         qapp.processEvents()
-        editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
-        assert editor is not None
-        entry = editor.findChild(QLineEdit)
-        assert entry is not None and entry.isVisible()
+        entry = reference_frequency_line(form)
+        assert entry.isVisible()
         assert entry.text() == "7000.0"
         assert not entry.isEnabled()
-        from qtpy.QtWidgets import QPushButton
-
         button = reference.findChild(QPushButton, "convertReferenceToInline")
         assert button is not None and button.isEnabled()
         button.click()
         qapp.processEvents()
-        editor = tree_widget(form).itemWidget(tree_item(form, "mod.ro_freq"), 1)
-        assert editor is not None
-        entry = editor.findChild(QLineEdit)
-        assert entry is not None and entry.isEnabled()
+        entry = reference_frequency_line(form)
+        assert entry.isEnabled()
         entry.setText("8000.0")
 
         _, updated_value = module_cfg_to_value(

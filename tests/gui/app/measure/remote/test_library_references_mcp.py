@@ -50,11 +50,17 @@ def reference_library(request):
 
 @pytest.mark.parametrize("action", ["rename", "del"])
 def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
-    qapp, tmp_path, monkeypatch, reference_library, action
+    qapp,
+    tmp_path,
+    monkeypatch,
+    reference_library,
+    action,
+    point_models,
+    point_registry_guard,
 ):
     kind, spec, value, field, path = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
-    fx.ctrl.context_control.add_component("Q1", "qubit/transmon", {})
+    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
     fx.ctrl.apply_library_change(
         fx.ctrl.read_context(),
         LibraryChange(kind, "put", path, schema=CfgSchema(spec, value)),
