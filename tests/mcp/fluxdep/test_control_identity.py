@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.app.fluxdep.remote.wire_version import WIRE_VERSION
+from zcu_tools.gui.app.fluxdep.remote.wire_version import GUI_VERSION, WIRE_VERSION
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.fluxdep.assembly import FluxdepServer, build_fluxdep_server
@@ -30,7 +30,15 @@ class RouteTransport:
 
     def send_line(self, payload: dict[str, Any]) -> None:
         self.sent.append((payload["method"], payload["params"]))
-        reply = self.harness.request(self.link, payload["method"], **payload["params"])
+        if payload["method"] == "wire.version":
+            reply = {
+                "ok": True,
+                "result": {"wire_version": WIRE_VERSION, "gui_version": GUI_VERSION},
+            }
+        else:
+            reply = self.harness.request(
+                self.link, payload["method"], **payload["params"]
+            )
         self.deliver_reply({**reply, "id": payload["id"]})
 
     def close(self) -> None:

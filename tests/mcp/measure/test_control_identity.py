@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
+from zcu_tools.gui.remote.param_spec import build_input_schema
 from zcu_tools.mcp.core.bridge import McpBridge
 from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.session import MeasureMcpSession
@@ -51,6 +53,19 @@ def identity_client(tmp_path: Path) -> Iterator[MeasureClient]:
     seed.context.session.close()
     transport = seed.transport
     transport.responder = orientation
+    catalog = transport.replies["rpc.catalog"]["result"]["methods"]
+    catalog.extend(
+        {
+            "method": method,
+            "description": spec.description,
+            "params": build_input_schema(spec.params),
+            "timeout_seconds": spec.timeout_seconds,
+            "exposure": "rpc",
+            "tool_names": [],
+            "operation_key": None,
+        }
+        for method, spec in CONTROL_METHOD_SPECS.items()
+    )
     bridge = AttachedBridge(config, transport)
     session = MeasureMcpSession(
         config,
