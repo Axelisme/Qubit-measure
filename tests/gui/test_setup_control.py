@@ -1,121 +1,116 @@
-"""SetupControlFacet public contract tests."""
+"""SetupControlFacet public entry/point and connection routing contracts."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from pathlib import Path
 
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.result_scope import ResultScope
-from zcu_tools.gui.session.services.connection import ConnectMockRequest
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryInfo,
+    EntryRequest,
+    PointCreateRequest,
+    PointUseRequest,
+    SavedPoint,
+    WorkingPointInfo,
+)
+from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.services.connection import (
+    ConnectMockRequest,
+    ConnectRequest,
+    SoCConnectionService,
+)
 from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
-    ProjectRequest,
-    ResolvedProject,
+    ProjectSettingsService,
     SetupPreferences,
 )
+from zcu_tools.gui.session.services.simulated_environment import (
+    SimulatedEnvironmentCoordinator,
+)
 from zcu_tools.gui.session.setup_control import SetupControlFacet
+from zcu_tools.gui.session.types import SocCfgHandle
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.sim import SimParams
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
+from tests.gui.app.measure.remote._helpers import Fixture
 
 
-class RecordingSettings:
+class RecordingSettings(ProjectSettingsService):
     def __init__(self, log: CallLog) -> None:
         self._log = log
-        self.preferences = SetupPreferences(
-            chip_name="chip",
-            qub_name="qub",
-            res_name="res",
-            scope_id="/tmp/result/chip/qub",
-            ip="10.0.0.2",
-            port=7000,
-        )
-        self.scope = ResultScope(
-            scope_id="/tmp/result/chip/qub",
-            chip_name="chip",
-            qub_name="qub",
-            result_dir="/tmp/result/chip/qub",
-            params_path="/tmp/result/chip/qub/params.json",
-            source="discovered",
-        )
-        self.resolved = ResolvedProject(
-            chip_name="chip",
-            qub_name="qub",
-            res_name="res",
-            result_dir="/tmp/result/chip/qub",
-            database_path="/tmp/Database/chip/qub",
-            params_path="/tmp/result/chip/qub/params.json",
-            scope_id="/tmp/result/chip/qub",
+        self.preferences = SetupPreferences(entry_name="chip", ip="10.0.0.2", port=7000)
+        self.info = EntryInfo(
+            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
         )
 
     def get_setup_preferences(self) -> SetupPreferences:
         self._log.add("settings", "get_setup_preferences")
         return self.preferences
 
-    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        self._log.add("settings", "list_result_scopes", refresh=refresh)
-        return (self.scope,)
+    def list_entries(self, *, refresh: bool = False) -> tuple[str, ...]:
+        self._log.add("settings", "list_entries", refresh=refresh)
+        return ("chip",)
 
-    def apply_project(self, req: ProjectRequest) -> ResolvedProject:
-        self._log.add("settings", "apply_project", req)
-        return self.resolved
+    def new_entry(self, request: EntryRequest) -> EntryInfo:
+        self._log.add("settings", "new_entry", request)
+        return self.info
 
-    def remember_connection(self, prefs: ConnectionPreferences) -> None:
-        self._log.add("settings", "remember_connection", prefs)
+    def open_entry(self, request: EntryRequest) -> EntryInfo:
+        self._log.add("settings", "open_entry", request)
+        return self.info
+
+    def remember_connection(self, req: ConnectionPreferences) -> None:
+        self._log.add("settings", "remember_connection", req)
 
 
-class RecordingContext:
+class RecordingContext(ContextControlFacet):
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def use_context(self, label: str) -> None:
-        self._log.add("context", "use_context", label)
+    def use_point(self, request: PointUseRequest) -> SavedPoint:
+        self._log.add("context", "use_point", request)
+        return SavedPoint(entry_id="entry", point=request.label)
 
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None:
-        self._log.add(
-            "context",
-            "new_context",
-            bind_device=bind_device,
-            clone_from=clone_from,
+    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+        self._log.add("context", "new_point", request)
+        return SavedPoint(entry_id="entry", point=request.label)
+
+    def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
+        self._log.add("context", "list_points", refresh=refresh)
+        return (WorkingPointInfo("base", ""),)
+
+    def get_entry_info(self) -> EntryInfo:
+        self._log.add("context", "get_entry_info")
+        return EntryInfo(
+            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
         )
 
-    def get_context_labels(self) -> list[str]:
-        self._log.add("context", "get_context_labels")
-        return ["base"]
 
-    def get_active_context_label(self) -> str | None:
-        self._log.add("context", "get_active_context_label")
-        return "base"
-
-
-class RecordingConnection:
+class RecordingConnection(SoCConnectionService):
     def __init__(self, log: CallLog) -> None:
         self._log = log
+        self.cfg = make_mock_soccfg()
         self.connection_finished = RecordingSignal(log, "connection_finished")
         self.connection_failed = RecordingSignal(log, "connection_failed")
 
-    def start_connect(self, req: ConnectMockRequest) -> int:
+    def start_connect(self, req: ConnectRequest) -> int:
         self._log.add("connection", "start_connect", req)
         return 7
 
-    def get_soccfg(self) -> object:
+    def get_soccfg(self) -> SocCfgHandle:
         self._log.add("connection", "get_soccfg")
-        return "cfg"
+        return self.cfg
 
 
-class RecordingDevice:
+class RecordingDevice(DeviceControlFacet):
     def __init__(self, log: CallLog) -> None:
         self._log = log
-        self.entry = DeviceEntry(
-            name="flux",
-            type_name="YOKOGS200",
-            status="connected",
-        )
+        self.entry = DeviceEntry(name="flux", type_name="YOKOGS200", status="connected")
 
     def list_devices(self) -> list[DeviceEntry]:
         self._log.add("device", "list_devices")
@@ -126,25 +121,26 @@ class RecordingDevice:
         return "V"
 
 
-def _facet(
-    *,
-    on_project_applied: Callable[[ResolvedProject], None] | None = None,
-) -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
-    log = CallLog()
-    bus = BaseEventBus()
-    settings = RecordingSettings(log)
-    context = RecordingContext(log)
+class RecordingSimulatedEnvironment(SimulatedEnvironmentCoordinator):
+    def __init__(self, log: CallLog) -> None:
+        self._log = log
+
+    def start(self, *, sim_params: SimParams | None = None) -> int:
+        self._log.add("simulated_environment", "start", sim_params=sim_params)
+        return 7
+
+
+def _facet() -> tuple[SetupControlFacet, CallLog, BaseEventBus, RecordingConnection]:
+    log, bus = CallLog(), BaseEventBus()
     connection = RecordingConnection(log)
-    device = RecordingDevice(log)
     return (
         SetupControlFacet(
             bus=bus,
-            settings=cast(Any, settings),
-            context=cast(Any, context),
-            connection=cast(Any, connection),
-            simulated_environment=cast(Any, connection),
-            device=cast(Any, device),
-            on_project_applied=on_project_applied,
+            settings=RecordingSettings(log),
+            context=RecordingContext(log),
+            connection=connection,
+            simulated_environment=RecordingSimulatedEnvironment(log),
+            device=RecordingDevice(log),
         ),
         log,
         bus,
@@ -154,68 +150,62 @@ def _facet(
 
 def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None:
     facet, log, bus, _connection = _facet()
-    req = ProjectRequest("chip", "qub", "res")
+    request = EntryRequest("chip")
+    point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
+    saved = SavedPoint(entry_id="entry", point="base")
+    info = EntryInfo(
+        "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
+    )
     conn_req = ConnectionPreferences(ip="127.0.0.1", port=8887)
     connect_req = ConnectMockRequest()
-
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
             "get_setup_preferences",
             facet.get_setup_preferences,
-            SetupPreferences(
-                chip_name="chip",
-                qub_name="qub",
-                res_name="res",
-                scope_id="/tmp/result/chip/qub",
-                ip="10.0.0.2",
-                port=7000,
-            ),
+            SetupPreferences(entry_name="chip", ip="10.0.0.2", port=7000),
             call("settings", "get_setup_preferences"),
         ),
         (
-            "list_result_scopes",
-            facet.list_result_scopes,
-            (
-                ResultScope(
-                    scope_id="/tmp/result/chip/qub",
-                    chip_name="chip",
-                    qub_name="qub",
-                    result_dir="/tmp/result/chip/qub",
-                    params_path="/tmp/result/chip/qub/params.json",
-                    source="discovered",
-                ),
-            ),
-            call("settings", "list_result_scopes", refresh=False),
+            "list_entries",
+            facet.list_entries,
+            ("chip",),
+            call("settings", "list_entries", refresh=False),
         ),
         (
-            "apply_project",
-            lambda: facet.apply_project(req),
-            True,
-            call("settings", "apply_project", req),
+            "new_entry",
+            lambda: facet.new_entry(request),
+            info,
+            call("settings", "new_entry", request),
         ),
         (
-            "use_context",
-            lambda: facet.use_context("base"),
-            None,
-            call("context", "use_context", "base"),
+            "open_entry",
+            lambda: facet.open_entry(request),
+            info,
+            call("settings", "open_entry", request),
         ),
         (
-            "new_context",
-            lambda: facet.new_context(bind_device="flux", clone_from="base"),
-            None,
-            call("context", "new_context", bind_device="flux", clone_from="base"),
+            "get_entry_info",
+            facet.get_entry_info,
+            info,
+            call("context", "get_entry_info"),
         ),
         (
-            "get_context_labels",
-            facet.get_context_labels,
-            ["base"],
-            call("context", "get_context_labels"),
+            "use_point",
+            lambda: facet.use_point(PointUseRequest("base")),
+            saved,
+            call("context", "use_point", PointUseRequest("base")),
         ),
         (
-            "get_active_context_label",
-            facet.get_active_context_label,
-            "base",
-            call("context", "get_active_context_label"),
+            "new_point",
+            lambda: facet.new_point(point),
+            SavedPoint(entry_id="entry", point="new"),
+            call("context", "new_point", point),
+        ),
+        (
+            "list_points",
+            facet.list_points,
+            (WorkingPointInfo("base", ""),),
+            call("context", "list_points", refresh=False),
         ),
         (
             "start_connect",
@@ -232,28 +222,35 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         (
             "get_soccfg",
             facet.get_soccfg,
-            "cfg",
+            _connection.cfg,
             call("connection", "get_soccfg"),
         ),
     )
-
     assert facet.get_bus() is bus
-    for name, action, expected_result, _expected_call in cases:
-        assert action() == expected_result, name
-
+    for name, action, expected, _call in cases:
+        assert action() == expected, name
     assert log.calls == [expected_call for *_, expected_call in cases]
 
 
-def test_setup_control_project_applied_hook_receives_resolved_project() -> None:
-    seen: list[ResolvedProject] = []
-    facet, log, _bus, _connection = _facet(on_project_applied=seen.append)
-    req = ProjectRequest("chip", "qub", "res")
+def test_setup_control_project_applied_hook_receives_resolved_project(
+    qapp, tmp_path
+) -> None:
+    """Entry publication notifies the current binding owner through its public event."""
+    from zcu_tools.gui.session.events import ContextSwitchedPayload
 
-    assert facet.apply_project(req) is True
-
-    assert log.calls == [call("settings", "apply_project", req)]
-    assert len(seen) == 1
-    assert seen[0].params_path == "/tmp/result/chip/qub/params.json"
+    fixture = Fixture(project_root=str(tmp_path), empty_project=True)
+    seen: list[ContextSwitchedPayload] = []
+    subscription = fixture.bus.subscribe(ContextSwitchedPayload, seen.append)
+    try:
+        info = fixture.ctrl.setup_control.new_entry(EntryRequest("chip"))
+        assert info.name == "chip"
+        assert len(seen) == 1
+        assert seen[0].binding_id is not None
+        assert fixture.ctrl.context_control.get_source_binding() == seen[0].sources
+        assert fixture.ctrl.setup_control.get_entry_info() == info
+    finally:
+        subscription.unsubscribe()
+        fixture.stop()
 
 
 def test_setup_control_rebinds_connection_outcome_subscription() -> None:
@@ -262,7 +259,6 @@ def test_setup_control_rebinds_connection_outcome_subscription() -> None:
     facet, _log, bus, _connection = _facet()
     first: list[str] = []
     second: list[str] = []
-
     facet.bind_connection_outcome(
         lambda: first.append("done"), lambda message: first.append(message)
     )
@@ -272,11 +268,9 @@ def test_setup_control_rebinds_connection_outcome_subscription() -> None:
             success=False, is_mock=True, error_message="first failed"
         )
     )
-
     facet.bind_connection_outcome(
         lambda: second.append("done"), lambda message: second.append(message)
     )
     bus.emit(ConnectionFinishedPayload(success=True, is_mock=False))
-
     assert first == ["done", "first failed"]
     assert second == ["done"]

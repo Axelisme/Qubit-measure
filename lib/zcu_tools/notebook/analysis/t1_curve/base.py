@@ -250,7 +250,7 @@ def plot_t1_with_sample(
         calculate_eff_t1_vs_flux_fast(
             params,
             t_fluxs,
-            noise_channels=[(noise_name, {name: v})],  # type: ignore
+            noise_channels=[(noise_name, {name: v})],
             Temp=Temp,
             **other_noise_options,
         )

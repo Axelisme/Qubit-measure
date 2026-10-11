@@ -40,9 +40,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from qtpy.QtCore import QEvent, QSize, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QPixmap  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, QSize, Qt
+from qtpy.QtGui import QPixmap
+from qtpy.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -94,14 +94,14 @@ class _PreviewCard(QWidget):
             "QWidget#previewCard_run, QWidget#previewCard_analysis, QWidget#previewCard_post "
             "{ border:1px solid #dee2e6; border-radius:6px; background:white; }"
         )
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)  # type: ignore[attr-defined]
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(MIN_CARD_WIDTH)
 
         # Header
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         title = QLabel(f"<b>{display_name}</b>")
-        title.setTextFormat(Qt.RichText)  # type: ignore[attr-defined]
+        title.setTextFormat(Qt.TextFormat.RichText)
         title.setObjectName(f"previewTitle_{source_key}")
         header.addWidget(title)
         header.addStretch()
@@ -118,9 +118,11 @@ class _PreviewCard(QWidget):
         img_layout.setContentsMargins(0, 0, 0, 0)
         self._image_label = QLabel()
         self._image_label.setObjectName(f"previewImage_{source_key}")
-        self._image_label.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setScaledContents(False)
-        self._image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # type: ignore[attr-defined]
+        self._image_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._image_label.setMinimumHeight(120)
         self._image_label.setMinimumWidth(120)
         img_layout.addWidget(self._image_label)
@@ -134,10 +136,10 @@ class _PreviewCard(QWidget):
         empty_page.setObjectName(f"previewEmptyPage_{source_key}")
         empty_layout = QVBoxLayout(empty_page)
         empty_layout.setContentsMargins(8, 12, 8, 12)
-        empty_layout.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label = QLabel(f"{display_name} — {_EMPTY_TEXT}\n(no figure yet)")
         self._empty_label.setObjectName(f"previewEmpty_{source_key}")
-        self._empty_label.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)
         self._empty_label.setStyleSheet(
             "color:#6c757d; border:1px dashed #adb5bd; background:#f8f9fa; "
@@ -152,10 +154,10 @@ class _PreviewCard(QWidget):
         error_page.setObjectName(f"previewErrorPage_{source_key}")
         error_layout = QVBoxLayout(error_page)
         error_layout.setContentsMargins(8, 12, 8, 12)
-        error_layout.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._error_label = QLabel(f"{display_name} — {_UNAVAILABLE_TEXT}")
         self._error_label.setObjectName(f"previewError_{source_key}")
-        self._error_label.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
+        self._error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._error_label.setWordWrap(True)
         self._error_label.setStyleSheet(
             "color:#842029; border:1px solid #f5c2c7; background:#f8d7da; "
@@ -212,13 +214,13 @@ class _PreviewCard(QWidget):
         # KeepAspectRatio + SmoothTransformation per spec; ensure does not exceed viewport.
         scaled = self._orig_pixmap.scaled(
             vp,
-            Qt.KeepAspectRatio,  # type: ignore[attr-defined]
-            Qt.SmoothTransformation,  # type: ignore[attr-defined]
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
         self._image_label.setPixmap(scaled)
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
-        if obj is self._image_label and event.type() == QEvent.Resize:  # type: ignore[attr-defined]
+        if obj is self._image_label and event.type() == QEvent.Type.Resize:
             if (
                 self._orig_pixmap is not None
                 and self._stack.currentWidget() is self._image_page
@@ -326,7 +328,7 @@ class DataFigurePreviewGallery(QWidget):
             self._renderer = render_figure_preview_png
 
         self.setObjectName("dataFigurePreviewGallery")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # type: ignore[attr-defined]
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN, OUTER_MARGIN)
@@ -335,7 +337,7 @@ class DataFigurePreviewGallery(QWidget):
         header = QLabel(
             "<b>Figure previews</b> <span style='color:#6c757d; font-weight:normal;'>(read-only)</span>"
         )
-        header.setTextFormat(Qt.RichText)  # type: ignore[attr-defined]
+        header.setTextFormat(Qt.TextFormat.RichText)
         header.setObjectName("previewGalleryHeader")
         outer.addWidget(header)
         hint = QLabel(
@@ -349,14 +351,14 @@ class DataFigurePreviewGallery(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setObjectName("previewGalleryScroll")
         self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)  # type: ignore[attr-defined]
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._inner = QWidget()
         self._inner.setObjectName("previewGalleryInner")
         # Use grid for viewport-driven mosaic (narrow single column vs wide mosaic).
         self._inner_layout = QGridLayout(self._inner)
         self._inner_layout.setContentsMargins(0, 0, 0, 0)
         self._inner_layout.setSpacing(LAYOUT_SPACING)
-        self._inner_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+        self._inner_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         # Track ordered cards for layout.
         self._ordered_cards: list[_PreviewCard] = []
 
@@ -499,7 +501,7 @@ class DataFigurePreviewGallery(QWidget):
 
     def eventFilter(self, obj, event) -> bool:  # type: ignore[override]
         try:
-            if obj is self._scroll.viewport() and event.type() == QEvent.Resize:  # type: ignore[attr-defined]
+            if obj is self._scroll.viewport() and event.type() == QEvent.Type.Resize:
                 self._arrange_cards()
         except Exception:
             pass
@@ -594,7 +596,7 @@ class DataFigurePreviewGallery(QWidget):
             return
         # Render via injected adapter (S3) — per-card isolated.
         try:
-            png_bytes = self._renderer(fig)  # type: ignore[arg-type]
+            png_bytes = self._renderer(fig)
         except Exception as exc:  # pragma: no cover - exercised via injected failure
             logger.warning("preview render failed for %r: %s", key, exc, exc_info=True)
             card.show_unavailable(type(exc).__name__)

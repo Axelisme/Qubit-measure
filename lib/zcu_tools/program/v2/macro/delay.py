@@ -15,14 +15,14 @@ class DelayRegAuto(TimedMacro):
     """
 
     # fields: time_reg (str), gens (bool), ros (bool)
-    def preprocess(self, prog) -> None:  # type: ignore[override]
+    def preprocess(self, prog) -> None:
         # Resolve early to fail fast on missing/invalid register names.
         prog._get_reg(self.time_reg)
         auto_t = prog.get_max_timestamp(gens=self.gens, ros=self.ros)
         auto_rounded = self.convert_time(prog, auto_t, "auto_t")
         prog.decrement_timestamps(auto_rounded)
 
-    def expand(self, prog):  # type: ignore[override]
+    def expand(self, prog):  # pyright: ignore[reportIncompatibleMethodOverride]
         insts = []
         auto_t_reg = self.t_regs["auto_t"]
         if isinstance(auto_t_reg, Integral):

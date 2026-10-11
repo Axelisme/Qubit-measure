@@ -8,7 +8,6 @@ from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalo
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
@@ -53,6 +52,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
@@ -131,6 +131,7 @@ def build_app_services(
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
     params_for: ParamsFor | None = None,
+    alias_preset: tuple[AliasRow, ...] = (),
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -138,6 +139,14 @@ def build_app_services(
     LiveModel env + ModuleLibrary registration surface). It is only stored, never
     called during construction, so passing the still-initialising Controller is
     safe and keeps the bundle complete (no service built outside this function).
+
+    ``alias_preset`` supplies ordered caller-owned session-memory rows. Omitted
+    or empty presets create an empty table. Softlinks and unbound rows are kept;
+    the first nonempty component snapshot uses the role registry's unique focus
+    candidate for the primary empty row. Explicit table edits disable that
+    one-time initialization. Invalid syntax, duplicate aliases or forward links
+    raise InvalidInputError(alias_invalid) during construction. No device or
+    cache lookup is performed, and each bundle owns its own alias table.
     """
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
@@ -158,7 +167,7 @@ def build_app_services(
         runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
-        alias_rows=(AliasRow("qubit", ""), AliasRow("resonator", "$qubit.resonator")),
+        alias_rows=alias_preset,
         params_for=params_for,
     )
     context = session.context
@@ -233,15 +242,17 @@ def build_app_services(
     )
     run = RunService(
         state,
-        runner,
+        session.runner,
         bus,
         handles,
         writeback,
         gate=operation_gate,
         devices=device.get_connected_devices,
     )
-    analyze = AnalyzeService(state, runner, bus, writeback, handles)
-    post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
+    analyze = AnalyzeService(state, session.runner, bus, writeback, handles)
+    post_analyze = PostAnalyzeService(
+        state, session.runner, bus, handles, writeback=writeback
+    )
     save = SaveService(state, bus, access=access)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
@@ -269,7 +280,7 @@ def build_app_services(
     )
     operation_control = OperationControlFacet(
         handles=handles,
-        progress=progress,
+        progress=session.progress,
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
@@ -299,7 +310,7 @@ def build_app_services(
         operation_control=operation_control,
         handles=handles,
         background=background,
-        progress=progress,
+        progress=session.progress,
         guard=guard,
         device=device,
         device_control=session.device_control,

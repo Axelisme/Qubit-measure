@@ -518,14 +518,18 @@ def test_operation_progress_unknown_total_has_null_percent(fx):
         sock.close()
 
 
-def test_device_setup_builds_request_from_live_info_and_updates(fx):
-    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
+def test_device_setup_builds_request_from_complete_cfg(fx):
+    fx.service.device_control.get_device_info = MagicMock(
         return_value=FakeDeviceInfo(address="none", value=0.0)
     )
-    fx.service.device_control.start_setup_device = MagicMock(return_value=7)  # type: ignore[method-assign]
+    fx.service.device_control.start_setup_device = MagicMock(return_value=7)
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "device.setup", {"name": "bias", "updates": {"value": 1.5}})
+        resp = call(
+            sock,
+            "device.setup",
+            {"name": "bias", "cfg": {"address": "none", "value": 1.5}},
+        )
         assert resp["ok"] is True
         req = fx.service.device_control.start_setup_device.call_args.args[0]
         assert isinstance(req, SetupDeviceRequest)
@@ -537,13 +541,17 @@ def test_device_setup_builds_request_from_live_info_and_updates(fx):
         sock.close()
 
 
-def test_device_setup_rejects_protected_info_update(fx):
-    fx.service.device_control.get_device_info = MagicMock(  # type: ignore[method-assign]
+def test_device_setup_rejects_wrong_info_model_type(fx):
+    fx.service.device_control.get_device_info = MagicMock(
         return_value=FakeDeviceInfo(address="none", value=0.0)
     )
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "device.setup", {"name": "bias", "updates": {"type": "x"}})
+        resp = call(
+            sock,
+            "device.setup",
+            {"name": "bias", "cfg": {"address": "none", "type": "x"}},
+        )
         assert resp["ok"] is False
         assert resp["error"]["code"] == "invalid_params"
     finally:
@@ -693,7 +701,7 @@ def test_device_handlers_dispatch_only_through_device_control_facet():
     }
 
     assert _dispatch_with_device_control(
-        "device.setup", {"name": "bias", "updates": {"value": 2.0}}, dev
+        "device.setup", {"name": "bias", "cfg": {"address": "none", "value": 2.0}}, dev
     ) == {"operation_id": 104}
     assert isinstance(dev.start_setup_device.call_args.args[0], SetupDeviceRequest)
 
@@ -784,38 +792,6 @@ def test_device_mutation_error_path_is_precondition_failed(fx):
         resp = call(sock, "device.disconnect", {"name": "missing"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
-    finally:
-        sock.close()
-
-
-def test_context_md_write_and_delete(fx):
-    md = fx.state.session_env.md
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "context.md_set_attr", {"key": "bias", "value": 0.25})
-        assert resp["ok"] is True
-        assert md.bias == 0.25
-
-        resp = call(sock, "context.md_del_attr", {"key": "bias"}, rid="2")
-        assert resp["ok"] is True
-        assert not hasattr(md, "bias")
-    finally:
-        sock.close()
-
-
-def test_context_ml_delete_delegates(fx):
-    # ADR-0006: there is no raw-dict context.set_ml_* RPC anymore (ml entries are
-    # built/edited via the editor session). Delete still delegates to the context
-    # control facet, not the wider controller.
-    fx.service.context_control.del_ml_module = MagicMock()  # type: ignore[method-assign]
-    fx.service.context_control.del_ml_waveform = MagicMock()  # type: ignore[method-assign]
-    sock = open_client(fx.service.port)
-    try:
-        assert call(sock, "context.ml_del_module", {"name": "m"})["ok"]
-        fx.service.context_control.del_ml_module.assert_called_once_with("m")
-
-        assert call(sock, "context.ml_del_waveform", {"name": "w"}, rid="2")["ok"]
-        fx.service.context_control.del_ml_waveform.assert_called_once_with("w")
     finally:
         sock.close()
 

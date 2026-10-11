@@ -112,10 +112,10 @@ def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
 
     if axis is None:
         if signals.dtype == complex:  # perform on real & imag part
-            signals.real -= np.nanmedian(signals.real)  # type: ignore
-            signals.imag -= np.nanmedian(signals.imag)  # type: ignore
+            signals.real -= np.nanmedian(signals.real)
+            signals.imag -= np.nanmedian(signals.imag)
         else:
-            signals -= np.nanmedian(signals)  # type: ignore
+            signals -= np.nanmedian(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
@@ -124,10 +124,10 @@ def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
         val_mask = ~np.all(np.isnan(signals), axis=0)
         val_signals = signals[:, val_mask]
         if val_signals.dtype == complex:
-            val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)  # type: ignore
-            val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)  # type: ignore
+            val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)
+            val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)
         else:
-            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)  # type: ignore
+            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
         signals[:, val_mask] = val_signals
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
@@ -166,14 +166,14 @@ def minus_mean(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
         return signals
 
     if axis is None:
-        signals -= np.nanmean(signals)  # type: ignore
+        signals -= np.nanmean(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         # minus the mean
         val_mask = ~np.all(np.isnan(signals), axis=0)
-        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)  # type: ignore
+        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
 
@@ -219,13 +219,13 @@ def rescale(signals: NDArray[T_dtype], axis: int | None = None) -> NDArray[T_dty
 
     if axis is None:
         if np.sum(~np.isnan(signals)) > 1:  # at least 2 non-nan values
-            signals /= np.nanstd(signals)  # type: ignore
+            signals /= np.nanstd(signals)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         val_mask = np.sum(~np.isnan(signals), axis=0) > 1
-        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)  # type: ignore
+        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)  # pyright: ignore[reportArgumentType, reportCallIssue]
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
     else:
@@ -488,7 +488,7 @@ def peak_n_avg(
         raise ValueError(f"n should be positive, but get {n}")
 
     if np.sum(~np.isnan(data)) <= n:
-        return np.nanmean(data)  # type: ignore
+        return np.nanmean(data)  # pyright: ignore[reportReturnType]
 
     # Replace NaN with a sentinel that loses the argpartition race so NaN
     # positions are never selected as top-n candidates.

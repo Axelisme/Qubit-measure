@@ -8,36 +8,21 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     DeviceChangedPayload,
 )
-from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from tests.gui.app.measure.remote._helpers import make_ctx
 
 
 def _state() -> State:
     return State(
         SessionEnv(
-            parameters=ParameterContext(
-                point=PointDocument(
-                    format="zcu.parameter-container",
-                    format_version="1.0",
-                    general=PointGeneral(created_at="2026-10-08T00:00:00Z"),
-                ),
-                library=LibrarySnapshot(
-                    ModuleLibraryDocument(
-                        format="zcu.module-library", format_version="1.0"
-                    )
-                ),
-                target=EntryDraft(entry_id="entry"),
-                roles=None,
-            ),
+            parameters=make_ctx().parameters,
             soc=None,
             soccfg=None,
             chip_name="chip",

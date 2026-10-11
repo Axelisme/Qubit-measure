@@ -143,7 +143,7 @@ def t1_delay_axis(
             normalized_points[index] = cast(
                 float,
                 brentq(
-                    lambda x: arc_length(x) - target,
+                    lambda x, target=target: arc_length(x) - target,
                     0.0,
                     1.0,
                     xtol=_ROOT_XTOL,

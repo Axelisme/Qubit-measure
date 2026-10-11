@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from dataclasses import replace
-from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -19,7 +17,6 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec
 from zcu_tools.resources.entry.schema import PointDocument
@@ -35,7 +32,7 @@ from zcu_lab.v2._support.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult
+from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxResult
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter as TwoToneFluxDepAdapter
@@ -186,15 +183,18 @@ def test_current_request_propagates_invalid_parameter_calibration(
         _current_plugin(entrypoint, flux_parameters(half, 2.0), flux_plots)
 
 
-def _request(md: MetaDict | None = None) -> AnalyzeRequest[Any, FluxPickParams]:
-    devs = np.linspace(-5.0, 5.0, 60)
-    freqs = np.linspace(4.0, 5.0, 30)
-    signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
+def _request(
+    parameters: ParameterContext | None = None,
+) -> AnalyzeRequest[FreqFluxResult, FluxPickParams]:
+    devs = np.linspace(-5.0, 5.0, 60, dtype=np.float64)
+    freqs = np.linspace(4.0, 5.0, 30, dtype=np.float64)
+    signals = np.asarray(
+        np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30)), dtype=np.complex128
+    )
     return AnalyzeRequest(
-        run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
+        run_result=FreqFluxResult(values=devs, freqs=freqs, signals=signals),
         analyze_params=FluxPickParams(),
-        md=md if md is not None else MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=parameters,
     )
 
 
@@ -239,12 +239,16 @@ def test_plugin_typed_actions_and_commands_share_committed_state():
     plots.release()
 
 
-def test_equal_seed_cannot_finish_until_a_valid_line_is_committed() -> None:
-    md = MetaDict()
-    md.flx_half = md.flx_int = 0.0
+def test_equal_seed_cannot_finish_until_a_valid_line_is_committed(
+    flux_parameters: FluxParameters,
+) -> None:
+    parameters = flux_parameters(0.0, 0.0)
     plots = Plots(NonPresentingHost())
     plugin = make_flux_pick_plugin(
-        _request(md), force_magnitude=True, plots=plots, result_builder=render_flux_pick
+        _request(parameters),
+        force_magnitude=True,
+        plots=plots,
+        result_builder=render_flux_pick,
     )
     session = plugin.open(ManualOwnerScheduler())
     with pytest.raises(FailedPreconditionError, match="separat"):
@@ -262,29 +266,38 @@ def test_equal_seed_cannot_finish_until_a_valid_line_is_committed() -> None:
     [(OneToneFluxDepAdapter, True), (TwoToneFluxDepAdapter, False)],
 )
 def test_both_adapters_seed_projection_and_publish_named_result_figure(
-    adapter_type, magnitude_only: bool
-):
-    md = MetaDict()
-    md.flx_half = 0.0
-    md.flx_int = 2.0
+    adapter_type: type[OneToneFluxDepAdapter] | type[TwoToneFluxDepAdapter],
+    magnitude_only: bool,
+    flux_parameters: FluxParameters,
+) -> None:
+    parameters = flux_parameters(0.0, 2.0)
     plots = Plots(NonPresentingHost())
-    request = _request(md)
-    bare = request.run_result
-    result_type = (
-        FluxDepResult if adapter_type is OneToneFluxDepAdapter else FreqFluxResult
-    )
-    request = replace(
-        request,
-        run_result=RunRecord(
-            cfg=None,
-            result=result_type(
-                bare.values,
-                bare.freqs,
-                np.asarray(bare.signals, dtype=np.complex128),
+    bare = _request(parameters).run_result
+    if adapter_type is OneToneFluxDepAdapter:
+        plugin = OneToneFluxDepAdapter().make_interactive_plugin(
+            AnalyzeRequest(
+                run_result=RunRecord[FluxDepCfg, FluxDepResult](
+                    cfg=None,
+                    result=FluxDepResult(bare.values, bare.freqs, bare.signals),
+                ),
+                analyze_params=FluxPickParams(),
+                parameters=parameters,
+                predictor=None,
             ),
-        ),
-    )
-    plugin = adapter_type().make_interactive_plugin(request, plots=plots)
+            plots=plots,
+        )
+    else:
+        plugin = TwoToneFluxDepAdapter().make_interactive_plugin(
+            AnalyzeRequest(
+                run_result=RunRecord[FreqFluxCfg, FreqFluxResult](
+                    cfg=None, result=bare
+                ),
+                analyze_params=FluxPickParams(),
+                parameters=parameters,
+                predictor=None,
+            ),
+            plots=plots,
+        )
     assert isinstance(plugin, FluxPickPlugin)
     session = plugin.open(ManualOwnerScheduler())
     state = session.snapshot()

@@ -44,7 +44,13 @@ from zcu_tools.resources.context.library import (
     ModuleLibrary,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry import snapshot, source_path
+from zcu_tools.resources.entry import (
+    DestinationExistsError,
+    snapshot,
+    source_path,
+    validate_path_segment,
+)
+from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.roles import role_registry
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
@@ -102,11 +108,13 @@ class ContextService:
         installation. Its capability stays with the library capture, not a
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
-        alias_rows supplies the app's session-only default table. On the first
-        nonempty cached component snapshot, its empty primary shorthand row gets
+        alias_rows supplies the caller's fallback for each missing-file entry.
+        On its first nonempty snapshot, the empty primary shorthand row gets
         the registry's sole default-focus candidate, or remains empty. Defaults
-        never reset on later point changes. An explicit set_alias_rows command,
-        even before any point, disables this one-time default initialization.
+        never reset on later point changes. Each entry install loads its saved
+        table, or resets this fallback and its first-point initialization. Saved
+        empty rows are authoritative. Explicit set/apply disables initialization
+        until the next entry install.
         """
         self._owner = OwnerThreadGuard()
         self._state = state
@@ -121,7 +129,8 @@ class ContextService:
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._aliases = AliasTable(alias_rows)
+        self._alias_preset = AliasTable(alias_rows).rows
+        self._aliases = AliasTable(self._alias_preset)
         self._aliases_initialized = False
         parameters = state.session_env.parameters
         if parameters is not None and not parameters.source_faults:
@@ -133,11 +142,23 @@ class ContextService:
         """Prepare an opened entry and atomically publish an empty DRAFT.
 
         Prepare setup, the complete point-description cache, and entry-scoped
-        assets before replacing any binding. Failure retains the old binding,
+        assets and saved aliases before replacing any binding. A missing alias
+        file resets the caller preset and first-nonempty-point initialization;
+        a saved table (including empty rows) disables it. Header/structure or
+        alias syntax failures propagate, never falling back to the preset.
+        Failure retains the old binding,
         not deleting an entry already created by resources. Success bumps the
         context once and publishes a switch fact after installation.
         """
         self._owner.assert_owner()
+        saved_aliases = entry.load_aliases()
+        aliases = AliasTable(
+            self._alias_preset
+            if saved_aliases is None
+            else tuple(
+                AliasRow(name, value) for name, value in saved_aliases.aliases.items()
+            )
+        )
         setup = entry.setup
         points = self._load_points(entry)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
@@ -170,6 +191,8 @@ class ContextService:
         self._point = None
         self._library = None
         self._points = points
+        self._aliases = aliases
+        self._aliases_initialized = saved_aliases is not None
         self._publish(parameters, sources, ContextReadiness.DRAFT, active_label="")
         return info
 
@@ -217,23 +240,37 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point; never copy DRAFT. Resource errors
-        propagate. Post-creation binding failure raises PointBindingError from
-        its cause, retaining the point and old binding without retry/deletion.
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        label raises InvalidInputError(point_label_invalid) before source reads or
+        writes, preserving binding, files, ledger and versions. Label safety follows
+        the entry owner's single path component rule. An existing destination
+        raises InvalidInputError with the entry owner's FileExistsError message,
+        preserving the same state. Other resource errors propagate. Post-creation
+        binding failure raises PointBindingError from its cause, retaining the
+        point and old binding without retry/deletion.
         """
         self._owner.assert_owner()
         entry = self._require_open_entry()
+        try:
+            validate_path_segment(request.label, field="label")
+        except ValueError as exc:
+            raise InvalidInputError(
+                str(exc), reason_code="point_label_invalid"
+            ) from exc
         clone = (
             entry.use_point(request.clone_from)
             if request.clone_from is not None
             else None
         )
-        point = entry.new_point(
-            request.label,
-            clone_from=clone,
-            description=request.description,
-            origin=request.origin.origin,
-        )
+        try:
+            point = entry.new_point(
+                request.label,
+                clone_from=clone,
+                description=request.description,
+                origin=request.origin.origin,
+            )
+        except DestinationExistsError as exc:
+            raise InvalidInputError(str(exc)) from exc
         try:
             parameters, library, sources, info = self._prepare_point(
                 entry, request.label, point
@@ -338,11 +375,13 @@ class ContextService:
     ) -> ParameterContext:
         """Capture published point/library/storage and all current alias rows.
 
-        aliases optionally maps alias names to temporary concrete component
-        names. Overrides retain dependent authored links and change only this
+        aliases optionally maps aliases to temporary component or device names.
+        Names need not belong to the point or device catalog. Overrides retain
+        dependent authored links and change only this
         capture, never global rows, versions, publication or selection. Invalid
-        identifiers raise InvalidInputError(alias_invalid). $alias.path reads
-        resolve lazily without consumer declarations or kind checks; missing or
+        identifiers raise InvalidInputError(alias_invalid). $alias returns its
+        name string; $alias.path reads resolve lazily without consumer kind
+        checks. Missing or
         unbound aliases raise RoleResolutionError naming the alias, with no
         concrete-name fallback. Bare concrete paths remain independent.
         The capture never follows later source or alias edits and performs no
@@ -366,7 +405,7 @@ class ContextService:
         return self._aliases.rows
 
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Commit the dialog's complete ordered table on the owner sequence.
+        """Install a complete ordered memory-only table on the owner sequence.
 
         Invalid syntax, duplicate names and non-backward $ links raise
         InvalidInputError(alias_invalid) without changing rows or versions.
@@ -382,6 +421,25 @@ class ContextService:
         if self._aliases.rows != previous:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Explicitly confirm authored rows, saving only when an entry is open.
+
+        On the owner thread, validate syntax/order through AliasTable, then save
+        through the entry before installing memory and publishing changes. EMPTY
+        succeeds in memory only. InvalidInputError(alias_invalid) or storage I/O
+        errors preserve old rows, versions and destination file; storage causes
+        propagate unchanged. Identical rows still save but publish no event.
+        Successful Apply disables default initialization. No ledger or point
+        write occurs; set_alias_rows remains memory-only.
+        """
+        self._owner.assert_owner()
+        candidate = AliasTable(rows)
+        if self._entry is not None:
+            self._entry.save_aliases(
+                EntryAliases(aliases={row.alias: row.value for row in candidate.rows})
+            )
+        self.set_alias_rows(candidate.rows)
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.

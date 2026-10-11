@@ -14,24 +14,24 @@ from zcu_tools.gui.plotting import (
 )
 
 
-def _make_container() -> FigureContainer:
+def _make_container() -> tuple[FigureContainer, QStackedWidget]:
     stack = QStackedWidget()
     placeholder = QLabel("(placeholder)")
     stack.addWidget(placeholder)
-    return FigureContainer(stack, placeholder)
+    return FigureContainer(stack, placeholder), stack
 
 
 def test_attach_existing_figure_to_container(qapp):
     del qapp
     import matplotlib.pyplot as plt
 
-    container = _make_container()
+    container, stack = _make_container()
     fig = plt.figure()
 
     canvas = attach_existing_figure_to_container(fig, container)
 
-    assert container._stack.count() == 2
-    assert container._stack.currentWidget() is canvas
+    assert stack.count() == 2
+    assert stack.currentWidget() is canvas
     assert get_figure_container(fig) is container
 
     plt.close(fig)
@@ -41,7 +41,8 @@ def test_plot_state_snapshot_and_invariants(qapp):
     del qapp
     import matplotlib.pyplot as plt
 
-    container = _make_container()
+    # This test observes the public snapshot, not the stack presentation.
+    container, _ = _make_container()
     fig = plt.figure()
     attach_existing_figure_to_container(fig, container)
 
@@ -65,9 +66,9 @@ def test_two_figures_coexist_in_one_container(qapp):
     """
     del qapp
     import matplotlib.pyplot as plt
-    from qtpy import sip  # type: ignore[attr-defined]
+    from qtpy import sip
 
-    container = _make_container()
+    container, stack = _make_container()
     fig_a = plt.figure()  # run/analyze figure
     fig_b = plt.figure()  # post-analysis figure
     try:
@@ -79,13 +80,13 @@ def test_two_figures_coexist_in_one_container(qapp):
 
         # Same figure -> same (live) canvas reused, not a fresh dead wrapper.
         assert canvas_a_again is canvas_a
-        assert not sip.isdeleted(canvas_a)  # type: ignore[attr-defined]
-        assert not sip.isdeleted(canvas_b)  # type: ignore[attr-defined]
+        assert not sip.isdeleted(canvas_a)
+        assert not sip.isdeleted(canvas_b)
 
         # Both canvases coexist in the stack (placeholder + 2 canvases).
-        assert container._stack.count() == 3
+        assert stack.count() == 3
         # Last attached (A) is the visible one.
-        assert container._stack.currentWidget() is canvas_a
+        assert stack.currentWidget() is canvas_a
         assert get_figure_container(fig_a) is container
         assert get_figure_container(fig_b) is container
     finally:
@@ -99,9 +100,9 @@ def test_attach_self_heals_dead_canvas_wrapper(qapp):
     the dead wrapper."""
     del qapp
     import matplotlib.pyplot as plt
-    from qtpy import sip  # type: ignore[attr-defined]
+    from qtpy import sip
 
-    container = _make_container()
+    container, stack = _make_container()
     fig = plt.figure()
     try:
         canvas = attach_existing_figure_to_container(fig, container)
@@ -111,15 +112,17 @@ def test_attach_self_heals_dead_canvas_wrapper(qapp):
         # not enough here: matplotlib keeps a strong reference so the DeferredDelete
         # never collects the C++ object — ``sip.delete`` is the deterministic kill.
         container.detach_canvas(canvas)
-        sip.delete(canvas)  # type: ignore[attr-defined]
-        QApplication.instance().processEvents()  # type: ignore[union-attr]
-        assert sip.isdeleted(canvas)  # type: ignore[attr-defined]
+        sip.delete(canvas)
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+        app.processEvents()
+        assert sip.isdeleted(canvas)
 
         # Re-attach must not raise; it creates a fresh, live canvas.
         fresh = attach_existing_figure_to_container(fig, container)
         assert fresh is not canvas
-        assert not sip.isdeleted(fresh)  # type: ignore[attr-defined]
-        assert container._stack.currentWidget() is fresh
+        assert not sip.isdeleted(fresh)
+        assert stack.currentWidget() is fresh
     finally:
         plt.close(fig)
 
@@ -145,7 +148,8 @@ def test_registry_evicts_gc_collected_figure(qapp):
     from matplotlib.figure import Figure
     from zcu_tools.gui.plotting.host import _fig_container_registry
 
-    container = _make_container()
+    # Bare-figure eviction observes the registry snapshot, not a canvas stack.
+    container, _ = _make_container()
     fig = Figure()
     _fig_container_registry[fig] = container
     assert get_figure_container(fig) is container
@@ -172,13 +176,13 @@ def test_new_figure_does_not_detach_other_container(qapp):
     from matplotlib.figure import Figure
     from zcu_tools.gui.plotting.host import _fig_container_registry
 
-    container_a = _make_container()
-    container_b = _make_container()
+    container_a, stack_a = _make_container()
+    container_b, stack_b = _make_container()
 
     # A keeps a real, current canvas of its own.
     fig_a = plt.figure()
     canvas_a = attach_existing_figure_to_container(fig_a, container_a)
-    assert container_a._stack.currentWidget() is canvas_a
+    assert stack_a.currentWidget() is canvas_a
 
     # A second figure was once mapped to container_a but its entry then got
     # weak-evicted (the figure is GC'd). With an id-keyed dict this entry would
@@ -192,8 +196,8 @@ def test_new_figure_does_not_detach_other_container(qapp):
     try:
         canvas_b = attach_existing_figure_to_container(fig_b, container_b)
         # B got its own canvas; A's container is untouched (still showing A).
-        assert container_b._stack.currentWidget() is canvas_b
-        assert container_a._stack.currentWidget() is canvas_a
+        assert stack_b.currentWidget() is canvas_b
+        assert stack_a.currentWidget() is canvas_a
     finally:
         plt.close(fig_b)
         plt.close(fig_a)
@@ -207,14 +211,14 @@ def test_attach_ignores_stale_previous_container_entry(qapp):
     import matplotlib.pyplot as plt
     from zcu_tools.gui.plotting.host import _fig_container_registry
 
-    stale_container = _make_container()
-    target_container = _make_container()
+    stale_container, stale_stack = _make_container()
+    target_container, target_stack = _make_container()
 
     # Give the stale container a real, current canvas of its own so we can detect
     # an erroneous placeholder flip.
     other_fig = plt.figure()
     other_canvas = attach_existing_figure_to_container(other_fig, stale_container)
-    assert stale_container._stack.currentWidget() is other_canvas
+    assert stale_stack.currentWidget() is other_canvas
 
     fig = plt.figure()
     try:
@@ -225,8 +229,8 @@ def test_attach_ignores_stale_previous_container_entry(qapp):
         canvas = attach_existing_figure_to_container(fig, target_container)
 
         # The stale entry was dropped without detaching the unrelated container.
-        assert target_container._stack.currentWidget() is canvas
-        assert stale_container._stack.currentWidget() is other_canvas
+        assert target_stack.currentWidget() is canvas
+        assert stale_stack.currentWidget() is other_canvas
         assert get_figure_container(fig) is target_container
     finally:
         plt.close(fig)

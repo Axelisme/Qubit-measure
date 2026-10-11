@@ -119,20 +119,20 @@ def _pid_alive(pid: int) -> bool:
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
-        handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+        handle = ctypes.windll.kernel32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, pid
         )
         if not handle:
             return False
         try:
             code = ctypes.c_ulong()
-            if not ctypes.windll.kernel32.GetExitCodeProcess(  # type: ignore[attr-defined]
+            if not ctypes.windll.kernel32.GetExitCodeProcess(
                 handle, ctypes.byref(code)
             ):
                 return False
             return code.value == STILL_ACTIVE
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+            ctypes.windll.kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -657,7 +657,7 @@ class McpBridge:
                     cwd=str(repo_root),
                     stdout=subprocess.DEVNULL,
                     stderr=stderr,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 )
             else:
                 self._proc = subprocess.Popen(
@@ -788,10 +788,9 @@ class McpBridge:
             }
 
         if shutdown_rpc is not None and self.is_connected:
-            try:
+            # RPC failure must not prevent the OS-signal cleanup below.
+            with suppress(Exception):
                 self.send_rpc_raw(shutdown_rpc, {}, 5.0)
-            except Exception:  # noqa: BLE001 — fall through to signal
-                pass
 
         try:
             if proc is not None:

@@ -1,9 +1,6 @@
 """Recipe adapters propose calibrations for the captured Run environment."""
 
-from collections.abc import Generator
 from dataclasses import dataclass
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -14,22 +11,12 @@ from zcu_tools.gui.app.measure.adapter import (
     PostWritebackRequest,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
-from zcu_tools.gui.app.measure.services.writeback import WritebackService
-from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.entry import ResultEntry, component_registry
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import QubitSchema, ResonatorSchema
-from zcu_lab.definitions import register_all
+from tests.zcu_lab._writeback_support import WritebackSession
+from tests.zcu_lab._writeback_support import writeback_registry as _registry
 from zcu_lab.recipes import RECIPES
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
 from zcu_lab.v2.lookback.core import LookbackResult
@@ -54,12 +41,6 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyRe
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
 
 
-def _registry() -> Registry:
-    registry = Registry()
-    register_all(registry)
-    return registry
-
-
 def _recipe_adapters() -> list[str]:
     registry = _registry()
     return [
@@ -68,60 +49,6 @@ def _recipe_adapters() -> list[str]:
         if registry.create(recipe.adapter_name).capabilities.analysis
         != AnalysisMode.NONE
     ]
-
-
-@dataclass
-class WritebackSession:
-    control: ContextControlFacet
-    context: ContextService
-    service: WritebackService
-
-
-@pytest.fixture
-def session(tmp_path: Path) -> Generator[WritebackSession]:
-    before = registry_state()
-    try:
-        for kind, model in [
-            ("qubit/transmon", QubitSchema),
-            ("resonator", ResonatorSchema),
-        ]:
-            if kind not in component_registry.kinds():
-                component_registry.register(kind, model)
-        installed = registry_state()
-        entry = ResultEntry.create(
-            "entry",
-            result_root=tmp_path / "results",
-            database_root=tmp_path / "Database",
-        )
-        entry.new_point("run-point")
-        entry.new_point("later-point")
-        bus = BaseEventBus()
-        context = ContextService(
-            SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
-            bus,
-            bind_assets=ArbWaveformDatabase.info_at,
-        )
-        context.install_entry(entry)
-        control = ContextControlFacet(context=context)
-        for point in ("run-point", "later-point"):
-            control.use_point(PointUseRequest(point))
-            for index in (1, 2):
-                control.add_component(f"R{index}", "resonator", {})
-                control.add_component(
-                    f"Q{index}",
-                    "qubit/transmon",
-                    {"resonator": f"R{index}", "ext": {"readout_cal": {}}},
-                )
-        control.use_point(PointUseRequest("run-point"))
-        control.set_alias_rows(
-            (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
-        )
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control, entry_ledger=context.entry_ledger)
-        yield WritebackSession(control, context, service)
-        assert registry_state() == installed
-    finally:
-        restore_registry(before)
 
 
 @dataclass(frozen=True)
@@ -296,6 +223,7 @@ def _calibration(name: str) -> Calibration:
 @pytest.mark.parametrize(
     "change_point", [False, True], ids=["rebind", "rebind-and-point"]
 )
+@pytest.mark.io
 def test_recipe_writeback_keeps_run_component_after_environment_change(
     session: WritebackSession, name: str, change_point: bool
 ) -> None:

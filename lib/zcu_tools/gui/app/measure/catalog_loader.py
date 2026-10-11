@@ -14,7 +14,7 @@ import keyword
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from hashlib import sha256
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from threading import get_ident
 from types import CodeType, ModuleType
@@ -59,9 +59,16 @@ class _Source:
 
 
 @dataclass(frozen=True)
+class _NamespaceSource:
+    """An existing namespace package; path is its source directory, not a file."""
+
+    path: Path
+
+
+@dataclass(frozen=True)
 class _Revision:
     token: PreparedCatalogReload
-    sources: dict[str, _Source]
+    sources: dict[str, _Source | _NamespaceSource]
     code: dict[str, CodeType]
 
 
@@ -115,6 +122,10 @@ class _SourceFinder(importlib.abc.MetaPathFinder):
         source = self._revision.sources.get(fullname)
         if source is None:
             raise ModuleNotFoundError(f"No source for reload module {fullname!r}")
+        if isinstance(source, _NamespaceSource):
+            spec = ModuleSpec(fullname, loader=None, is_package=True)
+            spec.submodule_search_locations = [str(source.path)]
+            return spec
         loader = _SourceLoader(source, self._revision.code[fullname], self._retained)
         return importlib.util.spec_from_file_location(
             fullname,
@@ -184,7 +195,7 @@ class SourceExperimentCatalogLoader:
         self._loading = False
         self._prepared: _Revision | None = None
         self._fixed = {
-            name: sha256(source.content).digest()
+            name: source
             for name, source in self._inventory().items()
             if not self._owns(name)
         }
@@ -202,9 +213,10 @@ class SourceExperimentCatalogLoader:
         if self._loading:
             raise CatalogReloadError("A catalog load is already in progress")
 
-    def _inventory(self) -> dict[str, _Source]:
-        inventory: dict[str, _Source] = {}
+    def _inventory(self) -> dict[str, _Source | _NamespaceSource]:
+        inventory: dict[str, _Source | _NamespaceSource] = {}
         for source in self._sources:
+            directories: set[Path] = set()
             for path in source.package_root.rglob("*.py"):
                 parts = path.relative_to(source.package_root).with_suffix("").parts
                 package = parts[-1] == "__init__"
@@ -214,12 +226,24 @@ class SourceExperimentCatalogLoader:
                 if name in inventory:
                     raise CatalogReloadError(f"Ambiguous source module {name!r}")
                 inventory[name] = _Source(path, path.read_bytes(), package)
+                for directory in path.parents:
+                    if directory == source.package_root.parent:
+                        break
+                    directories.add(directory)
+            # Python owns each ancestor package even without an __init__.py.
+            for directory in directories:
+                if (directory / "__init__.py").is_file():
+                    continue
+                parts = directory.relative_to(source.package_root).parts
+                name = ".".join((source.namespace, *parts))
+                if name in inventory:
+                    raise CatalogReloadError(f"Ambiguous source module {name!r}")
+                inventory[name] = _NamespaceSource(directory)
         return inventory
 
-    def _check_fixed(self, sources: dict[str, _Source]) -> None:
-        for name, digest in self._fixed.items():
-            source = sources.get(name)
-            if source is None or sha256(source.content).digest() != digest:
+    def _check_fixed(self, sources: dict[str, _Source | _NamespaceSource]) -> None:
+        for name, original in self._fixed.items():
+            if sources.get(name) != original:
                 raise CatalogReloadError(
                     f"Fixed source {name!r} changed; restart the app",
                     restart_required=True,
@@ -258,6 +282,7 @@ class SourceExperimentCatalogLoader:
                     source.content, str(source.path), "exec", dont_inherit=True
                 )
                 for name, source in owned.items()
+                if isinstance(source, _Source)
             }
         except (OSError, SyntaxError) as exc:
             raise CatalogReloadError(f"Catalog preflight failed: {exc}") from exc
@@ -351,6 +376,8 @@ class SourceExperimentCatalogLoader:
         try:
             # Deferred imports outlive the finder. Remove old owned bytecode too.
             for source in revision.sources.values():
+                if isinstance(source, _NamespaceSource):
+                    continue
                 Path(importlib.util.cache_from_source(str(source.path))).unlink(
                     missing_ok=True
                 )

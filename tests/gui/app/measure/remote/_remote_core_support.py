@@ -9,35 +9,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from qtpy.QtCore import QCoreApplication
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
-from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.remote import (
-    ControlOptions,
-    RemoteControlAdapter,
-)
-from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
-from zcu_lab.definitions import register_all
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
-
-
-def make_ctx() -> SessionEnv:
-    return SessionEnv(
-        md=MagicMock(),
-        ml=MagicMock(),
-        soc=MagicMock(),
-        soccfg=make_mock_soccfg(),
-        res_name="fake_res",
-        result_dir="/tmp/zcu_result",
-        database_path="/tmp/zcu_db/fake_chip/fake_qubit",
-        active_label="ctx001",
-        readiness=ContextReadiness.ACTIVE,
-    )
+from ._helpers import Fixture
 
 
 def make_view() -> MagicMock:
@@ -52,42 +25,8 @@ def make_view() -> MagicMock:
     return view
 
 
-class RemoteCoreFixture:
-    """Hold strong refs to Controller + service to survive GC mid-test."""
-
-    def __init__(self, opts: ControlOptions | None = None) -> None:
-        self.state = State(make_ctx())
-        self.registry = Registry()
-        register_all(self.registry)
-        if not self.registry.has("fake"):
-            self.registry.register("fake", FakeAdapter)
-        self.view = make_view()
-        io_manager = MagicMock(spec=IOManager, has_project=True, has_context=True)
-        io_manager.get_active_label.return_value = "ctx001"
-        self.bus = EventBus()
-        self.ctrl = Controller(
-            state=self.state,
-            registry=self.registry,
-            io_manager=io_manager,
-            view=self.view,
-            bus=self.bus,
-        )
-        if opts is None:
-            opts = ControlOptions(port=0)
-        # tab.list_all now reads active_tab_id off the render view (a view
-        # projection), so the fixture must supply one — mirror _helpers.Fixture.
-        self.service = RemoteControlAdapter(
-            controller=self.ctrl,
-            opts=opts,
-            owner_scheduler=QtOwnerScheduler(),
-            render_view=self.view,
-        )
-
-    def start(self) -> int:
-        return self.service.start()
-
-    def stop(self) -> None:
-        self.service.stop()
+class RemoteCoreFixture(Fixture):
+    """Use the same real entry/point composition as the remote contract suite."""
 
 
 def send(sock: socket.socket, obj: dict[str, Any]) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
 
@@ -595,6 +596,8 @@ class ScalarInputWidget(QWidget):
                 if raw.endswith("."):
                     raw += "0"
             text = f"= {raw}"
+        elif spec.type is str:
+            text = f"= {json.dumps(value.resolved, ensure_ascii=False)}"
         else:
             text = f"= {value.resolved}"
         self._ghost.setText(text)
@@ -604,7 +607,7 @@ class ScalarInputWidget(QWidget):
     def _install_context_menu(self, widget: QWidget | None) -> None:
         if widget is None:
             return
-        if not isinstance(widget, (QAbstractSpinBox, QLineEdit)):
+        if not isinstance(widget, (QAbstractSpinBox, QLineEdit, QComboBox)):
             return
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
@@ -612,7 +615,7 @@ class ScalarInputWidget(QWidget):
         )
 
     def _show_context_menu(
-        self, widget: QAbstractSpinBox | QLineEdit, global_pos: Any
+        self, widget: QAbstractSpinBox | QLineEdit | QComboBox, global_pos: Any
     ) -> None:
         if isinstance(widget, QAbstractSpinBox):
             line_edit = widget.lineEdit()
@@ -637,8 +640,12 @@ class ScalarInputWidget(QWidget):
         expr = "" if value.value is None else str(value.value)
         self._submit(EvalValue(expr=expr))
 
-    def _build_context_menu(self, widget: QLineEdit) -> tuple[QMenu, Any]:
-        menu = widget.createStandardContextMenu()
+    def _build_context_menu(self, widget: QLineEdit | QComboBox) -> tuple[QMenu, Any]:
+        menu = (
+            widget.createStandardContextMenu()
+            if isinstance(widget, QLineEdit)
+            else QMenu(widget)
+        )
         if menu is None:
             raise RuntimeError("QLineEdit.createStandardContextMenu() returned None")
         if not self._supports_eval_mode():
@@ -654,8 +661,8 @@ class ScalarInputWidget(QWidget):
         spec = self._spec
         return (
             spec.editable
-            and self._options is None
-            and spec.type in {int, float, complex}
+            and (spec.type is str or self._options is None)
+            and spec.type in {int, float, complex, str}
         )
 
 

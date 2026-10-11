@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
+from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -57,6 +59,7 @@ class DummyAdapter:
     """
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
+    experiment_tag: ClassVar[str | None] = None
     exp_cls = DummyExp
 
     @classmethod
@@ -96,9 +99,9 @@ class DummyAdapter:
         del req, raw_cfg, context
         return object()
 
-    def load(self, req: LoadDataRequest):
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
         del req
-        return object()
+        raise NotImplementedError("DummyAdapter does not load native runs")
 
     def analyze(self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots):
         del req, plots
@@ -147,6 +150,20 @@ class DummyAdapter:
     ) -> Sequence[ParameterWriteback]:
         del req
         return []
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Reject native analysis persistence unsupported by this collaborator."""
+        raise NotImplementedError("DummyAdapter has no native analysis document")
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Reject native run persistence unsupported by this collaborator."""
+        raise NotImplementedError("DummyAdapter has no native run evidence")
 
     def save(self, req: SaveDataRequest[object]) -> None:
         del req

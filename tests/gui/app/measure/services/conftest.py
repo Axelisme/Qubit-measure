@@ -1,8 +1,10 @@
 """Native role-bound sources for result/analysis service contracts."""
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from pathlib import Path
 
 import pytest
+from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
@@ -13,6 +15,11 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 from zcu_tools.resources.entry.schema import PointDocument
+
+from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
+    native_save_session,
+)
 
 
 class SourceQubit(ComponentSchema):
@@ -55,3 +62,9 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
         role_registry.unregister("source_qubit")
         component_registry.unregister("run-source/qubit")
         assert component_registry.kinds() == before
+
+
+@pytest.fixture
+def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
+    with native_save_session(tmp_path, qapp) as session:
+        yield session

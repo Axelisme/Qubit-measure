@@ -1,41 +1,38 @@
-"""context.ml_rename_module / rename_ml_waveform dispatch handlers."""
+"""Native missing library rename retains the complete published capture."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.cfg_model import ConstWaveformCfg
+from zcu_tools.gui.session.context_types import LibraryChange
 
-from ._helpers import dispatch_handler as _dispatch
-
-
-def test_rename_module_drives_controller():
-    ctrl = MagicMock()
-    _dispatch(ctrl, "context.ml_rename_module", {"old": "a", "new": "b"})
-    ctrl.rename_ml_module.assert_called_once_with("a", "b")
+from ._helpers import Fixture, call, open_client
 
 
-def test_rename_waveform_drives_controller():
-    ctrl = MagicMock()
-    _dispatch(ctrl, "context.ml_rename_waveform", {"old": "w1", "new": "w2"})
-    ctrl.rename_ml_waveform.assert_called_once_with("w1", "w2")
-
-
-def test_rename_clash_is_precondition_failed():
-    ctrl = MagicMock()
-    ctrl.rename_ml_module.side_effect = FailedPreconditionError(
-        "A module named 'b' already exists."
+def test_native_missing_rename_preserves_the_published_library(qapp):
+    fx = Fixture()
+    context = fx.ctrl.context_control
+    context.set_waveform(
+        context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)
     )
-    with pytest.raises(RemoteError) as exc:
-        _dispatch(ctrl, "context.ml_rename_module", {"old": "a", "new": "b"})
-    assert exc.value.code is ErrorCode.PRECONDITION_FAILED
-
-
-def test_rename_missing_is_precondition_failed():
-    ctrl = MagicMock()
-    ctrl.rename_ml_module.side_effect = FailedPreconditionError("No module named 'a'.")
-    with pytest.raises(RemoteError) as exc:
-        _dispatch(ctrl, "context.ml_rename_module", {"old": "a", "new": "b"})
-    assert exc.value.code is ErrorCode.PRECONDITION_FAILED
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        before = call(sock, "context.snapshot")
+        assert before["ok"] is True, before
+        parameters = fx.ctrl.read_context()
+        library = parameters.library.document()
+        version = fx.state.version.get("context")
+        with pytest.raises(KeyError, match="a"):
+            fx.ctrl.apply_library_change(
+                parameters,
+                LibraryChange(
+                    "module", "rename", "Q1.pulses.a", new_path="Q1.pulses.b"
+                ),
+            )
+        assert fx.ctrl.read_context().library.document() == library
+        assert fx.state.version.get("context") == version
+        assert call(sock, "context.snapshot")["result"] == before["result"]
+    finally:
+        sock.close()
+        fx.stop()

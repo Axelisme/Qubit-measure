@@ -47,10 +47,6 @@ from zcu_lab.v2._support.measure.schema_builder import (
 # ---------------------------------------------------------------------------
 
 
-def _make_ml() -> MagicMock:
-    return MagicMock()
-
-
 def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
     spec = CfgSectionSpec(fields=spec_fields)
     value = CfgSectionValue(fields=val_fields or {})
@@ -116,8 +112,10 @@ def test_scalar_eval_value_unresolved_raises():
         {"freq": ScalarSpec(label="Freq", type=float)},
         {"freq": EvalValue(expr="missing_name", resolved=None)},
     )
-    with pytest.raises(RuntimeError, match="freq.*missing_name.*unresolved"):
-        schema_to_raw_dict(s, None, _make_ml())
+    with pytest.raises(RuntimeError) as error:
+        schema_to_raw_dict(s, None)
+    assert "missing_name" in str(error.value)
+    assert "freq" in str(error.value)
 
 
 def test_scalar_eval_value_resolves_against_md_when_no_snapshot():
@@ -288,23 +286,27 @@ def test_sweep_step_mode():
 
 
 def test_sweep_eval_edges_use_resolved_value():
-    from zcu_tools.program.v2 import SweepCfg
-
     s = _schema(
         {"sweep": SweepSpec()},
         {
             "sweep": SweepValue(
-                start=EvalValue(expr="r_f - 10", resolved=5990.0),
-                stop=EvalValue(expr="r_f + 10", resolved=6010.0),
+                start=EvalValue(expr="R1.freq - 10", resolved=5990.0),
+                stop=EvalValue(expr="R1.freq + 10", resolved=6010.0),
                 expts=11,
             )
         },
     )
-    result = schema_to_raw_dict(s, None, _make_ml())
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=6000.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
+    result = schema_to_raw_dict(s, parameters)
     sweep = result["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.start == pytest.approx(5990.0)
-    assert sweep.stop == pytest.approx(6010.0)
+    assert isinstance(sweep, dict)
+    assert sweep["start"] == pytest.approx(5990.0)
+    assert sweep["stop"] == pytest.approx(6010.0)
 
 
 def test_sweep_eval_unresolved_fails_fast():
@@ -318,8 +320,9 @@ def test_sweep_eval_unresolved_fails_fast():
             )
         },
     )
-    with pytest.raises(RuntimeError, match="unresolved"):
-        schema_to_raw_dict(s, None, _make_ml())
+    with pytest.raises(RuntimeError) as error:
+        schema_to_raw_dict(s, None)
+    assert "missing" in str(error.value)
 
 
 def test_sweep_eval_edges_resolve_against_md_when_no_snapshot():
@@ -750,7 +753,7 @@ def test_resolve_sweep_edge_non_numeric_resolved_raises():
         }
     )
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(ValueError, match="not_a_number"):
+    with pytest.raises(RuntimeError, match="numeric"):
         schema_to_raw_dict(s, parameters)
 
 
@@ -781,11 +784,11 @@ def _make_concrete_adapter() -> BaseAdapter:
 
 def _make_ctx(**kwargs):
     from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+    from tests.gui.app.measure.remote._helpers import make_ctx
 
     defaults = dict(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=make_ctx().parameters,
         soc=None,
         soccfg=None,
         result_dir="/res",

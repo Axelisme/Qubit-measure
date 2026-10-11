@@ -100,6 +100,10 @@ class InputEditor:
                 )
                 return CfgSectionValue(fields)
             if isinstance(spec, ReferenceSpec) and isinstance(current, ReferenceValue):
+                if parse_custom_reference_key(current.chosen_key) is None:
+                    raise CfgInputError(
+                        CfgInputReason.READONLY, "ref contents are readonly"
+                    )
                 shape = select_ref_value_spec(spec, current)
                 value = self._choose_custom(shape, current.value, path, label)
                 if not isinstance(value, CfgSectionValue):
@@ -109,7 +113,6 @@ class InputEditor:
                 return replace(
                     current,
                     value=value,
-                    is_overridden=True,
                     resolved_label=None,
                     error=None,
                 )
@@ -191,6 +194,9 @@ class InputEditor:
     def _scalar(self, spec: ScalarSpec, value: CfgInput) -> ScalarValue:
         clean = decode_input(encode_input(value))
         if isinstance(clean, EvalValue):
+            if spec.type is str:
+                # Name aliases are dynamic authored inputs, not numeric $ captures.
+                return EvalValue(clean.expr)
             if (
                 spec.type not in (int, float, complex)
                 or spec.choices is not None
@@ -256,11 +262,8 @@ class InputEditor:
             raise CfgInputError(
                 CfgInputReason.UNKNOWN_PATH, "reference has no active children"
             )
-        if (
-            not current.is_overridden
-            and parse_custom_reference_key(current.chosen_key) is None
-        ):
-            current = self._linked(spec, current.chosen_key)
+        if parse_custom_reference_key(current.chosen_key) is None:
+            raise CfgInputError(CfgInputReason.READONLY, "ref contents are readonly")
         return select_ref_value_spec(spec, current), current
 
     def _reference(
@@ -273,12 +276,18 @@ class InputEditor:
         if path == ("__ref",):
             return self._relink(spec, value)
         if path:
+            if (
+                isinstance(current, ReferenceValue)
+                and parse_custom_reference_key(current.chosen_key) is None
+            ):
+                raise CfgInputError(
+                    CfgInputReason.READONLY, "ref contents are readonly"
+                )
             shape, reference = self._contents(spec, current)
             contents = self._section(shape, reference.value, path, value)
             return replace(
                 reference,
                 value=contents,
-                is_overridden=True,
                 resolved_label=shape.label,
                 error=None,
             )
@@ -287,10 +296,10 @@ class InputEditor:
                 CfgInputReason.INVALID_VALUE, "reference input must be a mapping"
             )
         if "__ref" in value:
-            if value["__ref"] is None and len(value) != 1:
+            if len(value) != 1:
                 raise CfgInputError(
                     CfgInputReason.INVALID_VALUE,
-                    "disabled reference cannot have children",
+                    "reference selection cannot include children",
                 )
             current = self._relink(spec, value["__ref"])
             if len(value) == 1:
@@ -338,7 +347,6 @@ class InputEditor:
         return replace(
             reference,
             value=edited,
-            is_overridden=True,
             resolved_label=shape.label,
             error=None,
         )

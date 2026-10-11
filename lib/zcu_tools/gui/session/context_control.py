@@ -170,7 +170,16 @@ class ContextControlPort(Protocol):
         ...
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
-        """Create from setup/clone and select, preserving attribution/errors."""
+        """Create from setup/clone and select, preserving attribution/errors.
+
+        Existing destination raises InvalidInputError with the entry owner's
+        exists message before writes, preserving binding, files and versions.
+        Unsafe label raises InvalidInputError(point_label_invalid) before source
+        reads or writes, preserving selection, files, ledger and versions.
+        The entry owner defines safe single path segments. Other resource errors
+        propagate; a created point with binding failure is retained and reported
+        as PointBindingError. No entry raises FailedPreconditionError(no_entry).
+        """
         ...
 
     def get_source_binding(self) -> ContextSourceBinding | None:
@@ -194,6 +203,18 @@ class ContextControlPort(Protocol):
         Changed rows publish AliasesChangedPayload after installation; identical
         submissions publish nothing. Either submission disables later default
         initialization. No files, preferences or ledger records are written.
+        """
+        ...
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm the ordered table on the owner thread.
+
+        Validate syntax/order, then atomically save to the opened entry before
+        memory/event installation. EMPTY is memory-only. InvalidInputError or
+        storage errors propagate, retaining old rows, versions and file. Saved
+        empty rows are authoritative on reopen. Identical rows still save but
+        emit no change; successful confirmation disables default initialization.
+        No point, ledger or preferences write occurs.
         """
         ...
 
@@ -313,6 +334,10 @@ class ContextControlFacet(ContextControlPort):
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Commit the dialog's ordered rows through the owning service."""
         self._context.set_alias_rows(rows)
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Confirm rows using the port\'s validate/save/install contract."""
+        self._context.apply_alias_rows(rows)
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._context.list_value_sources()

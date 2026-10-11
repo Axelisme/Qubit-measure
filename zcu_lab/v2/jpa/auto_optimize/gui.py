@@ -27,13 +27,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import EvalValue
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import custom, literal
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
@@ -151,7 +152,7 @@ class JpaAutoOptimizeAdapter(
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(

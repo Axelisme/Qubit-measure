@@ -56,8 +56,34 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SessionServices:
-    """The session-core services every measurement-session app builds on."""
+    """Immutable session services and the infrastructure shared by their callers.
 
+    Fields:
+        runner: Injected operation lifecycle owner for startup, handles, optional
+            exclusion/progress, cancellation hooks and terminal cleanup. Begin
+            operations on the session owner thread; domain policy stays with callers.
+        progress: Injected session progress owner. Publishes live bars by operation
+            and owner id, with reads and listener delivery on the owner thread.
+        soc_connection: SoC connection commands and cached connection queries.
+        simulated_environment: Explicit simulated SoC/device/predictor setup.
+        predictor: Predictor installation and calculation commands.
+        predictor_control: Narrow predictor command/query/event facade.
+        progress_control: Narrow owner-keyed progress query/subscription facade.
+        context: Entry/point binding and fixed parameter capture owner.
+        context_control: Narrow parameter and alias command/query facade.
+        device: Device lifecycle commands and cached device queries.
+        device_control: Narrow device command/query/progress/event facade.
+        setup_control: Entry/point setup and independent SoC command facade.
+        settings: Entry opening/creation and remembered setup preferences.
+        values: Read-only lookup of the session value-source registry.
+        value_sources: Binder publishing cached owner-specific value sources.
+
+    ``runner`` and ``progress`` are the exact instances supplied to
+    ``build_session_services``; this bundle does not create or replace them.
+    """
+
+    runner: OperationRunner
+    progress: ProgressService
     soc_connection: SoCConnectionService
     simulated_environment: SimulatedEnvironmentCoordinator
     predictor: PredictorService
@@ -98,13 +124,17 @@ def build_session_services(
     a global Database selection. ``runner`` is the shared
     OperationRunner (ADR-0066) used by DeviceService for operation lifecycle;
     ``project_root`` anchors generated result/database paths and result-scope
-    discovery;
+    discovery. The returned bundle retains the exact ``runner`` and ``progress``
+    instances so app-specific operation clients can use the same infrastructure;
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to a new session-owned
     DeviceManager. Callers sharing drivers must supply the same registry.
-    alias_rows supplies the app's ordered session-memory defaults; ContextService
-    initializes an empty primary row once from the registered sole candidate.
-    Empty rows enable no aliases. Syntax/order errors propagate at construction.
+    alias_rows supplies the caller's ordered fallback for each entry without a
+    saved alias table. ContextService initializes an empty primary row on that
+    entry's first nonempty point from the registered sole candidate. Saved tables
+    are authoritative, including empty rows. Explicit Apply saves to the entry;
+    ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
+    Syntax/order errors propagate at construction.
     params_for is the user-owned read-only component-to-simulator parameter
     conversion; None disables component prefill, not explicit-parameter queries.
     """
@@ -154,6 +184,8 @@ def build_session_services(
         device=device_control,
     )
     return SessionServices(
+        runner=runner,
+        progress=progress,
         soc_connection=soc_connection,
         simulated_environment=simulated_environment,
         predictor=predictor,

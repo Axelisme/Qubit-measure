@@ -492,17 +492,13 @@ class ReferenceValue:
 
     chosen_key is a canonical custom key or a catalog/role path. value is its
     section payload; an empty linked section can await catalog resolution.
-    is_overridden preserves edited content instead of following this source.
+    Custom keys select editable inline content; all other keys follow a readonly source.
     resolved_label names the published shape, or None when unresolved. error
     is a publication diagnostic, or None.
     """
 
     chosen_key: str
     value: CfgSectionValue
-    # True when chosen_key names a library entry but the user has edited value
-    # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
-    # the override survives reload; False for pure library refs and <Custom:> refs.
-    is_overridden: bool = False
     # Resolution metadata belongs to the displayed snapshot, not the live catalog.
     resolved_label: str | None = field(default=None, kw_only=True)
     error: str | None = field(default=None, kw_only=True)

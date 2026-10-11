@@ -194,6 +194,12 @@ class CfgEditing(Protocol):
         self, expected_revision: CfgRevision, path: CfgPath, label: str
     ) -> CfgObservation: ...
 
+    def convert_reference_to_inline(
+        self, expected_revision: CfgRevision, path: CfgPath
+    ) -> CfgObservation:
+        """Freeze a valid published ref as same-shape inline content; see CfgResource."""
+        ...
+
     def reset(self, expected_revision: CfgRevision) -> CfgObservation: ...
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation: ...
@@ -332,6 +338,54 @@ class CfgResource:
         except CfgInputError as exc:
             raise CfgInputError(exc.reason, str(exc), path=path) from exc
         return self._commit_inputs(editor.schema, source)
+
+    def convert_reference_to_inline(
+        self, expected_revision: CfgRevision, path: CfgPath
+    ) -> CfgObservation:
+        """Publish a same-shape inline copy of a valid ref at this revision.
+
+        Uses only the current publication, not fresh source values. Nested ref,
+        Eval and range controls freeze recursively. Unknown paths raise UNKNOWN_PATH;
+        ref ancestors raise READONLY; inline/disabled/Invalid/Unavailable targets
+        raise CfgInputError INVALID_VALUE. Rejection leaves inputs/publication intact.
+        Existing revision, mutation and notification preconditions apply.
+        """
+        from .resolved import freeze_resolved_value
+        from .tree import replace_value_path
+
+        _validate_path(path)
+        self._check_command(expected_revision)
+        node = self._observation.tree
+        for key in path:
+            if node.mode == "ref":
+                raise CfgInputError(
+                    CfgInputReason.READONLY, "ref contents are readonly", path=path
+                )
+            if key not in node.children:
+                raise CfgInputError(
+                    CfgInputReason.UNKNOWN_PATH, "unknown reference path", path=path
+                )
+            node = node.children[key]
+        if (
+            not path
+            or node.mode != "ref"
+            or not node.valid
+            or self._observation.status is CfgStatus.UNAVAILABLE
+        ):
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE,
+                "conversion requires a valid published ref",
+                path=path,
+            )
+        try:
+            value = freeze_resolved_value(node.value)
+        except RuntimeError as exc:
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE, str(exc), path=path
+            ) from exc
+        inputs = deepcopy(self._inputs)
+        replace_value_path(inputs.value, ".".join(path), value)
+        return self._commit_inputs(inputs, self._resolution())
 
     def _commit_inputs(
         self, inputs: CfgSchema, source: CfgResolution
@@ -486,7 +540,7 @@ class CfgResource:
         source = self._resolution() if source is None else source
         failures: list[Exception] = []
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             try:
                 return source.evaluate_expression(expression)
             except InvalidInputError:
@@ -652,15 +706,20 @@ class CfgResource:
             prepared.append((resource, candidate, observation))
         for resource, candidate, observation in prepared:
             resource._install_refresh(candidate, observation)
-        for resource in members:
+        CfgResource._notify_group(members)
+        return tuple(deepcopy(observation) for _, _, observation in prepared)
+
+    @staticmethod
+    def _notify_group(resources: Sequence[CfgResource]) -> None:
+        """Block mutations across the whole group until all notifications finish."""
+        for resource in resources:
             resource._notifying += 1
         try:
-            for resource in members:
+            for resource in resources:
                 resource._notify()
         finally:
-            for resource in members:
+            for resource in resources:
                 resource._notifying -= 1
-        return tuple(deepcopy(observation) for _, _, observation in prepared)
 
 
 def _validate_path(path: object) -> None:

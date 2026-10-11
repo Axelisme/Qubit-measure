@@ -573,11 +573,23 @@ def test_tree_includes_immutable_literal_fields(qapp):
 
 
 def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.remote.cfg_observation import (
         build_cfg_observation,
     )
+    from zcu_tools.gui.cfg.model import DirectValue
 
-    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
+    from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+
+    cfg = OneToneFluxDepAdapter().make_default_cfg(
+        SessionEnv(parameters=None, soc=None, soccfg=None)
+    )
+    devices = cfg.value.fields["dev"]
+    assert isinstance(devices, CfgSectionValue)
+    devices.fields["flux_dev"] = DirectValue("flux_yoko")
+    ctrl = MagicMock()
+    ctrl.list_device_names.return_value = ["flux_yoko", "flux_yoko_2"]
+    root = _make_draft(ctrl, cfg.spec, cfg.value)
     flux_dev = _node(build_cfg_observation(root, "dev"), "flux_dev")
     assert flux_dev["input"]["resolved"] == "flux_yoko"
     assert flux_dev["choices"] == ["flux_yoko", "flux_yoko_2"]
@@ -653,15 +665,12 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
 def _fluxdep_root(device_names: list[str]):
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.get_current_md.return_value = ctx.md
     ctrl.list_device_names.return_value = list(device_names)
     return _make_draft(ctrl, cfg.spec, cfg.value)
 

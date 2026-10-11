@@ -26,15 +26,15 @@ def instant_plot(fig: Figure) -> None:
 
     figsize = fig.get_size_inches()
 
-    canvas.toolbar_visible = False  # type: ignore
-    canvas.header_visible = False  # type: ignore
-    canvas.footer_visible = False  # type: ignore
-    canvas.layout.width = f"{int(figsize[0] * fig.dpi)}px"  # type: ignore
-    canvas.layout.height = f"{int(figsize[1] * fig.dpi)}px"  # type: ignore
-    canvas._handle_message(canvas, {"type": "refresh"}, [])  # type: ignore
-    canvas._handle_message(canvas, {"type": "draw"}, [])  # type: ignore
-    canvas._handle_message(canvas, {"type": "send_image_mode"}, [])  # type: ignore
-    canvas._handle_message(canvas, {"type": "initialized"}, [])  # type: ignore
+    canvas.toolbar_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    canvas.header_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    canvas.footer_visible = False  # pyright: ignore[reportAttributeAccessIssue]
+    canvas.layout.width = f"{int(figsize[0] * fig.dpi)}px"  # pyright: ignore[reportAttributeAccessIssue]
+    canvas.layout.height = f"{int(figsize[1] * fig.dpi)}px"  # pyright: ignore[reportAttributeAccessIssue]
+    canvas._handle_message(canvas, {"type": "refresh"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    canvas._handle_message(canvas, {"type": "draw"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    canvas._handle_message(canvas, {"type": "send_image_mode"}, [])  # pyright: ignore[reportAttributeAccessIssue]
+    canvas._handle_message(canvas, {"type": "initialized"}, [])  # pyright: ignore[reportAttributeAccessIssue]
 
     display(canvas)
 
@@ -58,7 +58,7 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
 
     # Save the figure data to the sink, using the frame format and dpi.
     writer.fig.savefig(
-        writer._proc.stdin,  # type: ignore
+        writer._proc.stdin,  # pyright: ignore[reportAttributeAccessIssue]
         format=writer.frame_format,
         dpi=writer.dpi,
         **savefig_kwargs,
