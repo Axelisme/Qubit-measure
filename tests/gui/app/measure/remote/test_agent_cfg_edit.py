@@ -718,9 +718,15 @@ def test_holder_edits_resets_and_runs_current_cfg_without_ref(live_tab):
     fixture, tab_id = live_tab
     sock = open_client(fixture.service.port)
     try:
-        observe_run_inputs(
-            fixture, tab_id, lambda method, params: call(sock, method, params)["result"]
-        )
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("soc.info", {"include_cfg": True}),
+        ):
+            observed = call(sock, method, params)
+            assert observed["ok"], observed
+        for device in call(sock, "device.list")["result"]["devices"]:
+            observed = call(sock, "device.snapshot", {"name": device["name"]})
+            assert observed["ok"], observed
         edited = call(sock, "tab.edit_cfg", {
             "tab_id": tab_id, "edits": [{"path": ["gain"], "value": 0.75}]
         })
