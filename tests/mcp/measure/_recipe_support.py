@@ -52,10 +52,15 @@ def section(**children: dict[str, Any]) -> dict[str, Any]:
 
 
 def publish_reference_locks(node: object, *, readonly: bool = False) -> None:
-    """Publish ref modes and propagate source locks without clearing static locks.
+    """Update modes and locks in a recording cfg subtree, in place.
 
-    These recording trees select library sources; they do not simulate conversion
-    back to inline. Existing leaf locks remain intact when a source is selected.
+    ``node`` is an observation dict with a boolean ``readonly`` and optional
+    ``children`` dict of observations. Reference nodes carry a string or None
+    ``ref``: library references use ref mode, custom references use inline mode,
+    and None disables the reference. ``readonly`` carries an ancestor lock.
+    Descendants of library references, literals and existing static locks stay
+    readonly. These recording trees do not simulate conversion back to inline.
+    Raise TypeError for malformed nodes, references or children.
     """
     if not isinstance(node, dict):
         raise TypeError("Recording cfg nodes must be mappings")
