@@ -67,10 +67,10 @@ def acquire(run: Run[TraceCfg]) -> Trace:
         [0],
         [8, 9, 10, 11],
     )
-    return Trace(
-        np.array(grids[run.cfg.index], dtype=float),
-        np.array(values[run.cfg.index], dtype=complex),
-    )
+    signal = np.array(values[run.cfg.index], dtype=complex)
+    if run.cfg.tag == "synthetic/calibration":
+        signal[:] = 999
+    return Trace(np.array(grids[run.cfg.index], dtype=float), signal)
 
 
 def save_trace(source: Completed[TraceCfg, Trace], destination: Path) -> None:
@@ -99,11 +99,13 @@ def synthetic_run(
     inputs: Inputs,
     root: Path,
     terminal: Literal["done", "stopped", "failed", "aborted"] = "done",
+    *,
+    run_id: str = RUN_ID,
 ) -> tuple[Engine[Calibrated], T1Plan, RunIdentity, RunPaths]:
     plan = make_plan(inputs).model_copy(update={"fluxes": (1.0, 1.1, 1.2, 1.3)})
     metadata = native_metadata()
     identity = RunIdentity(
-        RUN_ID, metadata.provenance, str(plan.snapshot.entry_id), plan.snapshot.point
+        run_id, metadata.provenance, str(plan.snapshot.entry_id), plan.snapshot.point
     )
     paths = RunPaths(root / "metadata", root / "data")
     clock = ManualClock()
@@ -147,7 +149,7 @@ def synthetic_run(
         )
         yield from env.run(acquire, TraceCfg(state, "twotone/ge/t1"), save=save_trace)
         if state == 3:
-            clock.on_wait = lambda _signal: engine.stop(RUN_ID)
+            clock.on_wait = lambda _signal: engine.stop(run_id)
             yield from env.wait_until(clock.now() + timedelta(seconds=1))
         return Next(
             T1Point(

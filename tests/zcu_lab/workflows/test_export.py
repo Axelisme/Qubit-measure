@@ -336,3 +336,75 @@ def test_labber_allocation_failure_keeps_native_and_full_ledger_record(
         },
     ]
     assert list(outside.iterdir()) == []
+
+
+def test_opaque_workflow_id_keeps_native_writer_rejection_and_labber_success(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    run_id = "opaque-workflow"
+    engine, plan, identity, paths = synthetic_run(inputs, tmp_path, run_id=run_id)
+    assert engine.execute(run_id).lifecycle == "done"
+    canonical = engine.records(run_id)
+    snapshot = framework.FluxdepExportSnapshot(
+        identity, paths, plan.snapshot, SAVED_AT, None
+    )
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
+    ledger = RecordsLedger(records_dir, entry_id=str(plan.snapshot.entry_id))
+    layout = SaveLayout(
+        result_path=tmp_path / "result",
+        database_path=tmp_path / "database",
+        run_id=run_id,
+        point=plan.snapshot.point,
+        saved_at=SAVED_AT,
+    )
+    report = host.export_fluxdep_run(
+        run_id,
+        engine=engine,
+        request=host.FluxdepExportRequest(
+            snapshot,
+            partial(
+                science.prepare_t1_fluxdep_export, plan=plan, data_root=paths.data_root
+            ),
+            layout,
+            ledger,
+            "gui",
+            SAVED_AT,
+        ),
+    )
+    native, labber = report.outputs
+    assert native.status == "failed" and native.path == paths.data_root / "merged.h5"
+    assert (
+        native.error
+        and "ValueError" in native.error
+        and "run_id" in native.error
+        and "UTC timestamp" in native.error
+    )
+    assert not (paths.data_root / "merged.h5").exists()
+    assert labber.status == "saved" and labber.path is not None and labber.error is None
+    loaded = load_grouped_labber_data(
+        str(labber.path), required_variables=("signal", "time", "t1")
+    )
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("signal")].z,
+        [
+            [1 + 2j, 2 + 3j, complex(np.nan, np.nan)],
+            [4 + 5j, 6 + 7j, complex(np.nan, np.nan)],
+            [complex(np.nan, np.nan)] * 3,
+            [complex(np.nan, np.nan)] * 3,
+        ],
+    )
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("time")].z,
+        [[0, 1e-6, 2e-6], [0, 3e-6, np.nan], [np.nan] * 3, [np.nan] * 3],
+    )
+    np.testing.assert_array_equal(
+        loaded.variables[DataVariable("t1")].z, [20e-6, np.nan, np.nan, np.nan]
+    )
+    event = ledger.events()[0]
+    assert isinstance(event.payload, SavedPayload)
+    assert [out.status for out in event.payload.outputs] == ["failed", "saved"]
+    assert event.payload.labber_path == str(labber.path) and report.ledger_error is None
+    status = engine.status()
+    assert status is not None and status.lifecycle == "done"
+    assert engine.records(run_id) == canonical
