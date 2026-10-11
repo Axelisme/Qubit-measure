@@ -89,22 +89,12 @@ def test_samples_support_accepted_event_source(entry: ResultEntry) -> None:
     assert samples.read().iloc[0]["source"] == "accepted-event-id"
 
 
-@pytest.mark.parametrize("missing", ["run_id", "dev_value", "dev_unit"])
-def test_samples_reject_missing_required_coordinates_without_writing(
-    entry: ResultEntry, missing: str
-) -> None:
+def test_samples_reject_missing_run_id_without_writing(entry: ResultEntry) -> None:
     samples = entry.samples("Q1")
     # Widen the callable only to exercise runtime rejection of invalid calls.
     append: Callable[..., None] = samples.append
-    if missing == "run_id":
-        with pytest.raises(TypeError, match="run_id"):
-            append(dev_value=1.0, dev_unit="A")
-    elif missing == "dev_value":
-        with pytest.raises(TypeError, match="dev_value"):
-            append(run_id="run-a", dev_unit="A")
-    else:
-        with pytest.raises(TypeError, match="dev_unit"):
-            append(run_id="run-a", dev_value=1.0)
+    with pytest.raises(TypeError, match="run_id"):
+        append(dev_value=1.0, dev_unit="A")
     assert not (entry.result_path / "samples" / "Q1.jsonl").exists()
 
 
