@@ -8,10 +8,12 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeResult,
+    ParameterWriteback,
     PostWritebackRequest,
     SampleWriteback,
     WritebackRequest,
 )
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.types import SessionEnv
@@ -381,5 +383,38 @@ def test_fixed_bias_adapter_accepts_sample_from_run_capture(
         assert session.entry.samples("Q2").latest("run-sample") is None
         assert session.control.read_context().value("$qubit") == "Q2"
         assert session.control.read_target(captured.target).value("Q1.freq") is None
+    finally:
+        draft.teardown()
+
+
+@pytest.mark.parametrize(
+    "name", ["twotone/t1", "twotone/t2ramsey", "twotone/t2echo", "twotone/freq"]
+)
+def test_fixed_bias_adapter_without_capture_keeps_parameters_and_rejects_apply(
+    session: WritebackSession, name: str
+) -> None:
+    adapter = _registry().create(name)
+    calibration = _calibration(name)
+    proposals = adapter.get_writeback_items(
+        WritebackRequest(
+            calibration.source,
+            calibration.analysis,
+            SessionEnv(parameters=None, soc=None, soccfg=None),
+        )
+    )
+    assert all(isinstance(item, ParameterWriteback) for item in proposals)
+    assert {item.target_name: item.proposed_value for item in proposals} == (
+        calibration.scalars
+    )
+    draft = session.service.create_draft(
+        proposals, parameters=None, experiment_name=name, run_id="loaded-run"
+    )
+    events = session.entry.ledger.events()
+    try:
+        assert draft.unavailable_reasons == ()
+        with pytest.raises(FailedPreconditionError, match="captured context"):
+            draft.apply()
+        assert session.entry.ledger.events() == events
+        assert session.entry.samples("Q1").latest("loaded-run") is None
     finally:
         draft.teardown()
