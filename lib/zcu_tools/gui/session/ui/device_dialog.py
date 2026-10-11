@@ -298,7 +298,7 @@ class DeviceDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter, stretch=1)
 
         # --- Left side: List + Management ---

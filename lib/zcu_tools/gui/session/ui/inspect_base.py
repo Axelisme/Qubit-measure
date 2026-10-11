@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Never
 import yaml
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QFont  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QInputDialog,
@@ -193,7 +193,7 @@ class InspectDialogBase(QDialog):
         # Remember current selection to restore after rebuild
         prev_item = self._ml_tree.currentItem()
         prev_data = (
-            prev_item.data(0, Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
+            prev_item.data(0, Qt.ItemDataRole.UserRole)
             if prev_item is not None
             else None
         )
@@ -218,11 +218,11 @@ class InspectDialogBase(QDialog):
                 continue
             group_item = QTreeWidgetItem(self._ml_tree, [group_label])
             group_item.setFont(0, bold)
-            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # type: ignore[attr-defined]
+            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             group_item.setExpanded(True)
             for name in store:
                 child = QTreeWidgetItem(group_item, [name])
-                child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))  # type: ignore[attr-defined]
+                child.setData(0, Qt.ItemDataRole.UserRole, (group_label, name))
                 if prev_data == (group_label, name):
                     restore_item = child
 

@@ -188,13 +188,17 @@ def _snapshot(
             Figure() if has_figure and has_analyze_result else None
         )
     else:
-        figure_obj = figure  # type: ignore[assignment]
+        from matplotlib.figure import Figure
+
+        assert figure is None or isinstance(figure, Figure)
+        figure_obj = figure
     if post_figure is _DEFAULT_PARAMS:
         from matplotlib.figure import Figure as _Fig2
 
         post_figure_obj: Figure | None = _Fig2() if has_post_analyze_result else None
     else:
-        post_figure_obj = post_figure  # type: ignore[assignment]
+        assert post_figure is None or isinstance(post_figure, Figure)
+        post_figure_obj = post_figure
 
     # Capabilities include load_data
     caps = AdapterCapabilities(
