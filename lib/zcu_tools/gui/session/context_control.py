@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
-from zcu_tools.gui.session.context_types import SavedPoint
-
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
     from zcu_tools.format_version import YamlMap, YamlValue
@@ -19,6 +17,7 @@ if TYPE_CHECKING:
         LibraryChange,
         PointCreateRequest,
         PointUseRequest,
+        SavedPoint,
         WorkingPointInfo,
     )
     from zcu_tools.gui.session.services.context import ContextService
@@ -367,11 +366,9 @@ class ContextControlFacet(ContextControlPort):
         return self._context.get_entry_info()
 
     def current_point_label(self) -> str | None:
-        # The published parameters' target is the selected point, if any.
+        # Published parameters exist only while a saved point is selected.
         parameters = self._context.get_session_env().parameters
-        if parameters is None or not isinstance(parameters.target, SavedPoint):
-            return None
-        return parameters.target.point
+        return None if parameters is None else parameters.target.point
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)
