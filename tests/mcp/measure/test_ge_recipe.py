@@ -16,7 +16,7 @@ from zcu_tools.mcp.measure.recipe import RecipeAnalysis, RecipeRun, RecipeSessio
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_actual_support import cfg_value
-from ._recipe_support import PNG, LookbackGui, scalar
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar
 from ._support import MeasureClient, full_execution_reply, make_client
 
 RAW_REPORT = SaveReport(
@@ -114,10 +114,12 @@ class GeGui(LookbackGui):
         modules["probe_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": "<Custom:Pulse>",
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
+        publish_reference_locks(modules["probe_pulse"])
 
     def _observations(self):
         observations = super()._observations()
