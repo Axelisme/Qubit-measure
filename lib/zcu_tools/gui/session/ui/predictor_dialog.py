@@ -196,9 +196,9 @@ class PredictorDialog(QDialog):
         self._browse_btn = QPushButton("Browse")
         self._browse_btn.clicked.connect(self._on_browse_file)
         params_path_row.addWidget(self._browse_btn)
-        params_path_holder = QWidget()
-        params_path_holder.setLayout(params_path_row)
-        model_form.addRow("params.json:", params_path_holder)
+        # Add the row layout directly: a holder widget's default layout margins
+        # squeezed the edit and buttons to a few pixels inside the form row.
+        model_form.addRow("params.json:", params_path_row)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
         # ranges + many decimals so exploratory inputs are accepted; the only hard
@@ -344,6 +344,7 @@ class PredictorDialog(QDialog):
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
+        self._status_label.setObjectName("predictor_status")
         left_layout.addWidget(self._status_label)
 
         # ── Remove + Close on one horizontal row (saves vertical space) ────
@@ -630,7 +631,7 @@ class PredictorDialog(QDialog):
         else:
             self._flux_half = None
             self._flux_period = None
-            self._set_status("Not loaded", error=False)
+            self._set_hint("Not loaded")
             self._clear_predictor_display()
         self._update_active_label()
         self._sync_calibration_button()
@@ -1449,6 +1450,11 @@ class PredictorDialog(QDialog):
         self._status_label.setText(msg)
         color = "red" if error else "green"
         self._status_label.setStyleSheet(f"color: {color};")
+
+    def _set_hint(self, msg: str) -> None:
+        """Show a neutral state, such as no model loaded, in gray."""
+        self._status_label.setText(msg)
+        self._status_label.setStyleSheet("color: gray;")
 
     def _update_active_label(self) -> None:
         """Reflect whether a predictor is currently installed (active/inactive).
