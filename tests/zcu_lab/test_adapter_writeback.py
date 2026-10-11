@@ -265,7 +265,9 @@ def test_recipe_writeback_keeps_run_component_after_environment_change(
     assert {
         item.target_name for item in proposals
     } == scalars.keys() | calibration.modules.keys()
-    draft = session.service.create_draft(proposals, parameters=captured, experiment_name="test/writeback")
+    draft = session.service.create_draft(
+        proposals, parameters=captured, experiment_name="test/writeback"
+    )
     try:
         receipt = draft.apply()
         destination = session.control.read_target(captured.target)

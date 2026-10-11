@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
+    from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
+    from zcu_tools.resources.entry.writeback import WritebackEvidence, WritebackItem
 
 
 class ContextControlPort(Protocol):
@@ -98,6 +100,33 @@ class ContextControlPort(Protocol):
         requires that memory draft to remain selected. Supplied roles stay fixed;
         cross-entry, stale draft, missing point, schema and I/O errors propagate.
         No versions or events are published.
+        """
+        ...
+
+    def read_sample(self, target: ContextTarget, component: str, run_id: str) -> JsonObject | None:
+        """Read the latest entry sample for a run through the sample owner.
+
+        No selection/publication changes occur. Target admission, unsafe names,
+        invalid run_id, corrupt history and I/O failures propagate. A missing row
+        returns None. SavedPoint and EntryDraft read the same entry JSONL history.
+        """
+        ...
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Accept at the fixed target through the context owner and shared loop.
+
+        SavedPoint parameter/library values persist; EntryDraft values stay in
+        memory. Both append samples to entry JSONL; draft samples use point=None. Successful prefix
+        writes publish before later failures. Item failure raises
+        WritebackApplyError with accepted event_id, applied count and original
+        cause. Target admission and ledger append errors propagate unchanged.
+        No implicit point creation, saving, rollback or retry is provided.
         """
         ...
 
@@ -253,6 +282,20 @@ class ContextControlFacet(ContextControlPort):
     ) -> ParameterContext:
         """Read a captured target using ContextControlPort's current-value policy."""
         return self._context.read_target(target, roles=roles)
+
+    def read_sample(self, target: ContextTarget, component: str, run_id: str) -> JsonObject | None:
+        """Use the context owner's entry JSONL read contract."""
+        return self._context.read_sample(target, component, run_id)
+
+    def apply_writeback(
+        self,
+        target: ContextTarget,
+        items: tuple[WritebackItem, ...],
+        *,
+        evidence: WritebackEvidence,
+    ) -> str:
+        """Use ContextControlPort's ordered acceptance and prefix contract."""
+        return self._context.apply_writeback(target, items, evidence=evidence)
 
     def set_parameter(
         self,

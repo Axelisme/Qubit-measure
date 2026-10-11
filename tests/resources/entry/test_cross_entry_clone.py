@@ -55,7 +55,6 @@ def foreign_recorded_point(
                 AcceptedWrite(path="Q1.rate", value=5300.0),
                 AcceptedWrite(path="Q1.duration", value=12.0),
             ),
-            
         ),
     )
     foreign.ledger.append(event, record={"fit": {"samples": [1, True, None, "µ"]}})
@@ -201,7 +200,6 @@ def test_clone_imports_distinct_library_and_point_events(
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.waveforms.base.length", value=0.05),),
-            
         ),
     )
     foreign.ledger.append(second, record={"length": 0.05})

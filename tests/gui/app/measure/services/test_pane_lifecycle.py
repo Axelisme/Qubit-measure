@@ -453,9 +453,7 @@ def test_ge_real_fit_and_post_publish_separate_named_panes_and_writebacks(
         parameters=_ge_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
-    writeback = WritebackService(
-        MagicMock(), MagicMock()
-    )
+    writeback = WritebackService(MagicMock(), MagicMock())
     primary_service, primary_bg = _analyze_service(state, writeback, bus)
     params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)
     fit_plots = Plots(NonPresentingHost())

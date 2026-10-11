@@ -13,9 +13,8 @@ from zcu_tools.resources.entry import (
     JsonObject,
     PointView,
     ResultEntry,
+    writeback,
 )
-
-from zcu_tools.resources.entry import writeback
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 

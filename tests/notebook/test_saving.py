@@ -9,7 +9,6 @@ from unittest.mock import Mock
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.resources.entry import writeback
 from zcu_tools.cfg_model import ConstWaveformCfg, DirectReadoutCfg, PulseSpec
 from zcu_tools.datafile import (
     AnalysisDocument,
@@ -41,6 +40,7 @@ from zcu_tools.resources.entry import (
     role_registry,
     snapshot,
     source_path,
+    writeback,
 )
 from zcu_tools.resources.entry.schema import PointDocument
 

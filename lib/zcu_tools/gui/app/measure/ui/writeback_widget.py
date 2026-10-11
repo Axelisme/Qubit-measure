@@ -292,6 +292,8 @@ class WritebackWidget(QWidget):
         self,
         items: Sequence[WritebackItem],
         values: Mapping[str, WritebackValues],
+        *,
+        unavailable_reasons: tuple[str, ...] = (),
     ) -> None:
         """Render persistent items with service-owned captured preview facts.
 
@@ -337,6 +339,11 @@ class WritebackWidget(QWidget):
             self._rows_layout.addWidget(row)
             self._rows.append(row)
 
+        for reason in unavailable_reasons:
+            label = QLabel(reason)
+            label.setObjectName("writebackUnavailableReason")
+            label.setWordWrap(True)
+            self._rows_layout.addWidget(label)
         self._refresh_apply_enabled()
         self._update_responsive()
 

@@ -80,7 +80,7 @@ class JsonlSampleTable:
         with self._path.open("a", encoding="utf-8") as stream:
             stream.write(encoded)
 
-    def read(self) -> pd.DataFrame:
+    def _latest_records(self) -> dict[str, _SampleRecord]:
         """Return latest rows per run_id with a fresh RangeIndex.
 
         Rows retain their last occurrence's file order. An absent file returns
@@ -92,7 +92,7 @@ class JsonlSampleTable:
         except FileNotFoundError:
             if self._path.is_symlink():
                 raise
-            return pd.DataFrame()
+            return {}
         latest: dict[str, _SampleRecord] = {}
         with stream:
             for number, line in enumerate(stream, start=1):
@@ -105,7 +105,28 @@ class JsonlSampleTable:
                 # Replace the whole row and keep the last occurrences' file order.
                 latest.pop(record.run_id, None)
                 latest[record.run_id] = record
-        return pd.DataFrame([row.model_dump(mode="json") for row in latest.values()])
+        return latest
+
+    def read(self) -> pd.DataFrame:
+        """Return each run's last whole JSONL row in last-occurrence order.
+
+        Absent history returns an empty frame. Invalid rows, including corrupt
+        tails, raise ValueError with path/line; I/O failures propagate.
+        """
+        return pd.DataFrame([row.model_dump(mode="json") for row in self._latest_records().values()])
+
+    def latest(self, run_id: str) -> dict[str, JsonValue] | None:
+        """Read one run's latest complete JSON row, or None if absent.
+
+        run_id is a nonempty acquisition key. Validate the whole history like
+        read(), never skip corrupt siblings or tails. Returned fields are detached,
+        including JSON timestamp, nullable point, source and producer fields.
+        Missing history returns None; validation and I/O failures propagate.
+        """
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("run_id must be nonempty")
+        record = self._latest_records().get(run_id)
+        return None if record is None else record.model_dump(mode="json")
 
     def export_csv(self, path: str | Path, *, overwrite: bool = False) -> None:
         """Export latest rows to an exact CSV path without a pandas index.

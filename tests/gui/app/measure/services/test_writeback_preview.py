@@ -89,7 +89,8 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
                 )
             ],
             parameters=captured,
-         experiment_name="test/writeback",)
+            experiment_name="test/writeback",
+        )
         try:
             initial = service.preview_values(draft, session_id="param-1")["param-1"]
             assert (initial.actual_path, initial.unit) == ("U1.frequency", "MHz")
@@ -124,7 +125,8 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "d", proposed_value=[3, 4])],
         parameters=capture,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     first = service.preview_values(draft)["param-1"]
     assert first.actual_path == "general.ext.value"
     assert first.current == [1, 2]
@@ -172,7 +174,9 @@ def test_cfg_preview_contains_complete_current_and_live_draft_values(
         spec, value = waveform_cfg_to_value(capture.library.get_waveform(name))
         proposal = WaveformWriteback(name, "d", edit_schema=CfgSchema(spec, value))
         item_id, path, edited = "wf-1", "length", 0.2
-    draft = service.create_draft([proposal], parameters=capture, experiment_name="test/writeback")
+    draft = service.create_draft(
+        [proposal], parameters=capture, experiment_name="test/writeback"
+    )
     preview = service.preview_values(draft)[item_id]
     assert preview.actual_path == name
     assert preview.unit is None
@@ -240,7 +244,9 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session,
                 WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
             )
             field_name, expected = "length", 0.1
-    draft = service.create_draft(proposals, parameters=control.read_context(), experiment_name="test/writeback")
+    draft = service.create_draft(
+        proposals, parameters=control.read_context(), experiment_name="test/writeback"
+    )
     try:
         first, second = draft.items
         second.selected = False
@@ -277,6 +283,7 @@ def test_preview_without_context_fails_instead_of_claiming_missing_targets():
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "d", proposed_value=1)],
         parameters=None,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     with pytest.raises(FailedPreconditionError):
         service.preview_values(draft)

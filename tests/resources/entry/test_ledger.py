@@ -45,7 +45,6 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-            
         ),
     )
 
@@ -342,7 +341,7 @@ def test_payload_rejects_non_json_values(value: object) -> None:
         AcceptedPayload.model_validate(
             {
                 "writes": [{"path": "Q1.rate", "value": value}],
-                }
+            }
         )
 
 
@@ -371,7 +370,6 @@ def test_accepted_payload_requires_writes_and_allows_explicit_source() -> None:
     source = SourceReference(kind="event", id=str(uuid4()))
     payload = AcceptedPayload(
         writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
-        
         run_id="run-1",
         source=source,
     )

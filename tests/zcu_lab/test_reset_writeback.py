@@ -505,7 +505,9 @@ def test_reset_scalar_calibrations_apply_to_captured_extensions(
     session.control.use_point(PointUseRequest("later-point"))
     session.control.set_alias_rows((AliasRow("qubit", "Q2"),))
     selected = session.control.read_context().target
-    draft = session.service.create_draft(items, parameters=capture, run_id="scalar-run", experiment_name="test/writeback")
+    draft = session.service.create_draft(
+        items, parameters=capture, run_id="scalar-run", experiment_name="test/writeback"
+    )
     try:
         draft.apply(item_ids=tuple(item.session_id for item in draft.items[:2]))
         destination = session.control.read_target(capture.target)
@@ -558,8 +560,11 @@ def test_reset_finisher_preserves_tested_configuration_and_applies_analysis(
     items = _reset_items(family, capture, sample)
     _assert_reset_collection(family, items, capture, sample)
     draft = session.service.create_draft(
-        items, parameters=capture, run_id="finisher-run"
-    , experiment_name="test/writeback")
+        items,
+        parameters=capture,
+        run_id="finisher-run",
+        experiment_name="test/writeback",
+    )
     try:
         draft.apply()
         _assert_reset_applied(session, capture, sample, "finisher-run")
@@ -686,8 +691,11 @@ def test_reset_library_application_leaves_unselected_downstream_slot(
     items = _reset_items(family, capture, sample)
     _assert_reset_collection(family, items, capture, sample)
     draft = session.service.create_draft(
-        items, parameters=capture, run_id="library-only"
-    , experiment_name="test/writeback")
+        items,
+        parameters=capture,
+        run_id="library-only",
+        experiment_name="test/writeback",
+    )
     try:
         draft.edit(draft.items[-1].session_id, selected=False)
         draft.apply()
@@ -707,8 +715,11 @@ def test_bath_reset_slot_can_select_excited_module(session: WritebackSession) ->
     items = _reset_items("bath", capture, sample)
     _assert_reset_collection("bath", items, capture, sample)
     draft = session.service.create_draft(
-        items, parameters=capture, run_id="excited-run"
-    , experiment_name="test/writeback")
+        items,
+        parameters=capture,
+        run_id="excited-run",
+        experiment_name="test/writeback",
+    )
     try:
         draft.edit(draft.items[-1].session_id, proposed_value="Q1.reset.reset_bath_e")
         draft.apply(item_ids=(draft.items[-2].session_id, draft.items[-1].session_id))
@@ -735,7 +746,9 @@ def test_reset_drafts_keep_each_run_values_and_ledger_identity(
     sample_a = _reset_example(family)
     items_a = _reset_items(family, first, sample_a)
     _assert_reset_collection(family, items_a, first, sample_a)
-    draft_a = session.service.create_draft(items_a, parameters=first, run_id="run-A", experiment_name="test/writeback")
+    draft_a = session.service.create_draft(
+        items_a, parameters=first, run_id="run-A", experiment_name="test/writeback"
+    )
     session.control.use_point(PointUseRequest("later-point"))
     session.control.set_alias_rows((AliasRow("qubit", "Q2"),))
     target = session.control.read_context().target
@@ -768,7 +781,9 @@ def test_reset_drafts_keep_each_run_values_and_ledger_identity(
         _expected_child(sample_b, "reset_bath_e", "pi2_cfg")["phase"] = -95.0
     items_b = _reset_items(family, second, sample_b)
     _assert_reset_collection(family, items_b, second, sample_b)
-    draft_b = session.service.create_draft(items_b, parameters=second, run_id="run-B", experiment_name="test/writeback")
+    draft_b = session.service.create_draft(
+        items_b, parameters=second, run_id="run-B", experiment_name="test/writeback"
+    )
     try:
         session.control.use_point(PointUseRequest("run-point"))
         session.control.set_alias_rows((AliasRow("qubit", "Q1"),))
@@ -794,8 +809,11 @@ def test_reset_apply_retains_accepted_and_successful_prefix_on_validation_failur
     items = _reset_items("single", capture, sample)
     _assert_reset_collection("single", items, capture, sample)
     draft = session.service.create_draft(
-        items, parameters=capture, run_id="partial-run"
-    , experiment_name="test/writeback")
+        items,
+        parameters=capture,
+        run_id="partial-run",
+        experiment_name="test/writeback",
+    )
     try:
         draft.edit(
             draft.items[1].session_id, target_name="Q1.freq", proposed_value=True

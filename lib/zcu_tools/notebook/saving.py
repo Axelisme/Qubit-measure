@@ -38,6 +38,7 @@ from zcu_tools.resources.entry import (
     ModuleWriteback,
     ParameterWriteback,
     PointView,
+    PointWritebackTarget,
     RoleView,
     SampleWriteback,
     SaveLayout,
@@ -242,8 +243,9 @@ class SavedRun(Generic[CfgT, ResultT]):
 
         Append one accepted event, then apply parameter, module, waveform and
         samples in that order, preserving each mapping's iteration order.
-        Each item commits separately. The first schema, ledger, conflict or I/O error
-        propagates unchanged and stops later writes; prior successful items
+        Each item commits separately. An item failure raises WritebackApplyError
+        with event_id/applied and the original cause; ledger append fails unchanged.
+        The first failure stops later writes; prior successful items
         and the event remain. No cross-item rollback or retry is provided.
         Provenance kind is this run's experiment name, never caller-supplied.
         Return the accepted event ID after all items succeed.
@@ -269,8 +271,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             items.append(SampleWriteback(component, fields))
         return apply_writeback(
             tuple(items),
-            point=self._point,
-            storage=self._storage,
+            target=PointWritebackTarget(self._point, self._storage),
             evidence=WritebackEvidence(
                 kind=self._metadata.experiment,
                 run_id=self.run_id,

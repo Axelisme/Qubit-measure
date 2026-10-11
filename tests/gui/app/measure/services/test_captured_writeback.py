@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ModuleWriteback,
@@ -41,7 +40,6 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
-    ContextTarget,
     PointUseRequest,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
@@ -53,7 +51,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
-from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -89,9 +86,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         control = ContextControlFacet(context=context)
         control.add_component("Q1", "fake/drive/a", {})
         editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(
-            editor, write_port=control
-        )
+        service = WritebackService(editor, write_port=control)
         yield WritebackSession(entry, control, service)
         assert registry_state() == installed
     finally:
@@ -107,9 +102,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        service = WritebackService(
-            editor, write_port=control
-        )
+        service = WritebackService(editor, write_port=control)
         tab = native.state.get_tab("tab")
         captured = control.read_context()
         assert tab.run.metadata is not None
@@ -118,7 +111,8 @@ def test_accepted_retains_run_identity_with_or_without_save(
             [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
             parameters=captured,
             run_id=source_run_id,
-         experiment_name="test/writeback",)
+            experiment_name="test/writeback",
+        )
         if save_before_accept:
             native.save()
         assert (
@@ -187,9 +181,7 @@ def test_analysis_draft_uses_start_run_identity(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        writeback = WritebackService(
-            editor, write_port=control
-        )
+        writeback = WritebackService(editor, write_port=control)
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
         )
@@ -265,13 +257,16 @@ def test_post_analysis_draft_retains_primary_identity(
         editor = CfgEditorService(
             MagicMock(), control, MagicMock(), MagicMock(), native.bus
         )
-        writeback = WritebackService(
-            editor, write_port=control
-        )
+        writeback = WritebackService(editor, write_port=control)
         primary_draft = (
             None
             if source == "without_primary_draft"
-            else writeback.create_draft([], parameters=captured, run_id=expected, experiment_name="test/writeback")
+            else writeback.create_draft(
+                [],
+                parameters=captured,
+                run_id=expected,
+                experiment_name="test/writeback",
+            )
         )
         primary_result = PaneSummary()
         native.state.update_tab_analyze(
@@ -382,7 +377,8 @@ def test_writeback_lowers_waveform_expression_from_creation_capture(
             )
         ],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
     session.service.apply_draft(draft)
     current = session.control.read_context()
@@ -402,7 +398,8 @@ def test_append_failure_leaves_parameter_untouched(
     draft = session.service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Value", proposed_value=2.0)],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
 
     def fail_append(self: RecordsLedger, event: LedgerEvent, **_kwargs: object) -> None:
         raise OSError("ledger unavailable")
@@ -412,8 +409,6 @@ def test_append_failure_leaves_parameter_untouched(
         session.service.apply_draft(draft)
     assert not session.control.read_context().lookup("general.ext.flux_value").present
     assert session.entry.ledger.events() == ()
-
-
 
 
 def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
@@ -447,7 +442,8 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
             ),
         ],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     session.control.set_parameter(
         first, "Q1.ext.readout_cal.g_center", {"__complex__": [0.6, 0.1]}
     )
@@ -510,7 +506,8 @@ def test_receipt_reads_actual_role_target_after_point_change(
         [ParameterWriteback("driver.rate", "Rate", proposed_value=0.2, stderr=0.05)],
         parameters=captured,
         run_id="original-run",
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
@@ -572,8 +569,11 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
         )
         item_id, field = "wf-1", "length"
     draft = session.service.create_draft(
-        [item], parameters=captured, run_id="original-run"
-    , experiment_name="test/writeback")
+        [item],
+        parameters=captured,
+        run_id="original-run",
+        experiment_name="test/writeback",
+    )
     session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6
@@ -602,7 +602,8 @@ def test_each_parameter_write_preserves_its_own_stderr(
             ParameterWriteback("Q1.coherence", "Unknown error", proposed_value=5.0),
         ],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     session.service.apply_draft(draft)
     current = session.control.read_context()
     sources = [
@@ -634,7 +635,8 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
             ParameterWriteback("Q1.rate", "Direct", proposed_value=0.3),
         ],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         session.service.apply_draft(draft)
     assert session.entry.ledger.events() == ()
@@ -644,7 +646,9 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
 def test_empty_draft_reads_and_writes_without_context(
     session: WritebackSession,
 ) -> None:
-    draft = session.service.create_draft([], parameters=None, experiment_name="test/writeback")
+    draft = session.service.create_draft(
+        [], parameters=None, experiment_name="test/writeback"
+    )
     assert session.service.preview_values(draft) == {}
     assert session.service.write_draft(draft, ()) == []
     assert session.service.apply_draft(draft)["applied_ids"] == []
@@ -660,7 +664,8 @@ def test_stale_draft_target_is_not_replaced_by_selected_point(
     draft = session.service.create_draft(
         [ParameterWriteback("Q1.rate", "Rate", proposed_value=0.2)],
         parameters=captured,
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     session.entry.new_point("a")
     selected = session.control.use_point(PointUseRequest("a"))
     events = session.entry.ledger.events()
@@ -682,7 +687,8 @@ def test_preview_proposed_data_is_isolated_at_validation_boundary(
     draft = session.service.create_draft(
         [ParameterWriteback("Q1.ext.samples", "Samples", proposed_value=[1, 2])],
         parameters=session.control.read_context(),
-     experiment_name="test/writeback",)
+        experiment_name="test/writeback",
+    )
     preview = session.service.preview_values(draft)["param-1"]
     assert preview.current is None and preview.proposed == [1, 2]
     assert isinstance(preview.proposed, list)

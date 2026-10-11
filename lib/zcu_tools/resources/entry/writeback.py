@@ -1,8 +1,11 @@
 """Ordered accepted writes over point and library single-file transactions."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
+from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -15,6 +18,7 @@ from zcu_tools.cfg_model import (
     waveform_spec_from_raw,
 )
 
+from .ledger import RecordsLedger
 from .ledger_models import (
     AcceptedPayload,
     AcceptedWrite,
@@ -28,6 +32,9 @@ from .points import PointView
 from .provenance import Provenance
 from .storage import PointStorageBinding, bind_sample_table
 
+
+if TYPE_CHECKING:
+    from zcu_tools.resources.context.library import ModuleLibrary
 
 @dataclass(frozen=True)
 class ParameterWriteback:
@@ -124,33 +131,114 @@ def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     return AcceptedWrite(path=item.path, value=value)
 
 
+class WritebackApplyError(RuntimeError):
+    """An accepted item failed; prior items and the accepted event remain.
+
+    event_id identifies the already-appended accepted event. applied counts the
+    successfully committed prefix, not attempted items. __cause__ is the original
+    item failure. Ledger append failures occur before this error boundary and
+    propagate unchanged. No rollback, automatic retry or recovery is provided.
+    """
+
+    def __init__(self, *, event_id: str, applied: int) -> None:
+        self.event_id = event_id
+        self.applied = applied
+        super().__init__(f"Writeback {event_id} failed after {applied} applied items")
+
+
+class WritebackTarget(Protocol):
+    """Bound single-item write capabilities, persistent or memory-only.
+
+    entry_id/ledger identify the owning entry. point is its saved label, or None
+    for a memory draft. Each setter commits and validates one item or raises
+    without installing it. Publication belongs to the context owner, not this
+    protocol or the executor. Sample metadata is already supplied in fields.
+    """
+
+    entry_id: str
+    ledger: RecordsLedger
+    point: str | None
+
+    def set_parameter(
+        self, path: str, value: JsonValue, source: Provenance
+    ) -> None: ...
+    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None: ...
+    def set_waveform(
+        self, path: str, value: WaveformSpec, source: Provenance
+    ) -> None: ...
+    def append_sample(self, component: str, fields: JsonObject, *, run_id: str, at: datetime, source: str) -> None: ...
+
+
+class PointWritebackTarget:
+    """Bind a captured PointView/storage for Notebook or other persistent callers.
+
+    Construction does no I/O. The caller supplies matching captured capabilities.
+    Library opening is lazy; owner key/family/source/conflict errors propagate.
+    Each setter commits one file; sample rows append through the sample owner.
+    """
+
+    def __init__(self, point: PointView, storage: PointStorageBinding) -> None:
+        self._point = point
+        self._storage = storage
+        self.entry_id = str(storage.entry_id)
+        self.ledger = storage.ledger
+        self.point: str | None = storage.point
+        self._library_handle: ModuleLibrary | None = None
+
+    def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
+        """Commit one concrete point path with already-built provenance."""
+        with self._point.edit() as draft:
+            draft.set(path, value, provenance=source)
+
+    def _library(self) -> ModuleLibrary:
+        # Library imports entry provenance; defer to avoid the package cycle.
+        from zcu_tools.resources.context.library import ModuleLibrary
+
+        if self._library_handle is None:
+            self._library_handle = ModuleLibrary(
+                self._storage.result_path / "points" / self._storage.point / "module_cfg.yaml",
+                ledger=self._storage.result_path / "records" / "ledger.jsonl",
+                entry_id=self.entry_id,
+            )
+        return self._library_handle
+
+    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None:
+        """Commit one concrete library module root; owner validates its family."""
+        with self._library().edit() as draft:
+            draft.set_module(path, value, provenance=source)
+
+    def set_waveform(self, path: str, value: WaveformSpec, source: Provenance) -> None:
+        """Commit one concrete waveform root through the library owner."""
+        with self._library().edit() as draft:
+            draft.set_waveform(path, value, provenance=source)
+
+    def append_sample(self, component: str, fields: JsonObject, *, run_id: str, at: datetime, source: str) -> None:
+        """Append producer fields with the executor's accepted identity/time/source."""
+        bind_sample_table(self._storage.result_path, component).append(
+            run_id=run_id, point=self.point, at=at, source=source, **fields
+        )
+
+
 def apply_writeback(
     items: tuple[WritebackItem, ...],
     *,
-    point: PointView,
-    storage: PointStorageBinding,
+    target: WritebackTarget,
     evidence: WritebackEvidence,
 ) -> str:
-    """Append one accepted event, then commit each item in supplied order.
+    """Validate concrete values, append accepted, then commit in supplied order.
 
-    point and storage must be the caller's captured owning point and storage
-    binding. Items use concrete paths (role resolution belongs to the caller).
-    Nonempty items, strict JSON/Spec values, finite non-negative stderr and a
-    nonempty evidence.kind are validated before appending. Library key/family
-    and point schema validation happen at their existing owner during apply.
-    Samples require a nonempty evidence.run_id and bind component history only
-    when reached. Their producer fields are preserved, including optional dev
-    fields and units; run_id, point, UTC at and source come from this acceptance.
+    target binds the destination and its entry ledger; callers resolve roles
+    before this entry. Nonempty items, strict JSON/Spec values, finite nonnegative
+    stderr, kind and sample run_id are validated before append. Target owners
+    validate paths, schema, sources and transactions when each item is reached.
+    Samples receive run_id, nullable point, UTC at and accepted source; producer
+    device fields are preserved, not inferred. Return the event ID on success.
 
-    Each item uses its owner's single-file edit. The first failure propagates
-    unchanged and stops later items; already committed items and the accepted
-    event remain. There is no retry or cross-item/cross-file rollback. Library
-    opens lazily at the captured point, only if a library item is reached.
-    Return the accepted event ID only after all writes succeed.
+    Ledger append failures propagate unchanged, with no writes. An item failure
+    raises WritebackApplyError(event_id, applied) from its original cause, stops
+    later items and retains the successful prefix and event. No per-item progress
+    callback, cross-file rollback or automatic retry is provided.
     """
-    # Library imports entry provenance; defer the import to avoid that cycle.
-    from zcu_tools.resources.context.library import ModuleLibrary
-
     if not items:
         raise ValueError("writeback items must be nonempty")
     kind = TypeAdapter(str).validate_python(evidence.kind, strict=True)
@@ -165,18 +253,14 @@ def apply_writeback(
         id=str(uuid4()),
         kind="accepted",
         at=datetime.now(UTC).isoformat(),
-        entry_id=str(storage.entry_id),
+        entry_id=target.entry_id,
         origin=evidence.origin,
         payload=AcceptedPayload(
-            writes=writes,
-            analysis_summary={},
-            run_id=evidence.run_id,
-            source=evidence.source,
+            writes=writes, run_id=evidence.run_id, source=evidence.source
         ),
     )
-    storage.ledger.append(event)
-    library: ModuleLibrary | None = None
-    for item, write in zip(items, writes, strict=True):
+    target.ledger.append(event)
+    for applied, (item, write) in enumerate(zip(items, writes, strict=True)):
         provenance = Provenance(
             source=event.id,
             kind=kind,
@@ -184,35 +268,19 @@ def apply_writeback(
             at=event.at,
             stderr=item.stderr if isinstance(item, ParameterWriteback) else None,
         )
-        if isinstance(item, SampleWriteback):
-            # Metadata belongs to this acceptance, never to caller field values.
-            fields = {
-                key: value
-                for key, value in item.value.items()
-                if key not in {"run_id", "point", "at", "source"}
-            }
-            if evidence.run_id is None:
-                raise ValueError("sample writeback requires a run_id")
-            bind_sample_table(storage.result_path, item.component).append(
-                run_id=evidence.run_id,
-                point=storage.point,
-                at=datetime.fromisoformat(event.at),
-                source=event.id,
-                **fields,
-            )
-        elif isinstance(item, ParameterWriteback):
-            with point.edit() as draft:
-                draft.set(write.path, write.value, provenance=provenance)
-        else:
-            if library is None:
-                library = ModuleLibrary(
-                    storage.result_path / "points" / storage.point / "module_cfg.yaml",
-                    ledger=storage.result_path / "records" / "ledger.jsonl",
-                    entry_id=str(storage.entry_id),
-                )
-            with library.edit() as draft:
-                if isinstance(item, ModuleWriteback):
-                    draft.set_module(item.path, item.value, provenance=provenance)
-                else:
-                    draft.set_waveform(item.path, item.value, provenance=provenance)
+        try:
+            if isinstance(item, SampleWriteback):
+                if evidence.run_id is None:
+                    raise ValueError("sample writeback requires a run_id")
+                fields = {key: value for key, value in item.value.items() if key not in {"run_id", "point", "at", "source"}}
+                target.append_sample(item.component, fields, run_id=evidence.run_id,
+                                     at=datetime.fromisoformat(event.at), source=event.id)
+            elif isinstance(item, ParameterWriteback):
+                target.set_parameter(write.path, write.value, provenance)
+            elif isinstance(item, ModuleWriteback):
+                target.set_module(item.path, item.value, provenance)
+            else:
+                target.set_waveform(item.path, item.value, provenance)
+        except Exception as exc:
+            raise WritebackApplyError(event_id=event.id, applied=applied) from exc
     return event.id

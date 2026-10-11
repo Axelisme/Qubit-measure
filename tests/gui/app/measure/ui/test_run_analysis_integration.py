@@ -402,7 +402,11 @@ def test_writeback_baseline_captured_via_service(qapp):
         description="new",
         edit_schema=CfgSchema(spec, value),
     )
-    draft = svc.create_draft([md_item, md_item2, module_item], parameters=parameters, experiment_name="test/writeback")
+    draft = svc.create_draft(
+        [md_item, md_item2, module_item],
+        parameters=parameters,
+        experiment_name="test/writeback",
+    )
     try:
         items = draft.preview()
         r_f_item = next(i for i in items if i.target_name == "$resonator.freq")
