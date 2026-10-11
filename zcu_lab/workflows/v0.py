@@ -3,7 +3,7 @@
 Calibration values and traces are fake deterministic values, not physical policy.
 The JSON savers only exercise the exact-path saver seam, even for .h5 paths.
 They are not the official/native data format. Native T1_fluxdep lives in t1.py.
-Phase 3 replaces echo/overnight and removes fake calibration before retirement.
+Phase 3 replaces echo and removes fake calibration before retirement.
 Import declares functions only; it does not register workflows or start a run.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -190,14 +189,14 @@ class CalResult:
 
 @dataclass(frozen=True)
 class DecayCfg:
-    """Fake decay input; kind selects t1 or t2echo and cal holds calibration.
+    """Fake echo decay input; kind is t2echo and cal holds calibration.
 
     points is the sample count. stop_us is the final delay and relax_delay_us
     is the relaxation wait. reps/rounds describe acquire averaging, not outer
     workflow iterations. All timing is in microseconds.
     """
 
-    kind: Literal["t1", "t2echo"]
+    kind: Literal["t2echo"]
     cal: Calibrated
     points: int
     stop_us: float
@@ -250,11 +249,6 @@ def fake_decay(run: Run[DecayCfg], lifetime_us: float) -> DecayResult:
         for delay, step in sched.scan("delay", times):
             step.set_data(np.complex128(np.exp(-delay / lifetime_us)), flush=True)
     return DecayResult(times, buffer.array.copy())
-
-
-def run_t1(run: Run[DecayCfg]) -> DecayResult:
-    """Offline T1 acquire with a known 20 us lifetime."""
-    return fake_decay(run, 20.0)
 
 
 def run_t2echo(run: Run[DecayCfg]) -> DecayResult:
@@ -525,141 +519,10 @@ def t2echo_fluxdep(
     return Next(T2EchoPoint(index, flux, cal, fit, None), state)
 
 
-class OvernightPlan(BaseModel):
-    """Fixed overnight plan.
-
-    flux_dev names the device; flux is an absolute setpoint in required flux_unit
-    (A, V or native for Fake). The host rejects mismatched driver units without
-    conversion or mode changes. period_s separates
-    scheduled starts from the original UTC start. rounds counts outer steps;
-    points is samples per decay curve.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    flux_dev: str = Field(min_length=1)
-    flux_unit: Literal["A", "V", "native"] = Field(
-        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
-    )
-    flux: float = Field(description="Absolute setpoint in the device's native units")
-    period_s: float = Field(
-        default=600.0, gt=0, description="Interval between scheduled starts"
-    )
-    rounds: int = Field(
-        default=12, ge=1, description="Outer workflow iterations, not acquire rounds"
-    )
-    points: int = Field(default=51, ge=3)
-
-
-class OvernightTunables(BaseModel):
-    """Overnight knobs with no result feedback.
-
-    cal controls calibration; t1 controls acquire averaging. stop_us and
-    relax_delay_us are fixed timing. max_rel_err is the strict upper bound on
-    relative fit uncertainty. Changing cal does not invalidate saved calibration.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    cal: CalTunables = Field(default_factory=CalTunables)
-    t1: DecayKnobs = Field(default_factory=DecayKnobs)
-    stop_us: float = Field(default=100.0, gt=0.5)
-    relax_delay_us: float = Field(default=60.0, gt=0)
-    max_rel_err: float = Field(default=0.3, ge=0.01, le=1.0)
-
-
-@dataclass(frozen=True)
-class T1Round:
-    """One attempted overnight round.
-
-    index is zero-based; cal records calibration success/failure. t1 is an
-    accepted estimate or None; reason explains missing estimates and is None
-    on success.
-    """
-
-    index: int
-    cal: Calibration
-    t1: DecayValue | None
-    reason: str | None
-
-
-@dataclass
-class OvernightState:
-    """Overnight state retained between committed steps.
-
-    index is the next zero-based round. start is the original aware UTC origin.
-    carry holds calibration history; cal is None until full success, then reused.
-    """
-
-    index: int
-    start: datetime
-    carry: CalCarry
-    cal: Calibrated | None = None
-
-
-def init_overnight(env: InitEnv[DemoContext], _plan: OvernightPlan) -> OvernightState:
-    """Create round-zero state retaining the original UTC start and context."""
-    return OvernightState(0, env.started_at, initial_carry(env))
-
-
-@workflow(
-    "T1_overnight",
-    plan=OvernightPlan,
-    tunables=OvernightTunables,
-    init=init_overnight,
-)
-def t1_overnight(
-    env: WorkflowEnv[DemoContext],
-    plan: OvernightPlan,
-    tun: OvernightTunables,
-    state: OvernightState,
-) -> Step[OvernightState, T1Round]:
-    """Attempt a round at its original absolute deadline, without fit feedback.
-
-    The engine supplies detached state and captured tunables. Set flux on round
-    zero, reuse the first accepted calibration, and commit rejected fits with a
-    reason. Return Done after plan.rounds. Adapter, analysis, and saver errors
-    propagate to the engine.
-    """
-    # Check required ports before plots, waits, or any hardware effect.
-    _ = env.devices
-    _ = env.context
-    env.pbar("rounds", total=plan.rounds).set_progress(state.index)
-    if state.index >= plan.rounds:
-        return Done()
-    index = state.index
-    state.index += 1
-    yield from env.wait_until(state.start + timedelta(seconds=index * plan.period_s))
-    if index == 0:
-        yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
-
-    cal = state.cal
-    if cal is None:
-        cal = yield from calibrate(env, tun.cal, plan.flux, state.carry)
-        if isinstance(cal, CalibrationFailed):
-            return Next(T1Round(index, cal, None, cal.reason), state)
-        state.cal = cal
-    cfg = DecayCfg(
-        "t1",
-        cal,
-        plan.points,
-        tun.stop_us,
-        tun.relax_delay_us,
-        tun.t1.reps,
-        tun.t1.rounds,
-    )
-    outcome = yield from env.run(run_t1, cfg, save=save_decay)
-    if isinstance(outcome, Failed):
-        return Next(T1Round(index, cal, None, outcome.reason), state)
-    fit = analyze_decay(outcome.cfg, outcome.result)
-    if fit is None or fit.rel_err >= tun.max_rel_err:
-        return Next(T1Round(index, cal, None, "fit rejected"), state)
-    return Next(T1Round(index, cal, fit, None), state)
-
-
 def register_all(registry: WorkflowRegistry) -> None:
-    """Add the echo/overnight offline demonstrations to a host-owned catalog.
+    """Add the echo offline demonstration to a host-owned catalog.
 
     Import does not create a registry. Duplicate names raise ValueError from the
     supplied registry; the host creates a fresh registry for each reload.
     """
     registry.add(t2echo_fluxdep)
-    registry.add(t1_overnight)
