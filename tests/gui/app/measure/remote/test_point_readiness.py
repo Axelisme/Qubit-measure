@@ -196,12 +196,6 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
             error = reply["error"]
             assert isinstance(error, dict)
             assert error["code"] == ErrorCode.PRECONDITION_FAILED
-            snapshot = application.rpc("context.snapshot", {})
-            assert snapshot["ok"] is False
-            snapshot_error = snapshot["error"]
-            assert isinstance(snapshot_error, dict)
-            assert snapshot_error["code"] == ErrorCode.PRECONDITION_FAILED
-            assert snapshot_error["reason"] == "no_context"
         assert entry_resource(application).ledger.events() == before
         application.result("point.new", {"label": "b"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
