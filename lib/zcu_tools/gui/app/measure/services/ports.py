@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
+    from zcu_tools.resources.entry.ledger_models import JsonObject
 
     from .persistence_types import AppPersistedState
     from .writeback import WritebackDraft
@@ -97,6 +98,8 @@ class AnalysisPaneSnapshot:
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
+    # Fixed reasons for proposals omitted because Run-time sample evidence is missing.
+    unavailable_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +111,8 @@ class PostAnalysisPaneSnapshot:
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
+    # Fixed reasons for proposals omitted because Run-time sample evidence is missing.
+    unavailable_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,7 +226,9 @@ class WritebackLifecyclePort(Protocol):
         items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
+        experiment_name: str,
         run_id: str | None = None,
+        device_snapshot: Mapping[str, JsonObject] | None = None,
     ) -> WritebackDraft:
         """Fix proposals, destination and native Run identity in one draft.
 

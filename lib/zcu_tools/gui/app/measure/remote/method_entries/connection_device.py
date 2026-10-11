@@ -38,7 +38,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Initialize the simulated environment using the same coordinator as the "
             "GUI Use Simulate Env action. Disconnects real devices, prepares fake_flux, "
-            "binds its live value to MockSoc, and installs a predictor if absent. "
+            "binds its live value to MockSoc, without installing a predictor. "
             "Reuses an already valid simulation without resetting its values. "
             "Returns operation_id asynchronously; rpc_call maps it to a handle. "
             "Use wait(op=handle) for terminal status before running measurements. "

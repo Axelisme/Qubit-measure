@@ -16,9 +16,9 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。GUI ContextService 持有 entry／point／library，GUI 和 MCP 透過同一組 owner commands 讀寫。Acquired 由前端 acquisition owner 產生，saved 由共用 saver 產生，accepted 由 WritebackService 或 Notebook SavedRun 產生，entry 不推導這些事件。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - Entry 的 authored alias 表由 `resources.entry` 保存為 `aliases.yaml`，不是 point、setup、memento 或 ledger。ContextService 擁有有序表的語法、初始化與 Apply 時機，resources 擁有檔案表示及單檔原子替換。Notebook 不讀這份 GUI 表，MCP 的單次 aliases／target 覆寫不保存它。
-- SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
+- SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；條目樣本使用 append-only JSONL，讀取取每個 run_id 最後一整行，CSV 只作匯出。舊 `SampleTable` CSV API 留給未遷移 caller，不作 fallback。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
 ### Run 輸出位置與 writer 權責
@@ -74,6 +74,8 @@ Experiment persistence 使用 inner-first axes；disk payload 由 Result-native 
 結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 variables 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
 
 ### 失敗、路徑與遷移邊界
+
+Run accept 先追加一筆 accepted，再逐項提交參數、library 或樣本。項目失敗以 `WritebackApplyError` 公開 accepted event_id、成功前綴 applied 與原始 cause，保留前項與事件，停止後項。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。GUI writeback 只接受 SavedPoint，未選點時在 append 前拒絕，提示先選或建立點，不自動建點或寫 point=null 樣本。一般 sample append 的 point 選填契約不受影響。
 
 Memento read／decode 失敗可回 fresh default，並回報 restore outcome；restore／apply 程式錯誤仍傳播。Caretaker 不懂 cfg，也不自行決定何時保存。量測資料、參數和未知格式版本不能沿用 memento 的 whole-file default degradation：必要 variable、shape 或 unit 不符時，回報可定位的錯誤而非偽造空結果。
 

@@ -35,15 +35,15 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## Remote / Transport
 
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、明確收回與 ref-free cfg acceptance。
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
 - [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。SaveLayout 計算 run 輸出位置，獨立 writers 處理格式，上層編排 batch 與 ledger；參數容器使用工作單位與顯式定義注入。
 
-## Experiment runtime／Autofluxdep workflow
+## Experiment runtime／Workflows
 
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：runtime、executor、GUI Node、run snapshot、feedback 與 RunSession 的責任分界。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 與每次 env.run 前的 connected device capture。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、NotebookAdapter 與 GUI adapter 分工、RunContext／CfgEnv、具名原生圖與多圖保存、instance DeviceManager 與模擬環境 coordinator。
 
 
@@ -60,6 +60,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 協作流程歸外部 dev-flow／collab skills，repo 的 live resource 限制見 [CLAUDE.md](../../CLAUDE.md)。
 
 ## Draft
+
+- [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
 
 - [具名 workflows 與可丟棄的步驟執行](draft/workflows-engine.md)：新 engine、workflow／experiment、宿主、取消與保存分工的期 0 候選。顧問 review 與使用者 CP-A 通過前不實作，不取代既有 autofluxdep 契約。
 

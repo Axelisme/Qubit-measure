@@ -1724,7 +1724,6 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.session.events import (
         ContextSwitchedPayload,
-        PredictorChangedPayload,
         SocChangedPayload,
     )
 
@@ -1744,7 +1743,6 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
         TabAddedPayload,
         TabClosedPayload,
         TabContentChangedPayload,
-        PredictorChangedPayload,
         SocChangedPayload,
     )
     for payload_type in payload_types:

@@ -2,82 +2,55 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from pydantic import JsonValue
 from qick import QickConfig
 
+from ...datafile import JsonObject
+from ...device import BaseDeviceInfo
+from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
 
 
-@dataclass(frozen=True)
-class JsonParameters:
-    """Driver-owned JSON settings; ``values`` maps parameter names to JSON values.
-
-    The driver adapter defines valid names, units, ranges, and combinations.
-    Workflow execution copies these settings before handing them to the adapter.
-    """
-
-    values: dict[str, JsonValue]
-
-
-@dataclass(frozen=True)
-class DeviceSetup:
-    """One connected device's complete setup.
-
-    ``name`` is the host's connected-device name. ``parameters`` contains opaque
-    driver settings, not workflow tunables or expressions.
-    """
-
-    name: str
-    parameters: JsonParameters
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("DeviceSetup.name must not be empty")
-
-
-@dataclass(frozen=True)
-class DeviceSnapshot:
-    """Provenance at start/resume; ``items`` is the ordered device setup tuple.
-
-    This snapshot does not assert that hardware stays unchanged afterwards.
-    """
-
-    items: tuple[DeviceSetup, ...]
-
-
 class DevicePort(Protocol):
-    """Host-owned connected devices; adapters enforce device limits and cancel."""
+    """Host-owned connected devices; drivers enforce their hardcoded limits.
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
-        """Set an absolute value in native device units, or raise on failure.
+    Adapters forward cooperative cancellation and propagate driver failures.
+    Neither the adapter nor the engine declares or checks device limits.
+    """
 
-        Observe ``cancel_signal`` between cooperative work segments. Unknown or
-        disconnected names, invalid limits, and I/O failures must raise.
-        Unknown/disconnected-device errors must identify the requested name.
+    def capture_snapshot(self) -> Mapping[str, JsonObject]:
+        """Read all connected drivers once into detached JSON, or raise.
+
+        Called in the workflow worker before each experiment callback, under
+        the host's RUN lease. Reuse capture_device_snapshot and the public
+        driver mapping; do not read GUI cache or update GUI state. An explicitly
+        empty mapping means no connected devices. Read/serialization errors
+        propagate, without retries or cached fallbacks.
         """
         ...
 
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        """Live-read detached settings retaining the actual driver Info subclass.
 
-class PlotPort(Protocol):
-    """Figure capability called only on the engine execution thread."""
-
-    def axes(self, name: str) -> Axes:
-        """Return stable axes for a nonempty name; the host chooses the layout."""
+        Synchronous worker read, not an effect or cached GUI mapping. Unknown or
+        disconnected errors identify name; native I/O failures propagate.
+        """
         ...
 
-    def refresh(self, figure: Figure) -> None:
-        """Capture a detached snapshot before returning, or raise on failure.
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
+    ) -> None:
+        """Revalidate complete cfg through the selected driver's Info model.
 
-        Do not let frontend code mutate engine-owned artists. GUI scheduling and
-        snapshot throttling belong to the host, not to the engine state machine.
+        Do not rely on model_validate(instance) to revalidate unchecked copies.
+        Pass the same StopSignal through this seam and its original Event to
+        native setup. Unknown/disconnected names identify name; model validation,
+        driver limits and I/O errors propagate without retries or clamping.
         """
         ...
 
@@ -106,7 +79,9 @@ type ProgressFactory = Callable[..., BaseProgressBar]
 class EnginePorts[C]:
     """Capabilities owned and injected by the host.
 
-    ``plots`` snapshots engine figures. ``progress`` accepts the existing
+    ``plots`` is the host-owned Plots whose commands synchronously dispatch
+    artists to its PlotHost owner. The host stops execution before finish/release.
+    ``progress`` accepts the existing
     make_pbar arguments and returns BaseProgressBar, including runtime bars.
     Do not use make_pbar itself as this factory; use a concrete backend factory.
     ``clock`` implements aware UTC time and interruptible waits.
@@ -116,7 +91,7 @@ class EnginePorts[C]:
     adapter, or None. The engine never connects or disconnects these handles.
     """
 
-    plots: PlotPort
+    plots: Plots
     progress: ProgressFactory
     clock: Clock
     context: C | None = None

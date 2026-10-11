@@ -62,7 +62,9 @@ def multiple_waveform_writeback(waveform_writeback):
         proposals.append(
             WaveformWriteback(name, name, edit_schema=CfgSchema(spec, value))
         )
-    draft = service.create_draft(proposals, parameters=control.read_context())
+    draft = service.create_draft(
+        proposals, parameters=control.read_context(), experiment_name="test/writeback"
+    )
     try:
         service.apply_draft(draft)
         yield control, service, draft, names
@@ -134,7 +136,6 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
             run_result=result,
             analyze_params=_default_analyze_params(adapter, result, ctx),
             parameters=ctx.parameters,
-            predictor=ctx.predictor,
         ),
         plots=analysis_plots,
     )

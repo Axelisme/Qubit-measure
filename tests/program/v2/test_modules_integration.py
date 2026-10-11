@@ -12,6 +12,7 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
+from zcu_tools.program.v2 import SweepCfg, sweep2param
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -40,8 +41,7 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
-from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.program.v2.utils import readout_freq_words, sweep2param
+from zcu_tools.program.v2.utils import readout_freq_words
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg

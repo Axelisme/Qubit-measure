@@ -317,12 +317,10 @@ class RunAnalyzeControlFacet:
         self, tab_id: str, analyze_params_instance: object
     ) -> int:
         tab = self._state.get_tab(tab_id)
-        ctx = self._state.session_env
         req = AnalyzeRequest(
             run_result=tab.run.result,
             analyze_params=analyze_params_instance,
             parameters=tab.run.parameters,
-            predictor=ctx.predictor,
         )
         host = self._render_host()
         if host is None:

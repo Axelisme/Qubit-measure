@@ -9,9 +9,8 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from .ports import DeviceSnapshot
+from zcu_tools.datafile import SoftwareProvenance
 
-type Capability = Literal["soc", "devices", "context"]
 type Lifecycle = Literal[
     "running", "pausing", "paused", "stopping", "done", "aborted", "stopped", "failed"
 ]
@@ -116,6 +115,7 @@ class TunablesSnapshot:
     """Detached control view: ``revision`` is its version, ``values`` is JSON.
 
     Values contain the complete tunables model, not only the most recent patch.
+    Values are detached from the Engine, not a live writable view.
     """
 
     revision: int
@@ -176,21 +176,18 @@ class RunPaths:
 class RunIdentity:
     """Host-supplied identity and provenance, not inferred from directory names.
 
-    ``run_id`` is a nonempty stable run ID. ``devices`` is the detached start
-    snapshot. ``hostname`` identifies the host. ``git_commit``/``git_dirty``
-    describe workflow source, with None for unknown commit. ``entry_id`` and
-    ``entry_label`` identify the workpoint, or None. ``soc_fingerprint`` identifies
-    the SoC, or None when absent. The host retains hardware ownership.
+    ``run_id`` is a nonempty stable run ID.
+    ``provenance`` is the native SoftwareProvenance captured by the
+    host: its optional evidence remains None when genuinely unavailable.
+    Manifest and journal preserve this value nested under provenance.
+    ``entry_id`` and ``entry_label`` identify the workpoint, or None.
+    The host retains hardware ownership.
     """
 
     run_id: str
-    devices: DeviceSnapshot
-    hostname: str
-    git_commit: str | None = None
-    git_dirty: bool = False
+    provenance: SoftwareProvenance
     entry_id: str | None = None
     entry_label: str | None = None
-    soc_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id:

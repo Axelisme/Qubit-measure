@@ -81,7 +81,9 @@ def test_classification_reads_applied_ge_calibration(session: WritebackSession) 
             )
         )
     )
-    draft = session.service.create_draft(proposals, parameters=captured)
+    draft = session.service.create_draft(
+        proposals, parameters=captured, experiment_name="singleshot/ge"
+    )
     try:
         session.service.apply_draft(draft)
         applied = session.context.read_context()

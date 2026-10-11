@@ -6,14 +6,13 @@ from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 
-import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.device import BaseDeviceInfo, FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
-    DeviceSnapshot,
+    Completed,
     Engine,
     EnginePorts,
     InitEnv,
@@ -23,6 +22,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 
 START = datetime(2026, 10, 7, tzinfo=UTC)
@@ -53,44 +53,33 @@ class RecordingDevices:
     def __init__(self) -> None:
         self.values: list[tuple[str, float]] = []
         self.on_set: Callable[[StopSignal], object] | None = None
+        self.configs: list[BaseDeviceInfo] = []
+        self.signals: list[StopSignal] = []
+        self.drivers: dict[str, FakeDevice] = {}
+        self.captures = 0
 
-    def set_value(self, name: str, value: float, cancel_signal: StopSignal) -> None:
+    def capture_snapshot(self) -> dict[str, JsonObject]:
+        self.captures += 1
+        return capture_device_snapshot(self.drivers)
+
+    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
+        if name in self.drivers:
+            return self.drivers[name].get_info().model_copy(deep=True)
+        return FakeDeviceInfo(address="memory")
+
+    def setup_device(
+        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
+    ) -> None:
+        value = cfg.model_dump()["value"]
         self.values.append((name, value))
+        self.configs.append(cfg.model_copy(deep=True))
+        self.signals.append(cancel_signal)
         if self.on_set is not None:
             self.on_set(cancel_signal)
-
-
-class RecordingPlots:
-    """Record detached line and image snapshots from native Figures."""
-
-    def __init__(self) -> None:
-        self.figures: dict[str, Figure] = {}
-        self.snapshots: list[tuple[NDArray[np.float64], ...]] = []
-        self.image_snapshots: list[tuple[NDArray[np.float64], ...]] = []
-        self.error: Exception | None = None
-
-    def axes(self, name: str) -> Axes:
-        figure = Figure()
-        self.figures[name] = figure
-        return figure.subplots()
-
-    def refresh(self, figure: Figure) -> None:
-        if self.error is not None:
-            raise self.error
-        self.snapshots.append(
-            tuple(
-                np.asarray(line.get_ydata(), dtype=np.float64).copy()
-                for axes in figure.axes
-                for line in axes.lines
-            )
-        )
-        self.image_snapshots.append(
-            tuple(
-                np.asarray(image.get_array(), dtype=np.float64).copy()
-                for axes in figure.axes
-                for image in axes.images
-            )
-        )
+        if name in self.drivers:
+            driver = self.drivers[name]
+            validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
+            driver.setup(validated, progress=False, stop_event=cancel_signal.event)
 
 
 class RecordingBar(TQDMProgressBar):
@@ -136,6 +125,11 @@ class Cfg:
     dev: dict[str, str] | None = None
 
 
+def save_integer(source: Completed[Cfg, int], path: Path) -> None:
+    """Write the paired cfg value and integer result to the engine temporary."""
+    path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
+
+
 @dataclass
 class Rig:
     """One isolated host/Engine and its dynamic on-disk outputs."""
@@ -143,7 +137,7 @@ class Rig:
     root: Path
     clock: ManualClock = field(default_factory=ManualClock)
     devices: RecordingDevices = field(default_factory=RecordingDevices)
-    plots: RecordingPlots = field(default_factory=RecordingPlots)
+    plots: Plots = field(default_factory=lambda: Plots(NonPresentingHost()))
     initialized: list[datetime] = field(default_factory=list)
     bars: list[RecordingBar] = field(default_factory=list)
     engine: Engine[int] = field(init=False)
@@ -182,8 +176,6 @@ class Rig:
             "example",
             plan=Plan,
             tunables=Tunables,
-            state=State,
-            record=int,
             init=self.init,
         )(invoke)
         self.engine.start(
@@ -191,7 +183,17 @@ class Rig:
             plan=Plan() if plan is None else plan,
             tunables=Tunables(),
             paths=self.paths,
-            identity=RunIdentity("run", DeviceSnapshot(()), "offline"),
+            identity=RunIdentity(
+                "run",
+                SoftwareProvenance(
+                    software_versions={},
+                    git_commit=None,
+                    git_dirty=None,
+                    qick_version=None,
+                    soc_fingerprint=None,
+                    hostname="offline",
+                ),
+            ),
         )
 
     def events(self) -> tuple[dict[str, JsonValue], ...]:

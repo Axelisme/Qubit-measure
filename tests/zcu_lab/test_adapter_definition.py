@@ -55,7 +55,6 @@ def test_registry_analysis_input_controls_mist_power_scale(
             run_result=object(),
             analyze_params=selected,
             parameters=environment.parameters,
-            predictor=None,
         ),
         plots=Plots(NonPresentingHost()),
     )

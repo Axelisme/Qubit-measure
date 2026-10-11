@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，holder admission、平面 actual 與 bounded device setup
+**Last updated:** 2026-10-12，holder admission、完整 device setup 與獨立 predictor 查詢
 
 # `zcu_tools/mcp/measure/`
 
@@ -10,7 +10,7 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## Setup 工具
 
-`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。
+`recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。Ready 只核對 MockSoc 與 connected fake_flux，不依賴 predictor。全域 status 不讀或投影 installed predictor。
 
 `device_setup(name, cfg)` 接受 partial Info patch。工具先讀 before snapshot，合併 before.info 與 caller patch，再送一次完整 `device.setup(name, cfg)` RPC。YOKO patch 含 value 時，caller 必須明填 value_unit，不能借 before 的 unit。只改 output／rampstep 不需要 unit。欄位必填、extra、mode/unit 與 limits 由 RPC 的同一 Info model validator 拒絕，connected admission 由 GUI DeviceService 擁有。非 YOKO 沿各自的 Info 契約，不加 flux 規則或單位換算。
 
@@ -23,6 +23,12 @@ Raw RPC 是非同步完整 cfg 入口，不接受 partial updates、不補 cache
 ## 日常與細部操作
 
 日常量測優先 recipe，既有資料分析使用共用分析工具。細部 setup、cfg、保存、writeback 及排查由 RPC 承接。日常／排查是使用指引，不是權限模式。`rpc_call` 接受 catalog 中全部 `rpc` 與 `tool` methods；tool 名稱只提示高層入口。GUI 仍驗證每次操作。公開 method 的參數、回覆及前置條件由 `rpc_describe` 提供。
+
+Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"predictor.info", params=...)` 查詢。每次恰填一個來源：`qubit="Q2"` 讀目前選定工作點的具體元件，或 `params={"model":"transmon","EJmax":20,"EC":0.25,"d":0.1,"flux_half":0,"flux_period":1,"flux_bias":0}`（SQUID transmon，d 為 junction asymmetry），或 `params={"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0}` 做獨立試算。qubit 不解析 alias 或 path。直接參數不需要工作點，不讀 dialog/cache。能量用 GHz；flux_half、flux_period、flux_bias 與 device_value 用來源的 native device units，不是 flux quanta；frequency_mhz 與預測頻率用 MHz。
+
+`predictor.info` 回 `{model, params, missing}`，省略或 null 欄位保持未知。Predict 另填 device_value，Calibrate 另填 device_value 與 frequency_mhz。兩者需要完整有效參數，可填 from_level/to_level，預設 0/1。Calibrate 回 `{flux_bias_before, flux_bias_after, frequency_mhz, clamped}`，不寫元件、dialog 或檔案。兩種模型都選最小絕對 bias 的根，不選最接近目前 bias 的根。frequency_mhz 是實際達到的 MHz。不可達目標回全域最近頻率並標 clamped=true，同距時選最小絕對 bias。可達目標標 clamped=false。無效輸入仍拒絕，數值求解失敗不以 fallback 掩蓋。
+
+來源皆未填或同時填回 `invalid_params/invalid_predictor_source`；無效具體元件名稱回 `invalid_predictor_qubit`；直接參數格式或物理值無效回 `invalid_predictor_params`。計算缺欄位回 `missing_predictor_params`，message 與 data.missing 列出缺項。工具沿 GUI 的 live catalog 描述與錯誤傳遞，不另建參數或寫回邏輯。沒有 target、load/set/clear 或 installed model。
 
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 

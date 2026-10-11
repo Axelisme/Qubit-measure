@@ -65,8 +65,11 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v109: flux unit assertions and explicit native coordinate opt-in for FakeDevice.
 # v111: injected generator recipes, captured questions and explicit answer/writeback.
 # v112: status projects the opened EntryInfo rather than chip/qubit identity.
-# v114: holder/ref-free cfg with bounded partial setup over complete device RPC.
-MCP_VERSION = 114
+# v113: bounded partial device_setup over complete Info device.setup RPC.
+# v114: integration revision above the base's device_setup release.
+# v115: read-only predictor inputs and readiness without an installed predictor.
+# v116: holder/ref-free cfg integrated above the predictor release.
+MCP_VERSION = 116
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

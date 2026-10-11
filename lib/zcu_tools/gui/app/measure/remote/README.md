@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，holder admission、ref-free cfg 與完整 device setup
+**Last updated:** 2026-10-12，holder admission、完整 device setup、SavedPoint writeback 與獨立 predictor
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -44,7 +44,12 @@ Push     <- {"event": "...", "payload": {...}, "seq": 123, "origin": {"kind": "a
 
 Parameter writeback previews and write receipts use `kind="parameter"`.
 Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
-`written.parameter`.
+`written.parameter`. Sample previews and write receipts use `kind="sample"`,
+`sample-<n>` IDs and a concrete component as target. Apply lists components in
+`written.samples`; write receipts preserve complete latest JSONL rows in
+before/after, including accepted metadata. Preview exposes unavailable_reasons
+for omitted sample proposals. The existing preview/set/apply/write methods own
+these projections; no sample-specific RPC is added.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
@@ -169,9 +174,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 95`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 127`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 114`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 98`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 130`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 116`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -260,10 +265,14 @@ The wire surface is grouped by ownership:
   old flattened md keys or an ml runtime index. Library editing and template create/list use the app controller;
   `editor.*` provides independent library-entry drafts.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
-- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
+- `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
-- `predictor.*`：Fluxonium predictor load, edit, clear, and predictions through
-  `PredictorControlPort`.
+- `predictor.predict`／`predictor.calibrate`／`predictor.info`：read-only simulator queries with exactly one source, `qubit` or `params`. A concrete `qubit` such as Q2 reads the currently selected point through the injected params_for. It is not an alias or a path. Direct `params` has `model="fluxonium"` with named EJ, EC, EL, or `model="transmon"` with EJmax, EC, d (junction asymmetry), plus flux_half, flux_period, flux_bias fields. Energies use GHz; affine inputs and device_value use the source's native device units. Returned frequencies use MHz. Info returns `{model, params, missing}` and preserves unknown fields as null. Predict and Calibrate require complete valid inputs. Calibrate returns `{flux_bias_before, flux_bias_after, frequency_mhz, clamped}` without changing the component, dialog or source parameters. Both models choose the smallest absolute native bias across all roots. frequency_mhz is the actual attained MHz. Unreachable targets return the globally closest attainable frequency with clamped=true; ties choose the smallest absolute bias. Reachable targets have clamped=false. Invalid parameters or transitions are rejected, not clamped. Queries never read hardware, dialog/cache or an installed model. No target or load/set/clear commands.
+
+Predictor requests with neither source or both sources return `invalid_params` with reason `invalid_predictor_source`. Invalid concrete names return `invalid_predictor_qubit`; malformed direct inputs or invalid physics return `invalid_predictor_params`. Missing computation inputs return `missing_predictor_params`, a message naming the fields and `data.missing`. Info can inspect incomplete inputs without building a model. A missing component provider or context is a failed precondition, not an empty/default model.
+
+For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or `{"params":{"model":"fluxonium","EJ":5,"EC":1,"EL":0.5,"flux_half":0,"flux_period":1,"flux_bias":0},"device_value":0.1}`. The device coordinate is not flux quanta. Both calculation methods accept from_level and to_level, defaulting to 0 and 1. Calibrate additionally requires frequency_mhz and increasing nonnegative levels. Numerical solver failures propagate; a returned bias does not certify a fit.
+
 - `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_artifacts`接受 `all` 或唯一的 `{section,name}` refs，保存完整 artifact，不接受 caller paths。`tab.save_data` 與 `tab.save_artifacts` 同步回傳原 Run 的 run_id，即使全部輸出失敗也保留同一 ID，以及本次完整 paths/status/error，不建立 Save operation id。`tab.snapshot` 投影已提交的 sections/member/output 狀態，不計畫新路徑。Run screenshot 讀 live FigureContainer；analysis/post screenshot 讀目前選中的具名圖。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 的純讀與 command 都要求 holder；同一 owner loop 的較晚提交生效。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。

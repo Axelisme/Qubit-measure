@@ -194,16 +194,26 @@ class HeatmapPlot:
         self._marker: PathCollection | None = None
 
     def mark_point(self, x: float, y: float) -> None:
-        """Set the red best-point overlay; NaN coordinates hide it."""
+        """Set the red best-point overlay; NaN coordinates hide it.
+
+        Raise RuntimeError if draw removed this marker or its original axes.
+        """
         self._ensure_active()
         point = np.array([[x, y]], dtype=np.float64)
 
         def apply() -> None:
             self._ensure_active()
+            if self._axes not in self._figure.axes:
+                raise RuntimeError("Point marker was removed from its original axes.")
             if self._marker is None:
                 self._marker = self._axes.scatter(
                     [], [], color="red", label="Best Point", zorder=3
                 )
+            elif (
+                self._marker.axes is not self._axes
+                or self._marker not in self._axes.collections
+            ):
+                raise RuntimeError("Point marker was removed from its original axes.")
             self._marker.set_offsets(point)
 
         self._host.call(apply)
@@ -254,16 +264,26 @@ class HeatmapLinePlot:
         self._marker: Line2D | None = None
 
     def mark_line(self, x: float) -> None:
-        """Set a red dashed reference on the scan-line axes; NaN hides it."""
+        """Set a red dashed reference on the scan-line axes; NaN hides it.
+
+        Raise RuntimeError if draw removed this marker or its original axes.
+        """
         self._ensure_active()
         position = float(x)
 
         def apply() -> None:
             self._ensure_active()
+            if self._line_axes not in self._figure.axes:
+                raise RuntimeError("Line marker was removed from its original axes.")
             if self._marker is None:
                 self._marker = self._line_axes.axvline(
                     np.nan, color="red", linestyle="--"
                 )
+            elif (
+                self._marker.axes is not self._line_axes
+                or self._marker not in self._line_axes.lines
+            ):
+                raise RuntimeError("Line marker was removed from its original axes.")
             self._marker.set_xdata([position])
 
         self._host.call(apply)
@@ -340,8 +360,8 @@ class Plots(FigureCollection):
     """One producer's plotting lifetime, shared by frontend adapters.
 
     Stop the producer before finish. Host calls are synchronous and preserve
-    that producer's order. General figures stay unpresented until finish, while
-    live figures present immediately. Finishing fixes membership and stops typed
+    that producer's order. General figures stay unpresented until finish unless
+    drawn. Live factories and the first successful draw present immediately. Finishing fixes membership and stops typed
     updates; it does not declare analysis success. Release presentation separately
     after finishing. Neither finish nor release destroys retained Figure objects.
     """
@@ -375,6 +395,9 @@ class Plots(FigureCollection):
             raise ValueError("Live axes must belong to the named figure")
         if any(ax in self._live_axes for ax in resolved):
             raise ValueError("Axes already belong to a live plot")
+        self._live_axes.intersection_update(
+            ax for current in self.values() for ax in current.axes
+        )
         self._live_axes.update(resolved)
         return figure, resolved
 
@@ -382,6 +405,51 @@ class Plots(FigureCollection):
         if figure not in self._live:
             self._host.present(figure)
             self._live.append(figure)
+
+    def draw(self, name: str, callback: Callable[[Figure], None]) -> None:
+        """Draw on an existing named figure, then refresh on the host owner.
+
+        Execution is synchronous on the host owner thread and blocks the calling
+        worker thread until callback, presentation and refresh return.
+        The first successful draw presents the figure and makes it live; later
+        draws refresh the same presentation. Untouched general figures still
+        wait until finish to present. With a GUI host it
+        occupies the GUI thread; heavy drawing can freeze the interface.
+        The callback may freely modify axes shared with live templates, but must
+        not retain artists for later worker-side mutation. Calling cla() in the
+        callback removes same-axes template artists; their next update raises
+        RuntimeError. Callback exceptions propagate back to the caller without
+        rollback, presentation or refresh. Unknown names raise KeyError; finished plots raise
+        RuntimeError. Host errors also propagate.
+        """
+        self._ensure_active()
+        figure = self[name]
+
+        def draw_frame() -> None:
+            self._ensure_active()
+            callback(figure)
+            self._present_live(figure)
+            self._host.refresh(figure)
+
+        self._host.call(draw_frame)
+
+    def save(self, name: str, path: str | Path) -> None:
+        """Save an existing named figure on the host owner without refreshing.
+
+        Execution is synchronous on the host owner thread and blocks the calling
+        worker thread until saving completes. With a GUI host it occupies the
+        GUI thread; expensive rendering can freeze the interface. This method
+        invokes no callback and does not refresh. In draw(), callback exceptions
+        propagate to its caller, and callback cla() invalidates same-axes
+        templates whose next update raises RuntimeError; saving does not restore
+        those artists.
+        Use native Figure.savefig defaults and infer format from path. Saving is
+        allowed before or after finish. Parent directories are not created and
+        existing files follow native savefig overwrite behavior. Unknown names
+        raise KeyError; host, rendering and I/O errors propagate.
+        """
+        figure = self[name]
+        self._host.call(lambda: figure.savefig(path))
 
     def refresh(self, name: str) -> None:
         """Refresh a complete live frame after a batch of typed updates."""

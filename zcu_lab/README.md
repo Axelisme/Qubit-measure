@@ -1,10 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-12，固定 recipe summary capture 與 ref-free Run
+**Last updated:** 2026-10-12，ref-free Run、固定 recipe capture、caller-owned presets 與 component predictor 預填
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
-`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow caller 在正式 pull 後重用同一來源。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
+`zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
 `definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
@@ -35,3 +35,7 @@ Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 ac
 測試在 `tests/zcu_lab`，目錄對應本套件。通用契約逐一走過 measure registry，驗證 adapter conformance、context-free spec、成品 cfg validation 與 fresh schema。新增或刪除實驗不需要維護另一份測試清單。
 
 共用 domain helpers 與 template startup policy 有各自的接縫測試。個別實驗不另寫行為測試，除非使用者要求特殊邏輯；目前保留 AllXY、ZigZag 與 ZigZagScan 的 D142 案例。共同 runtime、NotebookAdapter 與 GUI framework 行為由框架 owner 的測試驗證。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
+
+`components.params_for(component)` 依 kind 讀 qubit 元件目前值。`qubit/fluxonium` 用 EJ／EC／EL 回 FluxoniumParams，`qubit/transmon` 用 EJmax／EC／d 回 TransmonParams。兩種 schema 共用 `QubitBaseSchema` 的通用欄位，不遷移也不兼容舊的 transmon 資料。
+Notebook 傳入 point.Q1；GUI composition 傳入隔離 capture 的 component model。
+缺項保留 None，ext.flux_bias 不代入預設值。參數與 Calibrate 不會回写元件。

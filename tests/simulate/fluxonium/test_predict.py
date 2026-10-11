@@ -19,7 +19,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
-import zcu_tools.simulate.fluxonium.predict as predict_mod
 from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -114,6 +113,30 @@ def test_predict_freq_golden() -> None:
     assert p.predict_freq(0.1, (1, 2)) == pytest.approx(3416.7599127277226, abs=1e-7)
 
 
+def test_predictor_queries_frequency_curves_in_mhz() -> None:
+    """The neutral query surface returns flux coordinates and transition rows."""
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    fluxs, frequencies = predictor.predict_frequencies_mhz(
+        np.array([0.1], dtype=np.float64), ((0, 1), (1, 2))
+    )
+    np.testing.assert_allclose(fluxs, [0.6])
+    np.testing.assert_allclose(
+        frequencies, [[1707.3748654723192], [3416.7599127277226]], atol=1e-7
+    )
+
+
+def test_predictor_queries_matrix_curves_above_level_one() -> None:
+    """Batch matrix queries retain the engine's higher-transition support."""
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    fluxs, magnitudes = predictor.predict_matrix_elements(
+        np.array([0.1, 0.2], dtype=np.float64), ((0, 1), (0, 3)), "n"
+    )
+    np.testing.assert_allclose(fluxs, [0.6, 0.7])
+    assert magnitudes.shape == (2, 2)
+    assert np.all(magnitudes > 0)
+    assert magnitudes[0, 0] == pytest.approx(0.05111118894415298, abs=1e-9)
+
+
 def test_predict_freq_reverse_transition_keeps_signed_contract() -> None:
     p = _make_predictor(PARAMS[0])
     forward = p.predict_freq(0.13, (0, 1))
@@ -205,7 +228,7 @@ def test_calculate_bias_recovers_predicted_freq() -> None:
     )
     cur_value = 0.12
     target = p.predict_freq(cur_value, (0, 1))
-    bias = p.calculate_bias(cur_value, target, (0, 1))
+    bias = p.calculate_bias(cur_value, target, (0, 1)).flux_bias
     assert bias == pytest.approx(0.0, abs=1e-4)
 
 
@@ -219,25 +242,8 @@ def test_calculate_bias_detects_offset() -> None:
     offset = 0.05
     # freq the qubit *actually* shows at cur_value if its true flux is shifted by offset
     observed = p.predict_freq(cur_value + offset, (0, 1))
-    bias = p.calculate_bias(cur_value, observed, (0, 1))
+    bias = p.calculate_bias(cur_value, observed, (0, 1)).flux_bias
     assert bias == pytest.approx(offset, abs=1e-3)
-
-
-def test_calculate_bias_warns_when_root_find_falls_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_root_scalar(*args, **kwargs):
-        raise RuntimeError("root failed")
-
-    monkeypatch.setattr(predict_mod, "root_scalar", fail_root_scalar)
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-
-    with pytest.warns(RuntimeWarning, match="Bias calibration failed"):
-        bias = p.calculate_bias(0.12, 0.0, (0, 1))
-
-    assert bias == pytest.approx(0.0, abs=1e-12)
 
 
 def test_update_bias_shifts_prediction() -> None:

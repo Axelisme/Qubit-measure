@@ -87,7 +87,7 @@ class MainDialogRegistry:
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
-            return PredictorDialog(
+            dialog = PredictorDialog(
                 self._ctrl.predictor_control,
                 parent=self._parent,
                 device=self._ctrl.device_control,
@@ -95,6 +95,8 @@ class MainDialogRegistry:
                 persistent_on_close=True,
                 control_identity=self._ctrl.control_identity,
             )
+            dialog.enable_parameter_cache()
+            return dialog
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
 

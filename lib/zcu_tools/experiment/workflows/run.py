@@ -2,32 +2,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import is_dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from qick import QickConfig
 
+from ...datafile import JsonObject
 from ..stop_signal import StopSignal
 from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
-from .display import Live1D, Live2D, Live2DRow
 from .models import MissingCapability
-from .ports import DevicePort, PlotPort
+from .ports import DevicePort
+
+# Axis vectors follow buffer dimension order; samples have the buffer shape.
+# Both are borrowed during the synchronous callback, including partial NaNs.
+type LiveUpdate = Callable[
+    [tuple[NDArray[np.float64], ...], NDArray[np.complex128]], None
+]
 
 
 class Run[Cfg]:
     """One experiment's cfg copy, native capabilities, and cancellation signal.
 
-    cfg is a deepcopy of the supplied dataclass and may be modified by the
-    experiment. cancel_signal is the engine-owned StopSignal; do not clear it.
+    cfg must be a dataclass instance or a Pydantic BaseModel instance, not a
+    class. Run deepcopies it; the experiment may modify this isolated copy.
+    Invalid cfg inputs raise TypeError. cancel_signal is the engine-owned
+    StopSignal; do not clear it.
     soc/soccfg/devices raise MissingCapability when their ports are absent.
     outcome retains the first non-completed Schedule result. Constructor
     soc/soccfg/devices arguments are native handles or None, never copied or
-    connected here. Construction does not set up devices, acquire, or save.
+    connected here. device_snapshot is required detached JSON captured by the
+    caller; use {} only when no devices are connected. Construction does not
+    read drivers, set up devices, acquire, or save.
     """
 
     def __init__(
@@ -35,12 +46,18 @@ class Run[Cfg]:
         cfg: Cfg,
         cancel_signal: StopSignal,
         *,
+        device_snapshot: Mapping[str, JsonObject],
         soc: object | None = None,
         soccfg: QickConfig | None = None,
         devices: DevicePort | None = None,
     ) -> None:
-        if isinstance(cfg, type) or not is_dataclass(cfg):
-            raise TypeError("Experiment cfg must be a dataclass instance")
+        if isinstance(cfg, type) or not (
+            is_dataclass(cfg) or isinstance(cfg, BaseModel)
+        ):
+            raise TypeError(
+                "Experiment cfg must be a dataclass or Pydantic BaseModel instance"
+            )
+        self._device_snapshot = deepcopy(dict(device_snapshot))
         self.cfg: Cfg = deepcopy(cfg)
         self.cancel_signal = cancel_signal
         self._soc = soc
@@ -48,9 +65,17 @@ class Run[Cfg]:
         self._devices = devices
         self._outcome = ScheduleOutcome()
         self._buffers: list[tuple[SignalBuffer, tuple[NDArray[np.float64], ...]]] = []
-        self._live: Live1D | Live2D | Live2DRow | None = None
-        self._plots: PlotPort | None = None
+        self._live: LiveUpdate | None = None
         self._live_error: BaseException | None = None
+
+    @property
+    def device_snapshot(self) -> Mapping[str, JsonObject]:
+        """Return detached fixed JSON captured by the caller before acquisition.
+
+        Construction and access never read drivers. Mutating an input or a
+        returned mapping cannot change this Run's acquisition facts.
+        """
+        return deepcopy(self._device_snapshot)
 
     @property
     def soc(self) -> object:
@@ -78,22 +103,27 @@ class Run[Cfg]:
         """Return the first live failure cause, preserving object identity.
 
         Engine checks this before interpreting a Schedule outcome, because
-        Schedule may have caught a projection or snapshot callback failure.
+        Schedule may have caught a plotting callback failure.
         """
         return self._live_error
 
-    def bind_live(self, live: Live1D | Live2D | Live2DRow, plots: PlotPort) -> None:
-        """Bind one live declaration before experiment code creates buffers.
+    def bind_live(self, live: LiveUpdate) -> None:
+        """Bind one data callback before experiment code creates buffers.
 
         This package-internal Engine seam is not an additional host API.
         More than one buffer with live enabled is ambiguous and fails the run.
-        Projection/refresh errors propagate and remain available in live_error.
-        Binding after buffer creation or binding twice raises ValueError.
+        live receives (float64 axis vectors, complex128 samples) in buffer
+        dimension order, including partial NaNs. It runs synchronously and must
+        not mutate or retain the borrowed arrays. Plot through Plots handles;
+        Run never mutates artists. Callback errors propagate and remain available
+        in live_error. Non-callables raise TypeError. Binding after buffer
+        creation or binding twice raises ValueError.
         """
+        if not callable(live):
+            raise TypeError("Live update must be callable")
         if self._buffers or self._live is not None:
             raise ValueError("Live must be bound once before buffer creation")
         self._live = live
-        self._plots = plots
 
     @property
     def outcome(self) -> ScheduleOutcome:
@@ -120,8 +150,8 @@ class Run[Cfg]:
         one-dimensional float64 axis of matching length per dimension.
         Invalid dimensions, dtype, rank, length, or values raise ValueError.
         Buffers start with NaNs; partial data remains valid runtime output.
-        Live callbacks project every update without dropping the last values;
-        snapshot coalescing belongs to the host PlotPort.
+        Live callbacks receive every update without dropping the last values.
+        Presentation and projection belong to the callback, not Run.
         """
         if not shape or any(type(size) is not int or size <= 0 for size in shape):
             raise ValueError("Buffer dimensions must be positive integers")
@@ -155,45 +185,11 @@ class Run[Cfg]:
     def _update_live(
         self, data: NDArray[np.complex128], axes: tuple[NDArray[np.float64], ...]
     ) -> None:
-        live, plots = self._live, self._plots
-        if live is None or plots is None:
+        live = self._live
+        if live is None:
             raise RuntimeError("Live callback has no binding")
         try:
-            projected = live.y(data)
-            if projected.shape != data.shape or not np.isrealobj(projected):
-                raise ValueError(
-                    "Live projection must preserve shape and produce real values"
-                )
-            if isinstance(live, Live1D):
-                if data.ndim != 1:
-                    raise ValueError("Live1D requires a one-dimensional buffer")
-                live.line.set_data(axes[0], projected)
-                figure = live.line.get_figure(root=True)
-            else:
-                if isinstance(live, Live2D):
-                    if data.ndim != 2:
-                        raise ValueError("Live2D requires a two-dimensional buffer")
-                    live.image.set_data(projected)
-                else:
-                    image = np.array(
-                        live.image.get_array(), dtype=np.float64, copy=True
-                    )
-                    if (
-                        data.ndim != 1
-                        or image.ndim != 2
-                        or type(live.row) is not int
-                        or not 0 <= live.row < image.shape[0]
-                        or data.size != image.shape[1]
-                    ):
-                        raise ValueError(
-                            "Live2DRow requires a valid row and matching width"
-                        )
-                    image[live.row] = projected
-                    live.image.set_data(image)
-                figure = live.image.get_figure(root=True)
-            if figure is None:
-                raise ValueError("Live artist must belong to a Figure")
-            plots.refresh(figure)
+            live(axes, data)
         except (Exception, KeyboardInterrupt) as error:
             # Keep the display source even when Schedule catches this callback.
             if self._live_error is None:

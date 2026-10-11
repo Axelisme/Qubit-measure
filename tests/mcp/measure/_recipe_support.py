@@ -138,8 +138,8 @@ class LookbackGui:
 
         The recording parameter-read wire below deliberately retains malformed
         values for caller rejection coverage; it does not claim native admission.
-        Formula evaluation uses the native expression owner; bare aliases return
-        their resolved names rather than numbers.
+        Formula evaluation, unlike that wire, uses the real scalar expression owner.
+        Bare aliases return resolved names; arithmetic returns numeric values.
         Direct native model construction requires no process-global registry.
         """
         resonator = ResonatorSchema.model_validate(
