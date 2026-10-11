@@ -263,3 +263,33 @@ def test_dialog_cache_restores_transmon_and_fluxonium_trials(
         assert fluxonium.parameters() == FluxoniumParams(EJ=4.1)
     finally:
         fluxonium.close()
+
+
+@pytest.mark.parametrize("model", ["fluxonium", "transmon"])
+@pytest.mark.parametrize(
+    "target, clamped", [(1707.3748654723192, False), (-100.0, True), (20000.0, True)]
+)
+def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
+    qapp, component_context, model, target, clamped
+):
+    from qtpy.QtWidgets import QLabel
+    from zcu_tools.simulate.transmon import TransmonParams
+
+    query = PredictorService(component_context, components.params_for)
+    before = component_context.read_context().document()
+    params = (
+        FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0)
+        if model == "fluxonium"
+        else TransmonParams(20.0, 0.3, 0.0, 0.0, 1.0, 0.0)
+    )
+    dialog = PredictorDialog(PredictorControlFacet(query), params=params)
+    try:
+        bias = dialog.calibrate(0.101, target)
+        actual = dialog.predict_frequency(0.101)
+        text = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+        assert f"clamped={str(clamped).lower()}" in text
+        assert f"{actual:.6g} MHz" in text
+        assert dialog.parameters().flux_bias == pytest.approx(bias)
+        assert component_context.read_context().document() == before
+    finally:
+        dialog.close()

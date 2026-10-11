@@ -19,7 +19,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
-import zcu_tools.simulate.fluxonium.predict as predict_mod
 from zcu_tools.resources.qubit_params import ParamsProject, QubitParams
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
@@ -229,7 +228,7 @@ def test_calculate_bias_recovers_predicted_freq() -> None:
     )
     cur_value = 0.12
     target = p.predict_freq(cur_value, (0, 1))
-    bias = p.calculate_bias(cur_value, target, (0, 1))
+    bias = p.calculate_bias(cur_value, target, (0, 1)).flux_bias
     assert bias == pytest.approx(0.0, abs=1e-4)
 
 
@@ -243,25 +242,8 @@ def test_calculate_bias_detects_offset() -> None:
     offset = 0.05
     # freq the qubit *actually* shows at cur_value if its true flux is shifted by offset
     observed = p.predict_freq(cur_value + offset, (0, 1))
-    bias = p.calculate_bias(cur_value, observed, (0, 1))
+    bias = p.calculate_bias(cur_value, observed, (0, 1)).flux_bias
     assert bias == pytest.approx(offset, abs=1e-3)
-
-
-def test_calculate_bias_warns_when_root_find_falls_back(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_root_scalar(*args, **kwargs):
-        raise RuntimeError("root failed")
-
-    monkeypatch.setattr(predict_mod, "root_scalar", fail_root_scalar)
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-
-    with pytest.warns(RuntimeWarning, match="Bias calibration failed"):
-        bias = p.calculate_bias(0.12, 0.0, (0, 1))
-
-    assert bias == pytest.approx(0.0, abs=1e-12)
 
 
 def test_update_bias_shifts_prediction() -> None:

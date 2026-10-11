@@ -110,7 +110,9 @@ def _make_ctrl(
     ctrl.predict_freq_curve.side_effect = _freq_side
     ctrl.predict_matrix_element_curve.side_effect = _mat_side
     ctrl.predict_freq.return_value = 1234.5
-    ctrl.calibrate_flux_bias.return_value = CalibrateFluxBiasResult(flux_bias=0.125)
+    ctrl.calibrate_flux_bias.return_value = CalibrateFluxBiasResult(
+        flux_bias=0.125, frequency_mhz=4567.0, clamped=False
+    )
     ctrl.on_predictor_changed.return_value = MagicMock(name="unsubscribe_predictor")
     return ctrl
 

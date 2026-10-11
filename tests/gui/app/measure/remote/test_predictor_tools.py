@@ -42,9 +42,14 @@ MISSING = ["EC", "EL", "flux_half", "flux_period", "flux_bias"]
 @pytest.fixture
 def simulator(qapp, tmp_path: Path):
     before_kinds = component_registry.kinds()
-    added = "qubit/fluxonium" not in before_kinds
-    if added:
-        component_registry.register("qubit/fluxonium", components.QubitSchema)
+    added = []
+    for kind, schema in (
+        ("qubit/fluxonium", components.QubitSchema),
+        ("qubit/transmon", components.TransmonSchema),
+    ):
+        if kind not in before_kinds:
+            component_registry.register(kind, schema)
+            added.append(kind)
     controller = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         Registry(),
@@ -64,8 +69,8 @@ def simulator(qapp, tmp_path: Path):
         sock.close()
         adapter.stop()
         assert vars(controller)["_background_svc"].quiesce()
-        if added:
-            component_registry.unregister("qubit/fluxonium")
+        for kind in added:
+            component_registry.unregister(kind)
         assert component_registry.kinds() == before_kinds
 
 
@@ -87,6 +92,19 @@ def prepare_point(controller: Controller) -> None:
     )
     controller.context_control.add_component(
         "Q2", "qubit/fluxonium", {"EJ": 4.1}, setup=True
+    )
+    controller.context_control.add_component(
+        "QT",
+        "qubit/transmon",
+        {
+            "EJmax": 20.0,
+            "EC": 0.3,
+            "d": 0.0,
+            "flux_half": 0.0,
+            "flux_period": 1.0,
+            "ext": {"flux_bias": 0.0},
+        },
+        setup=True,
     )
     controller.setup_control.new_point(
         PointCreateRequest("first", "", CommandOrigin("gui"))
@@ -343,3 +361,68 @@ def test_transmon_direct_info_and_missing_prediction(simulator) -> None:
     assert failed["error"]["data"]["missing"] == reply["result"]["missing"]
     invalid = call(sock, "predictor.info", {"params": {**direct, "EL": 1.0}})
     assert invalid["error"]["reason"] == "invalid_predictor_params"
+
+
+@pytest.mark.parametrize(
+    "model, qubit, reachable",
+    [("fluxonium", "Q1", 1707.3748654723192), ("transmon", "QT", 1707.3748654723192)],
+)
+@pytest.mark.parametrize("source", ["qubit", "params"])
+@pytest.mark.parametrize("target_kind", ["reachable", "below", "above"])
+def test_mcp_calibration_reports_actual_frequency_and_clamping_read_only(
+    simulator, tmp_path, request, model, qubit, reachable, source, target_kind
+):
+    controller, adapter, _ = simulator
+    prepare_point(controller)
+    before = controller.context_control.read_context().document()
+    direct = (
+        COMPLETE
+        if model == "fluxonium"
+        else {
+            "model": "transmon",
+            "EJmax": 20.0,
+            "EC": 0.3,
+            "d": 0.0,
+            "flux_half": 0.0,
+            "flux_period": 1.0,
+            "flux_bias": 0.0,
+        }
+    )
+    selection = {"qubit": qubit} if source == "qubit" else {"params": deepcopy(direct)}
+    target = (
+        reachable
+        if target_kind == "reachable"
+        else (-100.0 if target_kind == "below" else 20000.0)
+    )
+    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
+    try:
+        invoke("connect", {"port": adapter.port})
+        result = invoke(
+            "rpc_call",
+            {
+                "method": "predictor.calibrate",
+                "params": {**selection, "device_value": 0.101, "frequency_mhz": target},
+            },
+        )
+        assert "clamped" in result, "MCP must project model reachability"
+        assert result["clamped"] is (target_kind != "reachable")
+        assert result["flux_bias_before"] == 0.0
+        actual = invoke(
+            "rpc_call",
+            {
+                "method": "predictor.predict",
+                "params": {
+                    "params": {**direct, "flux_bias": result["flux_bias_after"]},
+                    "device_value": 0.101,
+                },
+            },
+        )
+        assert actual["freq_mhz"] == pytest.approx(result["frequency_mhz"], abs=1e-6)
+        if target_kind == "reachable":
+            assert result["frequency_mhz"] == pytest.approx(target, abs=1e-6)
+        assert controller.context_control.read_context().document() == before
+        assert selection == (
+            {"qubit": qubit} if source == "qubit" else {"params": direct}
+        )
+    finally:
+        bridge.disconnect()
