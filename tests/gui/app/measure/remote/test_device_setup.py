@@ -39,6 +39,13 @@ def submit(
     return method.handler(SetupAdapter(dev), params)
 
 
+def accept(dev: RecordingDeviceControl, cfg: dict[str, object]) -> Mapping[str, object]:
+    try:
+        return submit(dev, cfg)
+    except RemoteError as exc:
+        pytest.fail(f"valid complete cfg must be accepted: {exc}")
+
+
 def yoko_control() -> RecordingDeviceControl:
     return RecordingDeviceControl(
         YOKOGS200Info(address="cached", mode="current", value=0.002)
@@ -55,7 +62,7 @@ def reject_after_witness(
     invalid: dict[str, object],
     diagnostic: str,
 ) -> None:
-    assert submit(dev, valid) == {"operation_id": 71}
+    assert accept(dev, valid) == {"operation_id": 71}
     assert len(dev.requests) == 1
     with pytest.raises(RemoteError, match=diagnostic) as error:
         submit(dev, invalid)
@@ -72,9 +79,9 @@ def test_complete_cfg_returns_operation_without_merging_cached_values(
 ) -> None:
     if kind == "fake-defaults":
         dev = RecordingDeviceControl(FakeDeviceInfo(address="cached", value=9.0))
-        assert submit(dev, {"address": "requested"}) == {"operation_id": 71}
+        assert accept(dev, {"address": "requested"}) == {"operation_id": 71}
         assert dev.requests[0].info.model_dump()["value"] == 0.0
-        assert submit(dev, {"address": "requested", "value": 1.5}) == {
+        assert accept(dev, {"address": "requested", "value": 1.5}) == {
             "operation_id": 71
         }
         assert dev.requests[1].info.model_dump()["value"] == 1.5
@@ -90,7 +97,7 @@ def test_complete_cfg_returns_operation_without_merging_cached_values(
                 "value": 1.5,
             }
         )
-        assert submit(dev, cfg) == {"operation_id": 71}
+        assert accept(dev, cfg) == {"operation_id": 71}
         info = dev.requests[0].info.model_dump()
         assert info["value"] == cfg["value"]
         assert info["value_unit"] == ("A" if cfg["mode"] == "current" else "V")
