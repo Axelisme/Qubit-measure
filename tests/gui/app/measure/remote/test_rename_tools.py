@@ -26,7 +26,9 @@ def test_native_missing_rename_preserves_the_published_library(qapp):
         with pytest.raises(KeyError, match="a"):
             fx.ctrl.apply_library_change(
                 parameters,
-                LibraryChange("module", "rename", "Q1.pulses.a", new_path="Q1.pulses.b"),
+                LibraryChange(
+                    "module", "rename", "Q1.pulses.a", new_path="Q1.pulses.b"
+                ),
             )
         assert fx.ctrl.read_context().library.document() == library
         assert fx.state.version.get("context") == version

@@ -788,10 +788,6 @@ def test_device_mutation_error_path_is_precondition_failed(fx):
         sock.close()
 
 
-
-
-
-
 @pytest.mark.parametrize("source", ["primary", "run"])
 def test_post_control_rejects_replaced_source_without_starting(fx, source):
     tab = fx.ctrl.new_tab("fake")

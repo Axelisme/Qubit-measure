@@ -26,7 +26,9 @@ def test_partial_editor_read_cannot_unlock_commit(service, prefix: str) -> None:
     sock = open_client(service.service.port)
     try:
         editor = call(
-            sock, "editor.new", {"item_kind": "waveform", "from_name": "Q1.waveforms.seed"}
+            sock,
+            "editor.new",
+            {"item_kind": "waveform", "from_name": "Q1.waveforms.seed"},
         )["result"]["editor_id"]
         assert call(sock, "context.snapshot")["ok"] is True
         assert (
@@ -39,10 +41,9 @@ def test_partial_editor_read_cannot_unlock_commit(service, prefix: str) -> None:
         assert f"editor:{editor}" in rejected["error"]["data"]["stale"]
         assert call(sock, "editor.get", {"editor_id": editor})["ok"] is True
         assert call(sock, "editor.commit", params)["ok"] is True
-        assert (
-            service.ctrl.read_context().library.waveform_spec("Q1.waveforms.copy")
-            == service.ctrl.read_context().library.waveform_spec("Q1.waveforms.seed")
-        )
+        assert service.ctrl.read_context().library.waveform_spec(
+            "Q1.waveforms.copy"
+        ) == service.ctrl.read_context().library.waveform_spec("Q1.waveforms.seed")
     finally:
         reset_inbox(sock)
         sock.close()

@@ -87,14 +87,21 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
 def test_ml_rename_rejects_collision_without_overwriting(library_client):
     invoke, fx = library_client
     fx.ctrl.context_control.set_waveform(
-        fx.ctrl.read_context().target, "Q1.waveforms.occupied", ConstWaveformCfg(length=0.3)
+        fx.ctrl.read_context().target,
+        "Q1.waveforms.occupied",
+        ConstWaveformCfg(length=0.3),
     )
     invoke("rpc_call", {"method": "context.snapshot"})
     before = waveforms(fx)
     with pytest.raises(ValueError, match="exists|collision|already"):
         fx.ctrl.apply_library_change(
             fx.ctrl.read_context(),
-            LibraryChange("waveform", "rename", "Q1.waveforms.seed", new_path="Q1.waveforms.occupied"),
+            LibraryChange(
+                "waveform",
+                "rename",
+                "Q1.waveforms.seed",
+                new_path="Q1.waveforms.occupied",
+            ),
         )
     assert waveforms(fx) == before
 
@@ -105,11 +112,21 @@ def test_ml_get_index_and_named_cfg_are_read_only(library_client):
     seed = listed["library"]["components"]["Q1"]["waveforms"]["seed"]
     assert seed["style"] == "const"
     named = invoke(
-        "rpc_call", {"method": "context.snapshot", "params": {"path": "library.components.Q1.waveforms.seed"}}
+        "rpc_call",
+        {
+            "method": "context.snapshot",
+            "params": {"path": "library.components.Q1.waveforms.seed"},
+        },
     )
     assert named["value"] == waveforms(fx)["Q1.waveforms.seed"]
     with pytest.raises(GuiRpcError, match="missing"):
-        invoke("rpc_call", {"method": "context.snapshot", "params": {"path": "library.components.Q1.waveforms.missing"}})
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.snapshot",
+                "params": {"path": "library.components.Q1.waveforms.missing"},
+            },
+        )
     assert sorted(waveforms(fx)) == ["Q1.waveforms.seed"]
 
 
@@ -130,7 +147,11 @@ def test_ml_roles_and_create_use_gui_role_defaults(library_client):
     )
     assert created == {"created": "Q1.reset.reset_none"}
     stored = invoke(
-        "rpc_call", {"method": "context.snapshot", "params": {"path": "library.components.Q1.reset.reset_none"}}
+        "rpc_call",
+        {
+            "method": "context.snapshot",
+            "params": {"path": "library.components.Q1.reset.reset_none"},
+        },
     )
     assert stored["value"] == modules(fx)["Q1.reset.reset_none"]
 
@@ -154,7 +175,11 @@ def test_ml_edit_commits_prefix_and_save_as_preserves_source(library_client):
     assert saved["valid"] is True
     assert saved["applied"] == 1
     copy_cfg = invoke(
-        "rpc_call", {"method": "context.snapshot", "params": {"path": "library.components.Q1.waveforms.copy"}}
+        "rpc_call",
+        {
+            "method": "context.snapshot",
+            "params": {"path": "library.components.Q1.waveforms.copy"},
+        },
     )["value"]
     assert copy_cfg["length"] == pytest.approx(0.25)
     assert waveforms(fx)["Q1.waveforms.seed"] == before
@@ -341,7 +366,9 @@ def test_ml_edit_save_as_rejects_existing_name_without_overwriting(
     invoke, fx = library_client
     original = waveforms(fx)["Q1.waveforms.seed"]
     fx.ctrl.context_control.set_waveform(
-        fx.ctrl.read_context().target, "Q1.waveforms.occupied", ConstWaveformCfg(length=0.3)
+        fx.ctrl.read_context().target,
+        "Q1.waveforms.occupied",
+        ConstWaveformCfg(length=0.3),
     )
     occupied = waveforms(fx)["Q1.waveforms.occupied"]
 

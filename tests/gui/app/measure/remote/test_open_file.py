@@ -42,7 +42,9 @@ class FileAdapter(OldAdapter):
         if req.data_path == "bad.h5":
             raise ValueError("wrong experiment")
         cfg = None if req.data_path == "no-cfg.h5" else LoadedCfg()
-        return RunRecord(cfg=cfg, result=LoadedResult(req.data_path)), historical_metadata()
+        return RunRecord(
+            cfg=cfg, result=LoadedResult(req.data_path)
+        ), historical_metadata()
 
 
 @pytest.fixture

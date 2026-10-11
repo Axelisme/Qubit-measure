@@ -30,9 +30,7 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
     sock = open_client(fx.service.port)
     try:
         invoke("connect", {"port": fx.service.port})
-        entry = invoke(
-            "rpc_call", {"method": "entry.new", "params": {"name": "q"}}
-        )
+        entry = invoke("rpc_call", {"method": "entry.new", "params": {"name": "q"}})
         assert selection(invoke) == {"active": None, "labels": []}
         assert invoke(
             "rpc_call",
@@ -44,9 +42,12 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
             "rpc_call",
             {"method": "point.new", "params": {"label": "copy", "clone_from": "base"}},
         ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "copy"}
-        assert call(
-            sock, "context.snapshot", {"path": "point.general.ext.freq"}
-        )["result"]["value"] == 5.0
+        assert (
+            call(sock, "context.snapshot", {"path": "point.general.ext.freq"})[
+                "result"
+            ]["value"]
+            == 5.0
+        )
         assert selection(invoke) == {"active": "copy", "labels": ["base", "copy"]}
 
         failed = call(sock, "point.new", {"label": "bad", "clone_from": "missing"})
@@ -130,7 +131,10 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
         with pytest.raises(GuiRpcError):
             invoke(
                 "rpc_call",
-                {"method": "point.new", "params": {"label": "failed", "clone_from": "source"}},
+                {
+                    "method": "point.new",
+                    "params": {"label": "failed", "clone_from": "source"},
+                },
             )
         assert call(sock, "context.active", {})["result"]["label"] == "active"
         assert selection(invoke) == {"active": "active", "labels": ["active", "source"]}
@@ -163,15 +167,23 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
         invoke("connect", {"port": fx.service.port})
         entry = invoke("rpc_call", {"method": "entry.new", "params": {"name": "q"}})
         assert invoke(
-            "rpc_call", {"method": "point.new", "params": {"label": "base", "clone_from": None}}
+            "rpc_call",
+            {"method": "point.new", "params": {"label": "base", "clone_from": None}},
         ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "base"}
-        assert call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"] == {}
+        assert (
+            call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
+            == {}
+        )
         context = fx.ctrl.context_control
         context.set_parameter(context.read_context().target, "general.ext.freq", 5.0)
         assert invoke(
-            "rpc_call", {"method": "point.new", "params": {"label": "empty", "clone_from": None}}
+            "rpc_call",
+            {"method": "point.new", "params": {"label": "empty", "clone_from": None}},
         ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "empty"}
-        assert call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"] == {}
+        assert (
+            call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
+            == {}
+        )
         assert selection(invoke) == {"active": "empty", "labels": ["base", "empty"]}
     finally:
         bridge.disconnect()

@@ -731,14 +731,16 @@ def test_cached_cfg_read_without_expected_preserves_publication(
     expected = encode_ref(before)
     sock = open_client(fixture.service.port)
     try:
-        witness = call(
-            sock, "tab.get_cfg", {"tab_id": tab_id, "expected": expected}
-        )
+        witness = call(sock, "tab.get_cfg", {"tab_id": tab_id, "expected": expected})
         record_property("legal_publication_witness", json.dumps(witness))
         assert witness["ok"] is True, witness
         publication = witness["result"]
         assert set(publication) == {
-            "cfg_ref", "status", "tree", "source_basis", "diagnostics"
+            "cfg_ref",
+            "status",
+            "tree",
+            "source_basis",
+            "diagnostics",
         }
         assert publication["cfg_ref"] == expected
         assert publication["status"] == "Valid"

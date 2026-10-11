@@ -230,7 +230,9 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
                 target_name="Q1.pulses.same", description="M", edit_schema=module_schema
             ),
             WaveformWriteback(
-                target_name="Q1.waveforms.same", description="W", edit_schema=waveform_schema
+                target_name="Q1.waveforms.same",
+                description="W",
+                edit_schema=waveform_schema,
             ),
         ],
     )
@@ -238,7 +240,9 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
     context = fx.ctrl.context_control
     target = context.read_context().target
     context.add_component("Q1", "fake/drive/a", {})
-    context.set_module(target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict()))
+    context.set_module(
+        target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict())
+    )
     context.set_waveform(target, "Q1.waveforms.same", waveform)
     before_module, before_waveform = module.to_dict(), waveform.to_dict()
     fx.start()
@@ -277,22 +281,36 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
             },
         )
         assert result["ok"], result
-        assert fx.ctrl.read_context().library.module_spec("Q1.pulses.same").model_dump(mode="python")["gain"] == 0.8
-        assert fx.ctrl.read_context().library.waveform_spec("Q1.waveforms.same").model_dump(mode="python")["length"] == 0.2
+        assert (
+            fx.ctrl.read_context()
+            .library.module_spec("Q1.pulses.same")
+            .model_dump(mode="python")["gain"]
+            == 0.8
+        )
+        assert (
+            fx.ctrl.read_context()
+            .library.waveform_spec("Q1.waveforms.same")
+            .model_dump(mode="python")["length"]
+            == 0.2
+        )
         assert result["result"]["written"] == [
             {
                 "id": "ml-1",
                 "kind": "module",
                 "target": "Q1.pulses.same",
                 "before": before_module,
-                "after": fx.ctrl.read_context().library.module_spec("Q1.pulses.same").model_dump(mode="python"),
+                "after": fx.ctrl.read_context()
+                .library.module_spec("Q1.pulses.same")
+                .model_dump(mode="python"),
             },
             {
                 "id": "wf-1",
                 "kind": "waveform",
                 "target": "Q1.waveforms.same",
                 "before": before_waveform,
-                "after": fx.ctrl.read_context().library.waveform_spec("Q1.waveforms.same").model_dump(mode="python"),
+                "after": fx.ctrl.read_context()
+                .library.waveform_spec("Q1.waveforms.same")
+                .model_dump(mode="python"),
             },
         ]
     finally:
@@ -307,8 +325,12 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         FakeAdapter,
         "get_writeback_items",
         lambda self, request: [
-            ParameterWriteback(target_name="general.ext.a", description="A", proposed_value=11.0),
-            ParameterWriteback(target_name="general.ext.b", description="B", proposed_value=22.0),
+            ParameterWriteback(
+                target_name="general.ext.a", description="A", proposed_value=11.0
+            ),
+            ParameterWriteback(
+                target_name="general.ext.b", description="B", proposed_value=22.0
+            ),
         ],
     )
     fx = Fixture(active_label="ctx001")
@@ -344,7 +366,10 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         applied = call(sock, "tab.writeback_apply", {**params, "ids": ["param-1"]})
         assert applied["ok"]
         assert applied["result"]["applied_ids"] == ["param-1"]
-        assert context.read_context().lookup("general.ext.a").value == 11.0 and context.read_context().lookup("general.ext.b").value == 2.0
+        assert (
+            context.read_context().lookup("general.ext.a").value == 11.0
+            and context.read_context().lookup("general.ext.b").value == 2.0
+        )
         after = call(sock, "tab.writeback_preview", params)["result"]
         assert [item["current"] for item in after["items"]] == [11.0, 2.0]
         assert all(item["selected"] for item in after["items"])
@@ -390,7 +415,10 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
                 }
             ]
         }
-        assert context.read_context().lookup("general.ext.a").value == 11.0 and context.read_context().lookup("general.ext.b").value == 33.0
+        assert (
+            context.read_context().lookup("general.ext.a").value == 11.0
+            and context.read_context().lookup("general.ext.b").value == 33.0
+        )
     finally:
         sock.close()
         fx.stop()
