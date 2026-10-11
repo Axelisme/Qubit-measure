@@ -1146,7 +1146,11 @@ def test_device_read_failure_rejects_run_before_core() -> None:
 def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
     tmp_path: Path, qapp: QApplication
 ) -> None:
+    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+    from zcu_tools.gui.cfg.resource import CfgResource
     from zcu_tools.gui.session.aliases import AliasRow
+
+    from tests.gui.app.measure._cfg_fakes import PublishedHost
 
     with native_save_session(tmp_path, qapp) as session:
         session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
@@ -1158,7 +1162,11 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
             CfgSectionSpec(fields={"dev": CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str, choices_source="devices")})}),
             CfgSectionValue(fields={"dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})}),
         )
-        state.get_tab("tab").cfg = make_cfg(schema, state=state)
+        bindings = MeasureCfgBindings(PublishedHost(state))
+        state.get_tab("tab").cfg = CfgResource(
+            lambda: schema,
+            resolution=lambda: bindings.snapshot((), captured_values={}, parameters=captured),
+        )
         service, _gate, background, handles = _make_run_service(state, devices={})
         inputs = replace(
             _make_inputs(state, "tab", adapter),
@@ -1173,6 +1181,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         assert outcome is not None and outcome.status == "finished"
         result = state.get_tab("tab").run.result
         assert isinstance(result, RunRecord)
+        assert result.cfg is not None
         assert result.cfg.dev == {"flux_dev": "yoko1"}
         metadata = state.get_tab("tab").run.metadata
         assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
@@ -1180,7 +1189,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         path = next(item.output.path for item in report.outputs if item.output.format == "data_h5")
         restored = load_run_data(path)
         assert restored.metadata.snapshot.roles["flux_dev"] == "yoko1"
-        assert restored.cfg["dev"] == {"flux_dev": "yoko1"}
+        assert restored.cfg.values["dev"] == {"flux_dev": "yoko1"}
         assert session.context.read_context().value("$flux_dev") == "yoko2"
 
 
