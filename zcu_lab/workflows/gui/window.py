@@ -171,6 +171,7 @@ class T1WorkflowWindow(QWidget):
         self._loader = loader
         self._thread = get_ident()
         self._forms_for_run = False
+        self._catalog_error: CatalogReloadError | None = None
         self._state = state
         self._services = services
         self._runner = services.runner
@@ -265,7 +266,17 @@ class T1WorkflowWindow(QWidget):
         use_button = QPushButton("Prepare forms", self)
         use_button.setObjectName("workflow.source.use")
         use_button.clicked.connect(self._use_source_clicked)
-        for widget in (setup_button, aliases_button, self._source_status, use_button):
+        self._reload_button = QPushButton("Reload source", self)
+        self._reload_button.setObjectName("workflow.source.reload")
+        self._reload_button.setEnabled(self._loader is not None)
+        self._reload_button.clicked.connect(self._reload_clicked)
+        for widget in (
+            setup_button,
+            aliases_button,
+            self._source_status,
+            use_button,
+            self._reload_button,
+        ):
             self._layout.addWidget(widget)
         self._sync_source_status()
 
@@ -358,23 +369,56 @@ class T1WorkflowWindow(QWidget):
         panels/catalog, resets bases and reports dropped paths in the existing
         message label; services/session/controller/hardware and old run export
         binding remain unchanged. Local unparsed text is not a saved draft.
-        CatalogReloadError propagates on import/integrity failure; imports are
-        bounded, not a rollback of arbitrary Python side effects.
+        Failure retains parsed drafts and old panels but makes Start unavailable
+        until successful retry. CatalogReloadError.restart_required forbids retry
+        without restarting this app. Imports are bounded, not a rollback of
+        arbitrary Python side effects. Replacement errors are translated into
+        CatalogReloadError and shown without publishing a partial panel pair.
         """
         if get_ident() != self._thread:
             raise CatalogReloadError(
                 "Reload must run on its owner thread", restart_required=True
             )
-        self._ensure_can_start()
+        self._ensure_idle()
         if self._loader is None:
             raise CatalogReloadError("Source reload is not configured")
+        if self._catalog_error is not None and self._catalog_error.restart_required:
+            raise self._catalog_error
         snapshot = self.capture_persisted_state()
-        candidate = self._loader.load(self._loader.prepare())
-        env = self.plan_panel.env
-        plan = candidate.plan_panel(env, self)
         try:
-            knobs = candidate.knobs_panel(
-                FormState(candidate.knobs_model.default_input(env)), env, self
+            candidate = self._loader.load(self._loader.prepare())
+            plan, knobs, report = self._build_reload_panels(candidate, snapshot)
+        except Exception as exc:
+            error = (
+                exc
+                if isinstance(exc, CatalogReloadError)
+                else CatalogReloadError(f"Workflow catalog replacement failed: {exc}")
+            )
+            self._catalog_error = error
+            self._start_button.setEnabled(False)
+            self._reload_button.setEnabled(not error.restart_required)
+            self._message.setText(str(error))
+            if error is exc:
+                raise
+            raise error from exc
+        self._publish_panels(plan, knobs)
+        self._catalog = candidate
+        self._catalog_error = None
+        self._start_button.setEnabled(True)
+        self.show_input_restore_message(report)
+        return report
+
+    def _build_reload_panels(
+        self,
+        catalog: WorkflowCatalog,
+        snapshot: WorkflowInputSnapshot,
+    ) -> tuple[T1PlanPanel, T1TunablesPanel, WorkflowInputRestoreReport]:
+        env = self.plan_panel.env
+        plan = catalog.plan_panel(env, self)
+        knobs = None
+        try:
+            knobs = catalog.knobs_panel(
+                FormState(catalog.knobs_model.default_input(env)), env, self
             )
             report = WorkflowInputRestoreReport(
                 plan_dropped=plan.state.write_compatible(snapshot.plan, env),
@@ -384,14 +428,21 @@ class T1WorkflowWindow(QWidget):
             knobs.state.reset(knobs.state.input)
             plan.editor.refresh(env)
             knobs.editor.refresh(env)
+            return plan, knobs, report
         except Exception:
             plan.close()
             plan.deleteLater()
+            if knobs is not None:
+                knobs.close()
+                knobs.deleteLater()
             raise
-        self._publish_panels(plan, knobs)
-        self._catalog = candidate
-        self.show_input_restore_message(report)
-        return report
+
+    def _reload_clicked(self) -> None:
+        try:
+            self.reload_source()
+        except Exception as exc:
+            logger.exception("Workflow source reload failed")
+            self._message.setText(str(exc))
 
     def capture_persisted_state(self) -> WorkflowInputSnapshot:
         """Capture parsed plan/knobs input on the owner thread, without I/O.
@@ -468,6 +519,14 @@ class T1WorkflowWindow(QWidget):
         )
 
     def _ensure_can_start(self) -> None:
+        if self._catalog_error is not None:
+            raise CatalogReloadError(
+                "Workflow source is unavailable; reload successfully or restart",
+                restart_required=self._catalog_error.restart_required,
+            )
+        self._ensure_idle()
+
+    def _ensure_idle(self) -> None:
         """Reject replacement until the native run and owner delivery both end."""
         status = self.controller.status()
         if (
