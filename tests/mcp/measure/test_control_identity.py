@@ -9,8 +9,9 @@ import pytest
 from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.gui.remote.param_spec import build_input_schema
 from zcu_tools.mcp.core.bridge import McpBridge
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.measure.assembly import build_measure_tools
-from zcu_tools.mcp.measure.session import MeasureMcpSession
+from zcu_tools.mcp.measure.session import GuiRpcError, MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 from ._support import MeasureClient, WireTransport, make_client
@@ -54,7 +55,10 @@ def identity_client(tmp_path: Path) -> Iterator[MeasureClient]:
     seed.context.session.close()
     transport = seed.transport
     transport.responder = orientation
-    catalog = transport.replies["rpc.catalog"]["result"]["methods"]
+    catalog_reply = transport.replies["rpc.catalog"]
+    if callable(catalog_reply):
+        raise RuntimeError("identity fixture requires a catalog response")
+    catalog = catalog_reply["result"]["methods"]
     catalog.extend(
         {
             "method": method,
@@ -177,7 +181,7 @@ def test_control_errors_retain_native_code_reason_and_holder_data(
         "data": {"holder": "gui", "locked": True, "online": True},
     }
     client.transport.replies[method] = {"ok": False, "error": error}
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(GuiRpcError) as caught:
         client.call(
             "rpc_call",
             {
@@ -213,3 +217,16 @@ def test_stdio_preserves_control_error_envelope(identity_client, reason):
     assert reply["result"]["isError"] is True
     assert reply["result"]["content"][0]["text"].startswith("{"), reply
     assert json.loads(reply["result"]["content"][0]["text"]) == {"error": error}
+
+
+def test_auth_rejection_before_catalog_keeps_existing_auth_reason(identity_client):
+    client = identity_client
+    client.transport.replies["control.connect"] = {
+        "ok": False,
+        "error": {"code": "unauthorized", "message": "token required"},
+    }
+    with pytest.raises(GuiInvocationError) as caught:
+        client.call("connect", {})
+    assert caught.value.reason == "unauthorized"
+    assert not client.context.bridge.is_connected
+    assert all(method != "rpc.catalog" for method, _ in client.transport.sent)

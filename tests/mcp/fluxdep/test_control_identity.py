@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 from zcu_tools.gui.app.fluxdep.remote.wire_version import GUI_VERSION, WIRE_VERSION
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.bridge import DeliverFn, McpBridge, MCPBridgeConfig
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.fluxdep.assembly import FluxdepServer, build_fluxdep_server
 
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
@@ -23,7 +24,7 @@ class RouteTransport:
         harness.service.on_client_open(self.link)
         harness.links.append(self.link)
         self.is_open = True
-        self.deliver_reply = None
+        self.deliver_reply: DeliverFn | None = None
         self.sent: list[tuple[str, dict[str, Any]]] = []
 
     def attach(self, deliver_reply, deliver_event, on_closed) -> None:
@@ -40,6 +41,8 @@ class RouteTransport:
             reply = self.harness.request(
                 self.link, payload["method"], **payload["params"]
             )
+        if self.deliver_reply is None:
+            raise RuntimeError("Transport callback is not attached")
         self.deliver_reply({**reply, "id": payload["id"]})
 
     def close(self) -> None:
@@ -62,6 +65,18 @@ class RouteBridge(McpBridge):
         self.transports.append(transport)
         self.set_transport(transport)
         return "attached"
+
+    def launch(
+        self,
+        repo_root: Path,
+        port: int,
+        token: str | None = None,
+        auto_connect: bool = True,
+        extra_args: list[str] | None = None,
+    ) -> str:
+        if auto_connect:
+            self.connect(port, token)
+        return "launched"
 
 
 @pytest.fixture
@@ -98,7 +113,7 @@ def invoke(server: FluxdepServer, name: str, **arguments):
 def test_owner_connect_acquires_reports_control_and_exposes_release_acquire(
     control_server,
 ):
-    server, harness, bridge = control_server
+    server, _, bridge = control_server
     reply = invoke(server, "connect", label="sr-b4")
     expected = {"holder": "rpc:sr-b4", "locked": False, "online": True, "me": True}
     assert isinstance(reply, dict), reply
@@ -115,7 +130,7 @@ def test_owner_connect_acquires_reports_control_and_exposes_release_acquire(
 def test_locked_owner_connect_succeeds_but_acquire_preserves_native_failure(
     control_server,
 ):
-    server, harness, bridge = control_server
+    server, harness, _ = control_server
     harness.ctrl.control_identity.reclaim_local()
     reply = invoke(server, "connect", label="sr-b4")
     assert isinstance(reply, dict), reply
@@ -125,7 +140,7 @@ def test_locked_owner_connect_succeeds_but_acquire_preserves_native_failure(
         "online": True,
         "me": False,
     }
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(GuiInvocationError) as caught:
         invoke(server, "control_acquire")
     assert caught.value.reason == "control_locked"
     assert caught.value.data == {"holder": "gui", "locked": True, "online": True}
@@ -134,17 +149,17 @@ def test_locked_owner_connect_succeeds_but_acquire_preserves_native_failure(
 def test_readonly_connect_reads_rejects_writes_and_reconnects_with_same_identity(
     control_server,
 ):
-    server, harness, bridge = control_server
+    server, _, bridge = control_server
     reply = invoke(server, "connect", label="reader", mode="readonly")
     assert isinstance(reply, dict), reply
     assert reply["control"]["me"] is False
     original = invoke(server, "project_info")
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(GuiInvocationError) as caught:
         invoke(server, "project_setup", chip_name="changed", qub_name="q")
     assert caught.value.reason == "not_holder"
     assert caught.value.data == {"holder": "gui", "locked": False, "online": True}
     assert invoke(server, "project_info") == original
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(GuiInvocationError) as caught:
         invoke(server, "control_acquire")
     assert caught.value.reason == "readonly_connection"
     invoke(server, "disconnect")
@@ -156,13 +171,35 @@ def test_readonly_connect_reads_rejects_writes_and_reconnects_with_same_identity
     )
 
 
+def test_launch_without_auto_connect_retains_readonly_identity_for_later_attach(
+    control_server,
+):
+    server, _, bridge = control_server
+    assert (
+        invoke(server, "launch", label="reader", mode="readonly", auto_connect=False)
+        == "launched"
+    )
+    assert not bridge.is_connected
+    reply = invoke(server, "connect")
+    assert reply["control"] == {
+        "holder": "gui",
+        "locked": False,
+        "online": True,
+        "me": False,
+    }
+    assert bridge.transports[-1].sent[1] == (
+        "control.connect",
+        {"label": "reader", "mode": "readonly"},
+    )
+
+
 def test_other_online_holder_surfaces_native_control_held(control_server):
-    server, harness, bridge = control_server
+    server, harness, _ = control_server
     harness.client()
     reply = invoke(server, "connect", label="other")
     assert isinstance(reply, dict), reply
     assert reply["control"]["holder"] == "rpc:agent"
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(GuiInvocationError) as caught:
         invoke(server, "control_acquire")
     assert caught.value.reason == "control_held"
     assert caught.value.data == {"holder": "rpc:agent", "locked": False, "online": True}
@@ -176,7 +213,7 @@ def test_stdio_projects_real_control_rejections_without_losing_holder_data(
 ):
     from tests.mcp._stdio_support import invoke_stdio
 
-    server, harness, bridge = control_server
+    server, harness, _ = control_server
     mode = "owner"
     holder = "gui"
     locked = reason == "control_locked"
@@ -191,7 +228,7 @@ def test_stdio_projects_real_control_rejections_without_losing_holder_data(
     invoke(server, "connect", label="reader", mode=mode)
     if reason == "not_holder":
         method = "project_setup"
-    arguments = (
+    arguments: dict[str, object] = (
         {"chip_name": "changed", "qub_name": "q"} if reason == "not_holder" else {}
     )
     reply = invoke_stdio(
