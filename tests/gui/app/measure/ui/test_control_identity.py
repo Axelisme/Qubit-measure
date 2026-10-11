@@ -49,7 +49,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 
-pytestmark = pytest.mark.requires_loopback
+pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
 
 class StoppableAdapter(OldAdapter):
