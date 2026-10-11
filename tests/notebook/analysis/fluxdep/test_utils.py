@@ -12,17 +12,19 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from plotly.graph_objects import Scatter
+from plotly.graph_objects import Figure, Scatter
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.resources.sample_table import SampleFluxFrame, SampleTableV2Error
 
 
-def _sample_points_trace(fig) -> Scatter:
+def _sample_points_trace(fig: Figure) -> Scatter:
     # plot_sample_points adds exactly one marker scatter.
-    traces = [trace for trace in fig.data if trace.mode == "markers"]
+    traces = list(fig.select_traces({"mode": "markers"}))
     assert len(traces) == 1
-    return traces[0]
+    trace = traces[0]
+    assert isinstance(trace, Scatter)
+    return trace
 
 
 def _make_table(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -51,9 +53,9 @@ def test_explicit_flux_rows_plot_at_resolved_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.3, 0.7])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.3, 0.7])
     # Freq (MHz) -> GHz display conversion is preserved.
-    np.testing.assert_allclose(trace.y, [4.0, 4.0])
+    np.testing.assert_allclose(np.asarray(trace.y, dtype=np.float64), [4.0, 4.0])
     assert vis.xlimits == [0.3, 0.7]
 
 
@@ -72,7 +74,7 @@ def test_explicit_flux_precedes_row_frame() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.25])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.25])
 
 
 def test_row_frame_derived_rows_plot_at_derived_flux() -> None:
@@ -86,7 +88,7 @@ def test_row_frame_derived_rows_plot_at_derived_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, -0.5])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.5, -0.5])
 
 
 def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
@@ -102,7 +104,7 @@ def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
     )
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, -0.5])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.5, -0.5])
 
 
 def test_mixed_provenance_rows_plot_together() -> None:
@@ -119,7 +121,7 @@ def test_mixed_provenance_rows_plot_together() -> None:
     )
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.25, 0.5, 0.75])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.25, 0.5, 0.75])
     assert vis.xlimits == [0.25, 0.75]
 
 
@@ -141,7 +143,9 @@ def test_hover_labels_exclude_coordinate_and_freq_columns() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    label = trace.hovertext[0]
+    labels = np.asarray(trace.hovertext)
+    label = labels[0]
+    assert isinstance(label, str)
     assert "dev_value" not in label
     assert "dev_unit" not in label
     assert "flux_int" not in label
@@ -158,7 +162,7 @@ def test_unresolved_rows_fail_with_indexes() -> None:
     with pytest.raises(SampleTableV2Error, match="row\\(s\\) \\[1\\]"):
         vis.plot_sample_points(table)
     # nothing was plotted before the failure
-    assert len(vis.fig.data) == 0
+    assert len(list(vis.fig.select_traces())) == 0
 
 
 def test_fallback_frame_unit_mismatch_is_unresolved() -> None:
@@ -182,7 +186,7 @@ def test_legacy_coordinate_column_fails_before_analysis() -> None:
 
     with pytest.raises(SampleTableV2Error, match="calibrated mA"):
         vis.plot_sample_points(table)
-    assert len(vis.fig.data) == 0
+    assert len(list(vis.fig.select_traces())) == 0
 
 
 def test_empty_table_fails_before_analysis() -> None:
@@ -193,7 +197,7 @@ def test_empty_table_fails_before_analysis() -> None:
 
     with pytest.raises(SampleTableV2Error, match="empty"):
         vis.plot_sample_points(table)
-    assert len(vis.fig.data) == 0
+    assert len(list(vis.fig.select_traces())) == 0
 
 
 def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
@@ -216,8 +220,8 @@ def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
     vis.plot_sample_points(table)
 
     trace = _sample_points_trace(vis.fig)
-    np.testing.assert_allclose(trace.x, [0.5, 0.5])
-    np.testing.assert_allclose(trace.y, [4.0, 4.0])
+    np.testing.assert_allclose(np.asarray(trace.x, dtype=np.float64), [0.5, 0.5])
+    np.testing.assert_allclose(np.asarray(trace.y, dtype=np.float64), [4.0, 4.0])
 
 
 def test_plot_md_fluent_chain_smoke() -> None:
@@ -262,10 +266,9 @@ def test_plot_md_fluent_chain_smoke() -> None:
     )
 
     # sample-point markers plotted at fallback-resolved flux, MHz->GHz display
-    markers = [t for t in fig.data if t.mode == "markers"]
-    assert len(markers) == 1
-    np.testing.assert_allclose(markers[0].x, [0.5, 0.8])
-    np.testing.assert_allclose(markers[0].y, [4.0, 4.1])
+    marker = _sample_points_trace(fig)
+    np.testing.assert_allclose(np.asarray(marker.x, dtype=np.float64), [0.5, 0.8])
+    np.testing.assert_allclose(np.asarray(marker.y, dtype=np.float64), [4.0, 4.1])
 
     # dev-value secondary x axis ticks overlaid on the flux axis
     xaxis2 = fig.layout.xaxis2
