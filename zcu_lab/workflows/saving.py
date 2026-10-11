@@ -30,13 +30,45 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoExp,
     T2EchoResult,
 )
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
+    T2RamseyCfg,
+    T2RamseyExp,
+    T2RamseyResult,
+)
 from zcu_lab.workflows.acquire import (
     FrequencyAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
     T1Acquisition,
     T2EchoAcquisition,
+    T2RamseyAcquisition,
 )
+
+
+def save_t2ramsey(
+    source: Completed[T2RamseyCfg, T2RamseyAcquisition],
+    destination: Path,
+    *,
+    snapshot: RunSnapshot,
+) -> None:
+    """Write Ramsey IQ and fixed evidence to Engine's exact native path.
+
+    source supplies the completed cfg, rounded microsecond delays, complex IQ
+    and acquisition/device evidence; snapshot supplies historical entry/roles.
+    Use native twotone/ge/t2ramsey declaration and seconds-on-disk coordinates.
+    Parent must exist and destination must not. Native validation, collision
+    and I/O errors propagate; no capture, layout choice or retry occurs.
+    """
+    record: RunRecord[T2RamseyCfg, T2RamseyResult] = RunRecord(
+        source.cfg, source.result
+    )
+    _save(
+        record,
+        destination,
+        spec=T2RamseyExp().persistence_spec(),
+        snapshot=snapshot,
+        evidence=source.result.evidence,
+    )
 
 
 def _save[Cfg: ExpCfgModel, Result](
