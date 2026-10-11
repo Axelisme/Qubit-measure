@@ -904,7 +904,7 @@ def test_reset_apply_retains_accepted_and_successful_prefix_on_validation_failur
             draft.apply()
         destination = session.control.read_target(capture.target)
         assert destination.value("Q1.ext.reset_f") == 4300.0
-        assert destination.value("Q1.freq") is None
+        assert not destination.lookup("Q1.freq").present
         assert "Q1.reset.reset_10" not in destination.library.module_keys()
         assert destination.value("Q1.module.reset") == "Q1.reset.old_reset"
         accepted = session.context.entry_ledger(capture.target.entry_id).events()[-1]
