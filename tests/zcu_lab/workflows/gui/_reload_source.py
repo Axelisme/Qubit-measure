@@ -28,7 +28,7 @@ class ReloadSource:
         self.write(1)
         sys.path.insert(0, str(root))
         self.path = str(root)
-        self.views: list[T1WorkflowWindow] = []
+        self.views: list[tuple[T1WorkflowWindow, StartHarness]] = []
         self.loader = SourceCatalogLoader(
             sources=(SourcePackage("workflow_reload_fixture", self.root),),
             reload_modules=("workflow_reload_fixture.declaration",),
@@ -52,7 +52,7 @@ from zcu_lab.workflows.t1 import T1Plan, T1Tunables, init_t1
 from zcu_lab.workflows.gui.catalog import build_catalog
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
-from zcu_lab.workflows.gui.panel import T1PlanPanel
+from zcu_lab.workflows.gui.panel import T1PlanPanel, T1TunablesPanel
 
 class Plan(T1PlanForm):
     {fields}
@@ -64,6 +64,9 @@ class PlanPanel(T1PlanPanel):
     def __init__(self, env, parent=None):
         super().__init__(env, parent, model=Plan)
 
+class KnobsPanel(T1TunablesPanel):
+    pass
+
 @workflow("reload-v{version}", plan=T1Plan, tunables=T1Tunables, init=init_t1)
 def step(env, plan, tun, state):
     yield from ()
@@ -74,7 +77,8 @@ def prepare(*, plan, data_root, records):
 
 def build():
     return replace(build_catalog(), step=step, plan_model=Plan,
-                   knobs_model=Knobs, plan_panel=PlanPanel, prepare_export=prepare)
+                   knobs_model=Knobs, plan_panel=PlanPanel,
+                   knobs_panel=KnobsPanel, prepare_export=prepare)
 {failure}
 """
         )
@@ -89,13 +93,16 @@ def build():
             catalog=catalog,
             loader=self.loader,
         )
-        self.views.append(view)
+        self.views.append((view, harness))
         return view
 
     def close(self, qapp: QApplication) -> None:
         """Release views, retire all owned modules and restore the path list."""
-        for view in self.views:
+        for view, harness in self.views:
             view.close()
+            if harness.background.work is not None:
+                harness.complete_segment()
+                view.close()
             view.deleteLater()
         qapp.processEvents()
         sys.path.remove(self.path)
