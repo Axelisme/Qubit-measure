@@ -13,6 +13,8 @@ from typing import (
 )
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_errors import DeviceRegistrationError
 from zcu_tools.gui.session.events import (
@@ -190,22 +192,7 @@ _DEVICE_TYPE_REGISTRY: dict[str, tuple[str, bool]] = {
     "RohdeSchwarzSGS100A": ("zcu_tools.device.sgs100a.RohdeSchwarzSGS100A", True),
 }
 
-_DEVICE_DEFAULT_UNITS: dict[str, str] = {
-    "FakeDevice": "none",
-    "YOKOGS200": "A",
-}
-
-
-def _mode_dependent_unit(dev: DeviceState) -> str | None:
-    """Return "V" or "A" for a YOKOGS200 whose mode is cached in ``dev.info``.
-
-    Returns ``None`` for any other device type or when ``dev.info`` is ``None``
-    (device not yet connected / info not cached), signalling the caller to fall
-    back to :data:`_DEVICE_DEFAULT_UNITS`.
-    """
-    if dev.type_name == "YOKOGS200" and dev.info is not None:
-        return "V" if getattr(dev.info, "mode", None) == "voltage" else "A"
-    return None
+_FLUX_DEVICE_TYPES = {"FakeDevice", "YOKOGS200"}
 
 
 def _extract_numeric_device_value(info: BaseDeviceInfo | None) -> float | None:
@@ -730,35 +717,34 @@ class DeviceService:
         return dev.address
 
     def get_device_unit(self, name: str) -> str:
+        """Read cached flux Info.value_unit for a UI label, without hardware I/O.
+
+        Missing device/Info and non-flux Info return none. This read does not
+        infer a unit from device type or change connection/cache state.
+        """
         dev = self._state.get_device(name)
-        if dev is None:
-            return "none"
-        mode_unit = _mode_dependent_unit(dev)
-        if mode_unit is not None:
-            return mode_unit
-        return _DEVICE_DEFAULT_UNITS.get(dev.type_name, "none")
+        if dev is not None and isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
+            return dev.info.value_unit
+        return "none"
 
     def get_device_unit_strict(self, name: str) -> str:
-        """Resolve the flux unit for binding a context to ``name``, Fast-Fail.
+        """Read a cached flux unit for context binding, without hardware I/O.
 
-        Unlike the lenient :meth:`get_device_unit` (used for UI labels, which
-        tolerates unknown devices by returning "none"), this is the binding
-        path: the device must exist and its type must be on the unit whitelist
-        (``_DEVICE_DEFAULT_UNITS``). Anything else raises — a context's flux
-        value/unit must come from a *known* flux device, not an arbitrary one.
+        The device must be registered as YOKOGS200 or FakeDevice and have valid
+        flux Info. Otherwise DeviceRegistrationError names the device. Missing
+        Info never selects a unit from type; connection/cache state is unchanged.
         """
         dev = self._state.get_device(name)
         if dev is None:
             raise DeviceRegistrationError(f"No such device: {name!r}")
-        if dev.type_name not in _DEVICE_DEFAULT_UNITS:
+        if dev.type_name not in _FLUX_DEVICE_TYPES:
             raise DeviceRegistrationError(
                 f"Device {name!r} of type {dev.type_name!r} cannot bind a "
-                f"flux context (supported: {sorted(_DEVICE_DEFAULT_UNITS)})"
+                f"flux context (supported: {sorted(_FLUX_DEVICE_TYPES)})"
             )
-        mode_unit = _mode_dependent_unit(dev)
-        if mode_unit is not None:
-            return mode_unit
-        return _DEVICE_DEFAULT_UNITS[dev.type_name]
+        if not isinstance(dev.info, (YOKOGS200Info, FakeDeviceInfo)):
+            raise DeviceRegistrationError(f"Device {name!r} has no cached flux Info")
+        return dev.info.value_unit
 
     def get_cached_device_value(self, name: str) -> float | None:
         """Return the cached numeric predictor/flux value for a live device.
@@ -771,7 +757,7 @@ class DeviceService:
         dev = self._state.get_device(name)
         if dev is None or dev.status is not DeviceStatus.CONNECTED:
             return None
-        if dev.type_name not in _DEVICE_DEFAULT_UNITS:
+        if dev.type_name not in _FLUX_DEVICE_TYPES:
             return None
         return _extract_numeric_device_value(dev.info)
 

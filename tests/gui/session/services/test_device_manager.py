@@ -266,11 +266,11 @@ def test_devicemanager_get_value_and_set_via_setup(qapp):
 
 
 def test_get_device_unit_strict_whitelisted_device(qapp):
-    # FakeDevice is on the bind whitelist -> unit "none" (no raise).
+    # Connected FakeDevice Info declares the native coordinate (no raise).
     dev = FakeDevice()
     svc, _ = _make_real_svc(driver=dev)
     _register(svc, "flux")
-    assert svc.get_device_unit_strict("flux") == "none"
+    assert svc.get_device_unit_strict("flux") == "native"
 
 
 def test_get_device_unit_strict_unknown_device_raises(qapp):

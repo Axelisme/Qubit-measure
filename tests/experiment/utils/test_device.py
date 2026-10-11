@@ -5,6 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.device import YOKOGS200, FakeDevice, RohdeSchwarzSGS100A
+from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.device.mg3692 import AnritsuMG3692Info
+from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
+from zcu_tools.device.yoko import YOKOGS200Info
+from zcu_tools.experiment import utils as public_helpers
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils import device as helpers
 
@@ -132,3 +138,86 @@ def test_output_helper_changes_only_output() -> None:
     assert device.get_info() == before.with_updates(output="on")
     helpers.set_output(device, "off")
     assert device.get_info() == before
+
+
+def _flux_configuration(
+    model: Literal["yoko", "fake"], mode: Literal["current", "voltage"]
+) -> BaseDeviceInfo:
+    """Build an Info input without opening or querying a driver."""
+    if model == "fake":
+        return FakeDeviceInfo(address="unused", value=0.001)
+    return YOKOGS200Info(address="unused", mode=mode, value=0.001)
+
+
+@pytest.mark.parametrize(
+    "model, mode, unit",
+    [
+        pytest.param("yoko", "current", "A", id="yoko-current-A"),
+        pytest.param("yoko", "voltage", "V", id="yoko-voltage-V"),
+        pytest.param("fake", "current", "native", id="fake-native"),
+    ],
+)
+def test_check_flux_unit_accepts_matching_configuration(
+    model: Literal["yoko", "fake"], mode: Literal["current", "voltage"], unit: str
+) -> None:
+    cfg = _flux_configuration(model, mode)
+    before = cfg.model_copy(deep=True)
+    assert public_helpers.check_flux_unit(cfg, unit) is None
+    assert cfg == before
+
+
+@pytest.mark.parametrize(
+    "model, mode, unit",
+    [
+        pytest.param("yoko", "current", "V", id="yoko-current-V"),
+        pytest.param("yoko", "current", "native", id="yoko-current-native"),
+        pytest.param("yoko", "voltage", "A", id="yoko-voltage-A"),
+        pytest.param("yoko", "voltage", "native", id="yoko-voltage-native"),
+        pytest.param("fake", "current", "A", id="fake-A"),
+        pytest.param("fake", "current", "V", id="fake-V"),
+    ],
+)
+def test_check_flux_unit_rejects_mismatched_configuration(
+    model: Literal["yoko", "fake"], mode: Literal["current", "voltage"], unit: str
+) -> None:
+    cfg = _flux_configuration(model, mode)
+    before = cfg.model_copy(deep=True)
+    with pytest.raises(ValueError, match="unit"):
+        public_helpers.check_flux_unit(cfg, unit)
+    assert cfg == before
+
+
+@pytest.mark.parametrize(
+    "model, mode",
+    [
+        pytest.param("yoko", "current", id="yoko-current"),
+        pytest.param("yoko", "voltage", id="yoko-voltage"),
+        pytest.param("fake", "current", id="fake"),
+    ],
+)
+def test_check_flux_unit_rejects_unknown_unit(
+    model: Literal["yoko", "fake"], mode: Literal["current", "voltage"]
+) -> None:
+    cfg = _flux_configuration(model, mode)
+    before = cfg.model_copy(deep=True)
+    with pytest.raises(ValueError, match="unit"):
+        public_helpers.check_flux_unit(cfg, "mA")
+    assert cfg == before
+
+
+@pytest.mark.parametrize("model", ["sgs100a", "mg3692", "base-info"])
+def test_check_flux_unit_rejects_non_flux_configuration(model: str) -> None:
+    cfg: BaseDeviceInfo
+    if model == "sgs100a":
+        cfg = RohdeSchwarzSGS100AInfo(address="unused")
+    elif model == "mg3692":
+        cfg = AnritsuMG3692Info(address="unused")
+    else:
+        cfg = BaseDeviceInfo(address="unused", type="OtherDevice")
+    before = cfg.model_copy(deep=True)
+    with pytest.raises(TypeError) as error:
+        public_helpers.check_flux_unit(cfg, "A")
+    assert type(cfg).__name__ in str(error.value)
+    assert "flux" in str(error.value).lower()
+    assert "support" in str(error.value).lower()
+    assert cfg == before
