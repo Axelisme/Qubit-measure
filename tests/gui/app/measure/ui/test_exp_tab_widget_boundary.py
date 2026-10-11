@@ -171,7 +171,7 @@ def test_retired_view_stops_authority_projection(
 def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
     """Exercise real Qt process exit without mutating the suite's QApplication."""
     completed = subprocess.run(
-        [sys.executable, str(Path(__file__).with_name("_quit_authority.py")), str(tmp_path)],
+        [sys.executable, "-m", "tests.gui.app.measure.ui._quit_authority", str(tmp_path)],
         capture_output=True,
         text=True,
         check=False,
