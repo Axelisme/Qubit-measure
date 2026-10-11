@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import Qt, QTimer
+from qtpy.QtTest import QTest
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
@@ -134,6 +135,26 @@ def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
     indicator(view).click()
     assert tabs.tabBar().isEnabled()
     tabs.setCurrentIndex(1)
+    assert ctrl.interactive.inspect() is None
+
+
+def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
+    view, ctrl = window
+    button(view, "Analyze…").click()
+    panel = view.findChild(AnalyzePanelWidget)
+    assert panel is not None
+    tabs = panel.findChild(QTabWidget)
+    assert tabs is not None
+    active = ctrl.interactive.inspect()
+    assert active is not None and active.kind == "selection"
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    QTest.keyClick(tabs, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    assert panel.current_tab == "filter"
+    assert ctrl.interactive.inspect() == active
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+    indicator(view).click()
+    QTest.keyClick(tabs, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier)
+    assert panel.current_tab == "search"
     assert ctrl.interactive.inspect() is None
 
 
