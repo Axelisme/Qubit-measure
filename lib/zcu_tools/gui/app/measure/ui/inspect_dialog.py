@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -133,6 +134,8 @@ class _MlCreateDialog(QDialog):
         layout.addLayout(btn_row)
         create_btn.clicked.connect(self._on_create)
         cancel_btn.clicked.connect(self.reject)
+        for content in (self._template_combo, self._name_edit, create_btn):
+            bind_control_enabled(content, ctrl.control_identity)
 
     def _suggest_name(self, entry: Any) -> str:
         """Convention-based name suggestion for ``entry``, de-duplicated.
@@ -562,6 +565,8 @@ class InspectDialog(InspectDialogBase):
         self._apply_ml_draft(select_result=True)
 
     def _apply_ml_draft(self, *, select_result: bool) -> bool:
+        if self._app_ctrl.control_identity.status().holder != "gui":
+            return False
         data = self._ml_selected_data
         editor_id = self._ml_editor_id
         if data is None or editor_id is None:
@@ -642,6 +647,9 @@ class InspectDialog(InspectDialogBase):
 
     def _delete_ml_entry(self, data: tuple[str, str], *, confirm: bool) -> None:
         group, name = data
+        # Pin the target before the modal loop; a context switch must not redirect
+        # the accepted deletion into a different point or entry.
+        capture = self._ctrl.read_context()
         if confirm:
             answer = QMessageBox.question(
                 self,
@@ -652,11 +660,15 @@ class InspectDialog(InspectDialogBase):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        if self._app_ctrl.control_identity.status().holder != "gui":
+            return
         try:
-            if group == "modules":
-                self._app_ctrl.del_ml_module(name)
-            else:
-                self._app_ctrl.del_ml_waveform(name)
+            self._app_ctrl.apply_library_change(
+                capture,
+                LibraryChange(
+                    "module" if group == "modules" else "waveform", "delete", name
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — surface domain failures
             QMessageBox.warning(self, "Delete failed", str(exc))
             return
@@ -690,7 +702,6 @@ class InspectDialog(InspectDialogBase):
                 self._new_ml_dialog = None
 
         dialog = _MlCreateDialog(self._app_ctrl, parent=self)
-        bind_control_enabled(dialog, self._app_ctrl.control_identity)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         self._new_ml_dialog = dialog
         dialog.finished.connect(

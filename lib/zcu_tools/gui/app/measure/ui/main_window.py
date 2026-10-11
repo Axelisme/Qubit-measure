@@ -603,7 +603,12 @@ class MainWindow(QMainWindow):
 
         def on_decision(confirmed: bool) -> None:
             self._reload_prompt_open = False
-            if not confirmed or self._shutdown_requested or self._closing:
+            if (
+                not confirmed
+                or self._shutdown_requested
+                or self._closing
+                or self._ctrl.control_identity.status().holder != "gui"
+            ):
                 return
             try:
                 self._present_reload_report(self._ctrl.reload_experiments(preview))
@@ -683,7 +688,12 @@ class MainWindow(QMainWindow):
 
         def _on_decision(confirmed: bool) -> None:
             self._pending_tab_closes.discard(tab_id)
-            if not confirmed or self._shutdown_requested or self._closing:
+            if (
+                not confirmed
+                or self._shutdown_requested
+                or self._closing
+                or self._ctrl.control_identity.status().holder != "gui"
+            ):
                 return
             if self._tab_widgets.get(tab_id) is tab_w and self._ctrl.has_tab(tab_id):
                 logger.info("_on_tab_close_requested confirmed: tab_id=%r", tab_id)
@@ -780,6 +790,7 @@ class MainWindow(QMainWindow):
             initial_point=self._ctrl.get_session_env().active_label,
             start_directory=self._load_data_dialog_start_dir(),
             parent=self,
+            control_identity=self._ctrl.control_identity,
         )
         try:
             if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -787,6 +798,8 @@ class MainWindow(QMainWindow):
             path = dialog.selected_path()
         finally:
             dialog.deleteLater()
+        if self._ctrl.control_identity.status().holder != "gui":
+            return
         if path is None:
             raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:

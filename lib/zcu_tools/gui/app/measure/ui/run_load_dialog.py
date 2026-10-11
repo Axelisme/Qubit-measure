@@ -18,6 +18,11 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
+from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    local_write_allowed,
+)
 
 
 class RunLoadDialog(QDialog):
@@ -30,6 +35,9 @@ class RunLoadDialog(QDialog):
     Point/experiment filters are exact; time filter matches recorded_at text.
     Rows without data_path remain visible but cannot be loaded. Paths may have
     disappeared; the existing Load owner reports that failure after selection.
+    Optional control_identity gates the owned selection content but not Cancel.
+    File selection rechecks the owner on return; the caller must recheck again
+    before loading. Omitted authority leaves the existing selection behavior.
     """
 
     def __init__(
@@ -39,16 +47,20 @@ class RunLoadDialog(QDialog):
         initial_point: str,
         start_directory: str,
         parent: QWidget | None = None,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._runs = runs
+        self._control_identity = control_identity
         self._visible_runs: tuple[SavedRunInfo, ...] = ()
         self._start_directory = start_directory
         self._selected_path: str | None = None
         self.setWindowTitle("Load Data")
         self.resize(850, 440)
         layout = QVBoxLayout(self)
-        layout.addLayout(self._build_filters(initial_point))
+        filters = QWidget()
+        filters.setLayout(self._build_filters(initial_point))
+        layout.addWidget(filters)
         self._table = QTableWidget(0, 5)
         self._table.setObjectName("load_runs")
         self._table.setHorizontalHeaderLabels(
@@ -69,10 +81,16 @@ class RunLoadDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.setObjectName("load_cancel")
         cancel.clicked.connect(self.reject)
-        buttons.addWidget(file_button)
-        buttons.addStretch()
-        buttons.addWidget(self._load)
+        commands = QWidget()
+        command_layout = QHBoxLayout(commands)
+        command_layout.setContentsMargins(0, 0, 0, 0)
+        command_layout.addWidget(file_button)
+        command_layout.addStretch()
+        command_layout.addWidget(self._load)
+        buttons.addWidget(commands)
         buttons.addWidget(cancel)
+        for content in (filters, self._table, commands):
+            bind_control_enabled(content, control_identity)
         layout.addLayout(buttons)
         self._point.currentIndexChanged.connect(self._refresh)
         self._experiment.currentIndexChanged.connect(self._refresh)
@@ -167,6 +185,6 @@ class RunLoadDialog(QDialog):
             self._start_directory,
             "Native HDF5 (*.h5);;All files (*)",
         )
-        if path:
+        if path and local_write_allowed(self._control_identity):
             self._selected_path = path
             self.accept()

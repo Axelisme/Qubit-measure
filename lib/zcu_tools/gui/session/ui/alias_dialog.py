@@ -15,9 +15,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
+from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled
 
 
 class AliasDialog(QDialog):
@@ -29,10 +31,16 @@ class AliasDialog(QDialog):
     control.set_alias_rows(), stays open, and shows invalid-input errors inline
     without changing the installed table or discarding edits. Cancel or closing
     discards unapplied edits; an earlier successful Apply is not undone.
+    Optional control_identity gates content and Apply, never Cancel or closing.
+    Omitted authority preserves the behavior of apps without control identity.
     """
 
     def __init__(
-        self, control: ContextControlPort, parent: QWidget | None = None
+        self,
+        control: ContextControlPort,
+        parent: QWidget | None = None,
+        *,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._control = control
@@ -80,6 +88,8 @@ class AliasDialog(QDialog):
         apply_button.clicked.connect(self._apply)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        for content in (self._table, add, remove, apply_button):
+            bind_control_enabled(content, control_identity)
 
     def _append_row(self, row: AliasRow) -> None:
         index = self._table.rowCount()

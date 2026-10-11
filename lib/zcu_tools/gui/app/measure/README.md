@@ -94,8 +94,15 @@ Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次
 holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
 
 `gui.widgets.remote_edit_gate` 綁定 owner watch 與 Qt destruction。Setup、Aliases、Predictor、
-ArbWaveform 和巢狀 writeback dialogs 使用 write-only widget gate。DeviceDialog 與 Inspect 保留
-只讀瀏覽，分別套用自己的 read-only presentation gate。只有量測 Stop 和 device setup Stop
+ArbWaveform 和巢狀 writeback dialogs 只 gate owner 擁有的內容區與寫入 controls，維持既有
+modal 呈現，Cancel／Close／✕ 可用。關閉後再按主窗燈收回，不因關閉自動轉移 holder。
+Shared dialog 的 optional `control_identity` 指向同一 application owner；未提供時保留其他 app
+既有行為。Static file／text chooser 與 confirmation 不改呈現，返回後、寫入前重查 holder；
+非 Local 時不提交 cfg reset、entry create、predictor install、data load、waveform mutation、
+Inspect Apply／Delete、tab close 或 reload。Inspect Delete 先固定 `ParameterContext`，再以
+`Controller.apply_library_change` 刪除該 target；不因確認期間 context switch 改寫新 point。
+DeviceDialog 與 Inspect 保留只讀瀏覽，分別套用自己的 read-only presentation gate。
+只有量測 Stop 和 device setup Stop
 在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
 Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
 pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。

@@ -29,9 +29,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
-
-logger = logging.getLogger(__name__)
-
 from qtpy.QtCore import QTimer, Signal  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent, QShowEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -54,9 +51,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    local_write_allowed,
+)
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
@@ -65,6 +67,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+
+logger = logging.getLogger(__name__)
 
 # Default display window in flux (Φ/Φ₀) units (plan spec).
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
@@ -136,6 +140,9 @@ class PredictorDialog(QDialog):
     resolve; omitted or None-returning providers allow only pure calculations.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
+    Optional control_identity gates the controls but leaves Close and plots
+    usable. Browse rechecks that owner after the file chooser before installing.
+    Omitted authority preserves the behavior of apps without control identity.
     """
 
     state_changed = Signal()
@@ -148,9 +155,11 @@ class PredictorDialog(QDialog):
         device: DeviceControlPort | None = None,
         parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
+        self._control_identity = control_identity
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
@@ -266,7 +275,7 @@ class PredictorDialog(QDialog):
             device_combo.setMinimumWidth(160)
             device_combo.setMinimumContentsLength(16)
             device_combo.setSizeAdjustPolicy(
-                QComboBox.AdjustToMinimumContentsLengthWithIcon  # type: ignore[attr-defined]
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
             self._value_controls_row.addWidget(device_combo)
@@ -314,15 +323,9 @@ class PredictorDialog(QDialog):
         header = self._table.horizontalHeader()
         if header is not None:
             header.setStretchLastSection(True)
-        self._table.setSelectionBehavior(
-            QAbstractItemView.SelectRows  # type: ignore[attr-defined]
-        )
-        self._table.setSelectionMode(
-            QAbstractItemView.ExtendedSelection  # type: ignore[attr-defined]
-        )
-        self._table.setEditTriggers(
-            QTableWidget.NoEditTriggers  # type: ignore[attr-defined]
-        )
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         transitions_layout.addWidget(self._table)
 
@@ -358,12 +361,23 @@ class PredictorDialog(QDialog):
         action_row = QHBoxLayout()
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._on_remove_selected)
-        action_row.addWidget(self._remove_btn)
+        remove_region = QWidget()
+        remove_layout = QHBoxLayout(remove_region)
+        remove_layout.setContentsMargins(0, 0, 0, 0)
+        remove_layout.addWidget(self._remove_btn)
+        action_row.addWidget(remove_region)
         action_row.addStretch()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
         left_layout.addLayout(action_row)
+        for content in (
+            model_group,
+            transitions_group,
+            calibration_group,
+            remove_region,
+        ):
+            bind_control_enabled(content, control_identity)
 
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
@@ -1347,7 +1361,7 @@ class PredictorDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select params.json", "", "JSON files (*.json);;All files (*)"
         )
-        if not path:
+        if not path or not local_write_allowed(self._control_identity):
             return
         self._params_path_edit.setText(path)
         self._load_params_file(path)

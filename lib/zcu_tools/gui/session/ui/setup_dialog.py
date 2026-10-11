@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryInfo,
@@ -36,6 +37,10 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    local_write_allowed,
+)
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
@@ -60,22 +65,28 @@ class SetupDialog(QDialog):
     description and same-entry clone choice to the owner; failures remain
     visible in the status label without retry. Track device only suggests an
     editable label from cached value/unit, preserving manual edits and None.
+    Optional control_identity gates the owned content but not Close. New-entry
+    text prompts recheck that application owner before creating any resources.
+    Omitted authority preserves the behavior of apps without control identity.
     """
 
     def __init__(
         self,
         controller: SetupControlPort,
         parent: QWidget | None = None,
+        *,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
+        self._control_identity = control_identity
         self.setWindowTitle("Setup")
         self.resize(900, 600)
 
         root_layout = QVBoxLayout(self)
 
         # ── horizontal splitter: left = project, right = connection ──────
-        splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
@@ -207,7 +218,7 @@ class SetupDialog(QDialog):
         # soccfg description — hidden until connection succeeds
         self._cfg_text = QPlainTextEdit()
         self._cfg_text.setReadOnly(True)
-        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)  # type: ignore[attr-defined]
+        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self._cfg_text.setVisible(False)
         right_layout.addWidget(self._cfg_text, stretch=1)
 
@@ -215,9 +226,10 @@ class SetupDialog(QDialog):
         splitter.addWidget(right_widget)
 
         splitter.setSizes([450, 450])
+        bind_control_enabled(splitter, control_identity)
 
         # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)  # type: ignore[attr-defined]
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btn_box.rejected.connect(self.reject)
         root_layout.addWidget(btn_box)
 
@@ -388,7 +400,7 @@ class SetupDialog(QDialog):
 
     def _on_new_entry_clicked(self) -> None:
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
-        if not accepted:
+        if not accepted or not local_write_allowed(self._control_identity):
             return
         try:
             info = self._ctrl.new_entry(EntryRequest(name))

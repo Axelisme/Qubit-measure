@@ -29,6 +29,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.widgets.remote_edit_gate import (
+    bind_control_enabled,
+    local_write_allowed,
+)
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformError,
@@ -197,11 +202,23 @@ class _PreviewCanvas(QWidget):
 
 
 class ArbWaveformDialog(QDialog):
-    """Qubit-scoped arbitrary waveform asset manager."""
+    """Qubit-scoped arbitrary waveform asset manager.
 
-    def __init__(self, assets: ArbWaveformPort, parent: QWidget | None = None) -> None:
+    Optional control_identity gates recipe/asset controls, not Close or preview.
+    Rename, overwrite and deletion recheck that owner after their modal decision.
+    Omitted authority leaves the existing standalone dialog behavior unchanged.
+    """
+
+    def __init__(
+        self,
+        assets: ArbWaveformPort,
+        parent: QWidget | None = None,
+        *,
+        control_identity: ControlIdentity | None = None,
+    ) -> None:
         super().__init__(parent)
         self._assets = assets
+        self._control_identity = control_identity
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
         # Cheap path state: updated synchronously on every structure/data_key change.
@@ -236,6 +253,7 @@ class ArbWaveformDialog(QDialog):
         top_layout.addWidget(self._build_asset_group(), stretch=2)
         top_layout.addWidget(self._build_recipe_group(), stretch=3)
         splitter.addWidget(top)
+        bind_control_enabled(top, control_identity)
 
         preview_group = QGroupBox("Preview")
         preview_layout = QVBoxLayout(preview_group)
@@ -642,6 +660,8 @@ class ArbWaveformDialog(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        if not local_write_allowed(self._control_identity):
+            return
         # Save try: service renders the recipe once and persists it.
         try:
             self._assets.set_formula(data_key, recipe, overwrite=exists)
@@ -678,7 +698,7 @@ class ArbWaveformDialog(QDialog):
             "New data_key:",
             text=old_key,
         )
-        if not accepted:
+        if not accepted or not local_write_allowed(self._control_identity):
             return
         new_key = new_key.strip()
         if new_key == old_key:
@@ -716,7 +736,9 @@ class ArbWaveformDialog(QDialog):
             "Delete waveform",
             f"Delete arbitrary waveform {data_key!r}?",
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if answer != QMessageBox.StandardButton.Yes or not local_write_allowed(
+            self._control_identity
+        ):
             return
         try:
             self._assets.delete(data_key)

@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
-from zcu_tools.gui.widgets.remote_edit_gate import bind_control_enabled, watch_control
+from zcu_tools.gui.widgets.remote_edit_gate import watch_control
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -36,7 +36,11 @@ def _visible_dialog_names(
 
 
 class MainDialogRegistry:
-    """Owns the named non-modal dialogs exposed through ``MainWindow``."""
+    """Retain the named dialogs exposed through ``MainWindow``.
+
+    Keep each dialog's existing modal presentation. Dialog owners gate their
+    content and writes; the registry never disables a dialog's Cancel/Close.
+    """
 
     def __init__(
         self, ctrl: Controller, parent: QWidget, *, dialog_refs: DialogRefStore
@@ -66,7 +70,11 @@ class MainDialogRegistry:
         if name is DialogName.SETUP:
             from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-            return SetupDialog(self._ctrl.setup_control, parent=self._parent)
+            return SetupDialog(
+                self._ctrl.setup_control,
+                parent=self._parent,
+                control_identity=self._ctrl.control_identity,
+            )
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
@@ -85,6 +93,7 @@ class MainDialogRegistry:
                 device=self._ctrl.device_control,
                 parameter_provider=self._ctrl.context_control.read_context,
                 persistent_on_close=True,
+                control_identity=self._ctrl.control_identity,
             )
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
@@ -95,15 +104,23 @@ class MainDialogRegistry:
         if name is DialogName.ALIASES:
             from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 
-            return AliasDialog(self._ctrl.context_control, parent=self._parent)
+            return AliasDialog(
+                self._ctrl.context_control,
+                parent=self._parent,
+                control_identity=self._ctrl.control_identity,
+            )
         if name is DialogName.ARB_WAVEFORM:
             from .arb_waveform_dialog import ArbWaveformDialog
 
-            return ArbWaveformDialog(self._ctrl.arb_waveforms, parent=self._parent)
+            return ArbWaveformDialog(
+                self._ctrl.arb_waveforms,
+                parent=self._parent,
+                control_identity=self._ctrl.control_identity,
+            )
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
     def open(self, name: DialogName) -> None:
-        """Open a named dialog non-modally, or raise an existing instance."""
+        """Open with the existing modal policy, or raise a retained instance."""
         existing = self._dialog(name)
         if existing is not None:
             try:
@@ -126,8 +143,6 @@ class MainDialogRegistry:
                 self._ctrl.control_identity,
                 lambda status: dialog.set_read_only(status.holder != "gui"),
             )
-        elif name is not DialogName.INSPECT:
-            bind_control_enabled(dialog, self._ctrl.control_identity)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(

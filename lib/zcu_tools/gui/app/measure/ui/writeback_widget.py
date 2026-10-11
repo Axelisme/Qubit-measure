@@ -561,7 +561,6 @@ class WritebackWidget(QWidget):
 
     def _edit_md_item(self, item: ParameterWriteback) -> None:
         dialog = QDialog(self)
-        bind_control_enabled(dialog, self._ctrl.control_identity)
         dialog.setWindowTitle(f"Edit Value: {item.target_name}")
         layout = QVBoxLayout(dialog)
 
@@ -610,6 +609,8 @@ class WritebackWidget(QWidget):
                 logger.exception("failed to edit writeback value %s", item.session_id)
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
+        for content in (name_edit, value_edit, save_btn):
+            bind_control_enabled(content, self._ctrl.control_identity)
         save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # type: ignore[attr-defined]
         dialog.open()
@@ -631,7 +632,6 @@ class WritebackWidget(QWidget):
             return
 
         dialog = QDialog(self)
-        bind_control_enabled(dialog, self._ctrl.control_identity)
         dialog.setWindowTitle(f"Edit Config: {item.target_name}")
         dialog.setMinimumSize(560, 500)
 
@@ -651,6 +651,8 @@ class WritebackWidget(QWidget):
         layout.addLayout(name_row)
 
         def _commit_name() -> None:
+            if self._ctrl.control_identity.status().holder != "gui":
+                return
             text = name_edit.text().strip()
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
@@ -683,7 +685,7 @@ class WritebackWidget(QWidget):
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
-        self._add_cfg_close_action(dialog, layout)
+        self._add_cfg_close_action(dialog, layout, content=(name_edit, scroll))
 
         def _on_finished(*_: object) -> None:
             try:
@@ -697,7 +699,12 @@ class WritebackWidget(QWidget):
         dialog.finished.connect(_on_finished)
         dialog.open()
 
-    def _add_cfg_close_action(self, dialog: QDialog, layout: QVBoxLayout) -> None:
+    def _add_cfg_close_action(
+        self, dialog: QDialog, layout: QVBoxLayout, *, content: tuple[QWidget, ...]
+    ) -> None:
+        """Gate the editor content while keeping its close action available."""
+        for widget in content:
+            bind_control_enabled(widget, self._ctrl.control_identity)
         button_row = QHBoxLayout()
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)

@@ -998,7 +998,7 @@ class ExpTabWidget(QWidget):
             "Reset config to defaults? This discards the current configuration.",
             default=False,
         )
-        if not confirmed:
+        if not confirmed or self._ctrl.control_identity.status().holder != "gui":
             return
         assert self._actions is not None, "reset clicked before bind"
         self._cfg.reset()
