@@ -115,7 +115,7 @@ def test_tab_new_list_close_roundtrip(fx):
             sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
         )
         resp = _recv_response(sock)
-        assert resp["ok"] is True
+        assert resp["ok"] is True, resp
         tab_id = resp["result"]["tab_id"]
         assert tab_id
 

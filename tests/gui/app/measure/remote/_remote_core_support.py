@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from qtpy.QtCore import QCoreApplication
 
 from ._helpers import Fixture
+from ._helpers import open_client as open_owner_client
 
 
 def make_view() -> MagicMock:
@@ -63,4 +64,4 @@ def recv_response(sock: socket.socket, timeout_s: float = 3.0) -> dict[str, Any]
 
 
 def open_client(port: int) -> socket.socket:
-    return socket.create_connection(("127.0.0.1", port), timeout=1.0)
+    return open_owner_client(port)
