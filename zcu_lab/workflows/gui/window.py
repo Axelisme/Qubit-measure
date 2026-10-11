@@ -114,10 +114,8 @@ def _prepare_start_form[F: FormModel](
 def _encode_form_value(value: FormValue) -> JsonValue:
     """Project ordinary display leaves; scalar complex format belongs to codec."""
     if isinstance(value, complex):
-        encoded: dict[str, JsonValue] = {
-            key: list[JsonValue](parts) for key, parts in encode_complex(value).items()
-        }
-        return encoded
+        encoded = encode_complex(value)
+        return {"__complex__": list[JsonValue](encoded["__complex__"])}
     if isinstance(value, (list, tuple)):
         return [_encode_form_value(item) for item in value]
     if isinstance(value, dict):
