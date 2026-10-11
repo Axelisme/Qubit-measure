@@ -60,7 +60,7 @@ from tests.gui._completion_helpers import (
 )
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure.remote._helpers import _context_root
-from zcu_lab.definitions import register_all
+from zcu_lab.definitions import ALIAS_PRESET, register_all
 from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
@@ -115,6 +115,7 @@ class ControllerFixture:
         if mock_emit:
             self.bus.emit = MagicMock(wraps=self.bus.emit)
         self.ctrl = Controller(
+            alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
             view=self.view,

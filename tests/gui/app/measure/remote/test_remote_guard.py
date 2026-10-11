@@ -283,7 +283,11 @@ def test_recipe_optional_modules_reach_missing_calibration_on_real_gui(
     )
     try:
         call("connect", {"port": fx.service.port})
-        arguments = {}
+        arguments: dict[str, object] = (
+            {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
+            if recipe == "twotone_spectrum"
+            else {}
+        )
         if reuse:
             arguments["reuse_tab_id"] = call(
                 "rpc_call", {"method": "tab.new", "params": {"adapter_name": adapter}}

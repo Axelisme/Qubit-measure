@@ -612,6 +612,7 @@ class RecipeExecution:
             tools = self._tools.bound()
             session = RecipeSession(
                 tools,
+                summary_parameters=self._definition.summary_parameters,
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
