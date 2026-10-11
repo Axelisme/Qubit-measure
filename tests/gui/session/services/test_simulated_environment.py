@@ -24,7 +24,6 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest, DeviceService
-from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.simulated_environment import (
     FAKE_FLUX_DEVICE_NAME,
@@ -94,12 +93,10 @@ class Session:
         self.connection = SoCConnectionService(
             self.state, self.bus, self.gate, self.handles, runner
         )
-        self.predictor = PredictorService(self.state, self.bus)
         self.environment = SimulatedEnvironmentCoordinator(
             self.bus,
             self.device,
             self.connection,
-            self.predictor,
             self.gate,
             self.handles,
         )
@@ -162,7 +159,6 @@ def test_source_ready_before_soc_publication_and_terminal_origin(
     assert session.handles.known_outcome(token) == OperationOutcome("finished")
     assert session.finished[-1].success
     assert terminal_origins == [EventOrigin("agent", "client", str(token))]
-    assert session.predictor.get_predictor() is not None
     assert session.handles.live_count() == 0
     assert session.gate.snapshot() == ()
 
@@ -181,7 +177,6 @@ def test_disconnects_real_devices_then_reuses_valid_simulation(
     source = session.registry.get_device(FAKE_FLUX_DEVICE_NAME)
     source.setup(FakeDeviceInfo(address="none", value=0.2))
     soc = session.state.session_env.soc
-    predictor = session.predictor.get_predictor()
     another = session.connect_real("another")
     session.environment.start()
     session.background.drain()
@@ -189,7 +184,6 @@ def test_disconnects_real_devices_then_reuses_valid_simulation(
     assert session.registry.get_device(FAKE_FLUX_DEVICE_NAME) is source
     assert source.get_value() == 0.2
     assert session.state.session_env.soc is soc
-    assert session.predictor.get_predictor() is predictor
 
 
 def test_disconnect_failure_reports_partial_state_without_publishing_mock(
@@ -217,7 +211,6 @@ def test_low_level_mock_connect_does_not_assemble_environment(session: Session) 
     session.connection.connect_sync(ConnectMockRequest())
     assert session.connection.has_soc()
     assert session.registry.get_all_devices() == {}
-    assert session.predictor.get_predictor() is None
     assert session.finished == []
 
 
@@ -269,15 +262,6 @@ def test_wrong_source_type_rejected_at_binding_without_replacing_soc(
     assert session.registry.get_all_devices() == {}
 
 
-def test_existing_predictor_is_preserved(session: Session) -> None:
-    predictor = MagicMock()
-    session.predictor.install_predictor(predictor)
-    session.environment.start()
-    session.background.drain()
-    assert session.finished[-1].success
-    assert session.predictor.get_predictor() is predictor
-
-
 def test_cancelled_source_initialization_cleans_new_driver(session: Session) -> None:
     token = session.environment.start()
     session.background.deliver()
@@ -308,7 +292,7 @@ def test_cleanup_failure_retains_source_and_reports_both_failures(
     assert session.gate.snapshot() == ()
 
 
-def test_explicit_simulation_parameters_reach_soc_and_predictor(
+def test_explicit_simulation_parameters_reach_soc(
     session: Session,
 ) -> None:
     from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM

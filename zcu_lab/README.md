@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-11，Measure device alias defaults、共用 preset callers 與 recipe helpers
+**Last updated:** 2026-10-12，Measure device alias defaults、共用 preset callers、recipe helpers 與 component predictor 預填
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
@@ -35,3 +35,7 @@ Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 ac
 測試在 `tests/zcu_lab`，目錄對應本套件。通用契約逐一走過 measure registry，驗證 adapter conformance、context-free spec、成品 cfg validation 與 fresh schema。新增或刪除實驗不需要維護另一份測試清單。
 
 共用 domain helpers 與 template startup policy 有各自的接縫測試。個別實驗不另寫行為測試，除非使用者要求特殊邏輯；目前保留 AllXY、ZigZag 與 ZigZagScan 的 D142 案例。共同 runtime、NotebookAdapter 與 GUI framework 行為由框架 owner 的測試驗證。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
+
+`components.params_for(component)` 依 kind 讀 qubit 元件目前值。`qubit/fluxonium` 用 EJ／EC／EL 回 FluxoniumParams，`qubit/transmon` 用 EJmax／EC／d 回 TransmonParams。兩種 schema 共用 `QubitBaseSchema` 的通用欄位，不遷移也不兼容舊的 transmon 資料。
+Notebook 傳入 point.Q1；GUI composition 傳入隔離 capture 的 component model。
+缺項保留 None，ext.flux_bias 不代入預設值。參數與 Calibrate 不會回写元件。

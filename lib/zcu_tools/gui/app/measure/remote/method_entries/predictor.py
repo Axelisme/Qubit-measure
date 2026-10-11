@@ -1,87 +1,52 @@
-"""Predictor remote method entries."""
+"""Read-only simulator methods; catalog descriptions are the MCP input contract."""
 
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-from ._params import (
-    default_integer,
-    default_number,
-    required_number,
-    required_string,
+from ._params import default_integer, optional_string, required_number
+from ._registry import RemoteMethodEntry, method_entry
+
+_SOURCES = (
+    optional_string(
+        "qubit",
+        "Concrete qubit component name (e.g. Q2) at the current selected point, "
+        "not an alias/path. Supply exactly one of qubit or params.",
+    ),
+    ParamSpec(
+        "params",
+        JsonType.OBJECT,
+        required=False,
+        description="Independent named inputs. Fluxonium: {model: 'fluxonium', EJ, "
+        "EC, EL, flux_half, flux_period, flux_bias}. SQUID transmon: {model: "
+        "'transmon', EJmax, EC, d, flux_half, flux_period, flux_bias}, where d is "
+        "the junction asymmetry. Energies use GHz; affine values use native device "
+        "units. Omitted/null fields are unknown. Supply exactly one of qubit or "
+        "params; no dialog/cache or alias is read.",
+    ),
 )
-from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
-    method_entry(
-        "predictor.load",
-        "predictor:h_predictor_load",
-        MethodSpec(
-            30.0,
-            "Install a FluxoniumPredictor from a params.json file (its fluxdep_fit "
-            "section). Replaces any currently loaded predictor. Echoes the installed "
-            "model: {loaded: true, path, flux_bias, flux_half, flux_period, EJ, EC, EL}.",
-            (
-                required_string("path", "Predictor file path"),
-                default_number("flux_bias", 0.0, "Flux bias"),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "predictor.set_model_params",
-        "predictor:h_predictor_set_model_params",
-        MethodSpec(
-            10.0,
-            "Build+install a FluxoniumPredictor directly from typed model params "
-            "(no params.json). EJ/EC/EL are the Fluxonium energies in GHz "
-            "(e.g. 4:1:1); flux_half/flux_period are the value->flux affine anchors "
-            "in device-value units; flux_bias is the bias correction. Replaces any "
-            "currently loaded predictor. Echoes the installed model: {loaded: true, "
-            "path: null, flux_bias, flux_half, flux_period, EJ, EC, EL} (path is null "
-            "because this predictor has no backing file).",
-            (
-                required_number("EJ", "Josephson energy E_J (GHz)"),
-                required_number("EC", "Charging energy E_C (GHz)"),
-                required_number("EL", "Inductive energy E_L (GHz)"),
-                required_number(
-                    "flux_half", "Half-flux (Phi0/2) value->flux anchor (device units)"
-                ),
-                required_number(
-                    "flux_period", "Flux period (device units); must be non-zero"
-                ),
-                default_number("flux_bias", 0.0, "Flux bias correction (device units)"),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
-    method_entry(
-        "predictor.clear",
-        "predictor:h_predictor_clear",
-        MethodSpec(
-            5.0,
-            "Unload the current predictor (idempotent — succeeds with no predictor "
-            "loaded). Returns {loaded: false}.",
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
-    ),
     method_entry(
         "predictor.predict",
         "predictor:h_predictor_predict",
         MethodSpec(
             10.0,
-            "Predict a transition frequency at a device-value setpoint. Returns "
-            "{freq_mhz}.",
-            (
+            "Read-only transition prediction from exactly one qubit or params source. "
+            "Returns {freq_mhz}. Requires complete valid parameters. INVALID_PARAMS "
+            "reasons: invalid_predictor_source, invalid_predictor_qubit, "
+            "invalid_predictor_params, missing_predictor_params (data.missing lists fields).",
+            _SOURCES
+            + (
                 required_number(
                     "device_value",
-                    "Device-value setpoint in the instrument's native unit (e.g. "
-                    "current in A for YOKOGS200) — NOT a flux quantum. The predictor "
-                    "applies an internal value-to-flux affine conversion; passing a "
-                    "flux quantum (e.g. 0.5) will silently yield a wrong frequency.",
+                    "Setpoint in source-native device units, NOT flux quanta. "
+                    "flux = (device_value + flux_bias - flux_half)/flux_period + 0.5; "
+                    "no unit conversion or hardware read occurs.",
                 ),
-                default_integer("from_level", 0, "From level"),
-                default_integer("to_level", 1, "To level"),
+                default_integer("from_level", 0, "Nonnegative transition from level"),
+                default_integer("to_level", 1, "Nonnegative transition to level"),
             ),
         ),
     ),
@@ -90,31 +55,42 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "predictor:h_predictor_calibrate",
         MethodSpec(
             30.0,
-            "Calibrate the installed predictor flux_bias from one measured transition "
-            "frequency in MHz at a device-value setpoint in native instrument units. "
-            "Uses the shared PredictorService and returns {flux_bias_before, "
-            "flux_bias_after}; no hardware read or write is performed.",
-            (
+            "Compute {flux_bias_before, flux_bias_after, frequency_mhz, clamped} from exactly one "
+            "qubit or params source. Complete valid parameters are required; missing "
+            "fields return INVALID_PARAMS/missing_predictor_params with data.missing. "
+            "Source conflicts return invalid_predictor_source; malformed params or "
+            "qubits return invalid_predictor_params or invalid_predictor_qubit. "
+            "Only returns a candidate: never writes a component, dialog, file or "
+            "hardware. Selects smallest absolute native bias across all roots. "
+            "Unreachable targets return the nearest attainable frequency_mhz and "
+            "clamped=true, ties choose smallest absolute bias. Reachable targets "
+            "return clamped=false. Invalid inputs are rejected, not clamped.",
+            _SOURCES
+            + (
                 required_number(
-                    "device_value", "Measured setpoint in native instrument units"
+                    "device_value", "Measured setpoint in native device units"
                 ),
                 required_number(
                     "frequency_mhz", "Measured transition frequency in MHz"
                 ),
-                default_integer("from_level", 0, "Transition from level"),
-                default_integer("to_level", 1, "Transition to level"),
+                default_integer(
+                    "from_level", 0, "Nonnegative transition from level, below to_level"
+                ),
+                default_integer("to_level", 1, "Transition to level, above from_level"),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "predictor.info",
         "predictor:h_predictor_info",
         MethodSpec(
             5.0,
-            "Read the current predictor's installed model. Returns {loaded: false} "
-            "when none is loaded, else {loaded: true, path, flux_bias, flux_half, "
-            "flux_period, EJ, EC, EL} (path is null for an in-memory install).",
+            "Read-only {model, params, missing} from exactly one qubit or params "
+            "source. Null fields remain unknown; no complete model is required or "
+            "built. Source conflicts return INVALID_PARAMS/invalid_predictor_source; "
+            "unknown/invalid concrete names return invalid_predictor_qubit; malformed "
+            "direct inputs return invalid_predictor_params. Never reads dialog/cache.",
+            _SOURCES,
         ),
     ),
 )

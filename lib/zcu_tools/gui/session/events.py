@@ -36,7 +36,6 @@ class SessionEvent(str, Enum):
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
     ALIASES_CHANGED = "aliases_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
-    PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
     DEVICE_SETUP_STARTED = "device_setup_started"  # payload: DeviceSetupStartedPayload
     DEVICE_SETUP_FINISHED = (
@@ -128,13 +127,6 @@ class SocChangedPayload(SessionPayload):
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
     is_mock: bool = False
-
-
-@dataclass(frozen=True)
-class PredictorChangedPayload(SessionPayload):
-    """Payload for PREDICTOR_CHANGED: predictor state or values changed."""
-
-    EVENT: ClassVar[SessionEvent] = SessionEvent.PREDICTOR_CHANGED
 
 
 @dataclass(frozen=True)

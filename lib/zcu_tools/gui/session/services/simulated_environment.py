@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import ExclusionGate
     from zcu_tools.gui.session.services.connection import SoCConnectionService
     from zcu_tools.gui.session.services.device import DeviceService
-    from zcu_tools.gui.session.services.predictor import PredictorService
     from zcu_tools.program.v2.sim import SimParams
 
 logger = logging.getLogger(__name__)
@@ -66,14 +65,12 @@ class SimulatedEnvironmentCoordinator:
         bus: BaseEventBus,
         device: DeviceService,
         connection: SoCConnectionService,
-        predictor: PredictorService,
         gate: ExclusionGate,
         handles: OperationHandles,
     ) -> None:
         self._bus = bus
         self._device = device
         self._connection = connection
-        self._predictor = predictor
         self._gate = gate
         self._handles = handles
         self._attempt: _Attempt | None = None
@@ -211,9 +208,6 @@ class SimulatedEnvironmentCoordinator:
         return source
 
     def _publish_environment(self) -> None:
-        from zcu_tools.gui.session.services.predictor_from_sim import (
-            build_predictor_from_simparams,
-        )
         from zcu_tools.program.v2.mocksoc import make_mock_soc
         from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
@@ -230,13 +224,6 @@ class SimulatedEnvironmentCoordinator:
             )
             pair[0].set_flux_source(source.get_value)
         soc, soccfg = pair
-        if self._predictor.get_predictor() is None:
-            if soc.sim_params is None:
-                raise ValueError(
-                    "Simulated environment requires physics simulation parameters"
-                )
-            predictor = build_predictor_from_simparams(soc.sim_params)
-            self._predictor.install_predictor(predictor)
         self._connection.install_prepared_mock(soc, soccfg)
         self._finish(None)
 
