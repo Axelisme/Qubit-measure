@@ -82,11 +82,10 @@ class JsonlSampleTable:
             stream.write(encoded)
 
     def _latest_records(self) -> dict[str, _SampleRecord]:
-        """Return latest rows per run_id with a fresh RangeIndex.
+        """Return last whole validated rows per run_id in file-occurrence order.
 
-        Rows retain their last occurrence's file order. An absent file returns
-        an empty DataFrame. Invalid rows raise ValueError naming path and line;
-        other I/O errors propagate. Nested measurement JSON remains nested.
+        An absent file returns an empty mapping. Invalid rows raise ValueError
+        naming path and line; other I/O errors propagate. Nested JSON remains nested.
         """
         try:
             stream = self._path.open(encoding="utf-8")

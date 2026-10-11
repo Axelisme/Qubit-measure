@@ -157,8 +157,12 @@ class WritebackTarget(Protocol):
 
     entry_id/ledger identify the owning entry; point is its saved label.
     Each setter commits and validates one item or raises without installing it.
-    Publication belongs to the context owner, not this protocol or the executor.
-    append_sample receives producer fields separately from accepted metadata.
+    set_parameter accepts a concrete dotted point path and a working-unit JSON
+    value. set_module/set_waveform accept concrete library keys and named Specs.
+    source is the accepted Provenance for that item. Publication belongs to the
+    context owner, not this protocol or the executor. append_sample accepts a
+    safe component segment, producer fields and separate accepted run_id/UTC
+    at/event source; it records this target's point label through the sample owner.
     """
 
     entry_id: str
