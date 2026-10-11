@@ -243,6 +243,40 @@ def test_single_model_selector_rejects_expression_without_evaluating_tag(
     assert "kind" in invalid.messages[("branch",)]
 
 
+def test_single_model_selector_restore_drops_expression_and_retains_ordinary_tag(
+    name_env: FormEnv,
+) -> None:
+    assert name_env.parameters is not None
+    env = FormEnv(
+        parameters=name_env.parameters.bind_aliases((AliasRow("device", "first"),), {})
+    )
+    state = FormState(SingleSelectorForm.default_input(env))
+    saved = FormInput.from_json(
+        SingleSelectorForm,
+        FormInput(
+            SingleSelectorForm,
+            {"branch": {"kind": {"expr": "$device"}, "name": {"expr": "$device"}}},
+        ).to_json(),
+    )
+
+    assert state.write_compatible(saved.data, env) == (("branch", "kind"),)
+    assert state.input.data["branch"] == {
+        "kind": "first",
+        "name": {"expr": "$device"},
+    }
+    result = state.result(env)
+    assert isinstance(result, SingleSelectorForm), result
+    assert result.branch.kind == "first" and result.branch.name == "first"
+
+    ordinary = FormInput(
+        SingleSelectorForm, {"branch": {"kind": "first", "name": "saved"}}
+    )
+    assert state.write_compatible(ordinary.data, env) == ()
+    result = state.result(env)
+    assert isinstance(result, SingleSelectorForm), result
+    assert result.branch.kind == "first" and result.branch.name == "saved"
+
+
 class ScalarEnvelopeForm(FormModel):
     """Malformed envelopes retain field-specific input diagnostics."""
 
