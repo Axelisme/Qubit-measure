@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.recipe import RecipeAnalysis, RecipeRun, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, scalar
 from ._support import MeasureClient, full_execution_reply, make_client
 
@@ -668,18 +669,14 @@ def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, expli
         client, skip_writeback(client, client.call("singleshot_ge", arguments))
     ).data
     assert data["status"] == "finished", data
-    fields = data["actual"]["fields"]
-    assert fields["shots"]["value"] == 7000
+    fields = data["actual"]
+    assert cfg_value(gui.publication, "shots") == 7000
     assert fields["shots"]["source"] == "gui_default"
-    assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 5000.0
-    assert (
-        fields["modules.readout.ro_cfg.ro_freq"]["source"]
-        == "library:R1.readout.readout"
-    )
-    assert fields["modules.probe_pulse"]["value"] == "Q1.pulses.pi"
-    assert fields["modules.probe_pulse"]["source"] == (
-        "explicit" if explicit else "gui_default"
-    )
+    assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == 5000.0
+    assert fields["ro_frequency_mhz"]["source"] == "library:R1.readout.readout"
+    assert cfg_value(gui.publication, "modules.probe_pulse") == "Q1.pulses.pi"
+    if not explicit:
+        assert fields["pi_ref"]["source"] == "gui_default"
 
 
 @pytest.mark.parametrize("reuse", [False, True])
@@ -1076,7 +1073,7 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
-        assert data["actual"]["fields"]["shots"]["value"] == 1234
+        assert cfg_value(gui.publication, "shots") == 1234
         assert modules["probe_pulse"]["ref"] == "Q1.pulses.pi"
         assert modules["reset"]["ref"] is None
         assert modules["init_pulse"]["ref"] is None

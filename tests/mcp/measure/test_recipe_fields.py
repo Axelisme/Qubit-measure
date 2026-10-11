@@ -100,7 +100,7 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         before = list(client.transport.sent)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Unknown cfg field|source must be"):
             tab.retain_source(field, source)
         assert client.transport.sent == before
         assert gui.publication["cfg_ref"]["revision"] == "2"
@@ -111,7 +111,13 @@ def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
 ) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
-        tab = RecipeSession(client.context).open_tab("lookback")
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(
+                SummaryParameter("frequency", "modules.readout.pulse_cfg.freq"),
+                SummaryParameter("rounds", "rounds"),
+            ),
+        ).open_tab("lookback")
         before = len(client.transport.sent)
         tab.set_fields(
             [

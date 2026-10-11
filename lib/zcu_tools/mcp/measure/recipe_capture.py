@@ -26,14 +26,12 @@ class ActualField(TypedDict):
     value is the resolved scalar, module reference or named sweep values.
     source is the caller's captured parameter/calibration/library/default label,
     or SweepSources for individually labeled sweep inputs. None or omission
-    means no source was declared. input retains native raw
-    expression/resolution facts when present. unit is an asserted native unit,
+    means no source was declared. unit is an asserted native unit,
     never a request to convert value.
     """
 
     value: object
     source: NotRequired[str | SweepSources | None]
-    input: NotRequired[object]
     unit: NotRequired[str | None]
 
 
@@ -41,31 +39,25 @@ class RecipeActual(TypedDict):
     """Run-before-start capture; later queries do not replace it with live data.
 
     cfg_ref is the opaque GUI identity/revision observation used to start Run.
-    fields maps public cfg or derived parameter names to their resolved facts.
-    source_basis is the GUI's opaque source observation basis.
-    publication retains the complete native cfg publication, including raw
-    expressions and diagnostics. All members are detached from caller state.
+    fields maps declared summary cfg fields to value/source/unit facts.
+    Both members are detached from caller state; no cfg inputs are retained.
     """
 
     cfg_ref: object
     fields: dict[str, ActualField]
-    source_basis: object
-    publication: dict[str, object]
 
 
 def capture_actual(
     publication: Mapping[str, object], fields: Mapping[str, ActualField]
 ) -> RecipeActual:
-    """Detach one observed cfg publication and its resolved/source field facts.
+    """Detach cfg_ref and declared summary facts from an observed publication.
 
-    publication must contain cfg_ref and source_basis from tab.get_cfg/edit_cfg.
-    fields contains caller-resolved conditions, not values to edit into the GUI.
-    Missing publication keys raise KeyError. Preserve source labels, units and
-    raw inputs verbatim; do not read GUI state, resolve expressions or convert.
+    publication must contain cfg_ref from tab.get_cfg/edit_cfg. fields contains
+    resolved value/source/unit facts, not cfg inputs or values to edit. Missing
+    cfg_ref raises KeyError. Preserve source labels and units verbatim; do not
+    read GUI state, retain publication, resolve expressions or convert.
     """
     return RecipeActual(
         cfg_ref=deepcopy(publication["cfg_ref"]),
         fields=deepcopy(dict(fields)),
-        source_basis=deepcopy(publication["source_basis"]),
-        publication=deepcopy(dict(publication)),
     )

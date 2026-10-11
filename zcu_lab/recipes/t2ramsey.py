@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -88,8 +90,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -104,11 +109,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         "sweep.length",
         stop=max_delay_us,
         expts=points,
-        sources={"start": "explicit", "stop": "max_delay_us", "expts": "points"},
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
-    tab.set("detune_ratio", detune_ratio, source="detune_ratio")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
+    tab.set("detune_ratio", detune_ratio, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":

@@ -12,6 +12,7 @@ from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
 
@@ -101,13 +102,13 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
         initial = replies[0].data
         assert initial["status"] == "running"
         execution = initial["execution"]
-        initial["actual"]["fields"].clear()
+        initial["actual"].clear()
         before = len(client.transport.sent)
         status = client.call("status", {"execution": execution, "detail": "full"})
         waiting = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 0})
         )
-        assert status["actual"]["fields"]
+        assert status["actual"]
         assert waiting.data["execution"] == execution
         assert waiting.data["status"] == "running"
         assert len(client.transport.sent) == before
@@ -1008,9 +1009,6 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         ]
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
-        actual = data["actual"]
-        assert actual["cfg_ref"] == gui.publication["cfg_ref"]
-        fields = actual["fields"]
         for path, value in {
             "modules.readout.pulse_cfg.freq": 6020.0,
             "modules.readout.ro_cfg.ro_freq": 6020.0,
@@ -1018,8 +1016,8 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             "modules.readout.ro_cfg.trig_offset": expected[1],
             "rounds": 7,
         }.items():
-            assert fields[path]["value"] == value
-            assert type(fields[path]["value"]) is type(value)
+            assert cfg_value(gui.publication, path) == value
+            assert type(cfg_value(gui.publication, path)) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.reset_cfg") == int(reuse)
@@ -1129,19 +1127,24 @@ def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
         )
         assert answered.data["status"] == "finished"
         assert not answered.data["writeback"]["receipts"]
-        fields = reply.data["actual"]["fields"]
+        fields = reply.data["actual"]
         expected_pulse = 6100.0 if source == "library" else 6500.0
         expected_adc = 6500.0 if source == "r_f" else 6110.0
-        assert fields["modules.readout.pulse_cfg.freq"]["value"] == expected_pulse
-        assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == expected_adc
-        assert fields["modules.readout.pulse_cfg.freq"]["source"] == (
+        assert (
+            cfg_value(gui.publication, "modules.readout.pulse_cfg.freq")
+            == expected_pulse
+        )
+        assert (
+            cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == expected_adc
+        )
+        assert fields["frequency_mhz"]["source"] == (
             "library:R1.readout.calibrated"
             if source == "library"
             else "$resonator.freq"
         )
-        assert fields["modules.readout.ro_cfg.ro_length"]["value"] == 2.0
-        assert fields["modules.readout.ro_cfg.trig_offset"]["value"] == 0.1
-        assert fields["rounds"]["value"] == 3
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_length") == 2.0
+        assert cfg_value(gui.publication, "modules.readout.ro_cfg.trig_offset") == 0.1
+        assert cfg_value(gui.publication, "rounds") == 3
 
 
 @pytest.mark.parametrize(
