@@ -70,16 +70,23 @@ class T1PlanPanel(QWidget):
     state: FormState[T1PlanForm]
     editor: FormEditor[T1PlanForm]
 
-    def __init__(self, env: FormEnv, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        env: FormEnv,
+        parent: QWidget | None = None,
+        *,
+        model: type[T1PlanForm] = T1PlanForm,
+    ) -> None:
         """Create a partial draft on the GUI thread with an existing QApplication.
 
+        model is the catalog's current T1 plan form type (or a compatible subtype).
         Required module selections remain absent until host/user input supplies
         them. env is borrowed unchanged. Source/editor failures propagate and
         parent controls Qt lifetime. No Engine or live resource is accessed.
         """
         super().__init__(parent)
         self.env = env
-        self.state = FormState(T1PlanForm.default_input(env))
+        self.state = FormState(model.default_input(env))
         self.editor = FormEditor(self.state, env, self)
         layout = QVBoxLayout(self)
         layout.addWidget(self.editor)

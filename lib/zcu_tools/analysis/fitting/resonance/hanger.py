@@ -4,6 +4,7 @@ import warnings
 from typing import TypedDict
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
@@ -59,6 +60,24 @@ class HangerParams(TypedDict):
     bg_amp_slope: float
     bg_phase_curvature: float
     circle_params: tuple[float, float, float]
+
+
+def _draw_corrected_iq(
+    axes: Axes,
+    norm_signals: NDArray[np.complex128],
+    norm_xc: float,
+    norm_yc: float,
+    norm_r0: float,
+) -> None:
+    """Draw normalized corrected IQ data, its circle and reference axes."""
+    axes.plot(norm_signals.real, norm_signals.imag, label="corrected data")
+    axes.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))
+    axes.plot([norm_xc, 1], [norm_yc, 0], "kx--")
+    axes.axhline(0, color="k", linestyle="--")
+    axes.set_aspect("equal")
+    axes.grid()
+    axes.set_xlabel(r"$Re(S_{21})$")
+    axes.set_ylabel(r"$Im(S_{21})$")
 
 
 class HangerModel:
@@ -430,14 +449,7 @@ class HangerModel:
         if fit_bg_phase_curvature:
             Q_info += "\n" + r"$c = $" + f"{bg_phase_curvature:.4g} rad/MHz$^2$"
 
-        ax1.plot(norm_signals.real, norm_signals.imag, label="corrected data")
-        ax1.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))
-        ax1.plot([norm_xc, 1], [norm_yc, 0], "kx--")
-        ax1.axhline(0, color="k", linestyle="--")
-        ax1.set_aspect("equal")
-        ax1.grid()
-        ax1.set_xlabel(r"$Re(S_{21})$")
-        ax1.set_ylabel(r"$Im(S_{21})$")
+        _draw_corrected_iq(ax1, norm_signals, norm_xc, norm_yc, norm_r0)
 
         ax2.plot(
             freqs,

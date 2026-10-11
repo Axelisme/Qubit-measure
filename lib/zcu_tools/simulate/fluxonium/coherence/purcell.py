@@ -93,9 +93,7 @@ def purcell(
 
     purcell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
 
-    purcell_total = np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
-
-    return purcell_total
+    return np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
 
 
 def calculate_purcell_t1_vs_flux(
@@ -140,7 +138,7 @@ def calculate_purcell_t1_vs_flux(
         )
 
         def get_purcell_t1(
-            paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
+            paramsweep: ParameterSweep, paramindex_tuple: tuple[int, ...], **kwargs
         ) -> NDArray[np.float64]:
             fluxonium = paramsweep.get_subsys(0)
             resonator = paramsweep.get_subsys(1)

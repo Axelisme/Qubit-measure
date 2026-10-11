@@ -21,7 +21,6 @@ from zcu_tools.gui.form import (
     ModuleRef,
     field_error,
 )
-from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
@@ -74,7 +73,7 @@ class NullableModuleForm(FormModel):
 
 @pytest.mark.parametrize("operation", ["defaults", "write", "result"])
 def test_nullable_module_alias_requires_used_library(operation: str) -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     reference: dict[str, JsonValue] = {"kind": "ref", "name": "Q1.pulses.pi"}
     if operation == "defaults":
         with pytest.raises(PydanticCustomError, match="drive.name"):
@@ -102,7 +101,7 @@ def test_nullable_module_alias_requires_used_library(operation: str) -> None:
 
 def test_nullable_module_alias_uses_captured_library_for_active_branch_switch() -> None:
     source = library()
-    env = FormEnv(md=MetaDict(), library=source)
+    env = FormEnv(library=source)
     before = source.document()
     state = FormState(NullableModuleForm.default_input(env))
     state.write({("drive", "kind"): "inline"}, env)
@@ -126,7 +125,7 @@ def test_public_module_alias_projects_reference_choices() -> None:
             """Allow the fixed reference name at its model-field path."""
             return {("drive", "name"): ("Q1.pulses.pi",)}
 
-    env = FormEnv(md=MetaDict(), library=library())
+    env = FormEnv(library=library())
     validator = Draft202012Validator(ModuleAliasForm.input_schema(env))
     valid: dict[str, JsonValue] = {"drive": {"kind": "ref", "name": "Q1.pulses.pi"}}
     assert validator.is_valid(valid)
@@ -144,7 +143,7 @@ def test_public_module_alias_projects_reference_choices() -> None:
 
 def test_ref_to_inline_seeds_a_detached_spec_without_materializing_children() -> None:
     source = library()
-    env = FormEnv(md=MetaDict(), library=source)
+    env = FormEnv(library=source)
     before = source.document()
     state = FormState(ModuleForm.default_input(env))
     reference = state.result(env)
@@ -163,7 +162,7 @@ def test_ref_to_inline_seeds_a_detached_spec_without_materializing_children() ->
     }
 
     state.write({("drive", "module", "gain"): 0.5}, env)
-    changed_env = FormEnv(md=MetaDict(), library=library(0.75))
+    changed_env = FormEnv(library=library(0.75))
     detached = state.result(changed_env)
     assert isinstance(detached, ModuleForm)
     assert isinstance(detached.drive, ModuleInline)
@@ -174,7 +173,7 @@ def test_ref_to_inline_seeds_a_detached_spec_without_materializing_children() ->
 
 
 def test_same_batch_inline_content_overrides_the_library_seed() -> None:
-    env = FormEnv(md=MetaDict(), library=library())
+    env = FormEnv(library=library())
     state = FormState(ModuleForm.default_input(env))
     state.write({("drive", "module", "gain"): 0.9, ("drive", "kind"): "inline"}, env)
     result = state.result(env)
@@ -193,7 +192,7 @@ def test_used_reference_source_failure_keeps_its_consuming_path(
         "missing_key": "Q1.pulses.absent",
         "wrong_family": "Q1.waveforms.envelope",
     }[source]
-    env = FormEnv(md=MetaDict(), library=None if source is None else library())
+    env = FormEnv(library=None if source is None else library())
     state = FormState(FormInput(ModuleForm, {"drive": {"kind": "ref", "name": name}}))
     result = state.result(env)
     assert isinstance(result, FormErrors)
@@ -207,13 +206,13 @@ def test_used_reference_source_failure_keeps_its_consuming_path(
 
 
 def test_default_input_fails_for_used_missing_library_not_unused_capability() -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     with pytest.raises(PydanticCustomError, match="drive"):
         ModuleForm.default_input(env)
 
 
 def test_captured_devices_choices_missing_source_and_no_mutation() -> None:
-    env = FormEnv(md=MetaDict(), devices={"flux": FakeDeviceInfo(address="memory")})
+    env = FormEnv(devices={"flux": FakeDeviceInfo(address="memory")})
     before = env.devices["flux"].model_copy(deep=True)
     state = FormState(DeviceChoiceForm.default_input(env))
     assert isinstance(state.result(env), DeviceChoiceForm)
@@ -223,7 +222,7 @@ def test_captured_devices_choices_missing_source_and_no_mutation() -> None:
     assert ("device",) in rejected.messages
     assert env.devices["flux"] == before
 
-    missing_env = FormEnv(md=MetaDict())
+    missing_env = FormEnv()
     result = state.result(missing_env)
     assert isinstance(result, FormErrors)
     assert ("device",) in result.messages

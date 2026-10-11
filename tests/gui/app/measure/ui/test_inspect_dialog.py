@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
+    QApplication,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QTreeWidget,
+)
 from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
@@ -23,8 +35,14 @@ from zcu_tools.gui.app.measure.ui.inspect_dialog import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.entry import ResultEntry
 
+from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from zcu_lab.components import QubitSchema, ResonatorSchema
 
@@ -494,46 +512,131 @@ def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypa
     assert dialog._ml_editor_id is None
 
 
+@pytest.fixture
+def native_delete_inspector(
+    qapp, tmp_path: Path, monkeypatch
+) -> Generator[tuple[InspectDialog, ResultEntry]]:
+    background = BackgroundRunner()
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
+        lambda: background,
+    )
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        BaseEventBus(),
+        progress_transport=DirectProgressTransport(),
+        project_root=str(tmp_path),
+    )
+    ctrl.setup_control.new_entry(EntryRequest("entry"))
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    entry.new_point("point")
+    with entry.module_library("point").edit() as draft:
+        draft.set_module(
+            "R1.readout.readout_rf",
+            module_spec_from_raw(
+                {
+                    "type": "readout/direct",
+                    "ro_ch": 0,
+                    "ro_freq": 6000.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.0,
+                }
+            ),
+        )
+        draft.set_waveform(
+            "Q1.waveforms.drive_wav",
+            waveform_spec_from_raw({"style": "const", "length": 1.0}),
+        )
+    ctrl.context_control.use_point(PointUseRequest("point"))
+    dialog = InspectDialog(ctrl, ctrl.get_bus())
+    try:
+        yield dialog, entry
+    finally:
+        dialog.close()
+        background.quiesce()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+@pytest.mark.parametrize("trigger", ["button", "key"])
 def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(
-    qapp, monkeypatch
+    qapp, monkeypatch, native_delete_inspector, kind, trigger
 ):
-    from qtpy.QtWidgets import QMessageBox
-
-    ctrl = _make_ctrl_with_ml(_make_ml())
-    dialog = InspectDialog(ctrl, MagicMock())
-    _select_ml_child(dialog, 0)
-
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.No,
+    dialog, entry = native_delete_inspector
+    before = entry.module_library("point").snapshot()
+    source = "R1.readout.readout_rf" if kind == "module" else "Q1.waveforms.drive_wav"
+    group = "modules" if kind == "module" else "waveforms"
+    tree = next(
+        tree
+        for tree in dialog.findChildren(QTreeWidget)
+        if tree.findItems(group, Qt.MatchFlag.MatchExactly)
     )
-    dialog._del_ml_btn.click()
-    ctrl.del_ml_module.assert_not_called()
-
+    errors: list[str] = []
     monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: pytest.fail("tree Delete must not confirm"),
+        QMessageBox, "warning", lambda _parent, _title, message: errors.append(message)
     )
+    tree.setCurrentItem(
+        tree.findItems(source, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)[
+            0
+        ]
+    )
+    button = next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Delete"
+    )
+    assert button.isEnabled()
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+    )
+    button.click()
+    assert entry.module_library("point").snapshot().document() == before.document()
+    tabs = dialog.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
     dialog.show()
     dialog.activateWindow()
     dialog.raise_()
-    dialog._ml_tree.setFocus()
+    tree.setFocus()
     qapp.processEvents()
+    exceptions: list[BaseException] = []
     monkeypatch.setattr(
-        inspect_dialog.QApplication,
-        "focusWidget",
-        staticmethod(lambda: dialog._ml_tree),
+        sys, "excepthook", lambda _type, error, _trace: exceptions.append(error)
     )
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        Qt.Key.Key_Delete,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(dialog._ml_tree, event)
+    if trigger == "button":
+        monkeypatch.setattr(
+            QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+        )
+        button.click()
+    else:
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **k: pytest.fail("tree Delete must not confirm"),
+        )
+        event = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier
+        )
+        QApplication.sendEvent(tree, event)
     qapp.processEvents()
-    ctrl.del_ml_module.assert_called_once_with("R1.readout.readout_rf")
+    assert errors == [], f"Inspect reported a delete failure: {errors}"
+    assert exceptions == [], f"Inspect delete raised: {exceptions}"
+    persisted = entry.module_library("point").snapshot()
+    keys = persisted.module_keys() if kind == "module" else persisted.waveform_keys()
+    assert keys == ()
+    if kind == "module":
+        assert persisted.entry_state(
+            "Q1.waveforms.drive_wav", kind="waveform"
+        ) == before.entry_state("Q1.waveforms.drive_wav", kind="waveform")
+    else:
+        assert persisted.entry_state(
+            "R1.readout.readout_rf", kind="module"
+        ) == before.entry_state("R1.readout.readout_rf", kind="module")
 
 
 def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):

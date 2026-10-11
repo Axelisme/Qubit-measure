@@ -123,7 +123,7 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
                         trackers=[tracker],
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FluxResult(fluxes=jpa_fluxs, signals=signals)
 

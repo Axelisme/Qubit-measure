@@ -140,7 +140,7 @@ class FakeFreqExp(PersistableExperiment[FreqResult, FakeFreqCfg]):
             if rounds_done == 0:
                 signals_buffer.set(accumulated)
             signals_buffer.trigger_update(flush=True)
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FreqResult(freqs=freqs, signals=signals)
 

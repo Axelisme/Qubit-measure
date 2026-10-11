@@ -2,6 +2,8 @@
 
 # `zcu_tools/mcp/measure/`
 
+**Last updated:** 2026-10-11，reference mode 與 readonly 投影
+
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、guard、read-reveal、寫入後觀察刷新與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
 ## 固定工具與 RPC
@@ -27,6 +29,8 @@ Raw RPC 是非同步完整 cfg 入口，不接受 partial updates、不補 cache
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
 ## Recipe 與 execution
+
+`RecipeTab.use_library` 選 module 或 waveform 的 library 名稱，建立唯讀 ref，不隱含複製或編輯內容。`read_field` 讀取 cfg owner 的 mode 與 readonly。Ref 子欄位必須先在 owner 顯式轉 inline 才可編輯；MCP 不另做 resolver 或 copy。
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 

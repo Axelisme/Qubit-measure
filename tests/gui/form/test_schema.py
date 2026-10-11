@@ -17,7 +17,8 @@ from zcu_tools.gui.form import (
     LinRange,
     RangeInput,
 )
-from zcu_tools.resources.context import MetaDict
+
+from tests.gui._form_context import captured_ext_env
 
 
 class WholeContainerChoicesForm(FormModel):
@@ -48,7 +49,14 @@ class SchemaForm(FormModel):
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """The same captured choices drive schema and model validation."""
-        return {("mode",): ("beta",) if env.md.get("beta_only") else ("alpha",)}
+        return {
+            ("mode",): ("beta",)
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.beta_only").value
+            )
+            else ("alpha",)
+        }
 
 
 class SharedSection(BaseModel):
@@ -128,7 +136,12 @@ class LocalChoicesForm(FormModel):
     def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """An empty local declaration must also override its parent."""
         return {
-            ("mode",): () if env.md.get("empty_child") else ("child",),
+            ("mode",): ()
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.empty_child").value
+            )
+            else ("child",),
             ("nested", "mode"): ("middle",),
         }
 
@@ -143,7 +156,12 @@ class EnclosingChoicesForm(FormModel):
     def choices(cls, env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
         """Use conflicting and nonoverlapping choices at separate occurrences."""
         return {
-            ("restricted", "mode"): () if env.md.get("empty_parent") else ("parent",),
+            ("restricted", "mode"): ()
+            if (
+                env.parameters is not None
+                and env.parameters.lookup("general.ext.empty_parent").value
+            )
+            else ("parent",),
             ("restricted", "level"): (2.0,),
             ("restricted", "nested", "mode"): ("ancestor",),
         }
@@ -173,7 +191,7 @@ class NestedChoicesForm(FormModel):
 def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated() -> (
     None
 ):
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     validator = Draft202012Validator(NestedChoicesForm.input_schema(env))
     for kind in ("alpha", "beta"):
         valid: dict[str, JsonValue] = {
@@ -220,7 +238,7 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
 
 @pytest.mark.parametrize("kind", ["alpha", "beta"])
 def test_nullable_union_projects_branch_choices_and_complex_input(kind: str) -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     validator = Draft202012Validator(NullableChoicesForm.input_schema(env))
     assert validator.is_valid({"branch": None})
     null_result = FormState(FormInput(NullableChoicesForm, {"branch": None})).result(
@@ -266,7 +284,7 @@ def test_nullable_union_rejects_invalid_branch_local_choice_path() -> None:
             InvalidAlphaBranch | NullableBetaBranch | None, Field(discriminator="kind")
         ] = None
 
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     with pytest.raises(ValueError, match="path|field|leaf"):
         InvalidNullableForm.input_schema(env)
     active = FormState(FormInput(InvalidNullableForm, {"branch": {"kind": "alpha"}}))
@@ -279,9 +297,7 @@ def test_nullable_union_rejects_invalid_branch_local_choice_path() -> None:
 def test_deepest_local_choices_override_only_overlapping_parent_paths(
     empty_parent: bool, empty_child: bool
 ) -> None:
-    md = MetaDict()
-    md.update({"empty_parent": empty_parent, "empty_child": empty_child})
-    env = FormEnv(md=md.snapshot())
+    env = captured_ext_env(empty_parent=empty_parent, empty_child=empty_child)
     validator = Draft202012Validator(EnclosingChoicesForm.input_schema(env))
     valid: dict[str, JsonValue] = {
         "restricted": {
@@ -340,7 +356,7 @@ def test_choices_reject_container_key_and_index_paths(path: FormPath) -> None:
             """Return the test's intentionally invalid declared choice path."""
             return {path: (1.0,)}
 
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     with pytest.raises(ValueError, match="path|field|leaf|index|mapping"):
         ContainerChoicesForm.input_schema(env)
     state = FormState(ContainerChoicesForm.default_input(env))
@@ -351,12 +367,15 @@ def test_choices_reject_container_key_and_index_paths(path: FormPath) -> None:
 def test_schema_without_state_describes_partial_expression_complex_and_choices() -> (
     None
 ):
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     schema = SchemaForm.input_schema(env)
     validator = Draft202012Validator(schema)
     assert validator.is_valid({})
     assert validator.is_valid(
-        {"amount": {"expr": "seed"}, "amplitude": {"__complex__": [1.0, 2.0]}}
+        {
+            "amount": {"expr": "general.ext.seed"},
+            "amplitude": {"__complex__": [1.0, 2.0]},
+        }
     )
     assert validator.is_valid({"amplitude": {"expr": "1 + 2j"}, "optional": None})
     assert validator.is_valid({"amount": 3.0, "mode": "alpha"})
@@ -369,10 +388,8 @@ def test_schema_without_state_describes_partial_expression_complex_and_choices()
 
 
 def test_schema_recomputes_dynamic_choices_for_each_request() -> None:
-    alpha_env = FormEnv(md=MetaDict())
-    beta_md = MetaDict()
-    beta_md.update({"beta_only": True})
-    beta_env = FormEnv(md=beta_md.snapshot())
+    alpha_env = FormEnv()
+    beta_env = captured_ext_env(beta_only=True)
     alpha = Draft202012Validator(SchemaForm.input_schema(alpha_env))
     beta = Draft202012Validator(SchemaForm.input_schema(beta_env))
     assert alpha.is_valid({"mode": "alpha"})
@@ -393,7 +410,7 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
             """Restrict n at one occurrence of the public alias."""
             return {("restricted", "n"): (2,)}
 
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     validator = Draft202012Validator(RangeAliasForm.input_schema(env))
     counts: tuple[JsonValue, ...] = (2, {"expr": "2"})
     for count in counts:
@@ -429,7 +446,7 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
             """Constrain only the active range branch's n leaf."""
             return {("fluxes", "n"): (2,)}
 
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     validator = Draft202012Validator(NullableAliasForm.input_schema(env))
     values: tuple[JsonValue, ...] = (
         None,
@@ -451,7 +468,7 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
 
 
 def test_whole_container_choices_share_json_value_membership() -> None:
-    env = FormEnv(md=MetaDict())
+    env = FormEnv()
     valid: dict[str, JsonValue] = {
         "samples": [1.0],
         "phasors": [{"__complex__": [1.0, 2.0]}],

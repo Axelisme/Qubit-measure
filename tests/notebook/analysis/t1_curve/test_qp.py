@@ -38,3 +38,34 @@ def test_qp_reverse_extraction_matches_scqubits_x_qp() -> None:
     )[0]
 
     assert extracted_q_qp == pytest.approx(1 / x_qp, rel=1e-9)
+
+
+def test_qp_error_arrays_preserve_values_and_inputs() -> None:
+    params = (3.469, 0.952, 0.582)
+    omegas = np.array([0.8, 2.4, 5.1], dtype=np.float64)
+    t1s = np.array([1200.0, 3500.0, 8100.0], dtype=np.float64)
+    t1errs = np.array([0.0, 140.0, 810.0], dtype=np.float64)
+    sin2_elements = np.zeros((3, 2, 2), dtype=np.complex128)
+    sin2_elements[:, 0, 1] = [0.2 + 0.1j, 0.3 - 0.2j, 0.5 + 0.4j]
+    inputs = (omegas, t1s, sin2_elements, t1errs)
+    originals = tuple(array.copy() for array in inputs)
+
+    no_error_values = calc_Qqp_vs_omega(
+        params, omegas, t1s, sin2_elements, T1errs=None, Temp=0.035, Delta_eV=4e-4
+    )
+    values, errors = calc_Qqp_vs_omega(
+        params, omegas, t1s, sin2_elements, T1errs=t1errs, Temp=0.035, Delta_eV=4e-4
+    )
+
+    np.testing.assert_allclose(values, no_error_values, rtol=1e-14, atol=0.0)
+    np.testing.assert_allclose(errors, values * t1errs / t1s, rtol=1e-14, atol=0.0)
+    assert errors[0] == 0.0
+    assert np.all(values > 0.0)
+    for output in (no_error_values, values, errors):
+        assert output.shape == (3,)
+        assert output.dtype == np.dtype(np.float64)
+        assert np.all(np.isfinite(output))
+        for array in inputs:
+            assert not np.shares_memory(output, array)
+    for array, original in zip(inputs, originals, strict=True):
+        np.testing.assert_array_equal(array, original)

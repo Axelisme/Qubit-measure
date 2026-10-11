@@ -128,3 +128,7 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 中文文件使用 UTF-8。Windows 或 PowerShell 顯示 mojibake 時，先將 terminal 切換為 UTF-8，例如 `chcp 65001` 或設定 `$OutputEncoding`，不改寫檔案編碼。
 
 Agent plans 與 worktree 工作檔放在 gitignored `.agent_state/`。若舊 `task_plans/` 仍存在，維持 gitignored，只作為遷移前殘留。
+
+#### 使用者決策的引用
+
+`.agent_state/` 的決策編號（`Dnn`、`decisions/NNNN`）只在該 task 內有效，各 task 各自編號。Tracked 檔案（程式碼、註解、測試、repo 文件）直接寫出理由；屬於架構規則的引用 `ADR-NNNN`。使用者對元件定位、職責或跨模組邊界的裁決寫進 ADR 的決策段，附裁決日期與「」原話。

@@ -753,7 +753,7 @@ def test_resolve_sweep_edge_non_numeric_resolved_raises():
         }
     )
     s = CfgSchema(spec=spec, value=val)
-    with pytest.raises(ValueError, match="not_a_number"):
+    with pytest.raises(RuntimeError, match="numeric"):
         schema_to_raw_dict(s, parameters)
 
 

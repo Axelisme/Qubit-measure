@@ -137,10 +137,9 @@ def test_named_override_keeps_dependent_links_without_global_side_effects(
     [
         ((AliasRow("other", "Q1"),), "driver"),
         ((AliasRow("driver", ""),), "driver"),
-        ((AliasRow("driver", "absent"),), "driver"),
         ((AliasRow("driver", "Q1"), AliasRow("sense", "$driver.ext.missing")), "sense"),
     ],
-    ids=["missing-row", "unbound", "missing-component", "missing-link-field"],
+    ids=["missing-row", "unbound", "missing-link-field"],
 )
 def test_alias_failures_name_requested_alias_without_concrete_fallback(
     session: CaptureSession, rows: tuple[AliasRow, ...], alias: str
@@ -152,6 +151,20 @@ def test_alias_failures_name_requested_alias_without_concrete_fallback(
     with pytest.raises(RoleResolutionError) as error:
         captured.value(f"${alias}.rate")
     assert error.value.role == alias
+
+
+def test_unknown_alias_name_is_readable_but_its_component_field_is_not(
+    session: CaptureSession,
+) -> None:
+    rows = (AliasRow("driver", "absent"),)
+    session.control.set_alias_rows(rows)
+    captured = session.control.read_context()
+    assert captured.aliases == rows
+    assert captured.value("driver.rate") == 123.0
+    assert captured.value("$driver") == "absent"
+    with pytest.raises(RoleResolutionError) as error:
+        captured.value("$driver.rate")
+    assert error.value.role == "absent"
 
 
 def test_read_target_preserves_historical_names_in_saved_and_draft_reads(

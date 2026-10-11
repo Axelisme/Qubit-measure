@@ -233,7 +233,7 @@ ignore_imports =
     # Debt: predict takes numeric parameters from its caller (backlog).
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
-# D213: stateless shared core does not depend on domain/runtime owners.
+# Stateless shared core does not depend on domain/runtime owners.
 [importlinter:contract:core-utils-only]
 name = C19: the shared core depends only on utils
 type = forbidden
@@ -285,6 +285,17 @@ source_modules =
     zcu_tools
 forbidden_modules =
     zcu_lab
+
+# ADR-0062: fluxdep science policy stays independent of frontend driving adapters.
+[importlinter:contract:workflow-export-science-no-frontends]
+name = Fluxdep payload policy does not import frontend owners
+type = forbidden
+source_modules =
+    zcu_lab.workflows.export
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
 
 # D75: experiment cores remain independent of all GUI attachments and helpers.
 [importlinter:contract:user-core-no-gui]

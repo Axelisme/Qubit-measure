@@ -33,7 +33,9 @@ def _smooth_sigma(n_freq: int, divisor: int) -> int:
     return max(1, n_freq // divisor)
 
 
-def _smooth_freq_axis(signals: NDArray, divisor: int) -> NDArray:
+def _smooth_freq_axis[T: (np.float64, np.complex128)](
+    signals: NDArray[T], divisor: int
+) -> NDArray[T]:
     return smooth_signal1d(
         signals,
         method=PREPROCESS_SMOOTH_METHOD,

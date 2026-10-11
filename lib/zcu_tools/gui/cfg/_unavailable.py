@@ -32,9 +32,7 @@ def unavailable_tree(tree: CfgNodeObservation) -> CfgNodeObservation:
 
 
 def _is_linked(value: ReferenceValue) -> bool:
-    return (
-        not value.is_overridden and parse_custom_reference_key(value.chosen_key) is None
-    )
+    return parse_custom_reference_key(value.chosen_key) is None
 
 
 def _scalar_input(value: float | ScalarValue) -> float | ScalarValue:

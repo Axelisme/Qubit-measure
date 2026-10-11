@@ -122,7 +122,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
                         trackers=[tracker],
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return PowerResult(powers=jpa_powers, signals=signals)
 

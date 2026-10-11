@@ -19,14 +19,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from qtpy.QtCore import (  # type: ignore[attr-defined]
+from qtpy.QtCore import (
     QEvent,
     QObject,
     QStringListModel,
     Qt,
     Signal,  # type: ignore[reportPrivateImportUsage]
 )
-from qtpy.QtWidgets import QCompleter, QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QCompleter, QLineEdit
 
 
 @dataclass(frozen=True)
@@ -92,16 +92,16 @@ class ValueSourceInputController(QObject):
         self._host = host
         self._model = QStringListModel(self)
         self._completer = QCompleter(self._model, self)
-        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
-        self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)  # type: ignore[attr-defined]
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         self._completer.setWidget(line_edit)
         self._updating = False
         self._popup_filter_targets: list[QObject] = []
 
-        line_edit.textEdited.connect(self._on_text_edited)  # type: ignore[attr-defined]
+        line_edit.textEdited.connect(self._on_text_edited)
         line_edit.installEventFilter(self)
         self._install_popup_event_filters()
-        self._completer.activated[str].connect(self._on_completion_activated)  # type: ignore[index]
+        self._completer.activated[str].connect(self._on_completion_activated)
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
         if a0 is None or a1 is None:
@@ -125,11 +125,11 @@ class ValueSourceInputController(QObject):
             target.removeEventFilter(self)
         self._popup_filter_targets.clear()
         try:
-            self._line_edit.textEdited.disconnect(self._on_text_edited)  # type: ignore[attr-defined]
+            self._line_edit.textEdited.disconnect(self._on_text_edited)
         except (RuntimeError, TypeError):
             pass
         try:
-            self._completer.activated[str].disconnect(self._on_completion_activated)  # type: ignore[index]
+            self._completer.activated[str].disconnect(self._on_completion_activated)
         except (RuntimeError, TypeError):
             pass
 
@@ -188,8 +188,8 @@ class ValueSourceInputController(QObject):
     def _is_completion_accept_key(self, event: QEvent) -> bool:
         key = getattr(event, "key", lambda: None)()
         return key in {
-            Qt.Key.Key_Tab,  # type: ignore[attr-defined]
-            Qt.Key.Key_Backtab,  # type: ignore[attr-defined]
+            Qt.Key.Key_Tab,
+            Qt.Key.Key_Backtab,
         }
 
     def _select_first_completion(self) -> None:
