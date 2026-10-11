@@ -1,11 +1,15 @@
+from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock, patch
 
-from qtpy.QtWidgets import QCheckBox, QDialog, QLineEdit, QPushButton
+import pytest
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QApplication, QCheckBox, QDialog, QLineEdit, QPushButton
 from zcu_tools.gui.app.measure.adapter import ModuleWriteback, ParameterWriteback
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.control_identity import ControlIdentity
 
 
 def _preview(item: ParameterWriteback | ModuleWriteback) -> dict[str, WritebackValues]:
@@ -21,15 +25,49 @@ def _preview(item: ParameterWriteback | ModuleWriteback) -> dict[str, WritebackV
     }
 
 
-def _widget(item: ParameterWriteback | ModuleWriteback, ctrl=None) -> WritebackWidget:
-    if ctrl is None:
-        ctrl = MagicMock()
-    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
-        lambda *args, **kwargs: _preview(item)
-    )
-    widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
-    widget.populate([item], _preview(item))
-    return widget
+@pytest.fixture
+def control_factory() -> Iterator[Callable[[], MagicMock]]:
+    """Own each fake application authority until dependent views are deleted."""
+    controllers: list[MagicMock] = []
+
+    def create() -> MagicMock:
+        ctrl = MagicMock(control_identity=ControlIdentity())
+        controllers.append(ctrl)
+        return ctrl
+
+    yield create
+    controllers.clear()
+
+
+@pytest.fixture
+def widget_factory(
+    control_factory: Callable[[], MagicMock], qapp: QApplication
+) -> Iterator[
+    Callable[[ParameterWriteback | ModuleWriteback, MagicMock | None], WritebackWidget]
+]:
+    widgets: list[WritebackWidget] = []
+
+    def create(
+        item: ParameterWriteback | ModuleWriteback, ctrl: MagicMock | None
+    ) -> WritebackWidget:
+        if ctrl is None:
+            ctrl = control_factory()
+        ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+            lambda *args, **kwargs: _preview(item)
+        )
+        widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
+        widget.populate([item], _preview(item))
+        widgets.append(widget)
+        return widget
+
+    yield create
+    for widget in widgets:
+        for dialog in widget.findChildren(QDialog):
+            if dialog.isVisible():
+                dialog.reject()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
 
 
 def _edit_button(widget: WritebackWidget) -> QPushButton:
@@ -56,14 +94,14 @@ def _find_open_dialog(title_prefix: str) -> QDialog:
     return dialogs[-1]
 
 
-def test_edit_md_item_can_change_target_name(qapp):
+def test_edit_md_item_can_change_target_name(qapp, widget_factory, control_factory):
     """The parameter Edit dialog exposes an editable apply-as (target_name)."""
     item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
     item.session_id = "param-1"
 
-    widget = _widget(item)
+    widget = widget_factory(item, None)
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
@@ -87,13 +125,13 @@ def test_edit_md_item_can_change_target_name(qapp):
         dialog.close()
 
 
-def test_edit_md_item_rejects_blank_target_name(qapp):
+def test_edit_md_item_rejects_blank_target_name(qapp, widget_factory, control_factory):
     item = ParameterWriteback(
         target_name="r_f", description="freq", proposed_value=6000.0
     )
     item.session_id = "param-1"
 
-    widget = _widget(item)
+    widget = widget_factory(item, None)
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
@@ -115,14 +153,14 @@ def test_edit_md_item_rejects_blank_target_name(qapp):
         dialog.close()
 
 
-def test_edit_md_item_parses_complex_value(qapp):
+def test_edit_md_item_parses_complex_value(qapp, widget_factory, control_factory):
     """A complex md value coerces the user's "re+imj" input to complex (not str)."""
     item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
     item.session_id = "param-1"
 
-    widget = _widget(item)
+    widget = widget_factory(item, None)
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
@@ -139,14 +177,14 @@ def test_edit_md_item_parses_complex_value(qapp):
         dialog.close()
 
 
-def test_edit_md_item_rejects_unparseable_complex(qapp):
+def test_edit_md_item_rejects_unparseable_complex(qapp, widget_factory, control_factory):
     """An unparseable complex input fast-fails and leaves the original value."""
     item = ParameterWriteback(
         target_name="g_center", description="|g> centre", proposed_value=complex(1, 2)
     )
     item.session_id = "param-1"
 
-    widget = _widget(item)
+    widget = widget_factory(item, None)
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Value:")
     try:
@@ -166,14 +204,14 @@ def test_edit_md_item_rejects_unparseable_complex(qapp):
         dialog.close()
 
 
-def test_edit_cfg_item_reports_draft_resolution_failure(qapp):
+def test_edit_cfg_item_reports_draft_resolution_failure(qapp, widget_factory, control_factory):
     item = ModuleWriteback(
         target_name="readout_rf", description="A module", edit_schema=MagicMock()
     )
     item.session_id = "ml-1"
-    ctrl = MagicMock()
+    ctrl = control_factory()
     ctrl.get_writeback_item_draft_for_pane.side_effect = RuntimeError("draft closed")
-    widget = _widget(item, ctrl)
+    widget = widget_factory(item, ctrl)
 
     with patch(
         "zcu_tools.gui.app.measure.ui.writeback_widget.QMessageBox.critical"
@@ -183,7 +221,7 @@ def test_edit_cfg_item_reports_draft_resolution_failure(qapp):
     critical.assert_called_once_with(widget, "Unable to edit writeback", "draft closed")
 
 
-def test_edit_cfg_item_can_change_target_name(qapp):
+def test_edit_cfg_item_can_change_target_name(qapp, widget_factory, control_factory):
     """The module/waveform Edit dialog exposes an editable apply-as that commits
     on editingFinished."""
     item = ModuleWriteback(
@@ -191,7 +229,7 @@ def test_edit_cfg_item_can_change_target_name(qapp):
     )
     item.session_id = "ml-1"
 
-    ctrl = MagicMock()
+    ctrl = control_factory()
     draft = MeasureCfgBindings(ctrl).new_draft(
         CfgSchema(
             spec=CfgSectionSpec(fields={}),
@@ -201,7 +239,7 @@ def test_edit_cfg_item_can_change_target_name(qapp):
     )
     ctrl.get_writeback_item_draft_for_pane.return_value = draft
     ctrl.get_writeback_applied_for_pane.return_value = {"ml-1": True}
-    widget = _widget(item, ctrl)
+    widget = widget_factory(item, ctrl)
     cb = widget.findChildren(QCheckBox)[0]
     _edit_button(widget).click()
     dialog = _find_open_dialog("Edit Config:")
