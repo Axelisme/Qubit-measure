@@ -1,9 +1,12 @@
 """Shared request/reply invocation for generated GUI tools."""
 
-from dataclasses import dataclass
-from typing import Any
+from __future__ import annotations
 
-from zcu_tools.mcp.core.bridge import McpBridge
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zcu_tools.mcp.core.bridge import McpBridge
 from zcu_tools.mcp.core.reply import ToolReply
 
 
@@ -36,15 +39,13 @@ class GuiInvocationError(RuntimeError):
         code: str | None = None,
         reason: str | None = None,
         data: dict[str, Any] | None = None,
+        wire_message: str | None = None,
     ) -> None:
         self.code = code
         self.reason = reason
         self.data = data
-        self.message = message
-        super().__init__(
-            f"GUI Error ({code}): {message}"
-            + (f" (reason: {reason})" if reason else "")
-        )
+        self.message = message if wire_message is None else wire_message
+        super().__init__(message)
 
 
 def call_gui(bridge: McpBridge, call: GuiRpcCall) -> ToolReply:
@@ -59,7 +60,9 @@ def call_gui(bridge: McpBridge, call: GuiRpcCall) -> ToolReply:
     if not response["ok"]:
         error = response["error"]
         raise GuiInvocationError(
-            error["message"],
+            f"GUI Error ({error['code']}): {error['message']}"
+            + (f" (reason: {error['reason']})" if error.get("reason") else ""),
+            wire_message=error["message"],
             code=error["code"],
             reason=error.get("reason"),
             data=error.get("data"),

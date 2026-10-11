@@ -26,6 +26,7 @@ from typing import Any, TextIO
 
 from zcu_tools.gui.remote.param_spec import JsonType, build_input_schema
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 
 _GENERATED_RPC_TRANSPORT_SLACK_SECONDS = 1.0
 
@@ -192,23 +193,29 @@ def run_stdio_loop(
 
     ``server_version`` is the ``serverInfo.version`` reported on ``initialize``.
     input_stream/output_stream optionally supply caller-owned text streams; the
-    loop does not close them. Defaults use process stdin/stdout.
+    loop does not close them. Defaults use process stdin/stdout; absent process
+    streams raise RuntimeError before dispatch.
 
     A ``RuntimeError`` carrying a ``reason`` attribute (set from the GUI wire error
     envelope) has its tag appended to the tool-error text, so an agent can branch
     on the machine-readable reason without parsing the prose.
     """
     hooks = hooks or StdioLoopHooks()
-    input_stream = sys.stdin if input_stream is None else input_stream
-    output_stream = sys.stdout if output_stream is None else output_stream
-    _use_utf8(output_stream)
-    _use_utf8(input_stream)
+    # Injected text streams are already decoded and remain caller-owned.
+    incoming = sys.stdin if input_stream is None else input_stream
+    outgoing = sys.stdout if output_stream is None else output_stream
+    if incoming is None or outgoing is None:
+        raise RuntimeError("MCP stdio requires input and output text streams")
+    if input_stream is None:
+        _use_utf8(incoming)
+    if output_stream is None:
+        _use_utf8(outgoing)
     if hooks.on_start is not None:
         hooks.on_start()
 
     while True:
         try:
-            line = input_stream.readline()
+            line = incoming.readline()
             if not line:
                 if hooks.on_cleanup is not None:
                     hooks.on_cleanup()
@@ -220,8 +227,8 @@ def run_stdio_loop(
                 json.loads(line), config, tools, hooks, server_version
             )
             if resp is not None:
-                output_stream.write(json.dumps(resp) + "\n")
-                output_stream.flush()
+                outgoing.write(json.dumps(resp) + "\n")
+                outgoing.flush()
         except Exception as e:  # noqa: BLE001 — loop isolation keeps the server alive
             if hooks.on_error is not None:
                 hooks.on_error("MCP loop exception")
@@ -328,6 +335,24 @@ def _call_tool(
 
 
 def _tool_error_text(name: str | None, exc: Exception) -> str:
+    # Control refusals are agent decisions, so preserve their native envelope.
+    if isinstance(exc, GuiInvocationError) and exc.reason in {
+        "not_holder",
+        "control_locked",
+        "control_held",
+        "readonly_connection",
+    }:
+        return json.dumps(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "reason": exc.reason,
+                    "data": exc.data,
+                }
+            },
+            separators=(",", ":"),
+        )
     # GUI-side business errors (RuntimeError with an already-clear message) carry
     # no useful Python stack for the agent: the traceback is always the same
     # forwarder frames. Keep the full traceback only for unexpected bridge-side

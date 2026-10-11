@@ -1,5 +1,7 @@
 """Identity handshake helpers for the two writable GUI MCP frontends."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -20,10 +22,25 @@ class ControlConnection:
     mode: Literal["owner", "readonly"] = "owner"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.label, str) or not self.label.strip():
+        if not self.label.strip():
             raise ValueError("label must be a non-empty string")
         if self.mode not in ("owner", "readonly"):
             raise ValueError("mode must be owner or readonly")
+
+    @classmethod
+    def parse(cls, label: object, mode: object) -> ControlConnection:
+        """Validate decoded tool values before opening a socket.
+
+        Raise ValueError for nonstring/empty label or a mode other than the two
+        supported names. Return typed preferences, not authority or a GUI state.
+        """
+        if not isinstance(label, str):
+            raise ValueError("label must be a non-empty string")
+        if mode == "owner":
+            return cls(label, "owner")
+        if mode == "readonly":
+            return cls(label, "readonly")
+        raise ValueError("mode must be owner or readonly")
 
     def initialize(self, bridge: McpBridge) -> dict[str, object]:
         """Initialize after auth/wire checks; return native holder projection.

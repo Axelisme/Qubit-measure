@@ -71,6 +71,7 @@ class RouteBridge(McpBridge):
         repo_root: Path,
         port: int,
         token: str | None = None,
+        *,
         auto_connect: bool = True,
         extra_args: list[str] | None = None,
     ) -> str:

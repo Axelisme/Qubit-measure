@@ -44,12 +44,14 @@ def build_control_lifecycle_tools(
             handler=native_handler,
             is_launch=suffix == "launch",
         ) -> str | dict[str, object]:
-            selected = ControlConnection(
+            nonlocal identity
+            selected = ControlConnection.parse(
                 arguments.get("label", identity.label),
                 arguments.get("mode", identity.mode),
             )
             note = handler(arguments)
             if is_launch and not arguments.get("auto_connect", True):
+                identity = selected
                 return note
             return initialize(note, selected)
 

@@ -24,7 +24,9 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
     if token is not None and (not isinstance(token, str) or not token):
         raise ValueError("token must be a non-empty string")
     # Validate supplied values before network work; omitted values retain identity.
-    ControlConnection(arguments.get("label", "agent"), arguments.get("mode", "owner"))
+    ControlConnection.parse(
+        arguments.get("label", "agent"), arguments.get("mode", "owner")
+    )
     connection = ctx.session.connect_to_gui(
         port=port,
         launch=launch,
@@ -38,7 +40,7 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 CONNECT_TOOL: dict[str, Any] = {
     "handler": tool_connect,
-    "description": "Attach to the live GUI or launch one when requested. Supply token if the GUI requires authentication; reconnect reuses it. Never connects hardware; authentication failures and incompatible wire contracts are distinct errors.",
+    "description": "Attach to the live GUI or launch one when requested. Initially label=agent and mode=owner; readonly never acquires. Reconnect retains omitted identity options; changing them reopens the socket. Return native control status even when the GUI is locked or another holder controls it. Supply token if required. Never connects hardware; authentication and incompatible wire contracts are distinct errors.",
     "inputSchema": {
         "type": "object",
         "properties": {

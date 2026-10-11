@@ -18,13 +18,14 @@ from zcu_tools.mcp.core.bridge import (
     MCPBridgeConfig,
 )
 from zcu_tools.mcp.core.control import ControlConnection
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.measure.session_policy import describe_stale_keys
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 
-class GuiRpcError(RuntimeError):
+class GuiRpcError(GuiInvocationError):
     """A GUI or MCP boundary error with a stable agent-facing reason."""
 
     def __init__(
@@ -37,11 +38,9 @@ class GuiRpcError(RuntimeError):
         data: dict[str, Any] | None = None,
         wire_message: str | None = None,
     ) -> None:
-        super().__init__(message)
-        self.data = data
-        self.message = wire_message if wire_message is not None else message
-        self.reason = reason
-        self.code = code
+        super().__init__(
+            message, reason=reason, code=code, data=data, wire_message=wire_message
+        )
         self.request_rejected = request_rejected
 
 
@@ -345,7 +344,18 @@ class MeasureMcpSession:
                 raise GuiRpcError(
                     "invalid GUI wire.version revision", reason="incompatible_wire"
                 )
-            control = self._control_connection.initialize(self.bridge)
+            try:
+                control = self._control_connection.initialize(self.bridge)
+            except GuiInvocationError as exc:
+                if exc.code != "unauthorized":
+                    raise
+                raise GuiRpcError(
+                    "GUI authentication is required; provide its control token",
+                    reason="unauthorized",
+                    code="unauthorized",
+                    data=exc.data,
+                    wire_message=exc.message,
+                ) from exc
             reply = self.bridge.send_rpc_raw("rpc.catalog", {}, 5.0)
             if not reply.get("ok"):
                 error = reply.get("error")
