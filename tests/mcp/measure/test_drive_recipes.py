@@ -871,6 +871,26 @@ def test_rabi_invalid_arguments_fail_before_gui_binding(
         assert client.transport.sent == before
 
 
+@pytest.mark.parametrize("parameter", ["center_mhz", "span_mhz", "points"])
+@pytest.mark.parametrize("null", [False, True], ids=["missing", "null"])
+def test_twotone_requires_explicit_range_and_count_before_gui_work(
+    tmp_path, parameter, null
+):
+    gui = DriveGui(
+        {"$qubit.freq": 6100.0, "$qubit.kappa": 4.0, "$resonator.freq": 7200.0}
+    )
+    arguments = {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
+    if null:
+        arguments[parameter] = None
+    else:
+        del arguments[parameter]
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("twotone_spectrum", arguments)
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["phase"] == "preparing"
+        assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
+
+
 @pytest.mark.parametrize("readout_ref", [None, "calibrated", "direct"])
 def test_twotone_runs_once_with_gui_sweep_and_preserved_readout(tmp_path, readout_ref):
     gui = DriveGui(

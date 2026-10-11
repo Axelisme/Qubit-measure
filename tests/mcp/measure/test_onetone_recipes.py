@@ -71,6 +71,86 @@ def test_spectrum_rejects_explicit_invalid_input_before_gui_work(tmp_path, argum
         assert not gui.ran
 
 
+@pytest.mark.parametrize("parameter", ["flux_range", "flux_points"])
+@pytest.mark.parametrize("null", [False, True], ids=["missing", "null"])
+def test_flux_requires_explicit_range_and_count_before_gui_work(
+    tmp_path, parameter, null
+):
+    gui = FluxGui()
+    arguments = {
+        "flux_device": "coil",
+        "flux_unit": "A",
+        "flux_range": [0.005, -0.001],
+        "flux_points": 19,
+    }
+    if null:
+        arguments[parameter] = None
+    else:
+        del arguments[parameter]
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum_over_flux", arguments)
+        assert reply.data["status"] == "failed", reply.data
+        assert reply.data["error"]["phase"] == "preparing"
+        assert not any(method.startswith("tab.") for method, _ in client.transport.sent)
+
+
+@pytest.mark.parametrize(
+    "recipe,arguments,expected",
+    [
+        ("onetone_spectrum", {}, (6094.0, 6106.0)),
+        ("onetone_spectrum_over_power", {}, (6094.0, 6106.0)),
+        (
+            "onetone_spectrum_over_flux",
+            {
+                "flux_device": "coil",
+                "flux_unit": "A",
+                "flux_range": [0.005, -0.001],
+                "flux_points": 19,
+            },
+            (6096.0, 6104.0),
+        ),
+    ],
+)
+def test_resonator_recipes_write_numeric_calibrated_endpoints(
+    tmp_path, recipe, arguments, expected
+):
+    if recipe == "onetone_spectrum_over_flux":
+        gui = FluxGui()
+    elif recipe == "onetone_spectrum_over_power":
+        gui = PowerGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
+    else:
+        gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": 4.0})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call(recipe, arguments)
+        assert reply.data["status"] in ("finished", "awaiting_answer"), reply.data
+        sweeps = [
+            edit["value"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+            if edit["path"] == ["sweep", "freq"]
+        ]
+        assert sweeps == [{"start": expected[0], "stop": expected[1]}]
+        assert (
+            sum(method == "tab.run_start" for method, _ in client.transport.sent) == 1
+        )
+
+
+@pytest.mark.parametrize("width", [0.0, -1.0, float("inf"), float("nan"), True])
+def test_resonator_invalid_linewidth_stops_before_sweep_edit_or_run(tmp_path, width):
+    gui = OnetoneGui({"$resonator.freq": 6100.0, "$resonator.kappa": width})
+    with recipe_client(tmp_path, gui) as client:
+        reply = client.call("onetone_spectrum", {})
+        assert reply.data["status"] in ("failed", "needs_parameters"), reply.data
+        assert not any(
+            edit["path"] == ["sweep", "freq"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_cfg"
+            for edit in params["edits"]
+        )
+        assert not gui.ran
+
+
 def test_flux_reports_all_missing_sources_in_one_handoff(tmp_path):
     gui = FluxGui()
     gui.md.clear()
