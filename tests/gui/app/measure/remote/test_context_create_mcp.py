@@ -11,8 +11,11 @@ from ._helpers import Fixture, call, mcp_client, open_client
 
 def selection(invoke):
     """Read selection metadata without claiming a full-context observation."""
+    target = invoke(
+        "rpc_call", {"method": "context.snapshot", "params": {"path": "target"}}
+    )["value"]
     return {
-        "active": invoke("rpc_call", {"method": "context.active"})["label"],
+        "active": target["point"] if target["kind"] == "saved_point" else None,
         "labels": invoke("rpc_call", {"method": "context.labels"})["labels"],
     }
 

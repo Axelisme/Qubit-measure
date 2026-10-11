@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, ModuleCfgFactory, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
@@ -14,12 +15,13 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
+from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.parameters import ParameterContext
-from zcu_tools.resources.entry import RoleSpec
+from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
@@ -44,6 +46,49 @@ def publish_value(fx, value):
         storage=captured.storage,
     )
     fx.state.set_context(replace(fx.state.session_env, parameters=parameters))
+
+
+def assert_rejected_write_preserves_context(fx, sock, tab, value):
+    """Check typed native admission and pane write rejection with no storage effects."""
+    context = fx.ctrl.context_control
+    control = fx.ctrl.writeback_control
+    control.set_writeback_item_for_pane(
+        tab, "analysis", "param-1", proposed_value=value
+    )
+    captured = context.read_context()
+    storage = context.capture_storage(captured)
+    before_context = call(sock, "context.snapshot", {})
+    assert before_context["ok"], before_context
+    before_point = captured.document()
+    before_events = storage.ledger.events()
+    before_version = control.get_context_version()
+    before_versions = fx.state.version.snapshot()
+    for operation in (
+        lambda: AcceptedWrite.model_validate(
+            {"path": "general.ext.value", "value": value}
+        ),
+        lambda: control.get_writeback_values_for_pane(tab, "analysis"),
+        lambda: control.apply_writeback_for_pane(
+            tab, "analysis", item_ids=("param-1",)
+        ),
+        lambda: control.write_writeback_for_pane(
+            tab, "analysis", (WritebackEdit(session_id="param-1"),)
+        ),
+    ):
+        with pytest.raises(ValidationError) as rejected:
+            operation()
+        assert [(error["loc"], error["type"]) for error in rejected.value.errors()] == [
+            (("value",), "value_error")
+        ]
+        assert call(sock, "context.snapshot", {}) == before_context
+        current = context.read_context()
+        assert current.document() == before_point
+        assert current.target == captured.target
+        assert current.roles == captured.roles
+        assert current.aliases == captured.aliases
+        assert context.capture_storage(current).ledger.events() == before_events
+        assert control.get_context_version() == before_version
+        assert fx.state.version.snapshot() == before_versions
 
 
 @pytest.mark.parametrize(
@@ -77,7 +122,16 @@ def test_complete_md_values_survive_preview_and_write_socket(
         ],
     )
     fx = Fixture(active_label="ctx001")
-    publish_value(fx, before)
+    context = fx.ctrl.context_control
+    target = context.read_context().target
+    if isinstance(before, complex):
+        admitted = AcceptedWrite.model_validate(
+            {"path": "general.ext.value", "value": before}
+        )
+        context.set_parameter(target, "general.ext.value", admitted.value)
+    else:
+        # These original non-native values are rejection inputs, not stored seeds.
+        context.set_parameter(target, "general.ext.value", 1.0)
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -100,29 +154,36 @@ def test_complete_md_values_survive_preview_and_write_socket(
                 == "finished"
             )
         params = {"tab_id": tab, "subtab_id": "analysis"}
-        preview = call(sock, "tab.writeback_preview", params)
-        assert preview["ok"], preview
-        item = preview["result"]["items"][0]
-        assert item["current"] == wire_before
-        assert item["proposed"] == wire_after
-        assert item["proposed_value"] == wire_after
-        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
-        assert call(sock, "context.snapshot", {})["ok"]
-        written = call(
-            sock, "tab.writeback_write", {**params, "write": [{"id": "param-1"}]}
-        )
-        assert written["ok"], written
-        assert written["result"] == {
-            "written": [
-                {
-                    "id": "param-1",
-                    "kind": "parameter",
-                    "target": "general.ext.value",
-                    "before": wire_before,
-                    "after": wire_after,
-                }
-            ]
-        }
+        if isinstance(before, complex):
+            preview = call(sock, "tab.writeback_preview", params)
+            assert preview["ok"], preview
+            item = preview["result"]["items"][0]
+            assert item["current"] == wire_before
+            assert item["proposed"] == wire_after
+            assert item["proposed_value"] == wire_after
+            assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+            assert call(sock, "context.snapshot", {})["ok"]
+            written = call(
+                sock, "tab.writeback_write", {**params, "write": [{"id": "param-1"}]}
+            )
+            assert written["ok"], written
+            assert written["result"] == {
+                "written": [
+                    {
+                        "id": "param-1",
+                        "kind": "parameter",
+                        "target": "general.ext.value",
+                        "before": wire_before,
+                        "after": wire_after,
+                    }
+                ]
+            }
+        else:
+            for invalid in (before, after):
+                assert_rejected_write_preserves_context(fx, sock, tab, invalid)
+            fx.ctrl.set_writeback_item_for_pane(
+                tab, "analysis", "param-1", proposed_value=1.0
+            )
         # Unsupported live context values must fail rather than claim a full preview.
         publish_value(fx, object())
         rejected = call(sock, "tab.writeback_preview", params)
@@ -135,37 +196,16 @@ def test_complete_md_values_survive_preview_and_write_socket(
             complex(float("inf"), 1),
             complex(1, float("nan")),
         ):
-            publish_value(fx, 1.0)
-            fx.ctrl.set_writeback_item_for_pane(
-                tab, "analysis", "param-1", proposed_value=invalid
-            )
-            rejected_preview = call(sock, "tab.writeback_preview", params)
-            assert not rejected_preview["ok"]
-            assert rejected_preview["error"]["code"] == "precondition_failed"
-            assert rejected_preview["error"]["reason"] == "unserializable_context"
-            assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
-            assert call(sock, "context.snapshot", {})["ok"]
-            rejected_write = call(
-                sock,
-                "tab.writeback_write",
-                {
-                    **params,
-                    "write": [{"id": "param-1"}],
-                },
-            )
-            assert not rejected_write["ok"]
-            assert rejected_write["error"]["code"] == "precondition_failed"
-            assert rejected_write["error"]["reason"] == "unserializable_context"
-            # Reply projection fails after apply; no rollback is promised.
-            rejected_current = call(sock, "tab.writeback_preview", params)
-            assert not rejected_current["ok"]
-            assert rejected_current["error"]["reason"] == "unserializable_context"
+            context.set_parameter(target, "general.ext.value", 1.0)
+            assert_rejected_write_preserves_context(fx, sock, tab, invalid)
     finally:
         sock.close()
         fx.stop()
 
 
-def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypatch):
+def test_batch_write_keeps_same_named_module_and_waveform_results(
+    qapp, monkeypatch, point_models, point_registry_guard
+):
     module = ModuleCfgFactory.from_raw(
         {
             "type": "pulse",
@@ -197,6 +237,7 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(qapp, monkeypa
     fx = Fixture(active_label="ctx001")
     context = fx.ctrl.context_control
     target = context.read_context().target
+    context.add_component("Q1", "fake/drive/a", {})
     context.set_module(target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict()))
     context.set_waveform(target, "Q1.waveforms.same", waveform)
     before_module, before_waveform = module.to_dict(), waveform.to_dict()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.session.context_types import LibraryChange
 
 from ._helpers import Fixture, call, open_client
@@ -10,6 +11,10 @@ from ._helpers import Fixture, call, open_client
 
 def test_native_missing_rename_preserves_the_published_library(qapp):
     fx = Fixture()
+    context = fx.ctrl.context_control
+    context.set_waveform(
+        context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)
+    )
     fx.start()
     sock = open_client(fx.service.port)
     try:
