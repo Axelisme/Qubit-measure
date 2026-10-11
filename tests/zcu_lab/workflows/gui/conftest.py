@@ -86,7 +86,9 @@ def native_app(
     """Keep real Qt workers alive through cancellation, delivery and drain."""
     del native_registry
     (tmp_path / "result").mkdir()
-    app = WorkflowsGuiBehavior(project_root=str(tmp_path))
+    app = WorkflowsGuiBehavior(
+        project_root=str(tmp_path), cache_dir=tmp_path / "cache", clean=True
+    )
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
     assert isinstance(adapter, T1RemoteControlAdapter)

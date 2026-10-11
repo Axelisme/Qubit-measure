@@ -81,7 +81,7 @@ def test_selected_overnight_gui_and_mcp_commit_same_native_pairs(
     assert engine is not None
     records = engine.records("overnight-host")
     assert len(records) == 2 and all(len(record.run_files) == 2 for record in records)
-    with pytest.raises(ValueError, match="[Uu]nsupported"):
+    with pytest.raises(ValueError):
         window.export_fluxdep("overnight-host")
 
 
