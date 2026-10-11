@@ -118,6 +118,14 @@ class ResultTree(Generic[T_Env]):
         else:
             self._result_cache.pop(measurement_name, None)
 
+    def _set_node_value(
+        self, path: tuple[Hashable, ...], value: Any, *, flush: bool
+    ) -> None:
+        """Preflight, write and notify a direct node update using the tree's env."""
+        self._ensure_direct_update_can_emit(path)
+        self.set_path(path, value)
+        self._emit_path_update(path, self._env, flush=flush)
+
     def _emit_path_update(
         self,
         path: tuple[Hashable, ...],
@@ -224,9 +232,7 @@ class ResultNode(Generic[T_Env]):
     def set(self, value: Any, *, flush: bool = False) -> None:
         if self.measurement_name is not None:
             raise ValueError("measurement subscription nodes are read-only")
-        self._tree._ensure_direct_update_can_emit(self.path)
-        self._tree.set_path(self.path, value)
-        self._tree._emit_path_update(self.path, self._tree._env, flush=flush)
+        self._tree._set_node_value(self.path, value, flush=flush)
 
     def buffer(
         self,
