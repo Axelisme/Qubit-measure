@@ -11,8 +11,8 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.figures import FigureCollection
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
@@ -43,7 +43,9 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_session_env.return_value = MagicMock(md=MetaDict(), ml=ModuleLibrary())
+    ctrl.get_session_env.return_value = SessionEnv(
+        parameters=None, soc=None, soccfg=None
+    )
 
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
     spec = CfgSectionSpec(

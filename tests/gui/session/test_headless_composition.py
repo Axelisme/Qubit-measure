@@ -196,7 +196,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
         terminal_threads.append(threading.get_ident())
         if not result.ok or result.result != "cancelled":
             raise AssertionError(f"unexpected cancel result: {result!r}")
-        state.set_preferences(SessionPreferences(chip_name="cancelled"))
+        state.set_preferences(SessionPreferences(entry_name="cancelled"))
         settle(OperationOutcome("cancelled"))
 
     with bus.origin(EventOrigin(kind="user")):
@@ -227,7 +227,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(
     assert cancel_outcome is not None and cancel_outcome.status == "cancelled"
     awaited = handles.await_outcome(cancel_token, timeout=0.0)
     assert awaited is not None and awaited.feedback == "headless stop"
-    assert state.preferences.chip_name == "cancelled"
+    assert state.preferences.entry_name == "cancelled"
     assert session.progress.bars_for_operation(cancel_token) == ()
     assert gate.snapshot() == ()
     assert handles.live_count() == 0
