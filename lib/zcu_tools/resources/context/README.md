@@ -1,8 +1,8 @@
-# `zcu_tools.resources.context` — named experiment work contexts
+# `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-11，刪除舊 context 實作
+**Last updated:** 2026-10-11，退休舊 context 與 metadata store
 
-本 package 管理 point-local `ModuleLibrary` 的 typed 文件。參數文件與工作點身分由 `resources.entry` 管理；session 的固定參數讀取由 `ContextService` 提供。
+本 package 擁有 point-local `ModuleLibrary`。條目、setup 與 point 參數由 [entry owner](../entry/README.md) 管理；GUI 的切換與命令由 ContextService 編排。Library 使用 typed 文件，不提供 flat modules／waveforms 或自動 mtime 同步。
 
 ## Module library
 
@@ -17,8 +17,10 @@
 - 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
 - `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。
 
-舊 flat 文件必須由顯式 migration 產生新文件。Runtime 不提供 alias bridge。Library 與參數文件各有自己的 snapshot／write owner，不提供雙 store memory 交換。
+舊 flat 文件必須由 root `migrations/` 的離線工具產生新文件。Runtime 不提供 alias bridge。Library 與參數文件各有自己的 snapshot 與 write owner，不提供雙 store memory 交換。
+
+Caller 透過 `ResultEntry.module_library(label)` 開啟既有 point 的 library；建立 point、seed 與 clone 由 ResultEntry 負責。
 
 ## Cfg materialization
 
-Experiment cfg materialization 屬於 `zcu_tools.experiment.cfg_assembler`，不是 ModuleLibrary 的責任。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定參數與 device manager，讀取失敗直接傳播。
+Experiment cfg materialization 屬於 `zcu_tools.experiment.cfg_assembler`，不是 ModuleLibrary 的責任。Caller 提供固定 library projection 與 device snapshot。GUI 的 schema／expression lowering 由 adapter owner 完成。Notebook 的顯式 `CfgEnv` 選定 library snapshot 與 device manager，讀取失敗直接傳播。更新 library 後，caller 重新捕捉 snapshot 並建立 CfgEnv。

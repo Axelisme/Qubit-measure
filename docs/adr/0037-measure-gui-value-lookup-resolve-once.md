@@ -8,9 +8,9 @@ cached device values, active project labels, loaded predictor metadata, or
 operator-selected flux device state. Stable needs still use explicit typed
 helpers and ports. A string-key lookup is only an escape hatch for rare,
 multi-source defaults and for writing the current value of a source into
-`MetaDict`.
+a point parameter field.
 
-**Related:** ContextService is the single md/ml write authority in [[0067]];
+**Related:** ContextService is the GUI parameter/library command owner in [[0067]];
 service role and port discipline follow [[0067]]; session-core sharing
 is defined in [[0067]]; cfg editor sessions and `EvalValue` wire handling are
 defined in [[0008]]; role defaults and context-free cfg definitions live under
@@ -41,21 +41,21 @@ measure-gui provides a read-only value lookup in the session layer.
 
 The lookup does not replace explicit typed dependencies. Existing stable helpers
 such as `proper_res_freq_range()`, `proper_qub_freq_range()`, `proper_relax()`,
-and direct `ctx.md`/`ctx.ml` reads remain the preferred path.
+and direct `ctx.parameters` reads remain the preferred path.
 
 ## Resolve-once input
 
 Source references use a sibling concept to `EvalValue`, not an extension of
 `EvalValue`.
 
-- `EvalValue` stores an md expression together with its last resolved result.
+- `EvalValue` stores a parameter expression together with its last resolved result.
   The field resolves it when set and on expression refresh. Cfg lowering
   outputs the stored result when one exists. With an expression resolver,
-  lowering first re-evaluates every expression against the current md,
+  lowering first re-evaluates every expression against the captured ParameterContext,
   coerces it to the field type, and aborts if any evaluation or coercion fails; a successful re-evaluation that differs from
   the stored result only logs drift. Without a stored result, lowering outputs
   the resolver's evaluation.
-  The earlier wording "a live md expression resolved by cfg lowering" no longer
+  The earlier wording "a live parameter expression resolved by cfg lowering" no longer
   describes the current semantics, which [[0065]] owns.
 - `ValueRef` means "read this registered value now and materialize the result".
   It is never persisted as a lazy reference.
@@ -76,21 +76,20 @@ Source references use a sibling concept to `EvalValue`, not an extension of
   `MeasureCfgDefinition.instantiate(ctx)` creates a fresh cfg, then store ordinary
   direct values in the value tree. Restore與使用者編輯不保留或重跑lazy source。
 
-`ContextService` remains the md/ml write authority. Any path that writes a
-`ValueRef`-style token to `MetaDict` resolves it in the UI/input layer before
-calling `coerce_md_value` and `set_md_attr`, so the service sees and stores an
-ordinary scalar.
+`ContextService` owns GUI parameter/library commands. An input layer resolves a
+`ValueRef` before calling `set_parameter` with the captured target and canonical
+path. The service validates and stores an ordinary scalar through the entry owner.
 
 ## Expression boundary
 
 The first implementation supports token replacement, not a general composite
 source-expression parser. After a GUI token is resolved, any surrounding text is
 handled by the existing target input: cfg scalar eval mode keeps the resulting
-expression text, while Inspect md coercion accepts only scalar literals.
+expression text, while parameter input coercion accepts only scalar literals.
 
 If composite resolve-once expressions become necessary, the existing
 `gui.session.expression` AST numeric evaluator is deepened into a restricted
-numeric resolver with md-name, source-token, and small function resolvers. The
+numeric resolver with parameter-path, source-token, and small function resolvers. The
 design does not use Python `eval` or SymPy as the default engine: GUI scalar
 inputs need deterministic numeric results, not symbolic algebra or a broad
 function surface.

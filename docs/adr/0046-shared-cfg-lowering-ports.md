@@ -11,7 +11,7 @@ status: accepted
 
 measure-gui 與 autofluxdep-gui 使用相同的 finished-cfg static validation、dynamic
 validation 與 lowering 語意，但 expression evaluation、ModuleLibrary shape policy 與
-`SweepCfg` construction 分別屬於 app/runtime。把整個 `MetaDict`、`ModuleLibrary` 或 broad
+`SweepCfg` construction 分別屬於 app/runtime。把整個 `參數容器`、`ModuleLibrary` 或 broad
 environment object 放進 shared cfg core，會讓純 Spec/Value package 反向依賴 app policy；
 讓 autofluxdep 呼叫 measure adapter則會形成 app-to-app coupling。
 
@@ -85,7 +85,7 @@ node builders不屬於本決策，維持 [[0062]] dataflow。
 
 ## 拒絕的替代方案
 
-- **把 `MetaDict` / `ModuleLibrary` 放進 shared core**：破壞 import purity與 app ownership。
+- **把 `參數容器` / `ModuleLibrary` 放進 shared core**：破壞 import purity與 app ownership。
 - **建立 broad `LoweringEnv`**：把三種獨立能力綁成難以驗證的 environment object。
 - **process-global resolver registry**：引入 import-order side effect與跨 session hidden state。
 - **對 live lowering 只信 embedded reference snapshot**：破壞 live missing/relink與unsupported-shape contract。Resolved-only 入口另要求明確的 cached shape 與有效狀態。

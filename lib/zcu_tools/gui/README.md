@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-11，現行參數容器名稱
+**Last updated:** 2026-10-11，現行參數容器與舊接線退休
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -104,7 +104,7 @@ Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值�
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、parameter context、
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、參數容器、
 ModuleLibrary、logical key或generation policy；measure保有domain builder，重用這層
 tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 

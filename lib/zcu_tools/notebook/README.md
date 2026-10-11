@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-10，Notebook accept 共用逐項寫回
+**Last updated:** 2026-10-11，Notebook 參數容器入口
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -49,7 +49,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 ## 共用責任與目前邊界
 
-Cfg 組裝使用 `experiment.cfg_assembler.CfgEnv(md, ml, device_manager)`。Notebook 顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時讀取當次裝置資訊，失敗直接報錯；底層 assembler 與 GUI 仍使用 caller 給定的 snapshot。CfgEnv 不執行 setup、不解析 md expression，也不關閉資源。切換 md／ml 後重新建立 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置。Driver mapping 只固定名稱到 instance，不是資源 lease，driver guards 與既有 owner 不變。
+Cfg 組裝使用 `experiment.cfg_assembler.CfgEnv(ml=library.snapshot(), device_manager=...)`。Notebook 從 PointView 或 RoleView 讀取具體值，再放進 raw cfg；CfgEnv 不接收參數容器或解析 expression。Notebook 顯式呼叫 `make_cfg(raw_cfg, CfgModel, env, overrides=...)` 時使用固定的 library validation context，不讀取或設定裝置，失敗直接報錯；底層 assembler 與 GUI 同樣使用 caller 給定的 snapshot。CfgEnv 不執行 setup，也不關閉資源。切換 point 或更新 library 後重新捕捉 snapshot 並建立 CfgEnv。Run 不重做 make_cfg、不刷新 cfg、不重連或自動補裝置。Driver mapping 只固定名稱到 instance，不是資源 lease，driver guards 與既有 owner 不變。
 
 `acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 StopSignal 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Schedule 會接住 scope 內的一次 KeyboardInterrupt，保留 buffer 與 interrupted signal。Notebook 將這種正常返回發布為 stopped record，已完成點與其餘 NaN 可沿 save_run 保存。Adapter 不另加 cancellation 入口。
 

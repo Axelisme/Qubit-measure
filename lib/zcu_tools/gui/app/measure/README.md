@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-11，現行參數容器名稱
+**Last updated:** 2026-10-11，現行參數容器與舊接線退休
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -137,7 +137,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
-  Scalar parameter context與editable module/waveform items使用Edit；non-scalar parameter context的
+  Scalar parameter 與 editable module/waveform items 使用 Edit；non-scalar parameter 的
   current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
   proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
   complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，
@@ -311,10 +311,9 @@ Key ownership rules:
   request coercion與structured/domain-special wire policy，不擁有分類registry。
   ordinary/provider/persistence/invariant failures保持unexpected並保留controller traceback
   （ADR-0068）。
-- `ContextService` is the only writer for live `parameter context` / `ModuleLibrary`
-  contents. Its ModuleLibrary schema-replacement interface validates names and
-  lowers before mutation, then emits one `ML_CHANGED` fact and bumps `context`
-  once; failures leave the live entry untouched.
+- `ContextService` owns GUI parameter and ModuleLibrary commands. It validates
+  candidates and commits through the resource owners before publishing changed
+  facts and bumping `context`; failures do not publish a candidate.
 - `State` owns tab/device/pane/path resource state and resource versions. Pane swaps
   happen on the owner thread and return retired resources for post-commit cleanup.
 - `GuardService` owns the implemented domain checks. Qt and remote controls
@@ -398,7 +397,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    cfg-editor machinery before commit. `WritebackService.create_draft` captures
    the destination ParameterContext and its fixed role names. Preview facts
    expose the actual destination, latest stored current value and complete proposal.
-   Scalar parameter context rows show values and stderr with static schema unit labels
+   Scalar parameter rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
    Module/waveform items show bounded change summaries without units and keep
