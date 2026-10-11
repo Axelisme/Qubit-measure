@@ -26,7 +26,6 @@ from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._reload_source import InjectedCatalog
-
 from ._window_scenarios import (
     assert_figure_render_failure,
     install_reader_plot_workflow,

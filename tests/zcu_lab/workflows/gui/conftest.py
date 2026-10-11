@@ -42,7 +42,6 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.gui.window import T1WorkflowWindow

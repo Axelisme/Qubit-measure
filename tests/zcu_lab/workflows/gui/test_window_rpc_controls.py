@@ -20,12 +20,10 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._reload_source import InjectedCatalog
-
 from ._window_scenarios import install_rpc_pause_workflow
 from ._window_support import RpcRequest
 
@@ -113,7 +111,9 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
-    attempts, receipts = install_rpc_pause_workflow(window, harness, rpc, catalog_source)
+    attempts, receipts = install_rpc_pause_workflow(
+        window, harness, rpc, catalog_source
+    )
     token = window.start("rpc-run")
     assert isinstance(token, int)
     harness.complete_segment()

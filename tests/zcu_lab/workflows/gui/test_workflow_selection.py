@@ -85,6 +85,19 @@ def test_selected_overnight_gui_and_mcp_commit_same_native_pairs(
         window.export_fluxdep("overnight-host")
 
 
+def test_explicit_unknown_mcp_start_keeps_selection_and_drafts(
+    sim_session: SimSession,
+) -> None:
+    window = sim_session.app.window
+    window.select_workflow("overnight")
+    before = window.capture_persisted_state()
+    with pytest.raises(RuntimeError, match="invalid_params.*unknown_workflow"):
+        sim_session.call("start", {"run_id": "unknown", "name": "missing-workflow"})
+    assert window.workflow_name == "overnight"
+    assert window.capture_persisted_state() == before
+    assert window.controller.run_id is None
+
+
 def test_switching_workflows_preserves_separate_parsed_drafts(
     sim_session: SimSession,
 ) -> None:
