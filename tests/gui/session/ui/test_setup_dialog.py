@@ -25,6 +25,7 @@ from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
+    PointUseRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.services.connection import (
@@ -192,9 +193,8 @@ def test_entry_new_arbitrary_name_displays_owner_paths_and_empty_draft(
     info = controller.setup_control.get_entry_info()
     assert info is not None and info.name == "cooldown-A"
     assert entry_selector(dialog).currentText() == info.name
-    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
-    assert str(info.result_path) in labels
-    assert str(info.database_path) in labels
+    assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
+    assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
     assert state.session_env.readiness == ContextReadiness.DRAFT
     assert controller.context_control.read_context().document().components == {}
     assert controller.setup_control.list_points() == ()
@@ -257,11 +257,17 @@ def test_entry_owner_switch_updates_visible_identity_and_paths(
     dialog, controller, state = entry_dialog
     info = controller.setup_control.new_entry(EntryRequest("external"))
     assert entry_selector(dialog).currentText() == info.name
-    labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
-    assert str(info.result_path) in labels
-    assert str(info.database_path) in labels
+    assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
+    assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
     assert state.session_env.readiness == ContextReadiness.DRAFT
     assert state.session_env.soc is None
+
+
+def entry_path_row(dialog: SetupDialog, name: str) -> QLabel:
+    """Find the Result or Database path label by its public object name."""
+    label = dialog.findChild(QLabel, name)
+    assert label is not None
+    return label
 
 
 def point_field(dialog: SetupDialog, name: str) -> QLineEdit:
@@ -306,10 +312,8 @@ def test_working_point_switch_uses_label_and_displays_description(
     assert listing.count() == 2
     first_item, second_item = listing.item(0), listing.item(1)
     assert first_item is not None and second_item is not None
-    assert "bias-a" in first_item.text() and "near sweet spot" in first_item.text()
-    assert (
-        "bias-b" in second_item.text() and "away from sweet spot" in second_item.text()
-    )
+    assert first_item.toolTip() == "near sweet spot"
+    assert second_item.toolTip() == "away from sweet spot"
     listing.setCurrentRow(0)
     entry_button(dialog, "Switch to selected").click()
     assert controller.context_control.read_context().target == first
@@ -438,7 +442,7 @@ def test_working_points_follow_entry_changes_and_reopen_without_selecting(
     qapp.processEvents()
     assert listing.count() == 1
     item = listing.item(0)
-    assert item is not None and "other entry" in item.text()
+    assert item is not None and item.toolTip() == "other entry"
     assert controller.context_control.read_context().target == draft
     assert draft != new_point
     assert state.session_env.readiness == ContextReadiness.DRAFT
@@ -533,3 +537,168 @@ def test_working_point_cached_none_keeps_previous_suggestion(
     state.set_device_info("flux", None)
     controller.get_bus().emit(DeviceChangedPayload(name="flux"))
     assert label.text() == "0.12V"
+
+
+def point_texts(dialog: SetupDialog) -> list[str]:
+    listing = point_list(dialog)
+    return [listing.item(row).text() for row in range(listing.count())]
+
+
+def current_point_text(dialog: SetupDialog) -> str | None:
+    item = point_list(dialog).currentItem()
+    return item.text() if item is not None else None
+
+
+def selected_description(dialog: SetupDialog) -> QLabel:
+    label = dialog.findChild(QLabel, "selected_point_description")
+    assert label is not None
+    return label
+
+
+def test_long_status_message_wraps_without_widening_dialog(
+    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    dialog.resize(900, 600)
+    qapp.processEvents()
+    ip = dialog.findChild(QLineEdit)
+    widths = (dialog.width(), dialog.minimumSizeHint().width())
+    combo = entry_selector(dialog)
+    combo.addItem("missing_" + "x" * 160)
+    combo.setCurrentIndex(combo.count() - 1)
+    entry_button(dialog, "Open").click()
+    qapp.processEvents()
+    status = dialog.findChild(QLabel, "setup_status")
+    assert status is not None and status.text()
+    assert status.wordWrap()
+    assert dialog.width() == widths[0]
+    assert dialog.minimumSizeHint().width() <= max(widths[1], 900)
+    assert ip is not None
+
+
+def test_entry_paths_elide_middle_keep_name_and_open_folder(
+    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, _state = entry_dialog
+    info = controller.setup_control.get_entry_info()
+    assert info is not None
+    dialog.resize(520, 600)
+    qapp.processEvents()
+    for name, path in (
+        ("result_path", info.result_path),
+        ("database_path", info.database_path),
+    ):
+        row = entry_path_row(dialog, name)
+        assert row.toolTip() == str(path)
+        assert row.text().endswith(info.name)
+        assert row.text() != str(path)
+    folders = [b for b in dialog.findChildren(QPushButton) if b.text() == "Open folder"]
+    assert len(folders) == 2 and all(button.isEnabled() for button in folders)
+
+
+def test_point_rows_show_labels_and_selected_description_below(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+) -> None:
+    from qtpy.QtCore import Qt
+
+    dialog, controller, _state = entry_dialog
+    long_text = "JPA on, readout -30 dBm " * 8
+    controller.setup_control.new_point(
+        PointCreateRequest("bias-a", long_text, CommandOrigin("gui"))
+    )
+    controller.setup_control.new_point(
+        PointCreateRequest("bias-b", "", CommandOrigin("gui"))
+    )
+    listing = point_list(dialog)
+    assert point_texts(dialog) == ["bias-a", "● bias-b"]
+    assert listing.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    listing.setCurrentRow(0)
+    view = selected_description(dialog)
+    assert long_text.strip() in view.text()
+    assert view.wordWrap()
+    listing.setCurrentRow(1)
+    assert long_text.strip() not in view.text()
+
+
+def test_selection_and_marker_follow_current_point(
+    entry_dialog: tuple[SetupDialog, Controller, State], qapp: QApplication
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("p1", "p2", "p3"):
+        point_field(dialog, "point_label").setText(label)
+        entry_button(dialog, "Create").click()
+    assert point_texts(dialog) == ["p1", "p2", "● p3"]
+    assert current_point_text(dialog) == "● p3"
+    listing = point_list(dialog)
+    listing.setCurrentRow(1)
+    entry_button(dialog, "Switch to selected").click()
+    assert point_texts(dialog) == ["p1", "● p2", "p3"]
+    assert current_point_text(dialog) == "● p2"
+    current = listing.currentItem()
+    assert current is not None and current.font().bold()
+    first = listing.item(0)
+    assert first is not None and not first.font().bold()
+    controller.setup_control.use_point(PointUseRequest("p1"))
+    assert current_point_text(dialog) == "● p1"
+    dialog.hide()
+    dialog.show()
+    qapp.processEvents()
+    assert current_point_text(dialog) == "● p1"
+
+
+def test_entry_without_selected_point_selects_no_row(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+) -> None:
+    dialog, controller, _state = entry_dialog
+    controller.setup_control.new_point(
+        PointCreateRequest("p1", "", CommandOrigin("gui"))
+    )
+    controller.setup_control.open_entry(EntryRequest("remembered"))
+    assert point_texts(dialog) == ["p1"]
+    assert current_point_text(dialog) is None
+
+
+def test_create_clears_form_on_success_and_keeps_it_on_failure(
+    entry_dialog: tuple[SetupDialog, Controller, State],
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    label = point_field(dialog, "point_label")
+    description = point_field(dialog, "point_description")
+    label.setText("p1")
+    description.setText("first")
+    entry_button(dialog, "Create").click()
+    assert (label.text(), description.text()) == ("", "")
+    label.setText("p1")
+    description.setText("duplicate")
+    entry_button(dialog, "Create").click()
+    assert (label.text(), description.text()) == ("p1", "duplicate")
+
+
+def test_missing_result_root_shows_hint_instead_of_error(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = SetupController(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    dialog = SetupDialog(controller.setup_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        status = dialog.findChild(QLabel, "setup_status")
+        assert status is not None
+        assert str(tmp_path / "result") in status.toolTip()
+        assert "red" not in status.styleSheet()
+        assert entry_selector(dialog).count() == 0
+        (tmp_path / "result").write_text("not a directory", encoding="utf-8")
+        next(
+            b
+            for b in dialog.findChildren(QPushButton)
+            if b.toolTip() == "Refresh result entries"
+        ).click()
+        assert "red" in status.styleSheet()
+    finally:
+        dialog.reject()
+        controller.quiesce()
+        dialog.deleteLater()
+        qapp.processEvents()
