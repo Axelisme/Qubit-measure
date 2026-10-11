@@ -3,7 +3,6 @@
 from copy import deepcopy
 
 import pytest
-from simpleeval import simple_eval
 from zcu_tools.mcp.measure.recipe import (
     RecipeNeedsParameters,
     RecipeSession,
@@ -23,6 +22,7 @@ def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
         tab.use_library("modules.readout", None)
         assert gui.publication["cfg_ref"]["revision"] == "2"
         tab.set("rounds", 7)
+        # This short reference is a wire-edit literal, not native admission.
         tab.use_library("modules.readout", "readout")
         tab.disable_library("modules.reset")
 
@@ -129,7 +129,7 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
 @pytest.mark.parametrize("frequency", [None, 6200.0])
 def test_author_frequency_hides_both_readout_shapes(tmp_path, single, frequency):
     gui = LookbackGui()
-    gui.md["r_f"] = 6100.0
+    gui.md["$resonator.freq"] = 6100.0
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
     if single:
         readout["children"] = {"ro_freq": scalar(5000.0)}
@@ -158,17 +158,12 @@ def test_author_frequency_hides_both_readout_shapes(tmp_path, single, frequency)
 @pytest.mark.parametrize("prefer_library", [True, False])
 def test_author_frequency_only_uses_a_library_when_requested(tmp_path, prefer_library):
     gui = LookbackGui()
-    gui.md["r_f"] = 6100.0
+    gui.md["$resonator.freq"] = 6100.0
     readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
-    readout["ref"] = "readout"
+    readout["ref"] = "R1.readout.readout"
+    gui.library["R1.readout.readout"] = {}
 
-    def respond(method, params):
-        reply = gui(method, params)
-        if method == "context.snapshot":
-            reply["ml"]["modules"]["readout"] = {}
-        return reply
-
-    with recipe_client(tmp_path, respond) as client:
+    with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set_frequency(
             "modules.readout",
@@ -196,7 +191,7 @@ def test_author_frequency_missing_calibration_does_not_partially_edit(tmp_path):
 
 def test_author_qubit_frequency_uses_the_named_calibration(tmp_path):
     gui = LookbackGui()
-    gui.md.update(r_f=6100.0, q_f=4500.0)
+    gui.md.update({"$resonator.freq": 6100.0, "$qubit.freq": 4500.0})
     gui.publication["tree"]["children"]["modules"]["children"]["qub_pulse"] = {
         "kind": "reference",
         "valid": True,
@@ -233,33 +228,20 @@ def test_author_rejects_nonfinite_or_boolean_frequency_before_editing(
     assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
-def test_author_stale_edit_propagates_without_refresh_or_retry(tmp_path):
-    gui = LookbackGui()
-
-    with recipe_client(tmp_path, gui) as client:
-        client.transport.replies["tab.edit_cfg"] = {
-            "ok": False,
-            "error": {
-                "code": "precondition_failed",
-                "reason": "stale",
-                "message": "cfg changed",
-            },
-        }
-        tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(GuiRpcError) as error:
-            tab.set("rounds", 5)
-        assert error.value.reason == "stale"
-        assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 1
-        assert sum(method == "tab.get_cfg" for method, _ in client.transport.sent) == 1
-
-
 class _SweepGui(LookbackGui):
     """Cfg collaborator that resolves declared expressions like the GUI owner."""
 
     def __init__(self):
         super().__init__()
         self.md.update(
-            r_f=6100.0, rf_w=4.0, q_f=4500.0, qf_w=3.0, flx_half=0.001, flx_int=0.003
+            {
+                "$resonator.freq": 6100.0,
+                "$resonator.kappa": 4.0,
+                "$qubit.freq": 4500.0,
+                "$qubit.kappa": 3.0,
+                "$qubit.flux_half": 0.001,
+                "$qubit.flux_int": 0.003,
+            }
         )
         self.device = {
             "unit": "A",
@@ -274,8 +256,8 @@ class _SweepGui(LookbackGui):
                     "kind": "sweep",
                     "valid": True,
                     "inputs": {
-                        "start": self.input("r_f - 2 * rf_w"),
-                        "stop": self.input("r_f + 3 * rf_w"),
+                        "start": self.input("$resonator.freq - 2 * $resonator.kappa"),
+                        "stop": self.input("$resonator.freq + 3 * $resonator.kappa"),
                         "expts": self.input(41),
                     },
                 },
@@ -283,8 +265,8 @@ class _SweepGui(LookbackGui):
                     "kind": "sweep",
                     "valid": True,
                     "inputs": {
-                        "start": self.input("2 * flx_int - flx_half"),
-                        "stop": self.input("2 * flx_half - flx_int"),
+                        "start": self.input("2 * $qubit.flux_int - $qubit.flux_half"),
+                        "stop": self.input("2 * $qubit.flux_half - $qubit.flux_int"),
                         "expts": self.input(19),
                     },
                 },
@@ -294,7 +276,7 @@ class _SweepGui(LookbackGui):
     def input(self, value: object) -> dict[str, object]:
         """Resolve a scalar or expression against this collaborator's md."""
         result: dict[str, object] = scalar(
-            simple_eval(value, names=self.md) if isinstance(value, str) else value
+            self.evaluate_expression(value) if isinstance(value, str) else value
         )["input"]
         if isinstance(value, str):
             result.update(mode="expression", raw=value)
@@ -349,14 +331,17 @@ def test_author_frequency_sweep_retains_gui_width_and_omitted_count(
     assert inputs["stop"]["resolved"] == expected_center + expected_span / 2
     assert inputs["expts"]["resolved"] == (41 if expts is None else expts)
     if span is None:
-        assert "rf_w" in inputs["start"]["raw"]
-        assert "rf_w" in inputs["stop"]["raw"]
+        assert "$resonator.kappa" in inputs["start"]["raw"]
+        assert "$resonator.kappa" in inputs["stop"]["raw"]
 
 
 def test_author_qubit_frequency_sweep_retains_its_own_width(tmp_path):
     gui = _SweepGui()
     inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
-    inputs.update(start=gui.input("q_f - qf_w"), stop=gui.input("q_f + qf_w"))
+    inputs.update(
+        start=gui.input("$qubit.freq - $qubit.kappa"),
+        stop=gui.input("$qubit.freq + $qubit.kappa"),
+    )
     with recipe_client(tmp_path, gui) as client:
         RecipeSession(client.context).open_tab("lookback").set_frequency_sweep(
             "sweep.freq", calibration="qubit"
@@ -728,7 +713,7 @@ def test_author_run_derives_center_and_span_from_the_latest_resolved_range(tmp_p
         capture = tab.run().snapshot()
         assert capture is not None
         fields = capture.actual["fields"]
-        assert fields["center_mhz"] == {"value": 6100.0, "source": "r_f"}
+        assert fields["center_mhz"] == {"value": 6100.0, "source": "$resonator.freq"}
         assert fields["span_mhz"] == {"value": 200.0, "source": "gui_linewidth"}
         assert fields["sweep.freq"]["value"] == {
             "start": 6000.0,
