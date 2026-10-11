@@ -856,11 +856,14 @@ def test_iteration_record_replace_failure_logs_and_keeps_commits_and_next_state(
     iteration_document(rig, 3)
     assert [record.commit_seq for record in rig.engine.records("run")] == [1, 2]
     assert "step_failed" not in rig.kinds()
-    errors = [record for record in caplog.records if record.exc_info is not None]
+    errors = [
+        (record.getMessage(), record.exc_info[1])
+        for record in caplog.records
+        if record.exc_info is not None
+    ]
     assert any(
-        "record" in record.getMessage().lower()
-        and isinstance(record.exc_info[1], OSError)
-        for record in errors
+        "record" in message.lower() and isinstance(error, OSError)
+        for message, error in errors
     )
     assert (rig.paths.data_root / "iter/000001/record.json").is_dir()
 
