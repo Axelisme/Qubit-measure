@@ -10,6 +10,7 @@ import pytest
 from qtpy.QtWidgets import QDialog, QWidget
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.widgets import DialogRefStore
 
 
@@ -182,7 +183,7 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
 
 def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> None:
     parent = QWidget()
-    ctrl = MagicMock()
+    ctrl = MagicMock(control_identity=ControlIdentity())
     registry = MainDialogRegistry(ctrl, parent=parent, dialog_refs=DialogRefStore())
     dialog = QDialog(parent)
 
@@ -201,6 +202,7 @@ def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> N
         device=ctrl.device_control,
         parameter_provider=ctrl.context_control.read_context,
         persistent_on_close=True,
+        control_identity=ctrl.control_identity,
     )
 
 

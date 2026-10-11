@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.types import SessionEnv
 
@@ -102,7 +103,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     tmp_path: Path,
     action: str,
 ) -> None:
-    ctrl = MagicMock()
+    ctrl = MagicMock(control_identity=ControlIdentity())
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_bus.return_value = BaseEventBus()

@@ -6,9 +6,15 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QCoreApplication, QEvent, Qt, QTimer
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
+    QApplication,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QTreeWidget,
+)
 from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import (
@@ -23,6 +29,8 @@ from zcu_tools.gui.app.measure.ui.inspect_dialog import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.parameters import ParameterContext
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -54,7 +62,7 @@ def _make_ml() -> ParameterContext:
 
 
 def _make_ctrl() -> MagicMock:
-    ctrl = MagicMock()
+    ctrl = MagicMock(control_identity=ControlIdentity())
     ctrl.context_control = ctrl
     ctrl.inspect_document.side_effect = lambda **_kwargs: ctrl.read_context().document()
     return ctrl
@@ -494,46 +502,60 @@ def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypa
     assert dialog._ml_editor_id is None
 
 
-def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(
-    qapp, monkeypatch
-):
-    from qtpy.QtWidgets import QMessageBox
-
-    ctrl = _make_ctrl_with_ml(_make_ml())
+def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(qapp):
+    parameters = _make_ml()
+    ctrl = _make_ctrl_with_ml(parameters)
     dialog = InspectDialog(ctrl, MagicMock())
-    _select_ml_child(dialog, 0)
+    tree = next(
+        widget
+        for widget in dialog.findChildren(QTreeWidget)
+        if widget.objectName() != "component_tree"
+    )
+    group = tree.topLevelItem(0)
+    assert group is not None
+    tree.setCurrentItem(group.child(0))
+    delete = next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Delete"
+    )
+    tabs = dialog.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
+    observed: list[str] = []
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.No,
-    )
-    dialog._del_ml_btn.click()
-    ctrl.del_ml_module.assert_not_called()
+    def decline() -> None:
+        prompt = qapp.activeModalWidget()
+        if isinstance(prompt, QMessageBox):
+            observed.append(prompt.windowTitle())
+            prompt.done(int(QMessageBox.StandardButton.No))
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: pytest.fail("tree Delete must not confirm"),
-    )
-    dialog.show()
-    dialog.activateWindow()
-    dialog.raise_()
-    dialog._ml_tree.setFocus()
-    qapp.processEvents()
-    monkeypatch.setattr(
-        inspect_dialog.QApplication,
-        "focusWidget",
-        staticmethod(lambda: dialog._ml_tree),
-    )
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        Qt.Key.Key_Delete,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(dialog._ml_tree, event)
-    qapp.processEvents()
-    ctrl.del_ml_module.assert_called_once_with("R1.readout.readout_rf")
+    try:
+        dialog.open()
+        QTimer.singleShot(0, decline)
+        delete.click()
+        qapp.processEvents()
+        assert observed == ["Confirm Deletion"]
+        ctrl.apply_library_change.assert_not_called()
+        dialog.activateWindow()
+        dialog.raise_()
+        qapp.processEvents()
+        tree.setFocus()
+        qapp.processEvents()
+        event = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_Delete,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(tree, event)
+        qapp.processEvents()
+        ctrl.apply_library_change.assert_called_once_with(
+            parameters, LibraryChange("module", "delete", "R1.readout.readout_rf")
+        )
+    finally:
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
 
 
 def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):

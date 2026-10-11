@@ -38,6 +38,7 @@ from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -777,7 +778,7 @@ def test_cfg_edit_and_retarget_refresh_live_facts_and_applied_state(
     control, service, draft = waveform_writeback
     item = draft.items[0]
     model = service.get_item_draft(draft, item.session_id)
-    ctrl = MagicMock()
+    ctrl = MagicMock(control_identity=ControlIdentity())
     ctrl.get_writeback_item_draft_for_pane.return_value = model
     ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
         service.get_all_applied(draft)
