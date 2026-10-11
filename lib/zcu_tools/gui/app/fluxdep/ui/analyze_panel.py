@@ -535,7 +535,7 @@ class AnalyzePanelWidget(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select database", start, filter="HDF5 (*.h5 *.hdf5);;All files (*)"
         )
-        if path:
+        if path and self._edit_gate.local_editing:
             self._db_edit.setText(path)
 
     def _on_search(self) -> None:

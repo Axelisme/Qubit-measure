@@ -165,7 +165,7 @@ def choose_during_takeover(ctrl, path, activate, *, takeover=True, cancel=False)
                 "reject" if cancel else "accept",
                 Qt.ConnectionType.DirectConnection,
             )
-        except Exception as exc:
+        except (AssertionError, RuntimeError, TypeError) as exc:
             errors.append(exc)
             if isinstance(chooser, QDialog):
                 chooser.reject()

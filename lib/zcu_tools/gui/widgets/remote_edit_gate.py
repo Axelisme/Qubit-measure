@@ -28,6 +28,15 @@ class RemoteEditGate(QObject):
         ] = []
         self.destroyed.connect(self.dispose)
 
+    @property
+    def local_editing(self) -> bool:
+        """Whether the current application holder permits Local writes.
+
+        Recheck this after a modal chooser returns, before changing its owner.
+        This reads ControlIdentity rather than caching presentation state.
+        """
+        return self._control.status().holder == "gui"
+
     def bind(self, widget: QWidget) -> None:
         """Guard a dedicated editable container until that container is destroyed."""
         self.watch(widget.setEnabled, lifetime=widget)

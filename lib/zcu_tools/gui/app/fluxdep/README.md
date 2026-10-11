@@ -230,8 +230,9 @@ Local、Local 鎖定及 Remote label／在線狀態。點燈呼叫 `toggle_local
 鎖定或切換 Local 鎖定；轉移本身不取消 search 或 interactive Session。
 
 `RemoteEditGate` 只投影 Local 編輯是否可用。MainWindow 停用 collection／project／IO
-命令、spectrum list 選取及 redo controls。開啟中的可寫 dialog 也停用，accepted
-callback 在執行寫入前重查 holder。Picker 停用 controls 與 domain pointer gestures，
+命令、spectrum list 選取及 redo controls。可寫 dialog 維持 modal，只停用內容與
+OK；Cancel／✕ 可關閉，關閉後可按主窗指示燈收回。Dialog owner 綁定共用 gate，
+chooser 返回後與 accepted callback 執行寫入前都重查當下 holder。Picker 停用 controls 與 domain pointer gestures，
 但 canvas 保持可用；接管時丟棄未提交的 Local pointer preview。
 
 Analyze 的 Search form（含 Cancel search）在 Remote 停用。Filter tab 的進出會開啟或

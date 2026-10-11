@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        self._edit_gate.bind(dialog)
+        dialog.bind_edit_gate(self._edit_gate)
 
         def _on_accepted() -> None:
             if self._ctrl.control_identity.status().holder != "gui":
@@ -539,7 +539,7 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        self._edit_gate.bind(dialog)
+        dialog.bind_edit_gate(self._edit_gate)
 
         def _on_accepted() -> None:
             if self._ctrl.control_identity.status().holder == "gui":
@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        self._edit_gate.bind(dialog)
+        dialog.bind_edit_gate(self._edit_gate)
 
         def _on_accepted() -> None:
             if self._ctrl.control_identity.status().holder != "gui":
