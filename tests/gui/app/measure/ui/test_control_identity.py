@@ -300,7 +300,10 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     assert button(inspect, "Refresh").isEnabled()
     assert all(tree.isEnabled() for tree in inspect.findChildren(QTreeWidget))
     assert not button(inspect, "New").isEnabled()
-    assert not button(inspect, "Add").isEnabled()
+    add_component = inspect.findChild(QPushButton, "component_add")
+    if add_component is None:
+        raise LookupError("Inspect lacks its component Add control")
+    assert not add_component.isEnabled()
     assert ui.window.take_window_screenshot().startswith(b"\x89PNG")
     assert ui.window.take_dialog_screenshot(DialogName.INSPECT).startswith(b"\x89PNG")
     indicator = ui.window.findChild(QPushButton, "control_indicator")
