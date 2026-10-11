@@ -930,7 +930,7 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
     assert module_meta is not None and module_meta.source == ledger.events()[-1].id
 
 
-def test_accept_rejects_empty_and_unsupported_samples_before_ledger(
+def test_accept_rejects_empty_writeback_before_ledger(
     point: PointView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
@@ -939,11 +939,6 @@ def test_accept_rejects_empty_and_unsupported_samples_before_ledger(
     with pytest.raises(ValueError, match="nonempty"):
         saved.accept()
     with pytest.raises(ValueError, match="nonempty"):
-        saved.accept(parameter={}, module={}, waveform={})
-    with pytest.raises(NotImplementedError, match="samples"):
-        saved.accept(
-            parameter={"general.description": "untouched"},
-            samples={"Q1": {"t1_us": 10.0}},
-        )
+        saved.accept(parameter={}, module={}, waveform={}, samples={})
     assert ledger.events() == before
     assert point.description == "save-time context"
