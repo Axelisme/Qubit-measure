@@ -22,9 +22,11 @@ Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的
 
 參數讀取使用 `ParameterContext` 的 point／library 固定投影。`$qubit.freq` 是 alias 路徑，`Q1.freq` 是具體元件路徑。`$qubit.module.x180.waveform.length` 先沿 point 的 module slot 找 library，再讀 module leaf。Alias 的 authored links 只沿這份 capture 求值，不讀目前 session。
 
+裸 `$alias` 回傳固定表解析後的名稱字串，例如 `$flux_dev` 得到 `yoko1`。元件與 device 共用這張表，不在 capture 或 preview 預查名稱可用性。缺列或未綁定時指名失敗，不代用同名元件、舊解析值或靜態名稱。名稱不接受數值算術或字串插值。
+
 `EvalValue` 保存 expression 與解析結果。Measure tab 的 cfg resource 在 publication 時計算結果，Run 接受指定 revision 的已解析 values。獨立 draft 的 legacy lowering 可重新求值並檢查型別，失敗就拒絕，不是 tab Run 的入口。
 
-Cfg expression 的 `$alias.path` 是動態 alias 引用。`@{key}` 才是寫入時捕捉一次固定 source view 的數值，轉成括號 literal。捕捉失敗拒絕整批，不保留待未來求值的 token。精確來源與解析邊界由 [[0065]] 和 cfg owner 定義。
+Cfg expression 的 `$alias` 與 `$alias.path` 是動態 alias 引用。`@{key}` 才是寫入時捕捉一次固定 source view 的數值，轉成括號 literal。捕捉失敗拒絕整批，不保留待未來求值的 token。精確來源與解析邊界由 [[0065]] 和 cfg owner 定義。
 
 ## Resolve-once 輸入
 

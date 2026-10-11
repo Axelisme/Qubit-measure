@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-10，Run 前 device snapshot 保存
+**Last updated:** 2026-10-11，固定 Run snapshot 與儲存 device 單位
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -18,7 +18,9 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
   不擷取 live context 或讀硬體。`RunMetadata.device_snapshot` 保存 Run 前固定的
   JSON settings，key 是 device 名稱，value 是 get_info 設定。Native 沿既有 `/device`
   寫入 shape `()` 的 UTF-8 JSON dataset。None 不建 dataset，空 mapping 寫 `{}`，
-  表示已捕捉但當次沒有裝置。單位沿各 DeviceInfo 既有欄位，不加 unit 欄位。
+  表示已捕捉但當次沒有裝置。單位沿 DeviceInfo 的儲存欄位，YOKO 的
+  value_unit 為 A／V，Fake 為 native；RF 保既有 Hz／dBm，不加 value_unit。
+  Snapshot 不另造單位欄位或換算值。
   Save 不重讀或改寫為 sweep 後的設定。Reader 不讀硬體，拒絕非法 JSON 或 external-linked 已知資料。
   Native saving 使用 caller 的 exact path，先寫同目錄 temp，
   關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。

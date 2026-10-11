@@ -268,8 +268,8 @@ Measure launcher 從使用者套件的 `ALIAS_PRESET` 取得唯一的有序初�
 `alias_preset` 經 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 session。
 框架不宣告領域初值。獨立 caller 可提供自己的 rows，省略或空 tuple 都建立空表。
 ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
-role registry 的唯一 focus 候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入；無檔才重設 preset，重新啟用
-primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確
+role registry 的唯一候選填 primary 空列。每次開 entry 有 `aliases.yaml` 就載入。
+無檔才重設 preset，重新啟用 primary 初始化。已保存的空表與空列不自填。切 point 不重讀檔或換表，明確
 提交表後不再初始化，直到下次開 entry。Preset 的 flux_dev 空列不猜裝置，也不從 cache 填值。
 參數捕捉經 `read_context(aliases=...)` 固定當次 point、library、storage 與有序表。
 GUI adapter 不宣告角色，捕捉不從 GUI focus 或 adapter 的 via 推論 alias。
@@ -585,6 +585,8 @@ fixed ParameterContext, not the currently selected point or global aliases. `Cfg
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
+五個有 flux device 的 Measure adapter 使用 `$flux_dev` 作為初始名稱 expression，
+包括 JPA 的 jpa_flux_dev 欄位。明確 caller 設定不被 preset 覆蓋。
 String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
 使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
 並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
@@ -778,8 +780,12 @@ short waits and live catalog. The GUI remote adapter owns per-connection seen
 and operation outcomes; MCP only maps opaque agent handles to GUI operation IDs.
 New GUI RPC methods that should be agent-accessible need a live catalog policy and tests.
 
-MCP `RecipeTab.use_flux_device` 在既有 name／unit 驗證成功後，把 resolved unit
-寫入實驗 cfg.flux_unit。Unit 判定、recipe policy 與 binding capture 保持不變。
+`set_frequency`、`set_frequency_sweep`、`set_flux_sweep` 與 `use_flux_device` 的
+領域政策由 `zcu_lab.recipes.helpers` 擁有。`RecipeTab` 只提供通用 parameter／library／
+cfg field／device 讀取與 set／set_fields／set_sweep，框架不推論 calibration 或 linewidth。
+`zcu_lab.recipes.helpers.use_flux_device` 使用通用 `RecipeTab.read_device` 讀 cached
+snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 dev.flux_dev
+與獨立 cfg.flux_unit，不換算、不連線或 setup，也不改 recipe policy 或 alias capture。
 
 ## Dialog Rules
 

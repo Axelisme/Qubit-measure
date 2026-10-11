@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-10，實驗 cfg 自有 dev 與 Run snapshot owner
+**Last updated:** 2026-10-11，實驗 cfg、Run snapshot 與共用 flux 單位檢查
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 先用 cfg_model materialize，再用 program factory 的 from_core 轉成 native cfg，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
@@ -34,12 +34,15 @@
 
 `utils/device.py` 的 helpers 取代 setup_devices 與 set_*_in_dev_cfg。DeviceInfo 是資訊，不再提供 set_flux／set_freq／set_power／set_output 控制命令。Device 層只提供儀器本身的操作，不知道 flux 或 RF 角色；實驗層選 driver、明示單位與操作用途。
 
-- `set_flux(device, value, *, unit, stop, progress=False)` 接受 A、V 或 native。YOKO 的 A 要求 current 模式並呼叫 set_current，V 要求 voltage 模式並呼叫 set_voltage。Fake 只接受 native，呼叫 set_value。單位或模式不符在寫入前拒絕。Helper 不換算、不切模式、不改 rampstep、不自動開 output，YOKO ramp 使用同一 stop 並沿既有安全限制。
+- `check_flux_unit(cfg: BaseDeviceInfo, unit: str) -> None` 是純檢查，只比 YOKO／Fake Info 儲存的 value_unit。YOKO Info 驗 current／A 與 voltage／V，Fake 為 native。Mismatch 或契約外 unit 報 ValueError，其他 Info 報 TypeError 並指名不支援 flux 設定的類別。不換算、不改 cfg，不讀寫硬體或 cache。
+- `set_flux(device, value, *, unit, stop, progress=False)` 委派同一 checker，保既有 mode 查詢、stop、progress 與 driver safety，不新增 get_info 或其他硬體查詢。接受 A、V 或 native。YOKO 的 A 要求 current 模式並呼叫 set_current，V 要求 voltage 模式並呼叫 set_voltage。Fake 只接受 native，呼叫 set_value。單位或模式不符在寫入前拒絕。Helper 不換算、不切模式、不改 rampstep、不自動開 output，YOKO ramp 使用同一 stop 並沿既有安全限制。
 - `set_rf_frequency(device, freq_hz)` 呼叫 SGS100A 的 set_frequency 或 Fake 的 set_value。單位為 Hz，MHz 等換算由 caller 在呼叫處完成。
 - `set_rf_power(device, power_dbm)` 呼叫 SGS100A 的 set_power 或 Fake 的 set_value，單位為 dBm。
 - `set_output(device, "on" | "off")` 呼叫支援 driver 的 set_output。
 
 Helpers 對其他 device 種類報 TypeError，driver 錯誤原樣傳播。FakeDevice 維持單一 value，不新增 RF 欄位、protocol 或 registry；模擬頻率與功率仍寫同一值。
+
+Workflow 的同步 `get_device_cfg(name)` 與完整 cfg `setup_device(name, cfg)` 由宿主提供。Zcu_lab 工具組合讀取、`check_flux_unit` 與欄位修改，framework 不合併部分 cfg，也不新增通用 value＋unit effect。Measure MCP 的 partial `device_setup` 是另一個有界工具，見 ADR-0068。
 
 ## 子模組入口
 

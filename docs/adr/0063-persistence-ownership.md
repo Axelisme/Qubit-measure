@@ -17,6 +17,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
 - 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。GUI ContextService 持有 entry／point／library，GUI 和 MCP 透過同一組 owner commands 讀寫。Acquired 由前端 acquisition owner 產生，saved 由共用 saver 產生，accepted 由 WritebackService 或 Notebook SavedRun 產生，entry 不推導這些事件。
+- Entry 的 authored alias 表由 `resources.entry` 保存為 `aliases.yaml`，不是 point、setup、memento 或 ledger。ContextService 擁有有序表的語法、初始化與 Apply 時機，resources 擁有檔案表示及單檔原子替換。Notebook 不讀這份 GUI 表，MCP 的單次 aliases／target 覆寫不保存它。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
@@ -34,7 +35,7 @@ RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenanc
 
 兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。
 
-Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 既有欄位。YOKO current 模式的 value／rampstep 為 A，RF 頻率為 Hz，功率為 dBm，不新增 unit 欄位。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
+Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
 
 Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
@@ -45,6 +46,14 @@ GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包�
 GUI Native Load 透過 experiment owner 一次還原 typed record 與完整 RunMetadata，保留原 run_id、時間、completion 和最近成功 Labber path，不產生 acquired。相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 
 Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run_id 合併 acquired／saved，只有成功 native 輸出能作為 data_path，取最近成功路徑。Recorded at 是首 acquired 或首 saved 的事件時間，不冒充量測開始時間。查詢不讀 data.h5、不 stat 或寫事件，損壞 ledger 明確失敗。
+
+### Entry alias 表
+
+`EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 是明確空表，只有缺檔才使用 caller preset；格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+
+Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。EMPTY 只改 memory；普通 `set_alias_rows` 也只改 memory。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+
+每次開 entry 載入自己的表。無檔則重設 caller preset，重新啟用該 entry 第一份非空 point 的 primary 唯一候選初始化。已保存的空表或空列不自填，切 point 不重讀檔或換表。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
 
 ### 資料表示與完整性
 

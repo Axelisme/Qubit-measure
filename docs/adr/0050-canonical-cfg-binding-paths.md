@@ -18,7 +18,7 @@ Qt sweep widgets 使用 leaf targets。Agent 可在 sweep parent 使用 nominal 
 
 `gui.cfg` 擁有 custom-reference-key make／parse／query helpers。Binding 正規化可接受的 bare labels，內部 tag 只用於 persistence，不依賴 session policy。`ValueRef` 在 app seam 解析且只用於 scalar target。
 
-Binding path 指向 cfg 欄位，不是參數容器路徑。欄位中的 `$alias.path` expression 或 module slot 由固定 ParameterContext 解析；library key 使用具體元件路徑。Alias table 與具體參數路徑的權責見 [[0037]]／[[0067]]，不在 binding grammar 推論。
+Binding path 指向 cfg 欄位，不是參數容器路徑。欄位中的 `$alias` 名稱、`$alias.path` expression 或 module slot 由固定 ParameterContext 解析；library key 使用具體元件路徑。Alias table 與具體參數路徑的權責見 [[0037]]／[[0067]]，不在 binding grammar 推論。
 
 ## 完整觀察與 batch
 

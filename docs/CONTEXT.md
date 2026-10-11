@@ -21,11 +21,11 @@ _Avoid_: global parameter dict
 _Avoid_: role, device
 
 **Role（角色）**:
-實驗 adapter 所需的位置，例如 qubit 或 resonator，並帶有要求的 kind。角色不是元件本身。
+實驗用途中的位置，例如 qubit 或 resonator。角色不是元件本身，明確的元件 consumer 可以另要求 kind。
 _Avoid_: component name, module name
 
 **Alias**:
-GUI session 中可編輯的名稱對應，值是元件名稱或引用前列的軟連結。它可供多個實驗角色使用。
+可編輯的有序名稱對應，值是元件或 device 名稱，也可以引用前列的軟連結。條目保留原始對應，一次 Run 記錄當時的解析名稱。
 _Avoid_: focus component, tab-local binding
 
 **Ledger**:

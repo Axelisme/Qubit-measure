@@ -90,9 +90,10 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 
 ## 角色與失敗
 
-以下是 notebook `PointView.resolve` 的角色契約。GUI 使用 session-memory alias 表，
-公開 `read_context` 不檢查 consumer kind。既有 adapter declaration caller 的遷移
-尚未完成。Tab 不固定角色或環境。
+以下是 Notebook `PointView.resolve` 的角色契約。GUI 使用 ContextService 的
+同一張元件／device alias 表，Dialog Apply 才保存 entry，普通 set 只改 memory。
+公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 不固定角色或環境，
+Run 記錄當次固定 names。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。
 
 `PointView.resolve` 只使用 bound point 的快照。Sequence 取 role registry 的 RoleSpec，Mapping 可覆寫 kind pattern 與 via。未傳角色表時使用 caller 設定的有序 shorthand，沒有設定就報錯。
 
