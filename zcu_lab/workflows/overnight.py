@@ -1,7 +1,7 @@
 """Fixed-flux T1 followed by zero-detune Hahn echo, committed as one pair."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from math import isfinite
 from typing import Literal
@@ -177,7 +177,10 @@ def overnight(
     is recorded per member; the other member is still attempted. Unexpected
     acquisition/analysis/plot/saver/device errors propagate and stop the run.
     Pause/Stop discard uncommitted pairs while retaining published native files.
-    Progress counts committed pairs only. Drive, readout and timing are fixed;
+    Wait until max(now, previous committed actual start + interval). Overruns
+    start immediately, without catching up to an original-start grid. Pause
+    does not freeze wall time; Resume repeats the discarded pair under the same
+    rule. Progress counts committed pairs only. Drive, readout and timing are fixed;
     fit acceptance only affects scalar summaries, never the next native cfg.
     """
     _ = env.soc
@@ -188,6 +191,12 @@ def overnight(
     if state.round_index == plan.outer_rounds:
         return Done()
     scheduled = datetime.now(UTC)
+    if state.last_actual_start is not None:
+        scheduled = max(
+            scheduled,
+            state.last_actual_start + timedelta(seconds=plan.start_interval_s),
+        )
+    yield from env.wait_until(scheduled)
     actual = datetime.now(UTC)
     yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
     t1_stop = tun.sweep_factor * tun.t1_guess_us
