@@ -778,29 +778,6 @@ def test_show_error_dialog_retains_until_close(qapp):
     assert len(window._dialog_refs) == 0
 
 
-def test_open_notify_prompt_retains_until_close(qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.app.measure.ui.notify_dialog import NotifyUserDialog
-
-    ctrl = _apply_window_defaults(MagicMock())
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
-
-    window.open_notify_prompt(17, "Need input", timeout=60.0)
-    qapp.processEvents()
-
-    dialogs = window.findChildren(NotifyUserDialog)
-    assert len(dialogs) == 1
-    assert dialogs[0]._token == 17
-    assert len(window._dialog_refs) == 1
-    assert window.list_open_dialogs() == []
-
-    dialogs[0].reject()
-    qapp.processEvents()
-
-    assert len(window._dialog_refs) == 0
-
-
 def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog

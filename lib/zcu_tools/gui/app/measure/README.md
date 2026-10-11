@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-10，named aliases、Run admission 與 native Load 來源
+**Last updated:** 2026-10-11，移除 agent prompt
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -102,7 +102,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
   repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
-  writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
+  writeback view、feedback widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
   Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
   the adapter declares the capability) and per-pane `FigureContainer` routing
@@ -228,7 +228,7 @@ Shared layers:
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
   instance-owned frozen exact renderer registry。
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
-  handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
+  handles、operation runner、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
 - `zcu_tools.gui.plotting`：explicit figure host、container、export
   substrate。
@@ -672,8 +672,6 @@ controlled fields.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state
   and Stop requests with optional cancellation reasons.
-- `NotifyChannel` mirrors the same pattern for the `notify.open` / `notify.await`
-  RPC prompt. `notify.await` bounds the consumer wait so MCP transport stays alive.
 - Run reserves the existing tab busy state before cleanup and registration.
   Active-operation reads project domain-admitted handles. A startup reservation
   has no domain handle until submission succeeds; failed submission releases busy
