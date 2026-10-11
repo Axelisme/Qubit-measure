@@ -2,26 +2,23 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtCore import QCoreApplication, QEvent, QObject, Signal
-from qtpy.QtWidgets import QApplication, QTabWidget, QWidget
-from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.services import create_persistence_caretaker
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.runtime import GuiAssembly
 from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneParams,
@@ -170,41 +167,17 @@ def test_retired_view_stops_authority_projection(
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-class _QuitSource(QObject):
-    """An owned Qt shutdown signal, independent of the shared QApplication."""
-
-    aboutToQuit = Signal()
-
-
-def test_application_quit_stops_authority_projection(
-    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _session, ctrl, window, _fixture_tab = live_ui
-    source = _QuitSource()
-    previous_hook = sys.excepthook
-    tab_id = None
-    try:
-        behavior = MeasureGuiBehavior(
-            lambda: (Registry(), TemplateCatalog(), Loader()), clean=True
-        )
-        with monkeypatch.context() as patch:
-            patch.setattr(QApplication, "instance", lambda: source)
-            behavior.before_show(GuiAssembly(ctrl, window))
-        tab_id = ctrl.new_tab("saving")
-        window.add_tab_widget(tab_id, "saving")
-        widget = _RecordingInteractive()
-        window.mount_interactive_analysis(tab_id, lambda _env: widget)
-        assert widget.read_only_changes == [False]
-
-        source.aboutToQuit.emit()
-        ctrl.control_identity.connect("agent", "retired-view-check", "owner")
-
-        assert widget.read_only_changes == [False]
-    finally:
-        sys.excepthook = previous_hook
-        if tab_id is not None and ctrl.has_tab(tab_id):
-            ctrl.tab_control.close_tab(tab_id)
+@pytest.mark.slow
+def test_application_quit_stops_authority_projection(tmp_path: Path) -> None:
+    """Exercise real Qt process exit without mutating the suite's QApplication."""
+    completed = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("_quit_authority.py")), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "application quit retired authority projection" in completed.stdout
 
 
 def test_interactive_widget_lifecycle_is_owned_by_tab(
