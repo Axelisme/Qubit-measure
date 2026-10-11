@@ -42,7 +42,12 @@ def _addr_inc(inst: Mapping[str, object]) -> int:
 def _expected_p_addr(prog: ModularProgramV2) -> int:
     if not prog.prog_list:
         return 0
-    return max(inst["P_ADDR"] + _addr_inc(inst) for inst in prog.prog_list)
+    end_addrs = []
+    for inst in prog.prog_list:
+        p_addr = inst["P_ADDR"]
+        assert isinstance(p_addr, int)
+        end_addrs.append(p_addr + _addr_inc(inst))
+    return max(end_addrs)
 
 
 def _expected_line(prog: ModularProgramV2) -> int:

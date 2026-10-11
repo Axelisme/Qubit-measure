@@ -1,11 +1,10 @@
-"""Private point identity lookup; no notebook-facing PointView method."""
+"""Immutable point identity and clone checks; no view methods or identity table."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from weakref import WeakKeyDictionary
 
 if TYPE_CHECKING:
     from .points import PointView
@@ -13,10 +12,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PointOrigin:
-    """Owning entry identity and caller roots for a ResultEntry-created view.
+    """Complete owning identity supplied once when constructing a PointView.
 
-    source is point.yaml, entry_id the immutable UUID, result_root and
-    database_root the resolved roots used to open the owning entry.
+    source is the bound point.yaml path and entry_id its owning entry's immutable
+    UUID. result_root and database_root are the resolved roots supplied by the
+    constructor. Identity does not depend on later ResultEntry registration.
     """
 
     source: Path
@@ -25,42 +25,19 @@ class PointOrigin:
     database_root: Path
 
 
-# Weak keys keep identity only for the lifetime of the corresponding view.
-_sources: WeakKeyDictionary[PointView, PointOrigin | Path] = WeakKeyDictionary()
-
-
-def register(view: PointView, origin: PointOrigin | Path) -> None:
-    """Associate view with its point.yaml Path or full ResultEntry PointOrigin.
-
-    Construction records only the path, permitting same-entry clone. ResultEntry
-    replaces that path with full identity to permit foreign clone. No I/O runs.
-    """
-    _sources[view] = origin
-
-
 def clone_source(
-    view: PointView,
-    *,
-    result_root: Path,
-    database_root: Path,
-    entry_path: Path,
-    entry_id: str,
+    view: PointView, *, result_root: Path, database_root: Path
 ) -> PointOrigin:
-    """Return a verified source identity for clone into entry_path/entry_id.
+    """Return this view's constructor identity if both destination roots match.
 
-    A constructor-only path can clone within that same resolved entry. Foreign
-    views require ResultEntry identity and both roots must match. The caller
-    reloads the published point instead of using the view snapshot.
+    Root mismatch raises ValueError without I/O. The caller reloads the published
+    point and checks the source entry's UUID before cloning; no cached view data
+    or destination identity is used to invent an origin.
     """
-    origin = _sources.get(view)
-    if isinstance(origin, Path):
-        if origin.resolve().parents[2] != entry_path.resolve():
-            raise ValueError("PointView has no ResultEntry source identity")
-        return PointOrigin(
-            origin, entry_id, result_root.resolve(), database_root.resolve()
-        )
-    if origin is None:
-        raise ValueError("PointView has no ResultEntry source identity")
+    # Import at use time: views owns bindings and imports the identity type.
+    from .views import point_origin
+
+    origin = point_origin(view)
     if (
         origin.result_root != result_root.resolve()
         or origin.database_root != database_root.resolve()

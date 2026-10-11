@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import MetaDictWriteback, SessionEnv
+from zcu_tools.gui.app.measure.adapter import ParameterWriteback, SessionEnv
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -17,8 +18,12 @@ from zcu_tools.gui.app.measure.services.writeback_control import WritebackContro
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.types import ContextReadiness
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._control_fakes import CallLog, call
 
@@ -48,9 +53,8 @@ class RecordingGuard:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def acquire_writeback_permit(self, tab_id: str) -> str:
-        self._log.add("guard", "acquire_writeback_permit", tab_id)
-        return f"permit:{tab_id}"
+    def check_writeback(self, tab_id: str) -> None:
+        self._log.add("guard", "check_writeback", tab_id)
 
 
 class RecordingWriteback:
@@ -133,18 +137,20 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     bus.subscribe(TabInteractionChangedPayload, events.append)
 
     assert facet.get_writeback_item_draft_for_pane(
-        "tab-1", cast(Any, pane), "md-1"
-    ) == {"draft": draft, "session_id": "md-1"}
+        "tab-1", cast(Any, pane), "param-1"
+    ) == {"draft": draft, "session_id": "param-1"}
     assert facet.set_writeback_item_for_pane(
-        "tab-1", cast(Any, pane), "md-1", selected=False
+        "tab-1", cast(Any, pane), "param-1", selected=False
     ) == {"valid": True}
     assert facet.apply_writeback_for_pane("tab-1", cast(Any, pane)) == {
         "applied_ids": ["pane-item"],
         "written": {},
     }
 
-    assert call("writeback", "get_item_draft", draft, "md-1") in log.calls
-    assert call("writeback", "edit_draft", draft, "md-1", selected=False) in log.calls
+    assert call("writeback", "get_item_draft", draft, "param-1") in log.calls
+    assert (
+        call("writeback", "edit_draft", draft, "param-1", selected=False) in log.calls
+    )
     assert call("writeback", "apply_draft", draft, item_ids=None) in log.calls
     assert [event.fact for event in events] == [
         TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
@@ -152,7 +158,7 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
     ]
 
 
-@pytest.mark.parametrize("item_ids", [("md-1",), ()])
+@pytest.mark.parametrize("item_ids", [("param-1",), ()])
 def test_explicit_item_ids_reach_the_pane_owned_service(item_ids) -> None:
     facet, log, _state, writeback, _versions, _bus = _facet()
 
@@ -200,20 +206,31 @@ def test_pane_writeback_rejects_edit_while_tab_is_busy() -> None:
     state.busy = True
 
     with pytest.raises(FailedPreconditionError, match="busy"):
-        facet.set_writeback_item_for_pane("tab-1", "analysis", "md-1", selected=False)
+        facet.set_writeback_item_for_pane(
+            "tab-1", "analysis", "param-1", selected=False
+        )
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
 @pytest.mark.parametrize("fails", [False, True])
-def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fails):
-    context = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
-        soc=None,
-        soccfg=None,
-        readiness=ContextReadiness.ACTIVE,
+def test_batch_write_publishes_shared_draft_even_after_partial_failure(
+    pane, fails, tmp_path: Path
+):
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
-    state = State(context)
+    entry.new_point("a")
+    bus = BaseEventBus()
+    context_service = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        bus,
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    context_service.install_entry(entry)
+    control = ContextControlFacet(context=context_service)
+    control.use_point(PointUseRequest("a"))
+    parameters = control.read_context()
+    state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     state.add_tab(
         "tab-1",
         Session(
@@ -222,16 +239,16 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
             cfg=MagicMock(),
         ),
     )
-    port = MagicMock()
-    service = WritebackService(MagicMock(), port)
+    service = WritebackService(
+        MagicMock(), control, entry_ledger=context_service.entry_ledger
+    )
     draft = service.create_draft(
-        [
-            MetaDictWriteback(target_name="a", description="d", proposed_value=1),
-        ]
+        [ParameterWriteback("general.ext.a", "d", proposed_value=1)],
+        parameters=parameters,
     )
     tab = state.get_tab("tab-1")
     getattr(tab, pane).writeback_draft = draft
-    bus = BaseEventBus()
+    accepted_before = len(entry.ledger.events())
     observed = []
     bus.subscribe(
         TabInteractionChangedPayload,
@@ -239,7 +256,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
             (
                 event.tab_id,
                 event.fact,
-                service.preview_values(draft, context)["md-1"].proposed,
+                service.preview_values(draft)["param-1"].proposed,
             )
         ),
     )
@@ -251,7 +268,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
         resource_versions=lambda: {},
         bus=bus,
     )
-    changes = (WritebackEdit("md-1", proposed_value=11),)
+    changes = (WritebackEdit("param-1", proposed_value=11),)
     if fails:
         with pytest.raises(InvalidInputError):
             facet.write_writeback_for_pane(
@@ -259,12 +276,14 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(pane, fai
                 pane,
                 (*changes, WritebackEdit("missing")),
             )
-        port.apply_writes.assert_not_called()
+        assert len(entry.ledger.events()) == accepted_before
+        assert not control.read_context().lookup("general.ext.a").present
     else:
         result = facet.write_writeback_for_pane("tab-1", pane, changes)
-        assert [item.id for item in result] == ["md-1"]
-        port.apply_writes.assert_called_once()
-    guard.acquire_writeback_permit.assert_called_once_with("tab-1")
+        assert [item.id for item in result] == ["param-1"]
+        assert len(entry.ledger.events()) == accepted_before + 1
+        assert control.read_context().value("general.ext.a") == 11
+    guard.check_writeback.assert_called_once_with("tab-1")
     assert observed == [
         ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),
     ]

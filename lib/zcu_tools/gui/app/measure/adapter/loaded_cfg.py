@@ -59,17 +59,6 @@ def _project_section(
             continue
         incoming = raw[name]
         child_path = (*path, name)
-        if child_path == ("dev",) and isinstance(incoming, Mapping):
-            # Runtime devices are keyed by physical name; GUI selectors by role.
-            roles: dict[str, list[str]] = {}
-            for physical_name, info in incoming.items():
-                if isinstance(physical_name, str) and isinstance(info, Mapping):
-                    label = info.get("label")
-                    if isinstance(label, str):
-                        roles.setdefault(label, []).append(physical_name)
-            incoming = {
-                role: names[0] for role, names in roles.items() if len(names) == 1
-            }
         if isinstance(child_spec, CfgSectionSpec):
             child_value = value.fields[name]
             if isinstance(incoming, Mapping) and isinstance(

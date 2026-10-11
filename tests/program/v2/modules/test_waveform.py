@@ -1,14 +1,16 @@
+from collections.abc import Iterator
+from copy import deepcopy
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
-from qick.asm_v2 import QickParam
-from zcu_tools.program.v2.modules import (
-    WaveformCfgFactory,  # ensures leaf subclass registration
-)
+from zcu_tools.cfg_model import ArbWaveformCfg as CoreArbWaveformCfg
+from zcu_tools.cfg_model import CfgValidationContext
+from zcu_tools.cfg_model import FlatTopWaveformCfg as CoreFlatTopWaveformCfg
+from zcu_tools.core.waveform_format import WaveformFormatError
 from zcu_tools.program.v2.modules.waveform import (
-    AbsWaveformCfg,
     ArbWaveform,
     ArbWaveformCfg,
     ConstWaveform,
@@ -21,120 +23,37 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveform,
     GaussWaveformCfg,
-    resolve_waveform_ref,
+    WaveformCfgFactory,
 )
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
 
 
-def test_const_waveform_length_set_param():
-    cfg = ConstWaveformCfg(length=1.0)
-    cfg.set_param("length", 2.5)
-    assert cfg.length == 2.5
+@pytest.fixture(scope="module", autouse=True)
+def repository_state_guard() -> Iterator[None]:
+    before = vars(ArbWaveformDatabase)["_database_path"]
+    yield
+    assert vars(ArbWaveformDatabase)["_database_path"] == before
 
 
-def test_cosine_waveform_rejects_qickparam_length():
-    cfg = CosineWaveformCfg(length=1.0)
-    with pytest.raises(
-        ValueError, match="Cosine waveform length must be a float value"
-    ):
-        cfg.set_param("length", QickParam(start=1.0, spans={"a": 0.1}))
-
-
-def test_abs_waveform_cfg_is_abstract():
-    with pytest.raises(TypeError, match="abstract"):
-        AbsWaveformCfg(style="const")  # pyright: ignore[reportAbstractUsage]
-
-
-def test_const_waveform_rejects_unknown_param():
-    cfg = ConstWaveformCfg(length=1.0)
-    with pytest.raises(ValueError, match="Unknown parameter"):
-        cfg.set_param("gain", 1.0)
-
-
-def test_cosine_waveform_rejects_unknown_param():
-    cfg = CosineWaveformCfg(length=1.0)
-    with pytest.raises(ValueError, match="Unknown parameter"):
-        cfg.set_param("sigma", 0.1)
-
-
-def test_gauss_waveform_length_rescales_sigma():
-    cfg = GaussWaveformCfg(length=1.0, sigma=0.2)
-    cfg.set_param("length", 2.0)
-    assert cfg.length == 2.0
-    assert cfg.sigma == pytest.approx(0.4)
-
-
-def test_gauss_waveform_only_length_preserves_sigma():
-    cfg = GaussWaveformCfg(length=1.0, sigma=0.2)
-    cfg.set_param("only_length", 3.0)
-    assert cfg.length == 3.0
-    assert cfg.sigma == 0.2
-
-
-def test_drag_waveform_rejects_qickparam():
-    cfg = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0)
-    with pytest.raises(
-        ValueError, match="Drag waveform length must not be a QickParam"
-    ):
-        cfg.set_param("length", QickParam(start=1.0, spans={"a": 0.1}))
-
-
-def test_gauss_waveform_rejects_qickparam_and_unknown_param():
-    cfg = GaussWaveformCfg(length=1.0, sigma=0.2)
-
-    with pytest.raises(ValueError, match="must not be a QickParam"):
-        cfg.set_param("sigma", QickParam(start=1.0, spans={"a": 0.1}))
-
-    with pytest.raises(ValueError, match="Unknown parameter"):
-        cfg.set_param("delta", 0.1)
-
-
-def test_drag_waveform_length_rescales_sigma_and_updates_fields():
-    cfg = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0)
-
-    cfg.set_param("length", 2.0)
-    assert cfg.length == 2.0
-    assert cfg.sigma == pytest.approx(0.4)
-
-    cfg.set_param("sigma", 0.6)
-    cfg.set_param("delta", 0.3)
-    cfg.set_param("alpha", 0.5)
-    cfg.set_param("only_length", 1.5)
-
-    assert cfg.length == 1.5
-    assert cfg.sigma == 0.6
-    assert cfg.delta == 0.3
-    assert cfg.alpha == 0.5
-
-
-def test_drag_waveform_rejects_unknown_param():
-    cfg = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0)
-    with pytest.raises(ValueError, match="Unknown parameter"):
-        cfg.set_param("phase", 90.0)
-
-
-def test_arb_waveform_set_param_rejected():
-    cfg = ArbWaveformCfg(data="dummy")
-    with pytest.raises(ValueError, match="Arb waveform length is asset-derived"):
-        cfg.set_param("length", 2.0)
-
-
-def test_arb_waveform_cfg_rejects_legacy_length_field():
-    with pytest.raises(ValidationError, match="length"):
-        ArbWaveformCfg.model_validate({"style": "arb", "length": 1.0, "data": "dummy"})
-
-
-def test_arb_waveform_cfg_length_comes_from_data_duration(monkeypatch):
-    class Info:
-        duration = 2.5
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.inspect",
-        lambda key: Info(),
-    )
-
-    cfg = ArbWaveformCfg(data="dummy")
-
-    assert cfg.length == 2.5
+def _asset(
+    tmp_path: Path,
+    *,
+    idata: object = (0.0, 1.0, 0.0),
+    qdata: object = (0.0, 0.0, 0.0),
+    recipe_json: str | None = None,
+) -> str:
+    path = tmp_path / "demo.npz"
+    if recipe_json is None:
+        np.savez(path, idata=np.asarray(idata), qdata=np.asarray(qdata), time=[0, 1, 2])
+    else:
+        np.savez(
+            path,
+            idata=np.asarray(idata),
+            qdata=np.asarray(qdata),
+            time=[0, 1, 2],
+            recipe_json=np.array(recipe_json),
+        )
+    return path.resolve().as_posix()
 
 
 def test_waveform_build_dispatch_const():
@@ -154,9 +73,9 @@ def test_waveform_build_dispatch_cosine():
     assert isinstance(wf, CosineWaveform)
 
 
-def test_waveform_build_dispatch_drag_arb_and_flat_top():
+def test_waveform_build_dispatch_drag_arb_and_flat_top(tmp_path: Path):
     drag = DragWaveformCfg(length=1.0, sigma=0.2, delta=0.1, alpha=0.0).build("d")
-    arb = ArbWaveformCfg(data="demo").build("a")
+    arb = ArbWaveformCfg(data="demo", path=_asset(tmp_path)).build("a")
     flat_top = FlatTopWaveformCfg(
         length=1.0,
         raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
@@ -166,53 +85,6 @@ def test_waveform_build_dispatch_drag_arb_and_flat_top():
     assert isinstance(arb, ArbWaveform)
     assert isinstance(flat_top, FlatTopWaveform)
     assert isinstance(flat_top.raise_waveform, GaussWaveform)
-
-
-def test_waveform_adapter_dispatches_by_style():
-    cfg = WaveformCfgFactory.from_raw({"style": "gauss", "length": 1.0, "sigma": 0.2})
-    assert isinstance(cfg, GaussWaveformCfg)
-
-
-def test_waveform_adapter_rejects_unknown_style():
-    with pytest.raises(ValidationError, match="union_tag_invalid"):
-        WaveformCfgFactory.from_raw({"style": "no_such_style", "length": 1.0})
-
-
-def test_waveform_factory_string_ref_requires_module_library():
-    with pytest.raises(ValueError, match="ModuleLibrary is not provided"):
-        WaveformCfgFactory.from_raw("stored_waveform")
-
-
-def test_waveform_factory_string_ref_uses_module_library():
-    ml = MagicMock()
-    ml.get_waveform.return_value = ConstWaveformCfg(length=0.5)
-
-    cfg = WaveformCfgFactory.from_raw("stored_waveform", ml=ml)
-
-    assert isinstance(cfg, ConstWaveformCfg)
-    ml.get_waveform.assert_called_once_with("stored_waveform")
-
-
-def test_waveform_type_adapter_rejects_string_ref_without_context():
-    info = MagicMock()
-    info.context = None
-
-    with pytest.raises(ValueError, match="ModuleLibrary context not found"):
-        resolve_waveform_ref("named_waveform", info)
-
-
-def test_waveform_type_adapter_resolves_nested_raise_waveform_ref():
-    ml = MagicMock()
-    ml.get_waveform.return_value = GaussWaveformCfg(length=0.2, sigma=0.05)
-
-    cfg = WaveformCfgFactory.from_raw(
-        {"style": "flat_top", "length": 1.0, "raise_waveform": "gauss_rise"},
-        ml=ml,
-    )
-
-    assert isinstance(cfg, FlatTopWaveformCfg)
-    assert isinstance(cfg.raise_waveform, GaussWaveformCfg)
-    ml.get_waveform.assert_called_once_with("gauss_rise")
 
 
 def test_waveform_to_wav_kwargs_and_create_methods():
@@ -246,8 +118,8 @@ def test_waveform_to_wav_kwargs_and_create_methods():
     )
 
 
-def test_arb_waveform_make_iqdata_and_create(monkeypatch):
-    class FakeSoccfg(dict):
+def test_arb_waveform_make_iqdata_and_create(tmp_path: Path):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             assert ch == 0
             return 8.0
@@ -256,24 +128,18 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 2}]})
     prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 3
 
-    cfg = ArbWaveformCfg(data="demo")
-    waveform = cfg.build("arb")
-
-    idata_raw = np.array([0.0, 1.0, 0.5])
-    qdata_raw = np.array([0.0, -1.0, -0.5])
-    time_raw = np.array([0.0, 1.0, 2.0])
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (idata_raw, qdata_raw, time_raw),
+    cfg = ArbWaveformCfg(
+        data="demo",
+        path=_asset(tmp_path, idata=[0.0, 0.6, 0.3], qdata=[0.0, -0.8, -0.4]),
     )
+    waveform = cfg.build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
     assert len(idata) == 4
     assert qdata is not None
     assert len(qdata) == 4
-    assert np.allclose(idata, np.array([0.0, 4.0, 8.0, 6.0]))
-    assert np.allclose(qdata, np.array([0.0, -4.0, -8.0, -6.0]))
+    assert np.allclose(idata, np.array([0.0, 2.4, 4.8, 3.6]))
+    assert np.allclose(qdata, np.array([0.0, -3.2, -6.4, -4.8]))
 
     even_idata, even_qdata = waveform.make_iqdata(0, prog, even_length=True)
     assert len(even_idata) == 12
@@ -288,8 +154,8 @@ def test_arb_waveform_make_iqdata_and_create(monkeypatch):
     assert waveform.to_wav_kwargs() == {"style": "arb", "envelope": "arb"}
 
 
-def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
-    class FakeSoccfg(dict):
+def test_arb_waveform_make_iqdata_handles_missing_q_channel(tmp_path: Path):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 4.0
 
@@ -297,16 +163,7 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
     prog.us2cycles.return_value = 3
 
-    waveform = ArbWaveformCfg(data="demo").build("arb")
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (
-            np.array([0.0, 1.0, 0.0]),
-            None,
-            np.array([0.0, 1.0, 2.0]),
-        ),
-    )
+    waveform = ArbWaveformCfg(data="demo", path=_asset(tmp_path)).build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
 
@@ -314,8 +171,8 @@ def test_arb_waveform_make_iqdata_handles_missing_q_channel(monkeypatch):
     assert qdata is None
 
 
-def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
-    class FakeSoccfg(dict):
+def test_arb_waveform_make_iqdata_uses_full_data_duration(tmp_path: Path):
+    class FakeSoccfg(dict[str, object]):
         def get_maxv(self, ch):
             return 1.0
 
@@ -323,22 +180,180 @@ def test_arb_waveform_make_iqdata_uses_full_data_duration(monkeypatch):
     prog.soccfg = FakeSoccfg({"gens": [{"samps_per_clk": 1}]})
     prog.us2cycles.side_effect = lambda *, gen_ch, us: 2 if us == 2.0 else 99
 
-    waveform = ArbWaveformCfg(data="long_data").build("arb")
-
-    monkeypatch.setattr(
-        "zcu_tools.resources.waveform_assets.ArbWaveformDatabase.get",
-        lambda key: (
-            np.array([0.0, 1.0, 0.0]),
-            None,
-            np.array([0.0, 1.0, 2.0]),
-        ),
-    )
+    waveform = ArbWaveformCfg(data="long_data", path=_asset(tmp_path)).build("arb")
 
     idata, qdata = waveform.make_iqdata(0, prog)
 
     assert qdata is None
     assert np.allclose(idata, np.array([0.0, 1.0]))
     prog.us2cycles.assert_called_once_with(gen_ch=0, us=2.0)
+
+
+def test_arb_path_controls_length_samples_and_flat_top_after_global_db_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    path = _asset(tmp_path, idata=[0.0, 0.5, 0.0])
+    ArbWaveformDatabase.init(tmp_path / "other")
+    ArbWaveformDatabase.save(
+        "demo", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0])
+    )
+    cfg = ArbWaveformCfg(data="demo", path=path)
+    assert cfg.length == 2.0
+    prog = MagicMock()
+    prog.soccfg.get_maxv.return_value = 1.0
+    prog.soccfg.__getitem__.return_value = [{"samps_per_clk": 1}]
+    prog.us2cycles.return_value = 2
+    data, qdata = cfg.build("arb").make_iqdata(0, prog)
+    np.testing.assert_allclose(data, [0.0, 0.5])
+    assert qdata is None
+    flat = FlatTopWaveformCfg(length=5.0, raise_waveform=cfg).build("flat")
+    assert flat.to_wav_kwargs().get("length") == 3.0
+    # Playback reads the current file; serialization preserves locator values.
+    restored = ArbWaveformCfg.model_validate_json(cfg.model_dump_json())
+    assert restored.data == "demo" and restored.path == path
+    _asset(tmp_path, idata=[0.0, 0.2, 0.0])
+    data, _ = restored.build("updated").make_iqdata(0, prog)
+    np.testing.assert_allclose(data, [0.0, 0.2])
+
+
+@pytest.mark.parametrize("flat_top", [False, True])
+def test_converted_arb_copy_reads_current_capture_duration_and_iq(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flat_top: bool
+) -> None:
+    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
+    first = tmp_path / "first"
+    ArbWaveformDatabase.init(first)
+    ArbWaveformDatabase.save(
+        "demo",
+        time=np.array([0.0, 1.0, 2.0]),
+        idata=np.array([0.0, 0.3, 0.0]),
+        qdata=np.array([0.0, 0.4, 0.0]),
+    )
+    context = CfgValidationContext(assets=ArbWaveformDatabase.bound_info())
+    core = CoreArbWaveformCfg(data="demo")
+    source = (
+        CoreFlatTopWaveformCfg(length=6.0, raise_waveform=core) if flat_top else core
+    )
+    copied = deepcopy(WaveformCfgFactory.from_core(source, context=context))
+    native = copied.raise_waveform if isinstance(copied, FlatTopWaveformCfg) else copied
+    assert isinstance(native, ArbWaveformCfg)
+    ArbWaveformDatabase.init(tmp_path / "second")
+    ArbWaveformDatabase.save(
+        "demo",
+        time=np.array([0.0, 9.0]),
+        idata=np.array([0.9, 0.9]),
+    )
+    prog = MagicMock()
+    prog.soccfg.get_maxv.return_value = 1.0
+    prog.soccfg.__getitem__.return_value = [{"samps_per_clk": 1}]
+    prog.us2cycles.side_effect = lambda *, gen_ch, us: round(us)
+    waveform = native.build("captured")
+    assert waveform.length == 2.0
+    idata, qdata = waveform.make_iqdata(0, prog)
+    np.testing.assert_allclose(idata, [0.0, 0.3])
+    assert qdata is not None
+    np.testing.assert_allclose(qdata, [0.0, 0.4])
+
+    path = first / "demo.npz"
+    np.savez(path, time=[0, 2, 4], idata=[0, 0.6, 0], qdata=[0, 0.8, 0])
+    assert waveform.length == 4.0
+    idata, qdata = waveform.make_iqdata(0, prog, even_length=flat_top)
+    np.testing.assert_allclose(idata, [0.0, 0.3, 0.6, 0.3])
+    assert qdata is not None
+    np.testing.assert_allclose(qdata, [0.0, 0.4, 0.8, 0.4])
+    if isinstance(copied, FlatTopWaveformCfg):
+        assert copied.build("flat").to_wav_kwargs().get("length") == 2.0
+
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        _ = waveform.length
+    with pytest.raises(FileNotFoundError):
+        waveform.make_iqdata(0, prog)
+    np.savez(path, time=[0, 1], idata=[0, 2], qdata=[0, 0])
+    with pytest.raises(WaveformFormatError):
+        _ = waveform.length
+    with pytest.raises(WaveformFormatError):
+        waveform.make_iqdata(0, prog)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "relative.npz",
+        "C:/foreign/demo.npz" if Path("/").is_absolute() else "/foreign/demo.npz",
+    ],
+)
+def test_native_arb_rejects_nonlocal_or_relative_paths(path: str) -> None:
+    with pytest.raises(ValidationError):
+        ArbWaveformCfg.model_validate({"data": "demo", "path": path})
+
+
+def test_native_arb_requires_path_and_propagates_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ArbWaveformCfg.model_validate({"data": "demo"})
+    cfg = ArbWaveformCfg(data="demo", path=(tmp_path / "absent.npz").as_posix())
+    with pytest.raises(FileNotFoundError):
+        _ = cfg.length
+
+
+def test_native_arb_plays_samples_without_interpreting_formula_recipe(
+    tmp_path: Path,
+) -> None:
+    cfg = ArbWaveformCfg(
+        data="demo", path=_asset(tmp_path, recipe_json='{"future_recipe": true}')
+    )
+    assert cfg.length == 2.0
+
+
+def test_native_arb_retains_codec_failure_instead_of_empty_samples(
+    tmp_path: Path,
+) -> None:
+    cfg = ArbWaveformCfg(data="demo", path=_asset(tmp_path, idata=[0.0, 2.0, 0.0]))
+    with pytest.raises(WaveformFormatError) as error:
+        _ = cfg.length
+    assert error.value.reason == "amplitude_out_of_range"
+
+
+@pytest.mark.parametrize("style", ["arb", "flat_top"])
+def test_waveform_factory_converts_core_using_explicit_asset_path(
+    tmp_path: Path, style: str
+) -> None:
+    path = _asset(tmp_path)
+    context = CfgValidationContext(assets=ArbWaveformDatabase.info_at(tmp_path))
+    core = CoreArbWaveformCfg(data="demo")
+    source = (
+        core
+        if style == "arb"
+        else CoreFlatTopWaveformCfg(length=5.0, raise_waveform=core)
+    )
+    converted = WaveformCfgFactory.from_core(source, context=context)
+    native = (
+        converted.raise_waveform
+        if isinstance(converted, FlatTopWaveformCfg)
+        else converted
+    )
+    assert isinstance(native, ArbWaveformCfg)
+    assert native.path == path and native.data == "demo"
+    assert core.has_asset_binding is False
+
+
+@pytest.mark.parametrize("context", [None, CfgValidationContext()])
+def test_waveform_factory_requires_assets_instead_of_global_fallback(
+    context: CfgValidationContext | None,
+) -> None:
+    with pytest.raises(ValueError, match="assets"):
+        WaveformCfgFactory.from_core(CoreArbWaveformCfg(data="demo"), context=context)
+
+
+def test_waveform_factory_propagates_missing_asset(tmp_path: Path) -> None:
+    context = CfgValidationContext(assets=ArbWaveformDatabase.info_at(tmp_path))
+    with pytest.raises(ArbWaveformError) as error:
+        WaveformCfgFactory.from_core(
+            CoreArbWaveformCfg(data="missing"), context=context
+        )
+    assert error.value.reason == "data_key_not_found"
 
 
 def test_flat_top_waveform_create_and_kwargs():
@@ -362,15 +377,3 @@ def test_flat_top_waveform_create_and_kwargs():
         even_length=True,
         marker="flat",
     )
-
-
-def test_flat_top_waveform_set_param_rejects_unknown_name():
-    cfg = FlatTopWaveformCfg(
-        length=1.0,
-        raise_waveform=GaussWaveformCfg(length=0.2, sigma=0.05),
-    )
-    cfg.set_param("length", 2.0)
-    assert cfg.length == 2.0
-
-    with pytest.raises(ValueError, match="Unknown parameter"):
-        cfg.set_param("sigma", 0.1)

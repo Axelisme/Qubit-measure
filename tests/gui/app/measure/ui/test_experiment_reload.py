@@ -25,7 +25,6 @@ from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.services.io_manager import IOManager
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
@@ -52,7 +51,11 @@ def window_app(qapp) -> Iterator[WindowApp]:
     registry.register("demo", OldAdapter)
     loader = Loader()
     ctrl = Controller(
-        state, registry, IOManager(), None, BaseEventBus(), catalog_loader=loader
+        state=state,
+        registry=registry,
+        view=None,
+        bus=BaseEventBus(),
+        catalog_loader=loader,
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, dialog_presenter=dialogs)
@@ -260,14 +263,3 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
             app.dialogs.assert_no_unexpected_messages()
     finally:
         remote.stop()
-
-
-def test_busy_save_is_rejected_before_confirmation(window_app: WindowApp) -> None:
-    app = window_app
-    previous = app.ctrl.new_tab("demo")
-    app.state.get_tab(previous).is_saving_data = True
-    app.window.reload_experiments()
-    app.dialogs.consume_message_containing("critical", "Finish all operations")
-    assert app.ctrl.list_tab_ids() == [previous]
-    assert app.loader.loads == 0
-    app.dialogs.assert_no_unexpected_messages()

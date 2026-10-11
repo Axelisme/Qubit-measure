@@ -2,51 +2,85 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import QApplication, QLineEdit  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
+    QApplication,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QTreeWidget,
+)
+from zcu_tools.cfg_model import module_spec_from_raw, waveform_spec_from_raw
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
+from zcu_tools.gui.app.measure.cfg_schemas import (
+    module_cfg_to_value,
+    waveform_cfg_to_value,
+)
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui import inspect_dialog
 from zcu_tools.gui.app.measure.ui.inspect_dialog import (
     InspectDialog,
-    _MdCreateDialog,
     _MlCreateDialog,
 )
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import ModuleLibrary
+from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.cfg.binding import CfgDraft
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.entry import ResultEntry
+
+from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
-def _make_ml() -> ModuleLibrary:
-    ml = ModuleLibrary()
-    ml.modules["readout_rf"] = ModuleCfgFactory.from_raw(
-        {
-            "type": "readout/direct",
-            "ro_ch": 0,
-            "ro_freq": 6000.0,
-            "ro_length": 1.0,
-            "trig_offset": 0.0,
-        }
+def _make_ml() -> ParameterContext:
+    components = {
+        "R1": ResonatorSchema(kind="resonator"),
+        "Q1": QubitSchema(kind="qubit/transmon"),
+    }
+    parameters = parameter_capture(components)
+    library = parameters.library.replaced_module(
+        "R1.readout.readout_rf",
+        module_spec_from_raw(
+            {
+                "type": "readout/direct",
+                "ro_ch": 0,
+                "ro_freq": 6000.0,
+                "ro_length": 1.0,
+                "trig_offset": 0.0,
+            }
+        ),
+    ).replaced_waveform(
+        "Q1.waveforms.drive_wav",
+        waveform_spec_from_raw({"style": "const", "length": 1.0}),
     )
-    ml.waveforms["drive_wav"] = WaveformCfgFactory.from_raw(
-        {"style": "const", "length": 1.0}
-    )
-    return ml
+    return parameter_capture(components, library)
 
 
 def _make_ctrl() -> MagicMock:
     ctrl = MagicMock()
     ctrl.context_control = ctrl
+    ctrl.inspect_document.side_effect = lambda **_kwargs: ctrl.read_context().document()
     return ctrl
 
 
-def _make_ctrl_with_ml(ml: ModuleLibrary) -> MagicMock:
+def _make_ctrl_with_ml(parameters: ParameterContext) -> MagicMock:
     ctrl = _make_ctrl()
-    ctrl.get_current_ml.return_value = ml
-    ctrl.get_current_md.return_value = None
+    ctrl.read_context.return_value = parameters
     ctrl.get_bus.return_value = MagicMock()
     ctrl.list_device_names.return_value = []
     ctrl.arb_waveforms.list_data_keys.return_value = []
@@ -63,15 +97,7 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
     per open so attach() works, keyed by a fake editor_id, with owner→id discovery,
     commit (records last commit), and teardown.
     """
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.app.measure.cfg_schemas import (
-        module_cfg_to_value,
-        waveform_cfg_to_value,
-    )
-    from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.gui.cfg.binding import CfgDraft
 
-    ml = ctrl.get_current_ml.return_value
     drafts: dict[str, CfgDraft] = {}
     owner_to_id: dict[str, str] = {}
     counter = {"n": 0}
@@ -81,7 +107,9 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
             drafts.pop(owner_to_id.pop(owner_key), None)
         counter["n"] += 1
         eid = f"editor-{counter['n']}"
-        drafts[eid] = MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
+        drafts[eid] = MeasureCfgBindings(ctrl).new_draft(
+            CfgSchema(spec, value), parameters=ctrl.read_context()
+        )
         if owner_key is not None:
             owner_to_id[owner_key] = eid
         return eid
@@ -91,11 +119,16 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
 
     def _open(item_kind, *, from_name, gc=True, owner_key=None):
         # Load the existing entry's shape from the live ml (from_name path).
-        store = ml.modules if item_kind == "module" else ml.waveforms
+        library = ctrl.read_context().library
+        stored = (
+            library.get_module(from_name)
+            if item_kind == "module"
+            else library.get_waveform(from_name)
+        )
         to_value = (
             module_cfg_to_value if item_kind == "module" else waveform_cfg_to_value
         )
-        spec, value = to_value(store[from_name])
+        spec, value = to_value(stored)
         return _register(spec, value, owner_key), []
 
     def _remove(editor_id):
@@ -112,19 +145,25 @@ def _wire_cfg_editor(ctrl: MagicMock) -> None:
         draft = drafts[editor_id]
         schema = draft.snapshot()
         from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-        from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
 
-        raw = schema_to_raw_dict(schema, ctrl.get_current_md.return_value, ml)
-        is_module = old_name in ml.modules
+        parameters = ctrl.read_context()
+        raw = schema_to_raw_dict(schema, parameters)
+        library = parameters.library
+        is_module = old_name in library.module_keys()
+        kind = "module" if is_module else "waveform"
         if old_name != new_name:
-            if is_module:
-                del ml.modules[old_name]
-            else:
-                del ml.waveforms[old_name]
-        if is_module:
-            ml.register_module(**{new_name: ModuleCfgFactory.from_raw(raw, ml=ml)})
-        else:
-            ml.register_waveform(**{new_name: WaveformCfgFactory.from_raw(raw, ml=ml)})
+            library = library.renamed(old_name, new_name, kind=kind)
+        library = (
+            library.replaced_module(new_name, module_spec_from_raw(raw))
+            if is_module
+            else library.replaced_waveform(new_name, waveform_spec_from_raw(raw))
+        )
+        ctrl.read_context.return_value = ParameterContext(
+            point=parameters.document(),
+            library=library,
+            target=parameters.target,
+            roles=None,
+        )
         ctrl.replaced = (old_name, new_name, schema)
         _remove(editor_id)
 
@@ -151,16 +190,12 @@ def test_inspect_dialog_init_and_refresh(qapp):
     }.items()
     ctrl.get_current_md.return_value = mock_md
 
-    ctrl.get_current_ml.return_value = _make_ml()
+    ctrl.read_context.return_value = _make_ml()
 
     dialog = InspectDialog(ctrl, bus)
 
     # Check subscriptions
     assert bus.subscribe.call_count >= 2
-
-    # Check if MD dict was populated
-    # The layout is flat, so there should be 3 rows (scalar_int, scalar_float, nested)
-    assert dialog._md_table.rowCount() == 3
 
     # Check if ML was populated (tree widget)
     # The top level items should be "modules" and "waveforms"
@@ -211,266 +246,6 @@ def test_C9_inspect_dialog_raises_when_parent_has_no_open_dialog(qapp):
         dialog._on_arb_waveform_clicked()
 
 
-def _begin_inline_edit(dialog: InspectDialog, row: int, column: int, qapp) -> QLineEdit:
-    """Open one table editor with a real owner/focus in the offscreen test app."""
-    dialog.show()
-    dialog.activateWindow()
-    dialog.raise_()
-    qapp.processEvents()
-    item = dialog._md_table.item(row, column)
-    assert item is not None
-    dialog._md_table.editItem(item)
-    qapp.processEvents()
-    editor = dialog._md_table.findChild(QLineEdit)
-    assert editor is not None
-    editor.setFocus()
-    qapp.processEvents()
-    return editor
-
-
-def _send_key(widget: QLineEdit, key: Qt.Key, qapp) -> None:
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        key,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(widget, event)
-    qapp.processEvents()
-
-
-def test_inspect_dialog_measure_parameters_is_dense_inline_grid(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    assert dialog._md_table.columnCount() == 2
-    headers = [dialog._md_table.horizontalHeaderItem(i) for i in range(2)]
-    assert all(header is not None for header in headers)
-    assert [header.text() for header in headers if header is not None] == [
-        "Key",
-        "Value",
-    ]
-    key_item = dialog._md_table.item(0, 0)
-    value_item = dialog._md_table.item(0, 1)
-    assert key_item is not None and key_item.flags() & Qt.ItemFlag.ItemIsEditable
-    assert value_item is not None and value_item.flags() & Qt.ItemFlag.ItemIsEditable
-    assert dialog._new_btn.text() == "New"
-    assert dialog._delete_btn.text() == "Delete"
-
-
-def test_inspect_dialog_md_value_enter_commits_and_returns_table_focus(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.coerce_md_value.return_value = 20
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    editor = _begin_inline_edit(dialog, 0, 1, qapp)
-    editor.setText("20")
-    _send_key(editor, Qt.Key.Key_Return, qapp)
-
-    ctrl.coerce_md_value.assert_called_once_with("key1", "20")
-    ctrl.set_md_attr.assert_called_once_with("key1", 20)
-    assert dialog._md_table.hasFocus()
-
-
-def test_inspect_dialog_md_key_enter_renames_atomically(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    editor = _begin_inline_edit(dialog, 0, 0, qapp)
-    editor.setText("renamed")
-    _send_key(editor, Qt.Key.Key_Return, qapp)
-
-    ctrl.rename_md_attr.assert_called_once_with("key1", "renamed")
-    ctrl.set_md_attr.assert_not_called()
-    assert dialog._md_table.hasFocus()
-
-
-def test_inspect_dialog_md_escape_cancels_without_mutation(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    editor = _begin_inline_edit(dialog, 0, 1, qapp)
-    editor.setText("99")
-    _send_key(editor, Qt.Key.Key_Escape, qapp)
-
-    ctrl.coerce_md_value.assert_not_called()
-    ctrl.set_md_attr.assert_not_called()
-    edited_item = dialog._md_table.item(0, 1)
-    assert edited_item is not None and edited_item.text() == "10"
-    assert dialog._md_table.hasFocus()
-
-
-def test_inspect_dialog_new_parameter_is_retained_horizontal_and_deferred(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.get_current_ml.return_value = None
-    ctrl.coerce_md_value.return_value = 3.5
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    dialog._new_btn.click()
-    qapp.processEvents()
-    new_dialog = dialog._new_md_dialog
-    assert isinstance(new_dialog, _MdCreateDialog)
-    assert new_dialog.isVisible()
-    assert new_dialog._key_edit.parent() is new_dialog
-    assert isinstance(new_dialog._value_edit, QLineEdit)
-    assert ctrl.create_md_attr.call_count == 0
-
-    new_dialog._key_edit.setText("new_key")
-    new_dialog._value_edit.setText("3.5")
-    assert ctrl.create_md_attr.call_count == 0
-    new_dialog._create_btn.click()
-    qapp.processEvents()
-
-    ctrl.coerce_md_value.assert_called_once_with("new_key", "3.5")
-    ctrl.create_md_attr.assert_called_once_with("new_key", 3.5)
-    assert dialog._new_md_dialog is None
-
-
-def test_inspect_dialog_new_parameter_coercion_failure_does_not_mutate(
-    qapp, monkeypatch
-):
-    from qtpy.QtWidgets import QMessageBox
-    from zcu_tools.gui.session.services.context import MdValueError
-
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.get_current_ml.return_value = None
-    ctrl.coerce_md_value.side_effect = MdValueError("bad value")
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    dialog._new_btn.click()
-    qapp.processEvents()
-    assert dialog._new_md_dialog is not None
-    new_dialog = dialog._new_md_dialog
-    new_dialog._key_edit.setText("new_key")
-    new_dialog._value_edit.setText("bad")
-    new_dialog._create_btn.click()
-
-    ctrl.create_md_attr.assert_not_called()
-    assert dialog._new_md_dialog is new_dialog
-    assert new_dialog._key_edit.text() == "new_key"
-    assert new_dialog._value_edit.text() == "bad"
-
-
-def test_inspect_dialog_md_delete_button_confirms(qapp, monkeypatch):
-    from qtpy.QtWidgets import QMessageBox
-
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-    dialog._md_table.selectRow(0)
-
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
-    dialog._delete_btn.click()
-    ctrl.del_md_attr.assert_not_called()
-
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
-    dialog._delete_btn.click()
-    ctrl.del_md_attr.assert_called_once_with("key1")
-
-
-def test_inspect_dialog_md_delete_key_is_direct_when_table_has_focus(qapp, monkeypatch):
-    from qtpy.QtWidgets import QMessageBox
-
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-    dialog.show()
-    dialog.activateWindow()
-    dialog.raise_()
-    dialog._md_table.selectRow(0)
-    dialog._md_table.setFocus()
-    qapp.processEvents()
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: pytest.fail("Delete key must not confirm"),
-    )
-
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        Qt.Key.Key_Delete,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(dialog._md_table, event)
-    qapp.processEvents()
-
-    ctrl.del_md_attr.assert_called_once_with("key1")
-
-
-def test_inspect_dialog_md_delete_key_in_editor_remains_text_deletion(qapp):
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {"key1": 10}.items()
-    ctrl.get_current_md.return_value = mock_md
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    editor = _begin_inline_edit(dialog, 0, 1, qapp)
-    editor.setText("10")
-    editor.setCursorPosition(0)
-    _send_key(editor, Qt.Key.Key_Delete, qapp)
-
-    ctrl.del_md_attr.assert_not_called()
-    assert editor.text() == "0"
-
-
-def test_inspect_dialog_md_value_source_resolves_in_new_parameter(qapp):
-    from zcu_tools.gui.session.value_lookup import ValueInfo
-
-    ctrl = _make_ctrl()
-    mock_md = MagicMock()
-    mock_md.items.return_value = {}.items()
-    ctrl.get_current_md.return_value = mock_md
-    ctrl.get_current_ml.return_value = None
-    ctrl.read_value_source.return_value = (
-        ValueInfo("device.flux.value", float, "device:flux"),
-        0.5,
-    )
-    ctrl.coerce_md_value.return_value = 0.5
-    dialog = InspectDialog(ctrl, MagicMock())
-
-    dialog._new_btn.click()
-    qapp.processEvents()
-    assert dialog._new_md_dialog is not None
-    new_dialog = dialog._new_md_dialog
-    new_dialog._key_edit.setText("flx_current")
-    new_dialog._value_edit.setText("@{device.flux.value} ")
-    new_dialog._value_edit.setCursorPosition(len(new_dialog._value_edit.text()))
-    assert new_dialog._value_source_input is not None
-    new_dialog._value_source_input._on_text_edited(new_dialog._value_edit.text())
-
-    assert new_dialog._value_edit.text() == "0.5"
-    new_dialog._create_btn.click()
-    ctrl.read_value_source.assert_called_once_with("device.flux.value")
-    ctrl.coerce_md_value.assert_called_once_with("flx_current", "0.5")
-    ctrl.create_md_attr.assert_called_once_with("flx_current", 0.5)
-
-
 def _select_ml_child(dialog: InspectDialog, group_index: int, child_index: int = 0):
     group = dialog._ml_tree.topLevelItem(group_index)
     assert group is not None
@@ -492,7 +267,7 @@ def test_inspect_dialog_ml_embeds_service_editor_without_raw_or_modify_controls(
     assert dialog._del_ml_btn.text() == "Delete"
 
     _select_ml_child(dialog, 0)
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_revert_btn.text() == "Revert"
     assert dialog._ml_apply_btn.text() == "Apply"
@@ -509,23 +284,28 @@ def test_inspect_dialog_ml_apply_replaces_name_and_opens_fresh_clean_draft(qapp)
 
     draft = ctrl._drafts[old_editor_id]
     draft.root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
     qapp.processEvents()
 
-    assert ml.modules["readout_rf"].to_dict()["ro_freq"] == 6000.0
+    assert ml.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
     assert dialog._ml_status_label.text() == "Unsaved"
     assert dialog._ml_apply_btn.isEnabled()
 
     dialog._ml_apply_btn.click()
     qapp.processEvents()
 
-    assert "readout_rf" not in ml.modules
-    assert ml.modules["readout_v2"].to_dict()["ro_freq"] == 6123.0
-    ctrl.replace_cfg_editor.assert_called_once_with(
-        old_editor_id, "readout_rf", "readout_v2"
+    assert "R1.readout.readout_rf" not in ctrl.read_context().library.module_keys()
+    assert (
+        ctrl.read_context()
+        .library.get_module("R1.readout.readout_v2")
+        .to_dict()["ro_freq"]
+        == 6123.0
     )
-    assert dialog._ml_selected_data == ("modules", "readout_v2")
+    ctrl.replace_cfg_editor.assert_called_once_with(
+        old_editor_id, "R1.readout.readout_rf", "R1.readout.readout_v2"
+    )
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_v2")
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != old_editor_id
     assert (
@@ -548,8 +328,13 @@ def test_inspect_dialog_ml_waveform_selection_uses_same_embedded_session(qapp):
     qapp.processEvents()
     dialog._ml_apply_btn.click()
 
-    assert ml.waveforms["drive_wav"].to_dict()["length"] == 1.5
-    assert dialog._ml_selected_data == ("waveforms", "drive_wav")
+    assert (
+        ctrl.read_context()
+        .library.get_waveform("Q1.waveforms.drive_wav")
+        .to_dict()["length"]
+        == 1.5
+    )
+    assert dialog._ml_selected_data == ("waveforms", "Q1.waveforms.drive_wav")
     assert dialog._ml_status_label.text() == "Saved"
 
 
@@ -565,18 +350,20 @@ def test_inspect_dialog_ml_context_switch_apply_failure_keeps_draft(qapp, monkey
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
     ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
 
-    ctrl.get_current_ml.return_value = ml_b
+    ctrl.read_context.return_value = ml_b
     dialog.refresh()
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl.replace_cfg_editor.side_effect = CfgEditorError("different context")
     dialog._ml_apply_btn.click()
 
-    assert ml_b.modules["readout_rf"].to_dict()["ro_freq"] == 6000.0
+    assert (
+        ml_b.library.get_module("R1.readout.readout_rf").to_dict()["ro_freq"] == 6000.0
+    )
     assert dialog._ml_editor_id == editor_id
-    assert dialog._ml_name_edit.text() == "readout_v2"
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_v2"
     assert dialog._ml_status_label.text() == "Unsaved"
 
 
@@ -591,15 +378,15 @@ def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch)
     assert editor_id is not None
     draft = ctrl._drafts[editor_id]
     draft.root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("drive_wav")
-    dialog._ml_name_edit.textEdited.emit("drive_wav")
+    dialog._ml_name_edit.setText("Q1.waveforms.drive_wav")
+    dialog._ml_name_edit.textEdited.emit("Q1.waveforms.drive_wav")
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     ctrl.replace_cfg_editor.side_effect = ValueError("collision")
 
     dialog._ml_apply_btn.click()
 
-    assert set(ml.modules) == {"readout_rf"}
-    assert set(ml.waveforms) == {"drive_wav"}
+    assert set(ml.library.module_keys()) == {"R1.readout.readout_rf"}
+    assert set(ml.library.waveform_keys()) == {"Q1.waveforms.drive_wav"}
     assert dialog._ml_editor_id == editor_id
     assert (
         getattr(
@@ -618,13 +405,13 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
     editor_id = dialog._ml_editor_id
     assert editor_id is not None
     ctrl._drafts[editor_id].root.fields["ro_freq"].set_value(6123.0)
-    dialog._ml_name_edit.setText("renamed")
-    dialog._ml_name_edit.textEdited.emit("renamed")
+    dialog._ml_name_edit.setText("R1.readout.renamed")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.renamed")
 
     dialog._ml_revert_btn.click()
 
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != editor_id
     assert (
@@ -633,7 +420,10 @@ def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
         )
         == 6000.0
     )
-    assert "readout_rf" in ml.modules and "renamed" not in ml.modules
+    assert (
+        "R1.readout.readout_rf" in ml.library.module_keys()
+        and "R1.readout.renamed" not in ml.library.module_keys()
+    )
 
 
 def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeypatch):
@@ -642,8 +432,8 @@ def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeyp
     ctrl = _make_ctrl_with_ml(_make_ml())
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("draft_name")
-    dialog._ml_name_edit.textEdited.emit("draft_name")
+    dialog._ml_name_edit.setText("R1.readout.draft_name")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.draft_name")
     monkeypatch.setattr(
         QMessageBox,
         "question",
@@ -652,9 +442,9 @@ def test_inspect_dialog_ml_dirty_selection_cannot_silently_discard(qapp, monkeyp
 
     _select_ml_child(dialog, 1)
 
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._current_ml_item_data() == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "draft_name"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._current_ml_item_data() == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.draft_name"
 
 
 def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
@@ -666,8 +456,8 @@ def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
     ctrl = _make_ctrl_with_ml(ml)
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("readout_v2")
-    dialog._ml_name_edit.textEdited.emit("readout_v2")
+    dialog._ml_name_edit.setText("R1.readout.readout_v2")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.readout_v2")
 
     replace = ctrl.replace_cfg_editor.side_effect
 
@@ -684,10 +474,10 @@ def test_inspect_dialog_ml_dirty_selection_save_refreshes_tree_after_apply(
     _select_ml_child(dialog, 1)
     qapp.processEvents()
 
-    assert dialog._ml_selected_data == ("waveforms", "drive_wav")
-    assert dialog._ml_name_edit.text() == "drive_wav"
-    assert dialog._find_ml_item(("modules", "readout_rf")) is None
-    assert dialog._find_ml_item(("modules", "readout_v2")) is not None
+    assert dialog._ml_selected_data == ("waveforms", "Q1.waveforms.drive_wav")
+    assert dialog._ml_name_edit.text() == "Q1.waveforms.drive_wav"
+    assert dialog._find_ml_item(("modules", "R1.readout.readout_rf")) is None
+    assert dialog._find_ml_item(("modules", "R1.readout.readout_v2")) is not None
     assert not dialog._ml_refresh_pending
 
 
@@ -697,8 +487,8 @@ def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypa
     ctrl = _make_ctrl_with_ml(_make_ml())
     dialog = InspectDialog(ctrl, MagicMock())
     _select_ml_child(dialog, 0)
-    dialog._ml_name_edit.setText("draft_name")
-    dialog._ml_name_edit.textEdited.emit("draft_name")
+    dialog._ml_name_edit.setText("R1.readout.draft_name")
+    dialog._ml_name_edit.textEdited.emit("R1.readout.draft_name")
     dialog.show()
     dialog.raise_()
 
@@ -722,46 +512,131 @@ def test_inspect_dialog_ml_dirty_close_requires_explicit_decision(qapp, monkeypa
     assert dialog._ml_editor_id is None
 
 
+@pytest.fixture
+def native_delete_inspector(
+    qapp, tmp_path: Path, monkeypatch
+) -> Generator[tuple[InspectDialog, ResultEntry]]:
+    background = BackgroundRunner()
+    monkeypatch.setattr(
+        "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
+        lambda: background,
+    )
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(),
+        None,
+        BaseEventBus(),
+        progress_transport=DirectProgressTransport(),
+        project_root=str(tmp_path),
+    )
+    ctrl.setup_control.new_entry(EntryRequest("entry"))
+    entry = ResultEntry.open(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    entry.new_point("point")
+    with entry.module_library("point").edit() as draft:
+        draft.set_module(
+            "R1.readout.readout_rf",
+            module_spec_from_raw(
+                {
+                    "type": "readout/direct",
+                    "ro_ch": 0,
+                    "ro_freq": 6000.0,
+                    "ro_length": 1.0,
+                    "trig_offset": 0.0,
+                }
+            ),
+        )
+        draft.set_waveform(
+            "Q1.waveforms.drive_wav",
+            waveform_spec_from_raw({"style": "const", "length": 1.0}),
+        )
+    ctrl.context_control.use_point(PointUseRequest("point"))
+    dialog = InspectDialog(ctrl, ctrl.get_bus())
+    try:
+        yield dialog, entry
+    finally:
+        dialog.close()
+        background.quiesce()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+@pytest.mark.parametrize("trigger", ["button", "key"])
 def test_inspect_dialog_ml_delete_button_confirms_and_delete_key_is_direct(
-    qapp, monkeypatch
+    qapp, monkeypatch, native_delete_inspector, kind, trigger
 ):
-    from qtpy.QtWidgets import QMessageBox
-
-    ctrl = _make_ctrl_with_ml(_make_ml())
-    dialog = InspectDialog(ctrl, MagicMock())
-    _select_ml_child(dialog, 0)
-
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: QMessageBox.StandardButton.No,
+    dialog, entry = native_delete_inspector
+    before = entry.module_library("point").snapshot()
+    source = "R1.readout.readout_rf" if kind == "module" else "Q1.waveforms.drive_wav"
+    group = "modules" if kind == "module" else "waveforms"
+    tree = next(
+        tree
+        for tree in dialog.findChildren(QTreeWidget)
+        if tree.findItems(group, Qt.MatchFlag.MatchExactly)
     )
-    dialog._del_ml_btn.click()
-    ctrl.del_ml_module.assert_not_called()
-
+    errors: list[str] = []
     monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *a, **k: pytest.fail("tree Delete must not confirm"),
+        QMessageBox, "warning", lambda _parent, _title, message: errors.append(message)
     )
+    tree.setCurrentItem(
+        tree.findItems(source, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)[
+            0
+        ]
+    )
+    button = next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Delete"
+    )
+    assert button.isEnabled()
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+    )
+    button.click()
+    assert entry.module_library("point").snapshot().document() == before.document()
+    tabs = dialog.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
     dialog.show()
     dialog.activateWindow()
     dialog.raise_()
-    dialog._ml_tree.setFocus()
+    tree.setFocus()
     qapp.processEvents()
+    exceptions: list[BaseException] = []
     monkeypatch.setattr(
-        inspect_dialog.QApplication,
-        "focusWidget",
-        staticmethod(lambda: dialog._ml_tree),
+        sys, "excepthook", lambda _type, error, _trace: exceptions.append(error)
     )
-    event = QKeyEvent(
-        QEvent.Type.KeyPress,
-        Qt.Key.Key_Delete,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    QApplication.sendEvent(dialog._ml_tree, event)
+    if trigger == "button":
+        monkeypatch.setattr(
+            QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+        )
+        button.click()
+    else:
+        monkeypatch.setattr(
+            QMessageBox,
+            "question",
+            lambda *a, **k: pytest.fail("tree Delete must not confirm"),
+        )
+        event = QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier
+        )
+        QApplication.sendEvent(tree, event)
     qapp.processEvents()
-    ctrl.del_ml_module.assert_called_once_with("readout_rf")
+    assert errors == [], f"Inspect reported a delete failure: {errors}"
+    assert exceptions == [], f"Inspect delete raised: {exceptions}"
+    persisted = entry.module_library("point").snapshot()
+    keys = persisted.module_keys() if kind == "module" else persisted.waveform_keys()
+    assert keys == ()
+    if kind == "module":
+        assert persisted.entry_state(
+            "Q1.waveforms.drive_wav", kind="waveform"
+        ) == before.entry_state("Q1.waveforms.drive_wav", kind="waveform")
+    else:
+        assert persisted.entry_state(
+            "R1.readout.readout_rf", kind="module"
+        ) == before.entry_state("R1.readout.readout_rf", kind="module")
 
 
 def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
@@ -777,7 +652,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
     )
     QApplication.sendEvent(dialog._ml_name_edit, event)
     assert ctrl.del_ml_module.call_count == 0
-    assert dialog._ml_name_edit.text() == "eadout_rf"
+    assert dialog._ml_name_edit.text() == "1.readout.readout_rf"
 
 
 def _catalog():
@@ -897,7 +772,7 @@ def test_inspect_create_selects_embedded_editor_without_blocking(qapp, monkeypat
                         self.cb(None)
 
             self.finished = DummySignal()
-            self.created: tuple[str, str] | None = ("module", "readout_rf")
+            self.created: tuple[str, str] | None = ("module", "R1.readout.readout_rf")
 
         def setAttribute(self, *args: Any) -> None:
             pass
@@ -909,8 +784,8 @@ def test_inspect_create_selects_embedded_editor_without_blocking(qapp, monkeypat
     dialog._on_create_clicked()
 
     assert dialog._new_ml_dialog is None
-    assert dialog._ml_selected_data == ("modules", "readout_rf")
-    assert dialog._ml_name_edit.text() == "readout_rf"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.readout_rf")
+    assert dialog._ml_name_edit.text() == "R1.readout.readout_rf"
     assert dialog._ml_status_label.text() == "Saved"
 
 
@@ -935,20 +810,29 @@ def test_inspect_create_closes_previous_editor_before_selecting_new_entry(
                         self.cb(None)
 
             self.finished = DummySignal()
-            self.created: tuple[str, str] | None = ("module", "new_mod")
+            self.created: tuple[str, str] | None = ("module", "R1.readout.new_mod")
 
         def setAttribute(self, *args: Any) -> None:
             pass
 
         def open(self) -> None:
-            ml.modules["new_mod"] = ml.modules["readout_rf"]
+            current = ctrl.read_context()
+            ctrl.read_context.return_value = ParameterContext(
+                point=current.document(),
+                library=current.library.replaced_module(
+                    "R1.readout.new_mod",
+                    current.library.module_spec("R1.readout.readout_rf"),
+                ),
+                target=current.target,
+                roles=None,
+            )
             self.finished.emit()
 
     monkeypatch.setattr(inspect_dialog, "_MlCreateDialog", FakeCreateDialog)
     dialog._on_create_clicked()
 
-    assert dialog._ml_selected_data == ("modules", "new_mod")
-    assert dialog._ml_name_edit.text() == "new_mod"
+    assert dialog._ml_selected_data == ("modules", "R1.readout.new_mod")
+    assert dialog._ml_name_edit.text() == "R1.readout.new_mod"
     assert dialog._ml_status_label.text() == "Saved"
     assert dialog._ml_editor_id != old_editor_id
 

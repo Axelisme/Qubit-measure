@@ -1,22 +1,34 @@
+"""Owner-thread entry/point bindings and fixed session parameter reads."""
+
 from __future__ import annotations
 
-import dataclasses
-import logging
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any
+from copy import deepcopy
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from zcu_tools.gui.expected_error import (
-    ExpectedError,
-    ExpectedErrorCategory,
-    FailedPreconditionError,
-    InvalidInputError,
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.owner import OwnerThreadGuard
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.gui.session.context_types import (
+    ContextSource,
+    ContextSourceBinding,
+    EntryDraft,
+    EntryInfo,
+    LibraryChange,
+    PointBindingError,
+    SavedPoint,
+    WorkingPointInfo,
 )
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
 )
-from zcu_tools.gui.session.types import ContextReadiness
+from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
     ScalarValue,
@@ -25,580 +37,867 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     resolve_value_ref,
 )
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
-from zcu_tools.resources.context.content import (
-    replace_context_contents,
-    snapshot_context_contents,
+from zcu_tools.resources.context.library import (
+    MODULE_LIBRARY_FORMAT,
+    MODULE_LIBRARY_VERSION,
+    LibrarySnapshot,
+    ModuleLibrary,
+    ModuleLibraryDocument,
 )
-
-logger = logging.getLogger(__name__)
+from zcu_tools.resources.entry import (
+    DestinationExistsError,
+    snapshot,
+    source_path,
+    validate_path_segment,
+)
+from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.entry.roles import role_registry
+from zcu_tools.resources.entry.schema import (
+    PARAMETER_FORMAT,
+    PARAMETER_VERSION,
+    PointDocument,
+    PointGeneral,
+    SetupDocument,
+)
+from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import ModuleSpec, WaveformAssetInfo, WaveformSpec
+    from zcu_tools.format_version import YamlMap, YamlValue
+    from zcu_tools.gui.cfg import CfgSchema
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.ports import ProjectIOPort
+    from zcu_tools.gui.session.context_types import (
+        ContextTarget,
+        PointCreateRequest,
+        PointUseRequest,
+    )
     from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
-
-
-class MlEntryValidationError(InvalidInputError):
-    """Expected failure when raw ML entry cannot be deserialised."""
-
-
-class MdValueError(ValueError, ExpectedError):
-    """Expected failure when the MetaDict value text cannot be coerced safely."""
-
-    category = ExpectedErrorCategory.INVALID_INPUT
-
-
-def _coerce_scalar(text: str, current: Any) -> Any:
-    """Coerce text -> typed scalar.
-
-    If `current` is None (key not yet present), accept int/float/bool/str only.
-    Otherwise coerce to type(current); booleans must be 'true'/'false' (case
-    insensitive). Numeric coercion uses the standard constructors and re-raises
-    as MdValueError on failure.
-    """
-    stripped = text.strip()
-    if current is None:
-        # New key: try the most specific scalar first.
-        if stripped.lower() in ("true", "false"):
-            return stripped.lower() == "true"
-        try:
-            return int(stripped)
-        except ValueError:
-            pass
-        try:
-            return float(stripped)
-        except ValueError:
-            pass
-        return text  # raw string
-
-    target_type = type(current)
-    if target_type is bool:
-        low = stripped.lower()
-        if low in ("true", "1"):
-            return True
-        if low in ("false", "0"):
-            return False
-        raise MdValueError(f"Expected bool (true/false) for existing key, got {text!r}")
-    if target_type is int:
-        try:
-            return int(stripped)
-        except ValueError as exc:
-            raise MdValueError(f"Expected int, got {text!r}") from exc
-    if target_type is float:
-        try:
-            return float(stripped)
-        except ValueError as exc:
-            raise MdValueError(f"Expected float, got {text!r}") from exc
-    if target_type is str:
-        return text
-    raise MdValueError(
-        f"Unsupported existing value type {target_type.__name__!r} for key — "
-        "edit via structured tooling rather than the inline editor."
+    from zcu_tools.resources.entry import (
+        ComponentSchema,
+        PointView,
+        ResultEntry,
+        SetupView,
     )
-
-
-def _validate_md_key(key: object) -> None:
-    """Validate a user-facing MetaDict key before any content mutation."""
-    try:
-        validated = MetaDict.validate_data_key(key)
-    except (AttributeError, TypeError) as exc:
-        raise FailedPreconditionError(str(exc)) from exc
-    if not validated.strip():
-        raise FailedPreconditionError("MetaDict key must not be empty.")
+    from zcu_tools.resources.entry.ledger import RecordsLedger
+    from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextService:
-    """Encapsulates context switching, MetaDict/ModuleLibrary access, and project paths."""
+    """Own entry/point installation, fixed parameter captures, and global aliases.
+
+    Commands and captures run on the creating owner thread. Resource preparation
+    precedes publication, so failure never replaces a valid binding. The service
+    keeps writable resource handles private; consumers get isolated snapshots or
+    the explicit entry_ledger capability. Construction does not open an entry,
+    read hardware, or bind assets for EMPTY.
+    """
 
     def __init__(
         self,
         state: SessionState,
-        io_manager: ProjectIOPort,
         bus: BaseEventBus,
         values: ValueLookup | None = None,
+        *,
+        bind_assets: Callable[[Path], WaveformAssetInfo],
+        alias_rows: tuple[AliasRow, ...] = (),
     ) -> None:
+        """Use owner State/bus, optional value facade, and explicit asset binding.
+
+        bind_assets receives entry.database_path / 'arb_waveforms' on entry/point
+        installation. Its capability stays with the library capture, not a
+        global Database selection. Binding errors abort publication. values
+        defaults to State's facade and does not change parameter content/version.
+        alias_rows supplies the caller's fallback for each missing-file entry.
+        On its first nonempty snapshot, the empty primary shorthand row gets
+        the registry's sole default-focus candidate, or remains empty. Defaults
+        never reset on later point changes. Each entry install loads its saved
+        table, or resets this fallback and its first-point initialization. Saved
+        empty rows are authoritative. Explicit set/apply disables initialization
+        until the next entry install.
+        """
+        self._owner = OwnerThreadGuard()
         self._state = state
-        self._io = io_manager
         self._bus = bus
-        self._values = values or state.session_env.values
+        self._bind_assets = bind_assets
+        self._values = values if values is not None else state.session_env.values
+        self._entry: ResultEntry | None = None
+        self._entry_info: EntryInfo | None = None
+        self._setup: SetupView | None = None
+        self._point: PointView | None = None
+        self._library: ModuleLibrary | None = None
+        self._points: tuple[WorkingPointInfo, ...] = ()
+        self._source_binding: ContextSourceBinding | None = None
+        self._binding_id = 0
+        self._alias_preset = AliasTable(alias_rows).rows
+        self._aliases = AliasTable(self._alias_preset)
+        self._aliases_initialized = False
+        parameters = state.session_env.parameters
+        if parameters is not None and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
         if state.session_env.values is not self._values:
-            # Pure facade injection: this preserves set_context's "no content bump"
-            # semantics because md/ml are unchanged.
-            self._state.set_context(self._attach_values(state.session_env))
+            state.set_context(replace(state.session_env, values=self._values))
 
-    def _attach_values(self, ctx: SessionEnv) -> SessionEnv:
-        if ctx.values is self._values:
-            return ctx
-        return dataclasses.replace(ctx, values=self._values)
+    def install_entry(self, entry: ResultEntry) -> EntryInfo:
+        """Prepare an opened entry and atomically publish an empty DRAFT.
 
-    def has_project(self) -> bool:
-        return self._io.has_project
+        Prepare setup, the complete point-description cache, and entry-scoped
+        assets and saved aliases before replacing any binding. A missing alias
+        file resets the caller preset and first-nonempty-point initialization;
+        a saved table (including empty rows) disables it. Header/structure or
+        alias syntax failures propagate, never falling back to the preset.
+        Failure retains the old binding,
+        not deleting an entry already created by resources. Success bumps the
+        context once and publishes a switch fact after installation.
+        """
+        self._owner.assert_owner()
+        saved_aliases = entry.load_aliases()
+        aliases = AliasTable(
+            self._alias_preset
+            if saved_aliases is None
+            else tuple(
+                AliasRow(name, value) for name, value in saved_aliases.aliases.items()
+            )
+        )
+        setup = entry.setup
+        points = self._load_points(entry)
+        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        parameters = ParameterContext(
+            point=PointDocument(
+                format=PARAMETER_FORMAT,
+                format_version=f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
+                general=PointGeneral(created_at=datetime.now(timezone.utc).isoformat()),
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format=MODULE_LIBRARY_FORMAT,
+                    format_version=f"{MODULE_LIBRARY_VERSION.major}.{MODULE_LIBRARY_VERSION.minor}",
+                ),
+                assets=assets,
+            ),
+            target=EntryDraft(entry_id=entry.entry_id),
+            roles=None,
+        )
+        info = EntryInfo(
+            entry.entry_id,
+            entry.result_path.name,
+            entry.result_path,
+            entry.database_path,
+        )
+        sources = (ContextSource("setup", source_path(setup), None),)
+        self._entry = entry
+        self._entry_info = info
+        self._setup = setup
+        self._point = None
+        self._library = None
+        self._points = points
+        self._aliases = aliases
+        self._aliases_initialized = saved_aliases is not None
+        self._publish(parameters, sources, ContextReadiness.DRAFT, active_label="")
+        return info
+
+    def get_source_binding(self) -> ContextSourceBinding | None:
+        """Return detached cached persistent sources, or None for EMPTY.
+
+        This internal source ID is for facts/refresh, never part of read targets.
+        Query performs no I/O and does not select a point.
+        """
+        return deepcopy(self._source_binding)
+
+    def get_entry_info(self) -> EntryInfo | None:
+        """Return the cached opened entry, or None for EMPTY; never refresh."""
+        return deepcopy(self._entry_info)
+
+    def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
+        """Return cached label/descriptions, empty without an opened entry.
+
+        refresh=True completely prepares a fresh list before replacing cache.
+        Read/validation failures propagate, preserving the previous cache.
+        """
+        if refresh:
+            self._owner.assert_owner()
+            if self._entry is not None:
+                self._points = self._load_points(self._entry)
+        return deepcopy(self._points)
+
+    def use_point(self, request: PointUseRequest) -> SavedPoint:
+        """Prepare point/library/assets, then install ACTIVE and publish facts.
+
+        No opened entry raises FailedPreconditionError(no_entry). Preparation
+        failure retains the old binding. The returned target has no session
+        selection generation.
+        """
+        self._owner.assert_owner()
+        entry = self._require_open_entry()
+        point = entry.use_point(request.label)
+        parameters, library, sources, info = self._prepare_point(
+            entry, request.label, point
+        )
+        self._install_point(point, library, parameters, sources, info)
+        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+
+    def new_point(self, request: PointCreateRequest) -> SavedPoint:
+        """Create from setup or a same-entry clone, then install ACTIVE.
+
+        No opened entry raises FailedPreconditionError(no_entry). Pass description
+        and origin unchanged to ResultEntry.new_point; never copy DRAFT. An unsafe
+        label raises InvalidInputError(point_label_invalid) before source reads or
+        writes, preserving binding, files, ledger and versions. Label safety follows
+        the entry owner's single path component rule. An existing destination
+        raises InvalidInputError with the entry owner's FileExistsError message,
+        preserving the same state. Other resource errors propagate. Post-creation
+        binding failure raises PointBindingError from its cause, retaining the
+        point and old binding without retry/deletion.
+        """
+        self._owner.assert_owner()
+        entry = self._require_open_entry()
+        try:
+            validate_path_segment(request.label, field="label")
+        except ValueError as exc:
+            raise InvalidInputError(
+                str(exc), reason_code="point_label_invalid"
+            ) from exc
+        clone = (
+            entry.use_point(request.clone_from)
+            if request.clone_from is not None
+            else None
+        )
+        try:
+            point = entry.new_point(
+                request.label,
+                clone_from=clone,
+                description=request.description,
+                origin=request.origin.origin,
+            )
+        except DestinationExistsError as exc:
+            raise InvalidInputError(str(exc)) from exc
+        try:
+            parameters, library, sources, info = self._prepare_point(
+                entry, request.label, point
+            )
+        except Exception as exc:
+            # Resource creation succeeded; report the retained point as recovery.
+            raise PointBindingError(
+                entry_id=entry.entry_id, label=request.label
+            ) from exc
+        self._install_point(point, library, parameters, sources, info)
+        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+
+    def clear_context(self) -> None:
+        """Publish EMPTY, clear entry/point, retaining non-parameter handles.
+
+        Publish a switch fact after installation; do not delete resources.
+        """
+        self._owner.assert_owner()
+        self._entry = None
+        self._entry_info = None
+        self._setup = None
+        self._point = None
+        self._library = None
+        self._points = ()
+        self._publish(None, (), ContextReadiness.EMPTY, active_label="")
+
+    def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
+        """Return the cached setup template or current point document without I/O.
+
+        setup=True reads the opened entry template; False reads the published
+        DRAFT/ACTIVE point. No entry/context raises FailedPreconditionError.
+        Returned data is isolated; changing it does not write.
+        """
+        self._owner.assert_owner()
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No entry is opened", reason_code="no_entry"
+                )
+            return snapshot(self._setup)
+        return self.read_context().document()
+
+    def add_component(
+        self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
+    ) -> None:
+        """Add one component with working-unit fields using its registered kind.
+
+        setup=True edits only the opened entry template. Otherwise edit the
+        current DRAFT in memory or ACTIVE point in one resource transaction.
+        Invalid names/kinds/required fields/duplicates leave content unchanged.
+        Success on the current point installs its source before publishing one
+        parameter change. Setup edits never change existing points or captures.
+        No entry/context, schema, conflict and I/O errors propagate.
+        """
+        self._owner.assert_owner()
+        if self._entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        if setup:
+            if self._setup is None:
+                raise FailedPreconditionError(
+                    "No setup is opened", reason_code="no_entry"
+                )
+            self._setup.add_component(name, kind=kind, **fields)
+            return
+        parameters = self._published_parameters()
+        if isinstance(parameters.target, EntryDraft):
+            document = self._entry.updated_component(
+                parameters.document(), name, kind, fields
+            )
+        else:
+            if self._point is None:
+                raise FailedPreconditionError(
+                    "No point is selected", reason_code="no_context"
+                )
+            self._point.add_component(name, kind=kind, **fields)
+            document = snapshot(self._point)
+        self._publish_write(
+            ParameterContext(
+                point=document,
+                library=parameters.library,
+                target=parameters.target,
+                roles=None,
+                storage=parameters.storage,
+            ),
+            parameter=True,
+        )
+
+    def set_setup_parameter(self, path: str, value: YamlValue) -> None:
+        """Edit an existing concrete setup field in working units.
+
+        Commit through the setup resource, never an existing point. No entry,
+        invalid path/schema, conflict and I/O failures propagate; no retry.
+        """
+        self._owner.assert_owner()
+        if self._setup is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        with self._setup.edit() as draft:
+            draft.set(path, value)
+
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Capture published point/library/storage and all current alias rows.
+
+        aliases optionally maps aliases to temporary component or device names.
+        Names need not belong to the point or device catalog. Overrides retain
+        dependent authored links and change only this
+        capture, never global rows, versions, publication or selection. Invalid
+        identifiers raise InvalidInputError(alias_invalid). $alias returns its
+        name string; $alias.path reads resolve lazily without consumer kind
+        checks. Missing or
+        unbound aliases raise RoleResolutionError naming the alias, with no
+        concrete-name fallback. Bare concrete paths remain independent.
+        The capture never follows later source or alias edits and performs no
+        I/O. EMPTY raises FailedPreconditionError(no_context). Necessary source
+        faults raise ContextSourceUnavailableError, never returning old values.
+        """
+        self._owner.assert_owner()
+        parameters = self._state.session_env.parameters
+        if parameters is None:
+            raise FailedPreconditionError(
+                "No parameter context is installed", reason_code="no_context"
+            )
+        table = self._aliases
+        for alias, component in (aliases or {}).items():
+            table = table.with_override(alias, component)
+        return parameters.bind_aliases(table.rows, {})
+
+    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+        """Read immutable authored global rows without expanding links or I/O."""
+        self._owner.assert_owner()
+        return self._aliases.rows
+
+    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Install a complete ordered memory-only table on the owner sequence.
+
+        Invalid syntax, duplicate names and non-backward $ links raise
+        InvalidInputError(alias_invalid) without changing rows or versions.
+        Bindings are checked only when read, not against the current point here.
+        A changed table bumps context once and publishes AliasesChangedPayload
+        after installation. An identical explicit submission publishes nothing
+        but still prevents later default initialization. No file or ledger write.
+        """
+        self._owner.assert_owner()
+        previous = self._aliases.rows
+        self._aliases.replace(rows)
+        self._aliases_initialized = True
+        if self._aliases.rows != previous:
+            self._state.version.bump("context")
+            self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
+
+    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Explicitly confirm authored rows, saving only when an entry is open.
+
+        On the owner thread, validate syntax/order through AliasTable, then save
+        through the entry before installing memory and publishing changes. EMPTY
+        succeeds in memory only. InvalidInputError(alias_invalid) or storage I/O
+        errors preserve old rows, versions and destination file; storage causes
+        propagate unchanged. Identical rows still save but publish no event.
+        Successful Apply disables default initialization. No ledger or point
+        write occurs; set_alias_rows remains memory-only.
+        """
+        self._owner.assert_owner()
+        candidate = AliasTable(rows)
+        if self._entry is not None:
+            self._entry.save_aliases(
+                EntryAliases(aliases={row.alias: row.value for row in candidate.rows})
+            )
+        self.set_alias_rows(candidate.rows)
+
+    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+        """Return historical storage for a fixed capture on the owner sequence.
+
+        Current entry and point are not read. Source faults propagate;
+        draft/unbound captures raise FailedPreconditionError(storage_unavailable).
+        No refresh, file write, output reservation or ledger append occurs.
+        """
+        self._owner.assert_owner()
+        return parameters.capture_storage()
+
+    def read_target(
+        self, target: ContextTarget, *, roles: RoleBinding | None = None
+    ) -> ParameterContext:
+        """Read current values at a fixed target without changing selection.
+
+        SavedPoint opens independent point/library views in the currently opened
+        entry and may perform file I/O. EntryDraft reads the published memory
+        draft and requires that draft to remain selected. Supplied role names
+        stay fixed. Cross-entry, stale draft, missing point, schema, source and
+        I/O failures propagate. This read publishes no versions or events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        if isinstance(target, EntryDraft):
+            parameters = self._published_parameters()
+            return ParameterContext(
+                point=parameters.document(),
+                library=parameters.library,
+                target=target,
+                roles=roles,
+                storage=parameters.storage,
+            )
+        point = entry.use_point(target.point)
+        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        library = entry.module_library(target.point, assets=assets)
+        return ParameterContext(
+            point=snapshot(point),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+            storage=capture_point_storage(point),
+        )
+
+    def set_parameter(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write one concrete component/general path in working units.
+
+        Use the captured target, not the current selection. SavedPoint writes
+        one point file in the opened entry; a nonselected point stays unselected.
+        EntryDraft requires that entry's current memory-only DRAFT and writes
+        no point file. Omitted source records manual provenance; explicit source
+        is validated against this entry's ledger. Success publishes only when
+        writing the selected target, after resource commit/validation.
+        Cross-entry, stale DRAFT, path/schema/source, conflict and I/O failures
+        propagate without publishing a candidate. No retry or batch receipt.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            document = entry.updated_point(
+                parameters.document(), path, value, source=source
+            )
+        else:
+            point = (
+                self._point
+                if target == parameters.target and self._point is not None
+                else entry.use_point(target.point)
+            )
+            with point.edit() as draft:
+                draft.set(path, value, provenance=source)
+            document = snapshot(point)
+            self._points = tuple(
+                replace(info, description=document.general.description or "")
+                if info.label == target.point
+                else info
+                for info in self._points
+            )
+            if target != parameters.target:
+                return
+        self._publish_write(
+            ParameterContext(
+                point=document,
+                library=parameters.library,
+                target=target,
+                roles=None,
+                storage=(
+                    replace(
+                        parameters.storage, description=document.general.description
+                    )
+                    if parameters.storage is not None
+                    else None
+                ),
+            ),
+            parameter=True,
+        )
+
+    def set_module(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: ModuleSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a validated ModuleSpec at a concrete library root.
+
+        Target/publication/source/error rules match set_parameter. SavedPoint
+        uses one library transaction; DRAFT replaces an isolated memory library.
+        No lowering, materialization, accepted event production or batch receipt.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            library = parameters.library.replaced_module(path, value, provenance=source)
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, target, parameters)
+            with handle.edit() as draft:
+                draft.set_module(path, value, provenance=source)
+            if target != parameters.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=parameters.document(),
+                library=library,
+                target=target,
+                roles=None,
+                storage=parameters.storage,
+            ),
+            parameter=False,
+        )
+
+    def set_waveform(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: WaveformSpec,
+        *,
+        source: Provenance | None = None,
+    ) -> None:
+        """Write a WaveformSpec at a concrete waveforms root.
+
+        Target/publication/source/error rules match set_module. Owner rejects
+        invalid roots/families/sources before installing any candidate.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(target)
+        parameters = self._published_parameters()
+        if isinstance(target, EntryDraft):
+            library = parameters.library.replaced_waveform(
+                path, value, provenance=source
+            )
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, target, parameters)
+            with handle.edit() as draft:
+                draft.set_waveform(path, value, provenance=source)
+            if target != parameters.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=parameters.document(),
+                library=library,
+                target=target,
+                roles=None,
+                storage=parameters.storage,
+            ),
+            parameter=False,
+        )
+
+    def apply_library_change(
+        self,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> None:
+        """Apply one structure command to the captured target, lowering before writes.
+
+        parameters supplies fixed expression/reference data and the destination.
+        change uses concrete library roots; it never resolves global aliases.
+        App callbacks lower only put/replace schemas, without writing resources.
+        Rename moves Spec and sources; delete does not cascade references.
+        Replace checks source/destination and commits relocation plus value in
+        one library transaction. Draft is memory-only and must remain selected.
+        Same-entry nonselected SavedPoint writes do not select or publish.
+        Cross-entry/stale draft/lowering/schema/source/conflict/I/O failures
+        propagate, leaving this command uncommitted and publishing no events.
+        """
+        self._owner.assert_owner()
+        entry = self._require_write_target(parameters.target)
+        selected = self._published_parameters()
+        if isinstance(parameters.target, EntryDraft):
+            library = self._library_change_candidate(
+                selected.library,
+                parameters,
+                change,
+                lower_module=lower_module,
+                lower_waveform=lower_waveform,
+            )
+            entry.validate_library(library.document())
+        else:
+            handle = self._write_library(entry, parameters.target, selected)
+            with handle.edit() as draft:
+                candidate = self._library_change_candidate(
+                    draft.snapshot(),
+                    parameters,
+                    change,
+                    lower_module=lower_module,
+                    lower_waveform=lower_waveform,
+                )
+                draft.replace_contents(candidate)
+            if parameters.target != selected.target:
+                return
+            library = handle.snapshot()
+        self._publish_write(
+            ParameterContext(
+                point=selected.document(),
+                library=library,
+                target=parameters.target,
+                roles=None,
+                storage=selected.storage,
+            ),
+            parameter=False,
+        )
+
+    def _library_change_candidate(
+        self,
+        library: LibrarySnapshot,
+        parameters: ParameterContext,
+        change: LibraryChange,
+        *,
+        lower_module: Callable[[CfgSchema, ParameterContext], ModuleSpec],
+        lower_waveform: Callable[[CfgSchema, ParameterContext], WaveformSpec],
+    ) -> LibrarySnapshot:
+        """Prepare one isolated structure change using the resource owner's operations."""
+        destination = change.new_path if change.new_path is not None else change.path
+        if change.action == "delete":
+            return library.deleted(change.path, kind=change.kind)
+        if change.action == "rename":
+            return library.renamed(change.path, destination, kind=change.kind)
+        if change.schema is None:
+            raise InvalidInputError("Library put/replace requires a schema")
+        if change.action == "replace":
+            library.entry_value(change.path, kind=change.kind)
+            if destination != change.path:
+                library = library.renamed(change.path, destination, kind=change.kind)
+        if change.kind == "module":
+            return library.replaced_module(
+                destination, lower_module(change.schema, parameters)
+            )
+        return library.replaced_waveform(
+            destination, lower_waveform(change.schema, parameters)
+        )
+
+    def entry_ledger(self, entry_id: str) -> RecordsLedger:
+        """Return only the currently opened entry's ledger; never append an event.
+
+        No entry raises no_entry; a different UUID raises entry_not_open.
+        Use capture_storage(parameters).ledger for a result's historical origin.
+        Ledger capabilities are not serialized into wire data.
+        """
+        self._owner.assert_owner()
+        return self._require_entry(entry_id).ledger
+
+    def _require_open_entry(self) -> ResultEntry:
+        if self._entry is None:
+            raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
+        return self._entry
+
+    def _require_entry(self, entry_id: str) -> ResultEntry:
+        entry = self._require_open_entry()
+        if entry_id != entry.entry_id:
+            raise FailedPreconditionError(
+                f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
+            )
+        return entry
+
+    def _require_write_target(self, target: ContextTarget) -> ResultEntry:
+        """Reject cross-entry and stale memory targets before opening a resource."""
+        entry = self._require_entry(target.entry_id)
+        if isinstance(target, EntryDraft) and not self.has_draft_context():
+            raise FailedPreconditionError(
+                "The entry's memory DRAFT is no longer selected",
+                reason_code="draft_not_selected",
+            )
+        return entry
+
+    def _published_parameters(self) -> ParameterContext:
+        """Read the carrier without requiring unrelated selected-source data."""
+        parameters = self._state.session_env.parameters
+        if parameters is None:
+            raise RuntimeError("Opened entry has no parameter projection")
+        return parameters
+
+    def _write_library(
+        self, entry: ResultEntry, target: SavedPoint, parameters: ParameterContext
+    ) -> ModuleLibrary:
+        """Use the selected handle for conflicts, or open a detached Spec-only handle."""
+        if target == parameters.target and self._library is not None:
+            return self._library
+        return entry.module_library(target.point)
+
+    def _initialize_aliases(self, components: Mapping[str, ComponentSchema]) -> None:
+        if self._aliases_initialized or not components:
+            return
+        self._aliases_initialized = True
+        if not role_registry.shorthand:
+            return
+        primary = role_registry.shorthand[0]
+        self._aliases.replace(
+            tuple(
+                AliasRow(row.alias, role_registry.default_focus(components) or "")
+                if row.alias == primary and not row.value
+                else row
+                for row in self._aliases.rows
+            )
+        )
+
+    def _publish_write(self, parameters: ParameterContext, *, parameter: bool) -> None:
+        """Install a committed projection/version before its single content fact."""
+        if not self._aliases_initialized and not parameters.source_faults:
+            self._initialize_aliases(parameters.document().components)
+        self._state.set_context(replace(self._state.session_env, parameters=parameters))
+        self._state.version.bump("context")
+        payload = MdChangedPayload if parameter else MlChangedPayload
+        self._bus.emit(
+            payload(binding_id=self._binding_id, content_changed=True, fault=None)
+        )
+
+    def _load_points(self, entry: ResultEntry) -> tuple[WorkingPointInfo, ...]:
+        return tuple(
+            WorkingPointInfo(
+                label, snapshot(entry.use_point(label)).general.description or ""
+            )
+            for label in entry.list_points()
+        )
+
+    def _prepare_point(
+        self, entry: ResultEntry, label: str, point: PointView
+    ) -> tuple[
+        ParameterContext, ModuleLibrary, tuple[ContextSource, ...], WorkingPointInfo
+    ]:
+        if self._setup is None:
+            raise RuntimeError("Opened entry has no setup binding")
+        assets = self._bind_assets(entry.database_path / "arb_waveforms")
+        library = entry.module_library(label, assets=assets)
+        document = snapshot(point)
+        parameters = ParameterContext(
+            point=document,
+            library=library.snapshot(),
+            target=SavedPoint(entry_id=entry.entry_id, point=label),
+            roles=None,
+            storage=capture_point_storage(point),
+        )
+        sources = (
+            ContextSource("setup", source_path(self._setup), None),
+            ContextSource("point", source_path(point), None),
+            ContextSource("module_cfg", library.source_path, None),
+        )
+        info = WorkingPointInfo(label, document.general.description or "")
+        return parameters, library, sources, info
+
+    def _install_point(
+        self,
+        point: PointView,
+        library: ModuleLibrary,
+        parameters: ParameterContext,
+        sources: tuple[ContextSource, ...],
+        info: WorkingPointInfo,
+    ) -> None:
+        points = {cached.label: cached for cached in self._points}
+        points[info.label] = info
+        self._points = tuple(points[label] for label in sorted(points))
+        self._point = point
+        self._library = library
+        self._publish(
+            parameters, sources, ContextReadiness.ACTIVE, active_label=info.label
+        )
+
+    def _publish(
+        self,
+        parameters: ParameterContext | None,
+        sources: tuple[ContextSource, ...],
+        readiness: ContextReadiness,
+        *,
+        active_label: str,
+    ) -> None:
+        components = parameters.document().components if parameters is not None else {}
+        self._initialize_aliases(components)
+        if parameters is None:
+            self._source_binding = None
+        else:
+            self._binding_id += 1
+            self._source_binding = ContextSourceBinding(self._binding_id, sources)
+        info = self._entry_info
+        self._state.set_context(
+            replace(
+                self._state.session_env,
+                parameters=parameters,
+                result_dir=str(info.result_path) if info is not None else "",
+                database_path=str(info.database_path) if info is not None else "",
+                active_label=active_label,
+                readiness=readiness,
+            )
+        )
+        self._state.version.bump("context")
+        self._bus.emit(
+            ContextSwitchedPayload(
+                binding_id=self._source_binding.binding_id
+                if self._source_binding
+                else None,
+                sources=self.get_source_binding(),
+            )
+        )
+
+    def get_session_env(self) -> SessionEnv:
+        """Return the currently published environment; not a frozen Run snapshot."""
+        return self._state.session_env
 
     def has_context(self) -> bool:
-        """True when any valid context exists (in-memory DRAFT or file-backed ACTIVE)."""
+        """Return whether any DRAFT/ACTIVE parameter environment is published."""
         return self._state.session_env.has_context()
 
     def has_draft_context(self) -> bool:
+        """Return whether the published environment is memory-only DRAFT."""
         return self._state.session_env.is_draft()
 
     def is_active_context(self) -> bool:
-        """True only for a file-backed context eligible for run and save."""
+        """Return whether the published environment targets a persisted point."""
         return self._state.session_env.is_active()
 
-    def get_active_context_label(self) -> str | None:
-        return self._io.get_active_label()
-
-    def get_context_labels(self) -> list[str]:
-        return self._io.list_contexts()
-
-    def get_current_md(self) -> MetaDict:
-        return self._state.session_env.md
-
-    def get_current_ml(self) -> ModuleLibrary:
-        return self._state.session_env.ml
-
-    def get_session_env(self) -> SessionEnv:
-        """The live SessionEnv (md + ml + …) — used to seed role templates."""
-        return self._state.session_env
-
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
+        """Describe cached session values without reading hardware or files."""
         return self._values.describe()
 
     def read_value_source(
         self, key: str, type_name: str | None = None
     ) -> tuple[ValueInfo, ScalarValue]:
-        ref = ValueRef(key=key, type_name=type_name)
-        info = self._value_info(ref.key)
-        return info, resolve_value_ref(ref, self._values)
+        """Resolve one registered value, optionally as int/float/str/bool.
 
-    def _value_info(self, key: str) -> ValueInfo:
+        Return its description and scalar. Unknown keys raise MissingValue;
+        conversion/provider errors propagate through the ValueLookup contract.
+        """
+        ref = ValueRef(key=key, type_name=type_name)
         for info in self._values.describe():
             if info.key == key:
-                return info
+                return info, resolve_value_ref(ref, self._values)
         raise MissingValue(key, f"Value source {key!r} is not registered")
-
-    def get_flux_dir(self) -> str | None:
-        import os
-
-        ctx = self._state.session_env
-        label = self._io.get_active_label()
-        if ctx.result_dir and label:
-            return os.path.join(ctx.result_dir, "exps", label)
-        return None
-
-    def setup_project(self, result_dir: str) -> None:
-        logger.info("setup_project: result_dir=%r", result_dir)
-        self._io.setup(result_dir)
-
-    def set_project_context(
-        self,
-        md: Any,
-        ml: Any,
-        chip_name: str = "unknown_chip",
-        qub_name: str = "unknown_qubit",
-        res_name: str = "unknown_resonator",
-        result_dir: str = "",
-        database_path: str = "",
-    ) -> None:
-        logger.info(
-            "set_project_context: chip=%r qub=%r res=%r result_dir=%r db=%r",
-            chip_name,
-            qub_name,
-            res_name,
-            result_dir,
-            database_path,
-        )
-        new_ctx = self._attach_values(
-            dataclasses.replace(
-                self._state.session_env,
-                md=md,
-                ml=ml,
-                chip_name=chip_name,
-                qub_name=qub_name,
-                res_name=res_name,
-                result_dir=result_dir,
-                database_path=database_path,
-                active_label="",
-                readiness=ContextReadiness.DRAFT,
-            )
-        )
-        self._state.set_context(new_ctx)
-        # md/ml content is fully swapped → bump context (path 2 of 2; see the
-        # canonical anchor on ContextService.set_md_attr). set_context itself does
-        # not bump, so context-switch callers bump here explicitly.
-        self._state.version.bump("context")
-        self._bus.emit(
-            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
-        )
-
-    def use_context(self, label: str) -> None:
-        logger.info("use_context: label=%r", label)
-        new_ctx = self._io.use_context(label, self._state.session_env)
-        new_ctx = self._attach_values(
-            dataclasses.replace(
-                new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
-            )
-        )
-        self._state.set_context(new_ctx)
-        self._state.version.bump("context")
-        self._bus.emit(
-            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
-        )
-
-    def new_context(
-        self,
-        value: float | None = None,
-        unit: str = "none",
-        clone_from: str | None = None,
-        label: str | None = None,
-    ) -> None:
-        if label is not None and (
-            not label.strip()
-            or label in {".", ".."}
-            or any(
-                char in "/\\" or ord(char) < 32 or ord(char) == 127 for char in label
-            )
-        ):
-            raise InvalidInputError(
-                "context label must be a nonempty path segment without separators or control characters",
-                reason_code="invalid_context_label",
-            )
-        if clone_from is not None:
-            available = self._io.list_contexts()
-            if clone_from not in available:
-                raise InvalidInputError(
-                    f"unknown context label: {clone_from!r}; available: {available}",
-                    reason_code="unknown_context",
-                )
-        logger.info(
-            "new_context: value=%r unit=%r clone_from=%r label=%r",
-            value,
-            unit,
-            clone_from,
-            label,
-        )
-        new_ctx = self._io.new_context(
-            self._state.session_env,
-            value=value,
-            unit=unit,
-            clone_from=clone_from,
-            label=label,
-        )
-        label = self._io.get_active_label() or ""
-        new_ctx = self._attach_values(
-            dataclasses.replace(
-                new_ctx, active_label=label, readiness=ContextReadiness.ACTIVE
-            )
-        )
-        self._state.set_context(new_ctx)
-        self._state.version.bump("context")
-        self._bus.emit(
-            ContextSwitchedPayload(md=new_ctx.md, ml=new_ctx.ml),
-        )
-
-    def create_md_attr(self, key: str, value: Any) -> None:
-        """Create one new MetaDict key after validating the complete request.
-
-        Validation happens before the atomic snapshot commit, so collisions and
-        invalid keys cannot leave a partially-created entry or emit a fact.
-        """
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        _validate_md_key(key)
-        md = self._state.session_env.md
-        snapshot = dict(md.items())
-        if key in snapshot:
-            raise FailedPreconditionError(f"MetaDict already has attribute {key!r}.")
-        snapshot[key] = value
-        md.replace_contents(snapshot)
-        self._state.version.bump("context")
-        self._bus.emit(MdChangedPayload(md=md))
-
-    def rename_md_attr(self, old: str, new: str) -> None:
-        """Atomically rename one MetaDict key without a set-then-delete gap."""
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        _validate_md_key(old)
-        _validate_md_key(new)
-        md = self._state.session_env.md
-        snapshot = dict(md.items())
-        if old not in snapshot:
-            raise FailedPreconditionError(f"MetaDict has no attribute {old!r}.")
-        if new in snapshot:
-            raise FailedPreconditionError(f"MetaDict already has attribute {new!r}.")
-        snapshot[new] = snapshot.pop(old)
-        md.replace_contents(snapshot)
-        self._state.version.bump("context")
-        self._bus.emit(MdChangedPayload(md=md))
-
-    def set_md_attr(self, key: str, value: Any) -> None:
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        try:
-            _validate_md_key(key)
-        except FailedPreconditionError as exc:
-            raise InvalidInputError(str(exc), reason_code="invalid_md_key") from exc
-        md = self._state.session_env.md
-        setattr(md, key, value)
-        # Semantic context content change: bump so concurrency guards on
-        # ``context`` (tab.run_start / editor.commit / tab.writeback_apply) detect this edit.
-        #
-        # CANONICAL ANCHOR — "a completed md/ml write bumps context" has TWO physical
-        # paths (ADR-0067 collapsed writeback's direct write into path 1):
-        #   1. ContextService writes: create_md_attr / rename_md_attr / set_md_attr /
-        #      del_md_attr / replace_ml_*_from_schema / del_ml_* (field-level, each
-        #      bumps+emits) and apply_ml_writes (batch: prepare without live writes, then one bump +
-        #      one emit per kind; persistence errors occur after publication). Writeback / editor commit / inspect /
-        #      create_from_template all route here — the single write authority.
-        #   2. context-switch: setup_project / use_context / new_context  (whole md/ml swap)
-        # Both bump "context"; only set_context() itself does NOT (pure swap).
-        self._state.version.bump("context")
-        self._bus.emit(MdChangedPayload(md=md))
-
-    def del_md_attr(self, key: str) -> None:
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        md = self._state.session_env.md
-        try:
-            delattr(md, key)
-        except AttributeError as exc:
-            raise FailedPreconditionError(str(exc)) from exc
-        self._state.version.bump("context")
-        self._bus.emit(MdChangedPayload(md=md))
-
-    # ------------------------------------------------------------------
-    # ml/md content writes — the single write authority (ADR-0067).
-    #
-    # ``apply_ml_writes`` owns the *write sequence*: it sets md attrs +
-    # registers the (lowered) ml entries and, once every step succeeds, bumps the
-    # ``context`` version + emits at most one MD_CHANGED + one ML_CHANGED. It does
-    # not roll back a partial failure. The CfgSchema *lowering* is
-    # experiment-coupled, so it stays app-side and is injected as the
-    # ``lower_module`` / ``lower_waveform`` callbacks (the app's ContextWritePort
-    # façade builds them); this keeps ContextService free of the cfg-tree while
-    # still being the sole owner of the bump/emit/persistence.
-    # ------------------------------------------------------------------
-
-    def apply_ml_writes(
-        self,
-        md: Mapping[str, Any],
-        modules: Mapping[str, Any],
-        waveforms: Mapping[str, Any],
-        *,
-        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        dump: bool,
-    ) -> None:
-        """Prepare a whole batch in memory, publish once, then persist.
-
-        Later entries see earlier candidate writes, never partial live writes.
-        Preparation failures leave both stores and their version untouched.
-        Storage failures after publication report that settings were applied;
-        they do not roll back or retry the batch. ``dump`` requests an explicit
-        library dump in addition to the stores' normal synchronization policy.
-        """
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        if not (md or modules or waveforms):
-            return
-        ctx = self._state.session_env
-        candidate_md, candidate_ml = snapshot_context_contents(ctx.md, ctx.ml)
-        candidate_md.update(md)
-        for name, entry in modules.items():
-            candidate_ml.register_module(
-                **{name: lower_module(entry, candidate_ml, candidate_md)}
-            )
-        for name, entry in waveforms.items():
-            candidate_ml.register_waveform(
-                **{name: lower_waveform(entry, candidate_ml, candidate_md)}
-            )
-        touched_ml = bool(modules or waveforms)
-        replace_context_contents(
-            ctx.md,
-            ctx.ml,
-            metadata=candidate_md if md else None,
-            library=candidate_ml if touched_ml else None,
-        )
-        self._state.version.bump("context")
-        if md:
-            self._bus.emit(MdChangedPayload(md=ctx.md))
-        if touched_ml:
-            self._bus.emit(MlChangedPayload(ml=ctx.ml))
-        try:
-            if md:
-                ctx.md.sync()
-            if touched_ml:
-                if dump and ctx.ml.has_persistence:
-                    ctx.ml.dump()
-                else:
-                    ctx.ml.sync()
-        except Exception as exc:
-            logger.exception("Context settings applied, but saving failed")
-            raise RuntimeError("Settings were applied, but saving failed.") from exc
-
-    def replace_ml_module_from_schema(
-        self,
-        old_name: str,
-        new_name: str,
-        schema: Any,
-        *,
-        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        dump: bool = False,
-    ) -> None:
-        """Atomically replace one module name and its cfg.
-
-        The replacement validates the names and lowers the complete schema before
-        touching the live ``ModuleLibrary``.  A collision, missing source, or
-        lowering failure therefore leaves both the live entry and the caller's
-        draft unchanged.  A successful replacement is one ContextService-owned
-        content mutation: it bumps ``context`` once and emits one ``ML_CHANGED``.
-        """
-        self._replace_ml_entry_from_schema(
-            "module",
-            old_name,
-            new_name,
-            schema,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=dump,
-        )
-
-    def replace_ml_waveform_from_schema(
-        self,
-        old_name: str,
-        new_name: str,
-        schema: Any,
-        *,
-        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        dump: bool = False,
-    ) -> None:
-        """Atomically replace one waveform name and its cfg; see module variant."""
-        self._replace_ml_entry_from_schema(
-            "waveform",
-            old_name,
-            new_name,
-            schema,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=dump,
-        )
-
-    def _replace_ml_entry_from_schema(
-        self,
-        item_kind: str,
-        old_name: str,
-        new_name: str,
-        schema: Any,
-        *,
-        lower_module: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        lower_waveform: Callable[[Any, ModuleLibrary, MetaDict], Any],
-        dump: bool = False,
-    ) -> None:
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        if not old_name or not new_name:
-            raise FailedPreconditionError("ModuleLibrary names must not be empty.")
-
-        ctx = self._state.session_env
-        store = ctx.ml.modules if item_kind == "module" else ctx.ml.waveforms
-        if old_name not in store:
-            raise FailedPreconditionError(f"No {item_kind} named {old_name!r}.")
-        if old_name != new_name and new_name in store:
-            raise FailedPreconditionError(
-                f"A {item_kind} named {new_name!r} already exists."
-            )
-
-        # Lower and construct the replacement before the first live write.  The
-        # lower callback is the app-owned cfg boundary; ContextService remains
-        # the only owner of the resulting ModuleLibrary mutation.
-        lower = lower_module if item_kind == "module" else lower_waveform
-        replacement = lower(schema, ctx.ml, ctx.md)
-        if item_kind == "module":
-            ctx.ml.register_module(**{new_name: replacement})
-            if old_name != new_name:
-                ctx.ml.delete_module(old_name)
-        else:
-            ctx.ml.register_waveform(**{new_name: replacement})
-            if old_name != new_name:
-                ctx.ml.delete_waveform(old_name)
-
-        if dump and ctx.ml.has_persistence:
-            ctx.ml.dump()
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ctx.ml))
-
-    def del_ml_module(self, name: str) -> None:
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        ml = self._state.session_env.ml
-        ml.delete_module(name)
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ml))
-
-    def coerce_md_value(self, key: str, text: str) -> Any:
-        """Convert a user-typed string into a typed value for MetaDict[key].
-
-        - If the key exists in the live MetaDict, coerce to that key's existing
-          Python type (int/float/bool/str) and reject conversions that lose
-          information.
-        - If the key does not yet exist, accept only scalar text values: int,
-          float, bool, and bare strings. Reject complex literals (lists, tuples,
-          dicts) — those need to go through a structured editor, not a string
-          parser. This is intentionally narrower than ast.literal_eval, which
-          turned `"1, 2"` into a tuple silently.
-
-        Raises MdValueError on any conversion that cannot be performed safely.
-        """
-        existing = self._state.session_env.md
-        current = getattr(existing, key, None) if self.has_context() else None
-        return _coerce_scalar(text, current)
-
-    def del_ml_waveform(self, name: str) -> None:
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        ml = self._state.session_env.ml
-        ml.delete_waveform(name)
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ml))
-
-    def rename_ml_module(self, old: str, new: str) -> None:
-        """Rename an ml module by re-registering under ``new`` and deleting ``old``.
-
-        LINKED cfg references keep ``old`` and become invalid while it is missing;
-        restoring the key relinks them. MODIFIED references keep their inline
-        Custom values. The single ML_CHANGED below refreshes drafts. A clash
-        at the new name fails fast.
-        """
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        if not new:
-            raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.session_env.ml
-        if old not in ml.modules:
-            raise FailedPreconditionError(f"No module named {old!r}.")
-        if new in ml.modules:
-            raise FailedPreconditionError(f"A module named {new!r} already exists.")
-        ml.register_module(**{new: ml.modules[old]})
-        ml.delete_module(old)
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ml))
-
-    def rename_ml_waveform(self, old: str, new: str) -> None:
-        """Rename an ml waveform (see :meth:`rename_ml_module`)."""
-        if not self.has_context():
-            raise FailedPreconditionError("No experiment context.")
-        if not new:
-            raise FailedPreconditionError("New name must not be empty.")
-        ml = self._state.session_env.ml
-        if old not in ml.waveforms:
-            raise FailedPreconditionError(f"No waveform named {old!r}.")
-        if new in ml.waveforms:
-            raise FailedPreconditionError(f"A waveform named {new!r} already exists.")
-        ml.register_waveform(**{new: ml.waveforms[old]})
-        ml.delete_waveform(old)
-        self._state.version.bump("context")
-        self._bus.emit(MlChangedPayload(ml=ml))

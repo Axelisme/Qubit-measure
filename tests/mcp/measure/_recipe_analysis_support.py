@@ -2,11 +2,13 @@
 
 import base64
 from copy import deepcopy
+from dataclasses import asdict
 from threading import Event
 
 from zcu_tools.mcp.measure.analysis_execution import AnalysisStage, AnalysisWriteback
 
 from ._recipe_support import PNG, LookbackGui
+from ._save_report_support import analysis_report
 
 
 class AnalysisRecipeGui(LookbackGui):
@@ -34,7 +36,7 @@ class AnalysisRecipeGui(LookbackGui):
                 items=[
                     {
                         "id": f"{stage}-draft",
-                        "kind": "metadict",
+                        "kind": "parameter",
                         "target_name": name,
                         "current": 1.0,
                         "proposed": 2.0,
@@ -105,7 +107,7 @@ class AnalysisRecipeGui(LookbackGui):
         if method in (
             "tab.get_analyze_result",
             "tab.get_post_analyze_result",
-            "tab.save_image",
+            "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
         ):
@@ -133,12 +135,15 @@ class AnalysisRecipeGui(LookbackGui):
                     f"{pane}_state": {"figure_names": list(self.names[stage])}
                 },
             }
-        if method in ("tab.save_image", "tab.get_figure", "tab.writeback_preview"):
+        if method == "tab.save_artifacts":
+            stage = self.stage_for_operation(params)
+            pane = "analysis" if stage == "primary" else "post_analysis"
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(analysis_report(pane, self.names[stage]))
+        if method in ("tab.get_figure", "tab.writeback_preview"):
             stage = self.stage_for_operation(params)
             pane = "analysis" if stage == "primary" else "post_analysis"
             assert params["subtab_id"] == pane
-            if method == "tab.save_image":
-                return {"image_path": f"/actual/{params['figure_name']}.png"}
             if method == "tab.get_figure":
                 return {"png_b64": base64.b64encode(PNG).decode()}
             preview = self.writebacks[stage]

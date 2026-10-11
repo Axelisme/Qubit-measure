@@ -1,10 +1,9 @@
-"""Library mutations and active draft projections through the live MCP socket."""
+"""Native library mutations projected through the live MCP socket."""
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
+from zcu_tools.cfg_model import ModuleCfgFactory, WaveformCfgFactory
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
@@ -16,17 +15,16 @@ from zcu_tools.gui.cfg import (
     ReferenceSpec,
     ReferenceValue,
 )
-from zcu_tools.program.v2 import ModuleCfgFactory, WaveformCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.cfg.resource import CfgEdit
+from zcu_tools.gui.session.context_types import LibraryChange
 
 from ._helpers import Fixture, mcp_client
 
 
 @pytest.fixture(params=["module", "waveform"])
 def reference_library(request):
-    """Real program configs shared by linked and locally modified references."""
+    """Real program schemas for ref and explicit inline references."""
     kind = request.param
-    library = ModuleLibrary()
     if kind == "module":
         cfg = ModuleCfgFactory.from_raw(
             {
@@ -41,41 +39,46 @@ def reference_library(request):
                 "waveform": {"style": "const", "length": 0.1},
             }
         )
-        library.modules["seed"] = cfg
         spec, value = module_cfg_to_value(cfg)
-        field = "gain"
+        field, path = "gain", "Q1.pulses.seed"
     else:
-        waveform = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
-        library.waveforms["seed"] = waveform
-        spec, value = waveform_cfg_to_value(waveform)
-        field = "length"
-    return kind, library, spec, value, field
+        cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
+        spec, value = waveform_cfg_to_value(cfg)
+        field, path = "length", "Q1.waveforms.seed"
+    return kind, spec, value, field, path
 
 
 @pytest.mark.parametrize("action", ["rename", "del"])
-def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
-    qapp, tmp_path, monkeypatch, reference_library, action
+def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
+    qapp,
+    tmp_path,
+    monkeypatch,
+    reference_library,
+    action,
+    point_models,
+    point_registry_guard,
 ):
-    kind, library, spec, value, field = reference_library
+    kind, spec, value, field, path = reference_library
+    fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
+    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
+    fx.ctrl.apply_library_change(
+        fx.ctrl.read_context(),
+        LibraryChange(kind, "put", path, schema=CfgSchema(spec, value)),
+    )
     schema = CfgSchema(
         CfgSectionSpec(
-            fields={
-                name: ReferenceSpec(kind, [spec]) for name in ("linked", "modified")
-            }
+            fields={name: ReferenceSpec(kind, [spec]) for name in ("linked", "inline")}
         ),
         CfgSectionValue(
-            {name: ReferenceValue("seed", value) for name in ("linked", "modified")}
+            {name: ReferenceValue(path, value) for name in ("linked", "inline")}
         ),
     )
-    fx = Fixture(active_label="ctx001")
-    fx.state.set_context(replace(fx.state.session_env, md=MetaDict(), ml=library))
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     tab_id = "references"
     cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("modified", field), 0.75),))
+    converted = cfg.convert_reference_to_inline(cfg.observe().ref.revision, ("inline",))
+    cfg.edit(converted.ref.revision, (CfgEdit(("inline", field), 0.75),))
     fx.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
@@ -85,36 +88,42 @@ def test_library_mutation_refreshes_linked_and_modified_tab_drafts(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
         )["tree"]
         assert before["children"]["linked"]["valid"] is True
-        assert before["children"]["linked"]["ref"] == "seed"
-        assert before["children"]["modified"]["valid"] is True
-        invoke("rpc_call", {"method": "context.snapshot"})
-        arguments = (
-            {"old": "seed", "new": "moved"} if action == "rename" else {"name": "seed"}
-        )
-        invoke(
-            "rpc_call", {"method": f"context.ml_{action}_{kind}", "params": arguments}
+        assert before["children"]["linked"]["ref"] == path
+        assert before["children"]["linked"]["mode"] == "ref"
+        assert before["children"]["inline"]["mode"] == "inline"
+        fx.ctrl.apply_library_change(
+            fx.ctrl.read_context(),
+            LibraryChange(
+                kind,
+                "rename" if action == "rename" else "delete",
+                path,
+                new_path=path.replace("seed", "moved") if action == "rename" else None,
+            ),
         )
         after = invoke(
             "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
         )["tree"]
         linked = after["children"]["linked"]
-        assert linked["ref"] == "seed"
+        assert linked["ref"] == path
         assert linked["valid"] is False
         assert linked["error"] is not None
-        modified = after["children"]["modified"]
-        assert modified["ref"] == "seed"
-        assert modified["is_overridden"] is True
-        assert modified["valid"] is True
-        assert modified["children"][field]["input"]["resolved"] == 0.75
+        inline = after["children"]["inline"]
+        assert inline["mode"] == "inline"
+        assert inline["valid"] is True
+        assert inline["children"][field]["input"]["resolved"] == 0.75
         published = cfg.snapshot_inputs().value.fields
-        published_linked = published["linked"]
-        published_modified = published["modified"]
+        published_linked, published_inline = published["linked"], published["inline"]
         assert isinstance(published_linked, ReferenceValue)
-        assert isinstance(published_modified, ReferenceValue)
-        assert published_linked.chosen_key == "seed"
-        assert linked["error"] is not None
-        assert published_modified.chosen_key == "seed"
-        assert published_modified.is_overridden is True
+        assert isinstance(published_inline, ReferenceValue)
+        assert published_linked.chosen_key == path
+        assert published_inline.chosen_key == f"<Custom:{spec.label}>"
+        published_inline.value.fields.clear()
+        again = invoke(
+            "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
+        )["tree"]
+        assert (
+            again["children"]["inline"]["children"][field]["input"]["resolved"] == 0.75
+        )
     finally:
         bridge.disconnect()
         fx.stop()

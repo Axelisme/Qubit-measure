@@ -34,8 +34,12 @@ from zcu_tools.gui.cfg.resource import (
     CfgStatus,
     SourceRevision,
 )
+from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.session.context_types import EntryDraft
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
-from zcu_tools.resources.context import MetaDict
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry.schema import PointDocument
 
 
 class EmptyReferences:
@@ -44,10 +48,6 @@ class EmptyReferences:
 
     def resolve(self, kind: str, key: str) -> ResolvedReference | None:
         return None
-
-
-def make_range(start: float, stop: float, *, expts: int) -> object:
-    return {"start": start, "stop": stop, "expts": expts}
 
 
 @dataclass
@@ -92,7 +92,46 @@ def defaults() -> CfgSchema:
 
 def make_resource(sources: Sources | None = None) -> CfgResource:
     source = sources or Sources()
-    return CfgResource(defaults, resolution=source.read, make_range=make_range)
+    return CfgResource(defaults, resolution=source.read)
+
+
+@pytest.mark.parametrize("edge", ["start", "stop"])
+@pytest.mark.parametrize("mode", ["direct", "expression"])
+def test_invalid_sweep_endpoint_error_is_published_in_diagnostics(
+    edge: str, mode: str
+) -> None:
+    value = (
+        DirectValue(None, raw="invalid", error=f"Invalid {edge} endpoint")
+        if mode == "direct"
+        else EvalValue("$qubit.freq")
+    )
+    sweep = SweepValue(
+        start=value if edge == "start" else 0.0,
+        stop=value if edge == "stop" else 1.0,
+        expts=3,
+    )
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"range": SweepSpec()}),
+        CfgSectionValue(fields={"range": sweep}),
+    )
+    resolution = CfgResolution(
+        (),
+        lambda expression: evaluate_scalar_expr(expression, None),
+        lambda source_id: (),
+        EmptyReferences(),
+        lambda key: 0.0,
+        validate_scalar_expr,
+    )
+    resource = CfgResource(lambda: schema, resolution=lambda: resolution)
+    try:
+        observation = resource.observe()
+        assert observation.status is CfgStatus.INVALID
+        expected = f"Invalid {edge} endpoint" if mode == "direct" else "$qubit.freq"
+        assert any(expected in item.message for item in observation.diagnostics)
+        with pytest.raises(CfgPreconditionError):
+            resource.accept(observation.ref.revision)
+    finally:
+        resource.revoke()
 
 
 def test_restore_skips_defaults_until_reset_and_detaches_input_snapshot() -> None:
@@ -105,9 +144,7 @@ def test_restore_skips_defaults_until_reset_and_detaches_input_snapshot() -> Non
     initial = defaults()
     initial.value.fields["a"] = DirectValue(7.0)
     source = Sources()
-    resource = CfgResource(
-        fresh_defaults, initial=initial, resolution=source.read, make_range=make_range
-    )
+    resource = CfgResource(fresh_defaults, initial=initial, resolution=source.read)
     before = resource.observe()
     initial.value.fields["a"] = DirectValue(99.0)
     assert resource.accept(before.ref.revision).values["a"] == 7.0
@@ -170,7 +207,6 @@ def test_owner_replacement_obeys_revision_busy_reentry_and_revocation() -> None:
     resource = CfgResource(
         defaults,
         resolution=Sources().read,
-        make_range=make_range,
         mutation_allowed=lambda: allowed,
     )
     before = resource.observe()
@@ -273,6 +309,180 @@ def test_observe_and_accept_never_read_sources_and_accept_is_detached() -> None:
     assert refreshed.source_basis[0].revision == 1
 
 
+def test_one_off_acceptance_resolves_invalid_inputs_without_publication() -> None:
+    sources = Sources()
+    published = sources.read()
+
+    def unbound(expression: str) -> float:
+        raise InvalidInputError(f"Unbound alias in {expression}")
+
+    published = replace(published, evaluate_expression=unbound)
+    initial = defaults()
+    initial.value.fields["a"] = EvalValue("$qubit.t1")
+    resource = CfgResource(defaults, initial=initial, resolution=lambda: published)
+    before = resource.observe()
+    assert before.status is CfgStatus.INVALID
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    temporary = Sources(revision=7, values={"$qubit.t1": 9.0}).read()
+    preview = resource.preview(before.ref.revision, resolution=temporary)
+    assert preview.ref == before.ref
+    assert preview.status is CfgStatus.VALID
+    assert preview.source_basis == temporary.source_basis
+    value = preview.tree.children["a"].value
+    assert isinstance(value, EvalValue)
+    assert value.resolved == 9.0
+    assert (
+        resource.preview(before.ref.revision, resolution=published).status
+        is CfgStatus.INVALID
+    )
+
+    accepted = resource.accept(before.ref.revision, resolution=temporary)
+
+    assert accepted.ref == before.ref
+    assert accepted.source_basis == temporary.source_basis
+    assert accepted.values["a"] == 9.0
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert seen == [before]
+    accepted.values["a"] = 99.0
+    assert resource.accept(before.ref.revision, resolution=temporary).values["a"] == 9.0
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept(before.ref.revision)
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+
+
+def test_one_off_acceptance_does_not_replace_cached_values_or_read_factory() -> None:
+    sources = Sources()
+    resource = make_resource(sources)
+    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    reads = sources.reads
+    temporary = Sources(revision=3, values={"frequency": 12.0}).read()
+
+    accepted = resource.accept(before.ref.revision, resolution=temporary)
+
+    assert accepted.values["a"] == 12.0
+    assert accepted.source_basis == temporary.source_basis
+    assert resource.accept(before.ref.revision).values["a"] == 2.0
+    assert sources.reads == reads
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert seen == [before]
+
+
+@pytest.mark.parametrize("unexpected", [False, True])
+def test_one_off_acceptance_failure_keeps_inputs_and_publication(
+    unexpected: bool,
+) -> None:
+    resource = make_resource()
+    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+
+    def fail(expression: str) -> float:
+        if unexpected:
+            raise RuntimeError("resolver bug")
+        raise InvalidInputError(f"Unavailable alias in {expression}")
+
+    temporary = replace(Sources().read(), evaluate_expression=fail)
+    if unexpected:
+        with pytest.raises(RuntimeError, match="resolver bug"):
+            resource.accept(before.ref.revision, resolution=temporary)
+    else:
+        with pytest.raises(CfgPreconditionError) as caught:
+            resource.accept(before.ref.revision, resolution=temporary)
+        assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert seen == [before]
+    assert resource.accept(before.ref.revision).values["a"] == 2.0
+
+
+@pytest.mark.parametrize("guard", ["stale", "revoked", "notification"])
+def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
+    notification_active = False
+    resource = CfgResource(
+        defaults,
+        resolution=Sources().read,
+        notification_active=lambda: notification_active,
+    )
+    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    evaluations: list[str] = []
+
+    def evaluate(expression: str) -> float:
+        evaluations.append(expression)
+        return 12.0
+
+    temporary = replace(Sources().read(), evaluate_expression=evaluate)
+    expected = before.ref.revision
+    reason = CfgPreconditionReason.REENTRANT_MUTATION
+    if guard == "stale":
+        expected = CfgRevision(expected + 1)
+        reason = CfgPreconditionReason.STALE_REVISION
+    elif guard == "revoked":
+        resource.revoke()
+        reason = CfgPreconditionReason.RESOURCE_GONE
+    else:
+        notification_active = True
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept(expected, resolution=temporary)
+    assert caught.value.reason is reason
+    with pytest.raises(CfgPreconditionError) as preview_error:
+        resource.preview(expected, resolution=temporary)
+    assert preview_error.value.reason is reason
+    assert evaluations == []
+
+
+def test_one_off_acceptance_can_resolve_unavailable_publication() -> None:
+    sources = Sources()
+    resource = make_resource(sources)
+    observed = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    sources.fail = True
+    before = resource.refresh(observed.ref.revision)
+    assert before.status is CfgStatus.UNAVAILABLE
+    inputs = resource.snapshot_inputs()
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    reads = sources.reads
+    temporary = Sources(revision=8, values={"frequency": 15.0}).read()
+
+    accepted = resource.accept(before.ref.revision, resolution=temporary)
+
+    assert accepted.ref == before.ref
+    assert accepted.values["a"] == 15.0
+    assert accepted.source_basis == temporary.source_basis
+    assert resource.observe() == before
+    assert resource.snapshot_inputs() == inputs
+    assert sources.reads == reads
+    assert seen == [before]
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.accept(before.ref.revision)
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+
+
+def test_one_off_acceptance_rejects_subscriber_reentry() -> None:
+    resource = make_resource()
+    temporary = Sources().read()
+    reasons: list[CfgPreconditionReason] = []
+
+    def reenter(observation: CfgObservation) -> None:
+        with pytest.raises(CfgPreconditionError) as caught:
+            resource.accept(observation.ref.revision, resolution=temporary)
+        reasons.append(caught.value.reason)
+
+    resource.watch(reenter)
+    resource.edit(resource.observe().ref.revision, ())
+    assert reasons == [
+        CfgPreconditionReason.REENTRANT_MUTATION,
+        CfgPreconditionReason.REENTRANT_MUTATION,
+    ]
+
+
 def test_watch_initial_order_fault_isolation_and_reentry(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -318,9 +528,7 @@ def test_reset_failure_keeps_publication_and_does_not_notify() -> None:
             raise RuntimeError("defaults failure")
         return defaults()
 
-    resource = CfgResource(
-        create_defaults, resolution=Sources().read, make_range=make_range
-    )
+    resource = CfgResource(create_defaults, resolution=Sources().read)
     seen: list[int] = []
     resource.watch(lambda observation: seen.append(observation.ref.revision))
     before = resource.edit(CfgRevision(0), (CfgEdit(("a",), 9.0),))
@@ -338,7 +546,6 @@ def test_busy_policy_is_owned_by_resource_and_acceptance_is_separate() -> None:
     resource = CfgResource(
         defaults,
         resolution=Sources().read,
-        make_range=make_range,
         mutation_allowed=lambda: False,
     )
     before = resource.observe()
@@ -357,7 +564,6 @@ def test_source_refresh_is_not_blocked_by_manual_edit_policy(failed: bool) -> No
         defaults,
         initial=schema,
         resolution=sources.read,
-        make_range=make_range,
         mutation_allowed=lambda: False,
     )
     before = resource.observe()
@@ -398,7 +604,7 @@ def test_revocation_invalidates_handles_and_never_reuses_identity() -> None:
 @dataclass
 class ExpressionSources:
     captured: dict[str, object] = field(default_factory=lambda: {"device.value": -2})
-    names: dict[str, object] = field(default_factory=lambda: {"offset": 1.0})
+    names: dict[str, float] = field(default_factory=lambda: {"offset": 1.0})
     revision: int = 0
     capture_reads: list[str] = field(default_factory=list)
     fail_read: bool = False
@@ -409,15 +615,31 @@ class ExpressionSources:
         if self.fail_read:
             raise RuntimeError("source snapshot failure")
         captured = dict(self.captured)
-        md = MetaDict()
-        md.update(self.names)
+        parameters = ParameterContext(
+            point=PointDocument.model_validate(
+                {
+                    "format": "zcu.parameter-container",
+                    "format_version": "1.0",
+                    "general": {
+                        "created_at": "2026-10-08T00:00:00Z",
+                        "ext": self.names,
+                    },
+                    "components": {},
+                }
+            ),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ),
+            target=EntryDraft(entry_id="entry"),
+            roles=None,
+        )
         fail_evaluation = self.fail_evaluation
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             self.evaluation_reads.append(expression)
             if fail_evaluation:
                 raise RuntimeError("resolver defect")
-            return evaluate_scalar_expr(expression, md)
+            return evaluate_scalar_expr(expression, parameters)
 
         def capture(name: str) -> object:
             self.capture_reads.append(name)
@@ -448,7 +670,6 @@ def captured_resource() -> tuple[CfgResource, ExpressionSources]:
     resource = CfgResource(
         expression_defaults,
         resolution=sources.read,
-        make_range=make_range,
     )
     return resource, sources
 
@@ -458,12 +679,13 @@ def test_capture_groups_negative_power_and_keeps_dynamic_dependencies(
 ) -> None:
     resource, sources = captured_resource
     changed = resource.edit(
-        CfgRevision(0), (CfgEdit(("a",), EvalValue("$device.value ** 2 + offset")),)
+        CfgRevision(0),
+        (CfgEdit(("a",), EvalValue("@{device.value} ** 2 + general.ext.offset")),),
     )
     assert resource.accept(changed.ref.revision).values["a"] == 5.0
     value = changed.tree.children["a"].value
     assert isinstance(value, EvalValue)
-    assert value.expr == "(-2) ** 2 + offset"
+    assert value.expr == "(-2) ** 2 + general.ext.offset"
     sources.captured["device.value"] = 100
     sources.names["offset"] = 3.0
     sources.revision += 1
@@ -480,9 +702,9 @@ def test_capture_uses_real_functions_complex_and_integer_semantics(
     changed = resource.edit(
         CfgRevision(0),
         (
-            CfgEdit(("z",), EvalValue("$z * $z")),
-            CfgEdit(("flags",), EvalValue("$flags ^ 3")),
-            CfgEdit(("a",), EvalValue("cos($angle) + log(e)")),
+            CfgEdit(("z",), EvalValue("@{z} * @{z}")),
+            CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
+            CfgEdit(("a",), EvalValue("cos(@{angle}) + log(e)")),
         ),
     )
     values = resource.accept(changed.ref.revision).values
@@ -493,16 +715,37 @@ def test_capture_uses_real_functions_complex_and_integer_semantics(
     assert isinstance(changed.tree.children["flags"].value, EvalValue)
 
 
+def test_capture_complex_tag_and_large_integer_preserve_literal_types(
+    captured_resource,
+) -> None:
+    resource, sources = captured_resource
+    integer = 2**80 + 1
+    sources.captured.update({"z": {"__complex__": [1.0, 2.0]}, "flags": integer})
+    publication = resource.edit(
+        CfgRevision(0),
+        (
+            CfgEdit(("z",), EvalValue("@{z}")),
+            CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
+        ),
+    )
+    values = resource.accept(publication.ref.revision).values
+    assert values["z"] == 1.0 + 2.0j
+    assert isinstance(values["z"], complex)
+    assert values["flags"] == integer ^ 3
+    assert isinstance(values["flags"], int)
+    assert sources.capture_reads == ["z", "flags"]
+
+
 @pytest.mark.parametrize(
     "expression",
     [
-        "$",
-        "$device.value +",
-        "$device.",
-        "$device.value[0]",
-        "$device.value()",
-        "$ device",
-        "$device.value @ 2",
+        "@",
+        "@{device.value} +",
+        "@{device.}",
+        "@{device.value}[0]",
+        "@{device.value}()",
+        "@ {device.value}",
+        "@{device.value} @ 2",
     ],
 )
 def test_invalid_capture_structure_rejects_batch_before_reading_sources(
@@ -534,7 +777,7 @@ def test_capture_missing_source_rejects_without_publishing_prefix(
             before.ref.revision,
             (
                 CfgEdit(("a",), 10.0),
-                CfgEdit(("literal.dot",), EvalValue("$missing")),
+                CfgEdit(("literal.dot",), EvalValue("@{missing}")),
             ),
         )
     assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
@@ -550,12 +793,14 @@ def test_capture_rejects_non_literal_values(captured_resource, value: object) ->
     resource, sources = captured_resource
     sources.captured["device.value"] = value
     with pytest.raises(CfgInputError, match="numeric|finite") as caught:
-        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("$device.value")),))
+        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("@{device.value}")),))
     assert caught.value.reason is CfgInputReason.INVALID_VALUE
     assert resource.observe().ref.revision == 0
 
 
-@pytest.mark.parametrize("expression", ["'$device.value'", "sin(", "offset +"])
+@pytest.mark.parametrize(
+    "expression", ["'$device.value'", "sin(", "general.ext.offset +"]
+)
 def test_without_capture_tokens_incomplete_or_invalid_expression_is_saved(
     captured_resource, expression: str
 ) -> None:
@@ -573,12 +818,19 @@ def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) ->
     sources.names["device_value"] = 10.0
     changed = resource.edit(
         CfgRevision(0),
-        (CfgEdit(("a",), EvalValue("$device.value + device_value + missing")),),
+        (
+            CfgEdit(
+                ("a",),
+                EvalValue(
+                    "@{device.value} + general.ext.device_value + general.ext.missing"
+                ),
+            ),
+        ),
     )
     assert changed.status is CfgStatus.INVALID
     value = changed.tree.children["a"].value
     assert isinstance(value, EvalValue)
-    assert value.expr == "(-2) + device_value + missing"
+    assert value.expr == "(-2) + general.ext.device_value + general.ext.missing"
     sources.names["missing"] = 1.0
     sources.captured["device.value"] = 99
     changed = resource.refresh(changed.ref.revision)
@@ -591,7 +843,9 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     captured_resource, fault: str
 ) -> None:
     resource, sources = captured_resource
-    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("offset")),))
+    before = resource.edit(
+        CfgRevision(0), (CfgEdit(("a",), EvalValue("general.ext.offset")),)
+    )
     seen: list[CfgStatus] = []
     resource.watch(lambda observation: seen.append(observation.status))
     sources.fail_read = fault == "source"
@@ -605,7 +859,7 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     )
     value = unavailable.tree.children["a"].value
     assert isinstance(value, EvalValue)
-    assert value.expr == "offset"
+    assert value.expr == "general.ext.offset"
     assert value.resolved is None
     assert not unavailable.tree.valid
     assert not unavailable.tree.children["a"].valid
@@ -633,9 +887,7 @@ def test_separate_range_edits_preserve_command_order(
     schema = CfgSchema(
         CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
     )
-    resource = CfgResource(
-        lambda: schema, resolution=Sources().read, make_range=make_range
-    )
+    resource = CfgResource(lambda: schema, resolution=Sources().read)
     step = CfgEdit(("range", "step"), 0.5)
     geometry = CfgEdit(("range", "span" if centered else "stop"), 4.0)
     edits = (step, geometry) if step_first else (geometry, step)
@@ -644,6 +896,7 @@ def test_separate_range_edits_preserve_command_order(
         "start": -1.0 if centered else 0.0,
         "stop": 3.0 if centered else 4.0,
         "expts": 5 if step_first else 9,
+        "step": 1.0 if step_first else 0.5,
     }
 
 
@@ -656,7 +909,7 @@ def test_range_intent_preserves_unexpected_source_fault() -> None:
         fail = broken
         source = sources.read()
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             if fail:
                 raise defect
             return source.evaluate_expression(expression)
@@ -667,7 +920,7 @@ def test_range_intent_preserves_unexpected_source_fault() -> None:
         CfgSectionSpec(fields={"range": SweepSpec()}),
         CfgSectionValue({"range": SweepValue(EvalValue("frequency"), 6.0, 3)}),
     )
-    resource = CfgResource(lambda: schema, resolution=resolution, make_range=make_range)
+    resource = CfgResource(lambda: schema, resolution=resolution)
     before = resource.observe()
     broken = True
     with pytest.raises(ValueError, match="range source defect") as caught:
@@ -681,7 +934,8 @@ def test_replacing_failed_expression_does_not_evaluate_old_input(
 ) -> None:
     resource, sources = captured_resource
     changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("a",), EvalValue("offset")),)
+        resource.observe().ref.revision,
+        (CfgEdit(("a",), EvalValue("general.ext.offset")),),
     )
     sources.fail_evaluation = True
     unavailable = resource.refresh(changed.ref.revision)
@@ -699,7 +953,7 @@ def test_replaced_intermediate_expression_is_not_evaluated(captured_resource) ->
     changed = resource.edit(
         resource.observe().ref.revision,
         (
-            CfgEdit(("a",), EvalValue("offset")),
+            CfgEdit(("a",), EvalValue("general.ext.offset")),
             CfgEdit(("a",), 7.0),
         ),
     )
@@ -711,7 +965,8 @@ def test_replaced_intermediate_expression_is_not_evaluated(captured_resource) ->
 def test_retained_expression_uses_new_source_basis(captured_resource) -> None:
     resource, sources = captured_resource
     changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("a",), EvalValue("offset * 2")),)
+        resource.observe().ref.revision,
+        (CfgEdit(("a",), EvalValue("general.ext.offset * 2")),),
     )
     assert resource.accept(changed.ref.revision).values["a"] == 2.0
     sources.names["offset"] = 6.0
@@ -728,7 +983,9 @@ def test_unexpected_edit_evaluation_fault_is_not_invalid_input(
     before = resource.observe()
     sources.fail_evaluation = True
     with pytest.raises(RuntimeError, match="resolver defect"):
-        resource.edit(before.ref.revision, (CfgEdit(("a",), EvalValue("offset")),))
+        resource.edit(
+            before.ref.revision, (CfgEdit(("a",), EvalValue("general.ext.offset")),)
+        )
     assert resource.observe() == before
 
 
@@ -761,7 +1018,6 @@ def test_unavailable_projection_drops_linked_cache_and_derived_range_result() ->
     resource = CfgResource(
         create_defaults,
         resolution=lambda: replace(sources.read(), references=References()),
-        make_range=make_range,
     )
     before = resource.observe()
     assert before.status is CfgStatus.VALID
@@ -832,7 +1088,6 @@ def test_definition_rejects_unaddressable_or_reserved_keys(key, nested: bool) ->
         CfgResource(
             lambda: CfgSchema(spec, CfgSectionValue({})),
             resolution=sources.read,
-            make_range=make_range,
         )
     assert sources.reads == 0
 
@@ -855,12 +1110,11 @@ def test_unexpected_capture_validator_fault_preserves_publication(
     resource = CfgResource(
         defaults,
         resolution=lambda: replace(sources.read(), validate_expression=validate),
-        make_range=make_range,
     )
     before = resource.observe()
     with pytest.raises(RuntimeError) as caught:
         resource.edit(
-            before.ref.revision, (CfgEdit(("a",), EvalValue("$device.value")),)
+            before.ref.revision, (CfgEdit(("a",), EvalValue("@{device.value}")),)
         )
     assert caught.value is defect
     assert resource.observe() == before
@@ -885,7 +1139,7 @@ def test_group_refresh_publishes_individual_fault_before_any_notification() -> N
     sources.values = {"frequency": 8.0, "other": 9.0}
     stable = sources.read()
 
-    def evaluate(expression: str) -> int | float | complex:
+    def evaluate(expression: str) -> int | float | complex | str:
         if expression == "other":
             raise RuntimeError("second cfg resolver defect")
         return stable.evaluate_expression(expression)
@@ -926,7 +1180,6 @@ def test_range_incomplete_input_publishes_invalid_then_can_be_completed(
             CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
         ),
         resolution=Sources().read,
-        make_range=make_range,
     )
     edge = "span" if centered else "stop"
     incomplete = DirectValue(None, raw="-")
@@ -957,6 +1210,7 @@ def test_range_incomplete_input_publishes_invalid_then_can_be_completed(
         "start": 0.0,
         "stop": 2.0,
         "expts": 3,
+        "step": 1.0,
     }
 
 
@@ -975,7 +1229,6 @@ def test_whole_range_uses_new_geometry_before_step(centered: bool, order) -> Non
             CfgSectionSpec(fields={"range": spec}), CfgSectionValue({"range": value})
         ),
         resolution=Sources().read,
-        make_range=make_range,
     )
     changed = resource.edit(
         resource.observe().ref.revision,
@@ -983,7 +1236,12 @@ def test_whole_range_uses_new_geometry_before_step(centered: bool, order) -> Non
     )
     assert changed.status is CfgStatus.VALID
     accepted = resource.accept(changed.ref.revision)
-    assert accepted.values["range"] == {"start": 6.0, "stop": 14.0, "expts": 5}
+    assert accepted.values["range"] == {
+        "start": 6.0,
+        "stop": 14.0,
+        "expts": 5,
+        "step": 2.0,
+    }
     observed = changed.tree.children["range"].value
     assert isinstance(observed, (SweepValue, CenteredSweepValue))
     assert observed.step == 2.0
@@ -997,9 +1255,7 @@ def test_whole_range_rejection_is_atomic(payload) -> None:
     schema = defaults()
     schema.spec.fields["range"] = CenteredSweepSpec(locked_center=1.0)
     schema.value.fields["range"] = CenteredSweepValue(1.0, 2.0, 3)
-    resource = CfgResource(
-        lambda: schema, resolution=sources.read, make_range=make_range
-    )
+    resource = CfgResource(lambda: schema, resolution=sources.read)
     before = resource.observe()
     with pytest.raises(CfgInputError):
         resource.edit(

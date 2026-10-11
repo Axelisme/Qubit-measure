@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -19,7 +20,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import set_freq_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import set_rf_frequency
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -60,6 +61,7 @@ class FreqSweepCfg(ConfigBase):
 
 
 class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+    dev: Mapping[str, str] | None = None  # jpa_rf_dev: connected name; None: no RF.
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
     skew_penalty: float = Field(default=0.0, ge=0.0)
@@ -99,17 +101,9 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                 if step.cfg.dev is not None:
-                    set_freq_in_dev_cfg(
-                        step.cfg.dev,
-                        jpa_freq * 1e6,
-                        label="jpa_rf_dev",
+                    set_rf_frequency(
+                        context.devices[step.cfg.dev["jpa_rf_dev"]], jpa_freq * 1e6
                     )
-                setup_devices(
-                    step.cfg,
-                    context.devices,
-                    progress=False,
-                    cancel_signal=context.cancel_signal,
-                )
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
@@ -131,7 +125,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                         trackers=[tracker],
                     )
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FreqResult(freqs=jpa_freqs, signals=signals)
 

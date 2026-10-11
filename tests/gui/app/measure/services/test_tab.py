@@ -1,21 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Generator
+from dataclasses import asdict, replace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
     ContextReadiness,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
     SaveStatus,
 )
+from zcu_tools.gui.app.measure.services.ports import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -27,14 +28,22 @@ from zcu_tools.gui.app.measure.state import (
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources
+from tests.gui.app.measure._cfg_fakes import (
+    cfg_resolution,
+    cfg_resources,
+    parameter_capture,
+)
+from tests.gui.app.measure._native_save_support import (
+    GUI_ORIGIN,
+    NativeSaveSession,
+    native_save_session,
+)
 
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:
     state = State(
         SessionEnv(
-            md=MagicMock(),
-            ml=MagicMock(),
+            parameters=parameter_capture(),
             soc=MagicMock(),
             soccfg=MagicMock(),
             readiness=ContextReadiness.ACTIVE,
@@ -49,7 +58,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             cfg=MagicMock(),
             run=RunPaneState(result=object()),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
-            save=SavePaneState(data_path_override="data.h5", comment="draft note"),
+            save=SavePaneState(comment="draft note"),
         ),
     )
     writeback = MagicMock()
@@ -57,7 +66,14 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     # TabService's render model depends only on State + a writeback query port;
     # readiness / save paths come off State's aggregates, not sibling
     # app-services. The registry is unused by get_snapshot.
-    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
+    service = TabService(
+        state,
+        MagicMock(),
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     snapshot = service.get_snapshot("tab")
 
@@ -67,7 +83,6 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.interaction.has_active_context is True  # ctx.readiness=ACTIVE
     assert snapshot.analysis is not None
     assert snapshot.analysis.params is analyze_params
-    assert snapshot.paths is not None and snapshot.paths.data.path == "data.h5"
     assert snapshot.save is not None
     assert asdict(snapshot.save)["comment"] == "draft note"
     assert state.get_tab("tab").analysis.params is analyze_params
@@ -89,7 +104,12 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
     writeback.preview_draft.return_value = []
 
     snapshot = TabService(
-        state, MagicMock(), writeback, cfg_resources(state)
+        state,
+        MagicMock(),
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
     ).get_snapshot("tab")
 
     assert snapshot.analysis is not None
@@ -113,9 +133,14 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
     writeback.preview_draft.side_effect = RuntimeError("broken draft")
 
     with pytest.raises(RuntimeError, match="broken draft"):
-        TabService(state, MagicMock(), writeback, cfg_resources(state)).get_snapshot(
-            "tab"
-        )
+        TabService(
+            state,
+            MagicMock(),
+            writeback,
+            cfg_resources(state),
+            cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+            captured_parameters=lambda _aliases: state.session_env.parameters,
+        ).get_snapshot("tab")
 
 
 def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
@@ -132,7 +157,14 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
     state.set_tab_running("running", running=True)
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
-    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
+    service = TabService(
+        state,
+        MagicMock(),
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     running = service.get_snapshot("running").interaction
     idle = service.get_snapshot("idle").interaction
@@ -148,8 +180,7 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
 def _active_state() -> State:
     return State(
         SessionEnv(
-            md=MagicMock(),
-            ml=MagicMock(),
+            parameters=parameter_capture(),
             soc=MagicMock(),
             soccfg=MagicMock(),
             readiness=ContextReadiness.ACTIVE,
@@ -181,7 +212,14 @@ def test_snapshot_carries_post_analyze_fields() -> None:
     )
     writeback = MagicMock()
     writeback.preview_draft.return_value = []
-    service = TabService(state, MagicMock(), writeback, cfg_resources(state))
+    service = TabService(
+        state,
+        MagicMock(),
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     snapshot = service.get_snapshot("tab")
 
@@ -209,7 +247,14 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
             analysis=AnalysisPaneState(result=MagicMock()),  # primary result present
         ),
     )
-    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
+    service = TabService(
+        state,
+        MagicMock(),
+        MagicMock(),
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     out = service.initialize_tab_post_analyze_params("tab")
 
@@ -231,106 +276,155 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
             analysis=AnalysisPaneState(result=None),  # no primary analyze result
         ),
     )
-    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
+    service = TabService(
+        state,
+        MagicMock(),
+        MagicMock(),
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: state.session_env.parameters,
+    )
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
         service.initialize_tab_post_analyze_params("tab")
 
 
-def test_tab_snapshot_loaded_artifacts_have_no_success_record() -> None:
-    state = _active_state()
-    adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True
-    )
-    state.add_tab(
-        "tab",
-        Session(
-            adapter_name="fake",
-            adapter=adapter,
-            cfg=MagicMock(),
-            save=SavePaneState(data_path_override="data.hdf5"),
-            analysis=AnalysisPaneState(image_path_overrides={"fit": "analysis.png"}),
-        ),
-    )
-    state.update_tab_loaded_result("tab", object(), "existing.hdf5")
-
-    snapshot = TabService(
-        state, MagicMock(), MagicMock(), cfg_resources(state)
+def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
+    return TabService(
+        session.state,
+        registry=MagicMock(),
+        writeback=MagicMock(),
+        cfg_resources=MagicMock(),
+        cfg_resolution=MagicMock(),
+        captured_parameters=MagicMock(),
     ).get_snapshot("tab")
 
+
+@pytest.fixture
+def native_session(tmp_path: Path, qapp: QApplication) -> Generator[NativeSaveSession]:
+    with native_save_session(tmp_path, qapp) as session:
+        yield session
+
+
+def test_tab_snapshot_loaded_artifacts_have_no_success_record(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    record = session.state.get_tab("tab").run.result
+    assert record is not None
+    run = session.state.get_tab("tab").run
+    session.state.update_tab_loaded_result(
+        "tab",
+        record,
+        "existing.hdf5",
+        metadata=session.metadata,
+        parameters=run.parameters,
+        storage=run.storage,
+    )
+    snapshot = _native_snapshot(session)
+
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
-    assert [(a.key, a.status) for a in snapshot.artifacts] == [
-        (ArtifactKey(ArtifactKind.DATA), SaveStatus.NOT_SAVED),
+    assert [
+        (section.section, artifact.ref, artifact.status)
+        for section in snapshot.artifacts
+        for artifact in section.artifacts
+    ] == [
+        ("run", ArtifactRef("run", "measurement_data"), SaveStatus.NOT_SAVED),
     ]
-    data = snapshot.artifacts[0]
-    assert data.default_path == "data.hdf5"
-    assert data.is_saveable is True
-    assert data.last_saved_path is None
+    data = snapshot.artifacts[0].artifacts[0]
+    assert [output.format for output in data.members[0].outputs] == [
+        "data_h5",
+        "labber",
+    ]
+    assert all(output.status == "reserved" for output in data.members[0].outputs)
+    assert data.members[0].outputs[0].path == (
+        session.entry.database_path / "runs" / session.metadata.run_id / "data.h5"
+    )
 
 
-def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift() -> None:
-    state = _active_state()
-    adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
-    state.add_tab(
+def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status
+        is SaveStatus.NOT_SAVED
+    )
+    first = session.control.save_data("tab", comment="initial", origin=GUI_ORIGIN)
+    data = _native_snapshot(session).artifacts[0].artifacts[0]
+    assert data.status is SaveStatus.SAVED
+    assert [output.path for output in data.members[0].outputs] == [
+        item.output.path for item in first.outputs
+    ]
+
+    session.state.update_tab_comment("tab", "edited")
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status
+        is SaveStatus.UNSAVED_CHANGES
+    )
+    session.state.update_tab_comment("tab", "initial")
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status
+        is SaveStatus.UNSAVED_CHANGES
+    )
+    session.control.save_data("tab", origin=GUI_ORIGIN)
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status is SaveStatus.SAVED
+    )
+
+    record = session.state.get_tab("tab").run.result
+    assert record is not None
+    run = session.state.get_tab("tab").run
+    session.state.update_tab_result(
+        "tab", record, metadata=session.metadata, parameters=run.parameters
+    )
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status
+        is SaveStatus.NOT_SAVED
+    )
+    session.state.update_tab_loaded_result(
         "tab",
-        Session(
-            adapter_name="fake",
-            adapter=adapter,
-            cfg=MagicMock(),
-            save=SavePaneState(data_path_override="data.hdf5"),
+        record,
+        "imported.hdf5",
+        metadata=session.metadata,
+        parameters=run.parameters,
+        storage=run.storage,
+    )
+    loaded = _native_snapshot(session)
+    assert loaded.run is not None and loaded.run.source_path == "imported.hdf5"
+    assert loaded.artifacts[0].artifacts[0].status is SaveStatus.NOT_SAVED
+    assert all(
+        output.status == "reserved"
+        for output in loaded.artifacts[0].artifacts[0].members[0].outputs
+    )
+
+
+def test_artifact_failure_replaces_previous_output_evidence_without_marking_draft_saved(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    first = session.control.save_data("tab", origin=GUI_ORIGIN)
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status is SaveStatus.SAVED
+    )
+    session.state.update_tab_comment("tab", "next")
+    assert (
+        _native_snapshot(session).artifacts[0].artifacts[0].status
+        is SaveStatus.UNSAVED_CHANGES
+    )
+    failed = SaveReport(
+        first.run_id,
+        tuple(
+            replace(item, status="failed", error="disk full") for item in first.outputs
         ),
     )
-    state.update_tab_result("tab", object())
-    state.update_tab_comment("tab", "initial")
-    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
-
-    attempt = state.get_tab("tab").artifacts.started(ArtifactKey(ArtifactKind.DATA))
-    state.update_tab_comment("tab", "edited during save")
-    attempt.succeed("data_1.hdf5")
-    data = service.get_snapshot("tab").artifacts[0]
-    assert data.status is SaveStatus.UNSAVED_CHANGES
-    assert data.default_path == "data.hdf5"
-    assert data.last_saved_path == "data_1.hdf5"
-
-    state.update_tab_comment("tab", "initial")
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.SAVED
-    state.update_tab_result("tab", object())
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.UNSAVED_CHANGES
-    state.update_tab_loaded_result("tab", object(), "imported.hdf5")
-    loaded = service.get_snapshot("tab").artifacts[0]
-    assert loaded.status is SaveStatus.NOT_SAVED
-    assert loaded.last_saved_path is None
-
-
-def test_artifact_failure_preserves_previous_success_but_does_not_mark_new_draft_saved() -> (
-    None
-):
-    state = _active_state()
-    adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
-    state.add_tab(
-        "tab",
-        Session(
-            adapter_name="fake",
-            adapter=adapter,
-            cfg=MagicMock(),
-            save=SavePaneState(data_path_override="first.hdf5"),
-        ),
-    )
-    state.update_tab_result("tab", object())
-    service = TabService(state, MagicMock(), MagicMock(), cfg_resources(state))
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.NOT_SAVED
-    tracker = state.get_tab("tab").artifacts
-    tracker.started(ArtifactKey(ArtifactKind.DATA)).succeed("first_1.hdf5")
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.SAVED
-
-    state.update_tab_data_path_override("tab", "next.hdf5")
-    assert service.get_snapshot("tab").artifacts[0].status is SaveStatus.UNSAVED_CHANGES
-    tracker.started(ArtifactKey(ArtifactKind.DATA)).fail()
-    after_failure = service.get_snapshot("tab").artifacts[0]
-    assert after_failure.status is SaveStatus.UNSAVED_CHANGES
-    assert after_failure.last_saved_path == "first_1.hdf5"
-    assert after_failure.default_path == "next.hdf5"
+    session.state.get_tab("tab").artifacts.apply_report(failed)
+    after_failure = _native_snapshot(session).artifacts[0].artifacts[0]
+    assert after_failure.status is SaveStatus.NOT_SAVED
+    assert [
+        (output.format, output.path, output.status, output.error)
+        for output in after_failure.members[0].outputs
+    ] == [
+        (item.output.format, item.output.path, item.status, item.error)
+        for item in failed.outputs
+    ]

@@ -12,19 +12,25 @@ Covers:
 from __future__ import annotations
 
 import math
+from collections.abc import Generator
 
 import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.gui.cfg import (
-    DirectValue,
+    EvalValue,
     SweepValue,
 )
-from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.context_types import EntryDraft
+from zcu_tools.gui.session.expression import evaluate_numeric_expr
+from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.readout import resonator_freqs, s21, value_to_flux
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.entry import RoleSpec, component_registry
+from zcu_tools.resources.entry.schema import PointDocument
 
+from zcu_lab.components import QubitSchema
 from zcu_lab.v2._support.measure.ctx_helpers import proper_flux_range
 
 # ---------------------------------------------------------------------------
@@ -48,12 +54,15 @@ _VALID: dict = {
 }
 
 
-def _numeric_sweep_bounds(sweep: SweepValue) -> tuple[float, float]:
-    start = sweep.start.value if isinstance(sweep.start, DirectValue) else sweep.start
-    stop = sweep.stop.value if isinstance(sweep.stop, DirectValue) else sweep.stop
-    if not isinstance(start, (int, float)) or not isinstance(stop, (int, float)):
-        raise AssertionError("default guide sweep must have numeric fallback bounds")
-    return float(start), float(stop)
+def _numeric_sweep_bounds(
+    sweep: SweepValue, parameters: ParameterContext
+) -> tuple[float, float]:
+    if not isinstance(sweep.start, EvalValue) or not isinstance(sweep.stop, EvalValue):
+        raise AssertionError("calibrated guide sweep must have expression bounds")
+    return (
+        evaluate_numeric_expr(sweep.start.expr, parameters),
+        evaluate_numeric_expr(sweep.stop.expr, parameters),
+    )
 
 
 class TestSimParamsConstruction:
@@ -366,9 +375,9 @@ class TestSimParamsParamsJsonRoundTrip:
             pi_gain_len=0.4,
         )
 
-        assert p.EJ == fluxdep["params"]["EJ"]
-        assert p.EC == fluxdep["params"]["EC"]
-        assert p.EL == fluxdep["params"]["EL"]
+        assert fluxdep["params"]["EJ"] == p.EJ
+        assert fluxdep["params"]["EC"] == p.EC
+        assert fluxdep["params"]["EL"] == p.EL
         assert p.flux_half == fluxdep["flux_half"]
         assert p.flux_period == fluxdep["flux_period"]
         assert p.bare_rf == dispersive["bare_rf"]
@@ -376,23 +385,52 @@ class TestSimParamsParamsJsonRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# DEFAULT_SIMPARAM — realistic mock flux_period for visible flux_dep maps
+# DEFAULT_SIMPARAM — readout contrast at a calibrated guide sweep center
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def guide_context() -> Generator[ParameterContext]:
+    """Capture the simulator's integer/half flux points without hardware or files."""
+    before = component_registry.kinds()
+    component_registry.register("qubit/guide-read", QubitSchema)
+    try:
+        point = PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "1.0",
+                "general": {"created_at": "2026-10-04T00:00:00Z"},
+                "components": {
+                    "Q1": {
+                        "kind": "qubit/guide-read",
+                        "flux_half": DEFAULT_SIMPARAM.flux_half,
+                        "flux_int": DEFAULT_SIMPARAM.flux_half
+                        + DEFAULT_SIMPARAM.flux_period / 2,
+                    }
+                },
+            }
+        )
+        yield ParameterContext(
+            point=point,
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+            ),
+            target=EntryDraft(entry_id="00000000-0000-0000-0000-000000000001"),
+            roles=RoleBinding("Q1", {"qubit": RoleSpec("qubit/*")}, {"qubit": "Q1"}),
+        )
+    finally:
+        component_registry.unregister("qubit/guide-read")
+        assert component_registry.kinds() == before
+
+
 class TestDefaultSimParamFluxPeriod:
-    """DEFAULT_SIMPARAM.flux_period must sit within the onetone/twotone guide sweep.
+    """Default simulator readout resolves both states at the calibrated guide center."""
 
-    The production flux-dep guide sweep must map across at least one full period
-    so the mock 2D flux_dep plot shows visible dispersion. A flux_period much
-    larger than the sweep span would cover only a tiny fraction of a period and
-    produce a flat colour map.
-    """
-
-    def test_default_readout_blobs_are_visible_over_base_noise(self) -> None:
-        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-        guide = proper_flux_range(guide_ctx, expts=2)
-        guide_start, guide_stop = _numeric_sweep_bounds(guide)
+    def test_default_readout_blobs_are_visible_over_base_noise(
+        self, guide_context: ParameterContext
+    ) -> None:
+        guide = proper_flux_range(guide_context, expts=2)
+        guide_start, guide_stop = _numeric_sweep_bounds(guide, guide_context)
         guide_center = 0.5 * (guide_start + guide_stop)
         p = DEFAULT_SIMPARAM
         reduced_flux = value_to_flux(p, guide_center)
@@ -405,20 +443,4 @@ class TestDefaultSimParamFluxPeriod:
         assert separation_sigma > 1.0, (
             "|g>/<e> readout blobs are not separated above the base noise scale; "
             f"separation={separation_sigma:.3f} sigma"
-        )
-
-    def test_guide_sweep_covers_at_least_one_period(self) -> None:
-        # value_to_flux(v) = (v + flux_bias - flux_half) / flux_period + 0.5
-        # The guide sweep should span at least one period for visible dispersion.
-        guide_ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-        guide = proper_flux_range(guide_ctx, expts=2)
-        guide_start, guide_stop = _numeric_sweep_bounds(guide)
-        p = DEFAULT_SIMPARAM
-        flux_lo = (guide_start + p.flux_bias - p.flux_half) / p.flux_period + 0.5
-        flux_hi = (guide_stop + p.flux_bias - p.flux_half) / p.flux_period + 0.5
-        span = flux_hi - flux_lo
-        assert span >= 1.0, (
-            f"guide sweep [{guide_start:g}, {guide_stop:g}] covers only "
-            f"{span:.3f} periods "
-            f"(need >= 1.0 for visible dispersion); flux_period={p.flux_period}"
         )

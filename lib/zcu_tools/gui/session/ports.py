@@ -8,7 +8,7 @@ free of a back-edge to any ``gui.app.*`` package.
 This module holds the **exclusion seam**: the session-core operation-kind
 vocabulary (``OperationKind``), the conflict error, and the ``ExclusionGate``
 port. Each app keeps its own concrete ``OperationGate`` (the conflict *policy*)
-and adds its own app-specific kinds (measure: ``run``; autofluxdep: a sweep kind);
+and adds its own app-specific kinds (measure: ``run``);
 the port is keyed by the kind's wire string so a session service can name a
 session kind without the gate's full vocabulary leaking here (ADR-0066, decision
 3 of the session-core extraction).
@@ -19,7 +19,7 @@ this module as the session services move in.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
@@ -28,10 +28,11 @@ from zcu_tools.gui.event_bus import OriginKind
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.gui.session.services.device import DeviceProtocol
-    from zcu_tools.gui.session.types import SessionEnv
+    from zcu_tools.gui.session.types import ParameterContext, SessionEnv
     from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.entry import ResultEntry
 
 
 _T = TypeVar("_T")
@@ -264,37 +265,38 @@ class ProjectIOPort(Protocol):
 
 @runtime_checkable
 class ContextReadPort(Protocol):
-    """Read-only view of the active context's ModuleLibrary, as a CfgEditor needs.
+    """Fixed parameter capture, without file I/O or writable resource handles."""
 
-    A ``CfgEditorSession`` reads the current ml to seed a session opened
-    ``from_name`` (load an existing entry's shape). Reading only — all ml/md
-    *content writes* go through the app's ``ContextWritePort`` (ADR-0067:
-    ContextService is the single write authority). Symmetric name with
-    ``ContextWritePort``.
-    """
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix published point/library/storage and all current authored aliases.
 
-    def get_current_ml(self) -> ModuleLibrary: ...
+        aliases optionally maps alias names to temporary concrete components;
+        dependent links remain authored and no global state changes. Reads use
+        $ for aliases, bare paths for concrete components, with no kind policy
+        or same-name fallback. Missing/unbound aliases fail by name on use.
+        EMPTY raises FailedPreconditionError(no_context); source faults and
+        invalid override identifiers propagate. No I/O or later live reads occur.
+        """
+        ...
 
 
 @runtime_checkable
 class ProjectContextPort(Protocol):
-    """Project context commands as used by ``ProjectSettingsService``.
+    """Prepared entry installation, used by ProjectSettingsService.
 
-    ``ProjectSettingsService`` applies a project (one-way command into the
-    context); it depends on this port, not the concrete ``ContextService``.
+    Resources owns name/file validation; the session context owner publishes
+    DRAFT only after preparing all of the entry's required sources/cache.
     """
 
-    def set_project_context(
-        self,
-        md: object,
-        ml: object,
-        chip_name: str,
-        qub_name: str,
-        res_name: str,
-        result_dir: str,
-        database_path: str,
-    ) -> None: ...
-    def setup_project(self, result_dir: str) -> None: ...
+    def install_entry(self, entry: ResultEntry) -> EntryInfo:
+        """Install a resource-validated entry as DRAFT without selecting a point.
+
+        Return owner entry identity/paths. Preparation failure leaves the prior
+        binding installed and propagates its cause; no resource rollback occurs.
+        """
+        ...
 
 
 @runtime_checkable

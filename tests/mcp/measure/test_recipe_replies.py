@@ -8,8 +8,70 @@ import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.measure import tools_recipes
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_support import PNG, LookbackGui, recipe_client
 from ._support import full_execution_reply, make_client
+
+
+@pytest.mark.parametrize(
+    "arguments,expected",
+    [
+        (
+            {
+                "frequency_mhz": 6020.0,
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+                "rounds": 7,
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+            },
+            {},
+        ),
+        (
+            {
+                "readout_ref": "readout",
+                "use_reset": "reset",
+                "init_pulse_ref": "init",
+                "readout_length_us": 2.5,
+                "trigger_offset_us": 0.2,
+            },
+            {
+                "frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "ro_frequency_mhz": {
+                    "value": 6120.0,
+                    "source": "$resonator.freq",
+                    "unit": "MHz",
+                },
+                "rounds": {"value": 3, "source": "gui_default"},
+            },
+        ),
+    ],
+    ids=["all-explicit", "calibration-and-default"],
+)
+def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
+    tmp_path, arguments, expected
+):
+    gui = LookbackGui()
+    gui.md["$resonator.freq"] = 6120.0
+    with recipe_client(tmp_path, gui) as client:
+        initial = client.call("lookback", arguments)
+        assert initial.data["status"] == "awaiting_answer", initial.data
+        key = initial.data["execution"]
+        before = list(client.transport.sent)
+        gui.md["$resonator.freq"] = 6300.0
+        for reply in (
+            initial.data,
+            client.call("status", {"execution": key}),
+            client.call("wait", {"execution": key, "timeout": 0}).data,
+            client.call("status", {"execution": key, "detail": "full"}),
+        ):
+            assert reply["actual"] == expected
+        assert client.transport.sent == before
 
 
 @pytest.mark.parametrize("outcome", ["awaiting_answer", "missing", "failed"])
@@ -36,7 +98,7 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
         assert summary["status"] == (
             "needs_parameters" if outcome == "missing" else outcome
         )
-        assert summary["run_id"] is None
+        assert summary["run_id"] == ("run-a" if outcome == "awaiting_answer" else None)
         assert summary["steps"]["run"]["status"] == (
             "not_started"
             if outcome == "missing"
@@ -44,24 +106,12 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
             if outcome == "awaiting_answer"
             else outcome
         )
-        assert summary["previews"] == {
-            "run": [],
-            "primary": [full["analysis"]["figure"]]
-            if outcome == "awaiting_answer"
-            else [],
-            "post": [],
-        }
         if outcome == "awaiting_answer":
             assert summary["question_items"] == ("trigger_offset",)
             assert not summary["writeback"]["receipts"]
             assert initial.images
             assert waited.images
-            assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-                {"path": "/actual/raw.h5", "status": "saved"}
-            ]
-            assert (
-                full["actual"]["publication"]["cfg_ref"] == summary["actual"]["cfg_ref"]
-            )
+            assert summary["artifacts"]["raw"] == full["raw_save"]["artifacts"]["raw"]
         elif outcome == "missing":
             assert summary["missing"] == full["missing"]
         else:
@@ -98,7 +148,18 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         }
         assert full["writeback"]["destination_context"] == destination
         assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-            {"path": "/actual/raw.h5", "status": "saved"}
+            {
+                "format": "data_h5",
+                "path": "/runs/run-a/data.h5",
+                "status": "saved",
+                "error": None,
+            },
+            {
+                "format": "labber",
+                "path": "/labber/raw.hdf5",
+                "status": "saved",
+                "error": None,
+            },
         ]
 
 
@@ -158,7 +219,6 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
         candidate = summary["writeback"]["stages"]["primary"][0]
         assert candidate == completed.data["writeback"]["stages"]["primary"][0]
         assert candidate["target"] == "readout_rf"
-        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
         for source, expected in (("current", current), ("proposed", proposed)):
             projected = candidate[source]
             assert projected["type"] == "readout/pulse"
@@ -225,7 +285,6 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         assert candidate["target"] == "pi_len"
         assert candidate["resolved_target"] is None
         assert full["writeback"]["items"][0]["selected"] is False
-        assert candidate["cfg_ref"] == summary["actual"]["cfg_ref"]
         assert candidate["proposed"] == {
             "type": "pulse",
             "freq": 6100.0,
@@ -303,8 +362,7 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
         assert full["run_start"]["status"] == step_status
         assert summary["error"]["reason"] == reason
         assert summary["run_op"] is None
-        assert summary["actual"]["cfg_ref"] == full["actual"]["publication"]["cfg_ref"]
-        assert summary["steps"]["raw_save"]["status"] == "not_started"
+        assert summary["steps"]["raw_save"] is None
         assert len(client.transport.sent) == before
         assert [method for method, _ in client.transport.sent].count(
             "tab.run_start"
@@ -346,7 +404,18 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
                 "reason": "completed",
             }
             assert confirmed["artifacts"]["raw"]["data"]["members"]["data"] == [
-                {"path": "/actual/raw.h5", "status": "saved"}
+                {
+                    "format": "data_h5",
+                    "path": "/runs/run-a/data.h5",
+                    "status": "saved",
+                    "error": None,
+                },
+                {
+                    "format": "labber",
+                    "path": "/labber/raw.hdf5",
+                    "status": "saved",
+                    "error": None,
+                },
             ]
             assert [method for method, _ in client.transport.sent].count(
                 "tab.run_start"
@@ -402,8 +471,8 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         if method == "tab.writeback_preview":
             response["items"] = [
                 {
-                    "id": "md-1",
-                    "kind": "metadict",
+                    "id": "param-1",
+                    "kind": "parameter",
                     "target_name": "trigger_offset",
                     "selected": False,
                     "proposed": 0.24,
@@ -423,18 +492,11 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         summary = client.call("status", {"execution": execution})
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
-        assert summary["run_id"] is None
-        assert summary["actual"]["cfg_ref"] == full["actual"]["cfg_ref"]
-        assert summary["actual"]["parameters"]["frequency_mhz"] == {
-            "value": 6020.0,
-            "source": "frequency_mhz",
-            "unit": "MHz",
-        }
-        assert summary["actual"]["parameters"]["rounds"] == {
-            "value": 7,
-            "source": "rounds",
-        }
-        assert summary["actual"]["modules"]["reset"] == {
+        assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert cfg_value(gui.publication, "rounds") == 7
+        assert summary["actual"] == full["actual"]
+        assert summary["actual"]["use_reset"] == {
             "value": None,
             "source": "disabled",
         }
@@ -443,18 +505,55 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         assert summary["steps"]["analysis"]["primary"]["status"] == "finished"
         assert summary["steps"]["analysis_save"]["primary"]["status"] == "saved"
         assert summary["analysis"]["primary"]["params"] == {"threshold": 0.5}
-        assert summary["analysis"]["primary"]["details"] == {"offset": 0.24}
+        assert summary["analysis"]["primary"]["summary"] == {"offset": 0.24}
         assert summary["artifacts"]["raw"]["data"] == {
-            "status": "saved",
-            "lifetime": "persistent",
-            "members": {"data": [{"path": "/actual/raw.h5", "status": "saved"}]},
+            "status": "Saved",
+            "members": {
+                "data": [
+                    {
+                        "format": "data_h5",
+                        "path": "/runs/run-a/data.h5",
+                        "status": "saved",
+                        "error": None,
+                    },
+                    {
+                        "format": "labber",
+                        "path": "/labber/raw.hdf5",
+                        "status": "saved",
+                        "error": None,
+                    },
+                ]
+            },
         }
-        assert summary["artifacts"]["analysis"]["trace"]["members"] == {
-            "image": [{"path": "/actual/trace.png", "status": "saved"}]
+        assert summary["artifacts"]["raw"] == full["raw_save"]["artifacts"]["raw"]
+        assert summary["artifacts"]["analysis"]["results"] == {
+            "status": "Saved",
+            "members": {
+                "analysis:primary": [
+                    {
+                        "format": "json",
+                        "path": "/runs/run-a/analysis/results.json",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+                "figure:trace": [
+                    {
+                        "format": "png",
+                        "path": "/runs/run-a/analysis/trace.png",
+                        "status": "saved",
+                        "error": None,
+                    }
+                ],
+            },
         }
+        assert (
+            summary["artifacts"]["analysis"]
+            == full["analysis"]["save_report"]["artifacts"]["analysis"]
+        )
         candidate = summary["writeback"]["stages"]["primary"][0]
         assert candidate == {
-            "id": "md-1",
+            "id": "param-1",
             "kind": "parameter",
             "target": "trigger_offset",
             "resolved_target": None,
@@ -474,7 +573,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
 
 @pytest.mark.parametrize(
     "wire_op,phase,raw_status",
-    [(71, "run", "not_started"), (82, "raw_save", "failed"), (93, "analysis", "saved")],
+    [(71, "run", "not_started"), (93, "analysis", "saved")],
 )
 @pytest.mark.parametrize(
     "outcome",
@@ -502,17 +601,15 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "incompatible_wire"
         assert reply.data["error"]["phase"] == phase
-        assert reply.data["actual"]["fields"]["modules.readout.pulse_cfg.freq"] == {
-            "value": 6020.0,
-            "input": gui.publication["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]["children"]["pulse_cfg"]["children"]["freq"]["input"],
-            "source": "frequency_mhz",
-        }
-        assert reply.data["raw_save"]["status"] == raw_status
-        assert reply.data["raw_save"]["path"] == (
-            "/actual/raw.h5" if wire_op == 93 else None
-        )
+        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert reply.data["actual"]["rounds"] == {"value": 3, "source": "gui_default"}
+        if wire_op == 93:
+            assert reply.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                reply.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+            )
+        else:
+            assert reply.data["raw_save"] is None
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == (0 if wire_op == 71 else 1)
@@ -520,92 +617,11 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert "tab.get_analyze_result" not in methods
 
 
-def test_run_capture_keeps_calibrated_raw_input_after_live_cfg_changes(tmp_path):
-    gui = LookbackGui()
-    gui.md["r_f"] = 6120.0
-
-    def respond(method, params):
-        response = gui(method, params)
-        if method == "tab.run_start":
-            gui.md["r_f"] = 7000.0
-            readout = gui.publication["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]
-            state = readout["children"]["pulse_cfg"]["children"]["freq"]["input"]
-            state.update(raw="another_source", resolved=7000.0)
-        return response
-
-    with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {})
-        assert completed.data["status"] == "awaiting_answer", completed.data
-        before = len(client.transport.sent)
-        full = client.call(
-            "status", {"execution": completed.data["execution"], "detail": "full"}
-        )
-        frequency = full["actual"]["fields"]["modules.readout.pulse_cfg.freq"]
-        assert frequency["value"] == 6120.0
-        assert frequency["source"] == "r_f"
-        assert frequency["input"]["raw"] == "r_f"
-        assert frequency["input"]["mode"] == "expression"
-        assert frequency["input"]["resolved"] == 6120.0
-        assert (
-            full["actual"]["publication"]["tree"]["children"]["modules"]["children"][
-                "readout"
-            ]["children"]["pulse_cfg"]["children"]["freq"]["input"]
-            == (frequency["input"])
-        )
-        assert len(client.transport.sent) == before
-
-
-def test_full_query_keeps_the_publication_used_before_run(tmp_path):
-    gui = LookbackGui()
-    gui.publication["source_basis"] = [{"label": "sample", "revision": 3}]
-    captured: dict[str, Any] = {}
-
-    def respond(method, params):
-        response = gui(method, params)
-        if method == "tab.run_start":
-            captured.update(deepcopy(gui.publication))
-            gui.publication["source_basis"][0]["revision"] = 99
-            gui.publication["cfg_ref"]["revision"] = "99"
-            gui.publication["tree"]["children"]["rounds"] = {
-                "kind": "scalar",
-                "input": {"resolved": 999},
-            }
-        return response
-
-    with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
-        assert completed.data["status"] == "awaiting_answer", completed.data
-        execution = completed.data["execution"]
-        before = len(client.transport.sent)
-        full = client.call("status", {"execution": execution, "detail": "full"})
-        assert full["actual"]["publication"] == captured
-        assert full["actual"]["source_basis"] == [{"label": "sample", "revision": 3}]
-        assert full["actual"]["fields"]["rounds"]["value"] == 7
-        assert full["actual"]["fields"]["rounds"]["source"] == "rounds"
-        assert (
-            full["actual"]["publication"]["tree"]["children"]["rounds"]["input"][
-                "resolved"
-            ]
-            == 7
-        )
-        full["actual"]["publication"]["tree"]["children"].clear()
-        full["actual"]["fields"]["rounds"]["value"] = -1
-        full["actual"]["source_basis"].clear()
-        repeated = client.call("status", {"execution": execution, "detail": "full"})
-        assert repeated["actual"]["publication"] == captured
-        assert repeated["actual"]["fields"]["rounds"]["value"] == 7
-        assert repeated["actual"]["source_basis"] == captured["source_basis"]
-        assert len(client.transport.sent) == before
-
-
 @pytest.mark.parametrize(
     ("pending_method", "wire_op", "phase", "raw_status"),
     [
         ("operation.await", 71, "run", "not_started"),
-        ("tab.save_data", None, "raw_save", "unknown"),
-        ("operation.await", 82, "raw_save", "unknown"),
+        ("tab.save_data", None, "preparing", "unknown"),
         ("operation.await", 93, "analysis", "saved"),
     ],
 )
@@ -648,12 +664,14 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
         assert terminal.data["status"] == "failed"
         assert terminal.data["error"]["reason"] == "connection_lost"
         assert terminal.data["error"]["phase"] == phase
-        assert terminal.data["raw_save"]["status"] == raw_status
-        if wire_op == 82:
-            assert terminal.data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert terminal.data["raw_save"]["path"] is None
         if raw_status == "saved":
-            assert terminal.data["raw_save"]["path"] == "/actual/raw.h5"
+            assert terminal.data["raw_save"]["run_id"] == "run-a"
+            assert (
+                terminal.data["raw_save"]["artifacts"]["raw"]["data"]["status"]
+                == "Saved"
+            )
+        else:
+            assert terminal.data["raw_save"] is None
         state = client.call("status", {"execution": execution})
         assert state["error"] == terminal.data["error"]
         assert not reconnects
@@ -669,10 +687,9 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
     "failure, phase, raw_status",
     [
         ("run", "run", "not_started"),
-        ("raw_start", "raw_save", "failed"),
-        ("raw_finish", "raw_save", "failed"),
+        ("raw_start", "preparing", "failed"),
         ("analysis", "analysis", "saved"),
-        ("superseded_raw", "raw_save", "failed"),
+        ("superseded_raw", "preparing", "failed"),
         ("superseded_analysis", "analysis", "saved"),
         ("superseded_writeback", "writeback_read", "saved"),
         ("image", "analysis", "saved"),
@@ -685,7 +702,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
     gui = LookbackGui()
 
     def respond(method, params):
-        fail_operation = {"run": 71, "raw_finish": 82, "analysis": 93}.get(failure)
+        fail_operation = {"run": 71, "analysis": 93}.get(failure)
         if method == "operation.await" and params["operation_id"] == fail_operation:
             return {
                 "reason": "completed",
@@ -700,7 +717,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         "superseded_raw": "tab.save_data",
         "superseded_analysis": "tab.analyze",
         "superseded_writeback": "tab.writeback_preview",
-        "image": "tab.save_image",
+        "image": "tab.save_artifacts",
         "writeback": "tab.writeback_preview",
     }.get(failure)
     if failed_method:
@@ -724,36 +741,30 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         assert len(client.transport.sent) == before
         assert summary["status"] == data["status"] == "failed", data
         assert summary["error"] == data["error"]
-        assert summary["steps"]["raw_save"]["status"] == raw_status
-        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == (
-            [{"path": "/actual/raw.h5", "status": "saved"}]
-            if raw_status == "saved"
-            else [{"path": "/actual/raw.h5", "status": "reserved"}]
-            if failure == "raw_finish"
-            else []
-        )
-        if failure == "writeback":
-            assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [
-                {"path": "/actual/trace.png", "status": "saved"}
-            ]
+        if raw_status == "saved":
+            assert summary["steps"]["raw_save"]["status"] == "saved"
+            assert summary["artifacts"]["raw"] == data["raw_save"]["artifacts"]["raw"]
+        else:
+            assert summary["steps"]["raw_save"] is None
         assert reply.is_error
         assert data["error"]["phase"] == phase
         if failure.startswith("superseded"):
             assert data["error"]["reason"] == "result_superseded"
-        assert data["raw_save"]["status"] == raw_status
         assert data["tab"] == "t"
         assert data["run_op"] is not None
         if raw_status == "saved":
-            assert data["raw_save"]["path"] == "/actual/raw.h5"
-        if failure == "raw_finish":
-            assert data["raw_save"]["reserved_path"] == "/actual/raw.h5"
-            assert data["raw_save"]["operation_outcome"]["status"] == "failed"
+            assert data["raw_save"]["run_id"] == "run-a"
+        else:
+            assert data["raw_save"] is None
         if failure in ("image", "writeback"):
             assert data["analysis"]["result"]["summary"] == {"offset": 0.24}
         if failure == "writeback":
-            assert data["analysis"]["saved_images"] == [
-                {"figure_name": "trace", "image_path": "/actual/trace.png"}
-            ]
+            assert (
+                data["analysis"]["save_report"]["artifacts"]["analysis"]["results"][
+                    "status"
+                ]
+                == "Saved"
+            )
             assert reply.images[0].data == PNG
         methods = [method for method, _ in client.transport.sent]
         for method in (

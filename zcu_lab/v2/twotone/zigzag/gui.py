@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,7 +21,7 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_lab.v2._support.measure import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    scaled_md,
+    scaled_path_seed,
 )
 from zcu_lab.v2._support.measure.zigzag import (
     EXPECTS_ML,
@@ -71,7 +73,7 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         builder = add_gate_modules(MeasureCfgBuilder()).relax_delay(
-            scaled_md("t1", factor=5.0, fallback_value=30.5)
+            scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5)
         )
         return (
             add_repeat_fields(builder, n_times=10)
@@ -87,7 +89,11 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> ZigZagRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = ZigZagExp().run(cfg, context=context)

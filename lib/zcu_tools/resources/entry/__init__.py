@@ -1,6 +1,8 @@
 """Explicit-root parameter containers, independent of legacy context services."""
 
+from ._path_segments import validate_path_segment
 from .errors import (
+    DestinationExistsError,
     MissingReferenceError,
     RenameRecoveryError,
     RoleResolutionError,
@@ -28,6 +30,28 @@ from .provenance import ClonedFrom, Provenance
 from .registry import ComponentRegistry, RoleRegistry, RoleSpec, component_registry
 from .result_entry import ResultEntry, rename_entry
 from .roles import RoleView, role_registry
-from .save_layout import ArtifactKey, Output, SaveLayout, new_run_id
+from .save_layout import (
+    ArtifactKey,
+    Output,
+    SaveLayout,
+    WorkflowRoots,
+    new_run_id,
+    workflow_roots,
+)
 from .schema import ComponentSchema
-from .views import ComponentView, EditView, SetupView
+from .storage import PointStorageBinding, capture_point_storage
+from .views import (
+    ComponentView,
+    DocumentField,
+    EditView,
+    SetupView,
+    accept_source,
+    document_fields,
+    document_meta,
+    document_unit,
+    document_value,
+    manual_update,
+    resolve_path,
+    snapshot,
+    source_path,
+)

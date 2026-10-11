@@ -21,11 +21,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 
+from zcu_tools.gui.session.parameters import ParameterContext as ParameterContext
+from zcu_tools.gui.session.parameters import RoleBinding as RoleBinding
 from zcu_tools.gui.session.value_lookup import EmptyValueLookup, ValueLookup
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import ModuleLibrary
-    from zcu_tools.resources.context.metadict import MetaDict
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
@@ -73,8 +73,17 @@ class ContextReadiness(Enum):
 
 @dataclass(frozen=True)
 class SessionEnv:
-    md: MetaDict
-    ml: ModuleLibrary
+    """Published parameters plus independent live session capabilities.
+
+    parameters is None for EMPTY, otherwise a fixed capture without consumer
+    roles targeting EntryDraft or SavedPoint. soc/soccfg and predictor remain
+    live capabilities, not Run evidence. Names and paths are cached session
+    metadata; active_label is empty before point selection. readiness gates
+    ACTIVE-only Run/save. values reads the published value-source cache.
+    Retaining an environment does not update its parameter capture.
+    """
+
+    parameters: ParameterContext | None
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
     chip_name: str = "unknown_chip"

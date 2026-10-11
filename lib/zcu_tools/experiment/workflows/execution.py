@@ -380,10 +380,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             )
             if request.live is not None:
                 run.bind_live(request.live, self._ports.plots)
-            settings = run.device_setup
-            if request.setup_devices and settings is not None:
-                run.devices.setup(settings, signal)
-                self._check_cancel()
             try:
                 result = request.experiment(run)
             except ScheduleOutcomeError as error:

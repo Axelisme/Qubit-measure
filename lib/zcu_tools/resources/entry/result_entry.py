@@ -1,30 +1,46 @@
 """Creation and identity of a result entry across two explicit roots."""
 
+from __future__ import annotations
+
 import errno
 import os
 import shutil
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ruamel.yaml import YAML
 
+from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .errors import RenameRecoveryError
+from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
+from .errors import DestinationExistsError, RenameRecoveryError
 from .ledger import RecordsLedger
 from .ledger_models import ImportPayload, LedgerEvent, Origin, validate_origin
 from .points import PointView
+from .provenance import Provenance, ProvenanceData, validate_source
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
+    is_forward_minor,
 )
-from .views import SetupView
+from .views import (
+    SetupView,
+    add_component_to_draft,
+    prepare_point_update,
+    validate_view_components,
+)
+
+if TYPE_CHECKING:
+    from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
 
 
 def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -> Path:
@@ -32,7 +48,7 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     root_path = Path(root)
     path = root_path / name
     if new_destination and (path.exists() or path.is_symlink()):
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
+        raise DestinationExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(path))
     if path.resolve().parent != root_path.resolve():
         raise ValueError(f"{path}: entry escapes its root")
     return path
@@ -87,6 +103,7 @@ class ResultEntry:
         )
 
     def _validate_setup(self, document: SetupDocument) -> None:
+        validate_view_components(document, source=self._result_path / "setup.yaml")
         if self._entry_id is None:
             self._entry_id = document.general.entry_id
         elif document.general.entry_id != self._entry_id:
@@ -118,6 +135,25 @@ class ResultEntry:
         """Return this entry's exact Database directory, not the parent root."""
         return self._database_path
 
+    def load_aliases(self) -> EntryAliases | None:
+        """Read the entry-authored table, or None only when its file is absent.
+
+        Preserve order, empty bindings and raw $ links. Accept zcu.aliases 1.x;
+        header/schema/YAML and I/O errors propagate without preset fallback.
+        No component lookup or writes occur. Syntax validation belongs to the
+        caller\'s alias table owner.
+        """
+        return load_entry_aliases(self._result_path / "aliases.yaml")
+
+    def save_aliases(self, aliases: EntryAliases) -> None:
+        """Atomically save this named authored table as zcu.aliases 1.0.
+
+        Strict string validation precedes sibling-temp replacement. Failure
+        retains the old file and propagates its storage error. No point, setup,
+        ledger or preferences change; no multiwriter/crash guarantee is offered.
+        """
+        save_entry_aliases(self._result_path / "aliases.yaml", aliases)
+
     @property
     def ledger(self) -> RecordsLedger:
         """Bind this entry's records directory and UUID without caching events.
@@ -126,6 +162,61 @@ class ResultEntry:
         Missing records directories raise; accessing this property writes no files.
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+
+    def updated_point(
+        self,
+        document: PointDocument,
+        path: str,
+        value: YamlValue,
+        *,
+        source: Provenance | None = None,
+    ) -> PointDocument:
+        """Return an isolated working-unit point candidate for a memory command.
+
+        path is a concrete component/general dotted field, without role expansion.
+        Reuse the view's field/schema validation. Omitted source is manual;
+        explicit Provenance is validated against this entry's actual ledger and
+        clears clone origin on accepted leaves. Preserve unmodified fields and
+        created_at. Input/schema/source failures leave inputs unchanged.
+        No point/store/file creation, notification or event append. Manual does
+        not read a ledger; explicit event sources may read local ledger evidence.
+        """
+        return prepare_point_update(
+            document,
+            path,
+            value,
+            source=source,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
+        )
+
+    def updated_component(
+        self, document: PointDocument, name: str, kind: str, fields: YamlMap
+    ) -> PointDocument:
+        """Return a memory point with one added registered component.
+
+        fields contains working-unit YAML values. Reuse the resource's ordinary
+        add-component name/kind/schema/default/provenance rules. No point is
+        created, read or saved, and inputs are unchanged on success or failure.
+        Invalid name, duplicate, unknown kind or invalid fields propagate.
+        """
+        candidate = document.model_copy(deep=True)
+        add_component_to_draft(
+            candidate, name, kind, fields, self._result_path / "setup.yaml"
+        )
+        return candidate
+
+    def validate_library(self, document: ModuleLibraryDocument) -> None:
+        """Validate a memory library's keys/Specs/sources against this entry.
+
+        Delegate the existing library document validation without mutation,
+        materialization, asset access, YAML I/O or event production. Manual
+        sources do not read ledger evidence. Invalid keys/schema/sources raise;
+        explicit local event sources retain ledger/attachment/I/O failures.
+        """
+        document.validate_content(
+            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
+        )
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.
@@ -147,35 +238,40 @@ class ResultEntry:
         label: str,
         *,
         clone_from: str | PointView | None = None,
+        description: str | None = None,
         origin: Origin = "notebook",
-        call_id: str | None = None,
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
-        label is a safe single path segment; existing destinations are rejected.
+        label is a safe single path segment; existing destinations raise
+        DestinationExistsError before writes.
         Without clone_from, copy the latest setup components and provenance.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
         point and module_cfg, renew creation time and mark the direct clone origin.
         Cross-entry nonmanual sources become local import events with copied JSON
-        attachments; same-entry source IDs remain unchanged. origin/call_id name
-        the import operation: MCP needs a nonempty ID, other origins require None.
+        attachments; same-entry source IDs remain unchanged. origin identifies
+        the importing frontend as gui, notebook or mcp.
+        description=None preserves seed/clone metadata; a string explicitly sets it,
+        including empty text, within this creation/cleanup scope.
         No source files, data or images change. Failure removes only the new point;
         completed imports may remain orphaned. No cross-file transaction is provided.
         """
-        validate_origin(origin, call_id)
+        validate_origin(origin)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
         destination.mkdir()
         try:
             if clone_from is not None:
-                self._clone_point(
-                    destination, clone_from, origin=origin, call_id=call_id
-                )
+                self._clone_point(destination, clone_from, origin=origin)
             else:
                 self._seed_point(destination)
-            return self.use_point(label)
+            point = self.use_point(label)
+            if description is not None:
+                with point.edit() as draft:
+                    draft.set("general.description", description)
+            return point
         except BaseException:
             shutil.rmtree(destination)
             raise
@@ -210,7 +306,7 @@ class ResultEntry:
                 {"format": "zcu.module-library", "format_version": "1.0"}, stream
             )
 
-    def _clone_source(self, clone_from: str | PointView) -> tuple["ResultEntry", Path]:
+    def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
         database_root = self._database_path.parent
         expected_id = None
@@ -219,8 +315,6 @@ class ResultEntry:
                 clone_from,
                 result_root=result_root,
                 database_root=database_root,
-                entry_path=self._result_path,
-                entry_id=self.entry_id,
             )
             source = identity.source.parent
             name = source.parent.parent.name
@@ -249,23 +343,58 @@ class ResultEntry:
         clone_from: str | PointView,
         *,
         origin: Origin,
-        call_id: str | None,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
         store = source_entry._point_store(source / "point.yaml")
         with store.locked():
             store.refresh()
-            components = store.snapshot().components
-            for filename in ("point.yaml", "module_cfg.yaml"):
-                shutil.copyfile(source / filename, destination / filename)
+            point_document = store.snapshot()
+            shutil.copyfile(source / "point.yaml", destination / "point.yaml")
+        library_store = self._library_store(source / "module_cfg.yaml")
+        with library_store.locked():
+            library_store.refresh()
+            library_document = library_store.snapshot()
+            library_document.validate_content(
+                ledger=source_entry._result_path / "records/ledger.jsonl",
+                entry_id=source_entry.entry_id,
+            )
+            shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
+        forward_minor = is_forward_minor(
+            {
+                "format": point_document.format,
+                "format_version": point_document.format_version,
+            },
+            source=source / "point.yaml",
+        )
+        # Validate known source fields without narrowing the point's future-field policy.
+        point_sources = {
+            path: ProvenanceData.model_validate(
+                metadata, extra="ignore" if forward_minor else None
+            )
+            for path, metadata in point_document.provenance.items()
+        }
+        for metadata in point_sources.values():
+            validate_source(
+                metadata.to_provenance(),
+                source_entry._result_path / "records/ledger.jsonl",
+                source_entry.entry_id,
+            )
+        event_ids = tuple(
+            dict.fromkeys(
+                metadata.source
+                for metadata in (
+                    *point_sources.values(),
+                    *library_document.provenance.values(),
+                )
+                if metadata.source != "manual"
+            )
+        )
+        imports: dict[str, str] = {}
+        if source_entry is not self:
+            imports = self._import_sources(event_ids, source_entry, origin=origin)
         cloned_store = self._point_store(destination / "point.yaml")
         with cloned_store.edit() as draft:
-            imports: dict[str, str] = {}
-            if source_entry is not self:
-                imports = self._import_sources(
-                    store.snapshot(), source_entry, origin=origin, call_id=call_id
-                )
-            draft.components = components
+            draft.components = point_document.components
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
@@ -277,28 +406,50 @@ class ResultEntry:
                     "entry_id": source_entry.entry_id,
                     "point": source.name,
                 }
+        # New destination is private until both independent file commits succeed.
+        cloned_library = self._library_store(destination / "module_cfg.yaml")
+        with cloned_library.edit() as draft:
+            for metadata in draft.provenance.values():
+                if metadata.source in imports:
+                    metadata.source = imports[metadata.source]
+                metadata.cloned_from = {
+                    "entry_id": source_entry.entry_id,
+                    "point": source.name,
+                }
+            draft.validate_content(
+                ledger=self._result_path / "records/ledger.jsonl",
+                entry_id=self.entry_id,
+            )
+        cloned_library.snapshot().validate_content(
+            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
+        )
+
+    def _library_store(self, source: Path) -> DocumentStore[ModuleLibraryDocument]:
+        # Library imports entry provenance; defer composition until both packages load.
+        from zcu_tools.resources.context.library import (
+            MODULE_LIBRARY_FORMAT,
+            MODULE_LIBRARY_VERSION,
+            ModuleLibraryDocument,
+        )
+
+        return DocumentStore(
+            source,
+            ModuleLibraryDocument,
+            format=MODULE_LIBRARY_FORMAT,
+            supported_version=MODULE_LIBRARY_VERSION,
+        )
 
     def _import_sources(
         self,
-        document: PointDocument,
-        source_entry: "ResultEntry",
+        event_ids: tuple[str, ...],
+        source_entry: ResultEntry,
         *,
         origin: Origin,
-        call_id: str | None,
     ) -> dict[str, str]:
         imports: dict[str, str] = {}
         source_ledger = source_entry.ledger
         destination_ledger = self.ledger
-        for metadata in document.provenance.values():
-            event_id = metadata.get("source")
-            if event_id == "manual":
-                continue
-            if not isinstance(event_id, str):
-                raise ValueError(
-                    "point provenance.source must be a local event ID or manual"
-                )
-            if event_id in imports:
-                continue
+        for event_id in event_ids:
             try:
                 evidence = source_ledger.get(event_id)
             except KeyError as exc:
@@ -311,7 +462,6 @@ class ResultEntry:
                 at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 entry_id=self.entry_id,
                 origin=origin,
-                call_id=call_id,
                 payload=ImportPayload(
                     source_entry_id=source_entry.entry_id,
                     source_event_id=event_id,
@@ -338,22 +488,37 @@ class ResultEntry:
         module = directory / "module_cfg.yaml"
         if not module.is_file():
             raise FileNotFoundError(module)
-        view = PointView(
+        return PointView(
             self._point_store(source),
             source,
             ledger=self._result_path / "records/ledger.jsonl",
             entry_id=self.entry_id,
+            result_root=self._result_path.parent,
+            database_root=self._database_path.parent,
         )
-        _point_origin.register(
-            view,
-            _point_origin.PointOrigin(
-                source=source,
-                entry_id=self.entry_id,
-                result_root=self._result_path.parent.resolve(),
-                database_root=self._database_path.parent.resolve(),
-            ),
+
+    def module_library(
+        self, label: str, *, assets: WaveformAssetInfo | None = None
+    ) -> ModuleLibrary:
+        """Open a point-local library with this entry's ledger and optional assets.
+
+        label follows use_point's safe single-segment rules. Only module_cfg.yaml
+        is loaded; the point and assets are not read and no active point is selected.
+        Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
+        The existing library must have a valid header, schema and local provenance.
+        Invalid labels raise ValueError; missing files and validation/I/O errors
+        propagate. Opening creates no missing document.
+        """
+        # Avoid the library -> entry.provenance -> ResultEntry import cycle.
+        from zcu_tools.resources.context.library import ModuleLibrary
+
+        directory = _entry_path(self._result_path / "points", label)
+        return ModuleLibrary(
+            directory / "module_cfg.yaml",
+            assets=assets,
+            ledger=self._result_path / "records/ledger.jsonl",
+            entry_id=self.entry_id,
         )
-        return view
 
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):
@@ -364,12 +529,28 @@ class ResultEntry:
             EntryPointDocument,
             format=PARAMETER_FORMAT,
             supported_version=PARAMETER_VERSION,
+            validate=lambda document: validate_view_components(document, source=source),
+        )
+
+    @classmethod
+    def list_names(cls, *, result_root: str | Path) -> tuple[str, ...]:
+        """List sorted direct entry directories containing setup.yaml, without parsing.
+
+        Missing/non-directory/inaccessible roots retain their filesystem errors.
+        No legacy lookup, content validation or directory creation occurs.
+        """
+        return tuple(
+            sorted(
+                path.name
+                for path in Path(result_root).iterdir()
+                if path.is_dir() and (path / "setup.yaml").is_file()
+            )
         )
 
     @classmethod
     def create(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
-    ) -> "ResultEntry":
+    ) -> ResultEntry:
         result_path = _entry_path(result_root, name, new_destination=True)
         database_path = _entry_path(database_root, name, new_destination=True)
         created: list[Path] = []
@@ -403,7 +584,7 @@ class ResultEntry:
     @classmethod
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
-    ) -> "ResultEntry":
+    ) -> ResultEntry:
         result_path = _entry_path(result_root, name)
         database_path = _entry_path(database_root, name)
         for directory in (

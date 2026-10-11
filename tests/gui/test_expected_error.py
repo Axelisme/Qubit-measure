@@ -12,10 +12,6 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.gui.session.services.connection import SoCConnectionError
-from zcu_tools.gui.session.services.context import (
-    MdValueError,
-    MlEntryValidationError,
-)
 from zcu_tools.gui.session.services.device import DeviceRegistrationError
 from zcu_tools.gui.session.services.predictor import (
     PredictorLoadError,
@@ -98,22 +94,12 @@ def test_named_failed_precondition_errors_preserve_runtime_ancestry(
     "error",
     [
         CfgEditorError("bad editor"),
-        MlEntryValidationError("bad module"),
         MissingValue("missing", "missing value"),
         ValueTypeError("wrong", "wrong type"),
     ],
 )
 def test_named_invalid_input_errors_opt_in_explicitly(error: ExpectedError) -> None:
     assert error.category is ExpectedErrorCategory.INVALID_INPUT
-
-
-def test_md_value_error_preserves_value_error_ancestry() -> None:
-    error = MdValueError("bad value")
-
-    assert isinstance(error, ValueError)
-    assert isinstance(error, ExpectedError)
-    assert error.category is ExpectedErrorCategory.INVALID_INPUT
-    assert error.reason_code == ""
 
 
 def test_unavailable_value_is_failed_precondition() -> None:

@@ -17,6 +17,7 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_analysis_support import AnalysisRecipeGui
 from ._recipe_support import recipe_client
+from ._save_report_support import analysis_report
 
 
 def completed_run(session: RecipeSession) -> RecipeRun:
@@ -69,11 +70,8 @@ def test_analysis_starts_immediately_and_binds_primary_and_post_sources(
             {"path": "summary.frequency_error", "reason": "non_finite"}
         ]
         assert capture.save_status == "saved"
-        assert [image.image_path for image in capture.saved_images] == [
-            "/actual/fit.png",
-            "/actual/residual.png",
-        ]
-        assert capture.figure is not None and len(operation.preview_images()) == 1
+        assert capture.save_report == analysis_report("analysis", ["fit", "residual"])
+        assert len(operation.preview_images()) == 1
         post = run.analyze("post")
         post_result, status = post.complete_in_current_worker()
         assert isinstance(post_result, RecipeAnalysis) and status == "completed"
@@ -222,7 +220,7 @@ def test_analysis_cancellation_delivers_none_without_reading_results(
         assert capture.result is None and capture.writeback is None
         assert not any(
             method
-            in ("tab.get_analyze_result", "tab.save_image", "tab.writeback_preview")
+            in ("tab.get_analyze_result", "tab.save_artifacts", "tab.writeback_preview")
             for method, _ in client.transport.sent
         )
 
@@ -310,7 +308,7 @@ def test_analysis_failures_keep_the_original_source_and_confirmed_prefix(
         operation = run.analyze("primary")
         method = {
             "result": "tab.get_analyze_result",
-            "save": "tab.save_image",
+            "save": "tab.save_artifacts",
             "writeback": "tab.writeback_preview",
         }[phase]
         failure = {
@@ -321,14 +319,7 @@ def test_analysis_failures_keep_the_original_source_and_confirmed_prefix(
                 "reason": "result_superseded",
             },
         }
-        if phase == "save":
-            client.transport.replies[method] = lambda params: (
-                {"ok": True, "result": gui(method, params)}
-                if params["figure_name"] == "fit"
-                else failure
-            )
-        else:
-            client.transport.replies[method] = failure
+        client.transport.replies[method] = failure
         with pytest.raises(GuiRpcError) as error:
             operation.complete_in_current_worker()
         assert error.value.reason == "result_superseded"
@@ -343,11 +334,11 @@ def test_analysis_failures_keep_the_original_source_and_confirmed_prefix(
                 "writeback": "writeback_read",
             }[phase]
         )
-        assert [image.image_path for image in capture.saved_images] == {
-            "result": [],
-            "save": ["/actual/fit.png"],
-            "writeback": ["/actual/fit.png", "/actual/residual.png"],
-        }[phase]
+        assert capture.save_report == (
+            analysis_report("analysis", ["fit", "residual"])
+            if phase == "writeback"
+            else None
+        )
         assert (capture.result is None) == (phase == "result")
         assert capture.writeback is None
         assert run.snapshot().raw_save == raw
@@ -442,32 +433,33 @@ def test_failed_native_analysis_is_not_changed_to_cancelled_by_stop_intent(tmp_p
         assert capture.result is None
 
 
-def test_uncertain_analysis_save_retains_confirmed_image_and_unconfirmed_name(tmp_path):
+def test_uncertain_analysis_save_preserves_result_and_failure_without_a_report(
+    tmp_path,
+):
     gui = AnalysisRecipeGui()
     with recipe_client(tmp_path, gui) as client:
         run = completed_run(RecipeSession(client.context))
         operation = run.analyze("primary")
-        client.transport.replies["tab.save_image"] = lambda params: (
-            {"ok": True, "result": gui("tab.save_image", params)}
-            if params["figure_name"] == "fit"
-            else {
-                "ok": False,
-                "error": {"code": "timeout", "message": "save response lost"},
-            }
-        )
+        client.transport.replies["tab.save_artifacts"] = {
+            "ok": False,
+            "error": {"code": "timeout", "message": "save response lost"},
+        }
         with pytest.raises(GuiRpcError, match="save response lost"):
             operation.complete_in_current_worker()
         capture = operation.snapshot()
         assert capture is not None and capture.status == "failed"
         assert capture.save_status == "unknown"
-        assert capture.unconfirmed_image == "residual"
-        assert capture.remaining_images == ["residual"]
-        assert [image.image_path for image in capture.saved_images] == [
-            "/actual/fit.png"
-        ]
+        assert capture.save_report is None
+        assert capture.result is not None
+        assert capture.result.summary == {"frequency": 5.0, "frequency_error": None}
         assert (
-            sum(method == "tab.save_image" for method, _ in client.transport.sent) == 2
+            capture.error is not None and capture.error.reason == "gui_handler_timeout"
         )
+        assert [
+            params["artifacts"]
+            for method, params in client.transport.sent
+            if method == "tab.save_artifacts"
+        ] == [[{"section": "analysis", "name": "results"}]]
 
 
 def test_analysis_without_images_still_captures_writeback_and_empty_question_is_local(
@@ -485,11 +477,19 @@ def test_analysis_without_images_still_captures_writeback_and_empty_question_is_
         operation = run.analyze("primary")
         result, status = operation.complete_in_current_worker()
         assert isinstance(result, RecipeAnalysis) and status == "completed"
-        assert result.snapshot.save_status == "not_available"
+        assert result.snapshot.save_status == "saved"
+        assert result.snapshot.save_report is not None
+        assert (
+            result.snapshot.save_report.artifacts["analysis"]["results"]
+            .members["analysis:primary"][0]
+            .format
+            == "json"
+        )
         assert result.snapshot.writeback == gui.writebacks["primary"]
         assert operation.preview_images() == ()
-        assert not any(
-            method in ("tab.save_image", "tab.get_figure")
-            for method, _ in client.transport.sent
-        )
+        assert [
+            params["artifacts"]
+            for method, params in client.transport.sent
+            if method == "tab.save_artifacts"
+        ] == [[{"section": "analysis", "name": "results"}]]
         assert run.propose_writeback().snapshot().items == ("frequency",)

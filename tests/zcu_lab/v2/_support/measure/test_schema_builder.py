@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+from zcu_tools.cfg_model import CfgInputMap, module_spec_from_raw
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
@@ -13,21 +14,23 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     SweepValue,
 )
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.value_lookup import (
     EmptyValueLookup,
     MissingValue,
     ValueKey,
     ValueRegistry,
 )
-from zcu_tools.program.v2 import ModuleCfgFactory
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder, ModuleInit
 from zcu_lab.v2._support.measure.seeds import (
     SweepDefault,
     custom,
-    md,
-    scaled_md,
+    path_seed,
+    scaled_path_seed,
     value_source,
 )
 
@@ -35,22 +38,34 @@ from zcu_lab.v2._support.measure.seeds import (
 def _ctx(
     *,
     md_values: dict[str, float] | None = None,
-    ml: ModuleLibrary | None = None,
+    ml: LibrarySnapshot | None = None,
     values: ValueRegistry | None = None,
-):
-    md = MetaDict()
-    for key, value in (md_values or {}).items():
-        setattr(md, key, value)
+) -> SessionEnv:
+    point_values = md_values or {}
+    readout = "R1.readout.readout_rf" if ml is not None else None
+    parameters = parameter_capture(
+        {
+            "Q1": QubitSchema(
+                kind="qubit/transmon",
+                t1=point_values.get("t1"),
+                module={} if readout is None else {"readout": readout},
+            ),
+            "R1": ResonatorSchema(
+                kind="resonator",
+                ext={"default_probe_length": point_values.get("res_probe_len")},
+            ),
+        },
+        ml,
+    ).bind_aliases((AliasRow("qubit", "Q1"), AliasRow("resonator", "R1")), {})
     return SessionEnv(
-        md=md,
-        ml=ml if ml is not None else ModuleLibrary(),
+        parameters=parameters,
         soc=None,
         soccfg=None,
         values=values if values is not None else EmptyValueLookup(),
     )
 
 
-def _readout_raw(*, gain: float = 0.2) -> dict[str, object]:
+def _readout_raw(*, gain: float = 0.2) -> CfgInputMap:
     return {
         "type": "readout/pulse",
         "pulse_cfg": {
@@ -81,13 +96,13 @@ def test_definition_shape_is_context_free_and_instances_are_isolated() -> None:
     definition = (
         MeasureCfgBuilder()
         .pulse("pi_pulse", role_id="pi_pulse")
-        .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+        .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0))
         .sweep(
             "length",
             label="Delay (us)",
             default=SweepDefault(
                 start=0.0,
-                stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                stop=scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=500.0),
                 expts=101,
             ),
         )
@@ -101,13 +116,13 @@ def test_definition_shape_is_context_free_and_instances_are_isolated() -> None:
     calibrated = definition.instantiate(_ctx(md_values={"t1": 12.0}))
 
     assert empty.spec == static_spec == calibrated.spec
-    assert empty.value.fields["relax_delay"] == DirectValue(100.0)
-    assert calibrated.value.fields["relax_delay"] == EvalValue("5.0 * t1")
+    assert empty.value.fields["relax_delay"] == EvalValue("5.0 * $qubit.t1")
+    assert calibrated.value.fields["relax_delay"] == EvalValue("5.0 * $qubit.t1")
     sweep = calibrated.value.fields["sweep"]
     assert isinstance(sweep, CfgSectionValue)
     length = sweep.fields["length"]
     assert isinstance(length, SweepValue)
-    assert length.stop == EvalValue("5.0 * t1")
+    assert length.stop == EvalValue("5.0 * $qubit.t1")
 
     empty.spec.fields.clear()
     assert definition.spec == static_spec
@@ -143,10 +158,9 @@ def test_literal_sweep_is_snapshotted_at_authoring_and_per_instance() -> None:
 
 
 def test_module_init_modes_are_literal_and_smart_optional_means_adopt_or_none() -> None:
-    ml = ModuleLibrary()
-    ml.register_module(
-        readout_rf=ModuleCfgFactory.from_raw(_readout_raw(), ml=ml),
-    )
+    ml = LibrarySnapshot(
+        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+    ).replaced_module("R1.readout.readout_rf", module_spec_from_raw(_readout_raw()))
     definition = (
         MeasureCfgBuilder()
         .readout("smart", role_id="readout")
@@ -168,7 +182,10 @@ def test_module_init_modes_are_literal_and_smart_optional_means_adopt_or_none() 
     assert isinstance(modules, CfgSectionValue)
     smart = modules.fields["smart"]
     inline = modules.fields["inline"]
-    assert isinstance(smart, ReferenceValue) and smart.chosen_key == "readout_rf"
+    assert (
+        isinstance(smart, ReferenceValue)
+        and smart.chosen_key == "$qubit.module.readout"
+    )
     assert isinstance(inline, ReferenceValue)
     assert inline.chosen_key == "<Custom:Pulse Readout>"
     assert modules.fields["disabled"] is None
@@ -291,9 +308,10 @@ def test_module_override_failure_identifies_module_path_and_seed() -> None:
 
 
 def test_blank_overrides_do_not_pollute_library_but_overrides_always_apply() -> None:
-    ml = ModuleLibrary()
-    ml.register_module(
-        readout_rf=ModuleCfgFactory.from_raw(_readout_raw(gain=0.2), ml=ml),
+    ml = LibrarySnapshot(
+        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+    ).replaced_module(
+        "R1.readout.readout_rf", module_spec_from_raw(_readout_raw(gain=0.2))
     )
     definition = (
         MeasureCfgBuilder()
@@ -333,9 +351,9 @@ def test_md_override_and_locks_are_local_to_one_module_declaration() -> None:
             init=ModuleInit.INLINE,
             locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             overrides={
-                "ro_cfg.ro_length": md(
-                    "res_probe_len",
-                    expr="res_probe_len - 0.1",
+                "ro_cfg.ro_length": path_seed(
+                    "$resonator.ext.default_probe_length",
+                    expr="$resonator.ext.default_probe_length - 0.1",
                     fallback=0.9,
                 )
             },
@@ -356,7 +374,9 @@ def test_md_override_and_locks_are_local_to_one_module_declaration() -> None:
     assert isinstance(ro, CfgSectionValue)
     assert pulse.fields["freq"] == DirectValue(0.0)
     assert ro.fields["ro_freq"] == DirectValue(0.0)
-    assert ro.fields["ro_length"] == EvalValue("res_probe_len - 0.1")
+    assert ro.fields["ro_length"] == EvalValue(
+        "$resonator.ext.default_probe_length - 0.1"
+    )
 
     with pytest.raises(ValueError, match="cannot also be overridden"):
         MeasureCfgBuilder().readout(

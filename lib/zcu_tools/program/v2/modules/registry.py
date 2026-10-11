@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 from collections import OrderedDict
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import TYPE_CHECKING
 

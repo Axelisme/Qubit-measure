@@ -27,7 +27,9 @@ def _sample_points_trace(fig: Figure) -> Scatter:
         if trace.mode == "markers":
             traces.append(trace)
     assert len(traces) == 1
-    return traces[0]
+    trace = traces[0]
+    assert isinstance(trace, Scatter)
+    return trace
 
 
 def _coordinates(values: object) -> NDArray[np.float64]:

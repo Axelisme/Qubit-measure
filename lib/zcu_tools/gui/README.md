@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-08, cfg form submits every input immediately
+**Last updated:** 2026-10-11，entry alias 表與 shared session owner
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -104,15 +104,13 @@ Complex 使用一般 direct/eval 路徑。Cfg codec 與 editor 的 complex 值�
 
 `CfgSchemaAssembler`提供domain-free paired Spec/Value construction：同步declare dotted path、
 Fast Fail duplicate/parent conflict與錯誤default carrier、建立choice binding、對齊locked literal，
-並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、MetaDict、
-ModuleLibrary、logical key或generation policy；measure與autoflux各自保有domain builder，只共用這層
+並以one-shot deep-copy snapshot產生`CfgSchema`。它不知道role、Seed、SessionEnv、參數容器、
+ModuleLibrary、logical key或generation policy；measure保有domain builder，重用這層
 tree mechanics（ADR-0065；局部 authoring 見 ADR-0012）。
 
 generic public names由consumer直接從`zcu_tools.gui.cfg`匯入。measure adapter facade只暴露
 framework contract、request/result/writeback/analyze params與protocol signature需要的session
-vocabulary，不forward generic cfg names。`zcu_tools.gui.app.autofluxdep.cfg` package barrel只暴露
-`NodeCfgSchema`、OverridePlan/policy、module reference spec helpers與其它autoflux-local API；module
-normalization與policy binding留在`cfg.module_adapter`，program shape/spec與raw missing/subset policy由
+vocabulary，不forward generic cfg names。Program shape/spec與raw missing/subset policy由
 `experiment.cfg_editing`擁有（ADR-0065；catalog 細節見其 README）。
 
 `gui.cfg.tree`提供三個existing-tree path operations：`resolve_spec_path`穿section與reference
@@ -152,8 +150,7 @@ service-owned draft。
 
 此package不import `gui.app.*`、`experiment.*`、Qt、`resources`、`notebook`或`device`，
 也沒有broad environment object或global resolver registry。scalar option source與reference
-kind都是shared只轉送的opaque string；measure與autofluxdep各自提供
-app-local ports與module shape policy；autofluxdep不經measure lowering/conversion。
+kind都是shared只轉送的opaque string；measure提供app-local ports與module shape policy。
 
 ## Process Runtime (`runtime.py`)
 
@@ -169,8 +166,8 @@ entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
-`gui.session` owns measurement-session primitives. All four standalone GUI
-launchers (`measure`, `autofluxdep`, `fluxdep`, `dispersive`) use this runtime
+`gui.session` owns measurement-session primitives. All three standalone GUI
+launchers (`measure`, `fluxdep`, `dispersive`) use this runtime
 directly; measurement-session apps keep their domain composition in app behavior
 classes and launcher-provided factories.
 
@@ -183,15 +180,25 @@ it does not select a process-wide Matplotlib backend.
 
 ## Project / Result Scope
 
-`ResultScopeManager` scans `result/**/params.json` under the project root and
-treats each hit as a selectable result scope. Measurement-session setup dialogs
-(measure/autofluxdep) use that scope to apply a project; analysis dialogs
-(fluxdep/dispersive) use the same discovery in `widgets.ProjectDialog` as a
-dropdown picker only, leaving typed paths and Browse flows available.
-Measurement-session discovery is snapshot-cached: ordinary dialog reopen/apply
-paths reuse the last scan, while an explicit refresh requests a new scan. Applying
-a previously selected scope validates against the snapshot first and only rescans
-when the selected scope is absent.
+Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
+再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
+列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
+不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
+
+`ResultScopeManager` 仍供 `widgets.ProjectDialog` 的 analysis path picker 使用。
+它掃描 project root 下的 `result/**/params.json`，提供 result scope 候選；
+fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry binding。
+
+## Shared session dialogs (`session/ui/`)
+
+`SetupDialog`、`AliasDialog`、`InspectDialogBase`、`DeviceDialog` 與
+`PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
+`session/ui/alias_dialog.py` 的 AliasDialog 編輯元件與 device 共用的有序 alias 表。
+Apply 先驗表，再由 entry owner 原子保存，成功後才安裝 memory 並發布 fact。
+EMPTY 只改 memory；失敗保舊表、舊檔與 draft。Apply 不關閉，Cancel 不撤已 Apply 的表。
+開 entry 載入自己的表，無檔才重設 caller preset；切 point 不換表。
+Measure 與 workflows 直接 import 同一 owner，不留 app-local re-export 或 wrapper。
+App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
 ## Dialogs — always non-blocking
 
@@ -281,8 +288,7 @@ draft callbacks。detach以stable Python callback解除change/validity subscript
 `CfgFormWidget` accepts an optional field decoration provider keyed by full dotted
 cfg path. The shared renderer applies `hidden`, `enabled`, `tone`, `badge`, and
 `tooltip` metadata without changing the live value model. App-specific semantics
-stay outside the shared layer: for example, autofluxdep uses the same hook to mark
-generated Default cfg fields from its `OverridePlan`。measure則以generic
+stay outside the shared layer。measure以generic
 `TextInputEnhancer` seam安裝app-local value-source completion，shared widget不import session。
 
 Normal `LiteralSpec` rows remain hidden, but a decoration may explicitly unhide a
@@ -363,7 +369,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
+GUI entry point configures logging. All three `scripts/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

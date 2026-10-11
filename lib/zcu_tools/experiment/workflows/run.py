@@ -16,7 +16,7 @@ from ..v2.runtime import Schedule, SignalBuffer
 from ..v2.runtime.schedule import ScheduleOutcome
 from .display import Live1D, Live2D, Live2DRow
 from .models import MissingCapability
-from .ports import DevicePort, DeviceSetup, PlotPort
+from .ports import DevicePort, PlotPort
 
 
 class Run[Cfg]:
@@ -72,22 +72,6 @@ class Run[Cfg]:
         if self._devices is None:
             raise MissingCapability("devices")
         return self._devices
-
-    @property
-    def device_setup(self) -> tuple[DeviceSetup, ...] | None:
-        """Return cfg.dev settings, or None when absent/disabled.
-
-        A present dev must be None or a tuple of DeviceSetup. Invalid cfg
-        adaptation raises TypeError before the device adapter is invoked.
-        """
-        settings = getattr(self.cfg, "dev", None)
-        if settings is None:
-            return None
-        if not isinstance(settings, tuple) or not all(
-            isinstance(setting, DeviceSetup) for setting in settings
-        ):
-            raise TypeError("cfg.dev must be tuple[DeviceSetup, ...] or None")
-        return settings
 
     @property
     def live_error(self) -> BaseException | None:

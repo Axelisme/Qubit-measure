@@ -6,13 +6,10 @@ import h5py as h5
 import numpy as np
 from zcu_tools.datafile import (
     CfgSnapshot,
-    CloneOrigin,
     DataVariable,
     ExperimentPayload,
     LabberMetadata,
     LabberPayload,
-    ParameterSnapshot,
-    ParameterSource,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -55,23 +52,6 @@ def native_metadata(tag: str = "test/native") -> RunMetadata:
             point="sweet",
             description="Historical snapshot",
             roles={"qubit": "Q1"},
-            params={
-                "Q1.freq": ParameterSnapshot(
-                    value=5000.0,
-                    unit="MHz",
-                    source=ParameterSource(
-                        source="event-1",
-                        kind="calibration",
-                        run_id="20261006T000000Z-d4e5f6",
-                        at="2026-10-06T00:00:02Z",
-                        stderr=0.1,
-                        cloned_from=CloneOrigin(
-                            entry_id=UUID("87654321-4321-8765-4321-876543218765"),
-                            point="origin",
-                        ),
-                    ),
-                )
-            },
         ),
         provenance=SoftwareProvenance(
             software_versions={"zcu-tools": "0.1.0"},

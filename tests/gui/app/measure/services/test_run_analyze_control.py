@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
@@ -24,6 +24,8 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
 from zcu_tools.gui.cfg.resource import CfgId, CfgRef, CfgRevision, CfgStaleError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._control_fakes import CallLog, call
@@ -40,10 +42,11 @@ class RecordingState:
         self._log = log
         self._busy = busy
         self.running_tab_id: str | None = "running-tab"
-        self.session_env = SimpleNamespace(md="md", ml="ml", predictor="predictor")
+        self.session_env = SimpleNamespace(predictor="predictor")
         self.tab = SimpleNamespace(
             adapter=RecordingAdapter(log, analysis=analysis),
-            run=SimpleNamespace(result="run-result"),
+            parameters=None,
+            run=SimpleNamespace(result="run-result", parameters=None),
             cfg=SimpleNamespace(
                 observe=lambda: SimpleNamespace(
                     ref=CfgRef(CfgId("cfg-1"), CfgRevision(0))
@@ -88,25 +91,29 @@ class RecordingGuard:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def acquire_run_permit(self, tab_id: str, *, expected_revision: int) -> object:
-        self._log.add("guard", "acquire_run_permit", tab_id)
-        return "run-permit"
+    def capture_run_inputs(
+        self,
+        tab_id: str,
+        *,
+        expected_revision: int,
+        aliases: Mapping[str, str] | None = None,
+    ) -> object:
+        self._log.add("guard", "capture_run_inputs", tab_id)
+        return "run-inputs"
 
-    def acquire_load_permit(self, tab_id: str) -> object:
-        self._log.add("guard", "acquire_load_permit", tab_id)
-        return SimpleNamespace(tab_id=tab_id)
+    def check_load(self, tab_id: str) -> None:
+        self._log.add("guard", "check_load", tab_id)
 
-    def acquire_analyze_permit(self, tab_id: str) -> object:
-        self._log.add("guard", "acquire_analyze_permit", tab_id)
-        return "analyze-permit"
+    def check_analyze(self, tab_id: str) -> None:
+        self._log.add("guard", "check_analyze", tab_id)
 
 
 class RecordingRun:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def start_run(self, permit: object, *, plots: Plots) -> int:
-        self._log.add("run", "start_run", permit, plots)
+    def start_run(self, inputs: object, *, plots: Plots, origin: CommandOrigin) -> int:
+        self._log.add("run", "start_run", inputs, plots)
         return 11
 
     def release_view_plots(self, tab_id: str) -> None:
@@ -125,8 +132,8 @@ class RecordingLoad:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def load_result(self, permit: object, data_path: str) -> LoadTabResultOutcome:
-        self._log.add("load", "load_result", permit, data_path)
+    def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        self._log.add("load", "load_result", tab_id, data_path)
         return LoadTabResultOutcome(
             tab_id="tab-1",
             data_path=data_path,
@@ -141,16 +148,16 @@ class RecordingAnalyze:
         self._log = log
 
     def start_analyze(
-        self, permit: object, analyze_params_instance: object, *, plots: Plots
+        self, tab_id: str, analyze_params_instance: object, *, plots: Plots
     ) -> int:
         self._log.add(
-            "analyze", "start_analyze", permit, analyze_params_instance, plots
+            "analyze", "start_analyze", tab_id, analyze_params_instance, plots
         )
         return 22
 
     def start_plugin(
         self,
-        permit: object,
+        tab_id: str,
         plugin: PluginDefinition[Any, Any],
         owner: ManualOwnerScheduler,
         *,
@@ -160,7 +167,7 @@ class RecordingAnalyze:
         self._log.add(
             "analyze",
             "start_plugin",
-            permit,
+            tab_id,
             plugin,
             owner,
             analyze_params_instance,
@@ -333,13 +340,13 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
 
     assert log.calls[:4] == [
         call("state", "get_tab", "tab-1"),
-        call("guard", "acquire_run_permit", "tab-1"),
+        call("guard", "capture_run_inputs", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),
     ]
     assert log.calls[4].target == "run"
     assert log.calls[4].method == "start_run"
-    assert log.calls[4].args[0] == "run-permit"
+    assert log.calls[4].args[0] == "run-inputs"
     assert isinstance(log.calls[4].args[1], Plots)
 
 
@@ -347,7 +354,7 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
     "expected",
     [CfgRef(CfgId("cfg-1"), CfgRevision(1)), CfgRef(CfgId("other"), CfgRevision(0))],
 )
-def test_run_rejects_a_different_publication_before_permit_or_presentation(
+def test_run_rejects_a_different_publication_before_capture_or_presentation(
     expected: CfgRef,
 ) -> None:
     facet, log, _state, _bus = _facet()
@@ -367,10 +374,8 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
 
     assert outcome.has_analyze_params is True
     assert log.calls == [
-        call("guard", "acquire_load_permit", "tab-1"),
-        call(
-            "load", "load_result", SimpleNamespace(tab_id="tab-1"), "/tmp/result.hdf5"
-        ),
+        call("guard", "check_load", "tab-1"),
+        call("load", "load_result", "tab-1", "/tmp/result.hdf5"),
         call("run", "release_view_plots", "tab-1"),
         call("tab", "prepare_result_analysis", "tab-1"),
         call("bus", "emit", "TabContentChangedPayload"),
@@ -388,14 +393,38 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
     assert facet.analyze("tab-1", params) == 22
 
     assert log.calls[:4] == [
-        call("guard", "acquire_analyze_permit", "tab-1"),
+        call("guard", "check_analyze", "tab-1"),
         call("state", "is_tab_busy", "tab-1"),
         call("state", "get_tab", "tab-1"),
         call("host", "make_analysis_container", "tab-1"),
     ]
     assert log.calls[4].method == "start_analyze"
-    assert log.calls[4].args[:2] == ("analyze-permit", params)
+    assert log.calls[4].args[:2] == ("tab-1", params)
     assert isinstance(log.calls[4].args[2], Plots)
+
+
+@pytest.mark.parametrize("context_free", [False, True])
+def test_interactive_factory_receives_run_source_after_tab_rebinding(
+    result_sources: tuple[ParameterContext, ParameterContext],
+    context_free: bool,
+) -> None:
+    facet, log, state, _bus = _facet(analysis=AnalysisMode.INTERACTIVE)
+    q1, q2 = result_sources
+    captured = None if context_free else q1
+    state.tab.run.parameters = captured
+    state.tab.parameters = q2
+    state.session_env.parameters = q2
+
+    assert facet.analyze("tab-1", "params") == 23
+    factory = next(
+        entry for entry in log.calls if entry.method == "make_interactive_plugin"
+    )
+    request = factory.args[0]
+    assert isinstance(request, AnalyzeRequest)
+    assert request.parameters is captured
+    if request.parameters is not None:
+        assert request.parameters.resolve_path("source_qubit.rate") == "Q1.rate"
+        assert request.parameters.value("source_qubit.rate") == 1.0
 
 
 def test_interactive_analyze_mounts_render_host_session() -> None:

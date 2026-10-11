@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
@@ -16,6 +17,7 @@ from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
@@ -29,7 +31,7 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.device import ActiveDeviceOperation
-from zcu_tools.gui.session.services.io_manager import IOManager
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from .adapter import SessionEnv
@@ -51,13 +53,12 @@ from .services import (
     AppPersistedState,
     LoadTabResultOutcome,
     PersistenceError,
-    ProjectRequest,
     RestoreReport,
     TabSnapshot,
     build_app_services,
 )
 from .services.cfg_lowering import lower_module, lower_waveform
-from .services.ports import CfgEdit, CfgEditResult, ContextWrites
+from .services.ports import CfgEdit, CfgEditResult
 from .state import State
 from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -77,10 +79,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .arb_waveform import ArbWaveformPort
-    from .artifact_tracker import ArtifactKey
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
-    from .services.ports import SaveArtifactsSubmission, SaveDataSubmission
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
     from .services.tab_cfg import TabCfgLookup
@@ -162,6 +162,27 @@ class RenderHost(Protocol):
     def current_left_panel_width(self) -> int: ...
 
 
+class ViewSnapshot(TypedDict):
+    """Visible measure-window facts exposed to remote readers.
+
+    active_tab_id is the focused State-owned tab ID, or None.
+    tab_ids lists State-owned IDs in State order, excluding ghost widgets.
+    entry_label is the visible entry name, or "No entry open".
+    point_label is the visible SavedPoint label, "Draft (in-memory)", or
+    "No point selected". It never derives from component focus.
+    predictor_label and status are the visible predictor and status-bar text.
+    open_dialogs lists the named dialogs currently open, using wire names.
+    """
+
+    active_tab_id: str | None
+    tab_ids: list[str]
+    entry_label: str
+    point_label: str
+    predictor_label: str
+    status: str
+    open_dialogs: list[str]
+
+
 class RenderView(Protocol):
     """View reads and explicit presentation commands for RemoteControlAdapter.
 
@@ -173,7 +194,10 @@ class RenderView(Protocol):
         self, tab_id: str, pane: Literal["run", "analysis", "post_analysis", "data"]
     ) -> None: ...
 
-    def get_view_snapshot(self) -> dict[str, object]: ...
+    def get_view_snapshot(self) -> ViewSnapshot:
+        """Read visible entry/point and State-owned tab facts without mutation."""
+        ...
+
     def interactive_presentation(self, tab_id: str) -> tuple[Figure, bool] | None:
         """Read an active frontend's figure and preview flag, if mounted."""
         ...
@@ -211,9 +235,8 @@ class Controller(SessionControllerMixin):
     """Façade for the GUI application. Delegates to domain services.
 
     The identical shared controller forwards live in SessionControllerMixin
-    (read through the _*_svc accessors assigned in __init__); only the methods whose
-    body diverges from autofluxdep are kept here (apply_project /
-    get_project_root / get_bus, plus everything app-specific). Shared setup,
+    (read through the _*_svc accessors assigned in __init__); app-specific methods
+    are kept here (get_project_root / get_bus, plus everything app-specific). Shared setup,
     context / inspect, and value-md-ml consumers use their own control facets
     instead of this facade.
     """
@@ -222,7 +245,6 @@ class Controller(SessionControllerMixin):
         self,
         state: State,
         registry: Registry,
-        io_manager: IOManager,
         view: ViewProtocol | None,
         bus: EventBus,
         template_catalog: TemplateCatalog | None = None,
@@ -230,7 +252,19 @@ class Controller(SessionControllerMixin):
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
+        *,
+        alias_preset: tuple[AliasRow, ...] = (),
     ) -> None:
+        """Compose services for state/registry with an optional view and adapters.
+
+        ``alias_preset`` is the ordered caller-owned initial alias table, empty
+        when omitted. Softlinks and empty bindings stay authored. The session
+        uses the role registry's unique focus candidate once for the primary
+        empty row on the first nonempty component snapshot; later point changes
+        do not reset rows. Explicit table edits disable that initialization.
+        Invalid syntax, duplicates or forward links raise
+        InvalidInputError(alias_invalid). No device or cache is used to bind rows.
+        """
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
         # under. The entry script injects the repo root (Path(__file__).parent...)
@@ -279,15 +313,14 @@ class Controller(SessionControllerMixin):
             state=state,
             bus=bus,
             registry=registry,
-            io_manager=io_manager,
             cfg_editor_ctrl=self,
             progress_transport=transport,
-            notify_info=self._info,
             resource_versions=self.resources_versions,
             render_host=lambda: self._render_host,
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
+            alias_preset=alias_preset,
         )
         self._services = services
         self._operation_gate = services.operation_gate
@@ -447,16 +480,26 @@ class Controller(SessionControllerMixin):
     def _on_save_artifacts_finished(
         self, outcome: SaveArtifactsFinishedPayload
     ) -> None:
+        detail = ""
+        if outcome.report is not None:
+            detail = "\n".join(
+                f"{item.output.path}: {item.status}"
+                + (f" ({item.error})" if item.error is not None else "")
+                for item in outcome.report.outputs
+            )
         if outcome.error is None:
-            self._info("Artifacts saved")
+            self._info(detail)
         else:
-            self._notify("error", "Save failed", outcome.error)
+            self._notify("error", "Save failed", detail or outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
-        if outcome.error is None:
-            self._info(f"Data saved to {outcome.data_path}")
-            return
-        self._notify("error", "Save data failed", outcome.error)
+        if outcome.report is not None:
+            outputs = "\n".join(
+                f"{item.output.path}: {item.status}" for item in outcome.report.outputs
+            )
+            self._info(f"Data save outputs:\n{outputs}")
+        if outcome.error is not None:
+            self._notify("error", "Save data failed", outcome.error)
 
     def _on_device_setup_finished(self, payload: DeviceSetupFinishedPayload) -> None:
         if payload.outcome == "finished":
@@ -623,7 +666,7 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def has_project(self) -> bool:
-        return self._ctx_svc.has_project()
+        return self._ctx_svc.get_entry_info() is not None
 
     def has_context(self) -> bool:
         return self._ctx_svc.has_context()
@@ -655,8 +698,14 @@ class Controller(SessionControllerMixin):
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(self, tab_id: str, expected: CfgRef) -> int:
-        return self._run_analyze_control.start_run(tab_id, expected)
+    def start_run(
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+    ) -> int:
+        """Start observed cfg inputs with an optional single-Run alias override.
+
+        See RunAnalyzeControlFacet.start_run for admission and failure semantics.
+        """
+        return self._run_analyze_control.start_run(tab_id, expected, aliases=aliases)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)
@@ -821,87 +870,36 @@ class Controller(SessionControllerMixin):
         return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
 
     # ------------------------------------------------------------------
-    # Save (TabService)
-    # ------------------------------------------------------------------
-
-    def save_artifacts(self, tab_id: str) -> SaveArtifactsSubmission:
-        return self._save_control.save_artifacts(tab_id)
-
-    def save_data(
-        self, tab_id: str, data_path: str | None = None, comment: str | None = None
-    ) -> SaveDataSubmission:
-        return self._save_control.save_data(tab_id, data_path, comment=comment)
-
-    def save_image(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None = None
-    ) -> str:
-        return self._save_control.save_image(tab_id, key, image_path)
-
-    # ------------------------------------------------------------------
     # Context / IO (ContextService)
     # ------------------------------------------------------------------
 
-    def apply_project(self, req: ProjectRequest) -> dict[str, str]:
-        # Applies the project to the active context AND records it as the
-        # remembered prefs (in State); persisted to disk only at close.
-        # An unchanged project is a no-op inside the service; a failure raises.
-        # Either way we echo the resolved project rather than a bool.
-        # ProjectSettingsService owns result-scope resolution so callers cannot
-        # inject arbitrary result/database paths.
-        return self._settings_svc.apply_project(req).as_wire_dict()
+    def read_context(
+        self, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext:
+        """Fix point/library/storage and aliases through the context owner.
 
-    def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None:
-        self._ctx_svc.apply_ml_writes(
-            {},
-            {name: schema},
-            {},
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=False,
-        )
+        aliases maps alias names to temporary concrete components, preserving
+        authored dependent links without changing global state. Reads perform
+        no I/O or kind checks and retain no live callback. Missing/unbound $
+        aliases fail by name on use; EMPTY/source/invalid override errors
+        propagate. See ContextControlPort.read_context for the full contract.
+        """
+        return self._context_control.read_context(aliases=aliases)
 
-    def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None:
-        self._ctx_svc.apply_ml_writes(
-            {},
-            {},
-            {name: schema},
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=False,
-        )
-
-    def replace_ml_module_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
+    def apply_library_change(
+        self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
-        self._ctx_svc.replace_ml_module_from_schema(
-            old_name,
-            new_name,
-            schema,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=False,
-        )
+        """Commit one library structure command at the supplied fixed capture.
 
-    def replace_ml_waveform_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
-    ) -> None:
-        self._ctx_svc.replace_ml_waveform_from_schema(
-            old_name,
-            new_name,
-            schema,
+        App lowering callbacks convert schemas to Spec; ContextService owns
+        target validation, the single resource transaction and publication.
+        Failed commands leave editor teardown to the caller.
+        """
+        self._context_control.apply_library_change(
+            parameters,
+            change,
             lower_module=lower_module,
             lower_waveform=lower_waveform,
-            dump=False,
-        )
-
-    def apply_writes(self, writes: ContextWrites) -> None:
-        self._ctx_svc.apply_ml_writes(
-            writes.md,
-            writes.ml_modules,
-            writes.ml_waveforms,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=True,
         )
 
     # ------------------------------------------------------------------
@@ -926,50 +924,48 @@ class Controller(SessionControllerMixin):
         return self._ctx_svc.get_session_env()
 
     def create_from_template(self, item_kind: str, template_id: str, name: str) -> None:
-        """Create a new ModuleLibrary entry from the catalog template ID.
+        """Create a library root from a template using one fixed parameter capture.
 
-        ``item_kind`` must match the template's module/waveform store. ``name``
-        must be nonempty and unused in that store. Raise KeyError for an unknown
-        ID and FailedPreconditionError for a missing catalog, empty/colliding
-        name or kind mismatch. Factory and schema-validation failures propagate.
-
-        The template's fresh value and shape are lowered against the live md by
-        ContextService, so ModuleLibrary stores concrete numbers, not md links.
-        No library write occurs before both factories succeed.
+        Kind must match the template; the concrete name must be nonempty and
+        unused in its library family. Factory, capture, schema, conflict and I/O
+        failures propagate without a write. Factory SessionEnv.parameters and
+        lowering use the same fixed alias-aware capture, with no consumer kind
+        checks or later current-source lookup.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
         entry = self.get_template_catalog().get(template_id)
+        if item_kind != "module" and item_kind != "waveform":
+            raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
         if entry.item_kind != item_kind:
             raise FailedPreconditionError(
                 f"Template {template_id!r} is a {entry.item_kind}, not a {item_kind}."
             )
-        self._require_new_ml_name(item_kind, name)
-
-        ctx = self.get_session_env()
+        parameters = self._context_control.read_context()
+        keys = (
+            parameters.library.module_keys()
+            if item_kind == "module"
+            else parameters.library.waveform_keys()
+        )
+        if name in keys:
+            raise FailedPreconditionError(
+                f"A {item_kind} named {name!r} already exists."
+            )
+        ctx = replace(self.get_session_env(), parameters=parameters)
         ref = entry.make_value(ctx)
-        spec = entry.shape()
-        # ADR-0067: hand the un-lowered CfgSchema to the single write authority;
-        # ContextService lowers (against live md) + registers. No UI-side lowering.
-        schema = CfgSchema(spec=spec, value=ref.value)
-        if item_kind == "module":
-            self.set_ml_module_from_schema(name, schema)
-        else:
-            self.set_ml_waveform_from_schema(name, schema)
+        schema = CfgSchema(spec=entry.shape(), value=ref.value)
+        self.apply_library_change(
+            parameters, LibraryChange(item_kind, "put", name, schema=schema)
+        )
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:
-        """Whether an ml module/waveform of this name already exists."""
-        ml = self.get_current_ml()
-        store = ml.modules if item_kind == "module" else ml.waveforms
-        return name in store
-
-    def _require_new_ml_name(self, item_kind: str, name: str) -> None:
-        """Fail fast if a create would overwrite an existing ml entry."""
-        if self.has_ml_entry(item_kind, name):
-            raise FailedPreconditionError(
-                f"A {item_kind} named {name!r} already exists; "
-                "use Modify to change it, or pick a different name."
-            )
+        """Query a concrete root in the selected library; invalid kind raises."""
+        library = self._context_control.read_context().library
+        if item_kind == "module":
+            return name in library.module_keys()
+        if item_kind == "waveform":
+            return name in library.waveform_keys()
+        raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
 
     # ------------------------------------------------------------------
     # CfgEditor sessions (CfgEditorService) — headless ml editing for RPC
@@ -992,14 +988,23 @@ class Controller(SessionControllerMixin):
         )
 
     def open_seeded_cfg_editor(
-        self, seed: CfgSchema, *, gc: bool = False, owner_key: str | None = None
+        self,
+        seed: CfgSchema,
+        *,
+        parameters: ParameterContext | None,
+        gc: bool = False,
+        owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]:
         """Open a service-owned cfg model seeded from an existing CfgSchema.
 
-        Used by UI surfaces (tab cfg / writeback item) that own a non-ml-entry
-        draft; the owning widget then ``attach``es to ``get_cfg_editor_draft``.
+        parameters is the owner-supplied fixed expression/reference capture;
+        None permits pure math only. UI callers attach to get_cfg_editor_draft.
+        Seeded sessions cannot commit library structure writes. Invalid schema
+        and capture/reference failures propagate from the editor owner.
         """
-        return self._cfg_editor_svc.open_seeded(seed, gc=gc, owner_key=owner_key)
+        return self._cfg_editor_svc.open_seeded(
+            seed, parameters=parameters, gc=gc, owner_key=owner_key
+        )
 
     def get_cfg_editor_draft(self, editor_id: str) -> CfgDraft:
         """Return the service-owned CfgDraft for a widget to ``attach`` to."""
@@ -1127,10 +1132,11 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
 
     def get_project_root(self) -> str:
-        """The base directory default result/database paths are anchored under
-        (the repo root, injected by the entry script). Setup dialog + project RPC
-        derive defaults through ``derive_project_paths`` against this, NOT cwd, so
-        a .bat launcher that cd's into scripts/ still scopes under the repo root."""
+        """Return the injected base directory for result and Database roots.
+
+        Session composition passes its explicit roots to the entry owner;
+        opening an entry never derives chip/qubit identity from the current cwd.
+        """
         return self._project_root
 
     # ------------------------------------------------------------------
@@ -1173,27 +1179,6 @@ class Controller(SessionControllerMixin):
             TabInteractionChangedPayload(
                 tab_id=tab_id,
                 fact=TabInteractionFact.ANALYZE_PARAMS_CHANGED,
-            ),
-        )
-
-    def update_tab_data_path(self, tab_id: str, data_path: str | None) -> None:
-        """Per-pane Save data-path override (Save pane)."""
-        self._tab_svc.update_tab_data_path_override(tab_id, data_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
-            ),
-        )
-
-    def update_tab_image_path(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None
-    ) -> None:
-        self._tab_svc.update_tab_image_path_override(tab_id, key, image_path)
-        self._bus.emit(
-            TabInteractionChangedPayload(
-                tab_id=tab_id,
-                fact=TabInteractionFact.SAVE_PATHS_CHANGED,
             ),
         )
 

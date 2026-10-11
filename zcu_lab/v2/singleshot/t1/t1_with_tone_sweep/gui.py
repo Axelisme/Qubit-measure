@@ -22,10 +22,12 @@ only in which outer sweep they declare + its default.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -50,8 +52,10 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, custom, scaled_md
+from zcu_lab.v2._support.measure.seeds import SweepDefault, custom, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_analysis_float,
+    read_confusion_matrix,
     readout_probe_freq,
     readout_probe_freq_range,
 )
@@ -127,14 +131,18 @@ class _SsT1ToneSweepBase(
                 },
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .sweep(
                 "length",
                 label="Delay (us)",
                 default=SweepDefault(
                     start=0.0,
                     # The fallback is the fully scaled 5 * 100 us window.
-                    stop=scaled_md("t1", factor=5.0, fallback_value=500.0),
+                    stop=scaled_path_seed(
+                        "$qubit.t1", factor=5.0, fallback_value=500.0
+                    ),
                     expts=51,
                 ),
             )
@@ -142,17 +150,17 @@ class _SsT1ToneSweepBase(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .bool("uniform", label="Uniform (linear) sweep", default=True)
             .reps(1000)
@@ -161,7 +169,11 @@ class _SsT1ToneSweepBase(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> SsT1ToneSweepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))
@@ -176,8 +188,8 @@ class _SsT1ToneSweepBase(
         # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
         # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
         # axis.
-        ac_coeff = req.md.get("ac_stark_coeff")
-        confusion = req.md.get("confusion_matrix")
+        ac_coeff = read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
+        confusion = read_confusion_matrix(req.parameters)
         T1WithToneSweepExp().analyze(
             req.run_result,
             T1WithToneSweepAnalyzeOptions(

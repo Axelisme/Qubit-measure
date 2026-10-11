@@ -21,7 +21,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from .binding.draft import CfgDraft
 from .binding.observation import CfgNodeObservation
 from .binding.ports import ExpressionEvaluator, OptionProvider, ReferenceCatalog
-from .lowering import RangeFactory
+from .lowering import LoweredData
 from .model import (
     CfgNodeSpec,
     CfgSchema,
@@ -29,6 +29,8 @@ from .model import (
     DirectValue,
     EvalValue,
     ReferenceSpec,
+    ReferenceValue,
+    SweepValue,
 )
 from .resolved import lower_resolved_cfg
 
@@ -164,7 +166,7 @@ class CfgObservation:
 class AcceptedConfig:
     ref: CfgRef
     source_basis: SourceBasis
-    values: dict[str, object]
+    values: dict[str, LoweredData]
 
 
 class CfgStaleError(CfgPreconditionError):
@@ -192,21 +194,44 @@ class CfgEditing(Protocol):
         self, expected_revision: CfgRevision, path: CfgPath, label: str
     ) -> CfgObservation: ...
 
+    def convert_reference_to_inline(
+        self, expected_revision: CfgRevision, path: CfgPath
+    ) -> CfgObservation:
+        """Freeze a valid published ref as same-shape inline content; see CfgResource."""
+        ...
+
     def reset(self, expected_revision: CfgRevision) -> CfgObservation: ...
 
     def refresh(self, expected_revision: CfgRevision) -> CfgObservation: ...
 
 
 class CfgAcceptance(Protocol):
-    def accept(self, expected_revision: CfgRevision) -> AcceptedConfig: ...
+    def accept(
+        self,
+        expected_revision: CfgRevision,
+        *,
+        resolution: CfgResolution | None = None,
+    ) -> AcceptedConfig:
+        """Accept the observed inputs, optionally against a fixed one-off source.
+
+        Without ``resolution``, require the published observation to be Valid.
+        With it, resolve the same inputs without changing their publication.
+        Both paths reject stale revisions, revoked resources and notification
+        reentry; a non-Valid result raises CfgPreconditionError.
+        """
+        ...
 
 
 @dataclass(frozen=True)
 class CfgResolution:
-    """One command's stable, already-published source view (never live I/O).
+    """One command's fixed source view; callbacks must never perform live I/O.
 
-    Composition binds these ports to detached source snapshots. A new view is
-    acquired for a command, not for observe, watch, or acceptance.
+    Composition binds all ports to the same detached source snapshots. Editing
+    and refresh acquire a new view. Observe, watch and ordinary acceptance do
+    not. A Run owner may supply a one-off view to acceptance without publishing
+    it. ``source_basis`` identifies those snapshots; the other fields evaluate
+    expressions, enumerate options, resolve references, read frozen values and
+    validate expression syntax, respectively.
     """
 
     source_basis: SourceBasis
@@ -233,14 +258,12 @@ class CfgResource:
         defaults: Callable[[], CfgSchema],
         *,
         resolution: Callable[[], CfgResolution],
-        make_range: RangeFactory,
         initial: CfgSchema | None = None,
         mutation_allowed: Callable[[], bool] = lambda: True,
         notification_active: Callable[[], bool] = lambda: False,
     ) -> None:
         self._defaults = defaults
         self._resolution = resolution
-        self._make_range = make_range
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._closed = False
@@ -316,6 +339,54 @@ class CfgResource:
             raise CfgInputError(exc.reason, str(exc), path=path) from exc
         return self._commit_inputs(editor.schema, source)
 
+    def convert_reference_to_inline(
+        self, expected_revision: CfgRevision, path: CfgPath
+    ) -> CfgObservation:
+        """Publish a same-shape inline copy of a valid ref at this revision.
+
+        Uses only the current publication, not fresh source values. Nested ref,
+        Eval and range controls freeze recursively. Unknown paths raise UNKNOWN_PATH;
+        ref ancestors raise READONLY; inline/disabled/Invalid/Unavailable targets
+        raise CfgInputError INVALID_VALUE. Rejection leaves inputs/publication intact.
+        Existing revision, mutation and notification preconditions apply.
+        """
+        from .resolved import freeze_resolved_value
+        from .tree import replace_value_path
+
+        _validate_path(path)
+        self._check_command(expected_revision)
+        node = self._observation.tree
+        for key in path:
+            if node.mode == "ref":
+                raise CfgInputError(
+                    CfgInputReason.READONLY, "ref contents are readonly", path=path
+                )
+            if key not in node.children:
+                raise CfgInputError(
+                    CfgInputReason.UNKNOWN_PATH, "unknown reference path", path=path
+                )
+            node = node.children[key]
+        if (
+            not path
+            or node.mode != "ref"
+            or not node.valid
+            or self._observation.status is CfgStatus.UNAVAILABLE
+        ):
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE,
+                "conversion requires a valid published ref",
+                path=path,
+            )
+        try:
+            value = freeze_resolved_value(node.value)
+        except RuntimeError as exc:
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE, str(exc), path=path
+            ) from exc
+        inputs = deepcopy(self._inputs)
+        replace_value_path(inputs.value, ".".join(path), value)
+        return self._commit_inputs(inputs, self._resolution())
+
     def _commit_inputs(
         self, inputs: CfgSchema, source: CfgResolution
     ) -> CfgObservation:
@@ -373,16 +444,59 @@ class CfgResource:
         self._check_command(expected_revision, editing=False)
         return self.refresh_group((self,), resolution=self._resolution)[0]
 
-    def accept(self, expected_revision: CfgRevision) -> AcceptedConfig:
+    def accept(
+        self,
+        expected_revision: CfgRevision,
+        *,
+        resolution: CfgResolution | None = None,
+    ) -> AcceptedConfig:
+        """Return detached execution values for the observed input revision.
+
+        Without ``resolution``, use only the cached Valid publication. A supplied
+        fixed resolution prepares the current inputs as a temporary candidate,
+        including when the publication is Invalid or Unavailable. It never
+        changes inputs, revision, subscribers or the source factory. Non-Valid
+        results raise NOT_VALID; stale, revoked and notification guards apply
+        before evaluating the candidate. Unexpected resolver errors propagate.
+        """
         self._check_command(expected_revision, editing=False)
+        if resolution is not None:
+            candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
+            try:
+                if not candidate.is_valid():
+                    raise CfgPreconditionError(
+                        CfgPreconditionReason.NOT_VALID, "cfg is not valid"
+                    )
+                values = lower_resolved_cfg(candidate.snapshot())
+                return AcceptedConfig(self._observation.ref, basis, values)
+            finally:
+                candidate.close()
         if self._observation.status is not CfgStatus.VALID:
             raise CfgPreconditionError(
                 CfgPreconditionReason.NOT_VALID, "cfg is not valid"
             )
-        values = lower_resolved_cfg(self._draft.snapshot(), make_range=self._make_range)
+        values = lower_resolved_cfg(self._draft.snapshot())
         return AcceptedConfig(
             self._observation.ref, self._observation.source_basis, deepcopy(values)
         )
+
+    def preview(
+        self, expected_revision: CfgRevision, *, resolution: CfgResolution
+    ) -> CfgObservation:
+        """Resolve observed inputs against a fixed source without publication.
+
+        App owners receive a detached Valid or Invalid observation with the
+        same ref and the supplied source basis. Inputs, publication, subscribers
+        and the source factory stay unchanged. Stale, revoked and notification
+        guards run before evaluation; unexpected resolver failures propagate.
+        This does not accept execution values or refresh the observed revision.
+        """
+        self._check_command(expected_revision, editing=False)
+        candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
+        try:
+            return self._observe_draft(candidate, self._observation.ref, basis)
+        finally:
+            candidate.close()
 
     def revoke(self) -> None:
         if self._closed:
@@ -426,7 +540,7 @@ class CfgResource:
         source = self._resolution() if source is None else source
         failures: list[Exception] = []
 
-        def evaluate(expression: str) -> int | float | complex:
+        def evaluate(expression: str) -> int | float | complex | str:
             try:
                 return source.evaluate_expression(expression)
             except InvalidInputError:
@@ -533,6 +647,14 @@ class CfgResource:
             logging.getLogger(__name__).exception("Cfg resolution failed")
             return None, self._unavailable_observation(exc, source)
 
+    def _prepare_own_source_refresh(self) -> tuple[CfgDraft | None, CfgObservation]:
+        try:
+            source = self._resolution()
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Cfg source snapshot failed")
+            return None, self._unavailable_observation(exc, None)
+        return self._prepare_refresh(source)
+
     def _install_refresh(
         self, candidate: CfgDraft | None, observation: CfgObservation
     ) -> None:
@@ -550,9 +672,14 @@ class CfgResource:
     def refresh_group(
         resources: Sequence[CfgResource],
         *,
-        resolution: Callable[[], CfgResolution],
+        resolution: Callable[[], CfgResolution] | None = None,
     ) -> tuple[CfgObservation, ...]:
-        """Prepare all affected publications, install all, then notify subscribers."""
+        """Prepare all publications, install all, then notify subscribers.
+
+        A supplied resolution is one shared source. None uses each resource\'s
+        own source factory, preserving fixed consumer captures. Source failures
+        publish Unavailable per affected resource; notification is never partial.
+        """
         members = tuple(resources)
         if not members:
             return ()
@@ -560,31 +687,39 @@ class CfgResource:
             resource._check_command(resource._observation.ref.revision, editing=False)
         source: CfgResolution | None = None
         failure: Exception | None = None
-        try:
-            source = resolution()
-        except Exception as exc:
-            failure = exc
-            logging.getLogger(__name__).exception("Cfg source snapshot failed")
+        if resolution is not None:
+            try:
+                source = resolution()
+            except Exception as exc:
+                failure = exc
+                logging.getLogger(__name__).exception("Cfg source snapshot failed")
         prepared: list[tuple[CfgResource, CfgDraft | None, CfgObservation]] = []
         for resource in members:
             candidate: CfgDraft | None = None
             if failure is not None:
                 observation = resource._unavailable_observation(failure, None)
+            elif resolution is None:
+                candidate, observation = resource._prepare_own_source_refresh()
             else:
                 assert source is not None
                 candidate, observation = resource._prepare_refresh(source)
             prepared.append((resource, candidate, observation))
         for resource, candidate, observation in prepared:
             resource._install_refresh(candidate, observation)
-        for resource in members:
+        CfgResource._notify_group(members)
+        return tuple(deepcopy(observation) for _, _, observation in prepared)
+
+    @staticmethod
+    def _notify_group(resources: Sequence[CfgResource]) -> None:
+        """Block mutations across the whole group until all notifications finish."""
+        for resource in resources:
             resource._notifying += 1
         try:
-            for resource in members:
+            for resource in resources:
                 resource._notify()
         finally:
-            for resource in members:
+            for resource in resources:
                 resource._notifying -= 1
-        return tuple(deepcopy(observation) for _, _, observation in prepared)
 
 
 def _validate_path(path: object) -> None:
@@ -625,11 +760,23 @@ def _validate_definition(spec: CfgNodeSpec) -> None:
 
 
 def _diagnostics(tree: CfgNodeObservation, path: CfgPath = ()):
-    if not tree.valid and not tree.children:
-        value = tree.value
+    value = tree.value
+    if isinstance(value, ReferenceValue) and value.error:
+        yield CfgDiagnostic(path, "invalid_input", value.error)
+    elif not tree.valid and not tree.children:
         message = "input is incomplete or invalid"
         if isinstance(value, (DirectValue, EvalValue)):
             message = value.error or value.validation_error or message
+        elif isinstance(value, SweepValue):
+            errors = [
+                endpoint.error or endpoint.validation_error
+                for endpoint in (value.start, value.stop)
+                if isinstance(endpoint, (DirectValue, EvalValue))
+                and (endpoint.error or endpoint.validation_error)
+            ]
+            message = (
+                "; ".join(error for error in errors if error is not None) or message
+            )
         yield CfgDiagnostic(path, "invalid_input", message)
     for key, child in tree.children.items():
         yield from _diagnostics(child, (*path, key))

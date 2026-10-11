@@ -17,9 +17,10 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    MetaDictWriteback,
+    ParameterWriteback,
     WritebackItem,
 )
+from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 
@@ -27,14 +28,28 @@ from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 def items(count: int) -> list[WritebackItem]:
     result: list[WritebackItem] = []
     for index in range(count):
-        item = MetaDictWriteback(
+        item = ParameterWriteback(
             target_name=f"p{index}",
             description="parameter",
             proposed_value=float(index),
         )
-        item.session_id = f"md-{index}"
+        item.session_id = f"param-{index}"
         result.append(item)
     return result
+
+
+def previews(proposals: list[WritebackItem]) -> dict[str, WritebackValues]:
+    values: dict[str, WritebackValues] = {}
+    for item in proposals:
+        if not isinstance(item, ParameterWriteback):
+            raise TypeError("Layout proposals must be parameters")
+        values[item.session_id] = WritebackValues(
+            actual_path=item.target_name,
+            current=None,
+            proposed=item.proposed_value,
+            unit=None,
+        )
+    return values
 
 
 def settle(qapp: QApplication) -> None:
@@ -72,7 +87,8 @@ def test_resize_reflows_rows_without_moving_apply_below_the_ledger(
     qapp: QApplication,
 ) -> None:
     widget = WritebackWidget(MagicMock(), tab_id="t", pane="analysis")
-    widget.populate(items(3))
+    proposals = items(3)
+    widget.populate(proposals, previews(proposals))
     widget.show()
     try:
         for width in [500, 400, 500]:
@@ -129,7 +145,8 @@ def test_replacing_short_and_long_ledgers_grows_only_the_outer_scroll(
     try:
         heights: list[int] = []
         for count in [4, 30, 4]:
-            widget.populate(items(count))
+            proposals = items(count)
+            widget.populate(proposals, previews(proposals))
             settle(qapp)
             panel, _, _ = ledger(widget)
             heights.append(panel.height())
@@ -165,7 +182,11 @@ def test_shipped_analysis_scroll_reaches_apply_and_the_last_ledger_row(
         )
         index = next(i for i in range(tabs.count()) if tabs.tabText(i) == "Analysis")
         tabs.setCurrentIndex(index)
-        tab.update_writeback_items(items(30))
+        proposals = items(30)
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = previews(
+            proposals
+        )
+        tab.update_writeback_items(proposals)
         settle(qapp)
         widget = tab.writeback_widget
         outer = next(
@@ -178,7 +199,11 @@ def test_shipped_analysis_scroll_reaches_apply_and_the_last_ledger_row(
             settle(qapp)
             assert_scroll_reaches_both_ends(outer, widget, qapp)
         long_height = ledger(widget)[0].height()
-        tab.update_writeback_items(items(2))
+        proposals = items(2)
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = previews(
+            proposals
+        )
+        tab.update_writeback_items(proposals)
         settle(qapp)
         assert ledger(widget)[0].height() < long_height
     finally:

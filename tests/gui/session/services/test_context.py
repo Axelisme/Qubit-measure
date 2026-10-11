@@ -1,475 +1,746 @@
-"""Tests for ContextService."""
+"""Entry/point publication and fixed reads through the public session owner."""
 
-from __future__ import annotations
-
-import dataclasses
-from unittest.mock import MagicMock
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ContextReadiness
-from zcu_tools.gui.app.measure.state import SessionEnv, State
-from zcu_tools.gui.expected_error import (
-    ExpectedErrorCategory,
-    FailedPreconditionError,
+from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    ContextSourceBinding,
+    EntryDraft,
+    EntryInfo,
+    PointBindingError,
+    PointCreateRequest,
+    PointUseRequest,
+    SavedPoint,
 )
-from zcu_tools.gui.session.events import SessionEvent
+from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
+    ContextSwitchedPayload,
+)
 from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
+from zcu_tools.resources.entry import ResultEntry, RoleResolutionError
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.resources.entry.fakes import (
+    register_fakes,
+    registry_state,
+    restore_registry,
+)
 
 
-def test_context_service_has_project():
-    io_mock = MagicMock()
-    io_mock.has_project = True
+class Assets:
+    """Explicit resource capability provider with an observable binding failure."""
 
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
-    svc = ContextService(state, io_mock, MagicMock())
-    assert svc.has_project()
+    def __init__(self) -> None:
+        self.paths: list[Path] = []
+        self.fail = False
+
+    def bind(self, path: Path) -> WaveformAssetInfo:
+        self.paths.append(path)
+        if self.fail:
+            raise OSError("synthetic asset binding failure")
+        return ArbWaveformDatabase.info_at(path)
 
 
-def test_context_service_has_context():
-    io_mock = MagicMock()
-    io_mock.has_context = False
-
-    state = State(
-        SessionEnv(
-            md=MagicMock(),
-            ml=MagicMock(),
-            soc=None,
-            soccfg=None,
-            result_dir="",
-            readiness=ContextReadiness.DRAFT,
+@pytest.fixture(scope="module", autouse=True)
+def registered_entry_models() -> Generator[None]:
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        yield
+        assert registry_state() == installed, (
+            "session context module polluted registries"
         )
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture(autouse=True)
+def registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
+    before = registry_state()
+    yield
+    assert registry_state() == before, f"registry polluter: {request.node.nodeid}"
+
+
+@pytest.fixture
+def rich_entry(tmp_path: Path) -> ResultEntry:
+    entry = _entry(tmp_path)
+    for name, rate, sense in (("Q1", 4300.0, "R1"), ("Q2", 5100.0, "R2")):
+        entry.setup.add_component(name, kind="fake/drive/a", rate=rate, sense=sense)
+    for name in ("R1", "R2"):
+        entry.setup.add_component(name, kind="fake/sensor", rate=6500.0)
+    return entry
+
+
+@pytest.fixture
+def context() -> ContextService:
+    return ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
 
-    svc = ContextService(state, io_mock, MagicMock())
-    assert svc.has_context()
-    assert svc.has_draft_context()
-    assert not svc.is_active_context()
 
-
-def test_context_service_get_flux_dir():
-    io_mock = MagicMock()
-    io_mock.get_active_label.return_value = "flux_1.23_A"
-
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+def _entry(tmp_path: Path, name: str = "entry") -> ResultEntry:
+    return ResultEntry.create(
+        name, result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
-    ctx = SessionEnv(
-        md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/base/dir"
+
+
+def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
+    return PointCreateRequest(label, "session description", CommandOrigin("gui"), clone)
+
+
+def _entry_command(context: ContextService, command: str, entry_id: str) -> object:
+    if command == "use":
+        return context.use_point(PointUseRequest("new"))
+    if command == "new":
+        return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
+    return context.entry_ledger(entry_id)
+
+
+def test_alias_defaults_initialize_once_without_resetting_on_point_changes(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    context.install_entry(entry)
+    assert context.get_alias_rows()[0].value == ""
+    context.new_point(_new_request("first"))
+    assert context.get_alias_rows() == (
+        AliasRow("driver", "Q1"),
+        AliasRow("sense", "$driver.sense"),
     )
-    state.set_context(ctx)
+    context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
+    context.new_point(_new_request("second"))
+    assert context.get_alias_rows()[0].value == ""
+    capture = context.read_context()
+    assert capture is not None
+    with pytest.raises(RoleResolutionError, match="driver"):
+        capture.value("$driver.rate")
 
-    svc = ContextService(state, io_mock, MagicMock())
-    import os
 
-    expected = os.path.join("/base/dir", "exps", "flux_1.23_A")
-    assert svc.get_flux_dir() == expected
+def test_alias_defaults_use_an_already_published_snapshot_without_binding_assets(
+    context: ContextService,
+    tmp_path: Path,
+) -> None:
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0, sense="R1")
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    context.install_entry(entry)
+    context.new_point(_new_request("first"))
+
+    def no_asset_binding(_path: Path) -> WaveformAssetInfo:
+        raise AssertionError("Cached initialization must not reopen assets")
+
+    installed = ContextService(
+        SessionState(context.get_session_env()),
+        BaseEventBus(),
+        bind_assets=no_asset_binding,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
+    assert installed.get_alias_rows()[0] == AliasRow("driver", "Q1")
+    captured = installed.read_context()
+    assert captured is not None
+    assert captured.value("$driver.rate") == 4300.0
 
 
-def test_context_service_set_project_context():
-    state = State(
-        SessionEnv(
-            md=MagicMock(),
-            ml=MagicMock(),
-            soc=None,
-            soccfg=None,
-            result_dir="",
-            active_label="old_flux",
-            readiness=ContextReadiness.ACTIVE,
+def test_empty_alias_submission_before_a_point_prevents_default_rebinding(
+    context: ContextService, tmp_path: Path
+) -> None:
+    with pytest.raises(FailedPreconditionError) as caught:
+        context.read_context()
+    assert caught.value.reason_code == "no_context"
+    entry = _entry(tmp_path)
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=4300.0)
+    context.install_entry(entry)
+    context.set_alias_rows(context.get_alias_rows())
+    context.new_point(_new_request("first"))
+    assert context.get_alias_rows()[0].value == ""
+
+
+def test_first_component_publication_initializes_the_alias_default(
+    context: ContextService, tmp_path: Path
+) -> None:
+    context.install_entry(_entry(tmp_path))
+    context.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
+    context.add_component("Q2", "fake/drive/a", {"rate": 5100.0})
+    assert context.get_alias_rows()[0] == AliasRow("driver", "Q1")
+
+
+def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
+    None
+):
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    observed: list[tuple[tuple[AliasRow, ...], int]] = []
+
+    def on_aliases(event: AliasesChangedPayload) -> None:
+        assert service.get_alias_rows() == event.rows
+        observed.append((event.rows, state.version.snapshot().get("context", 0)))
+
+    bus.subscribe(AliasesChangedPayload, on_aliases)
+    rows = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    service.set_alias_rows(rows)
+    assert observed == [(rows, 1)]
+    with pytest.raises(InvalidInputError):
+        service.set_alias_rows(
+            (AliasRow("driver", "Q2"), AliasRow("sense", "$sense.sense"))
         )
+    assert service.get_alias_rows() == rows
+    assert state.version.snapshot().get("context") == 1
+    service.set_alias_rows(rows)
+    assert observed == [(rows, 1)]
+    assert state.version.snapshot().get("context") == 1
+
+
+def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fixed(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request("first"))
+    assert context.get_alias_rows()[0].value == ""
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
-    bus = MagicMock()
-    io_mock = MagicMock()
+    first = context.read_context()
+    assert first is not None
+    context.set_parameter(target, "Q1.rate", 4400.0)
+    current = context.read_context()
+    assert current is not None
+    assert first.value("$driver.rate") == 4300.0
+    assert current.value("$driver.rate") == 4400.0
+    context.new_point(_new_request("second"))
+    context.set_alias_rows(
+        (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
+    )
+    second = context.read_context()
+    assert second is not None
+    assert second.value("$driver.rate") == 5100.0
+    assert first.target == target
+    assert first.roles is not None
+    assert first.roles.names == {"driver": "Q1", "sense": "R1"}
+    assert second.roles is not None
+    assert second.roles.names == {"driver": "Q2", "sense": "R2"}
+    assert second.capture_storage().point == "second"
+    assert first.capture_storage().point == "first"
 
-    svc = ContextService(state, io_mock, bus)
 
-    md = MagicMock()
-    ml = MagicMock()
+def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_version(
+    rich_entry: ResultEntry,
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    context = ContextService(
+        state,
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    )
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    before = context.get_alias_rows()
+    version = state.version.snapshot()
+    temporary = context.read_context(aliases={"driver": "Q2"})
+    assert temporary is not None
+    assert temporary.value("$driver.rate") == 5100.0
+    assert temporary.roles is not None
+    assert temporary.roles.names == {"driver": "Q2", "sense": "R2"}
+    assert temporary.capture_storage().roles == temporary.roles.names
+    assert context.get_alias_rows() == before
+    assert state.version.snapshot() == version
+    current = context.read_context()
+    assert current is not None
+    assert current.roles is not None
+    assert current.roles.names == {}
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    )
+    assert temporary.value("$driver.rate") == 5100.0
 
-    svc.set_project_context(
-        md,
-        ml,
-        chip_name="C1",
-        qub_name="Q1",
-        res_name="R1",
-        result_dir="/res",
-        database_path="/db",
+
+@pytest.mark.parametrize("target", ["", "missing"])
+def test_bad_one_run_target_keeps_the_global_table(
+    context: ContextService,
+    rich_entry: ResultEntry,
+    target: str,
+) -> None:
+    context.install_entry(rich_entry)
+    context.new_point(_new_request("first"))
+    before = context.get_alias_rows()
+    with pytest.raises((InvalidInputError, RoleResolutionError)):
+        context.read_context(aliases={"driver": target}).value("$driver.rate")
+    assert context.get_alias_rows() == before
+
+
+def test_historical_target_reads_keep_resolved_alias_names_when_point_links_change(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request("first"))
+    context.set_alias_rows(
+        (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+    )
+    captured = context.read_context()
+    assert captured is not None
+    fixed_names = captured.roles
+    assert fixed_names is not None
+    assert fixed_names.names == {"driver": "Q1", "sense": "R1"}
+    context.set_parameter(target, "Q1.sense", "R2")
+    historical = context.read_target(target, roles=fixed_names)
+    assert historical.resolve_path("$sense.rate") == "R1.rate"
+    current = context.read_context()
+    assert current is not None
+    assert current.resolve_path("$sense.rate") == "R2.rate"
+    assert captured.value("$driver.sense") == "R1"
+
+
+def test_temporary_aliases_require_parameter_context(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    with pytest.raises(FailedPreconditionError) as caught:
+        context.read_context(aliases={"driver": "Q1"})
+    assert caught.value.reason_code == "no_context"
+
+
+def test_parameter_write_preserves_global_aliases(
+    context: ContextService,
+    rich_entry: ResultEntry,
+) -> None:
+    context.install_entry(rich_entry)
+    target = context.new_point(_new_request("a"))
+    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    rows = context.get_alias_rows()
+    context.set_parameter(target, "Q1.rate", 4500.0)
+    assert context.get_alias_rows() == rows
+    assert context.read_context().value("Q1.rate") == 4500.0
+
+
+def test_empty_queries_have_no_entry_point_or_component_selection(
+    context: ContextService,
+) -> None:
+    assert not context.has_context()
+    assert not context.has_draft_context()
+    assert not context.is_active_context()
+    assert context.get_entry_info() is None
+    assert context.list_points() == ()
+    assert context.get_alias_rows() == (
+        AliasRow("driver", ""),
+        AliasRow("sense", "$driver.sense"),
     )
 
-    assert svc.has_draft_context()
-    assert state.session_env.chip_name == "C1"
-    assert state.session_env.result_dir == "/res"
-    assert state.session_env.active_label == ""
-    assert state.session_env.readiness is ContextReadiness.DRAFT
-    assert not svc.is_active_context()
-    bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
+
+def test_empty_read_rejects_instead_of_returning_default_parameters(
+    context: ContextService,
+) -> None:
+    with pytest.raises(FailedPreconditionError) as error:
+        context.read_context()
+    assert error.value.reason_code == "no_context"
 
 
-def test_context_service_use_context():
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+@pytest.mark.parametrize("command", ["use", "new", "ledger"])
+def test_entry_commands_without_entry_fail_explicitly(
+    context: ContextService, command: str
+) -> None:
+    with pytest.raises(FailedPreconditionError) as error:
+        _entry_command(context, command, "not-open")
+    assert error.value.reason_code == "no_entry"
+
+
+def test_install_entry_publishes_empty_draft_and_preserves_nonparameter_capabilities(
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+
+    predictor = FluxoniumPredictor(
+        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
     )
-    bus = MagicMock()
-    io_mock = MagicMock()
-
-    mock_md = MagicMock()
-    mock_ml = MagicMock()
-    mock_ctx = SessionEnv(
-        md=mock_md, ml=mock_ml, soc=None, soccfg=None, result_dir="/base"
+    context = ContextService(
+        SessionState(
+            SessionEnv(parameters=None, soc=None, soccfg=None, predictor=predictor)
+        ),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
-    io_mock.use_context.return_value = mock_ctx
-
-    svc = ContextService(state, io_mock, bus)
-
-    # We must have a baseline result_dir in the draft context for use_context to inherit
-    state.session_env = dataclasses.replace(state.session_env, result_dir="/base")
-    old_ctx = state.session_env
-    ctx_version_before = state.version.get("context")
-
-    svc.use_context("flux_1.0_A")
-
-    io_mock.use_context.assert_called_with("flux_1.0_A", old_ctx)
-    assert state.session_env.md == mock_md
-    assert state.session_env.ml == mock_ml
-    assert state.session_env.result_dir == "/base"
-    assert state.session_env.active_label == "flux_1.0_A"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
-    assert svc.is_active_context()
-    bus.emit.assert_called_once()
-    # Switching context fully swaps md/ml → context version must advance.
-    assert state.version.get("context") == ctx_version_before + 1
+    entry = _entry(tmp_path)
+    old = context.get_session_env()
+    info = context.install_entry(entry)
+    current = context.get_session_env()
+    assert info.entry_id == entry.entry_id
+    assert info.result_path == entry.result_path
+    assert info.database_path == entry.database_path
+    assert current.readiness is ContextReadiness.DRAFT
+    assert current.soc is old.soc and current.values is old.values
+    assert current.predictor is predictor
+    assert current.parameters is not None
+    assert current.parameters.roles is None
+    assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
+    assert context.read_context().document().components == {}
+    assert context.list_points() == ()
 
 
-def test_context_service_new_context():
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
+def test_use_point_detaches_capture_and_uses_same_entry_library(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    first = entry.new_point("first", description="first point")
+    entry.new_point("second", description="second point")
+    context.install_entry(entry)
+    target = context.use_point(PointUseRequest("first"))
+    capture = context.read_context()
+    assert target == SavedPoint(entry_id=entry.entry_id, point="first")
+    assert capture.document().general.description == "first point"
+    with first.edit() as edit:
+        edit.general.description = "changed outside publication"
+    context.use_point(PointUseRequest("second"))
+    assert capture.document().general.description == "first point"
+    assert capture.target == target
+    assert context.read_context().document().general.description == "second point"
+    assert context.get_session_env().readiness is ContextReadiness.ACTIVE
+    assert {point.label: point.description for point in context.list_points()} == {
+        "first": "first point",
+        "second": "second point",
+    }
+
+
+def test_cross_entry_ledger_rejects_before_changing_binding(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    other = _entry(tmp_path, "other")
+    context.install_entry(entry)
+    before = context.read_context().target
+    with pytest.raises(FailedPreconditionError) as error:
+        _entry_command(context, "ledger", other.entry_id)
+    assert error.value.reason_code == "entry_not_open"
+    assert context.read_context().target == before
+    assert entry.list_points() == [] and other.list_points() == []
+
+
+def test_failed_point_read_keeps_previous_capture(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    entry.new_point("good", description="retained")
+    context.install_entry(entry)
+    before = context.use_point(PointUseRequest("good"))
+    with pytest.raises(FileNotFoundError):
+        context.use_point(PointUseRequest("missing"))
+    assert context.read_context().target == before
+    assert context.read_context().document().general.description == "retained"
+
+
+def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -> None:
+    assets = Assets()
+    context = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=assets.bind,
     )
-    bus = MagicMock()
-    io_mock = MagicMock()
+    first = _entry(tmp_path)
+    other = _entry(tmp_path, "other")
+    context.install_entry(first)
+    assets.fail = True
+    with pytest.raises(OSError, match="asset binding"):
+        context.install_entry(other)
+    info = context.get_entry_info()
+    assert info is not None and info.entry_id == first.entry_id
+    assert context.read_context().target == EntryDraft(entry_id=first.entry_id)
+    assert assets.paths[-1] == other.database_path / "arb_waveforms"
 
-    # baseline MD/ML
-    base_md = MagicMock()
-    base_ml = MagicMock()
-    base_ctx = dataclasses.replace(state.session_env, md=base_md, ml=base_ml)
-    state.session_env = base_ctx
 
-    mock_ctx = SessionEnv(
-        md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/base"
+@pytest.mark.parametrize("clone", [None, "source"])
+def test_new_point_uses_seed_or_clone_and_request_description(
+    context: ContextService, tmp_path: Path, clone: str | None
+) -> None:
+    entry = _entry(tmp_path)
+    source = entry.new_point("source", description="source")
+    with source.edit() as edit:
+        edit.set("general.ext.marker", 7.0)
+    context.install_entry(entry)
+    target = context.new_point(_new_request("destination", clone=clone))
+    assert target == SavedPoint(entry_id=entry.entry_id, point="destination")
+    document = context.read_context().document()
+    assert document.general.description == "session description"
+    assert document.general.ext.get("marker") == (None if clone is None else 7.0)
+    assert {point.label for point in context.list_points()} == {"source", "destination"}
+
+
+@pytest.mark.parametrize("clone", [None, "source"], ids=["setup", "clone"])
+def test_duplicate_point_is_typed_input_error_without_side_effects(
+    tmp_path: Path, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    for label in ("copy", "source"):
+        entry.new_point(label, description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((FileExistsError, InvalidInputError)) as caught:
+            context.new_point(_new_request("copy", clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert "exist" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["copy", "source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
+
+
+@pytest.mark.parametrize("clone", [None, "source"])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "../escape",
+        "",
+        ".",
+        "..",
+        "nested/point",
+        r"nested\point",
+        "\x00",
+        "C:point",
+        "/absolute",
+    ],
+    ids=[
+        "escape",
+        "empty",
+        "dot",
+        "parent",
+        "posix",
+        "windows",
+        "nul",
+        "drive",
+        "absolute",
+    ],
+)
+def test_unsafe_point_label_is_typed_input_error_without_side_effects(
+    tmp_path: Path, label: str, clone: str | None
+) -> None:
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context = ContextControlFacet(context=service)
+    entry = _entry(tmp_path)
+    entry.new_point("source", description="retained")
+    service.install_entry(entry)
+    target = context.use_point(PointUseRequest("source"))
+    before = context.read_context().document()
+    version = state.version.snapshot()
+    ledger = entry.ledger.events()
+    files = {
+        path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+        for path in tmp_path.rglob("*")
+    }
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        with pytest.raises((ValueError, InvalidInputError)) as caught:
+            context.new_point(_new_request(label, clone=clone))
+        assert isinstance(caught.value, InvalidInputError)
+        assert caught.value.reason_code == "point_label_invalid"
+        assert "single path component" in str(caught.value)
+        assert context.read_context().target == target
+        assert context.read_context().document() == before
+        assert [point.label for point in context.list_points()] == ["source"]
+        assert state.version.snapshot() == version
+        assert entry.ledger.events() == ledger
+        assert facts == []
+        assert {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None
+            for path in tmp_path.rglob("*")
+        } == files
+    finally:
+        subscription.unsubscribe()
+
+
+def test_created_point_binding_failure_retains_point_and_previous_binding(
+    tmp_path: Path,
+) -> None:
+    assets = Assets()
+    context = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=assets.bind,
     )
-    io_mock.new_context.return_value = mock_ctx
-    io_mock.get_active_label.return_value = "flux_1.5_V"
-    io_mock.list_contexts.return_value = ["src_label"]
-
-    svc = ContextService(state, io_mock, bus)
-
-    svc.new_context(value=1.5, unit="V", clone_from="src_label")
-
-    io_mock.new_context.assert_called_with(
-        base_ctx, value=1.5, unit="V", clone_from="src_label", label=None
-    )
-    bus.emit.assert_called_once()
-    assert bus.emit.call_args[0][0].EVENT == SessionEvent.CONTEXT_SWITCHED
-    assert state.session_env.active_label == "flux_1.5_V"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
+    entry = _entry(tmp_path)
+    context.install_entry(entry)
+    assets.fail = True
+    with pytest.raises(PointBindingError) as error:
+        context.new_point(_new_request("retained"))
+    assert error.value.entry_id == entry.entry_id and error.value.label == "retained"
+    assert isinstance(error.value.__cause__, OSError)
+    assert entry.list_points() == ["retained"]
+    assert context.read_context().target == EntryDraft(entry_id=entry.entry_id)
 
 
-def test_context_service_readiness_transitions_drive_has_context_queries():
-    """has_context / has_draft_context / is_active_context all derive from readiness."""
-    state = State(
-        SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="")
-    )
-    io_mock = MagicMock()
-    io_mock.has_context = False
-    svc = ContextService(state, io_mock, MagicMock())
-
-    # EMPTY
-    assert not svc.has_context()
-    assert not svc.has_draft_context()
-    assert not svc.is_active_context()
-
-    # DRAFT
-    svc.set_project_context(MagicMock(), MagicMock(), "C", "Q", "R", "/res", "/db")
-    assert svc.has_context()
-    assert svc.has_draft_context()
-    assert not svc.is_active_context()
-
-    # ACTIVE
-    io_mock.use_context.return_value = SessionEnv(
-        md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None, result_dir="/res"
-    )
-    svc.use_context("flux_1.0_A")
-    assert svc.has_context()
-    assert not svc.has_draft_context()
-    assert svc.is_active_context()
+def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    before = entry.ledger.events()
+    context.install_entry(entry)
+    ledger = context.entry_ledger(entry.entry_id)
+    assert ledger.events() == before
+    context.read_context()
+    assert entry.ledger.events() == before
 
 
-# ---------------------------------------------------------------------------
-# Helper for md/ml mutation tests
-# ---------------------------------------------------------------------------
+def test_clear_context_returns_empty_without_deleting_entry(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    context.install_entry(entry)
+    context.new_point(_new_request("working"))
+    context.clear_context()
+    assert context.get_session_env().parameters is None
+    assert context.get_session_env().readiness is ContextReadiness.EMPTY
+    assert context.get_entry_info() is None
+    assert context.list_points() == ()
+    assert entry.list_points() == ["working"]
 
 
-def _make_active_state() -> tuple[State, ContextService]:
-    md = MetaDict()
-    ml = ModuleLibrary()
-    state = State(
-        SessionEnv(
-            md=md,
-            ml=ml,
-            soc=None,
-            soccfg=None,
-            result_dir="",
-            readiness=ContextReadiness.ACTIVE,
+def test_cross_entry_clone_rejects_before_destination_or_ledger_changes(
+    context: ContextService, tmp_path: Path
+) -> None:
+    entry = _entry(tmp_path)
+    other = _entry(tmp_path, "other")
+    other.new_point("source")
+    context.install_entry(entry)
+    before = context.read_context().target
+    before_events = entry.ledger.events()
+    other_events = other.ledger.events()
+
+    with pytest.raises(ValueError, match="name"):
+        context.new_point(_new_request("destination", clone="other/source"))
+
+    assert entry.list_points() == []
+    assert other.list_points() == ["source"]
+    assert entry.ledger.events() == before_events
+    assert other.ledger.events() == other_events
+    assert context.read_context().target == before
+
+
+def test_publication_facts_observe_installed_state_and_one_context_bump(
+    rich_entry: ResultEntry,
+) -> None:
+    rich_entry.new_point("first")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    assets = Assets()
+    context = ContextService(state, bus, bind_assets=assets.bind)
+    observations: list[
+        tuple[int, SessionEnv, EntryInfo | None, ContextSourceBinding | None]
+    ] = []
+
+    def switched(payload: ContextSwitchedPayload) -> None:
+        observations.append(
+            (
+                state.version.get("context"),
+                state.session_env,
+                context.get_entry_info(),
+                payload.sources,
+            )
         )
-    )
-    bus = MagicMock()
-    svc = ContextService(state, MagicMock(), bus)
-    return state, svc
 
-
-# ---------------------------------------------------------------------------
-# create_md_attr / rename_md_attr
-# ---------------------------------------------------------------------------
-
-
-def _md_changed_events(svc: ContextService) -> list[object]:
-    from zcu_tools.gui.session.events import MdChangedPayload
-
-    return [
-        call.args[0]
-        for call in svc._bus.emit.call_args_list  # type: ignore[attr-defined]
-        if isinstance(call.args[0], MdChangedPayload)
-    ]
-
-
-def test_create_md_attr_commits_once_and_emits_one_fact():
-    state, svc = _make_active_state()
-    before = state.version.get("context")
-
-    svc.create_md_attr("new_key", 3.5)
-
-    assert dict(state.session_env.md.items()) == {"new_key": 3.5}
-    assert state.version.get("context") == before + 1
-    assert len(_md_changed_events(svc)) == 1
-
-
-def test_create_md_attr_collision_leaves_md_and_version_unchanged():
-    state, svc = _make_active_state()
-    state.session_env.md.existing = 1
-    svc._bus.reset_mock()  # type: ignore[attr-defined]
-    before = state.version.get("context")
-
-    with pytest.raises(FailedPreconditionError, match="already has attribute"):
-        svc.create_md_attr("existing", 2)
-
-    assert dict(state.session_env.md.items()) == {"existing": 1}
-    assert state.version.get("context") == before
-    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
-
-
-def test_create_md_attr_invalid_key_leaves_md_and_version_unchanged():
-    state, svc = _make_active_state()
-    before_data = dict(state.session_env.md.items())
-    before = state.version.get("context")
-
-    with pytest.raises(FailedPreconditionError, match="must not be empty"):
-        svc.create_md_attr("   ", 2)
-
-    assert dict(state.session_env.md.items()) == before_data
-    assert state.version.get("context") == before
-    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
-
-
-def test_rename_md_attr_commits_once_and_emits_one_fact():
-    state, svc = _make_active_state()
-    state.session_env.md.old_key = 3.5
-    before = state.version.get("context")
-    svc._bus.reset_mock()  # type: ignore[attr-defined]
-
-    svc.rename_md_attr("old_key", "new_key")
-
-    assert dict(state.session_env.md.items()) == {"new_key": 3.5}
-    assert state.version.get("context") == before + 1
-    assert len(_md_changed_events(svc)) == 1
-
-
-def test_rename_md_attr_collision_leaves_md_and_version_unchanged():
-    state, svc = _make_active_state()
-    state.session_env.md.old_key = 3.5
-    state.session_env.md.existing = 7
-    before_data = dict(state.session_env.md.items())
-    before = state.version.get("context")
-    svc._bus.reset_mock()  # type: ignore[attr-defined]
-
-    with pytest.raises(FailedPreconditionError, match="already has attribute"):
-        svc.rename_md_attr("old_key", "existing")
-
-    assert dict(state.session_env.md.items()) == before_data
-    assert state.version.get("context") == before
-    svc._bus.emit.assert_not_called()  # type: ignore[attr-defined]
-
-
-def test_md_set_and_delete_each_emit_one_fact():
-    state, svc = _make_active_state()
-    svc.set_md_attr("key", 1)
-    assert state.version.get("context") == 1
-    assert len(_md_changed_events(svc)) == 1
-
-    svc._bus.reset_mock()  # type: ignore[attr-defined]
-    svc.del_md_attr("key")
-    assert state.version.get("context") == 2
-    assert len(_md_changed_events(svc)) == 1
-
-
-# ---------------------------------------------------------------------------
-# del_md_attr
-# ---------------------------------------------------------------------------
-
-
-def test_del_md_attr_removes_attribute_and_bumps_context():
-    state, svc = _make_active_state()
-    state.session_env.md.r_f = 6000.0
-    before = state.version.get("context")
-
-    svc.del_md_attr("r_f")
-
-    assert not hasattr(state.session_env.md, "r_f")
-    assert state.version.get("context") == before + 1
-
-
-def test_del_md_attr_emits_md_changed():
-    state, svc = _make_active_state()
-    state.session_env.md.r_f = 6000.0
-    bus: MagicMock = svc._bus  # type: ignore[assignment]
-
-    svc.del_md_attr("r_f")
-
-    bus.emit.assert_called()
-    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert SessionEvent.MD_CHANGED in event_calls
-
-
-def test_del_md_attr_missing_is_failed_precondition_without_mutation():
-    state, svc = _make_active_state()
-    bus: MagicMock = svc._bus  # type: ignore[assignment]
-    before = state.version.get("context")
-
-    with pytest.raises(
-        FailedPreconditionError, match="MetaDict has no attribute missing"
-    ):
-        svc.del_md_attr("missing")
-
-    assert state.version.get("context") == before
-    bus.emit.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# del_ml_module
-# ---------------------------------------------------------------------------
-
-
-def test_del_ml_module_removes_module_and_bumps_context():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    fake_module = MagicMock()
-    ml.register_module(qub=fake_module)
-    before = state.version.get("context")
-
-    svc.del_ml_module("qub")
-
-    assert "qub" not in ml.modules
-    assert state.version.get("context") == before + 1
-
-
-def test_del_ml_module_emits_ml_changed():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    fake_module = MagicMock()
-    ml.register_module(qub=fake_module)
-    bus: MagicMock = svc._bus  # type: ignore[assignment]
-    bus.reset_mock()
-
-    svc.del_ml_module("qub")
-
-    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert SessionEvent.ML_CHANGED in event_calls
-
-
-# ---------------------------------------------------------------------------
-# rename_ml_module / rename_ml_waveform
-# ---------------------------------------------------------------------------
-
-
-def test_rename_ml_module_moves_key_and_emits_once():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    fake_module = MagicMock()
-    ml.register_module(qub=fake_module)
-    bus: MagicMock = svc._bus  # type: ignore[assignment]
-    bus.reset_mock()
-    before = state.version.get("context")
-
-    svc.rename_ml_module("qub", "qub2")
-
-    assert "qub" not in ml.modules
-    assert "qub2" in ml.modules
-    assert state.version.get("context") == before + 1
-    event_calls = [c[0][0].EVENT for c in bus.emit.call_args_list]
-    assert event_calls.count(SessionEvent.ML_CHANGED) == 1
-
-
-def test_rename_ml_module_clash_fails():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    ml.register_module(a=MagicMock(), b=MagicMock())
-    with pytest.raises(FailedPreconditionError, match="already exists") as exc_info:
-        svc.rename_ml_module("a", "b")
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
-    assert "a" in ml.modules  # untouched
-
-
-def test_rename_ml_module_missing_fails():
-    state, svc = _make_active_state()
-    with pytest.raises(FailedPreconditionError, match="No module named") as exc_info:
-        svc.rename_ml_module("nope", "x")
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
-
-
-def test_rename_ml_module_empty_name_fails():
-    state, svc = _make_active_state()
-    state.session_env.ml.register_module(qub=MagicMock())
-    with pytest.raises(FailedPreconditionError, match="must not be empty") as exc_info:
-        svc.rename_ml_module("qub", "")
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == ""
-
-
-def test_rename_ml_waveform_moves_key():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    ml.register_waveform(gauss=MagicMock())
-    svc.rename_ml_waveform("gauss", "gauss2")
-    assert "gauss" not in ml.waveforms
-    assert "gauss2" in ml.waveforms
-
-
-# ---------------------------------------------------------------------------
-# del_ml_waveform
-# ---------------------------------------------------------------------------
-
-
-def test_del_ml_waveform_removes_waveform_and_bumps_context():
-    state, svc = _make_active_state()
-    ml = state.session_env.ml
-    fake_wf = MagicMock()
-    ml.register_waveform(gauss=fake_wf)
-    before = state.version.get("context")
-
-    svc.del_ml_waveform("gauss")
-
-    assert "gauss" not in ml.waveforms
-    assert state.version.get("context") == before + 1
+    subscription = bus.subscribe(ContextSwitchedPayload, switched)
+    try:
+        assert state.version.get("context") == 0 and observations == []
+        info = context.install_entry(rich_entry)
+        context.use_point(PointUseRequest("first"))
+        assert state.version.get("context") == 2
+        context.new_point(_new_request("second"))
+        assert state.version.get("context") == 3
+        context.clear_context()
+        assert [version for version, *_ in observations] == [1, 2, 3, 4]
+        for version, env, entry_info, sources in observations:
+            if version == 4:
+                assert env.readiness is ContextReadiness.EMPTY
+                assert env.parameters is None and entry_info is None and sources is None
+                continue
+            assert entry_info == info
+            assert env.parameters is not None
+            expected = (
+                EntryDraft(entry_id=info.entry_id)
+                if version == 1
+                else SavedPoint(
+                    entry_id=info.entry_id, point="first" if version == 2 else "second"
+                )
+            )
+            assert env.parameters.target == expected
+            assert sources is not None and sources.sources
+            assert env.result_dir == str(info.result_path)
+            assert env.database_path == str(info.database_path)
+            assert env.active_label == (
+                "" if version == 1 else "first" if version == 2 else "second"
+            )
+            assert env.readiness is (
+                ContextReadiness.DRAFT if version == 1 else ContextReadiness.ACTIVE
+            )
+    finally:
+        subscription.unsubscribe()
+
+
+def test_failed_preparation_keeps_binding_version_and_publishes_no_facts(
+    rich_entry: ResultEntry, tmp_path: Path
+) -> None:
+    rich_entry.new_point("first")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    assets = Assets()
+    context = ContextService(state, bus, bind_assets=assets.bind)
+    events: list[ContextSwitchedPayload] = []
+    switched = bus.subscribe(ContextSwitchedPayload, events.append)
+    try:
+        context.install_entry(rich_entry)
+        target = context.use_point(PointUseRequest("first"))
+        version = state.version.get("context")
+        events.clear()
+        with pytest.raises(FileNotFoundError):
+            context.use_point(PointUseRequest("missing"))
+        assets.fail = True
+        with pytest.raises(OSError, match="asset binding"):
+            context.install_entry(_entry(tmp_path, "other"))
+        with pytest.raises(PointBindingError):
+            context.new_point(_new_request("retained"))
+        assert events == []
+        assert state.version.get("context") == version
+        assert context.read_context().target == target
+        assert rich_entry.list_points() == ["first", "retained"]
+    finally:
+        switched.unsubscribe()

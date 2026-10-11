@@ -22,10 +22,12 @@ Unit basis: every ``length`` / ``sigma`` / time argument is in microseconds
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.waveform_format import decode_npz
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.waveform import (
     ArbWaveformCfg,
@@ -85,12 +87,8 @@ def arb_waveform_abs_at(
     asset is represented by ``abs(I + jQ)``.
     """
 
-    from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
-
-    idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(wav.data)
-    idata = np.asarray(idata_raw, dtype=np.float64)
-    qdata = None if qdata_raw is None else np.asarray(qdata_raw, dtype=np.float64)
-    time = np.asarray(time_raw, dtype=np.float64)
+    samples = decode_npz(Path(wav.path).read_bytes()).samples
+    idata, qdata, time = samples.idata, samples.qdata, samples.time
 
     ienv = np.interp(t, time, idata, left=0.0, right=0.0)
     if qdata is None:
@@ -128,25 +126,22 @@ def envelope_at(
     t = np.asarray(t, dtype=np.float64)
     wav = cfg.waveform
 
-    if isinstance(wav, ConstWaveformCfg):
-        return _windowed(np.ones_like(t), t, length)
-
-    if isinstance(wav, (GaussWaveformCfg, DragWaveformCfg)):
-        sigma = (wav.sigma / wav.length) * length
-        return _windowed(gauss_shape(t, length, sigma), t, length)
-
-    if isinstance(wav, CosineWaveformCfg):
-        return _windowed(cosine_shape(t, length), t, length)
-
-    if isinstance(wav, ArbWaveformCfg):
-        return arb_waveform_abs_at(wav, t, length)
-
-    if isinstance(wav, FlatTopWaveformCfg):
-        return _flat_top_envelope_at(wav, t, length)
-
-    raise ValueError(
-        f"unsupported waveform style {type(wav).__name__} for envelope sampling"
-    )
+    match wav:
+        case ConstWaveformCfg():
+            return _windowed(np.ones_like(t), t, length)
+        case GaussWaveformCfg() | DragWaveformCfg():
+            sigma = (wav.sigma / wav.length) * length
+            return _windowed(gauss_shape(t, length, sigma), t, length)
+        case CosineWaveformCfg():
+            return _windowed(cosine_shape(t, length), t, length)
+        case ArbWaveformCfg():
+            return arb_waveform_abs_at(wav, t, length)
+        case FlatTopWaveformCfg():
+            return _flat_top_envelope_at(wav, t, length)
+        case _:
+            raise ValueError(
+                f"unsupported waveform style {type(wav).__name__} for envelope sampling"
+            )
 
 
 def _flat_top_envelope_at(

@@ -2,31 +2,28 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
-from dataclasses import dataclass
-from types import MappingProxyType
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
-from zcu_tools.gui.app.measure.state import (
-    AnalysisPaneState,
-    PostAnalysisPaneState,
-    Session,
-    TabInteractionState,
-)
+from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import CfgObservation
+from zcu_tools.gui.cfg.resource import (
+    CfgObservation,
+    CfgRef,
+    CfgResolution,
+    CfgStaleError,
+)
+from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
-    PathResourceSnapshot,
     PostAnalysisPaneSnapshot,
     RunPaneSnapshot,
     SavePaneSnapshot,
-    TabPathsSnapshot,
     TabSnapshot,
 )
 
@@ -71,13 +68,62 @@ class TabService:
         registry: Registry,
         writeback: WritebackLifecyclePort,
         cfg_resources: TabCfgResources,
+        cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
+        captured_parameters: Callable[
+            [Mapping[str, str] | None], ParameterContext | None
+        ],
     ) -> None:
+        """Inject owner-sequence captures and fixed cfg resolution construction.
+
+        captured_parameters freezes current global sources with optional named
+        aliases overrides. None and {} mean no override. EMPTY returns None
+        without overrides; nonempty aliases reject no_context. Source/alias errors
+        propagate before registration. Every cfg refresh/reset captures current
+        sources anew; cfg_resolution retains only its supplied fixed capture.
+        """
         self._state = state
         self._registry = registry
         # The tab lifecycle previews pane drafts and tears them down on close via
         # one narrow port, without depending on the concrete sibling service.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
+        self._cfg_resolution = cfg_resolution
+        self._captured_parameters = captured_parameters
+
+    def capture_parameters(
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext | None:
+        """Freeze current point/library/aliases for an existing tab's consumer.
+
+        aliases maps alias names to concrete components for this capture only.
+        None and {} use global rows. EMPTY yields None without overrides.
+        Unknown tab and source or alias failures propagate; no observation guard is refreshed.
+        """
+        self._state.get_tab(tab_id)
+        return self._captured_parameters(aliases)
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+    ) -> CfgObservation:
+        """Preview cfg with named aliases without publication or Run acceptance.
+
+        Require an existing tab and its exact observed identity/revision.
+        Resolve current inputs from the same capture owner as Run admission.
+        Stale refs, source/alias failures and cfg notification guards propagate.
+        None and {} return the cached observation. Nonempty aliases resolves
+        current inputs once. Return Valid or Invalid without changing global rows,
+        inputs or revision.
+        """
+        tab = self._state.get_tab(tab_id)
+        observed = tab.cfg.observe()
+        if expected != observed.ref:
+            raise CfgStaleError(expected, observed.ref)
+        if not aliases:
+            return observed
+        parameters = self.capture_parameters(tab_id, aliases=aliases)
+        return tab.cfg.preview(
+            expected.revision, resolution=self._cfg_resolution(parameters)
+        )
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
@@ -93,35 +139,11 @@ class TabService:
             has_soc=ctx.has_soc(),
             is_running=is_running,
             is_analyzing=tab.is_analyzing,
-            is_saving_data=tab.is_saving_data,
             has_run_result=tab.has_run_result(),
             has_analyze_result=tab.has_analyze_result(),
             has_figure=tab.has_figure(),
             has_post_analyze_result=tab.has_post_analyze_result(),
         )
-        data_path = PathResourceSnapshot(
-            override=tab.save.data_path_override,
-            path=tab.effective_data_path(ctx),
-        )
-
-        def image_paths(
-            kind: ArtifactKind,
-            pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
-        ) -> Mapping[str, PathResourceSnapshot]:
-            if pane.plots is None or pane.result is None:
-                return MappingProxyType({})
-            return MappingProxyType(
-                {
-                    name: PathResourceSnapshot(
-                        override=pane.image_path_overrides.get(name),
-                        path=tab.effective_image_path(ctx, ArtifactKey(kind, name)),
-                    )
-                    for name in pane.plots
-                }
-            )
-
-        analysis_image_paths = image_paths(ArtifactKind.ANALYSIS, tab.analysis)
-        post_image_paths = image_paths(ArtifactKind.POST_ANALYSIS, tab.post_analysis)
 
         # Pane-owned writeback items via opaque drafts.
         def _items_for_pane(pane) -> tuple[WritebackItem, ...]:
@@ -142,13 +164,13 @@ class TabService:
                 result=tab.run.result,
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
+                run_id=tab.run.confirmed_run_id,
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
                 result=tab.analysis.result,
                 figures=tab.analysis.plots,
                 writeback_items=analysis_items,
-                image_paths=analysis_image_paths,
                 has_writeback_draft=tab.analysis.writeback_draft is not None,
                 source_operation_id=tab.analysis.source_operation_id,
                 result_params=tab.analysis.result_params,
@@ -158,22 +180,24 @@ class TabService:
                 result=tab.post_analysis.result,
                 figures=tab.post_analysis.plots,
                 writeback_items=post_items,
-                image_paths=post_image_paths,
                 has_writeback_draft=tab.post_analysis.writeback_draft is not None,
                 source_operation_id=tab.post_analysis.source_operation_id,
                 result_params=tab.post_analysis.result_params,
             ),
-            save=SavePaneSnapshot(data_path=data_path, comment=tab.save.comment),
-            paths=TabPathsSnapshot(
-                data=data_path,
-                analysis_images=analysis_image_paths,
-                post_analysis_images=post_image_paths,
-            ),
+            save=SavePaneSnapshot(comment=tab.save.comment),
             artifacts=self._state.get_artifact_snapshots(tab_id),
         )
 
-    def new_tab(self, adapter_name: str, from_dict: TabSnapshot | None = None) -> str:
-        """Single tab-creation entry.
+    def new_tab(
+        self,
+        adapter_name: str,
+        from_dict: TabSnapshot | None = None,
+    ) -> str:
+        """Create a tab cfg whose refresh/reset reads current global sources.
+
+        Defaults use current global aliases, not focus or via inference. Unbound
+        aliases still permit tab creation; cfgs that consume them are Invalid.
+        The tab retains no source capture; Run admission captures its own inputs.
 
         ``from_dict is None`` → a fresh tab with the adapter's default cfg.
         ``from_dict`` given (restore) → rebuild the tab from the snapshot's
@@ -188,9 +212,16 @@ class TabService:
             tab_id,
             from_dict is not None,
         )
+
+        def current_parameters() -> ParameterContext | None:
+            return self._captured_parameters(None)
+
         cfg = self._cfg_resources.create(
             tab_id,
-            lambda: adapter.make_default_cfg(self._state.session_env),
+            lambda: adapter.make_default_cfg(
+                replace(self._state.session_env, parameters=current_parameters())
+            ),
+            resolution=lambda: self._cfg_resolution(current_parameters()),
             initial=from_dict.cfg_schema if from_dict is not None else None,
         )
         self._state.add_tab(
@@ -211,8 +242,10 @@ class TabService:
     def make_default_cfg(self, adapter_name: str) -> CfgSchema:
         """The adapter's default cfg under the current context — the base schema
         WorkspaceService needs to decode a persisted raw cfg into a live one."""
-        return self._registry.create(adapter_name).make_default_cfg(
-            self._state.session_env
+        adapter = self._registry.create(adapter_name)
+        parameters = self._captured_parameters(None)
+        return adapter.make_default_cfg(
+            replace(self._state.session_env, parameters=parameters)
         )
 
     def list_adapter_names(self) -> list[str]:
@@ -256,7 +289,13 @@ class TabService:
         return self._state.get_tab(tab_id).adapter_name
 
     def prepare_result_analysis(self, tab_id: str) -> AnalysisPreparation:
-        """Prepare analysis without turning a committed result into a failure."""
+        """Seed params from this Run/Load result and its saved source.
+
+        tab_id selects a tab with a result. Use its publication parameters,
+        including context-free None, never current tab/session bindings.
+        Publish returned params; adapter failure becomes AnalysisPreparation.error
+        without changing the result. Missing result raises RuntimeError.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.run.result is None:
             raise RuntimeError("No run result available to build analyze params")
@@ -264,7 +303,8 @@ class TabService:
             return AnalysisPreparation(has_params=False)
         try:
             instance = tab.adapter.get_analyze_params(
-                tab.run.result, self._state.session_env
+                tab.run.result,
+                replace(self._state.session_env, parameters=tab.run.parameters),
             )
         except Exception as exc:
             logger.exception("Analysis preparation failed for tab %s", tab_id)
@@ -276,16 +316,20 @@ class TabService:
         self._state.update_tab_analyze_param_instance(tab_id, instance)
 
     def initialize_tab_post_analyze_params(self, tab_id: str) -> object:
-        """Build + store the post-analysis param instance once the primary analyze
-        result exists. Fast-fails if
-        there is no primary analyze result to seed from."""
+        """Seed and store Post params from the primary result and result source.
+
+        tab_id selects a tab with a primary analysis result. Its Run/Load saved
+        parameters supply the source, including None without fallback. Return
+        the stored params. Missing primary result or adapter failure raises.
+        """
         tab = self._state.get_tab(tab_id)
         if tab.analysis.result is None:
             raise RuntimeError(
                 "No primary analyze result available to build post-analysis params"
             )
         instance = tab.adapter.get_post_analyze_params(
-            tab.analysis.result, self._state.session_env
+            tab.analysis.result,
+            replace(self._state.session_env, parameters=tab.run.parameters),
         )
         self._state.update_tab_post_analyze_param_instance(tab_id, instance)
         return instance
@@ -297,19 +341,3 @@ class TabService:
 
     def get_tab_post_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).post_analysis.result
-
-    def get_tab_data_path(self, tab_id: str) -> str | None:
-        return self._state.get_tab(tab_id).effective_data_path(self._state.session_env)
-
-    def get_tab_image_path(self, tab_id: str, key: ArtifactKey) -> str | None:
-        return self._state.get_tab(tab_id).effective_image_path(
-            self._state.session_env, key
-        )
-
-    def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
-        self._state.update_tab_data_path_override(tab_id, data_path)
-
-    def update_tab_image_path_override(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None
-    ) -> None:
-        self._state.update_tab_image_path_override(tab_id, key, image_path)

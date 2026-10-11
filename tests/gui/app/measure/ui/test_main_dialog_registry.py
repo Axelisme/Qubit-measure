@@ -190,14 +190,16 @@ def test_predictor_dialog_factory_injects_predictor_and_device_facets(qapp) -> N
         "zcu_tools.gui.session.ui.predictor_dialog.PredictorDialog",
         return_value=dialog,
     ) as predictor_dialog:
-        built = registry._build_dialog(DialogName.PREDICTOR)
+        registry.open(DialogName.PREDICTOR)
 
-    assert built is dialog
+    assert registry.dialog(DialogName.PREDICTOR) is dialog
+    assert dialog.isVisible()
+    registry.close(DialogName.PREDICTOR)
     predictor_dialog.assert_called_once_with(
         ctrl.predictor_control,
         parent=parent,
         device=ctrl.device_control,
-        md_provider=ctrl.context_control.get_current_md,
+        parameter_provider=ctrl.context_control.read_context,
         persistent_on_close=True,
     )
 

@@ -142,6 +142,20 @@ def test_correct_flux_from_f01_missing_frequency_keeps_raw_flux(
     np.testing.assert_array_equal(result.accepted, [False])
 
 
+def test_correct_flux_from_f01_rejects_unreachable_frequencies() -> None:
+    # Unreachable frequencies must not read as successful zero corrections.
+    raw_fluxs = np.full(3, 0.5, dtype=np.float64)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = correct_flux_from_f01(
+            raw_fluxs,
+            np.array([-1.0, 0.0, 100.0]),
+            (3.0, 1.0, 0.5),
+        )
+    np.testing.assert_array_equal(result.accepted, [False, False, False])
+    np.testing.assert_array_equal(result.corrected_fluxs, raw_fluxs)
+
+
 def test_correct_flux_from_f01_rejects_non_converged_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,7 +1,6 @@
 """Shared measurement-session core for the GUI apps.
 
-App-agnostic (no app import); the apps that drive a QICK measurement session —
-``main`` (measure-gui) and ``autofluxdep`` — build on these. A "session" here is
+App-agnostic (no app import); measure-gui builds its QICK measurement session on these. A "session" here is
 the measurement substrate every such app needs *before* it layers its own
 experiment surface: the active context (MetaDict + ModuleLibrary), the SoC
 connection, the multi-device set, and the async-operation lifecycle.
@@ -17,7 +16,6 @@ apps without a back-edge. Submodules are imported on demand:
 - ``operation_handles`` — the async-operation Handle/Cancel facet (ADR-0066),
   pure token mint/settle/await/poll/cancel with zero operation-kind knowledge.
 
-Each app keeps its own experiment surface (tabs/run for measure, node-sweep for
-autofluxdep) and its own ``OperationGate`` exclusion policy; only the
-session-core mechanism lives here.
+Measure keeps its tabs/run surface and ``OperationGate`` exclusion policy;
+only the session-core mechanism lives here.
 """

@@ -18,14 +18,15 @@ from qtpy.QtCore import (  # type: ignore[attr-defined]
     QSize,
 )
 from qtpy.QtGui import QColor, QPixmap  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QLabel,
+    QPushButton,
     QScrollArea,
     QWidget,
 )
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
@@ -127,10 +128,6 @@ def make_ctrl():
     ctrl.get_adapter_guide.return_value = {}
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.update_tab_data_path = MagicMock()
-    ctrl.update_tab_analysis_image_path = MagicMock()
-    ctrl.update_tab_post_analysis_image_path = MagicMock()
-    ctrl.update_tab_save_paths = MagicMock()
     ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
     ctrl.get_cfg_editor_draft.return_value = MagicMock()
     ctrl.active_operation_count.return_value = 0
@@ -141,11 +138,9 @@ def make_ctrl():
 def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=False):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
     caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=load)  # type: ignore[call-arg]
@@ -155,23 +150,14 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         result=object() if analysis is not AnalysisMode.NONE else None,
         figures=None,
         writeback_items=(),
-        image_paths={},
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if post else None,
         result=object() if post else None,
         figures=None,
         writeback_items=(),
-        image_paths={},
     )
-    save_snap = SavePaneSnapshot(
-        data_path=PathResourceSnapshot(override=None, path="/tmp/d.h5")
-    )
-    paths_snap = TabPathsSnapshot(
-        data=PathResourceSnapshot(override=None, path="/tmp/d.h5"),
-        analysis_images={},
-        post_analysis_images={},
-    )
+    save_snap = SavePaneSnapshot()
     snapshot = TabSnapshot(
         adapter_name="fake",
         cfg_schema=MagicMock(),
@@ -180,7 +166,6 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
             global_run_active=False,
             is_running=False,
             is_analyzing=False,
-            is_saving_data=False,
             has_context=True,
             has_active_context=True,
             has_soc=True,
@@ -194,7 +179,6 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         analysis=analysis_snap,
         post_analysis=post_snap,
         save=save_snap,
-        paths=paths_snap,
     )
     return with_artifacts(snapshot)
 
@@ -556,7 +540,8 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
     tab = exp_tab_widget("reach", ctrl, caps)
     snap = make_snapshot("reach", analysis=AnalysisMode.FIT, post=True)
-    tab.attach(snap, MagicMock())
+    actions = MagicMock()
+    tab.attach(snap, actions)
     # Select real Data subtab via left_tabs
     data_idx = None
     for i in range(tab._left_tabs.count()):
@@ -567,8 +552,16 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
     tab._left_tabs.setCurrentIndex(data_idx)
     tab._on_left_tab_changed(tab._left_tabs.currentIndex())
     assert tab._right_stack.currentWidget() is tab._data_gallery
-    # Ensure the data save action remains available from this pane.
-    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
+    # The Data pane still submits a whole Run artifact through its Save button.
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    assert buttons[0].isEnabled()
+    buttons[0].click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("reach", ArtifactRef("run", "measurement_data"))
+    ]
     tab.detach()
 
 
@@ -588,7 +581,8 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
 
     tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=fail_analysis)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
-    tab.attach(snap, MagicMock())
+    actions = MagicMock()
+    tab.attach(snap, actions)
     # Go to Data
     for i in range(tab._left_tabs.count()):
         if tab._left_tabs.tabText(i) == "Data":
@@ -603,10 +597,27 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     assert tab._data_gallery.card_state("run") == "available"
     assert tab._data_gallery.card_state("analysis") == "unavailable"
     assert tab._data_gallery.card_state("post_analysis") == "available"
-    # Save center should still be usable after single-card failure (A3)
-    assert tab._save_center.has_artifact(ArtifactKey(ArtifactKind.DATA))
-    assert tab._save_center.is_save_all_enabled() is True
-    assert tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.DATA)) is True
+    # Raster failure must not disable whole-artifact Save or Save All commands.
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    assert all(button.isEnabled() for button in buttons)
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("t1", ArtifactRef("run", "measurement_data")),
+        ("t1", ArtifactRef("analysis", "results")),
+        ("t1", ArtifactRef("post_analysis", "results")),
+    ]
+    save_all = next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Save All"
+    )
+    assert save_all.isEnabled()
+    save_all.click()
+    assert [call.args for call in actions.save_all.call_args_list] == [("t1",)]
     tab.detach()
 
 

@@ -8,7 +8,6 @@ Tab operation guards remain with the application lifecycle owner.
 from collections.abc import Callable
 from typing import Protocol
 
-from zcu_tools.gui.cfg.lowering import RangeFactory
 from zcu_tools.gui.cfg.model import CfgSchema
 from zcu_tools.gui.cfg.resource import (
     CfgAcceptance,
@@ -29,12 +28,8 @@ class TabCfgResources:
     def __init__(
         self,
         *,
-        resolution: Callable[[], CfgResolution],
-        make_range: RangeFactory,
         mutation_allowed: Callable[[str], bool],
     ) -> None:
-        self._resolution = resolution
-        self._make_range = make_range
         self._mutation_allowed = mutation_allowed
         self._resources: dict[str, CfgResource] = {}
 
@@ -43,10 +38,13 @@ class TabCfgResources:
         tab_id: str,
         defaults: Callable[[], CfgSchema],
         *,
+        resolution: Callable[[], CfgResolution],
         initial: CfgSchema | None = None,
     ) -> CfgResource:
         """Prepare before registering; restore does not execute defaults.
 
+        resolution returns published options with this tab's fixed parameter
+        capture. Refresh never substitutes the current session selection.
         The concrete result belongs to the creating application flow, not the
         frontend. A failed preparation leaves no tab association behind.
         """
@@ -58,8 +56,7 @@ class TabCfgResources:
         resource = CfgResource(
             defaults,
             initial=initial,
-            resolution=self._resolution,
-            make_range=self._make_range,
+            resolution=resolution,
             mutation_allowed=lambda: self._mutation_allowed(tab_id),
             notification_active=lambda: CfgResource.notifications_active(
                 tuple(self._resources.values())
@@ -86,9 +83,7 @@ class TabCfgResources:
         del self._resources[tab_id]
 
     def refresh_all(self) -> tuple[CfgObservation, ...]:
-        return CfgResource.refresh_group(
-            tuple(self._resources.values()), resolution=self._resolution
-        )
+        return CfgResource.refresh_group(tuple(self._resources.values()))
 
     def _require_not_notifying(self) -> None:
         if CfgResource.notifications_active(tuple(self._resources.values())):

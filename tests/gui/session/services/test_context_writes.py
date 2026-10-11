@@ -1,377 +1,494 @@
-"""Tests for ContextService ml/md writes — the single write authority (ADR-0067).
+"""Direct target writes through the shipped facet and real resource owners."""
 
-ml writes go through ``apply_ml_writes``, which registers the entries (lowered by
-the app-injected ``lower_module`` / ``lower_waveform`` callbacks — here the real
-``cfg_lowering`` ones), bumps "context", and emits at most one MD/ML_CHANGED per
-batch. The CfgSchema lowering itself is experiment-coupled and lives app-side
-(``cfg_lowering`` / the Controller's ContextWritePort façade).
-"""
-
-from __future__ import annotations
-
-from dataclasses import replace
-from typing import Any
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ContextReadiness
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
-from zcu_tools.gui.app.measure.services.cfg_lowering import lower_module, lower_waveform
-from zcu_tools.gui.app.measure.state import SessionEnv, State
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from pydantic import ValidationError
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.events import MdChangedPayload, MlChangedPayload
-from zcu_tools.gui.session.services.context import (
-    ContextService,
-    MlEntryValidationError,
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import (
+    ContextTarget,
+    EntryDraft,
+    PointUseRequest,
+    SavedPoint,
 )
-from zcu_tools.gui.session.services.io_manager import IOManager
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.events import (
+    ContextSwitchedPayload,
+    MdChangedPayload,
+    MlChangedPayload,
+)
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.document_store import ConflictError
+from zcu_tools.resources.entry import EditView, PointView, ResultEntry, snapshot
+from zcu_tools.resources.entry.ledger_models import (
+    AcceptedPayload,
+    AcceptedWrite,
+    LedgerEvent,
+)
+from zcu_tools.resources.entry.provenance import Provenance
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-_READOUT_RAW = {
-    "type": "readout/direct",
-    "ro_ch": 0,
-    "ro_freq": 6000.0,
-    "ro_length": 1.0,
-    "trig_offset": 0.0,
-}
-_WAVEFORM_RAW = {"style": "gauss", "length": 0.1, "sigma": 0.02}
+Kind = Literal["parameter", "module", "waveform"]
+KINDS: tuple[Kind, ...] = ("parameter", "module", "waveform")
+AT = "2026-10-07T00:00:00Z"
 
 
-def _module_schema(raw: dict[str, Any]) -> CfgSchema:
-    spec, value = module_cfg_to_value(raw)
-    return CfgSchema(spec=spec, value=value)
+@dataclass
+class _Session:
+    entry: ResultEntry
+    control: ContextControlFacet
+    service: ContextService
+    state: SessionState
+    bus: BaseEventBus
 
 
-def _waveform_schema(raw: dict[str, Any]) -> CfgSchema:
-    spec, value = waveform_cfg_to_value(raw)
-    return CfgSchema(spec=spec, value=value)
-
-
-def _make_svc_with_state(bus: EventBus | None = None) -> tuple[ContextService, State]:
-    state = State(
-        SessionEnv(
-            md=MetaDict(),
-            ml=ModuleLibrary(),
-            soc=None,
-            soccfg=None,
-            result_dir="",
-            readiness=ContextReadiness.DRAFT,
-        )
+@pytest.fixture
+def session(tmp_path: Path) -> _Session:
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
     )
-    return ContextService(
-        state, IOManager(), bus if bus is not None else EventBus()
-    ), state
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    service.install_entry(entry)
+    return _Session(entry, ContextControlFacet(context=service), service, state, bus)
 
 
-def _make_svc() -> ContextService:
-    return _make_svc_with_state()[0]
-
-
-def _apply(
-    svc: ContextService,
+def _write(
+    control: ContextControlFacet,
+    target: ContextTarget,
+    kind: Kind,
+    number: float,
     *,
-    md: dict[str, Any] | None = None,
-    modules: dict[str, Any] | None = None,
-    waveforms: dict[str, Any] | None = None,
-    dump: bool = True,
+    source: Provenance | None = None,
+    path: str | None = None,
 ) -> None:
-    svc.apply_ml_writes(
-        md or {},
-        modules or {},
-        waveforms or {},
-        lower_module=lower_module,
-        lower_waveform=lower_waveform,
-        dump=dump,
+    destination = (
+        path
+        if path is not None
+        else {
+            "parameter": "general.ext.flux_value",
+            "module": "Q1.pulses.pi",
+            "waveform": "Q1.waveforms.base",
+        }[kind]
     )
+    if kind == "parameter":
+        control.set_parameter(target, destination, number, source=source)
+    elif kind == "module":
+        control.set_module(
+            target,
+            destination,
+            PulseSpec(
+                ch=0, nqz=1, freq=100.0, gain=number, waveform="Q1.waveforms.missing"
+            ),
+            source=source,
+        )
+    else:
+        control.set_waveform(
+            target, destination, ConstWaveformCfg(length=number), source=source
+        )
 
 
-@pytest.mark.parametrize(
-    "bad",
-    [
-        {"__complex__": [1, 2]},
-        {"__metadict_string__": "literal"},
-        {"nested": [{"__complex__": [1, 2]}]},
-        {"nested": [{"__metadict_string__": "literal"}]},
-    ],
-)
-def test_create_md_attr_rejects_reserved_value_without_publication(bad):
-    bus = EventBus()
-    svc, state = _make_svc_with_state(bus)
+def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
+    if kind == "parameter":
+        return capture.value("general.ext.flux_value")
+    if kind == "module":
+        return capture.library.entry_value("Q1.pulses.pi", kind="module")["gain"]
+    return capture.library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
+
+
+def _meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
+    path = {
+        "parameter": "general.ext.flux_value",
+        "module": "Q1.pulses.pi.gain",
+        "waveform": "Q1.waveforms.base.length",
+    }[kind]
+    return capture.meta(path) if kind == "parameter" else capture.library.meta(path)
+
+
+def _select(session: _Session, label: str) -> SavedPoint:
+    session.entry.new_point(label)
+    return session.control.use_point(PointUseRequest(label))
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_read_target_observes_detached_writes_without_selecting_or_publishing(
+    session: _Session, kind: Kind
+) -> None:
+    first = _select(session, "a")
+    _write(session.control, first, kind, 0.2)
+    capture = session.control.read_context()
+    second = _select(session, "b")
+    _write(session.control, first, kind, 0.3)
+    selected = session.control.read_context()
+    version = session.state.version.get("context")
     events: list[object] = []
-    bus.subscribe(MdChangedPayload, events.append)
-    svc.get_current_md().update(stable=1)
-    before = state.version.get("context")
-
-    with pytest.raises(ValueError, match="reserved MetaDict tag"):
-        svc.create_md_attr("bad", bad)
-
-    assert dict(svc.get_current_md().snapshot().items()) == {"stable": 1}
-    assert state.version.get("context") == before
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    current = session.control.read_target(first)
+    assert current.target == first
+    assert _value(current, kind) == pytest.approx(0.3)
+    assert _value(capture, kind) == pytest.approx(0.2)
+    assert session.control.read_context().target == second
+    assert session.control.read_context().document() == selected.document()
+    assert session.state.version.get("context") == version
     assert events == []
 
 
-@pytest.mark.parametrize("failure_stage", ["module", "waveform"])
-def test_failed_late_preparation_keeps_live_context_and_version(failure_stage):
-    bus = EventBus()
-    svc, state = _make_svc_with_state(bus)
-    events: list[object] = []
-    bus.subscribe(MdChangedPayload, events.append)
-    bus.subscribe(MlChangedPayload, events.append)
-    svc.get_current_md().update(offset=1.0)
-    before = state.version.get("context")
+def test_read_target_draft_rejects_replaced_memory_context(session: _Session) -> None:
+    draft = session.control.read_context().target
+    session.control.set_parameter(draft, "general.ext.flux_value", 0.2)
+    assert session.control.read_target(draft).value("general.ext.flux_value") == 0.2
+    selected = _select(session, "a")
+    with pytest.raises(FailedPreconditionError) as error:
+        session.control.read_target(draft)
+    assert error.value.reason_code == "draft_not_selected"
+    assert session.control.read_context().target == selected
 
-    def reject(entry, library, metadata):
-        assert metadata.offset == 9.0
-        assert svc.get_current_md().offset == 1.0
-        assert svc.get_current_ml().modules == {}
-        raise MlEntryValidationError("injected later preparation failure")
 
-    with pytest.raises(MlEntryValidationError, match="later preparation"):
-        svc.apply_ml_writes(
-            {"offset": 9.0},
-            {"first": _module_schema(_READOUT_RAW)},
-            {"later": _waveform_schema(_WAVEFORM_RAW)},
-            lower_module=reject if failure_stage == "module" else lower_module,
-            lower_waveform=reject,
-            dump=False,
+def test_read_target_rejects_other_entries(session: _Session) -> None:
+    target = SavedPoint(entry_id="other", point="a")
+    before = session.control.read_context()
+    with pytest.raises(FailedPreconditionError) as error:
+        session.control.read_target(target)
+    assert error.value.reason_code == "entry_not_open"
+    assert session.control.read_context().document() == before.document()
+
+
+def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
+    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    with pytest.raises(FileNotFoundError):
+        session.control.read_target(target)
+    assert session.entry.list_points() == []
+
+
+def _source(entry: ResultEntry) -> Provenance:
+    event_id = str(uuid4())
+    entry.ledger.append(
+        LedgerEvent(
+            id=event_id,
+            kind="accepted",
+            at=AT,
+            entry_id=entry.entry_id,
+            origin="gui",
+            payload=AcceptedPayload(
+                writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
+                analysis_summary={},
+            ),
         )
-    assert svc.get_current_md().offset == 1.0
-    assert svc.get_current_ml().modules == {}
-    assert svc.get_current_ml().waveforms == {}
-    assert state.version.get("context") == before
+    )
+    return Provenance(event_id, "fit", None, AT, 0.01)
+
+
+def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
+    if kind == "parameter":
+        return snapshot(entry.use_point(target.point)).general.ext["flux_value"]
+    library = entry.module_library(
+        target.point,
+        assets=ArbWaveformDatabase.info_at(entry.database_path / "arb_waveforms"),
+    ).snapshot()
+    if kind == "module":
+        return library.entry_value("Q1.pulses.pi", kind="module")["gain"]
+    return library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
+@pytest.mark.parametrize("explicit_source", [False, True], ids=["manual", "accepted"])
+def test_target_setters_preserve_source_and_old_capture(
+    session: _Session, kind: Kind, saved: bool, explicit_source: bool
+) -> None:
+    target = _select(session, "a") if saved else session.control.read_context().target
+    capture = session.control.read_context()
+    old_document = capture.document()
+    old_library = capture.library.document()
+    created_at = old_document.general.created_at
+    source = _source(session.entry) if explicit_source else None
+    _write(session.control, target, kind, 0.2, source=source)
+    current = session.control.read_context()
+    assert _value(current, kind) == pytest.approx(0.2)
+    provenance = _meta(current, kind)
+    assert provenance is not None
+    if source is None:
+        assert provenance.source == "manual" and provenance.kind is None
+    else:
+        assert provenance == source
+    assert provenance.cloned_from is None
+    assert current.document().general.created_at == created_at
+    assert capture.document() == old_document
+    assert capture.library.document() == old_library
+    if saved:
+        assert isinstance(target, SavedPoint)
+        assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
+    else:
+        assert session.entry.list_points() == []
+        assert list((session.entry.result_path / "points").iterdir()) == []
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_detached_saved_point_write_keeps_current_point_and_publication(
+    session: _Session, kind: Kind
+) -> None:
+    first = _select(session, "a")
+    second = _select(session, "b")
+    capture = session.control.read_context()
+    before_version = session.state.version.get("context")
+    events: list[object] = []
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    _write(session.control, first, kind, 0.2)
+    assert _persisted(session.entry, first, kind) == pytest.approx(0.2)
+    assert session.control.read_context().target == second
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
+    )
+    assert session.state.version.get("context") == before_version
+    assert events == []
+    session.control.use_point(PointUseRequest("a"))
+    assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
+    _write(session.control, first, kind, 0.3)
+    assert _value(session.control.read_context(), kind) == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
+def test_cross_entry_target_rejected_before_any_write(
+    session: _Session, tmp_path: Path, kind: Kind, saved: bool
+) -> None:
+    old_target = (
+        _select(session, "a") if saved else session.control.read_context().target
+    )
+    other = ResultEntry.create(
+        "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
+    )
+    session.service.install_entry(other)
+    current = session.control.read_context()
+    with pytest.raises(FailedPreconditionError) as error:
+        _write(session.control, old_target, kind, 0.2)
+    assert error.value.reason_code == "entry_not_open"
+    assert session.control.read_context().document() == current.document()
+    assert session.entry.list_points() == (["a"] if saved else [])
+    assert other.list_points() == []
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_saved_selection_rejects_old_draft_without_retargeting(
+    session: _Session, kind: Kind
+) -> None:
+    draft = session.control.read_context().target
+    assert isinstance(draft, EntryDraft)
+    target = _select(session, "a")
+    capture = session.control.read_context()
+    with pytest.raises(FailedPreconditionError):
+        _write(session.control, draft, kind, 0.2)
+    assert session.control.read_context().target == target
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
+    )
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
+def test_invalid_source_keeps_projection_and_version(
+    session: _Session, kind: Kind, saved: bool
+) -> None:
+    target = _select(session, "a") if saved else session.control.read_context().target
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+    bad = Provenance(str(uuid4()), "fit", None, AT, 0.01)
+    with pytest.raises(ValueError, match="source.*does not exist") as error:
+        _write(session.control, target, kind, 0.2, source=bad)
+    assert error.value.__cause__ is not None
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
+    )
+    assert session.state.version.get("context") == version
+
+
+@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
+def test_invalid_parameter_schema_is_not_published(
+    session: _Session, saved: bool
+) -> None:
+    target = _select(session, "a") if saved else session.control.read_context().target
+    capture = session.control.read_context()
+    with pytest.raises(ValidationError, match="created_at"):
+        session.control.set_parameter(target, "general.created_at", "bad-time")
+    assert session.control.read_context().document() == capture.document()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_current_write_notifies_after_installation_without_switching_binding(
+    session: _Session, kind: Kind
+) -> None:
+    target = _select(session, "a")
+    binding = session.control.get_source_binding()
+    version = session.state.version.get("context")
+    observed: list[tuple[object, YamlValue, int]] = []
+
+    def observe(payload: MdChangedPayload | MlChangedPayload) -> None:
+        observed.append(
+            (
+                payload,
+                _value(session.control.read_context(), kind),
+                session.state.version.get("context"),
+            )
+        )
+
+    session.bus.subscribe(MdChangedPayload, observe)
+    session.bus.subscribe(MlChangedPayload, observe)
+    _write(session.control, target, kind, 0.2)
+    assert len(observed) == 1
+    payload, value, installed_version = observed[0]
+    expected = MdChangedPayload if kind == "parameter" else MlChangedPayload
+    assert isinstance(payload, expected)
+    assert binding is not None
+    assert payload.binding_id == binding.binding_id
+    assert payload.content_changed and payload.fault is None
+    assert value == pytest.approx(0.2) and installed_version == version + 1
+    assert session.control.get_source_binding() == binding
+
+
+@pytest.mark.parametrize("selected", ["point", "draft"])
+def test_detached_description_write_updates_cache_without_changing_selected_source(
+    session: _Session, selected: Literal["point", "draft"]
+) -> None:
+    first = _select(session, "a")
+    if selected == "point":
+        _select(session, "b")
+    else:
+        session.service.install_entry(session.entry)
+    before = session.control.read_context()
+    version = session.state.version.get("context")
+    binding = session.control.get_source_binding()
+    rows = session.control.get_alias_rows()
+    descriptions = {
+        info.label: info.description for info in session.control.list_points()
+    }
+    events: list[object] = []
+    for event in (MdChangedPayload, MlChangedPayload, ContextSwitchedPayload):
+        session.bus.subscribe(event, events.append)
+
+    session.control.set_parameter(
+        first, "general.description", "changed while detached"
+    )
+
+    after_descriptions = {
+        info.label: info.description for info in session.control.list_points()
+    }
+    assert after_descriptions == {**descriptions, "a": "changed while detached"}
+    assert (
+        snapshot(session.entry.use_point("a")).general.description
+        == "changed while detached"
+    )
+    after = session.control.read_context()
+    assert after.target == before.target
+    assert after.document() == before.document()
+    assert after.library.document() == before.library.document()
+    assert session.state.version.get("context") == version
+    assert session.control.get_source_binding() == binding
+    assert session.control.get_alias_rows() == rows
     assert events == []
 
 
-def test_candidate_lowering_sees_earlier_writes_without_publishing_them():
-    svc, state = _make_svc_with_state()
-    library = svc.get_current_ml()
-    metadata = svc.get_current_md()
-    metadata.update(offset=1.0)
+def test_description_write_updates_cached_point_description(session: _Session) -> None:
+    target = _select(session, "a")
+    session.control.set_parameter(target, "general.description", "changed")
+    assert session.control.list_points()[0].description == "changed"
 
-    def lower(entry, candidate_ml, candidate_md):
-        assert candidate_md.offset == 9.0
-        assert metadata.offset == 1.0
-        assert library.modules == {}
-        if entry == "second":
-            assert "first" in candidate_ml.modules
-        return _READOUT_RAW
 
-    svc.apply_ml_writes(
-        {"offset": 9.0},
-        {"first": "first", "second": "second"},
-        {},
-        lower_module=lower,
-        lower_waveform=lower_waveform,
-        dump=False,
+@pytest.mark.parametrize("kind", KINDS)
+def test_saved_setter_io_failure_keeps_publication(
+    session: _Session, monkeypatch: pytest.MonkeyPatch, kind: Kind
+) -> None:
+    target = _select(session, "a")
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+
+    def fail_replace(self: Path, target: str | Path) -> Path:
+        raise OSError("synthetic replace failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="synthetic replace failure"):
+        _write(session.control, target, kind, 0.2)
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
     )
-    assert svc.get_current_md() is metadata
-    assert svc.get_current_ml() is library
-    assert metadata.offset == 9.0
-    assert set(library.modules) == {"first", "second"}
-    assert state.version.get("context") == 1
+    assert session.state.version.get("context") == version
 
 
-def test_storage_failure_reports_applied_and_preserves_published_batch(
-    tmp_path, monkeypatch, caplog
-):
-    bus = EventBus()
-    svc, state = _make_svc_with_state(bus)
-    events: list[tuple[int, bool]] = []
+def test_parameter_conflict_propagates_without_publishing_candidate(
+    session: _Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _select(session, "a")
+    session.control.set_parameter(target, "general.ext.flux_value", 0.1)
+    capture = session.control.read_context()
+    version = session.state.version.get("context")
+    other = session.entry.use_point("a")
+    original = PointView.edit
 
-    def observe(_payload: object) -> None:
-        events.append((state.version.get("context"), "first" in library.modules))
+    @contextmanager
+    def interleaved(view: PointView) -> Generator[EditView]:
+        with original(view) as draft:
+            yield draft
+            with original(other) as external:
+                external.set("general.ext.flux_value", 0.3)
 
-    bus.subscribe(MdChangedPayload, observe)
-    bus.subscribe(MlChangedPayload, observe)
-    library = ModuleLibrary(tmp_path / "modules.yaml")
-    state.set_context(replace(state.session_env, ml=library))
-    defect = OSError("disk full")
-    saves = []
-
-    def fail_save():
-        saves.append(state.version.get("context"))
-        raise defect
-
-    monkeypatch.setattr(library, "dump", fail_save)
-    with pytest.raises(RuntimeError, match="applied, but saving failed") as caught:
-        _apply(svc, md={"offset": 9.0}, modules={"first": _module_schema(_READOUT_RAW)})
-    assert caught.value.__cause__ is defect
-    assert svc.get_current_md().offset == 9.0
-    assert "first" in library.modules
-    assert state.version.get("context") == 1
-    assert saves == [1]
-    assert events == [(1, True), (1, True)]
-    assert "Context settings applied, but saving failed" in caplog.text
+    monkeypatch.setattr(PointView, "edit", interleaved)
+    with pytest.raises(ConflictError):
+        session.control.set_parameter(target, "general.ext.flux_value", 0.2)
+    assert session.control.read_context().document() == capture.document()
+    assert session.state.version.get("context") == version
+    assert snapshot(session.entry.use_point("a")).general.ext["flux_value"] == 0.3
 
 
-def test_apply_ml_writes_registers_module():
-    svc = _make_svc()
-    _apply(svc, modules={"readout_rf": _module_schema(_READOUT_RAW)}, dump=False)
-    assert "readout_rf" in svc.get_current_ml().modules
-
-
-def test_apply_ml_writes_registers_waveform():
-    svc = _make_svc()
-    _apply(svc, waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)}, dump=False)
-    assert "drive_wav" in svc.get_current_ml().waveforms
-
-
-def test_md_write_bumps_context_version():
-    # Concurrency guards on ``context`` (tab.run_start / editor.commit / tab.writeback_apply)
-    # must detect md edits: a semantic md write bumps the context version.
-    svc, state = _make_svc_with_state()
-    before = state.version.get("context")
-    svc.set_md_attr("r_f", 6000.0)
-    assert state.version.get("context") == before + 1
-    svc.del_md_attr("r_f")
-    assert state.version.get("context") == before + 2
-
-
-def test_ml_write_bumps_context_version():
-    svc, state = _make_svc_with_state()
-    before = state.version.get("context")
-    _apply(svc, waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)}, dump=False)
-    assert state.version.get("context") == before + 1
-    svc.del_ml_waveform("drive_wav")
-    assert state.version.get("context") == before + 2
-
-
-def test_apply_ml_writes_batch_is_one_bump():
-    # A batch of md + ml writes lands as a single context bump (not N).
-    svc, state = _make_svc_with_state()
-    before = state.version.get("context")
-    _apply(
-        svc,
-        md={"r_f": 6000.0},
-        modules={"readout_rf": _module_schema(_READOUT_RAW)},
-        waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
-    )
-    assert state.version.get("context") == before + 1
-    ml = svc.get_current_ml()
-    assert "readout_rf" in ml.modules
-    assert "drive_wav" in ml.waveforms
-
-
-def test_apply_ml_writes_empty_is_noop():
-    svc, state = _make_svc_with_state()
-    before = state.version.get("context")
-    _apply(svc)
-    assert state.version.get("context") == before
-
-
-def test_apply_ml_writes_emits_once_per_kind():
-    bus = EventBus()
-    svc, _ = _make_svc_with_state(bus)
-    md_events = 0
-    ml_events = 0
-
-    def _on_md(_payload: object) -> None:
-        nonlocal md_events
-        md_events += 1
-
-    def _on_ml(_payload: object) -> None:
-        nonlocal ml_events
-        ml_events += 1
-
-    bus.subscribe(MdChangedPayload, _on_md)
-    bus.subscribe(MlChangedPayload, _on_ml)
-    _apply(
-        svc,
-        md={"r_f": 6000.0, "rf_w": 1.0},
-        modules={"readout_rf": _module_schema(_READOUT_RAW)},
-        waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)},
-    )
-    assert md_events == 1  # one MD_CHANGED for two md writes
-    assert ml_events == 1  # one ML_CHANGED for module + waveform
-
-
-def test_replace_ml_module_is_one_atomic_content_mutation():
-    bus = EventBus()
-    svc, state = _make_svc_with_state(bus)
-    _apply(svc, modules={"readout_rf": _module_schema(_READOUT_RAW)}, dump=False)
-    ml_events = 0
-
-    def _on_ml(_payload: object) -> None:
-        nonlocal ml_events
-        ml_events += 1
-
-    bus.subscribe(MlChangedPayload, _on_ml)
-    before = state.version.get("context")
-    replacement = dict(_READOUT_RAW, ro_freq=6123.0)
-    svc.replace_ml_module_from_schema(
-        "readout_rf",
-        "readout_v2",
-        _module_schema(replacement),
-        lower_module=lower_module,
-        lower_waveform=lower_waveform,
-        dump=False,
+@pytest.mark.parametrize("kind", KINDS)
+def test_missing_saved_point_is_not_created_by_setter(
+    session: _Session,
+    kind: Kind,
+) -> None:
+    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    capture = session.control.read_context()
+    with pytest.raises(FileNotFoundError):
+        _write(session.control, target, kind, 0.2)
+    assert session.entry.list_points() == []
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
     )
 
-    assert "readout_rf" not in svc.get_current_ml().modules
-    assert svc.get_current_ml().modules["readout_v2"].to_dict()["ro_freq"] == 6123.0
-    assert state.version.get("context") == before + 1
-    assert ml_events == 1
 
-
-def test_replace_ml_waveform_uses_waveform_lowering_and_store():
-    svc, state = _make_svc_with_state()
-    _apply(svc, waveforms={"drive_wav": _waveform_schema(_WAVEFORM_RAW)}, dump=False)
-    before = state.version.get("context")
-
-    svc.replace_ml_waveform_from_schema(
-        "drive_wav",
-        "drive_wav_v2",
-        _waveform_schema({**_WAVEFORM_RAW, "length": 0.2}),
-        lower_module=lower_module,
-        lower_waveform=lower_waveform,
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("saved", [False, True], ids=["draft", "saved"])
+def test_wrong_path_or_library_partition_keeps_publication(
+    session: _Session,
+    kind: Kind,
+    saved: bool,
+) -> None:
+    target = _select(session, "a") if saved else session.control.read_context().target
+    capture = session.control.read_context()
+    path = {
+        "parameter": "unknown.field",
+        "module": "Q1.waveforms.pi",
+        "waveform": "Q1.pulses.base",
+    }[kind]
+    with pytest.raises((ValueError, AttributeError)):
+        _write(session.control, target, kind, 0.2, path=path)
+    assert session.control.read_context().document() == capture.document()
+    assert (
+        session.control.read_context().library.document() == capture.library.document()
     )
-
-    assert "drive_wav" not in svc.get_current_ml().waveforms
-    assert svc.get_current_ml().waveforms["drive_wav_v2"].to_dict()["length"] == 0.2
-    assert state.version.get("context") == before + 1
-
-
-def test_replace_ml_collision_and_lowering_failure_leave_live_content_intact():
-    svc, state = _make_svc_with_state()
-    _apply(
-        svc,
-        modules={
-            "readout_rf": _module_schema(_READOUT_RAW),
-            "other": _module_schema(dict(_READOUT_RAW, ro_freq=6100.0)),
-        },
-        dump=False,
-    )
-    original = svc.get_current_ml().modules["readout_rf"].to_dict()
-    before = state.version.get("context")
-
-    with pytest.raises(FailedPreconditionError, match="already exists"):
-        svc.replace_ml_module_from_schema(
-            "readout_rf",
-            "other",
-            _module_schema(dict(_READOUT_RAW, ro_freq=6200.0)),
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-            dump=False,
-        )
-    assert svc.get_current_ml().modules["readout_rf"].to_dict() == original
-    assert state.version.get("context") == before
-
-    def _fail(*_args: object) -> object:
-        raise MlEntryValidationError("bad cfg")
-
-    with pytest.raises(MlEntryValidationError, match="bad cfg"):
-        svc.replace_ml_module_from_schema(
-            "readout_rf",
-            "readout_v2",
-            _module_schema(dict(_READOUT_RAW, ro_freq=6300.0)),
-            lower_module=_fail,
-            lower_waveform=lower_waveform,
-            dump=False,
-        )
-    assert svc.get_current_ml().modules["readout_rf"].to_dict() == original
-    assert "readout_v2" not in svc.get_current_ml().modules
-    assert state.version.get("context") == before

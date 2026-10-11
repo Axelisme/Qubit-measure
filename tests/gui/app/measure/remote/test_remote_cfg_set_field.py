@@ -28,7 +28,7 @@ from ._helpers import Fixture, call, open_client
 def _make_draft(
     ctrl: MagicMock, spec: CfgSectionSpec, value: CfgSectionValue
 ) -> CfgDraft:
-    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value))
+    return MeasureCfgBindings(ctrl).new_draft(CfgSchema(spec, value), parameters=None)
 
 
 def _set(draft: CfgDraft, path: str, value: object) -> None:
@@ -51,7 +51,9 @@ class _LiveFixture(Fixture):
         self._tab_id = "tab-live"
         self.prepare_tab(self._tab_id, FakeAdapter(), cfg)
         # Independent library editor; it never publishes tab cfg.
-        self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(cfg, gc=False)
+        self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
+            cfg, parameters=self.ctrl.read_context(), gc=False
+        )
 
     def get_value(self, path: str):
         """Read the current value of a path off the live session draft."""
@@ -410,63 +412,6 @@ def test_set_field_section_target_rejected(lf):
 # ---------------------------------------------------------------------------
 
 
-def test_context_get_md_keys(lf):
-    lf.state.session_env.md.update({"t1": 12.5, "freq": 5.0})
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "context.md_get")
-        assert resp["ok"] is True
-        assert set(resp["result"]["keys"]) == {"t1", "freq"}
-    finally:
-        sock.close()
-
-
-def test_context_get_md_attr_roundtrip(lf):
-    md = lf.state.session_env.md
-    md.update({"t1": 12.5})
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "context.md_get_attr", {"key": "t1"})
-        assert resp["ok"] is True
-        assert resp["result"]["value"] == 12.5
-    finally:
-        sock.close()
-
-
-def test_context_get_md_attr_unknown_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "context.md_get_attr", {"key": "nope"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_context_get_ml_names(lf):
-    from types import SimpleNamespace
-
-    ml = lf.state.session_env.ml
-    ml.modules = {
-        "readout": SimpleNamespace(type="pulse"),
-        "pi": SimpleNamespace(type="pulse"),
-    }
-    ml.waveforms = {"gauss": SimpleNamespace(style="gauss")}
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(sock, "context.ml_get")
-        assert resp["ok"] is True
-        index = resp["result"]
-        assert [m["name"] for m in index["modules"]] == ["pi", "readout"]
-        assert all(m["kind"] == "pulse" for m in index["modules"])
-        assert [(w["name"], w["style"]) for w in index["waveforms"]] == [
-            ("gauss", "gauss")
-        ]
-        assert all(e["description"] for entries in index.values() for e in entries)
-    finally:
-        sock.close()
-
-
 def test_device_list_and_snapshot(lf):
     sock = open_client(lf.service.port)
     try:
@@ -491,7 +436,7 @@ def test_device_list_and_snapshot(lf):
 def test_tab_get_cfg_returns_nested_tree_with_scalar_values(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})
+        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "expected": {}})
         assert resp["ok"] is True
         tree = resp["result"]["tree"]
         assert isinstance(tree, dict)
@@ -506,7 +451,9 @@ def test_tab_get_cfg_returns_nested_tree_with_scalar_values(lf):
 def test_tab_get_cfg_sweep_contains_input_states(lf):
     sock = open_client(lf.service.port)
     try:
-        tree = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})["result"]["tree"]
+        tree = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "expected": {}})[
+            "result"
+        ]["tree"]
         sweep = tree["children"]["sweep"]
         assert sweep["kind"] == "sweep"
         assert set(sweep["inputs"]) == {"start", "stop", "expts", "step"}
@@ -521,7 +468,9 @@ def test_editor_read_rejects_unrepresentable_cfg_instead_of_stringifying(lf):
 
     spec = CfgSectionSpec(fields={"fixed": LiteralSpec(object())})
     editor_id, _ = lf.ctrl.open_seeded_cfg_editor(
-        CfgSchema(spec, make_default_value(spec)), gc=False
+        CfgSchema(spec, make_default_value(spec)),
+        parameters=lf.ctrl.read_context(),
+        gc=False,
     )
     sock = open_client(lf.service.port)
     try:
@@ -536,7 +485,7 @@ def test_editor_read_rejects_unrepresentable_cfg_instead_of_stringifying(lf):
 def test_tab_get_cfg_unknown_tab_rejected(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.get_cfg", {"tab_id": "nope"})
+        resp = call(sock, "tab.get_cfg", {"tab_id": "nope", "expected": {}})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
         assert resp["error"]["reason"] == "resource_gone"
@@ -624,11 +573,23 @@ def test_tree_includes_immutable_literal_fields(qapp):
 
 
 def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
+    from zcu_tools.gui.app.measure.adapter import SessionEnv
     from zcu_tools.gui.app.measure.remote.cfg_observation import (
         build_cfg_observation,
     )
+    from zcu_tools.gui.cfg.model import DirectValue
 
-    root = _fluxdep_root(["flux_yoko", "flux_yoko_2"])
+    from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+
+    cfg = OneToneFluxDepAdapter().make_default_cfg(
+        SessionEnv(parameters=None, soc=None, soccfg=None)
+    )
+    devices = cfg.value.fields["dev"]
+    assert isinstance(devices, CfgSectionValue)
+    devices.fields["flux_dev"] = DirectValue("flux_yoko")
+    ctrl = MagicMock()
+    ctrl.list_device_names.return_value = ["flux_yoko", "flux_yoko_2"]
+    root = _make_draft(ctrl, cfg.spec, cfg.value)
     flux_dev = _node(build_cfg_observation(root, "dev"), "flux_dev")
     assert flux_dev["input"]["resolved"] == "flux_yoko"
     assert flux_dev["choices"] == ["flux_yoko", "flux_yoko_2"]
@@ -646,15 +607,12 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 
 def _fakefreq_root():
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     cfg = FakeFreqAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.get_current_md.return_value = ctx.md
     return _make_draft(ctrl, cfg.spec, cfg.value)
 
 
@@ -707,15 +665,12 @@ def test_moduleref_tagged_key_passes_through(qapp):
 
 def _fluxdep_root(device_names: list[str]):
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
-    ctrl.get_current_ml.return_value = ctx.ml
-    ctrl.get_current_md.return_value = ctx.md
     ctrl.list_device_names.return_value = list(device_names)
     return _make_draft(ctrl, cfg.spec, cfg.value)
 

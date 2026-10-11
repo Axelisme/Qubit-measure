@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -10,15 +8,17 @@ from typing import (
     Any,
     Generic,
     Protocol,
+    runtime_checkable,
 )
 
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.device import DeviceInfo
+    from zcu_tools.cfg_model import CfgValidationContext
+    from zcu_tools.datafile import RunMetadata
     from zcu_tools.experiment.cfg_model import ExpCfgModel
-    from zcu_tools.resources.context import ModuleLibrary
-    from zcu_tools.resources.context.metadict import MetaDict
+    from zcu_tools.gui.session.parameters import ParameterContext
+    from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 
@@ -126,6 +126,7 @@ class AnalyzeResultBase:
         return result
 
 
+@runtime_checkable
 class AnalyzeResult(Protocol):
     """Numeric analysis payload; figures belong to the operation's plots."""
 
@@ -152,31 +153,43 @@ T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
 
 @dataclass(frozen=True)
 class RunRequest:
-    """Runtime handles and detached, already observed device settings."""
+    """Observed SoC handles and the fixed cfg materialization capability.
+
+    cfg_context is the fixed library/assets validation context captured for
+    this Run; None permits only dependency-free inline cfg inputs.
+    """
 
     soc: SocHandle | None
     soccfg: SocCfgHandle | None
-    device_snapshot: Mapping[str, DeviceInfo]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "device_snapshot", deepcopy(dict(self.device_snapshot))
-        )
+    cfg_context: CfgValidationContext | None
 
 
 @dataclass(frozen=True)
 class LoadDataRequest:
+    """Canonical result file path and current-source capture fixed for this Load.
+
+    data_path identifies the file consumed by the adapter. parameters contains
+    the point/library/storage and aliases observed when Load starts, or None
+    when no parameter context is installed. It never replaces native history.
+    """
+
     data_path: str
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
 
 
 @dataclass(frozen=True)
 class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
+    """Inputs accepted for one primary analysis, independent of later session edits.
+
+    run_result is the selected run data. analyze_params holds adapter-specific
+    inputs. parameters is the Run/Load result's fixed source, or None for pure
+    calculation.
+    predictor is the operation-start model, or None when no model is loaded.
+    """
+
     run_result: T_Result
     analyze_params: T_AnalyzeParams
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
     predictor: FluxoniumPredictor | None
 
 
@@ -212,29 +225,36 @@ T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=NoAnalyzeParams)
 class PostAnalyzeRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeParams]):
     """Mirror of :class:`AnalyzeRequest` for the post-analysis layer.
 
-    Carries the raw ``run_result`` AND the primary ``analyze_result`` (the
-    post-analysis depends on the primary fit being present), plus the
-    post-analysis params and the md/ml/predictor context.
+    run_result is the selected run data. analyze_result is the required primary
+    analysis result. post_analyze_params are adapter-specific inputs. parameters is the Run/Load
+    result's fixed source, or None for pure calculation. predictor is the shared
+    operation-start model, or None when no model is loaded. Later tab bindings
+    and session edits do not replace these request inputs.
     """
 
     run_result: T_Result
     analyze_result: T_AnalyzeResult
     post_analyze_params: T_PostAnalyzeParams
-    md: MetaDict
-    ml: ModuleLibrary
+    parameters: ParameterContext | None
     predictor: FluxoniumPredictor | None
 
 
 @dataclass(frozen=True)
 class SaveDataRequest(Generic[T_Result]):
+    """Worker inputs captured from one tab, not the current session selection.
+
+    run_result is the pane-owned result; data_path is the reserved output file.
+    parameters is the tab's fixed role capture, None for context-free adapters.
+    storage retains its original entry/point roots, description, roles and ledger
+    capability. metadata is this result's historical Run evidence, or None
+    when no evidence was acquired. comment is the user's annotation.
+    """
+
     run_result: T_Result
     data_path: str
-    md: MetaDict
-    ml: ModuleLibrary
-    chip_name: str
-    qub_name: str
-    res_name: str
-    active_label: str
+    parameters: ParameterContext | None
+    storage: PointStorageBinding
+    metadata: RunMetadata | None = None
     comment: str = ""
 
 
@@ -262,12 +282,19 @@ class PostWritebackRequest(Generic[T_Result, T_AnalyzeResult, T_PostAnalyzeResul
 
 @dataclass
 class WritebackItem(ABC):
+    """Mutable proposal; stderr is its standard error in working units, or None.
+
+    The destination is a direct container path or captured role path. Selection
+    and session identity belong to the service, not the proposing adapter.
+    """
+
+    stderr: float | None = field(default=None, kw_only=True)
     # ``target_name`` is the apply destination name (md attr / ml module / ml
     # waveform — the item subtype names which namespace). It is mutable: agent/UI
     # may retarget the writeback before applying.
     target_name: str
     description: str
-    # ``session_id`` (``<kind>-<n>``, e.g. ``md-1``) is the stable identifier for
+    # ``session_id`` (``<kind>-<n>``, e.g. ``param-1``) is the stable identifier for
     # UI/wire/dedup. Stamped once by WritebackService when items are computed at
     # analyze time (never by the adapter), and decoupled from target_name so
     # retargeting does not change the id.
@@ -276,7 +303,9 @@ class WritebackItem(ABC):
 
 
 @dataclass
-class MetaDictWriteback(WritebackItem):
+class ParameterWriteback(WritebackItem):
+    """Propose a point parameter value at target_name, resolved against the Run capture."""
+
     proposed_value: Any
 
 

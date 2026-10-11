@@ -2,8 +2,8 @@
 
 The Post-Analysis page and controls exist only for adapters declaring the
 capability. Its operation gate depends on the primary analysis result, and its
-figure, writeback draft, and Save Image controls remain independent from the
-primary Analysis pane.
+figure, writeback draft, and whole-artifact Save controls remain independent
+from the primary Analysis pane.
 """
 
 from __future__ import annotations
@@ -14,8 +14,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from qtpy.QtWidgets import QLabel, QPushButton
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -70,10 +71,9 @@ def _snapshot(
 ) -> TabSnapshot:
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
+        RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
 
     analysis_pane = AnalysisPaneSnapshot(
@@ -81,25 +81,12 @@ def _snapshot(
         result=object() if has_analyze_result else None,
         figures=ready_figures(analysis_figure),
         writeback_items=(),
-        image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/a.png")}
-        if analysis_figure is not None
-        else {},
     )
     post_analysis_pane = PostAnalysisPaneSnapshot(
         params=post_params,
         result=object() if has_post_analyze_result else None,
         figures=ready_figures(post_analysis_figure),
         writeback_items=(),
-        image_paths={"fit": PathResourceSnapshot(override=None, path="/tmp/p.png")}
-        if post_analysis_figure is not None
-        else {},
-    )
-    paths = TabPathsSnapshot(
-        data=PathResourceSnapshot(
-            override=None, path="/tmp/data.h5" if has_run_result else None
-        ),
-        analysis_images=analysis_pane.image_paths,
-        post_analysis_images=post_analysis_pane.image_paths,
     )
     snapshot = TabSnapshot(
         adapter_name="ge",
@@ -108,7 +95,6 @@ def _snapshot(
             global_run_active=False,
             is_running=is_running,
             is_analyzing=is_analyzing,
-            is_saving_data=False,
             has_context=True,
             has_active_context=has_active_context,
             has_soc=True,
@@ -121,10 +107,13 @@ def _snapshot(
         capabilities=AdapterCapabilities(
             analysis=AnalysisMode.FIT, post_analysis=post_analysis
         ),
+        run=RunPaneSnapshot(
+            result=object() if has_run_result else None,
+            source_path=None,
+        ),
         analysis=analysis_pane,
         post_analysis=post_analysis_pane,
-        save=SavePaneSnapshot(data_path=paths.data),
-        paths=paths,
+        save=SavePaneSnapshot(),
     )
     return with_artifacts(snapshot)
 
@@ -225,23 +214,29 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
         _mock_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
-    tab.populate_post_analyze_params(_EmptyPostParams())
-
-    tab.update_interaction_state(
+    actions = MagicMock()
+    tab.attach(
         _snapshot(
             "tab-1",
             has_analyze_result=False,
             has_post_analyze_result=False,
             post_params=_EmptyPostParams(),
-        )
+        ),
+        actions,
     )
     assert tab._post_analyze_section.isHidden() is True
     assert tab.post_analyze_btn.isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is False
     assert tab._post_gate_label.isHidden() is False
-    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    assert tab._save_center.has_artifact(post_key) is False
-    assert tab._save_center.is_save_enabled(post_key) is False
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 1
+    buttons[0].click()
+    actions.save_artifact.assert_called_once_with(
+        "tab-1", ArtifactRef("run", "measurement_data")
+    )
+    actions.save_artifact.reset_mock()
 
     tab.update_interaction_state(
         _snapshot(
@@ -255,7 +250,18 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
     assert tab._post_analyze_section.isHidden() is True
     assert tab.post_analyze_btn.isEnabled() is True
     assert tab._post_gate_label.isHidden() is True
-    assert tab._save_center.is_save_enabled(post_key) is True
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    assert all(button.isEnabled() for button in buttons)
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("tab-1", ArtifactRef("run", "measurement_data")),
+        ("tab-1", ArtifactRef("analysis", "results")),
+        ("tab-1", ArtifactRef("post_analysis", "results")),
+    ]
 
 
 def test_post_run_disabled_while_tab_busy(qapp):
@@ -434,9 +440,8 @@ def test_take_figure_screenshot_captures_post_figure(qapp):
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_post_save_image_button_gated_on_post_result(qapp):
-    """The post Save Image button enables only with an active context + a post
-    result (its figure is the thing it saves)."""
+def test_post_artifact_save_requires_post_result(qapp):
+    """Post Save appears only for a result and submits the whole Figure/JSON artifact."""
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
@@ -447,11 +452,22 @@ def test_post_save_image_button_gated_on_post_result(qapp):
     tab.show()
     qapp.processEvents()
 
-    tab.update_interaction_state(
-        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=False)
+    actions = MagicMock()
+    tab.attach(
+        _snapshot("tab-1", has_analyze_result=True, has_post_analyze_result=False),
+        actions,
     )
-    post_key = ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit")
-    assert tab._save_center.is_save_enabled(post_key) is False
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 2
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("tab-1", ArtifactRef("run", "measurement_data")),
+        ("tab-1", ArtifactRef("analysis", "results")),
+    ]
+    actions.save_artifact.reset_mock()
 
     tab.update_interaction_state(
         _snapshot(
@@ -461,10 +477,24 @@ def test_post_save_image_button_gated_on_post_result(qapp):
             post_analysis_figure=Figure(),
         )
     )
-    assert tab._save_center.is_save_enabled(post_key) is True
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    assert all(button.isEnabled() for button in buttons)
+    labels = [label.text() for label in tab.findChildren(QLabel)]
+    assert "post_analysis · json" in labels
+    assert labels.count("fit · png") == 2
+    for button in buttons:
+        button.click()
+    assert [call.args for call in actions.save_artifact.call_args_list] == [
+        ("tab-1", ArtifactRef("run", "measurement_data")),
+        ("tab-1", ArtifactRef("analysis", "results")),
+        ("tab-1", ArtifactRef("post_analysis", "results")),
+    ]
 
 
-def test_post_save_image_button_disabled_without_active_context(qapp):
+def test_post_artifact_save_disabled_without_active_context(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
@@ -472,18 +502,26 @@ def test_post_save_image_button_disabled_without_active_context(qapp):
         _mock_ctrl(),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
-    tab.update_interaction_state(
+    actions = MagicMock()
+    tab.attach(
         _snapshot(
             "tab-1",
             has_analyze_result=True,
             has_post_analyze_result=True,
             has_active_context=False,
-        )
+        ),
+        actions,
     )
-    assert (
-        tab._save_center.is_save_enabled(ArtifactKey(ArtifactKind.POST_ANALYSIS, "fit"))
-        is False
-    )
+    buttons = [
+        button for button in tab.findChildren(QPushButton) if button.text() == "Save"
+    ]
+    assert len(buttons) == 3
+    assert all(not button.isEnabled() for button in buttons)
+    labels = [label.text() for label in tab.findChildren(QLabel)]
+    assert "post_analysis · json" in labels
+    for button in buttons:
+        button.click()
+    actions.save_artifact.assert_not_called()
 
 
 def test_post_tab_uses_separate_qt_tab_index(qapp):

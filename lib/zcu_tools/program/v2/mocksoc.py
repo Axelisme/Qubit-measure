@@ -181,7 +181,9 @@ class MockQickSoc(QickConfig):
 
     _BIG_COUNT = 2**31 - 1
 
-    def __init__(self, cfg_dict: dict, sim: SimParams | None = None) -> None:
+    def __init__(
+        self, cfg_dict: dict[str, object], sim: SimParams | None = None
+    ) -> None:
         super().__init__(cfg_dict)
         self._cfg_dict = cfg_dict
         self._readout_state = None

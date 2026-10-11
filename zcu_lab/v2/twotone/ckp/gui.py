@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -25,7 +26,6 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -36,23 +36,16 @@ from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result
 
 _CKP_SWEEP_EXPTS = 101
 _CKP_QUB_PULSE_LENGTH_US = 1.5
-_CKP_RF_WIDTH_FALLBACK_MHZ = 5.0
-_CKP_QUB_FREQ_FALLBACK_MHZ = 5000.0
 
 
 def _rf_width_timing_seed(
-    ctx: SessionEnv, *, numerator: float, offset: float = 0.0
-) -> float | EvalValue:
+    _ctx: SessionEnv, *, numerator: float, offset: float = 0.0
+) -> EvalValue:
     coefficient = numerator / (2 * math.pi)
-    if md_has_key(ctx, "rf_w"):
-        width = md_get_float(ctx, "rf_w", float("nan"))
-        if not math.isfinite(width) or width <= 0:
-            raise ValueError("MetaDict 'rf_w' must be a positive finite number")
-        expression = f"{coefficient} / rf_w"
-        if offset:
-            expression = f"{offset} + {expression}"
-        return EvalValue(expr=expression)
-    return offset + coefficient / _CKP_RF_WIDTH_FALLBACK_MHZ
+    expression = f"{coefficient} / $resonator.kappa"
+    if offset:
+        expression = f"{offset} + {expression}"
+    return EvalValue(expr=expression)
 
 
 def _res_pulse_length_seed(ctx: SessionEnv) -> float | EvalValue:
@@ -71,14 +64,12 @@ def _qub_post_delay_seed(ctx: SessionEnv) -> float | EvalValue:
     return _rf_width_timing_seed(ctx, numerator=3.1)
 
 
-def _qub_freq_sweep_seed(ctx: SessionEnv) -> SweepValue:
-    if md_has_key(ctx, "q_f"):
-        start: float | EvalValue = EvalValue(expr="q_f - 10")
-        stop: float | EvalValue = EvalValue(expr="q_f + 5")
-    else:
-        start = _CKP_QUB_FREQ_FALLBACK_MHZ - 10.0
-        stop = _CKP_QUB_FREQ_FALLBACK_MHZ + 5.0
-    return SweepValue(start=start, stop=stop, expts=_CKP_SWEEP_EXPTS)
+def _qub_freq_sweep_seed(_ctx: SessionEnv) -> SweepValue:
+    return SweepValue(
+        start=EvalValue("$qubit.freq - 10"),
+        stop=EvalValue("$qubit.freq + 5"),
+        expts=_CKP_SWEEP_EXPTS,
+    )
 
 
 CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
@@ -130,7 +121,11 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> CKPRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = CKP_Exp().run(cfg, context=context)
@@ -210,17 +205,17 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="chi",
                 description="Dispersive shift chi (MHz)",
                 proposed_value=result.chi,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="rf_w",
                 description="Resonator linewidth kappa (MHz)",
                 proposed_value=result.kappa,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="readout_f",
                 description="Readout frequency (MHz)",
                 proposed_value=result.res_freq,

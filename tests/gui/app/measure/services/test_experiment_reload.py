@@ -23,7 +23,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 
 
@@ -43,12 +43,19 @@ class App:
 
 @pytest.fixture
 def app() -> App:
-    state = State(SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None))
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
     registry.register("demo", OldAdapter)
     writeback = MagicMock()
-    tabs = TabService(state, registry, writeback, cfg_resources(state))
+    tabs = TabService(
+        state,
+        registry,
+        writeback,
+        cfg_resources(state),
+        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        captured_parameters=lambda _aliases: None,
+    )
     workspace = WorkspaceService(state, tabs, bus)
     loader = Loader()
     operations = MagicMock(return_value=0)
@@ -133,14 +140,12 @@ def test_confirmation_cannot_discard_changed_state(app: App, change: str) -> Non
     assert app.loader.loads == 0
 
 
-@pytest.mark.parametrize("busy", ["operation", "save", "analysis", "shutdown"])
+@pytest.mark.parametrize("busy", ["operation", "analysis", "shutdown"])
 def test_busy_or_shutdown_prevents_reload(app: App, busy: str) -> None:
     tab_id = app.controls.new_tab("demo")
     preview = app.reload.prepare_reload()
     if busy == "operation":
         app.operations.return_value = 1
-    elif busy == "save":
-        app.state.get_tab(tab_id).is_saving_data = True
     elif busy == "analysis":
         app.state.get_tab(tab_id).is_analyzing = True
     else:

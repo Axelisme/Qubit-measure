@@ -4,13 +4,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.adapter.lowering import make_sweep_range
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg.resource import CfgResolution, CfgRevision, SourceRevision
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     DeviceChangedPayload,
     MdChangedPayload,
@@ -26,6 +26,8 @@ from zcu_tools.gui.session.services.device import DeviceService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
+from zcu_tools.gui.session.types import ParameterContext
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
 from .arb_waveform import ArbWaveformService
@@ -51,12 +53,12 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.services.io_manager import IOManager
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .cfg_editor import CfgEditorHost
@@ -122,15 +124,14 @@ def build_app_services(
     state: State,
     bus: EventBus,
     registry: Registry,
-    io_manager: IOManager,
     cfg_editor_ctrl: CfgEditorHost,
     progress_transport: ProgressTransport,
-    notify_info: Callable[[str], None],
     resource_versions: Callable[[], Mapping[str, int]],
     render_host: Callable[[], RunAnalyzeRenderHost | None],
     owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
+    alias_preset: tuple[AliasRow, ...] = (),
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -138,6 +139,14 @@ def build_app_services(
     LiveModel env + ModuleLibrary registration surface). It is only stored, never
     called during construction, so passing the still-initialising Controller is
     safe and keeps the bundle complete (no service built outside this function).
+
+    ``alias_preset`` supplies ordered caller-owned session-memory rows. Omitted
+    or empty presets create an empty table. Softlinks and unbound rows are kept;
+    the first nonempty component snapshot uses the role registry's unique focus
+    candidate for the primary empty row. Explicit table edits disable that
+    one-time initialization. Invalid syntax, duplicate aliases or forward links
+    raise InvalidInputError(alias_invalid) during construction. No device or
+    cache lookup is performed, and each bundle owns its own alias table.
     """
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
@@ -155,9 +164,10 @@ def build_app_services(
         handles=handles,
         background=background,
         progress=progress,
-        io_manager=io_manager,
         runner=runner,
+        bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
+        alias_rows=alias_preset,
     )
     context = session.context
     device = session.device
@@ -165,9 +175,18 @@ def build_app_services(
 
     bindings = MeasureCfgBindings(cfg_editor_ctrl)
 
-    def cfg_resolution() -> CfgResolution:
+    def captured_parameters(
+        aliases: Mapping[str, str] | None,
+    ) -> ParameterContext | None:
+        if state.session_env.parameters is None and not aliases:
+            return None
+        return context.read_context(aliases=aliases)
+
+    def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
         captured = session.value_sources.snapshot()
-        source = bindings.snapshot_from_state(state, captured_values=captured.values)
+        source = bindings.snapshot_from_state(
+            state, captured_values=captured.values, parameters=parameters
+        )
         return replace(
             source,
             source_basis=(
@@ -177,8 +196,6 @@ def build_app_services(
         )
 
     tab_cfg = TabCfgResources(
-        resolution=cfg_resolution,
-        make_range=make_sweep_range,
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
 
@@ -186,6 +203,7 @@ def build_app_services(
         tab_cfg.refresh_all()
 
     for event_type in (
+        AliasesChangedPayload,
         ContextSwitchedPayload,
         DeviceChangedPayload,
         MdChangedPayload,
@@ -201,27 +219,41 @@ def build_app_services(
         versions=cfg_editor_ctrl,
         bus=bus,
     )
-    writeback = WritebackService(cfg_editor, write_port=cfg_editor_ctrl)
+    writeback = WritebackService(
+        cfg_editor,
+        write_port=ContextControlFacet(context=context),
+        entry_ledger=context.entry_ledger,
+    )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
-    tab = TabService(state, registry, writeback, tab_cfg)
+    tab = TabService(
+        state, registry, writeback, tab_cfg, cfg_resolution, captured_parameters
+    )
     workspace = WorkspaceService(state, tab, bus)
-    guard = GuardService(state)
-    load = LoadService(state, writeback, provide_options=bindings.provide_options)
+    guard = GuardService(
+        state, captured_parameters=captured_parameters, cfg_resolution=cfg_resolution
+    )
+    load = LoadService(
+        state,
+        writeback,
+        provide_options=bindings.provide_options,
+        context=ContextControlFacet(context=context),
+        captured_parameters=captured_parameters,
+    )
     run = RunService(
         state,
-        runner,
+        session.runner,
         bus,
         handles,
         writeback,
         gate=operation_gate,
         devices=device.get_connected_devices,
     )
-    analyze = AnalyzeService(state, runner, bus, writeback, handles)
-    post_analyze = PostAnalyzeService(state, runner, bus, handles, writeback=writeback)
-    save = SaveService(
-        state, runner, bus, owner_scheduler=QtOwnerScheduler(), access=access
+    analyze = AnalyzeService(state, session.runner, bus, writeback, handles)
+    post_analyze = PostAnalyzeService(
+        state, session.runner, bus, handles, writeback=writeback
     )
+    save = SaveService(state, bus, access=access)
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,
@@ -247,19 +279,13 @@ def build_app_services(
         access=access,
     )
     operation_control = OperationControlFacet(
-        save=save,
         handles=handles,
-        progress=progress,
+        progress=session.progress,
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
     save_control = SaveControlFacet(
-        state=state,
-        bus=bus,
-        guard=guard,
-        tab=tab,
-        save=save,
-        notify_info=notify_info,
+        state=state, guard=guard, save=save, context=context
     )
     writeback_control = WritebackControlFacet(
         state=state,
@@ -284,7 +310,7 @@ def build_app_services(
         operation_control=operation_control,
         handles=handles,
         background=background,
-        progress=progress,
+        progress=session.progress,
         guard=guard,
         device=device,
         device_control=session.device_control,

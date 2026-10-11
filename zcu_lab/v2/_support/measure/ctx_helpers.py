@@ -1,91 +1,79 @@
-"""Type-guarded helpers for reading SessionEnv.md values."""
+"""Fixed parameter scalar reads and deferred frequency/flux range policies."""
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import EvalValue, SweepValue
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 
-def md_get_float(ctx: SessionEnv, key: str, default: float) -> float:
-    value = ctx.md.get(key)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
+def optional_parameter_float(parameters: ParameterContext, path: str) -> float | None:
+    """Read a finite real scalar from one fixed parameter capture.
 
-
-def md_has_key(ctx: SessionEnv, key: str) -> bool:
-    sentinel = object()
-    value = ctx.md.get(key, sentinel)
-    return value is not sentinel and value is not None
-
-
-def _freq_range(
-    ctx: SessionEnv,
-    center_key: str,
-    width_key: str,
-    expts: int,
-    span_factor: float,
-    center_default: float,
-    width_default: float,
-) -> SweepValue:
-    """A symmetric ``center ± span_factor*width`` SweepValue.
-
-    Each existing md key remains live in the edge expression. Missing keys use
-    numeric fallbacks; without either key the edges are plain scalars.
-    A missing width with a non-positive numeric fallback uses ±30 MHz.
+    path is a direct component/general path or a captured role path accepted by
+    ParameterContext.lookup. Return None only for an absent leaf or explicit
+    null; otherwise return a float in the parameter's working units.
+    Bool/non-real values raise TypeError; nonfinite numbers raise ValueError.
+    Invalid paths, missing roles, unavailable sources and library errors
+    propagate from the capture without fallback, refresh or file I/O.
     """
-    center = md_get_float(ctx, center_key, center_default)
-    width = md_get_float(ctx, width_key, width_default)
-    half_span = span_factor * width if width > 0 else 30.0
-    have_center = md_has_key(ctx, center_key)
-    have_width = md_has_key(ctx, width_key)
-    center_term = center_key if have_center else repr(center)
-    # ``1 * width`` reads as just ``width``; keep the coefficient otherwise.
-    width_term = width_key if span_factor == 1.0 else f"{span_factor} * {width_key}"
-    if not have_width:
-        width_term = repr(half_span)
+    result = parameters.lookup(path)
+    if not result.present or result.value is None:
+        return None
+    value = result.value
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"Parameter must be a real scalar: {path!r}")
+    if not isfinite(value):
+        raise ValueError(f"Parameter must be finite: {path!r}")
+    return float(value)
 
-    def _edge(sign: int) -> float | EvalValue:
-        op = "-" if sign < 0 else "+"
-        if have_center or have_width:
-            return EvalValue(expr=f"{center_term} {op} {width_term}")
-        return center + sign * half_span
 
-    return SweepValue(start=_edge(-1), stop=_edge(+1), expts=expts)
+def _freq_range(keys: tuple[str, str], expts: int, span_factor: float) -> SweepValue:
+    center, width = keys
+    return SweepValue(
+        start=EvalValue(f"{center} - {span_factor} * {width}"),
+        stop=EvalValue(f"{center} + {span_factor} * {width}"),
+        expts=expts,
+    )
 
 
 def proper_res_freq_range(
-    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
+    parameters: ParameterContext | None, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Resonator frequency sweep range: ``r_f ± span_factor*rf_w``."""
-    return _freq_range(ctx, "r_f", "rf_w", expts, span_factor, 6500.0, 500.0)
+    """Store $resonator.freq ± span_factor*$resonator.kappa in working MHz.
+
+    No calibration is read here, even with parameters=None. Missing aliases or
+    calibration publish Invalid when the cfg resolves; no static fallback.
+    """
+    del parameters  # Keep the established caller signature without reading calibration.
+    return _freq_range(("$resonator.freq", "$resonator.kappa"), expts, span_factor)
 
 
 def proper_qub_freq_range(
-    ctx: SessionEnv, expts: int, *, span_factor: float = 1.5
+    parameters: ParameterContext | None, expts: int, *, span_factor: float = 1.5
 ) -> SweepValue:
-    """Qubit frequency sweep range: ``q_f ± span_factor*qf_w``."""
-    return _freq_range(ctx, "q_f", "qf_w", expts, span_factor, 5000.0, 1000.0)
+    """Store $qubit.freq ± span_factor*$qubit.kappa in working MHz.
 
-
-def proper_flux_range(ctx: SessionEnv, expts: int) -> SweepValue:
-    """Flux sweep range spanning one period around the calibrated flux points.
-
-    Extrapolates 10% past the two fitted positions (flx_half / flx_int):
-    ``start = 1.1*flx_int - 0.1*flx_half``, ``stop = 1.1*flx_half - 0.1*flx_int``.
-    When the md keys are absent, falls back to a fixed ``[-4e-3, 4e-3]`` scan.
+    parameters may be None; no source is read. Missing calibration becomes
+    Invalid at cfg resolution rather than a static default.
     """
-    if md_has_key(ctx, "flx_half") and md_has_key(ctx, "flx_int"):
-        start: float | EvalValue = EvalValue(expr="1.1 * flx_int - 0.1 * flx_half")
-        stop: float | EvalValue = EvalValue(expr="1.1 * flx_half - 0.1 * flx_int")
-    else:
-        start = -4e-3
-        stop = 4e-3
-    return SweepValue(start=start, stop=stop, expts=expts)
+    del parameters  # Keep the established caller signature without reading calibration.
+    return _freq_range(("$qubit.freq", "$qubit.kappa"), expts, span_factor)
+
+
+def proper_flux_range(parameters: ParameterContext | None, expts: int) -> SweepValue:
+    """Store a scan 10% beyond $qubit.flux_int and $qubit.flux_half.
+
+    parameters may be None; no calibration is read. Missing calibration becomes
+    Invalid at cfg resolution rather than a static default.
+    """
+    del parameters  # Keep the established caller signature without reading calibration.
+    return SweepValue(
+        start=EvalValue("1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half"),
+        stop=EvalValue("1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int"),
+        expts=expts,
+    )

@@ -1,6 +1,15 @@
-"""Errors that locate invalid components, role choices and rename failures."""
+"""Errors that locate invalid components, destinations and rename failures."""
 
 from pathlib import Path
+
+
+class DestinationExistsError(FileExistsError):
+    """An entry-owned new destination already exists, including a symlink.
+
+    This marks the explicit destination check, not arbitrary filesystem failures
+    while creating, cloning or committing resources. FileExistsError errno,
+    filename and message remain available to public resource callers.
+    """
 
 
 class UnknownFieldError(AttributeError):

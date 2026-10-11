@@ -11,11 +11,6 @@ from zcu_tools.gui.app.measure.remote.handlers.arb_waveform import (
 )
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
     h_device_connect,
-    h_project_apply,
-)
-from zcu_tools.gui.app.measure.remote.handlers.context import (
-    h_context_md_del_attr,
-    h_context_md_set_attr,
 )
 from zcu_tools.gui.app.measure.remote.handlers.editor import h_editor_new
 from zcu_tools.gui.app.measure.remote.handlers.run_save import (
@@ -43,7 +38,6 @@ from zcu_tools.gui.remote.errors import (
     RemoteError,
     remote_error_from_expected,
 )
-from zcu_tools.gui.result_scope import ResultScopeError
 
 WireTuple = tuple[ErrorCode, str, str, dict | None]
 
@@ -137,13 +131,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     editor_ctrl.open_cfg_editor.side_effect = CfgEditorError("unknown module")
     editor_adapter = SimpleNamespace(ctrl=editor_ctrl)
 
-    context_control = MagicMock()
-    context_control.set_md_attr.side_effect = FailedPreconditionError("No context")
-    context_control.del_md_attr.side_effect = FailedPreconditionError(
-        "MetaDict has no attribute missing"
-    )
-    context_adapter = SimpleNamespace(context_control=context_control)
-
     device_control = MagicMock()
     device_control.start_connect_device.side_effect = FailedPreconditionError(
         "Device busy"
@@ -157,133 +144,19 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     arb_adapter = SimpleNamespace(ctrl=arb_ctrl)
 
     render_view = MagicMock()
-    # New pane-qualified figure handler reads via tab_control snapshot for analysis/post and via render_view for run
-    # Mock tab_control for analysis pane
-    from unittest.mock import MagicMock as Mock2
-
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-    from zcu_tools.gui.app.measure.services.ports import (
-        AnalysisPaneSnapshot,
-        PostAnalysisPaneSnapshot,
-        TabSnapshot,
-    )
-    from zcu_tools.gui.cfg import CfgSchema
-
-    tab_control = Mock2()
-    # Make analysis pane have no figure to trigger precondition
-    caps = AdapterCapabilities(
-        analysis=AnalysisMode.FIT,
-        post_analysis=True,
-        load_data=False,
-        requires_soc=False,
-    )
-    ana = AnalysisPaneSnapshot(
-        params=None,
-        result=object(),
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    post = PostAnalysisPaneSnapshot(
-        params=None,
-        result=None,
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    snap = TabSnapshot(
-        adapter_name="fake",
-        cfg_schema=Mock2(spec=CfgSchema),
-        tab_id="t1",
-        interaction=Mock2(),
-        capabilities=caps,
-        run=None,
-        analysis=ana,
-        post_analysis=post,
-        save=None,
-        paths=None,
-    )
-    tab_control.get_tab_snapshot.return_value = snap
-    tab_control.has_tab.return_value = True
     render_view.take_figure_screenshot_for_subtab.side_effect = FailedPreconditionError(
         "tab 't1' analysis has no figure yet"
     )
+    tab_control = MagicMock()
+    tab_control.has_tab.return_value = True
     view_adapter = SimpleNamespace(render_view=render_view, tab_control=tab_control)
-    view_adapter.ctrl = Mock2()
-    view_adapter.ctrl.get_session_env.return_value = Mock2(
-        active_label="ctx",
-        chip_name="c",
-        qub_name="q",
-        res_name="r",
-        database_path="/tmp",
-        result_dir="/tmp",
-        is_active=lambda: True,
-    )
 
     writeback_control = MagicMock()
     writeback_control.has_tab.return_value = True
     writeback_control.set_writeback_item_for_pane.side_effect = InvalidInputError(
         "bad facet"
     )
-    tab_control_wb = MagicMock()
-    tab_control_wb.has_tab.return_value = True
-    # Mock snapshot for writeback pane
-    from unittest.mock import MagicMock as Mock3
-
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities as Caps2
-    from zcu_tools.gui.app.measure.adapter import AnalysisMode as AM2
-    from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot as APS2
-    from zcu_tools.gui.app.measure.services.ports import (
-        PostAnalysisPaneSnapshot as PAPS2,
-    )
-    from zcu_tools.gui.app.measure.services.ports import TabSnapshot as TS2
-    from zcu_tools.gui.cfg import CfgSchema as CS2
-
-    caps2 = Caps2(
-        analysis=AM2.FIT, post_analysis=True, load_data=False, requires_soc=False
-    )
-    ana2 = APS2(
-        params=None,
-        result=object(),
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    post2 = PAPS2(
-        params=None,
-        result=None,
-        figures=None,
-        writeback_items=tuple(),
-        image_paths={},
-    )
-    snap2 = TS2(
-        adapter_name="fake",
-        cfg_schema=Mock3(spec=CS2),
-        tab_id="t1",
-        interaction=Mock3(),
-        capabilities=caps2,
-        run=None,
-        analysis=ana2,
-        post_analysis=post2,
-        save=None,
-        paths=None,
-    )
-    tab_control_wb = MagicMock()
-    tab_control_wb.get_tab_snapshot.return_value = snap2
-    tab_control_wb.has_tab.return_value = True
-    writeback_adapter = SimpleNamespace(
-        writeback_control=writeback_control, tab_control=tab_control_wb
-    )
-    writeback_adapter.ctrl = Mock3()
-    writeback_adapter.ctrl.get_session_env.return_value = Mock3(
-        active_label="ctx",
-        chip_name="c",
-        qub_name="q",
-        res_name="r",
-        database_path="/tmp",
-        result_dir="/tmp",
-        is_active=lambda: True,
-    )
+    writeback_adapter = SimpleNamespace(writeback_control=writeback_control)
 
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
@@ -315,23 +188,6 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
                 {"item_kind": "module", "from_name": "missing"},
             ),
             (ErrorCode.INVALID_PARAMS, "unknown module", "", None),
-        ),
-        (
-            lambda: h_context_md_set_attr(
-                cast(Any, context_adapter), {"key": "x", "value": 1}
-            ),
-            (ErrorCode.PRECONDITION_FAILED, "No context", "", None),
-        ),
-        (
-            lambda: h_context_md_del_attr(
-                cast(Any, context_adapter), {"key": "missing"}
-            ),
-            (
-                ErrorCode.PRECONDITION_FAILED,
-                "MetaDict has no attribute missing",
-                "",
-                None,
-            ),
         ),
         (
             lambda: h_device_connect(
@@ -366,7 +222,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
                 {
                     "tab_id": "t1",
                     "subtab_id": "analysis",
-                    "id": "md-0",
+                    "id": "param-0",
                     "selected": True,
                 },
             ),
@@ -406,43 +262,3 @@ def test_dialog_screenshot_expected_errors_use_producer_taxonomy() -> None:
         "",
         None,
     )
-
-
-@pytest.mark.parametrize(
-    ("category", "reason", "code"),
-    [
-        (
-            ExpectedErrorCategory.INVALID_INPUT,
-            "params_read_failed",
-            ErrorCode.INVALID_PARAMS,
-        ),
-        (
-            ExpectedErrorCategory.FAILED_PRECONDITION,
-            "scope_prefix_is_not_semantics",
-            ErrorCode.PRECONDITION_FAILED,
-        ),
-    ],
-)
-def test_result_scope_projection_uses_category_not_reason_prefix(
-    category: ExpectedErrorCategory,
-    reason: str,
-    code: ErrorCode,
-) -> None:
-    ctrl = MagicMock()
-    ctrl.apply_project.side_effect = ResultScopeError(
-        "scope failure", category=category, reason_code=reason
-    )
-    adapter = SimpleNamespace(ctrl=ctrl)
-
-    actual = _remote_error(
-        lambda: h_project_apply(
-            cast(Any, adapter),
-            {
-                "chip_name": "chip",
-                "qub_name": "qubit",
-                "res_name": "resonator",
-            },
-        )
-    )
-
-    assert actual == (code, "scope failure", reason, None)

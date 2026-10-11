@@ -3,10 +3,13 @@
 import re
 from pathlib import Path
 
+from zcu_tools.resources.entry import ResultEntry
+
 from .errors import MigrationInputError
 from .models import (
     MigrationFileState,
     MigrationManifest,
+    ModuleFilePublication,
 )
 from .paths import contained_path, source_identity, source_removed, validate_segment
 from .state import MigrationSession, file_hash
@@ -132,12 +135,53 @@ def _validate_assignments(manifest: MigrationManifest) -> None:
             )
 
 
-def validate_owned_state(session: MigrationSession) -> None:
+def _validate_module_publication(
+    publication: ModuleFilePublication, manifest: MigrationManifest, entry: ResultEntry
+) -> None:
+    source_root = manifest.report.source.result_path
+    source = publication.source
+    if (
+        not source.is_absolute()
+        or contained_path(source, source_root) != source
+        or source.parent.parent != source_root
+        or source.name != "module_cfg.yaml"
+    ):
+        raise MigrationInputError("manifest: invalid point-local module source")
+    validate_segment(source.parent.name, "context label")
+    destination_root = manifest.report.destination.result_path
+    if (
+        not publication.destination.is_absolute()
+        or contained_path(publication.destination, destination_root)
+        != publication.destination
+    ):
+        raise MigrationInputError("manifest: invalid point-local module destination")
+    if (
+        manifest.source_hashes.get(str(source)) != publication.source_hash
+        or re.fullmatch(r"[0-9a-f]{64}", publication.source_hash) is None
+        or re.fullmatch(r"[0-9a-f]{64}", publication.destination_hash) is None
+    ):
+        raise MigrationInputError("manifest: module baseline/hash disagrees")
+    if file_hash(publication.destination) != publication.destination_hash:
+        raise MigrationInputError(
+            f"{publication.destination}: module destination hash changed"
+        )
+    # Check the recorded hash before opening the library, which validates its schema.
+    expected = entry.module_library(source.parent.name).source_path
+    if publication.destination != expected:
+        raise MigrationInputError("manifest: invalid point-local module destination")
+
+
+def validate_owned_state(
+    session: MigrationSession, *, entry: ResultEntry | None
+) -> None:
     """Check a loaded session's owned files, assignments and immutable source baselines.
 
     Require contained absolute paths, valid publication phases and matching hashes.
-    Raise MigrationInputError on conflict; missing/unreadable files propagate I/O.
-    No state or source files change."""
+    entry is bootstrap's matching opened entry, or None for a new dry-run with
+    no destination handle. Recorded module publications require an entry and use
+    its public library source_path; destination layout is not owned here.
+    Raise MigrationInputError on conflict or an absent required entry;
+    missing/unreadable files and library schema errors propagate. No files change."""
     manifest = session.manifest
     _validate_assignments(manifest)
     seen: set[tuple[Path, str]] = set()
@@ -152,4 +196,17 @@ def validate_owned_state(session: MigrationSession) -> None:
             state.phase == "prepared" and state.destination.exists()
         ):
             session.verify_destination(state)
+    module_sources: set[Path] = set()
+    module_destinations: set[Path] = set()
+    for publication in manifest.module_files:
+        if (
+            publication.source in module_sources
+            or publication.destination in module_destinations
+        ):
+            raise MigrationInputError("manifest: duplicate module publication")
+        module_sources.add(publication.source)
+        module_destinations.add(publication.destination)
+        if entry is None:
+            raise MigrationInputError("manifest: module publication requires an entry")
+        _validate_module_publication(publication, manifest, entry)
     _validate_baselines(manifest)

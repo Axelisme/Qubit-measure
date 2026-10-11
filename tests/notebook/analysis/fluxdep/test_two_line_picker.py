@@ -157,7 +157,7 @@ def test_release_refreshes_loss_view_at_latest_picked_position():
     picker.on_release(target, 4.5)
     loss_axes = next(ax for ax in fig.axes if not picker.is_main_axes(ax))
     lo, hi = loss_axes.get_xlim()
-    assert (lo + hi) / 2 == pytest.approx(target)
+    assert abs((lo + hi) / 2 - target) < 1e-6
 
 
 def test_release_preserves_loss_view_without_a_picked_line():

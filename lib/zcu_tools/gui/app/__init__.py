@@ -1,8 +1,7 @@
 """GUI app composition roots.
 
 One subpackage per standalone GUI app: ``main`` (the measure-gui), ``fluxdep``
-(flux-dependence analysis), ``dispersive`` (dispersive-shift fitting), and
-``autofluxdep`` (automated multi-task flux sweeps).
+(flux-dependence analysis), and ``dispersive`` (dispersive-shift fitting).
 
 The extracted shared layers (Stage E) carry the *mechanism*, never the domain
 (decision D2 — domain stays per-app: each keeps its own state, handlers, method

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -26,7 +27,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2.singleshot.amp_rabi.core import (
     AmpRabiAnalyzeOptions,
@@ -90,24 +91,26 @@ class SsAmpRabiAdapter(
                 label="Gain (a.u.)",
                 default=SweepDefault(
                     start=-0.3,
-                    stop=scaled_md("pi_gain", factor=4.0, fallback_value=1.0),
+                    stop=scaled_path_seed(
+                        "$qubit.module.x180.gain", factor=4.0, fallback_value=1.0
+                    ),
                     expts=51,
                 ),
             )
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1000)
             .rounds(1)
@@ -115,7 +118,11 @@ class SsAmpRabiAdapter(
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> SsAmpRabiRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = AmpRabiExp().run(cfg, context=context)

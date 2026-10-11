@@ -1,14 +1,14 @@
 """EvalNumericField — numeric input widget with right-click direct/eval toggle.
 
 Standalone; no LiveField / LiveModel dependency. Designed for the device dialog
-where eval expressions are resolved once at apply time against the current MetaDict
+where eval expressions are resolved once at apply time against the current ParameterContext
 (Design 1 in ADR for device-dialog eval). The ghost label is informational only.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from qtpy.QtCore import Qt, Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (  # type: ignore[attr-defined]
@@ -27,18 +27,19 @@ from zcu_tools.gui.session.expression import (
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context import MetaDict
+    from zcu_tools.gui.session.parameters import ParameterContext
 
 
 class EvalNumericField(QWidget):
     """Standalone numeric input with right-click direct↔eval toggle.
 
     direct mode: TrimDoubleSpinBox (configurable range/decimals).
-    eval mode: QLineEdit (MetaDict expression) + ghost '= <resolved>' label (live preview).
+    eval mode: QLineEdit (captured parameter paths) + ghost '= <resolved>' label (live preview).
 
     Ghost is informational only; authoritative resolve happens at dialog apply time via
-    the EvalRef marker returned by read_raw(). The md_provider callback is used solely
-    for the ghost preview and for carrying the resolved value back when switching from
+    the EvalRef marker returned by read_raw(). The parameter_provider callback is used solely
+    to supply a fixed capture (or None for pure calculation) for the ghost preview
+    and for carrying the resolved value back when switching from
     eval to direct mode.
 
     R3 compliance: load_direct() in eval mode updates the stored backing value without
@@ -54,7 +55,7 @@ class EvalNumericField(QWidget):
         minimum: float,
         maximum: float,
         decimals: int,
-        md_provider: Callable[[], MetaDict],
+        parameter_provider: Callable[[], ParameterContext | None],
         type_: type = float,
         parent: QWidget | None = None,
     ) -> None:
@@ -62,7 +63,7 @@ class EvalNumericField(QWidget):
         self._minimum = minimum
         self._maximum = maximum
         self._decimals = decimals
-        self._md_provider = md_provider
+        self._parameter_provider = parameter_provider
         self._type = type_
         self._mode: str = "direct"  # "direct" | "eval"
         # Backing store for the last known direct value. Updated by load_direct()
@@ -78,10 +79,10 @@ class EvalNumericField(QWidget):
         self._spin = TrimDoubleSpinBox()
         self._spin.setRange(minimum, maximum)
         self._spin.setDecimals(decimals)
-        self._spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)  # type: ignore[attr-defined]
+        self._spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
         layout.addWidget(self._spin, stretch=1)
-        self._spin.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # type: ignore[attr-defined]
-        self._spin.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+        self._spin.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._spin.customContextMenuRequested.connect(
             lambda pos: self._show_context_menu(self._spin, self._spin.mapToGlobal(pos))
         )
 
@@ -92,19 +93,15 @@ class EvalNumericField(QWidget):
         self._ghost = QLabel()
         self._ghost.setVisible(False)
         layout.addWidget(self._ghost)
-        self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # type: ignore[attr-defined]
-        self._line_edit.customContextMenuRequested.connect(  # type: ignore[attr-defined]
+        self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._line_edit.customContextMenuRequested.connect(
             lambda pos: self._show_context_menu(
                 self._line_edit, self._line_edit.mapToGlobal(pos)
             )
         )
-        self._spin.valueChanged.connect(  # type: ignore[attr-defined]
-            lambda _value: self.raw_changed.emit()
-        )
-        self._line_edit.textChanged.connect(self._sync_ghost)  # type: ignore[attr-defined]
-        self._line_edit.textChanged.connect(  # type: ignore[attr-defined]
-            lambda _text: self.raw_changed.emit()
-        )
+        self._spin.valueChanged.connect(lambda _value: self.raw_changed.emit())
+        self._line_edit.textChanged.connect(self._sync_ghost)
+        self._line_edit.textChanged.connect(lambda _text: self.raw_changed.emit())
 
     def load_direct(self, value: float) -> None:
         """Load a direct float value.
@@ -183,12 +180,11 @@ class EvalNumericField(QWidget):
         # Falls back to the stored direct value if resolution fails (no context,
         # invalid expression, etc.) — never surfaces an error here.
         try:
-            md = self._md_provider()
+            parameters = self._parameter_provider()
             resolved = coerce_eval_result(
-                evaluate_numeric_expr(self._line_edit.text(), md), self._type
+                evaluate_numeric_expr(self._line_edit.text(), parameters), self._type
             )
-            if isinstance(resolved, (int, float)):
-                self._direct_value = float(resolved)
+            self._direct_value = float(resolved)
         except Exception:
             pass
         self._mode = "direct"
@@ -199,7 +195,7 @@ class EvalNumericField(QWidget):
         self.raw_changed.emit()
 
     def _sync_ghost(self) -> None:
-        """Update the ghost label with a live resolve attempt against md_provider.
+        """Update the ghost label with a live resolve attempt against parameter_provider.
 
         Ghost format mirrors ScalarWidget: '= <value>' (gray italic) on success,
         '= ?' (red italic) with error tooltip on failure. Ghost is purely informational.
@@ -208,10 +204,12 @@ class EvalNumericField(QWidget):
             return
         expr = self._line_edit.text()
         try:
-            md = self._md_provider()
-            resolved = coerce_eval_result(evaluate_numeric_expr(expr, md), self._type)
+            parameters = self._parameter_provider()
+            resolved = coerce_eval_result(
+                evaluate_numeric_expr(expr, parameters), self._type
+            )
             # Float trailing-zero stripping: mirrors ScalarWidget ghost formatting.
-            if self._type is float and isinstance(resolved, (int, float)):
+            if self._type is float:
                 raw = f"{resolved:.{self._decimals}f}"
                 if "." in raw:
                     raw = raw.rstrip("0")
@@ -278,4 +276,4 @@ class EvalNumericField(QWidget):
         menu = self._build_context_menu(line_edit)
         if menu is None:
             return
-        cast(Any, menu).exec_(global_pos)
+        menu.exec_(global_pos)

@@ -20,10 +20,10 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
@@ -86,34 +86,34 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
             )
             run_cfg.reps = 1
 
-        setup_devices(
-            run_cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
-        with Schedule(run_cfg, stop=context.cancel_signal) as sched:
-            modules = sched.cfg.modules
-            builder = sched.prog_builder(context.soc, context.soccfg).add(
+        # Compile from the fixed cfg/soccfg before the interruptible acquisition
+        # scope so every suppressed interruption has an owner axis and buffer.
+        modules = deepcopy(run_cfg.modules)
+        program = ModularProgramV2(
+            context.soccfg,
+            deepcopy(run_cfg),
+            modules=[
                 Reset("reset", cfg=modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),
                 Readout("readout", cfg=modules.readout),
-            )
-            program = builder.build()
-            times = (
-                program.get_time_axis(ro_index=0)
-                + sched.cfg.modules.readout.ro_cfg.trig_offset
-            )
-            assert isinstance(times, np.ndarray)
+            ],
+        )
+        times = (
+            program.get_time_axis(ro_index=0)
+            + run_cfg.modules.readout.ro_cfg.trig_offset
+        )
+        assert isinstance(times, np.ndarray)
 
-            signals_buffer = SignalBuffer(
-                (len(times),),
-                on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
+        signals_buffer = SignalBuffer(
+            (len(times),),
+            on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
+        )
+        with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            _ = sched.prog_builder(context.soc, context.soccfg).run_program_decimated(
+                program
             )
-            sched.register_buffer(signals_buffer)
-            _ = builder.run_program_decimated(program)
-            return LookbackResult(times=times, signals=signals_buffer.array)
+        return LookbackResult(times=times, signals=signals_buffer.array)
 
     def analyze(
         self,

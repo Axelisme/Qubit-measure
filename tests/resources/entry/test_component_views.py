@@ -5,10 +5,128 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ruamel.yaml import YAML
-from zcu_tools.resources.entry import ComponentSchema, ResultEntry
+from zcu_tools.format_version import YamlMap
+from zcu_tools.resources.entry import (
+    ComponentSchema,
+    ResultEntry,
+    RoleSpec,
+    document_fields,
+    document_value,
+    snapshot,
+)
 from zcu_tools.resources.entry.views import FieldView
 
 from .view_support import create_entry, field_view, registered_model
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
+def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
+    tmp_path: Path, registry_state_guard: None, owner: str
+) -> None:
+    class Measured(ComponentSchema):
+        center: YamlMap
+        ext: YamlMap = Field(default_factory=dict)
+
+    tag: YamlMap = {"__complex__": [1.25, -2.5]}
+    with registered_model("notebook/complex-read", Measured) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component(
+            "N1", kind=kind, center=tag, ext={"cal": {"center": tag}, "samples": [tag]}
+        )
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        view.general.ext["center"] = tag
+        cal = field_view(field_view(view.N1.ext).cal)
+        assert view.N1.center == 1.25 - 2.5j
+        assert cal["center"] == 1.25 - 2.5j
+        assert view.general.ext.center == 1.25 - 2.5j
+        assert field_view(view.N1.ext).samples == [tag]
+        with view.edit() as draft:
+            assert draft.N1.center == 1.25 - 2.5j
+            assert field_view(field_view(draft.N1.ext).cal).center == 1.25 - 2.5j
+            assert draft.general.ext.center == 1.25 - 2.5j
+            assert document_value(snapshot(draft), "N1.center") == tag
+        document = snapshot(view)
+        assert document_value(document, "N1.center") == tag
+        assert document_value(document, "N1.ext.cal.center") == tag
+        assert document_value(document, "general.ext.center") == tag
+        rows = {row.editable_path: row.value for row in document_fields(document)}
+        assert rows["N1.center.__complex__"] == [1.25, -2.5]
+        assert rows["general.ext.center.__complex__"] == [1.25, -2.5]
+        if owner == "point":
+            point = entry.use_point("working")
+            roles = point.resolve({"sense": RoleSpec(kind=kind)}, sense="N1")
+            assert roles.sense.center == 1.25 - 2.5j
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
+def test_manual_complex_writes_encode_and_keep_validation_and_sources(
+    tmp_path: Path, registry_state_guard: None, owner: str
+) -> None:
+    class Measured(ComponentSchema):
+        freq: float = Field(strict=True, gt=0)
+        ext: YamlMap = Field(default_factory=dict)
+
+    with registered_model("notebook/complex-write", Measured) as kind:
+        entry, results, database = create_entry(tmp_path)
+        entry.setup.add_component(
+            "N1", kind=kind, freq=10.0, ext={"cal": {"center": {"__complex__": [1, 2]}}}
+        )
+        view = entry.setup if owner == "setup" else entry.new_point("working")
+        cal = field_view(field_view(view.N1.ext).cal)
+        cal.center = 3 - 4j
+        assert cal.center == 3 - 4j
+        view.general.ext["center"] = 5 + 6j
+        with view.edit() as draft:
+            draft.set("N1.ext.cal.center", 7 - 8j)
+            draft.general.ext.center = 9 + 10j
+            assert field_view(field_view(draft.N1.ext).cal).center == 7 - 8j
+            assert draft.general.ext.center == 9 + 10j
+            assert document_value(snapshot(draft), "N1.ext.cal.center") == {
+                "__complex__": [7.0, -8.0]
+            }
+            assert cal.center == 3 - 4j
+        assert cal.center == 7 - 8j
+        for path in ("N1.ext.cal.center", "general.ext.center"):
+            source = view.meta(path)
+            assert source is not None and source.source == "manual"
+        before = snapshot(view)
+        with pytest.raises(ValidationError):
+            view.N1.freq = 1 + 2j
+        assert snapshot(view) == before
+        reopened = ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        )
+        loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
+        assert field_view(field_view(loaded.N1.ext).cal).center == 7 - 8j
+        assert loaded.general.ext.center == 9 + 10j
+        assert document_value(snapshot(loaded), "N1.ext.cal.center") == {
+            "__complex__": [7.0, -8.0]
+        }
+        assert loaded.meta("N1.ext.cal.center") == view.meta("N1.ext.cal.center")
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        {"__complex__": [True, 2]},
+        {"__complex__": [1]},
+        {"__complex__": [1, 2], "extra": 3},
+    ],
+)
+def test_malformed_complex_view_leaf_raises_without_mutating_document(
+    tmp_path: Path, registry_state_guard: None, tag: YamlMap
+) -> None:
+    class Measured(ComponentSchema):
+        ext: YamlMap = Field(default_factory=dict)
+
+    with registered_model("notebook/complex-invalid", Measured) as kind:
+        entry, _, _ = create_entry(tmp_path)
+        entry.setup.add_component("N1", kind=kind, ext={"center": tag})
+        before = snapshot(entry.setup)
+        with pytest.raises(ValueError, match="Complex"):
+            _ = field_view(entry.setup.N1.ext).center
+        assert snapshot(entry.setup) == before
+        assert document_value(before, "N1.ext.center") == tag
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])

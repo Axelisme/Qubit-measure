@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .lowering import RangeFactory, lower_finished_cfg
+from .lowering import LoweredData, lower_finished_cfg
 from .model import (
     CfgNodeValue,
     CfgSchema,
@@ -18,9 +18,7 @@ from .model import (
 from .reference_key import make_custom_reference_key
 
 
-def lower_resolved_cfg(
-    schema: CfgSchema, *, make_range: RangeFactory
-) -> dict[str, object]:
+def lower_resolved_cfg(schema: CfgSchema) -> dict[str, LoweredData]:
     """Lower an isolated copy using only cached resolution and validation state.
 
     Every expression and enabled reference must already be resolved. The local
@@ -30,13 +28,26 @@ def lower_resolved_cfg(
     This does not change the live-context contract of ``lower_finished_cfg``.
     """
     frozen = deepcopy(schema)
-    _freeze_value(frozen.value, "")
+    value = freeze_resolved_value(schema.value)
+    if not isinstance(value, CfgSectionValue):
+        raise RuntimeError("Resolved cfg requires a root section")
+    frozen.value = value
     return lower_finished_cfg(
         frozen,
         resolve_expression=None,
         resolve_reference=None,
-        make_range=make_range,
     )
+
+
+def freeze_resolved_value(value: CfgNodeValue | None) -> CfgNodeValue | None:
+    """Detach a currently valid, resolved publication as editable actual values.
+
+    Freeze nested references to same-shape Custom keys, expressions to direct
+    results, and range controls to their published values. None stays disabled.
+    Unresolved values or error diagnostics raise RuntimeError; callers must
+    reject Invalid/Unavailable publications before invoking this operation.
+    """
+    return _freeze_value(deepcopy(value), "")
 
 
 def _freeze_value(value: CfgNodeValue | None, path: str) -> CfgNodeValue | None:
@@ -76,7 +87,7 @@ def _resolved_scalar(value: ScalarValue, path: str) -> DirectValue:
     if error is not None:
         raise RuntimeError(f"Config field '{path}': {error}")
     if isinstance(value, DirectValue):
-        return value
+        return DirectValue(deepcopy(value.value))
     if value.resolved is None:
         raise RuntimeError(
             f"Config field '{path}' expression {value.expr!r} is unresolved"

@@ -38,6 +38,10 @@ class WorkspaceService:
         self._bus = bus
 
     def new_tab(self, adapter_name: str) -> str:
+        """Create, activate and announce a tab using current global sources.
+
+        Default-cfg failure publishes no tab fact.
+        """
         tab_id = self._tabs.new_tab(adapter_name)
         self._state.set_active_tab(tab_id)
         self._bus.emit(

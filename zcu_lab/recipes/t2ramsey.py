@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -34,6 +36,7 @@ def _validate_inputs(
 def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     use_reset: str | None = None,
@@ -45,6 +48,9 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     rounds: int | None = None,
 ) -> RecipeGenerator:
     """Save one Ramsey sweep and yield Primary before asking to write.
+
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
 
     session is driver-supplied. reuse_tab_id resets that idle twotone/t2ramsey tab.
     readout_ref/pi2_ref select calibrated library modules; None retains the GUI
@@ -70,7 +76,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         points,
     )
 
-    tab = session.open_tab("twotone/t2ramsey", reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "twotone/t2ramsey",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -80,8 +90,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -96,11 +109,11 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         "sweep.length",
         stop=max_delay_us,
         expts=points,
-        sources={"start": "explicit", "stop": "max_delay_us", "expts": "points"},
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
-    tab.set("detune_ratio", detune_ratio, source="detune_ratio")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
+    tab.set("detune_ratio", detune_ratio, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":
@@ -124,6 +137,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in ("reuse_tab_id", "readout_ref", "use_reset", "pi2_ref")

@@ -29,8 +29,8 @@ class EffectExecutor(Protocol):
     ) -> Completed[Cfg, Result] | Failed:
         """Execute request and save before returning its typed outcome.
 
-        request contains validated name, experiment, cfg, saver, optional live,
-        and setup_devices. Failures and cancellation never produce Completed.
+        request contains validated name, experiment, cfg, saver and optional
+        live. Failures and cancellation never produce Completed.
         """
         ...
 
@@ -45,7 +45,7 @@ class EffectExecutor(Protocol):
 
 @dataclass
 class RunEffect[Cfg, Result](Effect):
-    """Internal request; experiment/cfg/save/live/setup_devices match env.run.
+    """Internal request; experiment/cfg/save/live match env.run.
 
     name is the validated ASCII function-name stem used for run files.
     outcome is absent until successful dispatch, then Completed or Failed.
@@ -56,7 +56,6 @@ class RunEffect[Cfg, Result](Effect):
     cfg: Cfg
     save: Callable[[Completed[Cfg, Result], Path], None]
     live: Live1D | Live2D | Live2DRow | None
-    setup_devices: bool
     name: str = field(init=False)
     outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)
 

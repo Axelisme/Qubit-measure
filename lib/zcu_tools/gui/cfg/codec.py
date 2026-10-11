@@ -2,13 +2,14 @@
 
 ``schema_to_raw`` encodes a live ``CfgSchema`` as a JSON-compatible dict;
 ``raw_to_schema`` rebuilds the value tree against a base spec. The codec owns no
-I/O or app state, and both measure workspace persistence and autofluxdep node
-persistence use the same wire shape.
+I/O or app state. Measure workspace persistence uses this wire shape.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+
+from zcu_tools.core.complex_codec import decode_complex, encode_complex
 
 from .inheritance import make_default_value
 from .model import (
@@ -165,7 +166,6 @@ def _node_value_to_raw(
             return {
                 "__kind": f"{spec.kind}_ref",
                 "chosen_key": value.chosen_key,
-                "is_overridden": value.is_overridden,
                 "value": _section_value_to_raw(
                     _select_allowed_spec(
                         spec,
@@ -294,26 +294,6 @@ def _decode_direct_wire(raw: dict[str, object], spec: ScalarSpec) -> DirectValue
     return DirectValue(value=value, raw=text, error=error)
 
 
-def encode_complex(value: complex) -> dict[str, list[float]]:
-    """Encode a complex scalar without formatting or precision loss."""
-    return {"__complex__": [value.real, value.imag]}
-
-
-def decode_complex(value: object) -> complex:
-    """Decode the explicit complex tag shared by cfg persistence and editing."""
-    if not isinstance(value, dict) or set(value) != {"__complex__"}:
-        raise ValueError("Complex scalar requires a __complex__ object")
-    parts = value["__complex__"]
-    if not isinstance(parts, list) or len(parts) != 2:
-        raise ValueError("Complex scalar requires two components")
-    real, imag = parts
-    if isinstance(real, bool) or not isinstance(real, (int, float)):
-        raise ValueError("Complex real component must be a real number")
-    if isinstance(imag, bool) or not isinstance(imag, (int, float)):
-        raise ValueError("Complex imaginary component must be a real number")
-    return complex(real, imag)
-
-
 def _parse_sweep_edge(raw: object) -> float | ScalarValue:
     if isinstance(raw, dict) and raw.get("__kind") == "direct":
         return _decode_direct_wire(raw, ScalarSpec("Sweep edge", float))
@@ -355,7 +335,6 @@ def _ref_value_from_raw(
         return ReferenceValue(
             chosen_key=chosen_key,
             value=nested,
-            is_overridden=bool(raw.get("is_overridden", False)),
         )
     kind_label = spec.kind.capitalize()
     raise RuntimeError(

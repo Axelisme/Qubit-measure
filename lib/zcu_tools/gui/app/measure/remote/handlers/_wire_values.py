@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-_COMPLEX_TAG = "__complex__"
+from zcu_tools.core.complex_codec import decode_complex, encode_complex
 
 
 def context_wire_value(value: object) -> object:
@@ -16,7 +16,7 @@ def context_wire_value(value: object) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, complex):
-        return context_wire_value({"__complex__": [value.real, value.imag]})
+        return context_wire_value(encode_complex(value))
     if isinstance(value, np.ndarray):
         return context_wire_value(value.tolist())
     if isinstance(value, np.generic):
@@ -33,23 +33,14 @@ def context_wire_value(value: object) -> object:
     raise TypeError(f"unsupported context value: {type(value).__name__}")
 
 
-def _is_complex_tag(value: object) -> bool:
-    return (
-        isinstance(value, dict)
-        and set(value) == {_COMPLEX_TAG}
-        and isinstance(value[_COMPLEX_TAG], (list, tuple))
-        and len(value[_COMPLEX_TAG]) == 2
-        and all(isinstance(p, (int, float)) for p in value[_COMPLEX_TAG])
-    )
-
-
 def coerce_wire_value(value: object) -> object:
     """Decode an inbound complex tag; leave every other wire value unchanged.
 
-    Writeback uses this before applying a proposed value to MetaDict, whose
-    persistence format also supports complex numbers.
+    A dict containing __complex__ is decoded by the shared strict scalar
+    codec. Invalid tags raise ValueError, and oversized numeric components
+    can raise OverflowError. No strings or tuples are guessed as complex.
+    Writeback uses this before accepting the proposed working-unit value.
     """
-    if _is_complex_tag(value):
-        re, im = value[_COMPLEX_TAG]  # type: ignore[index]
-        return complex(re, im)
+    if isinstance(value, dict) and "__complex__" in value:
+        return decode_complex(value)
     return value

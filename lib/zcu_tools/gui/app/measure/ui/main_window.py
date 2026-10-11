@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import QCloseEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
-    QFileDialog,
+from qtpy.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -22,15 +22,17 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
+from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactKey, ArtifactKind
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
-from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
+from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
+from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
 from .main_dialog_registry import MainDialogRegistry
@@ -38,12 +40,7 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
-
-_SAVE_ERROR_TITLES: dict[ArtifactKind, str] = {
-    ArtifactKind.DATA: "Save data failed",
-    ArtifactKind.ANALYSIS: "Save image failed",
-    ArtifactKind.POST_ANALYSIS: "Save post-analysis image failed",
-}
+from .run_load_dialog import RunLoadDialog
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +48,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
 
@@ -88,18 +85,18 @@ class _MainWindowTabActions:
     def apply_post_writeback(self, tab_id: str) -> None:
         self._window.apply_tab_writeback(tab_id, pane="post_analysis")
 
-    def save_data(self, tab_id: str) -> None:
-        self._window.save_tab_data(tab_id)
-
-    def save_image(self, tab_id: str, key: ArtifactKey) -> None:
-        self._window.save_tab_image(tab_id, key)
+    def save_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        if ref == ArtifactRef("run", "measurement_data"):
+            self._window.save_tab_data(tab_id)
+        else:
+            self._window.save_tab_artifact(tab_id, ref)
 
     def save_all(self, tab_id: str) -> None:
         self._window.save_tab_artifacts(tab_id)
 
 
 class MainWindow(QMainWindow):
-    """Top-level window; implements ViewProtocol for Controller callbacks."""
+    """Present current session sources and pane-owned historical results."""
 
     def __init__(
         self,
@@ -142,16 +139,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(self._toolbar.layout)
 
         # --- context / predictor status bar ---
-        ctx_bar = QHBoxLayout()
-        ctx_bar.addWidget(QLabel("Context:"))
-        self._ctx_label = QLabel("(none)")
-        ctx_bar.addWidget(self._ctx_label)
-        ctx_bar.addSpacing(24)
-        ctx_bar.addWidget(QLabel("Predictor:"))
-        self._predictor_label = QLabel("none")
-        ctx_bar.addWidget(self._predictor_label)
-        ctx_bar.addStretch()
-        main_layout.addLayout(ctx_bar)
+        main_layout.addLayout(self._build_context_bar())
 
         # --- tab widget ---
         self._tabs = QTabWidget()
@@ -173,6 +161,24 @@ class MainWindow(QMainWindow):
         # Cleanup on destroy
         self.destroyed.connect(self._cleanup_bus_subscriptions)
 
+    def _build_context_bar(self) -> QHBoxLayout:
+        """Assemble the persistent entry/point/predictor controls."""
+        ctx_bar = QHBoxLayout()
+        ctx_bar.addWidget(QLabel("Entry:"))
+        self._entry_label = QLabel("No entry open")
+        self._entry_label.setObjectName("current_entry")
+        ctx_bar.addWidget(self._entry_label)
+        ctx_bar.addWidget(QLabel("Point:"))
+        self._point_label = QLabel("No point selected")
+        self._point_label.setObjectName("current_point")
+        ctx_bar.addWidget(self._point_label)
+        ctx_bar.addSpacing(24)
+        ctx_bar.addWidget(QLabel("Predictor:"))
+        self._predictor_label = QLabel("none")
+        ctx_bar.addWidget(self._predictor_label)
+        ctx_bar.addStretch()
+        return ctx_bar
+
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         self._events.close()
 
@@ -181,10 +187,10 @@ class MainWindow(QMainWindow):
         if tab_id in self._tab_widgets:
             return
 
-        tab_label = adapter_name
         # Construct the tab from the same immutable capabilities snapshot used
         # for its initial attach, so optional panes never need dynamic rebuilds.
         snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        tab_label = adapter_name
         caps = snapshot.capabilities
         if caps is None:
             raise RuntimeError(
@@ -203,7 +209,9 @@ class MainWindow(QMainWindow):
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
-        self._set_tab_activity_marker(tab_id, self._ctrl.get_running_tab_id() == tab_id)
+        self._set_tab_activity_marker(
+            tab_id, active=self._ctrl.get_running_tab_id() == tab_id
+        )
 
     def remove_tab_widget(self, tab_id: str) -> None:
         logger.info("_on_bus_tab_closed: tab_id=%r", tab_id)
@@ -299,25 +307,6 @@ class MainWindow(QMainWindow):
                 list(current.post_analysis.writeback_items)
             )
 
-    def refresh_tab_save_paths(
-        self, tab_id: str, snapshot: TabSnapshot | None = None
-    ) -> None:
-        tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None:
-            return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
-        assert current.paths is not None
-        assert current.capabilities is not None
-        tab_w.set_data_path(current.paths.data.path or "")
-        for name, path in current.paths.analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.ANALYSIS, name), path.path or ""
-            )
-        for name, path in current.paths.post_analysis_images.items():
-            tab_w.set_image_path(
-                ArtifactKey(ArtifactKind.POST_ANALYSIS, name), path.path or ""
-            )
-
     def refresh_tab_figure(
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
@@ -350,7 +339,7 @@ class MainWindow(QMainWindow):
         if tab_w is not None:
             tab_w.clear_all_figures()
 
-    def _set_tab_activity_marker(self, tab_id: str, active: bool) -> None:
+    def _set_tab_activity_marker(self, tab_id: str, *, active: bool) -> None:
         """Project Run activity on one top-level tab without storing busy state."""
         tab_w = self._tab_widgets.get(tab_id)
         if not isinstance(tab_w, QWidget):
@@ -371,7 +360,7 @@ class MainWindow(QMainWindow):
     def _refresh_tab_activity_markers(self, running_tab_id: str | None) -> None:
         """Derive every tab marker from the current State running identity."""
         for tab_id in self._tab_widgets:
-            self._set_tab_activity_marker(tab_id, tab_id == running_tab_id)
+            self._set_tab_activity_marker(tab_id, active=tab_id == running_tab_id)
 
     def refresh_run_lock(self, running_tab_id: str | None) -> None:
         logger.debug("refresh_run_lock: running_tab_id=%r", running_tab_id)
@@ -393,25 +382,31 @@ class MainWindow(QMainWindow):
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
 
     def refresh_context_panel(self) -> None:
-        label = self._ctrl.get_active_context_label()
-        if label is not None:
-            # file-backed flux context is active
-            self._ctx_label.setText(label)
-            self._ctx_label.setStyleSheet("")
-        elif self._ctrl.has_draft_context():
-            # draft context (in-memory, no file sync)
-            self._ctx_label.setText(
-                "Draft context (in-memory) — set up project for persistence"
-            )
-            self._ctx_label.setStyleSheet("color: blue;")
-        elif self._ctrl.has_project():
-            self._ctx_label.setText(
-                "Project set — select a context to enable Run/Analyze/Save"
-            )
-            self._ctx_label.setStyleSheet("color: orange;")
+        """Project current entry and point without submitting source commands.
+
+        Show the SavedPoint name, "Draft (in-memory)", or "No point selected".
+        Refresh tab interaction state without changing titles or result panes.
+        """
+        entry = self._ctrl.context_control.get_entry_info()
+        parameters = self._ctrl.get_session_env().parameters
+        target = parameters.target if parameters is not None else None
+        if entry is None:
+            self._entry_label.setText("No entry open")
+            self._entry_label.setStyleSheet("color: gray;")
         else:
-            self._ctx_label.setText("No project set — use Project… to configure")
-            self._ctx_label.setStyleSheet("color: gray;")
+            self._entry_label.setText(entry.name)
+            self._entry_label.setStyleSheet("")
+        if isinstance(target, SavedPoint):
+            self._point_label.setText(target.point)
+            self._point_label.setStyleSheet("")
+        elif parameters is not None:
+            self._point_label.setText("Draft (in-memory)")
+            self._point_label.setStyleSheet("color: blue;")
+        else:
+            self._point_label.setText("No point selected")
+            self._point_label.setStyleSheet(
+                "color: orange;" if entry else "color: gray;"
+            )
         for tab_id, tab_w in self._tab_widgets.items():
             if self._ctrl.has_tab(tab_id):
                 tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
@@ -545,7 +540,15 @@ class MainWindow(QMainWindow):
         return self._ctrl.get_adapter_names()
 
     def create_tab(self, adapter_name: str) -> None:
-        self._ctrl.new_tab(adapter_name)
+        """Create a registered adapter tab using current global aliases.
+
+        Unbound aliases permit creation with Invalid cfg. Role resolution
+        failures are shown through the presenter; other failures propagate.
+        """
+        try:
+            self._ctrl.new_tab(adapter_name)
+        except RoleResolutionError as exc:
+            self.show_error_dialog("Cannot create tab", str(exc))
 
     def reload_experiments(self) -> None:
         if (
@@ -740,14 +743,26 @@ class MainWindow(QMainWindow):
         logger.info("load_tab_data_dialog: tab_id=%r", tab_id)
         if self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None:
             return
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load data file",
-            self._load_data_dialog_start_dir(),
-            "HDF5 files (*.hdf5 *.h5);;All files (*)",
-        )
-        if not path:
+        try:
+            runs = self._ctrl.save_control.list_saved_runs()
+        except Exception as exc:
+            logger.exception("Ledger run listing failed: tab_id=%r", tab_id)
+            self.show_error_dialog("Load data failed", str(exc))
             return
+        dialog = RunLoadDialog(
+            runs,
+            initial_point=self._ctrl.get_session_env().active_label,
+            start_directory=self._load_data_dialog_start_dir(),
+            parent=self,
+        )
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            path = dialog.selected_path()
+        finally:
+            dialog.deleteLater()
+        if path is None:
+            raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:
             outcome = self._ctrl.load_tab_result(tab_id, path)
         except LoadDataError as exc:
@@ -795,47 +810,47 @@ class MainWindow(QMainWindow):
 
     # -- centralized save dispatch (S2) --------------------------
 
-    def _present_save_error(self, kind: ArtifactKind, exc: Exception) -> None:
-        title = _SAVE_ERROR_TITLES.get(kind)
-        if title is None:
-            raise RuntimeError(f"unknown artifact {kind!r}")
-        self.show_error_dialog(title, str(exc))
-
     def _dispatch_artifact_save(
-        self, tab_w: ExpTabWidget, kind: ArtifactKind, save_call: Callable[[], object]
-    ) -> bool:
-        """Present operational errors; render the State-owned terminal outcome."""
+        self, tab_w: ExpTabWidget, save_call: Callable[[], object]
+    ) -> None:
+        """Present synchronous Save errors and refresh the committed output state."""
         try:
             save_call()
-        except (ExpectedError, OSError, ValueError) as exc:
+        except Exception as exc:
+            logger.exception("Synchronous Save failed for tab %r", tab_w.tab_id)
             self.refresh_tab_interaction(tab_w.tab_id)
-            self._present_save_error(kind, exc)
-            return False
+            self.show_error_dialog("Save failed", str(exc))
+            return
         self.refresh_tab_interaction(tab_w.tab_id)
-        return True
 
     def save_tab_data(self, tab_id: str) -> None:
+        """Execute synchronous native data Save using the displayed annotation and GUI origin.
+
+        Unknown tab IDs leave the UI unchanged. Guard/submission failures use
+        the existing save feedback path; the Save report is complete on return.
+        """
         logger.info("save_tab_data: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_data")
         if tab_w is None:
             return
-        # Path/comment read is invariant; let exception propagate (Fast Fail)
-        path = tab_w.get_data_path() or None
         comment = tab_w.get_comment()
         self._dispatch_artifact_save(
             tab_w,
-            ArtifactKind.DATA,
-            lambda: self._ctrl.save_data(tab_id, path, comment=comment),
+            lambda: self._ctrl.save_control.save_data(
+                tab_id, comment=comment, origin=CommandOrigin("gui")
+            ),
         )
 
-    def save_tab_image(self, tab_id: str, key: ArtifactKey) -> None:
-        logger.info("save_tab_image: tab_id=%r key=%r", tab_id, key)
-        tab_w = self._resolve_tab_widget(tab_id, "save_tab_image")
+    def save_tab_artifact(self, tab_id: str, ref: ArtifactRef) -> None:
+        """Submit every member of a declared artifact with GUI attribution."""
+        tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifact")
         if tab_w is None:
             return
-        path = tab_w.get_image_path(key) or None
         self._dispatch_artifact_save(
-            tab_w, key.kind, lambda: self._ctrl.save_image(tab_id, key, path)
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
+                tab_id, artifacts=(ref,), origin=CommandOrigin("gui")
+            ),
         )
 
     def save_tab_artifacts(self, tab_id: str) -> None:
@@ -843,11 +858,12 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "save_tab_artifacts")
         if tab_w is None:
             return
-        try:
-            self._ctrl.save_artifacts(tab_id)
-        except (ExpectedError, OSError, ValueError) as exc:
-            self.show_error_dialog("Save failed", str(exc))
-        self.refresh_tab_interaction(tab_id)
+        self._dispatch_artifact_save(
+            tab_w,
+            lambda: self._ctrl.save_control.save_artifacts(
+                tab_id, comment=tab_w.get_comment(), origin=CommandOrigin("gui")
+            ),
+        )
 
     def handle_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         tab_id = payload.tab_id
@@ -877,9 +893,10 @@ class MainWindow(QMainWindow):
     # Remote view query helpers
     # ------------------------------------------------------------------
 
-    def get_view_snapshot(self) -> dict[str, object]:
-        """Capture the visible window state as a JSON-friendly dict.
+    def get_view_snapshot(self) -> ViewSnapshot:
+        """Read visible labels, status and dialogs as a JSON-friendly ViewSnapshot.
 
+        Entry and Point text comes directly from the persistent visible labels.
         tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
         rather than _tab_widgets, so ghost widget entries that have diverged from
         State never leak into the projection (ADR-0068 view = second SSOT reader).
@@ -901,7 +918,8 @@ class MainWindow(QMainWindow):
         return {
             "active_tab_id": active_id,
             "tab_ids": state_tab_ids,
-            "context_label": self._ctx_label.text() if self._ctx_label else "",
+            "entry_label": self._entry_label.text(),
+            "point_label": self._point_label.text(),
             "predictor_label": (
                 self._predictor_label.text() if self._predictor_label else ""
             ),

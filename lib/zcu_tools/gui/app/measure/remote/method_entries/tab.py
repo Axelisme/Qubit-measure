@@ -19,7 +19,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_new",
         MethodSpec(
             10.0,
-            "Create a new tab for the named adapter. Returns {tab_id}.",
+            "Create a new tab using current global aliases. Unbound aliases allow "
+            "creation with an Invalid cfg. The tab retains no source capture; "
+            "named alias overrides belong to a single Run. Returns {tab_id}.",
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
         agent=AgentMethodPolicy(
@@ -106,12 +108,36 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 "tab:{tab_id}:result",
                 "tab:{tab_id}:analyze",
                 "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:path:data",
-                "tab:{tab_id}:path:analysis_image",
-                "tab:{tab_id}:path:post_analysis_image",
+                "tab:{tab_id}:save",
             ),
             reveals_when_nonempty=("tab_id",),
         ),
+    ),
+    method_entry(
+        "tab.parameter_read",
+        "tab:h_tab_parameter_read",
+        MethodSpec(
+            5.0,
+            "Read only requested paths and module_refs from current point/library/aliases "
+            "for this tab. Optional aliases maps names to concrete components for this read only. None and {} mean no override. "
+            "Returns {values, modules}: absent values are "
+            "omitted, null is retained; each module ref maps to an existing "
+            "canonical library root or null for missing/custom. Invalid paths, "
+            "unknown roles and source failures propagate. Does not observe "
+            "or refresh the live context guard.",
+            (
+                required_string("tab_id"),
+                ParamSpec("paths", JsonType.ARRAY, required=True),
+                ParamSpec("module_refs", JsonType.ARRAY, required=True),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
+                ),
+            ),
+        ),
+        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.get_cfg",
@@ -119,11 +145,23 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Return a complete cached resource publication: cfg_ref, status, tree, "
-            "source_basis and diagnostics. Reads never refresh or query sources. "
+            "source_basis and diagnostics. Ordinary reads do not query sources. "
+            "Nonempty aliases requires expected cfg_ref and resolves current inputs "
+            "against named overrides without publication. None and {} read cached cfg. Stale "
+            "refs reject; the returned ref never refreshes to a newer revision. "
             "Use cfg_ref as expected for tab.edit_cfg or tab.reset_cfg. Paths are arrays of field "
             "segments; writes use the closed __expr/__text/__complex/__ref codec. "
             "Library editor observations use their own independent interface.",
-            (required_string("tab_id"),),
+            (
+                required_string("tab_id"),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
+                ),
+                ParamSpec("expected", JsonType.OBJECT, required=False),
+            ),
         ),
         agent=AgentMethodPolicy(),
     ),

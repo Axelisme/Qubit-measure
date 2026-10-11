@@ -12,6 +12,8 @@ from zcu_tools.mcp.measure.recipe import (
     RecipeSession,
 )
 
+from .helpers import set_frequency
+
 
 def _validate_inputs(
     references: tuple[tuple[str, str | None], ...],
@@ -37,6 +39,7 @@ def _validate_inputs(
 def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     session: RecipeSession,
     *,
+    target: str | None = None,
     reuse_tab_id: str | None = None,
     readout_ref: str | None = None,
     drive_ref: str | None = None,
@@ -49,6 +52,9 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     rounds: int | None = None,
 ) -> RecipeGenerator:
     """Save one gain sweep and yield Primary before asking to write.
+
+    target binds the new tab's primary role without changing GUI focus.
+    Omission uses focus. Do not pass target when reusing an existing tab.
 
     session is driver-supplied. reuse_tab_id resets that idle amp_rabi tab.
     readout_ref/drive_ref select library modules; None retains the GUI selection.
@@ -75,7 +81,11 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         points,
     )
 
-    tab = session.open_tab("twotone/rabi/amp_rabi", reuse=reuse_tab_id)
+    tab = session.open_tab(
+        "twotone/rabi/amp_rabi",
+        aliases=None if target is None else {"qubit": target},
+        reuse=reuse_tab_id,
+    )
     if use_reset is None:
         tab.disable_library("modules.reset")
     else:
@@ -86,18 +96,21 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
     try:
-        tab.set_frequency(
+        set_frequency(
+            tab,
             "modules.qub_pulse.freq",
             frequency_mhz,
-            calibration="qubit",
+            calibration="$qubit.freq",
             required="frequency_mhz",
-            source="frequency_mhz",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
     try:
-        tab.set_frequency(
-            "modules.readout", calibration="resonator", required="readout_ref"
+        set_frequency(
+            tab,
+            "modules.readout",
+            calibration="$resonator.freq",
+            required="readout_ref",
         )
     except RecipeNeedsParameters as error:
         missing.extend(error.missing)
@@ -109,13 +122,11 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
         start=gain_range[0] if gain_range is not None else None,
         stop=gain_range[1] if gain_range is not None else None,
         expts=points,
-        sources={"start": "gain_range", "stop": "gain_range", "expts": "points"},
+        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
     )
-    tab.set(
-        "modules.qub_pulse.waveform.length", pulse_length_us, source="pulse_length_us"
-    )
-    tab.set("reps", reps, source="reps")
-    tab.set("rounds", rounds, source="rounds")
+    tab.set("modules.qub_pulse.waveform.length", pulse_length_us, source="explicit")
+    tab.set("reps", reps, source="explicit")
+    tab.set("rounds", rounds, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":
@@ -139,6 +150,7 @@ DEFINITION = RecipeDefinition(
         "type": "object",
         "additionalProperties": False,
         "properties": {
+            "target": {"type": ["string", "null"], "minLength": 1},
             **{
                 name: {"type": ["string", "null"], "minLength": 1}
                 for name in ("reuse_tab_id", "readout_ref", "drive_ref", "use_reset")

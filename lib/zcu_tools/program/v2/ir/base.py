@@ -76,9 +76,7 @@ class IRCompileMixin(QickProgramV2):
         # Map each program address to the instruction physically at it, so the
         # debug log can show what each dispatch entry actually jumps to.
         # (WAIT occupies 2 words, so not every P_ADDR has an entry.)
-        inst_at_addr: dict[int, dict[str, Any]] = {
-            d["P_ADDR"]: d for d in self.prog_list if "P_ADDR" in d
-        }
+        inst_at_addr = {d["P_ADDR"]: d for d in self.prog_list if "P_ADDR" in d}
 
         def _inst_summary(addr: int) -> str:
             d = inst_at_addr.get(addr)

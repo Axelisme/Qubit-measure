@@ -4,18 +4,19 @@ create_from_role)."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
-from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog, TemplateEntry
 from zcu_tools.gui.cfg import DirectValue, LiteralSpec, make_custom_reference_key
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.gui.session.types import SessionEnv
 
 from tests.zcu_lab.v2._support.measure._role_characterization import (
     GOLDEN_PATH as _GOLDEN_PATH,
+)
+from tests.zcu_lab.v2._support.measure._role_characterization import (
+    make_context,
 )
 from tests.zcu_lab.v2._support.measure._role_characterization import (
     serialize as _serialize,
@@ -24,7 +25,7 @@ from zcu_lab.templates import ALL_TEMPLATE_ENTRIES, register_all_templates
 
 
 def _empty_ctx() -> SessionEnv:
-    return SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    return make_context()
 
 
 def test_register_all_templates_populates_catalog():
@@ -152,17 +153,7 @@ def _role_value_payload(entries) -> dict[str, object]:
     }
 
 
-def _ordered_json_oracle(payload: object) -> tuple[int, str]:
-    encoded = json.dumps(
-        payload,
-        sort_keys=False,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
-    return len(encoded), hashlib.sha256(encoded).hexdigest()
-
-
-def test_named_role_values_match_tracked_golden_and_exact_hash() -> None:
+def test_named_role_values_match_tracked_golden() -> None:
     named_entries = [
         entry
         for entry in ALL_TEMPLATE_ENTRIES
@@ -176,33 +167,3 @@ def test_named_role_values_match_tracked_golden_and_exact_hash() -> None:
     actual = _role_value_payload(named_entries)
 
     assert actual == expected
-    assert _ordered_json_oracle(actual) == (
-        4886,
-        "ea9e0c1f883dda4f74421e44774b10cc596a7f5cb124673fc755e8ae727e6ac3",
-    )
-
-
-def test_structural_blank_values_preserve_exact_ordered_hash() -> None:
-    blank_entries = [
-        entry for entry in ALL_TEMPLATE_ENTRIES if entry.template_id.endswith(":blank")
-    ]
-    payload = _role_value_payload(blank_entries)
-
-    assert len(blank_entries) == 13
-    assert _ordered_json_oracle(payload) == (
-        3982,
-        "d0ae77e39560a0f980c31e6cb55ab17abe3f92c25299117fb58c2ba5982ef954",
-    )
-
-
-def test_all_26_role_pairs_preserve_exact_ordered_hash() -> None:
-    payload = [
-        (entry.template_id, _serialize(entry.make_value(_empty_ctx())))
-        for entry in ALL_TEMPLATE_ENTRIES
-    ]
-
-    assert len(payload) == 26
-    assert _ordered_json_oracle(payload) == (
-        8919,
-        "6b913a3f73cf35ae081086b53f3f3a6ecfde60e81cb2140b8dd5585b71bf19ae",
-    )

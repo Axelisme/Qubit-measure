@@ -66,22 +66,3 @@ env_vars = [
   "XDG_SESSION_TYPE",
 ]
 default_tools_approval_mode = "approve"
-
-[mcp_servers.autofluxdep-gui]
-command = "uv"
-args = [
-  "run",
-  "--extra",
-  "gui",
-  "python",
-  "lib/zcu_tools/mcp/autofluxdep/server.py",
-]
-env_vars = [
-  "QT_QPA_PLATFORM",
-  "DISPLAY",
-  "WAYLAND_DISPLAY",
-  "XDG_RUNTIME_DIR",
-  "DBUS_SESSION_BUS_ADDRESS",
-  "XDG_SESSION_TYPE",
-]
-default_tools_approval_mode = "approve"

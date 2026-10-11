@@ -1,5 +1,6 @@
 """Public MCP forwarding with GUI-owned concurrency enforcement."""
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,36 @@ import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._support import make_client
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"summaries": True},
+        {"summaries": False},
+        {"path": "aliases.0.resolved", "summaries": True},
+        {"path": ""},
+    ],
+)
+def test_context_browse_forwarding_preserves_one_request_and_reply(
+    tmp_path: Path,
+    params: dict[str, object],
+) -> None:
+    expected = {
+        "target": {"kind": "entry_draft", "entry_id": "entry"},
+        "aliases": [{"alias": "drive", "value": "Q1", "resolved": "Q1"}],
+        "path": "aliases.0.resolved",
+        "value": "Q1",
+    }
+    client = make_client(tmp_path, lambda method, params: expected)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    assert (
+        client.call("rpc_call", {"method": "context.snapshot", "params": params})
+        == expected
+    )
+    assert client.transport.sent == [("context.snapshot", params)]
 
 
 def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
@@ -32,7 +63,7 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
             {"applied": [], "failed": None, "skipped": []},
         ),
         (
-            "project.info",
+            "entry.info",
             {},
             {"chip_name": "chip", "qub_name": "q1", "result_dir": "/results/q1"},
         ),
@@ -98,6 +129,47 @@ def test_rpc_stale_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
     assert failure.value.code == "precondition_failed"
     assert "run result" in str(failure.value)
     assert client.transport.sent == [("tab.load_data", params)]
+
+
+@pytest.mark.parametrize(
+    ("method", "params"),
+    [("point.list", {}), ("point.use", {"label": "base"})],
+)
+def test_point_reads_and_use_forward_one_request(
+    tmp_path: Path,
+    method: str,
+    params: Mapping[str, object],
+) -> None:
+    client = make_client(tmp_path, lambda method, params: {"selected": "base"})
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    assert client.call("rpc_call", {"method": method, "params": dict(params)}) == {
+        "selected": "base"
+    }
+    assert client.transport.sent == [(method, dict(params))]
+
+
+def test_point_new_gui_failure_is_preserved_without_retry(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    client.context.session.ensure_connected()
+    client.transport.sent.clear()
+    data = {"entry_id": "entry-uuid", "point": "retained", "created": True}
+    client.transport.replies["point.new"] = {
+        "ok": False,
+        "error": {
+            "code": "controller_error",
+            "reason": "point_binding_failed",
+            "message": "created but not installed",
+            "data": data,
+        },
+    }
+    params = {"label": "retained"}
+    with pytest.raises(GuiRpcError) as failure:
+        client.call("rpc_call", {"method": "point.new", "params": params})
+    assert failure.value.reason == "point_binding_failed"
+    assert failure.value.code == "controller_error"
+    assert "created but not installed" in str(failure.value)
+    assert client.transport.sent == [("point.new", params)]
 
 
 def test_internal_read_returns_full_operational_snapshot(tmp_path: Path) -> None:

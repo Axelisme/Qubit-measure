@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 from qtpy.QtWidgets import QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -43,7 +41,7 @@ from tests.gui.widgets.cfg._tree_support import tree_item, tree_widget
 def _make_ctx():
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    return SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
+    return SessionEnv(parameters=None, soc=None, soccfg=None)
 
 
 # ---------------------------------------------------------------------------
@@ -52,31 +50,25 @@ def _make_ctx():
 
 
 def test_sweep_value_uses_expts_as_canonical():
-    from zcu_tools.program.v2 import SweepCfg
-
-    ml = MagicMock()
     schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=1.0, stop=2.0, expts=5, step=999.0)},
     )
-    result = schema_to_raw_dict(schema, None, ml)
-    assert isinstance(result["f"], SweepCfg)
-    assert result["f"].expts == 5
-    assert result["f"].step == pytest.approx(0.25)
+    result = schema_to_raw_dict(schema, None)
+    assert isinstance(result["f"], dict)
+    assert result["f"]["expts"] == 5
+    assert result["f"]["step"] == pytest.approx(0.25)
 
 
 def test_sweep_value_step_mode():
-    from zcu_tools.program.v2 import SweepCfg
-
-    ml = MagicMock()
     schema = section_schema(
         {"f": SweepSpec(label="Freq")},
         {"f": SweepValue(start=0.0, stop=1.0, expts=11, step=0.1)},
     )
-    result = schema_to_raw_dict(schema, None, ml)
+    result = schema_to_raw_dict(schema, None)
     sweep = result["f"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.step == pytest.approx(0.1)
+    assert isinstance(sweep, dict)
+    assert sweep["step"] == pytest.approx(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +121,7 @@ def test_dynamic_arb_waveform_data_choices(qapp, ctrl):
         },
         {"data": DirectValue(None)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -164,7 +156,7 @@ def test_arb_waveform_data_choice_allows_empty_initial_value(qapp, ctrl):
         },
         {"data": DirectValue("")},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -290,7 +282,7 @@ def test_populate_scalar_fields_round_trip(qapp, ctrl):
         },
         {"reps": DirectValue(100), "freq": DirectValue(6.0)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -315,7 +307,7 @@ def test_set_editing_enabled_keeps_scroll_area_enabled(qapp, ctrl):
         {"reps": DirectValue(100)},
     )
     w = CfgFormWidget()
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     w.attach(draft)
     try:
         scroll = w.findChild(QScrollArea)
@@ -375,7 +367,7 @@ def test_read_values_does_not_mutate_original(qapp, ctrl):
         {"reps": ScalarSpec(label="Reps", type=int)},
         {"reps": DirectValue(100)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -425,7 +417,7 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         },
         {"f": CenteredSweepValue(center=0.0, span=100.0, expts=201)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -551,7 +543,7 @@ def test_populate_nested_section_round_trip(qapp, ctrl):
         },
         {"inner": CfgSectionValue(fields={"gain": DirectValue(0.05)})},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -661,7 +653,7 @@ def test_spec_tooltip_populates_decoration_and_provider_can_override(qapp, ctrl)
             "window": SweepValue(start=0.0, stop=1.0, expts=11),
         },
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget(decoration_provider=TooltipProvider())
     try:
         form.attach(draft)
@@ -706,7 +698,7 @@ def test_sweep_edge_decoration_disables_only_that_edge(qapp, ctrl):
         {"window": SweepSpec(label="Window")},
         {"window": SweepValue(start=0.0, stop=10.0, expts=21)},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget(decoration_provider=StopGeneratedProvider())
     try:
         form.attach(draft)
@@ -823,7 +815,7 @@ def test_literal_rows_are_hidden_regardless_of_key(qapp, ctrl):
             "waveform": CfgSectionValue(fields={"sigma": DirectValue(1.2)}),
         },
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -880,7 +872,7 @@ def test_literal_decoration_reveals_read_only_value(qapp, ctrl):
         {"freq": LiteralSpec(0.0, label="Freq")},
         {},
     )
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         form.attach(draft)
@@ -910,7 +902,7 @@ def test_populate_full_fake_freq_schema(qapp, ctrl):
     from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     schema = FakeFreqAdapter().make_default_cfg(_make_ctx())
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
         # Binding resolves reference labels and expression errors before rendering.

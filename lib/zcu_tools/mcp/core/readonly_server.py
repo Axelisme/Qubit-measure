@@ -1,4 +1,4 @@
-"""Factory for the observe-only dispersive and autofluxdep MCP apps.
+"""Factory for the observe-only dispersive MCP app.
 
 Lifecycle tools are shared with the Fluxdep control assembly. Read forwarding
 and owned-GUI cleanup retain the existing observe-only policy. Measure composes
@@ -61,7 +61,7 @@ def build_readonly_server(
     ``repo_root`` anchors the GUI launch script; pass ``Path(__file__).parents[4]``
     from the caller (``lib/zcu_tools/mcp/<app>/server.py`` -> repo root).
     ``gui_name`` is the human GUI name embedded in the lifecycle-tool prose (e.g.
-    ``autofluxdep-gui``). Events are dropped (READ-ONLY: no ``on_event`` hook), so the
+    ``dispersive-gui``). Events are dropped (READ-ONLY: no ``on_event`` hook), so the
     GUI's event stream never reaches the agent.
     """
     bridge = McpBridge(config)

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.device import DeviceManager, FakeDeviceInfo
+from zcu_tools.cfg_model import module_spec_from_raw
+from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
+from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.measure.specs import make_pulse_spec
+from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.cfg import (
     CfgSchema,
     CfgSectionSpec,
@@ -22,11 +25,89 @@ from zcu_tools.gui.cfg import (
     SweepSpec,
     SweepValue,
 )
+from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
+from tests.gui.app.measure._cfg_fakes import PublishedHost, parameter_capture
 from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter, CalibrationCfg
+from zcu_lab.components import QubitSchema
+
+
+@pytest.fixture
+def device_name_schema() -> CfgSchema:
+    return CfgSchema(
+        CfgSectionSpec(
+            fields={
+                "flux_dev": ScalarSpec(
+                    "Flux", str, choices_source="devices", required=True
+                )
+            }
+        ),
+        CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")}),
+    )
+
+
+def test_device_name_resource_refresh_preview_and_accept_share_fixed_sources(
+    device_name_schema: CfgSchema,
+) -> None:
+    base = parameter_capture()
+    first = base.bind_aliases((AliasRow("flux_dev", "yoko1"),), {})
+    state = State(SessionEnv(parameters=first, soc=None, soccfg=None))
+    bindings = MeasureCfgBindings(PublishedHost(state))
+    current = first
+
+    def resolution():
+        return bindings.snapshot((), captured_values={}, parameters=current)
+
+    resource = CfgResource(lambda: device_name_schema, resolution=resolution)
+    try:
+        observed = resource.observe()
+        assert observed.status is CfgStatus.VALID
+        assert resource.accept(observed.ref.revision).values == {"flux_dev": "yoko1"}
+        current = base.bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
+        preview = resource.preview(observed.ref.revision, resolution=resolution())
+        assert preview.tree.children["flux_dev"].value == EvalValue(
+            "$flux_dev", resolved="yoko2"
+        )
+        assert resource.observe() == observed
+        assert resource.accept(
+            observed.ref.revision, resolution=resolution()
+        ).values == {"flux_dev": "yoko2"}
+        changed = resource.edit(
+            observed.ref.revision, (CfgEdit(("flux_dev",), EvalValue("$flux_dev")),)
+        )
+        assert changed.status is CfgStatus.VALID
+        current = base.bind_aliases((AliasRow("flux_dev", "yoko3"),), {})
+        refreshed = resource.refresh(changed.ref.revision)
+        assert resource.accept(refreshed.ref.revision).values == {"flux_dev": "yoko3"}
+        assert resource.snapshot_inputs().value.fields["flux_dev"] == EvalValue(
+            "$flux_dev"
+        )
+        current = base.bind_aliases((AliasRow("flux_dev", ""),), {})
+        invalid = resource.refresh(refreshed.ref.revision)
+        assert invalid.status is CfgStatus.INVALID
+        assert any(
+            "flux_dev" in diagnostic.message for diagnostic in invalid.diagnostics
+        )
+    finally:
+        resource.revoke()
+
+
+@pytest.mark.parametrize("parameters", [None, parameter_capture().bind_aliases((), {})])
+def test_name_lowering_never_uses_old_resolved_when_context_is_missing(
+    parameters,
+) -> None:
+    schema = CfgSchema(
+        CfgSectionSpec(fields={"flux_dev": ScalarSpec("Flux", str)}),
+        CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev", resolved="yoko1")}),
+    )
+    with pytest.raises(RuntimeError, match="flux_dev"):
+        schema_to_raw_dict(schema, parameters)
+    captured = parameter_capture().bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
+    assert schema_to_raw_dict(schema, captured) == {"flux_dev": "yoko2"}
+
 
 _PULSE = {
     "type": "pulse",
@@ -42,8 +123,15 @@ _PULSE = {
 
 
 def test_measure_ports_integrate_metadict_and_sweepcfg() -> None:
-    md = MetaDict()
-    md.start = 1.0
+    from tests.gui.app.measure._cfg_fakes import parameter_capture
+    from zcu_lab.components import QubitSchema, ResonatorSchema
+
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(kind="resonator", freq=1.0),
+            "Q1": QubitSchema(kind="qubit/transmon"),
+        }
+    )
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
@@ -53,18 +141,18 @@ def test_measure_ports_integrate_metadict_and_sweepcfg() -> None:
         ),
         value=CfgSectionValue(
             fields={
-                "frequency": EvalValue("start + 1"),
-                "sweep": SweepValue(EvalValue("start"), 2.0, 5),
+                "frequency": EvalValue("R1.freq + 1"),
+                "sweep": SweepValue(EvalValue("R1.freq"), 2.0, 5),
             }
         ),
     )
 
-    raw = schema_to_raw_dict(schema, md, ModuleLibrary())
+    raw = schema_to_raw_dict(schema, parameters)
 
     assert raw["frequency"] == 2.0
     sweep = raw["sweep"]
-    assert isinstance(sweep, SweepCfg)
-    assert sweep.model_dump() == {
+    assert isinstance(sweep, dict)
+    assert sweep == {
         "start": 1.0,
         "stop": 2.0,
         "expts": 5,
@@ -79,77 +167,33 @@ def test_measure_reference_missing_then_relinks_with_embedded_snapshot() -> None
         spec=CfgSectionSpec(
             fields={"drive": ReferenceSpec(kind="module", allowed=[make_pulse_spec()])}
         ),
-        value=CfgSectionValue(fields={"drive": ReferenceValue("drive", snapshot)}),
+        value=CfgSectionValue(
+            fields={"drive": ReferenceValue("Q1.pulses.drive", snapshot)}
+        ),
     )
-    ml = ModuleLibrary()
-    ml.register_module(drive=_PULSE)
-    ml.delete_module("drive")
+    ml = LibrarySnapshot(
+        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+    ).replaced_module("Q1.pulses.drive", module_spec_from_raw(_PULSE))
+    ml = ml.deleted("Q1.pulses.drive", kind="module")
 
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(schema, None, ml)
-    assert str(exc_info.value) == "Unknown module reference: 'drive'"
+        schema_to_raw_dict(
+            schema, parameter_capture({"Q1": QubitSchema(kind="qubit/transmon")}, ml)
+        )
+    assert str(exc_info.value) == "Unknown module reference: 'Q1.pulses.drive'"
 
-    ml.register_module(drive={**_PULSE, "gain": 0.9})
-    raw = schema_to_raw_dict(schema, None, ml)
-    assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
-
-
-@pytest.mark.parametrize("device_name", ["sensor", "probe"])
-def test_run_cfg_assembly_uses_only_the_frozen_device_snapshot(
-    device_name: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = CalibrationAdapter()
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
-    schema = CfgSchema(
-        spec=CfgSectionSpec(
-            fields={
-                "dev": CfgSectionSpec(
-                    fields={
-                        device_name: CfgSectionSpec(
-                            fields={"label": ScalarSpec("Label", str)}
-                        ),
-                    }
-                )
-            }
-        ),
-        value=CfgSectionValue(
-            fields={
-                "dev": CfgSectionValue(
-                    fields={
-                        device_name: CfgSectionValue(
-                            fields={"label": DirectValue("frozen_label")}
-                        ),
-                    }
-                )
-            }
-        ),
+    ml = ml.replaced_module(
+        "Q1.pulses.drive", module_spec_from_raw({**_PULSE, "gain": 0.9})
     )
-    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
-    device = FakeDeviceInfo(address="frozen", value=0.125)
-    request = RunRequest(soc=None, soccfg=None, device_snapshot={device_name: device})
-    device.value = 99.0
-
-    def unexpected_device_read(_manager):
-        pytest.fail("Frozen Run must not read live devices")
-
-    monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
-    cfg = adapter.build_exp_cfg(raw, request)
-
-    assert cfg.dev is not None
-    observed = cfg.dev[device_name]
-    assert isinstance(observed, FakeDeviceInfo)
-    assert observed.label == "frozen_label"
-    assert observed.value == 0.125
-    assert observed.address == "frozen"
-    assert observed is not device
-    assert device.label != "frozen_label"
-    assert raw["dev"] == {device_name: {"label": "frozen_label"}}
+    raw = schema_to_raw_dict(
+        schema, parameter_capture({"Q1": QubitSchema(kind="qubit/transmon")}, ml)
+    )
+    assert raw["drive"]["gain"] == 0.25  # type: ignore[index]
 
 
 def _calibration_schema(mode: str) -> tuple[CalibrationAdapter, SessionEnv, CfgSchema]:
     adapter = CalibrationAdapter()
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    ctx = SessionEnv(parameters=parameter_capture(), soc=None, soccfg=None)
     schema = adapter.make_default_cfg(ctx)
     schema.value.fields["mode"] = DirectValue(mode)
     return adapter, ctx, schema
@@ -163,7 +207,7 @@ def test_optional_calibration_parse_error_is_not_ignored_by_mode(mode: str) -> N
     calibration.fields["frequency"] = EvalValue("missing_calibration")
 
     with pytest.raises(RuntimeError, match="calibration.frequency|missing_calibration"):
-        schema_to_raw_dict(schema, ctx.md, ctx.ml)
+        schema_to_raw_dict(schema, ctx.parameters)
 
 
 @pytest.mark.parametrize("mode", ["plain", "calibrated"])
@@ -173,12 +217,14 @@ def test_resolved_calibration_is_assembled_from_cfg_not_metadict(mode: str) -> N
     assert isinstance(calibration, CfgSectionValue)
     for key, value in {"frequency": 6000.0, "width": 10.0, "phase": 0.1}.items():
         calibration.fields[key] = DirectValue(value)
-    ctx.md.frequency = 7000.0
-    ctx.md.width = 20.0
-    ctx.md.phase = 0.2
-    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    ctx = SessionEnv(
+        parameters=parameter_capture(frequency=7000.0, width=20.0, phase=0.2),
+        soc=None,
+        soccfg=None,
+    )
+    raw = schema_to_raw_dict(schema, ctx.parameters)
     cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
+        raw, RunRequest(soc=None, soccfg=None, cfg_context=None)
     )
 
     assert cfg.mode == mode
@@ -190,10 +236,14 @@ def test_resolved_calibration_is_assembled_from_cfg_not_metadict(mode: str) -> N
 
 
 def test_empty_optional_calibration_uses_model_defaults() -> None:
-    adapter, ctx, schema = _calibration_schema("plain")
-    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    adapter = CalibrationAdapter()
+    schema = adapter.make_default_cfg(
+        SessionEnv(parameters=None, soc=None, soccfg=None)
+    )
+    schema.value.fields["mode"] = DirectValue("plain")
+    raw = schema_to_raw_dict(schema, None)
     cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, device_snapshot={})
+        raw, RunRequest(soc=None, soccfg=None, cfg_context=None)
     )
     assert cfg.mode == "plain"
     assert cfg.calibration == CalibrationCfg()
@@ -214,8 +264,12 @@ def test_empty_optional_calibration_uses_model_defaults() -> None:
 def test_adapter_run_rejects_invalid_calibration_before_device_io(
     field: str, value: float | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    adapter, ctx, schema = _calibration_schema("calibrated")
-    raw = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    adapter = CalibrationAdapter()
+    schema = adapter.make_default_cfg(
+        SessionEnv(parameters=None, soc=None, soccfg=None)
+    )
+    schema.value.fields["mode"] = DirectValue("calibrated")
+    raw = schema_to_raw_dict(schema, None)
     raw["calibration"] = {
         "frequency": 6000.0,
         "width": 10.0,
@@ -229,7 +283,7 @@ def test_adapter_run_rejects_invalid_calibration_before_device_io(
     monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
     with pytest.raises(ValueError, match=field):
         adapter.run(
-            RunRequest(soc=None, soccfg=None, device_snapshot={}),
+            RunRequest(soc=None, soccfg=None, cfg_context=None),
             raw,
             context=RunContext(
                 None,
@@ -261,7 +315,7 @@ def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:
 
 def test_measure_rejects_unknown_custom_reference_kind_exactly() -> None:
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(_unknown_reference_schema(disabled=False), None, None)
+        schema_to_raw_dict(_unknown_reference_schema(disabled=False), None)
 
     assert str(exc_info.value) == (
         "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "
@@ -271,7 +325,7 @@ def test_measure_rejects_unknown_custom_reference_kind_exactly() -> None:
 
 def test_measure_rejects_unknown_disabled_reference_kind_exactly() -> None:
     with pytest.raises(RuntimeError) as exc_info:
-        schema_to_raw_dict(_unknown_reference_schema(disabled=True), None, None)
+        schema_to_raw_dict(_unknown_reference_schema(disabled=True), None)
 
     assert str(exc_info.value) == (
         "Config field 'asset' uses unsupported reference kind 'unknown/asset'; "

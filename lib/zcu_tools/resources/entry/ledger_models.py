@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from zcu_tools.core.complex_codec import encode_complex
+
 
 def _json_value(value: object) -> object:
     """Reject non-JSON Python values before Pydantic can coerce them."""
@@ -66,15 +68,10 @@ type _Identity = Annotated[StrictStr, AfterValidator(_uuid)]
 type _Nonempty = Annotated[StrictStr, AfterValidator(_nonempty)]
 
 
-def validate_origin(origin: Origin, call_id: str | None) -> None:
-    """Reject unknown origins, missing MCP IDs and IDs on non-MCP operations."""
+def validate_origin(origin: Origin) -> None:
+    """Reject origins other than gui, notebook or mcp before resource writes."""
     if origin not in ("gui", "notebook", "mcp"):
         raise ValueError("origin must be gui, notebook or mcp")
-    if origin == "mcp":
-        if not isinstance(call_id, str) or not call_id.strip():
-            raise ValueError("origin=mcp requires a nonempty call_id")
-    elif call_id is not None:
-        raise ValueError("call_id must be None for non-MCP origins")
 
 
 class _LedgerModel(BaseModel):
@@ -109,10 +106,24 @@ class SavedOutput(_LedgerModel):
 
 
 class AcceptedWrite(_LedgerModel):
-    """Accepted working-unit value at a nonempty dot-separated container path."""
+    """One accepted value for a nonempty dot-separated container path.
+
+    path is a concrete destination with nonempty segments; no escaping or
+    indexing is supported. value stores strict JSON in working units.
+    Native complex input at this field alone becomes the shared __complex__
+    tag before JSON validation. Nested complex, non-finite components and
+    other non-JSON values raise ValueError; strings are never decoded.
+    """
 
     path: _Nonempty
     value: JsonValue
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _encode_complex_value(cls, value: object) -> object:
+        if isinstance(value, complex):
+            return encode_complex(value)
+        return value
 
     @field_validator("path")
     @classmethod
@@ -212,7 +223,7 @@ class LedgerEvent(_LedgerModel):
     format is zcu.ledger; format_version is 1.x (append only accepts 1.0).
     id and entry_id are UUIDs; kind selects acquired, saved, analyzed, accepted
     or import. at is an ISO 8601 UTC timestamp with Z or +00:00. origin identifies
-    the operation; call_id is required only for MCP. record is None on append,
+    the frontend as gui, notebook or mcp. record is None on append,
     or records/<id>.json on disk. payload carries the kind-specific evidence.
     New 1.0 models reject unknown fields; readers can project future-minor fields
     while preserving the complete raw line separately in LedgerEntry.
@@ -225,7 +236,6 @@ class LedgerEvent(_LedgerModel):
     at: StrictStr
     entry_id: _Identity
     origin: Origin
-    call_id: StrictStr | None = None
     record: StrictStr | None = None
     payload: (
         AcquiredPayload
@@ -281,7 +291,6 @@ class LedgerEvent(_LedgerModel):
     @model_validator(mode="after")
     def validate_envelope(self) -> Self:
         """Check operation identity, canonical record reference and payload kind."""
-        validate_origin(self.origin, self.call_id)
         if self.record is not None and self.record != f"records/{self.id}.json":
             raise ValueError("record must be records/<id>.json")
         expected: dict[str, type[BaseModel]] = {

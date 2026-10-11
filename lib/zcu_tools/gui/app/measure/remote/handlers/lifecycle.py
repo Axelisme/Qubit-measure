@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.artifact_tracker import SaveStatus
-from zcu_tools.gui.app.measure.remote.artifact_keys import artifact_key_wire
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -32,9 +31,12 @@ def require_saved(adapter: RemoteControlAdapter, tab_ids: list[str]) -> None:
     descriptions = []
     for tab_id in tab_ids:
         artifacts = [
-            artifact_key_wire(item.key)
-            for item in adapter.tab_control.get_tab_snapshot(tab_id).artifacts
-            if item.status in (SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES)
+            f"{item.ref.section}/{item.ref.name}"
+            for section in adapter.tab_control.get_tab_snapshot(tab_id).artifacts
+            for item in section.artifacts
+            if item.ref.section == "run"
+            and item.ref.name == "measurement_data"
+            and item.status is not SaveStatus.SAVED
         ]
         if artifacts:
             unsaved.append({"tab": tab_id, "artifacts": artifacts})

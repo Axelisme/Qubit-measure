@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -21,15 +22,12 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
-    DirectValue,
     EvalValue,
     ScalarSpec,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.modules.pulse import PulseCfg
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float, md_has_key
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -37,7 +35,9 @@ from zcu_lab.v2._support.measure.schema_builder import (
 )
 from zcu_lab.v2._support.measure.seeds import custom
 from zcu_lab.v2._support.measure.singleshot_shared import (
+    read_analysis_float,
     read_chi_kappa,
+    read_confusion_matrix,
     readout_probe_freq,
 )
 from zcu_lab.v2.singleshot.ac_stark.core import (
@@ -53,95 +53,49 @@ from zcu_lab.v2.singleshot.ac_stark.core import (
 # downstream MIST experiments read as ``ac_coeff``.
 SsAcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
 
-_RF_WIDTH_FALLBACK_MHZ = 5.0
+
+def _probe_length(_ctx: SessionEnv) -> EvalValue:
+    return EvalValue("$qubit.module.x180.waveform.length")
 
 
-def _selected_qubit_pulse(ctx: SessionEnv) -> PulseCfg | None:
-    # Match the pi_pulse role's library priority for stark_pulse2.
-    for name in ("pi_amp", "pi_len"):
-        pulse = ctx.ml.modules.get(name)
-        if isinstance(pulse, PulseCfg):
-            return pulse
-    return None
+def _qubit_frequency(_ctx: SessionEnv) -> EvalValue:
+    return EvalValue("$qubit.freq")
 
 
-def _probe_length(ctx: SessionEnv) -> float:
-    pulse = _selected_qubit_pulse(ctx)
-    if pulse is not None:
-        length = pulse.waveform.length
-        if (
-            not isinstance(length, (int, float))
-            or not math.isfinite(length)
-            or length <= 0
-        ):
-            raise ValueError(
-                "The selected pi-pulse waveform length must be positive and finite"
-            )
-        return float(length)
-    return 0.3  # Draft fallback until a calibrated pi pulse is available.
+def _qubit_channel(_ctx: SessionEnv) -> EvalValue:
+    return EvalValue("$qubit.wiring.L01.ch")
 
 
-def _qubit_frequency(ctx: SessionEnv) -> float | EvalValue:
-    if md_has_key(ctx, "q_f"):
-        return EvalValue(expr="q_f")
-    pulse = _selected_qubit_pulse(ctx)
-    if pulse is None:
-        return 4000.0
-    if not isinstance(pulse.freq, (int, float)):
-        raise ValueError("The selected pi-pulse frequency must be a fixed number")
-    return float(pulse.freq)
+def _qubit_mixer_frequency(_ctx: SessionEnv) -> EvalValue:
+    return EvalValue("$qubit.module.x180.mixer_freq")
 
 
-def _qubit_channel(ctx: SessionEnv) -> int | EvalValue:
-    for key in ("qub_ch", "qub_1_4_ch", "qub_4_5_ch"):
-        if md_has_key(ctx, key):
-            return EvalValue(expr=key)
-    pulse = _selected_qubit_pulse(ctx)
-    return pulse.ch if pulse is not None else 0
-
-
-def _qubit_mixer_frequency(ctx: SessionEnv) -> DirectValue | EvalValue:
-    pulse = _selected_qubit_pulse(ctx)
-    mixer_freq = pulse.mixer_freq if pulse is not None else None
-    if mixer_freq is None:
-        return DirectValue(None)
-    if md_has_key(ctx, "q_f"):
-        return EvalValue(expr="q_f")
-    return DirectValue(mixer_freq)
-
-
-def _rf_width_timing(
-    ctx: SessionEnv, *, numerator: float, offset: float = 0.0
-) -> float | EvalValue:
+def _rf_width_timing(_ctx: SessionEnv, *, numerator: float) -> EvalValue:
     coefficient = numerator / (2 * math.pi)
-    if md_has_key(ctx, "rf_w"):
-        width = md_get_float(ctx, "rf_w", float("nan"))
-        if not math.isfinite(width) or width <= 0:
-            raise ValueError("MetaDict 'rf_w' must be a positive finite number")
-        return EvalValue(expr=f"{offset} + {coefficient} / rf_w")
-    return offset + coefficient / _RF_WIDTH_FALLBACK_MHZ
+    return EvalValue(f"{coefficient} / $resonator.kappa")
 
 
-def _cavity_tone_length(ctx: SessionEnv) -> float | EvalValue:
-    return _rf_width_timing(ctx, numerator=5.1, offset=_probe_length(ctx))
+def _cavity_tone_length(_ctx: SessionEnv) -> EvalValue:
+    coefficient = 5.1 / (2 * math.pi)
+    return EvalValue(
+        f"$qubit.module.x180.waveform.length + {coefficient} / $resonator.kappa"
+    )
 
 
-def _qubit_pre_delay(ctx: SessionEnv) -> float | EvalValue:
+def _qubit_pre_delay(ctx: SessionEnv) -> EvalValue:
     return _rf_width_timing(ctx, numerator=5.0)
 
 
-def _qubit_post_delay(ctx: SessionEnv) -> float | EvalValue:
+def _qubit_post_delay(ctx: SessionEnv) -> EvalValue:
     return _rf_width_timing(ctx, numerator=3.1)
 
 
-def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
-    if md_has_key(ctx, "q_f"):
-        return SweepValue(
-            start=EvalValue(expr="q_f - 700.0"),
-            stop=EvalValue(expr="q_f + 100.0"),
-            expts=801,
-        )
-    return SweepValue(start=3300.0, stop=4100.0, expts=801)
+def _freq_sweep_default(_ctx: SessionEnv) -> SweepValue:
+    return SweepValue(
+        start=EvalValue(expr="$qubit.freq - 700.0"),
+        stop=EvalValue(expr="$qubit.freq + 100.0"),
+        expts=801,
+    )
 
 
 @dataclass
@@ -170,26 +124,18 @@ class SsAcStarkAdapter(
             "hardware."
         ),
         expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live MetaDict. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. The run classifies each "
-            "shot using these values; missing or invalid cfg calibration fails "
-            "before hardware. "
-            "ANALYSIS additionally REQUIRES 'chi' (dispersive shift, MHz) and "
-            "'rf_w' (resonator linewidth kappa, MHz) — both feed the AC-Stark "
-            "coefficient fit and analyze fast-fails if either is missing (run "
-            "the dispersive-shift experiment first). 'rf_w' also sets the pulse "
-            "timing; 'readout_f' (or 'r_f') seeds the cavity tone, and 'q_f' "
-            "centres the qubit-frequency sweep. Qubit-channel metadata remains "
-            "linked in the pulse prefill; a configured qubit mixer tracks 'q_f'. "
-            "Optionally reads "
-            "'confusion_matrix' (readout correction) and 'cutoff' (drop gains "
-            "above it before fitting) at analyze time."
+            "Run classification defaults reference $qubit.ext.readout_cal.g_center, "
+            "$qubit.ext.readout_cal.e_center and $qubit.ext.readout_cal.radius. "
+            "Probe frequency/channel use $qubit.freq and $qubit.wiring.L01.ch; "
+            "probe length/mixer use $qubit.module.x180.waveform.length and "
+            "$qubit.module.x180.mixer_freq. Cavity timing uses $resonator.kappa. "
+            "Missing aliases or calibration leave cfg Invalid. Analyze calibration "
+            "sources are not yet migrated to the historical Run contract."
         ),
         expects_ml=(
-            "Uses the calibrated 'pi_amp' qubit pulse when available (falling back "
-            "to 'pi_len') and a readout module. The cavity tone is inline; reset "
-            "and init pulse start disabled, as in single_qubit.md."
+            "Uses $qubit.module.readout for SMART readout. Cavity and qubit probe "
+            "tones are inline with canonical scalar calibration references; reset "
+            "and init pulse start disabled."
         ),
         typical_writeback=(
             "Proposes the fitted AC-Stark coefficient into MetaDict "
@@ -236,19 +182,22 @@ class SsAcStarkAdapter(
                 "stark_pulse2",
                 role_id="pi_pulse",
                 label="Qubit Probe Tone (freq sweep)",
-                blank_overrides={"waveform.length": 0.3},
+                init=ModuleInit.INLINE,
                 overrides={
+                    "waveform.length": custom(
+                        _probe_length, description="calibrated probe length"
+                    ),
                     "freq": custom(
                         _qubit_frequency,
-                        description="qubit probe frequency from q_f",
+                        description="qubit probe frequency",
                     ),
                     "ch": custom(
                         _qubit_channel,
-                        description="qubit probe channel from MetaDict",
+                        description="qubit probe wiring channel",
                     ),
                     "mixer_freq": custom(
                         _qubit_mixer_frequency,
-                        description="qubit probe mixer frequency from q_f",
+                        description="calibrated qubit probe mixer frequency",
                     ),
                     "pre_delay": custom(
                         _qubit_pre_delay,
@@ -278,17 +227,17 @@ class SsAcStarkAdapter(
             .field(
                 "g_center",
                 spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("g_center"),
+                default=EvalValue("$qubit.ext.readout_cal.g_center"),
             )
             .field(
                 "e_center",
                 spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("e_center"),
+                default=EvalValue("$qubit.ext.readout_cal.e_center"),
             )
             .field(
                 "radius",
                 spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("ge_radius"),
+                default=EvalValue("$qubit.ext.readout_cal.radius"),
             )
             .reps(1000)
             .rounds(2)
@@ -298,7 +247,11 @@ class SsAcStarkAdapter(
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> SsAcStarkRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = AcStarkExp().run(cfg, context=context)
@@ -307,14 +260,11 @@ class SsAcStarkAdapter(
     def analyze(
         self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams], *, plots: Plots
     ) -> SsAcStarkAnalyzeResult:
-        # ``chi`` / ``kappa`` (= md 'rf_w', the resonator linewidth) are required
-        # fit inputs read from md — fast-fail if either is missing. The domain
-        # derives eta = kappa²/(kappa²+chi²) internally. ``confusion_matrix``
-        # (readout correction) and ``cutoff`` (drop high gains before fitting) are
-        # optional md inputs, never user knobs; absent → domain defaults.
-        chi, kappa = read_chi_kappa(req.md)
-        confusion = req.md.get("confusion_matrix")
-        cutoff = req.md.get("cutoff")
+        # Required chi/kappa and optional readout correction/cutoff use this
+        # Run's fixed capture. The core derives eta and owns fit defaults.
+        chi, kappa = read_chi_kappa(req.parameters)
+        confusion = read_confusion_matrix(req.parameters)
+        cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
         analysis = AcStarkExp().analyze(
             req.run_result,
             AcStarkAnalyzeOptions(
@@ -330,7 +280,7 @@ class SsAcStarkAdapter(
     ) -> Sequence[WritebackItem]:
         # Key ``ac_stark_coeff`` per single_qubit.md:3329.
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="ac_stark_coeff",
                 description="AC-Stark coefficient (photon number per gain²)",
                 proposed_value=req.analyze_result.ac_stark_coeff,

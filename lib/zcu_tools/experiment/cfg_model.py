@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, TypeVar
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.device import DeviceInfo
 
 T_CfgModel = TypeVar("T_CfgModel", bound="ExpCfgModel")
 
 
 class ExpCfgModel(ConfigBase):
-    dev: Mapping[str, DeviceInfo] | None = None
+    """Framework base for experiment-owned inputs.
+
+    Concrete experiment cfgs declare their device role-name mappings and units
+    when needed. This base carries neither device selections nor settings.
+    Drivers are resolved by the experiment through RunContext.devices at use.
+    """
 
     @classmethod
     def validate_or_warn(

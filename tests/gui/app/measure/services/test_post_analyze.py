@@ -32,7 +32,6 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 from tests.gui._completion_helpers import on_post_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -47,8 +46,7 @@ def _plots(figure: Figure | None = None) -> Plots:
 
 def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
     ctx = SessionEnv(
-        md=MetaDict(),
-        ml=ModuleLibrary(),
+        parameters=None,
         soc=MagicMock(),
         soccfg=MagicMock(),
         result_dir="/tmp",
@@ -92,13 +90,17 @@ class _FakeBg:
 
 
 def _make_service(
-    state: State, bus: EventBus, *, fail_submit: bool = False
+    state: State,
+    bus: EventBus,
+    *,
+    fail_submit: bool = False,
+    writeback: MagicMock | None = None,
 ) -> tuple[PostAnalyzeService, _FakeBg]:
     bg = _FakeBg(fail_submit=fail_submit)
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)  # type: ignore[arg-type]
-    writeback = MagicMock()
+    runner = OperationRunner(MagicMock(), handles, progress, bg, bus)
+    writeback = writeback if writeback is not None else MagicMock()
     writeback.create_draft.return_value = None
     svc = PostAnalyzeService(state, runner, bus, handles, writeback)
     return svc, bg

@@ -47,7 +47,7 @@ def save_run_data(
     same-directory temporary file, close it, then atomically publish; failures
     remove this call's temp and preserve the prior destination.
     extensions reuses a detached validated image for same-shape generic rewrites;
-    None creates version 1.0. Known nodes must resolve within this file. Existing
+    None creates version 2.0. Known nodes must resolve within this file. Existing
     fixed UTF-8 JSON retains unchanged raw text; edits beyond byte capacity fail.
     Invalid known data raises a destination/location ValueError. I/O errors
     propagate. No cross-file or power-loss guarantee.
@@ -74,7 +74,7 @@ def save_run_data(
                 _validate_header(file, destination)
             else:
                 file.attrs["format"] = "zcu.experiment-data"
-                file.attrs["format_version"] = "1.0"
+                file.attrs["format_version"] = "2.0"
             write_metadata(file, metadata, cfg)
             _write_payload(file, payload, labber_json)
         if replace:
@@ -135,7 +135,7 @@ def _validate_header(file: h5.File, source: Path) -> None:
             "format_version": text_attr(file, "format_version"),
         },
         expected_format="zcu.experiment-data",
-        supported_version=FormatVersion(1, 0),
+        supported_version=FormatVersion(2, 0),
         source=source,
     )
 

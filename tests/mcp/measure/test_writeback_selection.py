@@ -13,7 +13,7 @@ def captured_preview() -> RecipeWritebackPreview:
             "has_draft": True,
             "items": [
                 {
-                    "id": "md-old",
+                    "id": "param-old",
                     "target_name": "frequency",
                     "selected": False,
                     "proposed_value": {"value": 2},
@@ -40,7 +40,7 @@ def test_captured_selection_uses_stable_names_and_preserves_original_order():
     assert selection.items == ("frequency", "classifier")
     assert selection.preview.primary is not None
     assert selection.preview.post is not None
-    assert [item["id"] for item in selection.preview.primary["items"]] == ["md-old"]
+    assert [item["id"] for item in selection.preview.primary["items"]] == ["param-old"]
     assert [item["id"] for item in selection.preview.post["items"]] == ["post-old"]
     assert selection.preview.primary["items"][0]["selected"] is False
     assert selection.preview.primary["destination_context"] == {

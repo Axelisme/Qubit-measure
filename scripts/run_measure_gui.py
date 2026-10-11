@@ -86,10 +86,7 @@ def _build_measure_catalogs():
         preserved_modules=(
             "zcu_lab.templates",
             "zcu_lab.v2._support.measure",
-            "zcu_lab.v2._support.autofluxdep",
             "zcu_lab.v2._support.singleshot",
-            "zcu_lab.v2.autofluxdep._support",
-            "zcu_lab.v2.overnight._support",
         ),
         catalog_module="zcu_lab.definitions",
     )
@@ -108,11 +105,14 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
+    from zcu_lab import ALIAS_PRESET
+
     return launch_gui_runtime(
         MeasureGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
         extra_logging_namespaces=("zcu_lab",),
         registry_factory=_build_measure_catalogs,
+        alias_preset=ALIAS_PRESET,
         clean=args.clean,
         project_root=project_root,
     )

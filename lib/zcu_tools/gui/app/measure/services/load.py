@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -10,12 +10,15 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, LoadDataReque
 from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import RoleBinding
 
-from .guard import LoadPermit
 from .plot_lifecycle import release_retired_plots
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
+    from zcu_tools.gui.session.context_control import ContextControlPort
+    from zcu_tools.gui.session.parameters import ParameterContext
 
     from .ports import WritebackLifecyclePort
 
@@ -64,7 +67,20 @@ class LoadService:
         writeback: WritebackLifecyclePort,
         *,
         provide_options: Callable[[str], Sequence[object]],
+        context: ContextControlPort,
+        captured_parameters: Callable[
+            [Mapping[str, str] | None], ParameterContext | None
+        ],
     ) -> None:
+        """Inject fixed current-source capture and cfg backfill option lookup.
+
+        captured_parameters reads current point/library/storage and global aliases
+        on the owner thread; its result must not follow later source changes.
+        context reads the file's fixed point/roles in the opened entry without
+        changing selection. provide_options returns cfg backfill choices.
+        """
+        self._context = context
+        self._captured_parameters = captured_parameters
         self._state = state
         self._writeback = writeback
         self._provide_options = provide_options
@@ -75,8 +91,21 @@ class LoadService:
         caps = getattr(adapter, "capabilities", None)
         return isinstance(caps, AdapterCapabilities) and caps.load_data
 
-    def load_result(self, permit: LoadPermit, data_path: str) -> LoadTabResultOutcome:
-        tab_id = permit.tab_id
+    def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
+        """Load data_path into an existing tab after GuardService.check_load.
+
+        Call in the same owner-thread command; data_path is the selected file.
+        Capture current global parameters once before the adapter call, never tab
+        birth bindings. Retain its Save storage, not its aliases for analysis.
+        In the same entry, read the file's point/roles once for analysis and WB.
+        This reads current persisted values, not an unrecorded historical version.
+        Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
+        analysis remains available. Historical source read failures propagate
+        before result replacement. Retain native history without acquisition.
+        Return committed result details and cfg backfill status. Busy or cfg
+        notification reentrancy rejects before loading; adapter file/capability
+        failures raise LoadDataError without replacing the previous result.
+        """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
@@ -87,11 +116,19 @@ class LoadService:
                 "This tab does not support loading data files.",
                 reason_code="unsupported_load",
             )
-        ctx = self._state.session_env
-        request = LoadDataRequest(data_path=data_path, md=ctx.md, ml=ctx.ml)
+        request = LoadDataRequest(
+            data_path=data_path,
+            parameters=self._captured_parameters(None),
+        )
+        # Native history owns aliases; Save needs only the Load-time entry capability.
+        storage = (
+            None
+            if request.parameters is None
+            else request.parameters.bind_aliases((), {}).storage
+        )
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
-            result = tab.adapter.load(request)
+            result, metadata = tab.adapter.load(request)
         except NotImplementedError as exc:
             raise LoadDataError(
                 f"This tab does not support loading data files.\n\nDetails: {exc}",
@@ -108,8 +145,26 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
+        history = metadata.snapshot
+        parameters = None
+        if (
+            request.parameters is not None
+            and request.parameters.target.entry_id == str(history.entry_id)
+            and history.point is not None
+        ):
+            parameters = self._context.read_target(
+                SavedPoint(entry_id=str(history.entry_id), point=history.point),
+                roles=RoleBinding(None, {}, history.roles),
+            )
         snapshot = getattr(result, "cfg", None)
-        retired = self._state.update_tab_loaded_result(tab_id, result, data_path)
+        retired = self._state.update_tab_loaded_result(
+            tab_id,
+            result,
+            data_path,
+            metadata=metadata,
+            parameters=parameters,
+            storage=storage,
+        )
         self._teardown_retired(retired)
         return LoadTabResultOutcome(
             tab_id=tab_id,

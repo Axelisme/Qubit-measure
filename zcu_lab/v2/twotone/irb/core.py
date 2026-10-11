@@ -11,7 +11,6 @@ from pydantic import Field, model_validator
 from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -99,9 +98,6 @@ class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
                 for child in np.random.SeedSequence(run_cfg.seed).spawn(run_cfg.n_seeds)
             ],
             dtype=np.int64,
-        )
-        setup_devices(
-            run_cfg, context.devices, progress=True, cancel_signal=context.cancel_signal
         )
         viewer = context.plots.liveplot_1d(
             "measurement",

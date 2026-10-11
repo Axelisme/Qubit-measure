@@ -1,14 +1,14 @@
 """Loaded result backfill publishes through the existing cfg resource."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.device.fake import FakeDeviceInfo
+from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
-from zcu_tools.gui.app.measure.services.guard import LoadPermit
 from zcu_tools.gui.app.measure.services.load import LoadService
 from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
@@ -27,21 +27,25 @@ from zcu_tools.gui.cfg.resource import (
     CfgStatus,
 )
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources
+from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
+from tests.gui.app.measure._load_support import historical_metadata
 
 
 class RuntimeCfg(ExpCfgModel):
+    dev: Mapping[str, str] | None = None
     reps: int = 20
 
 
 class NullableRuntimeCfg(ExpCfgModel):
+    dev: Mapping[str, str] | None = None
     reps: object = None
 
 
-def make_record(cfg: ExpCfgModel | None) -> RunRecord[ExpCfgModel, object]:
-    return RunRecord(cfg=cfg, result=object())
+def make_record(
+    cfg: ExpCfgModel | None,
+) -> tuple[RunRecord[ExpCfgModel, object], RunMetadata]:
+    return RunRecord(cfg=cfg, result=object()), historical_metadata()
 
 
 @dataclass
@@ -55,9 +59,7 @@ class LoadApp:
 
 
 def make_app(*, device: bool = False) -> LoadApp:
-    state = State(
-        SessionEnv(md=MetaDict(None), ml=ModuleLibrary(None), soc=None, soccfg=None)
-    )
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     fields: dict[str, CfgNodeSpec] = {
         "reps": ScalarSpec("Reps", int),
         "note": ScalarSpec("Note", str, required=True),
@@ -86,13 +88,21 @@ def make_app(*, device: bool = False) -> LoadApp:
         values["dev"] = CfgSectionValue(fields={"jpa_rf_dev": DirectValue("stable")})
     schema = CfgSchema(CfgSectionSpec(fields=fields), CfgSectionValue(fields=values))
     resources = cfg_resources(state)
-    cfg = resources.create("tab", lambda: schema)
+    cfg = resources.create(
+        "tab", lambda: schema, resolution=lambda: cfg_resolution(state, None)
+    )
     adapter = MagicMock()
     adapter.capabilities = AdapterCapabilities(load_data=True)
     adapter.load.return_value = make_record(RuntimeCfg())
     state.add_tab("tab", Session(adapter_name="test", adapter=adapter, cfg=cfg))
     options = MagicMock(return_value=["stable"] if device else [])
-    service = LoadService(state, MagicMock(), provide_options=options)
+    service = LoadService(
+        state,
+        MagicMock(),
+        provide_options=options,
+        context=MagicMock(),
+        captured_parameters=lambda _aliases: None,
+    )
     return LoadApp(state, resources, cfg, service, adapter, options)
 
 
@@ -123,12 +133,13 @@ def test_load_updates_same_resource_and_preserves_current_input(app: LoadApp) ->
     observations = []
     unsubscribe = editor.watch(observations.append)
     before = editor.observe()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     after = editor.observe()
     unsubscribe()
 
     assert outcome.cfg_backfill == "applied"
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
     assert after.ref.cfg_id == before.ref.cfg_id
     assert after.ref.revision == before.ref.revision + 1
     assert after.status is CfgStatus.VALID
@@ -147,30 +158,33 @@ def test_unavailable_snapshot_keeps_cfg_and_loaded_result(
 ) -> None:
     before = app.cfg.observe()
     app.adapter.load.return_value = make_record(snapshot)
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
 
 
 def test_invalid_complete_candidate_keeps_input_and_revision(app: LoadApp) -> None:
     app.cfg.edit(app.cfg.observe().ref.revision, (CfgEdit(("note",), ""),))
     before = app.cfg.observe()
     inputs = app.cfg.snapshot_inputs()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
     assert app.cfg.snapshot_inputs() == inputs
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
 
 
 def test_nonoptional_null_snapshot_keeps_resource(app: LoadApp) -> None:
     before = app.cfg.observe()
     app.adapter.load.return_value = make_record(NullableRuntimeCfg())
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
 
 
 def test_missing_device_option_without_other_fields_keeps_cfg(
@@ -178,24 +192,23 @@ def test_missing_device_option_without_other_fields_keeps_cfg(
 ) -> None:
     app = device_app
     app.adapter.load.return_value = make_record(
-        ExpCfgModel(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
+        NullableRuntimeCfg(dev={"jpa_rf_dev": "stale"})
     )
     before = app.cfg.observe()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
 
 
 def test_missing_device_option_preserves_selector_when_other_fields_apply(
     device_app: LoadApp,
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"stale": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "stale"}))
     before = app.cfg.observe()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "applied"
     accepted = app.cfg.accept(app.cfg.observe().ref.revision)
     assert accepted.values["reps"] == 20
@@ -208,14 +221,13 @@ def test_candidate_device_missing_from_fixed_source_rejects_complete_backfill(
 ) -> None:
     app = device_app
     app.options.return_value = ["stable", "new"]
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "new"}))
     before = app.cfg.observe()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
 
 
 @pytest.mark.parametrize(
@@ -233,20 +245,19 @@ def test_option_failure_keeps_entire_cfg_and_loaded_result(
     device_app: LoadApp, response
 ) -> None:
     app = device_app
-    app.adapter.load.return_value = make_record(
-        RuntimeCfg(dev={"new": FakeDeviceInfo(address="fake", label="jpa_rf_dev")})
-    )
+    app.adapter.load.return_value = make_record(RuntimeCfg(dev={"jpa_rf_dev": "new"}))
     if isinstance(response, Exception):
         app.options.side_effect = response
     else:
         app.options.return_value = response
     before = app.cfg.observe()
     inputs = app.cfg.snapshot_inputs()
-    outcome = app.service.load_result(LoadPermit("tab"), "result.hdf5")
+    outcome = app.service.load_result("tab", "result.hdf5")
     assert outcome.cfg_backfill == "not_applied"
     assert app.cfg.observe() == before
     assert app.cfg.snapshot_inputs() == inputs
-    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value
+    assert app.state.get_tab("tab").run.result is app.adapter.load.return_value[0]
+    assert app.state.get_tab("tab").run.metadata == app.adapter.load.return_value[1]
     app.cfg.edit(before.ref.revision, (CfgEdit(("reps",), 9),))
     assert app.cfg.accept(app.cfg.observe().ref.revision).values["reps"] == 9
 
@@ -259,7 +270,7 @@ def test_reentrant_load_does_not_publish_cfg_or_replace_result(app: LoadApp) -> 
         if observation.ref == before.ref:
             return
         try:
-            app.service.load_result(LoadPermit("tab"), "result.hdf5")
+            app.service.load_result("tab", "result.hdf5")
         except CfgPreconditionError as exc:
             attempts.append(exc)
 

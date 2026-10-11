@@ -62,7 +62,7 @@ class BadgeProvider:
 def attached_form(
     schema: CfgSchema, ctrl: MagicMock, rendering: RecordingRenderers
 ) -> Generator[CfgFormWidget]:
-    draft = MeasureCfgBindings(ctrl).new_draft(schema)
+    draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget(renderers=rendering.registry)
     try:
         form.attach(draft)

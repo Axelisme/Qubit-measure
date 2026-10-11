@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationInfo
 from qick.asm_v2 import QickParam
@@ -10,14 +10,15 @@ from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context import LibrarySnapshot
 
 
 def resolve_module_ref(value: Any, info: ValidationInfo) -> Any:
     if isinstance(value, str):
         if info.context is None:
             raise ValueError("ModuleLibrary context not found")
-        return cast("ModuleLibrary", info.context["ml"]).get_module(value)
+        library: LibrarySnapshot = info.context["ml"]
+        return library.get_module(value)
     return value
 
 

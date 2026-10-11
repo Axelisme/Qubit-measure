@@ -4,7 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter
-from ruamel.yaml import YAML
 
 from zcu_tools.datafile import (
     JsonObject,
@@ -16,6 +15,7 @@ from zcu_tools.resources.entry import (
     SetupView,
 )
 
+from ._module_cfg import convert_module_cfg
 from .errors import MigrationInputError
 from .evidence import has_legacy_expression
 from .models import (
@@ -177,77 +177,6 @@ def _map_parameters(
             draft.set("general.ext", ext)
 
 
-def _defer_modules(
-    session: MigrationSession,
-    source: Path,
-    target: Path,
-    mapping: MigrationMapping,
-    view: SetupView | PointView | None,
-) -> None:
-    if not source.is_file():
-        return
-    source = contained_path(source, session.manifest.report.source.result_path)
-    session.baseline(source)
-    envelope = _YAML_MAP.validate_python(
-        YAML(typ="safe").load(source.read_text(encoding="utf-8")), strict=True
-    )
-    if "modules" not in envelope or "waveforms" not in envelope:
-        raise MigrationInputError(f"{source}: expected waveforms/modules envelope")
-    modules = _YAML_MAP.validate_python(envelope["modules"], strict=True)
-    waveforms = _YAML_MAP.validate_python(envelope["waveforms"], strict=True)
-    for name in waveforms:
-        record_pending(
-            session, source, f"waveforms.{name}", "Legacy waveform; 由 4a 轉換"
-        )
-    for name in envelope.keys() - {"modules", "waveforms"}:
-        record_pending(session, source, name, "Unknown legacy library root; 由 4a 轉換")
-    references: dict[str, str] = {}
-    for rule in mapping.module_rules:
-        if rule.old_name in modules and rule.reference_path is not None:
-            references.setdefault(rule.reference_path, rule.target_path)
-    if view is not None and references:
-        with view.edit() as draft:
-            for path, reference in references.items():
-                draft.set(path, reference)
-    for name in modules:
-        rule = next(
-            (rule for rule in mapping.module_rules if rule.old_name == name), None
-        )
-        reason = (
-            f"{rule.reason}; 由 4a 轉換"
-            if rule is not None
-            else ("Unknown legacy module; no inferred destination; 由 4a 轉換")
-        )
-        if rule is not None and rule.reference_path is not None:
-            reason += (
-                f"; {rule.reference_path} references {references[rule.reference_path]}"
-            )
-        record_pending(session, source, f"modules.{name}", reason)
-        report = session.manifest.report
-        items = tuple(
-            item
-            for item in report.key_mappings
-            if (item.old_file, item.old_key) != (source, name)
-        )
-        session.report(
-            replace(
-                report,
-                key_mappings=(
-                    *items,
-                    KeyMappingItem(
-                        old_file=source,
-                        old_key=name,
-                        new_file=target,
-                        new_path=rule.target_path if rule is not None else None,
-                        action="module",
-                        reason=reason,
-                    ),
-                ),
-            )
-        )
-    session.baseline(source)
-
-
 def _convert_context(
     session: MigrationSession,
     entry: ResultEntry | None,
@@ -277,12 +206,12 @@ def _convert_context(
             else entry.new_point(label)
         )
     _map_parameters(session, source, target, values, mapping, view)
-    _defer_modules(
+    convert_module_cfg(
         session,
-        candidate.parent / "module_cfg.yaml",
-        target.parent / "module_cfg.yaml",
-        mapping,
-        view,
+        entry=entry,
+        label=None if is_setup else label,
+        source=candidate.parent / "module_cfg.yaml",
+        mapping=mapping,
     )
     session.baseline(source)
 
@@ -294,7 +223,7 @@ def convert_parameters(
 
     session owns progress/report and sources; entry is its handle or None in a new
     dry-run; mapping provides registered seeds and working-unit key decisions.
-    Preserve unknown/expressions in ext, defer module cfg and copy params bytes.
+    Preserve unknown/expressions in ext, convert typed module cfg and copy params bytes.
     Completed parameters are not rewritten. Checkpoint completion; input/schema
     and I/O failures propagate without modifying the old result tree."""
     if session.manifest.parameters_complete:

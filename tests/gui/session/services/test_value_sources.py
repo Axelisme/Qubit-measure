@@ -16,14 +16,14 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+
+from tests.gui.app.measure.remote._helpers import make_ctx
 
 
 def _state() -> State:
     return State(
         SessionEnv(
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=make_ctx().parameters,
             soc=None,
             soccfg=None,
             chip_name="chip",
@@ -54,7 +54,7 @@ def test_context_sources_read_live_context_values() -> None:
     assert registry.get_as("project.result_dir", str) == "/result"
 
     state.set_context(dataclasses.replace(state.session_env, chip_name="chip2"))
-    bus.emit(ContextSwitchedPayload(md=state.session_env.md, ml=state.session_env.ml))
+    bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
 
     assert registry.get_as("context.chip_name", str) == "chip2"
 

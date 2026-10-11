@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
@@ -8,6 +8,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickState,
     fold_initial_lines,
 )
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -15,15 +16,17 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import EvalValue
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
 from zcu_lab.v2._support.measure.flux_pick_plugin import (
     FluxPickPlugin,
@@ -38,7 +41,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import flux_range, qub_freq_range
+from zcu_lab.v2._support.measure.seeds import flux_range, literal, qub_freq_range
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
 if TYPE_CHECKING:
@@ -86,9 +89,9 @@ class FluxDepAdapter(
             "Needs a qubit-probe pulse module and a pulse-readout module; "
             "references a ModuleLibrary waveform named 'ro_waveform' when "
             "present. Optionally references a calibrated reset module. Also "
-            "needs a flux device reference 'flux_dev' (a connected device, "
-            "defaulting to a registered device named 'flux' and falling back "
-            "to 'flux_yoko') — a device, not a library entry."
+            "needs a flux device name 'flux_dev' ($flux_dev resolves "
+            "from the alias table with no fallback) — "
+            "a device, not a library entry."
         ),
         typical_writeback=(
             "Interactive analysis (not a fit): after the run, the user drags "
@@ -119,7 +122,11 @@ class FluxDepAdapter(
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FluxDepRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqFluxExp().run(cfg, context=context)
@@ -129,6 +136,13 @@ class FluxDepAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
+            )
             .reset(optional=True)
             .pulse(
                 "qub_pulse",
@@ -137,11 +151,10 @@ class FluxDepAdapter(
                 locked={"freq": 0.0},
             )
             .readout()
-            .device_from_value_source(
+            .device(
                 "flux_dev",
                 label="Flux Device",
-                source_key="device.flux.name",
-                fallback="flux_yoko",
+                default=literal(EvalValue("$flux_dev")),
             )
             .relax_delay(1.0)
             .sweep(
@@ -163,11 +176,27 @@ class FluxDepAdapter(
     def make_interactive_plugin(
         self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots
     ) -> FluxPickPlugin:
+        """Build a phase-aware picker from the fixed Run/Load result source.
+
+        req.parameters=None or absent/null $qubit.flux_half/flux_int uses the
+        line owner's defaults. A supplied capture resolves those paths using
+        its fixed aliases; scalar, alias and source failures propagate. No live
+        context or legacy md/ml is read. plots receives the pick figure on Done.
+        """
         result = req.run_result.result
         inputs = FluxPickInputs(result.signals, result.values, result.freqs)
-        half, integer = fold_initial_lines(
-            inputs.dev_values, req.md.get("flx_half"), req.md.get("flx_int")
+        parameters = req.parameters
+        flux_half = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "$qubit.flux_half")
         )
+        flux_int = (
+            None
+            if parameters is None
+            else optional_parameter_float(parameters, "$qubit.flux_int")
+        )
+        half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
         # Two-tone spectra may carry useful phase information.
         return FluxPickPlugin(
             inputs,
@@ -197,37 +226,22 @@ class FluxDepAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
-                target_name="flx_half",
+            ParameterWriteback(
+                target_name="$qubit.flux_half",
                 description="Half-flux (Φ₀/2) sweet-spot device value",
                 proposed_value=result.flx_half,
             ),
-            MetaDictWriteback(
-                target_name="flx_int",
+            ParameterWriteback(
+                target_name="$qubit.flux_int",
                 description="Integer-flux sweet-spot device value",
                 proposed_value=result.flx_int,
             ),
-            MetaDictWriteback(
-                target_name="flx_period",
+            ParameterWriteback(
+                target_name="$qubit.flux_period",
                 description="Flux period (device units) = 2·|flx_int − flx_half|",
                 proposed_value=result.flx_period,
             ),
         ]
-
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FreqFluxCfg:
-        cfg_raw = dict(raw_cfg)
-        dev_raw = cfg_raw.pop("dev")
-        if not isinstance(dev_raw, dict):
-            raise RuntimeError("FluxDep dev section must lower to a dict")
-        dev_patch: dict[str, dict[str, str]] = {}
-        for label_key, device_name in dev_raw.items():
-            if not isinstance(device_name, str) or not device_name:
-                raise RuntimeError(
-                    f"FluxDep dev.{label_key} must be a non-empty device name"
-                )
-            dev_patch[device_name] = {"label": label_key}
-        cfg_raw["dev"] = dev_patch
-        return super().build_exp_cfg(cfg_raw, req)
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_flux"

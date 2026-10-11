@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 
 if TYPE_CHECKING:
+    from zcu_tools.datafile import AnalysisDocument, RunMetadata
+    from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
+    from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
 
 from .interactive import InteractivePluginProvider
@@ -69,9 +72,10 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles
-    every adapter as an opaque ``ExpAdapterProtocol`` and never narrows run /
-    analyze / writeback result types (they cross Qt ``Signal(object)``
-    boundaries as plain objects). The cross-method type linkage that pyright
+    every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
+    results remain opaque. Native acquisition evidence checks only the RunRecord
+    envelope described by run(), not its concrete cfg/result types. Results
+    cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
     ``BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]``.
     """
@@ -80,6 +84,11 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
     # adapter overriding it) must annotate this as ``ClassVar`` too, or pyright
     # rejects the Protocol conformance.
     capabilities: ClassVar[AdapterCapabilities]
+    # Declaring persistence spec tag for acquisition metadata; None means this
+    # adapter does not produce native run evidence. Declaring a tag opts into
+    # run()'s RunRecord envelope contract when the tab has a saved origin.
+    # Never infer it from a name.
+    experiment_tag: ClassVar[str | None]
 
     @classmethod
     def guide(cls) -> AdapterGuide:
@@ -103,18 +112,43 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Build the analyze parameter instance presented to the user."""
         ...
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> Any:
-        """Execute detached resolved inputs; never resolve from live context."""
+        """Execute detached resolved inputs; never resolve from live context.
+
+        req provides accepted device/SoC inputs; raw_cfg contains the accepted
+        lowered cfg, and context owns this acquisition's plots and stop signal.
+        With experiment_tag set and a saved tab origin, return RunRecord(cfg,
+        result) for native evidence. A bare result then raises TypeError at the
+        Run publication boundary and publishes neither result nor metadata.
+        Without the tag or saved origin, the framework does not manufacture
+        acquisition metadata and retains the adapter's opaque result contract.
+        Acquisition errors follow the operation's terminal policy: without
+        accepted user cancellation they fail the operation. Accepted cancellation
+        may instead produce a cancelled outcome; Schedule errors remain failures.
+        """
         ...
 
-    def load(self, req: LoadDataRequest) -> Any:
-        """Load a canonical result file and return its run-result object."""
+    def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
+        """Read the exact native req.data_path and return (record, history).
+
+        The record stays adapter-owned and opaque to the framework. History is
+        the original RunMetadata, including identity, times and source. Do not
+        recapture it from req.parameters. Raise NotImplementedError for an
+        unsupported core, ValueError for invalid native data and OSError for
+        unreadable files; other core failures propagate.
+        """
         ...
 
     def analyze(self, req: AnalyzeRequest[Any, Any], *, plots: Plots) -> Any:
@@ -146,6 +180,31 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         self, req: PostWritebackRequest[Any, Any, Any]
     ) -> Sequence[WritebackItem]:
         """Return the writeback items proposed from one post-analysis result."""
+        ...
+
+    def capture_analysis_document(
+        self,
+        result: object,
+        parameters: object | None,
+        *,
+        pane: Literal["analysis", "post_analysis"],
+    ) -> AnalysisDocument:
+        """Capture a completed result and its historical dataclass inputs.
+
+        None parameters means no inputs. Return finite JSON without figures or
+        arrays; invalid result/input types or values raise TypeError/ValueError.
+        The returned document isolates containers at the datafile boundary.
+        No live-context lookup or I/O. BaseAdapter supplies the implementation.
+        """
+        ...
+
+    def prepare_save_data(self, result: object, *, comment: str) -> PreparedRunData:
+        """Prepare this experiment's RunRecord for both native data writers.
+
+        No I/O or metadata capture occurs. Invalid record/cfg/Result/comment or
+        a missing persistence declaration raises TypeError, ValueError or
+        NotImplementedError. Do not mutate result arrays during saving.
+        """
         ...
 
     def save(self, req: SaveDataRequest[Any]) -> None:

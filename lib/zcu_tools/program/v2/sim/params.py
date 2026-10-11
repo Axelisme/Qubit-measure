@@ -36,8 +36,7 @@ class SimParams(ConfigBase):
     """Physical parameters for the TLS Bloch-equation mock simulator.
 
     All frequency fields are in GHz.  All time fields (T1, T2, T2_star) are in µs.
-    The choice of µs follows the experiment-layer convention used throughout
-    experiment/v2/autofluxdep/{t1,t2echo,t2ramsey}.py.
+    The choice of µs follows the experiment-layer time convention.
 
     Fields
     ------

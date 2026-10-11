@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from copy import deepcopy
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -46,7 +46,7 @@ class FakeAnalyzeParams:
     threshold: Annotated[float, ParamMeta(label="Threshold", decimals=2)] = 0.5
 
 
-def _require_int(raw_cfg: dict[str, object], key: str) -> int:
+def _require_int(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> int:
     value = raw_cfg.get(key)
     if not isinstance(value, int):
         raise RuntimeError(
@@ -55,7 +55,7 @@ def _require_int(raw_cfg: dict[str, object], key: str) -> int:
     return value
 
 
-def _require_float(raw_cfg: dict[str, object], key: str) -> float:
+def _require_float(raw_cfg: Mapping[str, ExperimentCfgValue], key: str) -> float:
     value = raw_cfg.get(key)
     if not isinstance(value, (int, float)):
         raise RuntimeError(
@@ -90,18 +90,25 @@ class FakeAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeExpCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FakeExpCfg:
+        """Build the stub from explicit fields; it uses no device roles or settings."""
+        del req
         return FakeExpCfg(
             reps=_require_int(raw_cfg, "reps"),
             rounds=_require_int(raw_cfg, "rounds"),
             gain=_require_float(raw_cfg, "gain"),
             noise_scale=_require_float(raw_cfg, "noise_scale"),
             sweep=SweepCfg.model_validate(raw_cfg["sweep"]),
-            dev=deepcopy(req.device_snapshot),
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FakeRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeExp().run(cfg, context=context)
@@ -119,10 +126,10 @@ class FakeAdapter(
 
     def get_writeback_items(
         self, req: WritebackRequest[FakeRunResult, FakeAnalyzeResult]
-    ) -> Sequence[MetaDictWriteback]:
+    ) -> Sequence[ParameterWriteback]:
         return [
-            MetaDictWriteback(
-                target_name="fake_peak",
+            ParameterWriteback(
+                target_name="general.ext.fake_peak",
                 description="Fake peak value from FakeAdapter analysis",
                 proposed_value=req.analyze_result.peak,
             )

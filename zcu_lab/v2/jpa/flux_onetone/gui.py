@@ -8,8 +8,10 @@ operator guide. The core experiment lives in
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -20,14 +22,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import EvalValue
 
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_flux_dev
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, res_freq_range
+from zcu_lab.v2._support.measure.seeds import custom, literal, res_freq_range
 from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
 from zcu_lab.v2.jpa.flux_onetone.core import (
     OneToneFluxCfg,
@@ -67,17 +69,16 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             "interface) before running."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_flux' — a "
-            "previously accepted JPA flux device value, preferred as the flux "
-            "sweep centre; 'r_f' — resonator frequency, centring the readout "
-            "frequency sweep; 'rf_w' — linewidth, setting the span as "
-            "r_f ± 1.5*rf_w; 'res_ch' / 'ro_ch' — drive / ADC channels; "
-            "'timeFly' — cable time-of-flight for the trigger offset."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a pulse-readout module (e.g. 'readout_rf'); references a "
-            "ModuleLibrary waveform named 'ro_waveform' when present. "
-            "Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "No writeback — this adapter has no analysis step (the "
@@ -87,7 +88,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
         ),
         recommended=(
             "No analysis options. Typical sweep: JPA flux device value ~101 "
-            "points around the seeded centre (best_jpa_flux when present), "
+            "points around the seeded centre ($jpa.flux), "
             "readout frequency ~101 points spanning 1.5 linewidths around "
             "'r_f'. Confirm the JPA pump state yourself before every run. "
             "Survey the map wide first, then narrow the ranges around the "
@@ -99,6 +100,13 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
+            )
             .reset(optional=True)
             .readout(
                 pulse_only=True,
@@ -112,7 +120,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(
@@ -133,19 +141,12 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             .build()
         )
 
-    def build_exp_cfg(
-        self, raw_cfg: dict[str, object], req: RunRequest
-    ) -> OneToneFluxCfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_flux_dev(cfg_raw, req.device_snapshot)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        # Pure preflight over the detached request snapshot.
-        lower_jpa_flux_dev(raw_cfg, req.device_snapshot)
-
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> JpaFluxOneToneRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, OneToneFluxExp().run(cfg, context=context))

@@ -212,7 +212,9 @@ def _coerce_numeric_column(samples: pd.DataFrame, column: str) -> NDArray[np.flo
             data={"column": column, "indexes": non_real_indexes},
         )
     try:
-        series = pd.to_numeric(source, errors="raise")
+        # pandas' untyped converter also accepts scalars and arrays; this boundary
+        # always consumes a column and retains its Series representation.
+        series = pd.Series(pd.to_numeric(source, errors="raise"))
         return series.to_numpy(dtype=np.dtype(np.float64))
     except (TypeError, ValueError, OverflowError) as exc:
         raise SampleTableV2Error(
@@ -553,6 +555,6 @@ def migrate_sample_table_v2(
         output[column] = samples[column].to_numpy()
     coordinate = [c for c in SAMPLE_COORDINATE_COLUMNS if c in output.columns]
     measurement = [c for c in samples.columns if c not in mapped]
-    output = output[coordinate + measurement]
+    output = output.reindex(columns=coordinate + measurement)
     validate_sample_table_v2(output, allow_empty=True)
     return output

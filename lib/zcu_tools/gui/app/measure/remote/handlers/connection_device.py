@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -76,42 +76,6 @@ def h_simulation_initialize(
     return {"operation_id": operation_id}
 
 
-def h_project_apply(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from zcu_tools.gui.session.services.project_settings import ProjectRequest
-
-    # The handler runs on the GUI owner thread: read current identity, resolve
-    # omitted fields and apply the result in this single RPC, never from MCP.
-    has_project = adapter.ctrl.has_project()
-    current = adapter.ctrl.get_session_env() if has_project else None
-    chip_raw = params.get("chip_name")
-    qub_raw = params.get("qub_name")
-    res_raw = params.get("res_name")
-    if current is None and (chip_raw is None or qub_raw is None or res_raw is None):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            "chip_name, qub_name and res_name are required for a first project",
-            reason="missing_project_fields",
-        )
-    if current is None:
-        chip, qub, res = str(chip_raw), str(qub_raw), str(res_raw)
-    else:
-        chip = str(chip_raw) if chip_raw is not None else current.chip_name
-        qub = str(qub_raw) if qub_raw is not None else current.qub_name
-        res = str(res_raw) if res_raw is not None else current.res_name
-
-    scope_id_raw = params.get("scope_id")
-    if scope_id_raw is not None:
-        scope_id = str(scope_id_raw)
-    elif current is not None and (chip, qub) == (current.chip_name, current.qub_name):
-        scope_id = adapter.ctrl.setup_control.get_setup_preferences().scope_id or None
-    else:
-        scope_id = None
-    req = ProjectRequest(chip_name=chip, qub_name=qub, res_name=res, scope_id=scope_id)
-    return adapter.ctrl.apply_project(req)
-
-
 def h_device_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -156,16 +120,16 @@ def h_device_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
     name = str(params["name"])
-    updates = cast(dict[str, object], params["updates"])  # ParamSpec validated
+    cfg = params["cfg"]  # ParamSpec validated object; Info owns field validation.
     dev = adapter.device_control
     info = dev.get_device_info(name)
     if info is None:
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED,
-            f"Device {name!r} has no live info to update",
+            f"Device {name!r} has no Info model for setup",
         )
     try:
-        updated = info.with_updates(**dict(updates))
+        updated = type(info).model_validate(cfg)
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     operation_id = dev.start_setup_device(SetupDeviceRequest(name=name, info=updated))

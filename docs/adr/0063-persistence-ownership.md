@@ -13,12 +13,47 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 ### 保存目的與 owner
 
 - App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 只提供單檔 I/O、default degradation 與 replace。measure GUI 目前在 lifecycle close 保存，autofluxdep GUI 另有 debounce 與 terminal 保存；shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
-- Experiment Data File 保存一個 Experiment Result。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
+- Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow Run Result Artifact 保存跨 node／flux 的資料與 audit。autofluxdep 的 lifecycle／`RunStore` 擁有 run-scoped artifact；node 經 observer 與 store 提交結果，不直接管理 HDF5。它不是單一 Experiment Result。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 新參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。這些能力尚未接線到現行 MetaDict、ModuleLibrary、GUI 或 MCP，也不提供 ledger producer。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。GUI ContextService 持有 entry／point／library，GUI 和 MCP 透過同一組 owner commands 讀寫。Acquired 由前端 acquisition owner 產生，saved 由共用 saver 產生，accepted 由 WritebackService 或 Notebook SavedRun 產生，entry 不推導這些事件。
+- Entry 的 authored alias 表由 `resources.entry` 保存為 `aliases.yaml`，不是 point、setup、memento 或 ledger。ContextService 擁有有序表的語法、初始化與 Apply 時機，resources 擁有檔案表示及單檔原子替換。Notebook 不讀這份 GUI 表，MCP 的單次 aliases／target 覆寫不保存它。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；`SampleTable` 只存 schema-free CSV。
-- Waveform asset 擁有播放 arrays、reference time axis 和 duration。ModuleLibrary waveform cfg 只保存 asset key，不另存可覆寫的播放長度。program 在完整 asset duration 取樣到硬體 timing；調整時間內容須改 asset 或 recipe，而不是在 cfg 伸縮或任意裁切。
+- Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
+
+### Run 輸出位置與 writer 權責
+
+`resources.entry.ResultEntry` 提供條目的不可變身分，以及 exact Result／Database paths 與 scoped ledger。小資料在 `results/<name>/`，量測輸出在 `Database/<name>/`。`SaveLayout` 根據這些 paths、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+
+新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<run_id>/`。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域副本，對等 paths 使用同一份 bytes。Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取新檔名，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+
+`experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。上層保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
+
+RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
+
+`RunMetadata.device_snapshot` 保存 Run 開始前讀取的全部已連線 device 設定。GUI 在取得 operation hardware lease 後、adapter.run 前讀取。Notebook 在使用者的程序內同步執行，由 caller 擁有資源，不新增 lease；snapshot 在建立 RunContext 後、core.run 前讀取。
+
+兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。
+
+Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
+
+Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
+
+`datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.run_saving.save_artifacts` 接 typed data、Figure 與 AnalysisDocument，逐成員編碼一次，逐輸出隔離失敗，回傳一次 SaveReport 並追加 saved。`NotebookExperiment.save_run` 綁定 PointView，使用 entry owner 的 capture_point_storage，保存 adapter 驗證過的 acquisition source。SavedRun 固定該 run 的資料、context 與 evidence，PartialSaveError 保留同一 handle 供明確再存，不建立恢復收據或自動 retry。
+
+GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
+
+GUI Native Load 透過 experiment owner 一次還原 typed record 與完整 RunMetadata，保留原 run_id、時間、completion 和最近成功 Labber path，不產生 acquired。相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
+
+Load Data 同時提供 File 選檔與 opened entry ledger 清單。清單按 run_id 合併 acquired／saved，只有成功 native 輸出能作為 data_path，取最近成功路徑。Recorded at 是首 acquired 或首 saved 的事件時間，不冒充量測開始時間。查詢不讀 data.h5、不 stat 或寫事件，損壞 ledger 明確失敗。
+
+### Entry alias 表
+
+`EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 是明確空表，只有缺檔才使用 caller preset；格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+
+Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。EMPTY 只改 memory；普通 `set_alias_rows` 也只改 memory。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+
+每次開 entry 載入自己的表。無檔則重設 caller preset，重新啟用該 entry 第一份非空 point 的 primary 唯一候選初始化。已保存的空表或空列不自填，切 point 不重讀檔或換表。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
 
 ### 資料表示與完整性
 
@@ -26,9 +61,15 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色由 `zcu_lab.components` 擁有。Lib 外的組合根顯式傳入共用 ComponentRegistry，在 startup 註冊，不在 import 或 reload 時註冊。`.importlinter` 的 `entry-definitions-composition-only` 與 `framework-no-user` 禁止框架反向 import 定義。使用者 model 可用 validator 處理舊欄位；框架不猜兼容規則。
 
-DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。這讓 model 的讀檔轉換在下一次 commit 寫回，同時保留未改節點與 forward-minor 的剩餘未知欄位。Forbid／ignore 的 typed snapshot 隱藏未來欄位，allow model 保留它們。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
+DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
 
-Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。單一 Result 的 canonical one-shot grouped file 使用共同 grid、一份 shared metadata 與明確 variable-to-channel mapping；必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
+Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入；forward-minor 保留容器層剩餘未知欄位，不覆寫元件或 nested model 的 extra 策略。
+
+任何 minor 都由元件定義者的 model 決定 defaults、validators 與舊寫法演進。Forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們；ignore 丟棄的欄位在非空 commit 時移除。
+
+框架不提供版本遷移鏈或相容 loader。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
+
+Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。正規 data.h5 的各 Data Variable 可以使用不同 grid，共用一份結果身分與 metadata。Labber 的 canonical one-shot grouped 輸出才要求共同 grid 與明確 variable-to-channel mapping。必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
 結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 variables 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
 
@@ -38,17 +79,17 @@ Memento read／decode 失敗可回 fresh default，並回報 restore outcome；r
 
 Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／journal 失敗會使 run 失敗，並保留此前已 flush 的證據。Terminal export／report 失敗要顯示，但不把成功量測 row 改標為 measurement failure。Stop 仍嘗試 finalize；取消請求不保證 finalize 成功，也不表示 rollback。單檔 replace、HDF5 flush 和 journal append 不是跨檔交易或掉電持久保證；不可從 manifest 的 accepted 標記推導任意 crash 後可安全 resume。跨檔失敗窗口的讀取、修復和 resume 規則尚未驗證。
 
-Experiment saver 寫 caller 指定的 exact path，若檔案已存在則拒絕；需要 unique filename 或覆蓋政策時，由 GUI／runner／notebook 在呼叫 saver 前決定 final path。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測；manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
+Experiment writer 寫 caller 指定的 exact path。Labber 拒絕既有目的地；native 預設也拒絕，只有明確 replace=True 才用同目錄 temp、關檔後 atomic replace，失敗清 temp 並保留舊目的地。SaveLayout 的 Labber suffix 只避讓當時已存在的檔案，不是跨程序 filename reservation；collision 由上層回報該輸出失敗，不隱藏 retry。單檔 replace 與 ledger append 不是跨檔交易，也不保證掉電恢復。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測。Workflow manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
 
 Normal runtime 只接受各自契約指定的格式，不猜測 legacy shape／unit；版本必須與 artifact kind 一起判斷，合法 streaming v1 不因數字小於 one-shot v2 而視為同類 legacy。Experiment 的舊 converter 和 GUI fallback 已退休。SampleTable legacy 資料只能由 caller 明確呼叫 pure DataFrame conversion；此函式不自動改寫 CSV。QubitParams 的 project identity migration 由其 owner 管理，不因本 ADR 授權寫入使用者資料，也不建立跨資料類型的共用 migration layer。
 
 ### 共享資料與引用
 
-QubitParams 的 caller 以 typed 語意方法讀寫；更新一個 section 保留其它已知和未知 section。Timestamp 只表示 section 修改時間，不是 dependency provenance 或自動失效。單一 typed module 不等於跨程序互斥，也不代表 mtime 同步可解決多 writer 衝突。
+`params.json` 的 QubitParams 與工作點的 `Q1.params` 是獨立資料，不自動同步。QubitParams 的 caller 以 typed 語意方法讀寫；更新一個 section 保留其它已知和未知 section。Timestamp 只表示 section 修改時間，不是 dependency provenance 或自動失效。單一 typed module 不等於跨程序互斥，也不代表 mtime 同步可解決多 writer 衝突。
 
 SampleTable v2 明示 `dev_value` 的 A／V base unit，flux 與 row frame 由獨立欄位表示。Flux 解析依 explicit、row-frame、fallback-frame 順序，並標明每列來源；fallback frame 必須與該列 unit 一致。自描述 unit 不保證缺少 flux／frame 的列能不靠外部輸入算出 flux。分析用 correction／alignment 不默默寫回原始樣品資料，也不自動修正 explicit flux。Autofluxdep export 用 run 建立時的 unit snapshot，不以 export 當下的 live device state 重讀舊結果。
 
-Asset repository 的 rename／delete 只處理資產，不掃描或改寫 ModuleLibrary 的 nested references。舊 key 可能因此成為 dangling reference；使用端解析缺失資產時明確失敗，由 caller／使用者修正引用。這避免 repository 反向理解 experiment cfg，也避免跨 owner 批次寫入。凍結 cfg key 不等於凍結該 key 所指的 asset bytes；本決策不引入 asset versioning、copy-on-run 或自動引用遷移。
+Asset repository 的 rename／delete 只處理資產，不掃描或改寫 ModuleLibrary 的 nested references。舊 key 可能因此成為 dangling reference；使用端解析缺失資產時明確失敗，由 caller／使用者修正引用。這避免 repository 反向理解 experiment cfg，也避免跨 owner 批次寫入。Capture-bound assets.path_for 驗 key 與檔存在，不載入 samples。Native cfg 的 path 以本機絕對路徑與 POSIX separators 序列化。Data.h5 不附帶 NPZ。移動 asset 或跨 OS 後，caller 須明確重定位 path；讀量測 arrays 不需要重播。覆寫同 path 會改變之後播放的 bytes。本決策不引入 asset versioning、copy-on-run、packaging 或自動引用遷移。
 
 ## 後果
 

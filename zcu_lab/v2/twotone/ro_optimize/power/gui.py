@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -28,7 +29,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import scaled_path_seed
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
     PowerAnalyzeOptions,
@@ -112,7 +113,9 @@ class RoOptPowerAdapter(
             .reset(optional=True)
             .pulse("qub_pulse", role_id="pi_pulse")
             .readout(pulse_only=True, locked={"pulse_cfg.gain": 0.0})
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .sweep(
                 "gain",
                 label="Readout gain (a.u.)",
@@ -127,7 +130,7 @@ class RoOptPowerAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: dict[str, object],
+        raw_cfg: Mapping[str, ExperimentCfgValue],
         *,
         context: RunContext,
     ) -> RoOptPowerRunResult:
@@ -156,7 +159,7 @@ class RoOptPowerAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,

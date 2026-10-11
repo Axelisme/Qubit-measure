@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from pydantic import TypeAdapter
 
 from zcu_tools.datafile import JsonObject, json_values_equal
+from zcu_tools.resources.context.library import library_key_kind
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -21,6 +22,7 @@ from .models import (
     MigrationReport,
     MigrationRequest,
     MigrationSource,
+    ModuleRule,
 )
 from .paths import contained_path, validate_segment
 from .recovery import validate_owned_state
@@ -57,13 +59,28 @@ def validate_mapping(mapping: MigrationMapping) -> None:
             )
         if any(not key for key in rule.requires_keys):
             raise MigrationInputError(f"{rule.old_key}: empty evidence key")
-    names: set[str] = set()
-    for module in mapping.module_rules:
-        if not module.old_name or module.old_name in names or not module.target_path:
+    _validate_library_rules(mapping.module_rules)
+
+
+def _validate_library_rules(rules: tuple[ModuleRule, ...]) -> None:
+    names: set[tuple[str, str]] = set()
+    for module in rules:
+        identity = (module.kind, module.old_name)
+        if not module.old_name or identity in names:
+            raise MigrationInputError(f"{identity!r}: duplicate/empty library key")
+        names.add(identity)
+        try:
+            target_kind = library_key_kind(module.target_path)
+        except ValueError as exc:
+            raise MigrationInputError(f"{identity!r}: {exc}") from exc
+        if module.kind != target_kind:
             raise MigrationInputError(
-                f"{module.old_name!r}: invalid module declaration"
+                f"{identity!r}: source/target library family differs"
             )
-        names.add(module.old_name)
+        if module.kind == "waveform" and module.reference_path is not None:
+            raise MigrationInputError(
+                f"{identity!r}: waveform cannot supply a module slot"
+            )
 
 
 def _protect_result_root(root: Path, *paths: Path) -> None:
@@ -312,7 +329,7 @@ def prepare_session(
     else:
         manifest, entry = _new_session(request, mapping, source, destination)
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
-    validate_owned_state(session)
+    validate_owned_state(session, entry=entry)
     session.checkpoint()
     publish_report(session)
     return session, entry

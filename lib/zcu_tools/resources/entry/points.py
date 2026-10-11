@@ -17,6 +17,8 @@ from .views import (
     GeneralView,
     add_component_to_draft,
     document_meta,
+    point_origin,
+    register_view_read,
     stage_component,
     stage_general,
 )
@@ -26,7 +28,10 @@ class PointView:
     """A bound point's cached working-unit values, independent of setup.
 
     Obtain a view from ResultEntry.use_point or new_point. Component and general
-    reads do no I/O. Unknown components or unset fields raise AttributeError.
+    reads do no I/O. Complex tags read as native complex scalars; manual
+    scalar writes encode through the core codec before schema validation.
+    Package snapshot/document reads retain raw YAML tags. Malformed tag reads
+    propagate the core codec error. Unknown components or unset fields raise AttributeError.
     Assignments and edit() commit only this point's document. Successful field
     writes clear cloned_from even when the value is unchanged. Call refresh()
     to observe disk edits; another view does not change this view's binding.
@@ -39,23 +44,43 @@ class PointView:
         *,
         ledger: Path,
         entry_id: str,
+        result_root: Path,
+        database_root: Path,
     ) -> None:
         """Bind one validated working-unit store without I/O.
 
         source is store's point.yaml path under the owning entry's points/label.
         The store owns single-file validation, conflict checks and persistence.
         ResultEntry supplies these dependencies; construction does not reload or
-        validate them. There are no shared setup or multi-file callbacks.
+        revalidate field values. Binding rejects components shadowing any public
+        SetupView/PointView/EditView member with ValueError naming the member.
+        ledger is this entry's records/ledger.jsonl and entry_id
+        its immutable UUID. result_root and database_root are the caller's owning
+        roots; they are resolved once. Complete clone identity is bound here,
+        including for directly constructed views. Cloning requires matching roots
+        and reloads the published source, not this cached snapshot. No later
+        identity registration is required. There are no multi-file callbacks.
+        ResultEntry's store callback rejects shadowing on refresh/mutation before
+        publication. With a caller-provided store, the caller supplies validate
+        for that subsequent lifecycle. Without it, refresh/mutation can publish
+        shadowing names; those components cannot be read as view attributes and
+        must be read through snapshot/document_value instead.
         """
         self._store = store
         self._source = source
         self._ledger = ledger
         self._entry_id = entry_id
-        _point_origin.register(self, source)
+        origin = _point_origin.PointOrigin(
+            source=source,
+            entry_id=entry_id,
+            result_root=result_root.resolve(),
+            database_root=database_root.resolve(),
+        )
+        register_view_read(self, store, source, origin=origin)
 
     @property
     def general(self) -> GeneralView:
-        """Return this point's cached creation time, description and YAML ext."""
+        """Return cached general fields; tagged ext leaves read as native complex."""
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager
@@ -108,18 +133,25 @@ class PointView:
         roles: Mapping[str, RoleSpec] | Sequence[str] | None = None,
         *,
         focus: str | None = None,
-        **explicit: str,
+        **explicit: str | None,
     ) -> RoleView:
         """Resolve only declared roles from this point's cached components.
 
         Explicit choices precede one matching focus, then RoleSpec.via or a
-        role-name string field on already resolved components.
-        None uses the caller-registered notebook shorthand. Errors identify the
-        role, focus, kind and reason. The returned name mapping stays fixed while
-        values follow this bound point's working-unit snapshot and edits.
+        role-name string field on already resolved components. An explicit None
+        means deliberately unbound, not inference; reading that declared role
+        raises RoleResolutionError.
+        None uses the caller-registered notebook shorthand. Automatic inference
+        with zero/multiple choices omits the role; its use then raises
+        RoleResolutionError. Explicit invalid choices and dangling/wrong-kind
+        targets fail here. Errors identify role, focus, kind and reason. The returned name mapping stays fixed while
+        values follow this bound point's working-unit snapshot and edits. Its
+        constructor origin also binds the returned roles to this entry/point.
         """
         names = resolve_names(self._store.snapshot().components, roles, focus, explicit)
-        return RoleView(names, self.__getattr__)
+        return RoleView(
+            names, self.__getattr__, origin=point_origin(self), roles=roles, focus=focus
+        )
 
     def meta(self, path: str) -> Provenance | None:
         """Return an independent cached source in working units, or None."""
@@ -136,7 +168,9 @@ class PointView:
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a complete registered component to this point, not its template.
 
-        name is an unreserved public identifier and kind is a registered kind.
+        name is a public identifier, not a keyword or a public member of
+        SetupView, PointView or EditView. Shadowing raises ValueError naming the
+        member. kind is a registered kind.
         fields are working-unit YAML values, including all required model fields.
         Original field validators and defaults run; references resolve only in
         this point, when resolve is called. Invalid names, schema values or

@@ -85,15 +85,6 @@ forbidden_modules =
     zcu_tools.device
     zcu_tools.notebook
 
-# ADR-0045: autofluxdep consumes shared owners, not the measure app.
-[importlinter:contract:autofluxdep-no-main]
-name = C5: autofluxdep does not depend on the measure app
-type = forbidden
-source_modules =
-    zcu_tools.gui.app.autofluxdep
-forbidden_modules =
-    zcu_tools.gui.app.measure
-
 # lib/zcu_tools/analysis/fluxdep/README.md: notebook and GUI are adapters of the
 # analysis kernel (formerly ADR-0028).
 [importlinter:contract:fluxdep-kernel-no-adapters]
@@ -141,7 +132,7 @@ type = layers
 layers =
     zcu_tools.gui : zcu_tools.notebook : zcu_tools.mcp
     zcu_tools.experiment
-    zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
+    zcu_tools.datafile : zcu_tools.device : zcu_tools.program : zcu_tools.analysis : zcu_tools.plotting : zcu_tools.simulate : zcu_tools.resources : zcu_tools.cfg_model : zcu_tools.core : zcu_tools.utils : zcu_tools.progress_bar : zcu_tools.qick_remote
 ignore_imports =
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
 
@@ -153,8 +144,6 @@ ancestors =
 depth = 0
 ignore_imports =
     zcu_tools.experiment.cfg_editing.** -> zcu_tools.gui.cfg
-    # Debt, see C10.
-    zcu_tools.resources.context.library -> zcu_tools.program.v2
 
 [importlinter:contract:stateful-independent]
 name = C10: stateful capability modules do not import each other
@@ -165,20 +154,15 @@ modules =
     zcu_tools.device
     zcu_tools.qick_remote
 ignore_imports =
-    # Debt: cfg schema moves to the cfg_model kernel; removed with storage-redesign's
-    # module library and the zcu_lab move (stage 2).
-    zcu_tools.resources.context.library -> zcu_tools.program.v2
     # Debt: program depends on cfg_model Protocols instead (stage 1, backlog).
     zcu_tools.program.v2.modules -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.base -> zcu_tools.resources.context
     zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.context
-    zcu_tools.program.v2.modules.waveform -> zcu_tools.resources.waveform_assets
-    zcu_tools.program.v2.sim.waveforms -> zcu_tools.resources.waveform_assets
     # Debt, see C12.
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
 [importlinter:contract:cfg-kernel-external-only]
-name = C11: the cfg_model kernel depends only on utils
+name = C11: the cfg_model kernel depends only on utils and core.waveform_format
 type = forbidden
 source_modules =
     zcu_tools.cfg_model
@@ -201,6 +185,7 @@ forbidden_modules =
 name = C12: stable tools do not depend on stateful capability modules
 type = forbidden
 source_modules =
+    zcu_tools.core
     zcu_tools.analysis
     zcu_tools.datafile
     zcu_tools.plotting
@@ -216,6 +201,28 @@ ignore_imports =
     # Debt: predict takes numeric parameters from its caller (backlog).
     zcu_tools.simulate.fluxonium.predict -> zcu_tools.resources.qubit_params
 
+# Stateless shared core does not depend on domain/runtime owners.
+[importlinter:contract:core-utils-only]
+name = C19: the shared core depends only on utils
+type = forbidden
+source_modules =
+    zcu_tools.core
+forbidden_modules =
+    zcu_tools.analysis
+    zcu_tools.cfg_model
+    zcu_tools.datafile
+    zcu_tools.device
+    zcu_tools.experiment
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    zcu_tools.plotting
+    zcu_tools.program
+    zcu_tools.progress_bar
+    zcu_tools.qick_remote
+    zcu_tools.resources
+    zcu_tools.simulate
+
 [importlinter:contract:mcp-remote-only]
 name = C13: mcp uses only the GUI remote contract
 type = forbidden
@@ -227,7 +234,6 @@ ignore_imports =
     # Not debt: the shared remote transport and each app's wire specs (ADR-0068).
     zcu_tools.mcp.** -> zcu_tools.gui.remote.**
     zcu_tools.mcp.** -> zcu_tools.gui.app.*.remote.**
-    zcu_tools.mcp.** -> zcu_tools.gui.app.autofluxdep.services.remote.**
     # Debt: logging setup is not part of the remote contract (backlog).
     zcu_tools.mcp.measure.server -> zcu_tools.gui.logging_setup
 

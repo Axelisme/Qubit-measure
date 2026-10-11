@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
+from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -16,7 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
     LoadDataRequest,
-    MetaDictWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SaveDataRequest,
@@ -25,10 +28,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import SweepValue
+from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_get_float
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -46,14 +48,10 @@ from zcu_lab.v2.fake.freq.core import (
 from zcu_lab.v2.onetone.freq.core import FreqAnalyzeOptions
 
 
-def _freq_sweep_default(ctx: SessionEnv) -> SweepValue:
-    r_f = md_get_float(ctx, "r_f", 6000.0)
-    rf_w_raw = ctx.md.get("rf_w")
-    rf_w = float(rf_w_raw) if isinstance(rf_w_raw, (int, float)) else None
-    half_span = rf_w * 5.0 if rf_w is not None else 200.0
+def _freq_sweep_default(_ctx: SessionEnv) -> SweepValue:
     return SweepValue(
-        start=r_f - half_span,
-        stop=r_f + half_span,
+        start=EvalValue("$resonator.freq - 5.0 * $resonator.kappa"),
+        stop=EvalValue("$resonator.freq + 5.0 * $resonator.kappa"),
         expts=201,
     )
 
@@ -178,18 +176,31 @@ class FakeFreqAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> FakeFreqCfg:
+    def build_exp_cfg(
+        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
+    ) -> FakeFreqCfg:
         return super().build_exp_cfg({**raw_cfg, "fast_mode": self._fast_mode}, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> FakeFreqRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FakeFreqExp(self._model_type, self._params).run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
-    def load(self, req: LoadDataRequest) -> FakeFreqRunResult:
-        return FakeFreqExp(self._model_type, self._params).load(Path(req.data_path))
+    def load(self, req: LoadDataRequest) -> tuple[FakeFreqRunResult, RunMetadata]:
+        """Read an exact native file with the configured core persistence spec.
+
+        Return typed cfg/Result and original full history, without recapture or
+        Labber fallback. Invalid native data raises ValueError; I/O errors
+        propagate. The tab parameter capture does not replace file history.
+        """
+        spec = FakeFreqExp(self._model_type, self._params).persistence_spec()
+        return load_run_with_metadata(Path(req.data_path), spec=spec)
 
     def analyze(
         self,
@@ -218,12 +229,12 @@ class FakeFreqAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="r_f",
                 description="Resonator frequency (MHz)",
                 proposed_value=result.freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="rf_w",
                 description="Resonator linewidth FWHM (MHz)",
                 proposed_value=result.fwhm,

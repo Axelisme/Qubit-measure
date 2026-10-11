@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
+from zcu_tools.resources.context import MetaDict
 from zcu_tools.resources.syncfile import auto_sync
 
 
 def test_syncfile_has_persistence_false_without_path() -> None:
     assert MetaDict().has_persistence is False
-    assert ModuleLibrary().has_persistence is False
 
 
 def test_syncfile_has_persistence_true_with_path(tmp_path) -> None:
     assert MetaDict(tmp_path / "meta.json").has_persistence is True
-    assert ModuleLibrary(tmp_path / "module_cfg.yaml").has_persistence is True
 
 
 def test_auto_sync_rejects_non_syncfile_receiver() -> None:

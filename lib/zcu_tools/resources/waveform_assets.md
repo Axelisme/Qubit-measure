@@ -1,8 +1,16 @@
 # `waveform_assets` 參考
 
-**Last updated:** 2026-10-01 — formula writes separate from inspection
+**Last updated:** 2026-10-07 — internal data, formula and NPZ ownership
 
 本檔是 [`waveform_assets.py`](waveform_assets.py) 的 owner 參考，記錄 `ArbWaveformDatabase` 的檔案格式、方法與約束。家族導覽見 [resources README](README.md)。
+
+公開 imports 仍從 `waveform_assets` 取得。它持有 Database 與 asset scope binding；內部責任分為：
+
+- [`_waveform_data.py`](_waveform_data.py)：資料型別、payload／array validation、numeric 限制與 preview arithmetic。
+- [`_waveform_formula.py`](_waveform_formula.py)：FormulaSegment／Recipe、受限 AST、SymPy evaluation 與 rendering。
+- [`_waveform_npz.py`](_waveform_npz.py)：NPZ archive 讀寫與內嵌 recipe JSON 解碼，JSON 編碼沿用 Recipe 的方法。
+
+Formula 與 NPZ 重用 data 的驗證規則。Data 只以型別註記引用 Recipe，不在 runtime 載入 formula，避免循環依賴。
 
 ## `ArbWaveformDatabase`
 
@@ -61,6 +69,8 @@ Formula 寫入方法 `create_from_formula`／`update_formula` 成功返回 `None
 ## 資產與 recipe 約束
 
 Data key 符合 `^[A-Za-z][A-Za-z0-9_]*$`，單一檔案為 `<data_key>.npz`。
+`core.waveform_format` 擁有 NPZ keys、arrays 與 JSON 語法驗證。Resources 管理實體 I/O 與 formula 語意，將格式錯誤轉成既有 ArbWaveformError，保留 reason、diagnostics 與 cause。Program/sim 只播放 samples，不重新驗 formula。
+`bound_info().path_for(key)` 回傳 capture-bound 絕對路徑，只驗 key 與檔存在。切換 global DB 不改這個 capability。Native arb 透過 from_core 取得必填 path，序列化 key/path，不保留 provider、不附帶 NPZ、不凍結 bytes。
 載入拒絕未知 key；若有 `recipe_json` 卻無法解析則直接失敗，不退回 raw asset。
 三條 playback array 同長且長度介於 2 與 `MAX_ARB_WAVEFORM_SAMPLES = 1_000_001`；
 匯入 raw `.npz` 的 time 軸可不等距，但必須從 0 開始並嚴格遞增。

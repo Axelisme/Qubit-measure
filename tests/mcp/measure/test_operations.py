@@ -97,7 +97,14 @@ def test_status_indexes_gui_operations_and_session_executions(
             "destination_context": {},
         },
         "state.has_project": {"value": True},
-        "project.info": {"chip_name": "chip", "qub_name": "qubit", "res_name": "res"},
+        "entry.info": {
+            "entry": {
+                "entry_id": "entry-uuid",
+                "name": "cooldown-A",
+                "result_path": "/results/cooldown-A",
+                "database_path": "/data/cooldown-A",
+            }
+        },
         "state.has_context": {"value": True},
         "state.has_active_context": {"value": True},
         "context.active": {"label": "bias"},
@@ -131,6 +138,26 @@ def test_status_indexes_gui_operations_and_session_executions(
             "invalidated_on_success": [],
         }
         replies["operation.await"] = {"reason": "completed", "status": "finished"}
+        replies["tab.save_artifacts"] = {
+            "run_id": "run-a",
+            "artifacts": {
+                "analysis": {
+                    "results": {
+                        "status": "Saved",
+                        "members": {
+                            "analysis:primary": [
+                                {
+                                    "format": "json",
+                                    "path": "/actual/analysis/results.json",
+                                    "status": "saved",
+                                    "error": None,
+                                }
+                            ]
+                        },
+                    }
+                }
+            },
+        }
         replies["tab.get_analyze_result"] = {
             "summary": None,
             "invalid": [],
@@ -144,7 +171,7 @@ def test_status_indexes_gui_operations_and_session_executions(
     )
     pending_summary = client.call("status", {"execution": pending.snapshot().execution})
     assert client.call("status", {}) == {
-        "project": {"chip": "chip", "qubit": "qubit", "resonator": "res"},
+        "entry": replies["entry.info"]["entry"],
         "soc": {"connected": True, "mock": True},
         "context": {"active": "bias"},
         "devices": [{"name": "flux", "status": "connected", "connected": True}],

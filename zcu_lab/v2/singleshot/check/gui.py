@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,7 +24,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import scaled_md
+from zcu_lab.v2._support.measure.seeds import scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_shared import read_ge_centers
 from zcu_lab.v2.singleshot.check.core import (
     CheckAnalyzeOptions,
@@ -92,7 +94,9 @@ class CheckAdapter(
                 init=ModuleInit.INLINE,
             )
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=100.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
+            )
             .int("shots", label="Shots", default=5000)
             .reps(1, locked=True)
             .rounds(1, locked=True)
@@ -105,7 +109,11 @@ class CheckAdapter(
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> CheckRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = CheckExp().run(cfg, context=context)
@@ -116,7 +124,7 @@ class CheckAdapter(
     ) -> CheckAnalyzeResult:
         # The check classifies the scatter against the GE centres — read the trio
         # from md (fast-fail if the upstream 'singleshot/ge' writeback is absent).
-        g_center, e_center, radius = read_ge_centers(req.md)
+        g_center, e_center, radius = read_ge_centers(req.parameters)
         CheckExp().analyze(
             req.run_result, CheckAnalyzeOptions(g_center, e_center, radius), plots=plots
         )

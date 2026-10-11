@@ -8,7 +8,7 @@ only for wire serialisation. Experiment-surface events (tabs / runs / node-sweep
 stay in each app's own event module.
 
 Import-clean: only TYPE_CHECKING references to the session ``SocHandle`` surfaces
-and MetaDict/ModuleLibrary, so this sits in ``gui/session`` below the apps.
+and source diagnostics, so this sits in ``gui/session`` below the apps.
 """
 
 from __future__ import annotations
@@ -20,16 +20,21 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 from zcu_tools.gui.event_bus import BasePayload, OriginKind
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.session.aliases import AliasRow
+    from zcu_tools.gui.session.context_types import (
+        ContextSourceBinding,
+        ContextSourceFault,
+    )
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionEvent(str, Enum):
     """Session-core event names (the wire-name vocabulary)."""
 
-    MD_CHANGED = "md_changed"  # MetaDict attribute was set or deleted
-    ML_CHANGED = "ml_changed"  # ModuleLibrary contents changed
-    CONTEXT_SWITCHED = "context_switched"  # active md/ml context switched
+    MD_CHANGED = "md_changed"  # published point content/health changed
+    ML_CHANGED = "ml_changed"  # published library content/health changed
+    CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
+    ALIASES_CHANGED = "aliases_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     PREDICTOR_CHANGED = "predictor_changed"  # predictor state or values changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
@@ -61,27 +66,58 @@ class SimulatedEnvironmentFinishedPayload(SessionPayload):
 
 @dataclass(frozen=True)
 class MdChangedPayload(SessionPayload):
-    """Payload for MD_CHANGED: a MetaDict attribute was set or deleted."""
+    """Installed point content/health fact, without a writable resource.
+
+    binding_id is the current internal source ID. content_changed distinguishes
+    data change from health-only publication. fault is the detached diagnostic,
+    or None after success. Observers read the already installed projection.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.MD_CHANGED
-    md: MetaDict
+    binding_id: int
+    content_changed: bool
+    fault: ContextSourceFault | None
 
 
 @dataclass(frozen=True)
 class ContextSwitchedPayload(SessionPayload):
-    """Payload for CONTEXT_SWITCHED: active md/ml context switched."""
+    """Installed binding fact, emitted after parameters are published.
+
+    binding_id is the service-local source ID, or None for EMPTY.
+    sources is the ordered persistent source binding, or None without sources.
+    Neither field grants write access or changes a captured consumer's target.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.CONTEXT_SWITCHED
-    md: MetaDict
-    ml: ModuleLibrary
+    binding_id: int | None
+    sources: ContextSourceBinding | None
+
+
+@dataclass(frozen=True)
+class AliasesChangedPayload(SessionPayload):
+    """Committed global table; rows are immutable authored values in row order.
+
+    No links are expanded in this fact. Consumers read the installed current
+    context to prepare cfg publications; no tab or Run capture is modified.
+    """
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.ALIASES_CHANGED
+    rows: tuple[AliasRow, ...]
 
 
 @dataclass(frozen=True)
 class MlChangedPayload(SessionPayload):
-    """Payload for ML_CHANGED: ModuleLibrary contents changed."""
+    """Installed library content/health fact, without a writable resource.
+
+    binding_id is the current internal source ID. content_changed distinguishes
+    data change from health-only publication. fault is the detached diagnostic,
+    or None after success. Observers read the already installed projection.
+    """
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.ML_CHANGED
-    ml: ModuleLibrary
+    binding_id: int
+    content_changed: bool
+    fault: ContextSourceFault | None
 
 
 @dataclass(frozen=True)

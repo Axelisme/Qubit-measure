@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -9,19 +10,27 @@ from typing import (
     NotRequired,
     TypeAlias,
     TypedDict,
-    cast,
 )
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BeforeValidator, Field, TypeAdapter, ValidationInfo
+from pydantic import (
+    BeforeValidator,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+)
 from qick.asm_v2 import QickParam
 
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools import cfg_model as core_cfgs
+from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
+from zcu_tools.cfg_model import WaveformCfg as CoreWaveformCfg
+from zcu_tools.core.waveform_format import decode_npz
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
-    from zcu_tools.resources.context import ModuleLibrary
+    from zcu_tools.resources.context import LibrarySnapshot
 
 
 class AbsWaveformCfg(ConfigBase, ABC):
@@ -120,21 +129,38 @@ class DragWaveformCfg(AbsWaveformCfg):
 
 
 class ArbWaveformCfg(AbsWaveformCfg):
+    """Native arbitrary envelope with an explicit local playback path.
+
+    style is arb. data is the logical asset key, retained for diagnostics.
+    path is the required host-absolute NPZ location, serialized with POSIX
+    separators; it is the sole playback authority, not a repository key lookup.
+    Relative/foreign paths raise ValueError during validation. Reads propagate
+    file/format failures and read current bytes; cfg does not freeze samples.
+    """
+
     style: Literal["arb"] = "arb"
     data: str
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: str) -> str:
+        path = Path(value)
+        if not value or not path.is_absolute():
+            raise ValueError("Arb playback path must be an absolute local path")
+        return path.as_posix()
 
     @property
     def length(self) -> float:
-        from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
-
-        return ArbWaveformDatabase.inspect(self.data).duration
+        """Read path-derived time[-1] in µs; propagate I/O/format failures."""
+        return float(decode_npz(Path(self.path).read_bytes()).samples.time[-1])
 
     def build(self, name: str) -> ArbWaveform:
         return ArbWaveform(name, self)
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         raise ValueError(
-            "Arb waveform length is asset-derived; data cannot be changed through set_param"
+            f"Arb waveform length is asset-derived; data cannot be changed through set_param: {name}={value}"
         )
 
 
@@ -142,7 +168,8 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     if isinstance(value, str):
         if info.context is None:
             raise ValueError("ModuleLibrary context not found")
-        return cast("ModuleLibrary", info.context["ml"]).get_waveform(value)
+        library: LibrarySnapshot = info.context["ml"]
+        return library.get_waveform(value)
     return value
 
 
@@ -182,18 +209,63 @@ WaveformCfg: TypeAlias = Annotated[
 
 class WaveformCfgFactory:
     @staticmethod
+    def from_core(
+        core_cfg: CoreWaveformCfg,
+        *,
+        context: CfgValidationContext | None,
+    ) -> WaveformCfg:
+        """Convert a materialized core envelope to native cfg without mutation.
+
+        context supplies capture-bound asset paths for arb, including a
+        flat-top raise envelope. Arb without context/assets raises ValueError.
+        Resolve keys through assets.path_for and propagate key/missing/I/O
+        errors. Native cfg holds only key/path values, never the capability.
+        Non-arb conversion needs no assets. Do not reinterpret formula recipes.
+        """
+        if isinstance(core_cfg, core_cfgs.ConstWaveformCfg):
+            return ConstWaveformCfg.model_validate(core_cfg.to_dict())
+        if isinstance(core_cfg, core_cfgs.FlatTopWaveformCfg):
+            return FlatTopWaveformCfg(
+                length=core_cfg.length,
+                raise_waveform=_raise_from_core(
+                    core_cfg.raise_waveform, context=context
+                ),
+            )
+        return _raise_from_core(core_cfg, context=context)
+
+    @staticmethod
     def from_raw(
         raw: str | dict[str, Any] | AbsWaveformCfg,
         *,
-        ml: ModuleLibrary | None = None,
+        ml: LibrarySnapshot | None = None,
     ) -> WaveformCfg:
         if isinstance(raw, str):
             if ml is None:
                 raise ValueError(
                     f"Got waveform name '{raw}' but ModuleLibrary is not provided"
                 )
-            raw = ml.get_waveform(raw)
-        return TypeAdapter(WaveformCfg).validate_python(raw, context={"ml": ml})
+            resolved_raw = ml.get_waveform(raw)
+        else:
+            resolved_raw = raw
+        return TypeAdapter(WaveformCfg).validate_python(
+            resolved_raw, context={"ml": ml}
+        )
+
+
+def _raise_from_core(
+    core_cfg: core_cfgs.RaiseWaveformCfg,
+    *,
+    context: CfgValidationContext | None,
+) -> RaiseWaveformCfg:
+    """Convert a non-flat core envelope, resolving arb paths only at this seam."""
+    if isinstance(core_cfg, core_cfgs.ArbWaveformCfg):
+        if context is None or context.assets is None:
+            raise ValueError("Arb waveform conversion requires context.assets")
+        return ArbWaveformCfg(
+            data=core_cfg.data,
+            path=context.assets.path_for(core_cfg.data).as_posix(),
+        )
+    return TypeAdapter(RaiseWaveformCfg).validate_python(core_cfg.to_dict())
 
 
 class QickWaveformKwargs(TypedDict):
@@ -315,14 +387,20 @@ class ArbWaveform(AbsWaveform):
         prog.add_envelope(ch, self.name, idata=idata, qdata=qdata)
 
     def make_iqdata(
-        self, ch: int, prog: ModularProgramV2, even_length: bool = False
-    ) -> tuple[NDArray, NDArray | None]:
-        # lazy import to avoid circular import
-        from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+        self, ch: int, prog: ModularProgramV2, *, even_length: bool = False
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
+        """Read cfg.path samples and interpolate at the channel's timing grid.
 
+        ch selects prog.soccfg generator scale and samples per clock. Scale
+        normalized samples by get_maxv(ch) and return I/Q arrays; zero Q is
+        None. even_length rounds to an even number of clocks for flat-top ramps.
+        Use the full reference duration, never stretch/truncate by another cfg
+        length. File/codec failures propagate; no repository lookup occurs.
+        """
         cfg = self.waveform_cfg
         assert isinstance(cfg, ArbWaveformCfg)
-        idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(cfg.data)
+        samples = decode_npz(Path(cfg.path).read_bytes()).samples
+        idata_raw, qdata_raw, time_raw = samples.idata, samples.qdata, samples.time
 
         maxv = prog.soccfg.get_maxv(ch)
         samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]

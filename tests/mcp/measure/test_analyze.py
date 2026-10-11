@@ -3,6 +3,7 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from threading import Event, Thread, get_ident
 from typing import Any
 
@@ -37,14 +38,12 @@ from ._analyze_support import (
     call_stdio as _call_stdio,
 )
 from ._analyze_support import (
-    hold_wire_reply as _hold_wire_reply,
-)
-from ._analyze_support import (
     sent_methods as _methods,
 )
 from ._analyze_support import (
     stdio_data as _data,
 )
+from ._save_report_support import analysis_report
 from ._support import MeasureClient
 
 _INVALID_PNGS = [
@@ -59,7 +58,7 @@ _INVALID_PNGS = [
 
 
 @pytest.mark.parametrize("payload", [None, {"command": "set_value", "args": {"x": 2}}])
-def test_interact_forwards_once_and_materializes_session_image(
+def test_interact_forwards_once_and_delivers_inline_image(
     tmp_path, clients, monkeypatch, payload
 ):
     state = {"value": 2}
@@ -91,10 +90,8 @@ def test_interact_forwards_once_and_materializes_session_image(
     assert result["commands"] == [{"name": "set_value"}, {"name": "done"}]
     assert result["plugin"] == "generic-test"
     assert result["preview_active"] is True
-    path = _assert_figure(reply, present=True)
+    _assert_figure(reply, present=True)
     assert _methods(client) == ["tab.interact"]
-    client.context.session.cleanup_pngs()
-    assert path is not None and not path.exists()
 
 
 def test_interact_headless_and_wire_failure_do_not_retry(
@@ -106,7 +103,7 @@ def test_interact_headless_and_wire_failure_do_not_retry(
         lambda method, params: {"operation_id": 71, "state": {}, "figure": None},
     )
     reply = _call_stdio(monkeypatch, client, "tab_interact", {"tab": "t"})
-    assert _data(reply) == {"handle": 1, "state": {}, "figure": None}
+    assert _data(reply) == {"handle": 1, "state": {}}
     _assert_figure(reply, present=False)
     client.transport.sent.clear()
     client.transport.replies["tab.interact"] = {
@@ -173,15 +170,15 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
                     {"path": "summary.frequency_error", "reason": "non_finite"}
                 ]
             return observed
-        if name == "tab.save_image":
+        if name == "tab.save_artifacts":
             assert params == {
                 "tab_id": "t",
-                "subtab_id": pane,
-                "figure_name": params["figure_name"],
-                "image_path": None,
+                "artifacts": [{"section": pane, "name": "results"}],
                 "operation_id": 71,
             }
-            return {"image_path": f"/actual/{params['figure_name']}.png"}
+            return asdict(
+                analysis_report(pane, ["fit", "residual"] if has_figure else [])
+            )
         if name == "tab.get_figure":
             assert params == {
                 "tab_id": "t",
@@ -222,48 +219,28 @@ def test_finished_analysis_uses_start_facts_without_hidden_pre_reads(
             _call_full_execution_stdio(monkeypatch, client, tool, arguments)
         )
         assert observed["result"] == result["result"]
-        assert observed["saved_images"] == result["saved_images"]
+        assert observed["save_report"] == result["save_report"]
     summary = client.call("status", {"execution": result["execution"]})
-    assert summary["previews"] == {
-        "run": [],
-        "primary": [result["figure"]] if stage == "primary" and has_figure else [],
-        "post": [result["figure"]] if stage == "post" and has_figure else [],
-    }
-    assert summary["analysis"][stage]["warnings"] == (
-        ["singular error"] if has_invalid else []
-    )
-    assert summary["analysis"][stage]["details"] == (
-        {"frequency": 5.0, "frequency_error": None}
-        if has_invalid
-        else {"frequency": 5.0}
-    )
-    assert summary["invalid"] == (
-        [{"path": f"analysis.{stage}.details.frequency_error", "reason": "non_finite"}]
-        if has_invalid
-        else []
-    )
+    assert summary["analysis"][stage]["summary"] == result["result"]["summary"]
+    assert summary["analysis"][stage]["invalid"] == result["result"]["invalid"]
+    assert summary["invalid"] == result["result"]["invalid"]
     assert result["result"]["params"] == {"gain": 2, "model": "fit"}
     assert result["params"] == result["result"]["params"]
     assert result["invalidated"] == ["post.writeback"]
     assert result["operation_outcome"]["status"] == "finished"
-    assert result["save_status"] == ("saved" if has_figure else "not_available")
-    assert result["saved_images"] == (
-        [
-            {"figure_name": "fit", "image_path": "/actual/fit.png"},
-            {"figure_name": "residual", "image_path": "/actual/residual.png"},
-        ]
-        if has_figure
-        else []
+    assert result["save_status"] == "saved"
+    assert result["save_report"] == asdict(
+        analysis_report(pane, ["fit", "residual"] if has_figure else [])
     )
-    assert result["remaining_images"] == []
-    assert result["unconfirmed_image"] is None
+    assert summary["artifacts"] == result["save_report"]["artifacts"]
     assert result["error"] is None
     _assert_figure(reply, present=has_figure)
     assert _methods(client) == [
         method,
         "operation.await",
         result_method,
-        *(["tab.save_image", "tab.save_image", "tab.get_figure"] if has_figure else []),
+        "tab.save_artifacts",
+        *(["tab.get_figure"] if has_figure else []),
         "tab.writeback_preview",
     ]
 
@@ -341,11 +318,6 @@ def test_interactive_start_hands_off_current_state_without_waiting(
     for key in ("state", "commands", "plugin", "info", "preview_active"):
         assert data["interaction"][key] == interaction[key]
     summary = client.call("status", {"execution": data["execution"]})
-    assert summary["previews"] == {
-        "run": [],
-        "primary": [data["figure"]] if has_figure else [],
-        "post": [],
-    }
     assert summary["interaction"] == {
         "plugin": "picker",
         "state": {"value": 3},
@@ -392,9 +364,9 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
             )
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {"gain": 2})
-        if method == "tab.save_image":
+        if method == "tab.save_artifacts":
             saving.set()
-            return {"image_path": "/actual/fit.png"}
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(_PNG).decode()}
         raise AssertionError(method)
@@ -415,9 +387,7 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
     assert completed["execution"] == execution
     assert completed["op"] == started["op"]
     assert completed["status"] == "finished"
-    assert completed["saved_images"] == [
-        {"figure_name": "fit", "image_path": "/actual/fit.png"}
-    ]
+    assert completed["save_report"] == asdict(analysis_report("analysis", ["fit"]))
     assert completed["invalidated"] == ["post_analysis"]
     _assert_figure(reply, present=True)
     effects = [m for m in _methods(client) if m != "operation.await"]
@@ -425,7 +395,7 @@ def test_interactive_analysis_completes_after_gui_done(tmp_path, clients, monkey
         "tab.analyze",
         "tab.interact",
         "tab.get_analyze_result",
-        "tab.save_image",
+        "tab.save_artifacts",
         "tab.get_figure",
         "tab.writeback_preview",
     ]
@@ -595,12 +565,14 @@ def test_cancel_latches_intent_and_retains_original_terminal(
     assert _methods(client).count("operation.cancel") == 1
 
 
-def _admitted_save_terminal(client: MeasureClient, outcome: str) -> dict[str, Any]:
+def _admitted_save_terminal(
+    client: MeasureClient, outcome: str, names: list[str]
+) -> dict[str, Any]:
     if outcome == "lost":
         client.transport.close()
         assert client.transport.on_closed is not None
         client.transport.on_closed(EOFError("save reply lost"))
-        return {"ok": True, "result": {"image_path": "/unconfirmed/fit.png"}}
+        return {"ok": True, "result": asdict(analysis_report("analysis", names))}
     if outcome in _AMBIGUOUS_SAVE_ERRORS:
         return {"ok": False, "error": _AMBIGUOUS_SAVE_ERRORS[outcome]}
     if outcome == "rejected":
@@ -608,17 +580,18 @@ def _admitted_save_terminal(client: MeasureClient, outcome: str) -> dict[str, An
             "ok": False,
             "error": {"code": "precondition_failed", "message": "disk rejected export"},
         }
-    return {"ok": True, "result": {"image_path": "/actual/fit.png"}}
+    return {"ok": True, "result": asdict(analysis_report("analysis", names))}
 
 
-@pytest.mark.parametrize("remaining", [False, True])
+@pytest.mark.parametrize("has_residual", [False, True])
 @pytest.mark.parametrize(
     "save_outcome", ["saved", "rejected", "lost", *_AMBIGUOUS_SAVE_ERRORS]
 )
 def test_cancel_during_admitted_save_retains_the_real_reply(
-    tmp_path, clients, monkeypatch, remaining, save_outcome
+    tmp_path, clients, monkeypatch, has_residual, save_outcome
 ):
     saving, release, intent = Event(), Event(), Event()
+    names = ["prefix", "fit", "residual"] if has_residual else ["prefix", "fit"]
     read_internal = GuiConnection.read_internal
 
     def read(connection, method, params, **kwargs):
@@ -634,11 +607,7 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         if method == "operation.await":
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
-            return _result_reply(
-                "analysis",
-                ["prefix", "fit", "residual"] if remaining else ["prefix", "fit"],
-                {},
-            )
+            return _result_reply("analysis", names, {})
         if method == "operation.cancel":
             return {"status": "finished"}
         raise AssertionError(method)
@@ -646,14 +615,16 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
     client = _client(tmp_path, clients, respond)
 
     def save(params):
-        if params["figure_name"] == "prefix":
-            return {"ok": True, "result": {"image_path": "/actual/prefix.png"}}
-        assert params["figure_name"] == "fit"
+        assert params == {
+            "tab_id": "t",
+            "artifacts": [{"section": "analysis", "name": "results"}],
+            "operation_id": 71,
+        }
         saving.set()
         assert release.wait(10), "test did not release admitted save"
-        return _admitted_save_terminal(client, save_outcome)
+        return _admitted_save_terminal(client, save_outcome, names)
 
-    client.transport.replies["tab.save_image"] = save
+    client.transport.replies["tab.save_artifacts"] = save
     with ThreadPoolExecutor(max_workers=1) as pool:
         try:
             started = _data(
@@ -671,18 +642,15 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
             )
             assert {
                 key: pending[key]
-                for key in ("cancel_requested", "status", "unconfirmed_image")
+                for key in ("cancel_requested", "status", "save_status", "save_report")
             } == {
                 "cancel_requested": True,
                 "status": "running",
-                "unconfirmed_image": "fit",
+                "save_status": "saving",
+                "save_report": None,
             }
             pending_summary = client.call("status", {"execution": started["execution"]})
-            assert pending_summary["artifacts"]["analysis"]["fit"] == {
-                "status": "saving",
-                "lifetime": "persistent",
-                "members": {"image": []},
-            }
+            assert pending_summary["artifacts"] == {}
         finally:
             release.set()
         cancelled = request.result(timeout=3)
@@ -704,45 +672,22 @@ def test_cancel_during_admitted_save_retains_the_real_reply(
         "operation_status": "finished",
         "analysis_summary": {"frequency": 5.0},
     }
-    confirmed = ["prefix", "fit"] if save_outcome == "saved" else ["prefix"]
-    assert completed["saved_images"] == [
-        {"figure_name": name, "image_path": f"/actual/{name}.png"} for name in confirmed
-    ]
     unknown = save_outcome == "lost" or save_outcome in _AMBIGUOUS_SAVE_ERRORS
     assert completed["save_status"] == (
-        ("incomplete" if remaining else "saved")
-        if save_outcome == "saved"
-        else "unknown"
-        if unknown
-        else "incomplete"
+        "saved" if save_outcome == "saved" else "unknown" if unknown else "incomplete"
     )
-    assert completed["unconfirmed_image"] == ("fit" if unknown else None)
+    report = (
+        asdict(analysis_report("analysis", names)) if save_outcome == "saved" else None
+    )
+    assert completed["save_report"] == report
     summary = client.call("status", {"execution": started["execution"]})
-    assert summary["artifacts"]["analysis"]["prefix"]["members"]["image"] == [
-        {"path": "/actual/prefix.png", "status": "saved"}
-    ]
-    assert summary["artifacts"]["analysis"]["fit"] == {
-        "status": "saved"
-        if save_outcome == "saved"
-        else "unknown"
-        if unknown
-        else "incomplete",
-        "lifetime": "persistent",
-        "members": {
-            "image": [{"path": "/actual/fit.png", "status": "saved"}]
-            if save_outcome == "saved"
-            else []
-        },
-    }
-    assert completed["remaining_images"] == (
-        ([] if save_outcome == "saved" else ["fit"])
-        + (["residual"] if remaining else [])
-    )
+    assert summary["artifacts"] == (report["artifacts"] if report is not None else {})
     if save_outcome != "saved":
         assert completed["error"]["phase"] == "image_save"
     _assert_ambiguous_save_error(completed, save_outcome)
-    assert _methods(client).count("tab.save_image") == 2
+    assert _methods(client).count("tab.save_artifacts") == 1
     assert "tab.get_figure" not in _methods(client)
+    assert "tab.writeback_preview" not in _methods(client)
 
 
 def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkeypatch):
@@ -752,7 +697,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
     read_internal = GuiConnection.read_internal
 
     def send(connection, method, params, *args, **kwargs):
-        if method == "tab.save_image":
+        if method == "tab.save_artifacts":
             save_ready.set()
             assert blocker_entered.wait(10), "test did not occupy the RPC lock"
             dispatch_save.set()
@@ -773,7 +718,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {})
-        if method == "project.info":
+        if method == "entry.info":
             blocker_entered.set()
             assert release_blocker.wait(10), "test did not release the RPC lock"
             return {"project": "test"}
@@ -791,7 +736,7 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
             )
             assert save_ready.wait(2)
             blocker = pool.submit(
-                client.call, "rpc_call", {"method": "project.info", "params": {}}
+                client.call, "rpc_call", {"method": "entry.info", "params": {}}
             )
             assert dispatch_save.wait(2)
             request = pool.submit(client.call, "cancel", {"op": started["op"]})
@@ -800,7 +745,8 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
                 "status", {"execution": started["execution"], "detail": "full"}
             )
             assert pending["cancel_requested"] is True
-            assert pending["unconfirmed_image"] is None
+            assert pending["save_status"] == "not_started"
+            assert pending["save_report"] is None
         finally:
             blocker_entered.set()
             release_blocker.set()
@@ -815,92 +761,10 @@ def test_cancel_rejects_save_queued_behind_another_rpc(tmp_path, clients, monkey
         )
     )
     assert completed["status"] == "cancelled"
-    assert completed["saved_images"] == []
-    assert completed["remaining_images"] == ["fit"]
+    assert completed["save_report"] is None
     assert completed["save_status"] == "not_started"
-    assert "tab.save_image" not in _methods(client)
+    assert "tab.save_artifacts" not in _methods(client)
     assert "tab.get_figure" not in _methods(client)
-
-
-@pytest.mark.parametrize("cancel_first", [False, True])
-def test_close_drains_pending_save_and_cancel_before_png_cleanup(
-    tmp_path, clients, monkeypatch, cancel_first
-):
-    intent = Event()
-    read_internal = GuiConnection.read_internal
-
-    def read(connection, method, params, **kwargs):
-        if method == "operation.cancel":
-            intent.set()
-        return read_internal(connection, method, params, **kwargs)
-
-    monkeypatch.setattr(GuiConnection, "read_internal", read)
-
-    client = _client(tmp_path, clients)
-    client.transport.replies.update(
-        {
-            method: {"ok": True, "result": result}
-            for method, result in {
-                "tab.analyze": {
-                    "operation_id": 71,
-                    "interactive": False,
-                    "params": {},
-                    "invalidated_on_success": [],
-                },
-                "operation.await": {"reason": "completed", "status": "finished"},
-                "tab.get_analyze_result": _result_reply("analysis", ["fit"], {}),
-            }.items()
-        }
-    )
-    session = client.context.session
-    image = session.write_png(_PNG)
-    saving = _hold_wire_reply(client, monkeypatch, "tab.save_image")
-    cleanup_pngs = session.cleanup_pngs
-    cleanup_states = []
-
-    def cleanup():
-        cleanup_states.extend(session.executions.snapshots())
-        assert image.exists()
-        cleanup_pngs()
-
-    request = None
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        try:
-            started = _data(
-                _call_full_execution_stdio(
-                    monkeypatch, client, "tab_analyze", {"tab": "t"}
-                )
-            )
-            assert saving.wait(2)
-            if cancel_first:
-                request = pool.submit(
-                    client.call, "cancel", {"execution": started["execution"]}
-                )
-                assert intent.wait(2)
-            with monkeypatch.context() as patch:
-                patch.setattr(session, "cleanup_pngs", cleanup)
-                pool.submit(session.close).result(timeout=2)
-            if cancel_first:
-                assert request is not None
-                cancelled = request.result(timeout=2)
-                assert cancelled.is_error is True
-                assert cancelled.data["gui_cancel"]["status"] == "failed"
-                assert cancelled.data["cancel_requested"] is True
-        finally:
-            client.context.bridge.disconnect()
-    assert len(cleanup_states) == 1
-    assert cleanup_states[0].status == "failed"
-    assert cleanup_states[0].phase == "terminal"
-    assert not image.parent.exists()
-    completed = client.call(
-        "status", {"execution": started["execution"], "detail": "full"}
-    )
-    assert completed["status"] == "failed"
-    assert completed["save_status"] == "unknown"
-    assert completed["unconfirmed_image"] == "fit"
-    assert completed["error"]["phase"] == "image_save"
-    assert completed["cancel_requested"] is cancel_first
-    assert "operation.cancel" not in _methods(client)
 
 
 @pytest.mark.parametrize("interactive", [False, True])
@@ -987,8 +851,8 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
             return {"reason": "completed", "status": "finished"}
         if method == "tab.get_analyze_result":
             return _result_reply("analysis", ["fit"], {})
-        if method == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report("analysis", ["fit"]))
         if method == "tab.get_figure":
             saved.set()
             return {"png_b64": base64.b64encode(_PNG).decode()}
@@ -1015,11 +879,9 @@ def test_gui_completion_during_initial_handoff_keeps_the_execution(
         )
     )
     assert completed["status"] == "finished"
-    assert completed["saved_images"] == [
-        {"figure_name": "fit", "image_path": "/actual/fit.png"}
-    ]
+    assert completed["save_report"] == asdict(analysis_report("analysis", ["fit"]))
     assert _methods(client).count("tab.analyze") == 1
-    assert _methods(client).count("tab.save_image") == 1
+    assert _methods(client).count("tab.save_artifacts") == 1
 
 
 @pytest.mark.parametrize("tool", ["tab_analyze", "tab_interact"])
@@ -1108,8 +970,9 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
                 ["fit"],
                 {},
             )
-        if name == "tab.save_image":
-            return {"image_path": "/actual/fit.png"}
+        if name == "tab.save_artifacts":
+            pane = "analysis" if stage == "primary" else "post_analysis"
+            return asdict(analysis_report(pane, ["fit"]))
         assert name == "tab.get_figure"
         return {"png_b64": base64.b64encode(png).decode()}
 
@@ -1125,15 +988,14 @@ def test_invalid_finished_png_is_a_tool_error_without_retry(
     assert "Invalid PNG image" in data["error"]["message"]
     assert data["error"]["phase"] == "figure_read"
     assert data["result"]["summary"] == {"frequency": 5.0}
-    assert data["saved_images"] == [
-        {"figure_name": "fit", "image_path": "/actual/fit.png"}
-    ]
+    pane = "analysis" if stage == "primary" else "post_analysis"
+    assert data["save_report"] == asdict(analysis_report(pane, ["fit"]))
     assert data["save_status"] == "saved"
     assert _methods(client) == [
         method,
         "operation.await",
         result_method,
-        "tab.save_image",
+        "tab.save_artifacts",
         "tab.get_figure",
     ]
 
@@ -1159,6 +1021,9 @@ def test_analysis_can_complete_on_recipe_worker(
             await_callers.append(get_ident())
             assert params["operation_id"] == 71
             return {"reason": "completed", "status": outcome, "error": "fit failed"}
+        if name == "tab.save_artifacts":
+            assert params["artifacts"] == [{"section": pane, "name": "results"}]
+            return asdict(analysis_report(pane))
         assert name == result_method
         return _result_reply(pane, [], {"gain": 2})
 
@@ -1190,6 +1055,7 @@ def test_analysis_can_complete_on_recipe_worker(
             method,
             "operation.await",
             result_method,
+            "tab.save_artifacts",
             "tab.writeback_preview",
         ]
     else:

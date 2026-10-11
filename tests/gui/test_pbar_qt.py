@@ -268,14 +268,30 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
     from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
     from zcu_tools.progress_bar.interface import use_pbar_factory
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
     from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
 
-    ctx = SessionEnv(md=MetaDict(), ml=ModuleLibrary(), soc=None, soccfg=None)
+    from zcu_tools.gui.session.aliases import AliasRow
+
+    from tests.gui.app.measure._cfg_fakes import parameter_capture
+    from zcu_lab.components import ResonatorSchema, WiringSchema
+
+    parameters = parameter_capture(
+        {
+            "R1": ResonatorSchema(
+                kind="resonator",
+                freq=6000.0,
+                kappa=1.0,
+                wiring=WiringSchema(ch=0, ro_ch=0),
+                ext={"time_of_fly": 0.5},
+            )
+        }
+    )
+    parameters = parameters.bind_aliases((AliasRow("resonator", "R1"),), {})
+    ctx = SessionEnv(parameters=parameters, soc=None, soccfg=None)
     adapter = FakeFreqAdapter(fast_mode=True)
     schema = adapter.make_default_cfg(ctx)
 
@@ -292,9 +308,12 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
         fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}
     )
 
+    from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
-    raw_cfg = schema_to_raw_dict(schema, ctx.md, ctx.ml)
+    raw_cfg: dict[str, ExperimentCfgValue] = dict(
+        schema_to_raw_dict(schema, ctx.parameters)
+    )
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.stop_signal import StopSignal
     from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -302,7 +321,7 @@ def test_fake_freq_adapter_run_with_qt_pbar(qapp):
     plots = Plots(NonPresentingHost())
     with use_pbar_factory(factory):
         run_result = adapter.run(
-            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={}),
+            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
             raw_cfg,
             context=RunContext(
                 ctx.soc, ctx.soccfg, plots, devices={}, cancel_signal=StopSignal()

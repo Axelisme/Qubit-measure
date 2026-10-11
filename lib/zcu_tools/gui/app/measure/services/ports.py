@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -17,33 +17,8 @@ from typing import (
     runtime_checkable,
 )
 
-
-@dataclass(frozen=True, slots=True)
-class SaveDataSubmission:
-    """Accepted save work; the reserved path is not proof of successful I/O."""
-
-    operation_id: int
-    data_path: str
-
-
-@dataclass(frozen=True, slots=True)
-class SaveDestination:
-    key: ArtifactKey
-    path: str
-
-
-@dataclass(frozen=True, slots=True)
-class SaveArtifactsSubmission:
-    """Reserved destinations; only a finished outcome establishes successful I/O."""
-
-    operation_id: int
-    destinations: tuple[SaveDestination, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ActiveSaveOperation:
-    operation_id: int
-    tab_id: str
+from zcu_tools.gui.session.context_types import LibraryChange
+from zcu_tools.gui.session.types import ParameterContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,10 +56,7 @@ if TYPE_CHECKING:
         AdapterCapabilities,
         WritebackItem,
     )
-    from zcu_tools.gui.app.measure.artifact_tracker import (
-        ArtifactKey,
-        ArtifactSnapshot,
-    )
+    from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
         RetiredPaneResources,
         Session,
@@ -97,21 +69,23 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from .persistence_types import AppPersistedState
-
-
-@dataclass(frozen=True, slots=True)
-class PathResourceSnapshot:
-    """Read model for one independently-owned path resource."""
-
-    override: str | None
-    path: str | None
+    from .writeback import WritebackDraft
 
 
 @dataclass(frozen=True, slots=True)
 class RunPaneSnapshot:
+    """Current Run and confirmed persistence identity.
+
+    result is the adapter-owned record or None; source_path is the loaded file
+    or None. source_operation_id identifies the publishing acquisition or None
+    after Load. run_id is None until at least one persistent output succeeds;
+    it survives failed resaves, but does not survive Run replacement.
+    """
+
     result: object | None
     source_path: str | None
     source_operation_id: int | None = None
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +94,6 @@ class AnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -132,7 +105,6 @@ class PostAnalysisPaneSnapshot:
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
-    image_paths: Mapping[str, PathResourceSnapshot]
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -140,17 +112,9 @@ class PostAnalysisPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
-    data_path: PathResourceSnapshot
+    """Current annotation; destinations belong only to artifact outputs."""
+
     comment: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class TabPathsSnapshot:
-    """Data and each named image path, projected independently by a tab."""
-
-    data: PathResourceSnapshot
-    analysis_images: Mapping[str, PathResourceSnapshot]
-    post_analysis_images: Mapping[str, PathResourceSnapshot]
 
 
 @dataclass(frozen=True)
@@ -159,7 +123,7 @@ class TabSnapshot:
 
     Render (``TabService.get_snapshot``) populates every field; persist/restore
     uses only the serializable head (adapter_name + cfg_schema). Pane-owned
-    read models (run/analysis/post_analysis/save/paths) are the only
+    read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
 
@@ -172,8 +136,7 @@ class TabSnapshot:
     analysis: AnalysisPaneSnapshot | None = None
     post_analysis: PostAnalysisPaneSnapshot | None = None
     save: SavePaneSnapshot | None = None
-    paths: TabPathsSnapshot | None = None
-    artifacts: tuple[ArtifactSnapshot, ...] = ()
+    artifacts: tuple[ArtifactSectionSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,47 +172,18 @@ class PersistOriginatorPort(Protocol):
 
 @runtime_checkable
 class ContextWritePort(Protocol):
-    """The single authority for ml/md content writes (ADR-0067).
+    """App structure commands, with app schema lowering bound by composition.
 
-    Sources holding an un-lowered ``CfgSchema`` (editor commit, writeback apply,
-    inspect save, create_from_template) write through this port; ContextService
-    lowers (app-local ``schema_to_raw_dict`` with the live md, so callers cannot
-    forget md)
-    + registers, and on success bumps the ``context`` version + emits
-    ML/MD_CHANGED. The only implementer is ContextService.
-
-    ``apply_writes`` is the batch entry: a successful apply (writeback) of md
-    attrs + multiple ml entries lands as **one** version bump and **at most one**
-    ML_CHANGED + one MD_CHANGED (the per-write methods each bump/emit on their
-    own; batching avoids N redundant full-refreshes). A failed batch is not
-    rolled back and publishes nothing; see ``ContextWrites``.
+    ParameterContext fixes the destination and expression/reference data.
+    ContextService owns the resource transaction and publication; no live
+    library handle, batch writeback or implicit target is exposed here.
     """
 
-    def set_ml_module_from_schema(self, name: str, schema: CfgSchema) -> None: ...
-    def set_ml_waveform_from_schema(self, name: str, schema: CfgSchema) -> None: ...
-    def replace_ml_module_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
-    ) -> None: ...
-    def replace_ml_waveform_from_schema(
-        self, old_name: str, new_name: str, schema: CfgSchema
-    ) -> None: ...
-    def set_md_attr(self, key: str, value: Any) -> None: ...
-    def apply_writes(self, writes: ContextWrites) -> None: ...
-
-
-@dataclass(frozen=True)
-class ContextWrites:
-    """A batch of ml/md content writes applied in insertion order.
-
-    On success the owner bumps the context version once and emits one event per
-    touched kind. The batch is not all-or-nothing: a later lower, register or
-    dump failure leaves the earlier live md/ml changes in place without a bump
-    or event. ``md`` maps attr name → value; ``ml_modules`` / ``ml_waveforms``
-    map entry name → its un-lowered ``CfgSchema``."""
-
-    md: dict[str, Any]
-    ml_modules: dict[str, CfgSchema]
-    ml_waveforms: dict[str, CfgSchema]
+    def apply_library_change(
+        self, parameters: ParameterContext, change: LibraryChange
+    ) -> None:
+        """Apply one typed structure command; target/lowering/write errors propagate."""
+        ...
 
 
 @runtime_checkable
@@ -263,8 +197,13 @@ class TabLifecyclePort(Protocol):
     """
 
     def new_tab(
-        self, adapter_name: str, from_dict: TabSnapshot | None = None
-    ) -> str: ...
+        self,
+        adapter_name: str,
+        from_dict: TabSnapshot | None = None,
+    ) -> str:
+        """Create or restore a tab using the current session sources."""
+        ...
+
     def close_tab(self, tab_id: str) -> None: ...
     def make_default_cfg(self, adapter_name: str) -> CfgSchema: ...
 
@@ -277,7 +216,21 @@ class WritebackLifecyclePort(Protocol):
     removed.
     """
 
-    def create_draft(self, items: Iterable[WritebackItem]) -> Any: ...
+    def create_draft(
+        self,
+        items: Iterable[WritebackItem],
+        *,
+        parameters: ParameterContext | None,
+        run_id: str | None = None,
+    ) -> WritebackDraft:
+        """Fix proposals, destination and native Run identity in one draft.
+
+        run_id is historical RunMetadata.run_id, even before Save, or None
+        without native evidence. Save does not change the draft's identity.
+        Editor failure propagates after retiring any newly opened sessions.
+        """
+        ...
+
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
 
@@ -297,6 +250,7 @@ class CfgEditorPort(Protocol):
         self,
         seed: CfgSchema,
         *,
+        parameters: ParameterContext | None,
         gc: bool = False,
         owner_key: str | None = None,
     ) -> tuple[str, tuple[SettableTarget, ...]]: ...
@@ -317,26 +271,9 @@ class CfgEditorPort(Protocol):
 
 
 @runtime_checkable
-class TabResultWritePort(Protocol):
-    """The narrow State-write contract a run policy depends on (ADR-0066).
-
-    Run's lifecycle writes only these three tab-result mutations; depending on
-    this port instead of the concrete ``State`` keeps the policy bound to a
-    contract, not behaviour (ADR-0067). ``State`` is the only implementer and
-    satisfies it structurally (no inheritance change)."""
-
-    def clear_tab_results(self, tab_id: str) -> RetiredPaneResources: ...
-    def set_tab_running(self, tab_id: str, *, running: bool) -> None: ...
-    def update_tab_result(
-        self, tab_id: str, result: object, *, source_operation_id: int | None = None
-    ) -> RetiredPaneResources: ...
-
-
-@runtime_checkable
 class TabAnalyzeWritePort(Protocol):
     """The narrow State-write contract an analyze / post-analyze policy depends
-    on (ADR-0066). Same rationale as ``TabResultWritePort``; ``State`` is the
-    only implementer. Result replacement methods return detached resources for
+    on (ADR-0066). Result replacement methods return detached resources for
     post-commit draft cleanup."""
 
     def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None: ...
@@ -382,11 +319,6 @@ class TabAnalyzeReadPort(Protocol):
     def session_env(self) -> SessionEnv: ...
 
     def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
-
-
-@runtime_checkable
-class RunStatePort(TabBusyQueryPort, TabResultWritePort, Protocol):
-    """Complete State surface consumed by ``RunService``."""
 
 
 @runtime_checkable

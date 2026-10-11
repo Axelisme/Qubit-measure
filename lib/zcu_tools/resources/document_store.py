@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from io import StringIO
@@ -42,6 +43,7 @@ __all__ = (
     "ConflictError",
     "DocumentChange",
     "DocumentStore",
+    "DocumentValue",
     "FieldPath",
     "LockTimeoutError",
 )
@@ -66,6 +68,19 @@ class DocumentChange:
     reason: Literal["commit", "refresh"]
 
 
+@dataclass(frozen=True)
+class DocumentValue:
+    """A detached canonical YAML value from one failed document transaction.
+
+    present is False for an absent key and True for a stored value, including
+    YAML null. value is None when absent; otherwise it holds the canonical
+    YAML value in working units. Mutable values never alias the error or store.
+    """
+
+    present: bool
+    value: YamlValue
+
+
 class _Missing(Enum):
     # Absent keys must differ from YAML null during patch/conflict comparison.
     VALUE = "<missing>"
@@ -85,15 +100,56 @@ class ConflictError(RuntimeError):
         path: FieldPath,
         original: YamlValue | _Missing,
         current: YamlValue | _Missing,
+        *,
+        proposed: YamlValue | _Missing,
     ) -> None:
-        """Record source/path and the conflicting normalized original/current values."""
+        """Capture this rejected edit's source, path and three detached values.
+
+        original/current are normalized baseline/competing values; proposed is
+        canonical draft serialization at the same mapping-key path. The existing
+        absent-key marker distinguishes absence from YAML null in each value.
+        """
         self.source = source
         self.path = path
-        self.original = original
-        self.current = current
+        self.original = deepcopy(original)
+        self.current = deepcopy(current)
+        self._proposed = deepcopy(proposed)
         super().__init__(
             f"{source}: conflict at {path!r}: original={original!r}, current={current!r}"
         )
+
+    @property
+    def original_value(self) -> DocumentValue:
+        """Return a detached baseline value at this conflict's mapping-key path.
+
+        An absent key is present=False/value=None; YAML null is present=True.
+        """
+        return _document_value(self.original)
+
+    @property
+    def current_value(self) -> DocumentValue:
+        """Return a detached value read under the failed commit's lock.
+
+        This is the normalized competing value, not a later refresh or read.
+        """
+        return _document_value(self.current)
+
+    @property
+    def proposed_value(self) -> DocumentValue:
+        """Return canonical draft serialization at the conflict path.
+
+        Capture the full ancestor value when a changed leaf meets a replaced or
+        absent ancestor, before final model validation. Reading this projection
+        does not rerun model hooks.
+        """
+        return _document_value(self._proposed)
+
+
+def _document_value(value: YamlValue | _Missing) -> DocumentValue:
+    """Translate the existing absent-key marker and detach a conflict value."""
+    if value is _Missing.VALUE:
+        return DocumentValue(present=False, value=None)
+    return DocumentValue(present=True, value=deepcopy(value))
 
 
 class LockTimeoutError(TimeoutError):
@@ -476,7 +532,9 @@ class DocumentStore[T: BaseModel]:
         document, normalized, snapshot = self._read()
         if not patches:
             return document, snapshot, ()
-        self._merge_patches(normalized, base_normalized, base_values, patches)
+        self._merge_patches(
+            normalized, base_normalized, base_values, draft_values, patches
+        )
         final_normalized, snapshot = self._model_snapshot(normalized)
         disk_patches = tuple(_changes(document, final_normalized))
         # Use the same positional merge for raw nodes so unchanged comments survive.
@@ -511,6 +569,7 @@ class DocumentStore[T: BaseModel]:
         document: YamlMap,
         base_document: YamlMap,
         base_values: YamlValue,
+        draft_values: YamlValue,
         patches: tuple[tuple[FieldPath, YamlValue | _Missing], ...],
     ) -> None:
         """Conflict-check baselines, then merge typed patches in place.
@@ -519,14 +578,16 @@ class DocumentStore[T: BaseModel]:
         raw YAML nodes; both patches and document values use the caller's units.
         """
         for path, _ in patches:
-            self._check_conflict(base_document, document, path)
+            self._check_conflict(base_document, document, draft_values, path)
         for path, value in patches:
             merged = _patch_node(
                 _lookup(document, path), _lookup(base_values, path), value
             )
             _apply(document, path, merged)
 
-    def _check_conflict(self, base: YamlMap, current: YamlMap, path: FieldPath) -> None:
+    def _check_conflict(
+        self, base: YamlMap, current: YamlMap, draft: YamlValue, path: FieldPath
+    ) -> None:
         for length in range(1, len(path) + 1):
             prefix = path[:length]
             original = _lookup(base, prefix)
@@ -539,7 +600,13 @@ class DocumentStore[T: BaseModel]:
             ):
                 continue
             if not _same_value(original, latest):
-                raise ConflictError(self._path, prefix, original, latest)
+                raise ConflictError(
+                    self._path,
+                    prefix,
+                    original,
+                    latest,
+                    proposed=_lookup(draft, prefix),
+                )
 
     def _read(self) -> tuple[YamlMap, YamlMap, T]:
         """Read raw nodes, normalized YAML values and a public typed snapshot.

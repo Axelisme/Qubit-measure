@@ -1,10 +1,9 @@
-"""SessionControllerMixin — shared Controller forwards used by both apps.
+"""SessionControllerMixin — Controller forwards into session services.
 
-Both measurement-session app Controllers (measure: ``gui/app/measure/controller``;
-autofluxdep: ``gui/app/autofluxdep/controller``) expose a wall of one-line
-forwards into the same four session services (soc_connection / context / device /
+The measure Controller (``gui/app/measure/controller``) exposes one-line
+forwards into four session services (soc_connection / context / device /
 settings). Shared dialogs now use explicit control facets; app-local and
-compatibility callers may still use these forwards. The byte-identical
+compatibility callers may still use these forwards. The forwarding
 implementation lives here.
 
 Design (Candidate #14, Option B — abstract service accessors):
@@ -15,10 +14,8 @@ Design (Candidate #14, Option B — abstract service accessors):
   service types. pyright treats each as an attribute the concrete Controller must
   supply, and enforces the declared service type at every forward. Each app
   satisfies them however its own attribute layout already provides the service —
-  both measure and autofluxdep keep the same flat ``self._soc_svc`` etc. they
-  already assign (measure from ``build_app_services``; autofluxdep aliased off its
-  ``SessionServices`` bundle), so NO rename of the controllers' existing
-  attributes is needed. (Annotation-only rather than ``@property``: a ``property``
+  measure keeps the flat ``self._soc_svc`` etc. assigned from
+  ``build_app_services``, so no rename of its existing attributes is needed. (Annotation-only rather than ``@property``: a ``property``
   is a data descriptor whose ``__set__`` raises ``AttributeError``, so the
   controllers' existing ``self._soc_svc = ...`` assignments would crash at
   runtime; a bare annotation gives the identical pyright enforcement with no name
@@ -36,9 +33,8 @@ Each app keeps as its own override the methods whose body genuinely diverges:
   a session service).
 - ``get_bus`` — returns the app-specific ``EventBus`` subtype.
 
-Project apply is not forwarded here: the setup dialog uses ``SetupControlPort``, and
-measure's remote ``project.apply`` uses the measure Controller's own
-``apply_project``, which returns the resolved-project dict (WIRE-48).
+Entry New/Open is not forwarded here: the setup dialog and measure remote
+entry handlers use ``SetupControlPort`` directly.
 
 Layering: this module lives in the shared ``gui/session/`` layer, so it MUST NOT
 import Qt or ``gui.app.*`` (guarded by ``tests/gui/test_shared_layer.py``). Every
@@ -51,13 +47,12 @@ inside the concrete controllers.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.event_bus import BaseEventBus, EventSubscriptions
 from zcu_tools.gui.session.events import ConnectionFinishedPayload
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.result_scope import ProjectPaths, ResultScope
     from zcu_tools.gui.session.services.connection import (
         ConnectRequest,
         SoCConnectionService,
@@ -70,7 +65,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
     from zcu_tools.gui.session.types import SocCfgHandle
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
-    from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
 
 class SessionControllerMixin:
@@ -96,44 +90,6 @@ class SessionControllerMixin:
     # --- setup dialog: project settings ----------------------------------
     def get_left_panel_width(self) -> int:
         return self._settings_svc.get_left_panel_width()
-
-    def list_result_scopes(self, *, refresh: bool = False) -> tuple[ResultScope, ...]:
-        return self._settings_svc.list_result_scopes(refresh=refresh)
-
-    def derive_project_paths(self, chip_name: str, qub_name: str) -> ProjectPaths:
-        return self._settings_svc.derive_project_paths(chip_name, qub_name)
-
-    # --- setup dialog: context switching ---------------------------------
-    def use_context(self, label: str) -> None:
-        self._ctx_svc.use_context(label)
-
-    def new_context(
-        self,
-        bind_device: str | None = None,
-        clone_from: str | None = None,
-    ) -> None:
-        """Create a new flux context, optionally bound to a flux device.
-
-        ``bind_device`` (a connected device name) decides the flux unit/value: the
-        unit comes from the device-type whitelist (Fast-Fail if the device is
-        unknown or its type is not whitelisted) and the value is *read* from the
-        device's current state (never set). ``bind_device=None`` makes an unbound
-        context (unit="none", no value). ``clone_from`` is the label of an existing
-        context to clone its ml/md from. The new context's label is derived
-        automatically by ``ContextManager`` — callers cannot name it directly.
-        """
-        if bind_device is not None:
-            unit = self._dev_svc.get_device_unit_strict(bind_device)
-            value = self._dev_svc.get_device_value_for_new_context(bind_device)
-        else:
-            unit, value = "none", None
-        self._ctx_svc.new_context(value=value, unit=unit, clone_from=clone_from)
-
-    def get_context_labels(self) -> list[str]:
-        return self._ctx_svc.get_context_labels()
-
-    def get_active_context_label(self) -> str | None:
-        return self._ctx_svc.get_active_context_label()
 
     def list_value_sources(self) -> tuple[ValueInfo, ...]:
         return self._ctx_svc.list_value_sources()
@@ -176,31 +132,3 @@ class SessionControllerMixin:
     # --- setup dialog: device list/unit lookup ----------------------------
     def list_devices(self) -> list[DeviceEntry]:
         return self._dev_svc.list_devices()
-
-    # --- inspect dialog: md edit + ml view/rename/delete ------------------
-    def get_current_md(self) -> MetaDict:
-        return self._ctx_svc.get_current_md()
-
-    def get_current_ml(self) -> ModuleLibrary:
-        return self._ctx_svc.get_current_ml()
-
-    def coerce_md_value(self, key: str, text: str) -> Any:
-        return self._ctx_svc.coerce_md_value(key, text)
-
-    def set_md_attr(self, key: str, value: Any) -> None:
-        self._ctx_svc.set_md_attr(key, value)
-
-    def del_md_attr(self, key: str) -> None:
-        self._ctx_svc.del_md_attr(key)
-
-    def rename_ml_module(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_module(old, new)
-
-    def rename_ml_waveform(self, old: str, new: str) -> None:
-        self._ctx_svc.rename_ml_waveform(old, new)
-
-    def del_ml_module(self, name: str) -> None:
-        self._ctx_svc.del_ml_module(name)
-
-    def del_ml_waveform(self, name: str) -> None:
-        self._ctx_svc.del_ml_waveform(name)

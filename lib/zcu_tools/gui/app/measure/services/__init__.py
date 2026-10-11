@@ -34,13 +34,9 @@ if TYPE_CHECKING:
         create_persistence_caretaker,
     )
     from .guard import (
-        AnalyzePermit,
         GuardError,
         GuardService,
-        LoadPermit,
-        RunPermit,
-        SavePermit,
-        WritebackPermit,
+        RunInputs,
     )
     from .load import LoadService, LoadTabResultOutcome
     from .operation_gate import OperationGate, OperationKind
@@ -56,13 +52,11 @@ if TYPE_CHECKING:
     )
     from .ports import (
         AnalysisPaneSnapshot,
-        PathResourceSnapshot,
         PostAnalysisPaneSnapshot,
         RestoreIssue,
         RestoreReport,
         RunPaneSnapshot,
         SavePaneSnapshot,
-        TabPathsSnapshot,
     )
     from .post_analyze import PostAnalyzeService
     from .run import RunService
@@ -91,11 +85,7 @@ __all__ = [
     "PostAnalyzeService",
     "GuardError",
     "GuardService",
-    "LoadPermit",
-    "RunPermit",
-    "SavePermit",
-    "AnalyzePermit",
-    "WritebackPermit",
+    "RunInputs",
     "LoadService",
     "LoadTabResultOutcome",
     "RunService",
@@ -117,12 +107,10 @@ __all__ = [
     "ProjectSettingsService",
     "TabService",
     "TabSnapshot",
-    "PathResourceSnapshot",
     "RunPaneSnapshot",
     "AnalysisPaneSnapshot",
     "PostAnalysisPaneSnapshot",
     "SavePaneSnapshot",
-    "TabPathsSnapshot",
     "RestoreIssue",
     "RestoreReport",
     "WorkspaceService",
@@ -150,11 +138,7 @@ _EXPORT_MODULES: dict[str, str] = {
     "PostAnalyzeService": ".post_analyze",
     "GuardError": ".guard",
     "GuardService": ".guard",
-    "LoadPermit": ".guard",
-    "RunPermit": ".guard",
-    "SavePermit": ".guard",
-    "AnalyzePermit": ".guard",
-    "WritebackPermit": ".guard",
+    "RunInputs": ".guard",
     "LoadService": ".load",
     "LoadTabResultOutcome": ".load",
     "RunService": ".run",
@@ -176,12 +160,10 @@ _EXPORT_MODULES: dict[str, str] = {
     "ProjectSettingsService": "zcu_tools.gui.session.services.project_settings",
     "TabService": ".tab",
     "TabSnapshot": ".tab",
-    "PathResourceSnapshot": ".ports",
     "RunPaneSnapshot": ".ports",
     "AnalysisPaneSnapshot": ".ports",
     "PostAnalysisPaneSnapshot": ".ports",
     "SavePaneSnapshot": ".ports",
-    "TabPathsSnapshot": ".ports",
     "RestoreIssue": ".ports",
     "RestoreReport": ".ports",
     "WorkspaceService": ".workspace",

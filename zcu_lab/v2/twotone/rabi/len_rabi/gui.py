@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -12,8 +13,8 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     ParamMeta,
     RunRequest,
     SessionEnv,
@@ -25,6 +26,9 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSchema,
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
 
@@ -33,7 +37,19 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_md
+from zcu_lab.v2._support.measure.seeds import (
+    SweepDefault,
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_lab.v2._support.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalyzeOptions,
     LenRabiCfg,
@@ -42,6 +58,35 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import (
 )
 
 LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
+
+
+def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_module_spec().allowed[0])
+    value.with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
+    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
+    value.with_field("nqz", 2)
+    value.with_field("gain", 0.3)
+    value.with_field("waveform.length", 1.0)
+    return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+
+def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
+    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
+    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
+    value.with_field("pulse_cfg.freq", frequency)
+    value.with_field(
+        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("pulse_cfg.nqz", 2)
+    value.with_field("pulse_cfg.gain", 0.1)
+    value.with_field("pulse_cfg.waveform.length", 1.0)
+    value.with_field("ro_cfg.ro_freq", frequency)
+    value.with_field(
+        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
+    )
+    value.with_field("ro_cfg.ro_length", 0.9)
+    value.with_field("ro_cfg.trig_offset", 0.55)
+    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -56,7 +101,7 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len_err: float
     pi2_len: float
     pi2_len_err: float
-    # Rabi oscillation frequency in MHz (1/us), preserved for writeback as 'rabi_f'.
+    # Rabi oscillation frequency in MHz (1/us), proposed at qubit.ext.rabi_freq.
     rabi_f: float
     rabi_f_err: float
     fit_quality: dict[str, dict[str, object]] | None = None
@@ -82,32 +127,30 @@ class LenRabiAdapter(
             "(the pulse gain stays fixed)."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional, seeding defaults): 'q_f' — "
-            "qubit frequency feeding the drive pulse (~2000–6000 MHz); "
-            "'qub_ch' — qubit-drive channel; 'pi_len' — prior pi-pulse length, "
-            "the length sweep spans up to 4*pi_len (fallback 0.3 us). Readout "
-            "defaults pull 'r_f' (~4000–8000 MHz), 'res_ch' / 'ro_ch', and "
-            "'timeFly' for the readout trigger offset (~0–1 us)."
+            "Uses the tab's captured qubit and resonator roles. Length sweep "
+            "stop is 4 * qubit.module.x180.waveform.length (fallback 0.3 us); "
+            "relax delay is 5 * qubit.t1 (fallback 30.5 us). Fresh drive uses "
+            "qubit.freq (fallback 4000 MHz) and wiring.L01.ch (fallback 0). "
+            "Fresh readout uses resonator.freq (fallback 6000 MHz) and "
+            "wiring.ch/wiring.ro_ch (fallback 0), with trigger offset 0.55 us."
         ),
         expects_ml=(
-            "Needs a qubit drive-pulse module — prefers calibrated library "
-            "pi pulses ('pi_len' / 'pi_amp') and falls back to a blank inline "
-            "pulse — and a readout module that references a calibrated library "
-            "readout ('readout_dpm' / 'readout_rf' / 'readout' / "
-            "'res_readout') when present, else a blank pulse-readout that "
-            "references the 'ro_waveform' waveform when one exists. Optional "
-            "reset references a library reset ('reset_bath' / 'reset_10' / "
-            "'reset_120') when present, else stays disabled."
+            "Mounts captured qubit.module.x180/readout/reset slots. Missing "
+            "or dangling drive/readout slots use fresh inline pulses; reset "
+            "stays disabled. The length sweep owns waveform.length, locked "
+            "at 1 us in the cfg. Inline drive gain is 0.3; inline readout "
+            "gain is 0.1, const length 1 us and ADC window 0.9 us. No named "
+            "waveform is adopted."
         ),
         typical_writeback=(
-            "Proposes MetaDict scalars 'pi_len', 'pi2_len' (fitted lengths), "
-            "and 'rabi_f' (Rabi oscillation frequency in MHz). Also proposes "
-            "ModuleLibrary modules 'pi_len' and 'pi2_len' — length-calibrated "
-            "pi-pulse modules produced by this adapter — with waveform length "
-            "overridden to the fitted pi / pi/2 value. amp_rabi produces the "
-            "separate 'pi_amp'/'pi2_amp' gain-calibrated modules and seeds its "
-            "gain sweep from the 'pi_len' scalar written here. Module items are "
-            "skipped when no source cfg is available (e.g. loaded from file)."
+            "Proposes qubit.ext.rabi_freq in MHz from the fit. With a source "
+            "cfg, copies the drive pulse into captured qubit.pulses.pi_amp "
+            "and pi2_amp, replacing waveform.length with fitted pi and pi/2 "
+            "lengths. Separately proposes qubit.module.x180/x90 pointing to "
+            "those resolved keys, even when already bound to them, plus "
+            "qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). "
+            "Every item is independently selectable. Without cfg only "
+            "rabi_freq remains. No separate length scalars or live defaults."
         ),
         recommended=(
             "Phase defaults to fixed 0/180 degrees; enable Fit phase offset "
@@ -121,7 +164,11 @@ class LenRabiAdapter(
     )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> LenRabiRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = LenRabiExp().run(cfg, context=context)
@@ -131,24 +178,42 @@ class LenRabiAdapter(
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
             MeasureCfgBuilder()
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="rabi_pulse",
-                label="Rabi Pulse",
-                locked={"waveform.length": 1.0},
-                blank_overrides={"gain": 0.3},
+            .field(
+                "modules.reset",
+                spec=make_reset_module_spec(optional=True),
+                default=module_seed("$qubit.module.reset", fallback=None),
             )
-            .readout()
+            .field(
+                "modules.qub_pulse",
+                spec=make_pulse_module_spec(label="Rabi Pulse").lock_literal(
+                    "waveform.length", 1.0
+                ),
+                default=module_seed(
+                    "$qubit.module.x180",
+                    fallback=custom(_blank_rabi_pulse, description="inline rabi pulse"),
+                ),
+            )
+            .field(
+                "modules.readout",
+                spec=make_readout_module_spec(),
+                default=module_seed(
+                    "$qubit.module.readout",
+                    fallback=custom(_blank_readout, description="inline readout"),
+                ),
+            )
             .relax_delay(
-                scaled_md("t1", factor=5.0, fallback_value=30.5),
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
             )
             .sweep(
                 "length",
                 label="Length (us)",
                 default=SweepDefault(
                     start=0.03,
-                    stop=scaled_md("pi_len", factor=4.0, fallback_value=0.3),
+                    stop=scaled_path_seed(
+                        "$qubit.module.x180.waveform.length",
+                        factor=4.0,
+                        fallback_value=0.3,
+                    ),
                     expts=101,
                 ),
             )
@@ -157,7 +222,9 @@ class LenRabiAdapter(
             .build()
         )
 
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
         cfg = self.build_exp_cfg(raw_cfg, req)
         _, soccfg = require_soc_handles(req)
         sweep2array(
@@ -191,50 +258,70 @@ class LenRabiAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
     ) -> Sequence[WritebackItem]:
+        """Propose independent calibrations from the source and captured roles.
+
+        req pairs the source RunRecord, fitted lengths/frequency and captured
+        ctx.parameters. Always propose qubit.ext.rabi_freq in MHz. With cfg,
+        add qubit.pulses.pi_amp/pi2_amp pulse proposals with fitted lengths,
+        independent x180/x90 slot proposals containing their resolved keys,
+        and qubit.ext.pi_product = source gain * pi_len (a.u. * us).
+        Same-key slots are still proposed. Without cfg return only rabi_freq.
+        Only waveform lengths change; source cfg is not mutated. Missing
+        capture, role resolution, non-scalar source gain and unsupported
+        waveform-length conversion fail explicitly. No hardware, live
+        calibration reads or writes occur.
+        """
+        parameters = req.ctx.parameters
+        if parameters is None:
+            raise ValueError("Length Rabi writeback requires captured parameters")
         result = req.analyze_result
         items: list[WritebackItem] = [
-            MetaDictWriteback(
-                target_name="pi_len",
-                description="Pi pulse length (us)",
-                proposed_value=result.pi_len,
-            ),
-            MetaDictWriteback(
-                target_name="pi2_len",
-                description="Pi/2 pulse length (us)",
-                proposed_value=result.pi2_len,
-            ),
-            MetaDictWriteback(
-                target_name="rabi_f",
+            ParameterWriteback(
+                target_name="$qubit.ext.rabi_freq",
                 description="Rabi oscillation frequency (MHz)",
                 proposed_value=result.rabi_f,
             ),
         ]
-
-        # Emit module writeback items when the source record has a cfg.
-        # Each item is a copy of qub_pulse with waveform.length overridden to
-        # the fitted pi / pi/2 value, registered as a library module for
-        # subsequent experiments that reference the calibrated pulse by name.
-        # These are the LENGTH-calibrated modules 'pi_len'/'pi2_len' produced
-        # by this adapter (single_qubit.md); amp_rabi produces the separate
-        # gain-calibrated 'pi_amp'/'pi2_amp' modules and reads the 'pi_len'
-        # SCALAR (also written above) as its gain-sweep default-value seed.
         snapshot = req.run_result.cfg
-        if snapshot is not None:
-            qub_pulse_cfg = snapshot.modules.qub_pulse
-            for target, length, desc in [
-                ("pi_len", result.pi_len, "len pi pulse"),
-                ("pi2_len", result.pi2_len, "len pi/2 pulse"),
-            ]:
-                spec, value = module_cfg_to_value(qub_pulse_cfg)
-                value.with_field("waveform.length", length)
-                items.append(
-                    ModuleWriteback(
-                        target_name=target,
-                        description=desc,
-                        edit_schema=CfgSchema(spec=spec, value=value),
-                    )
+        if snapshot is None:
+            return items
+        pulse = snapshot.modules.qub_pulse
+        gain = pulse.gain
+        if not isinstance(gain, (int, float)):
+            raise ValueError("Length Rabi pi_product requires a scalar source gain")
+        for target, slot, length, description in (
+            ("$qubit.pulses.pi_amp", "$qubit.module.x180", result.pi_len, "Pi pulse"),
+            (
+                "$qubit.pulses.pi2_amp",
+                "$qubit.module.x90",
+                result.pi2_len,
+                "Pi/2 pulse",
+            ),
+        ):
+            key = parameters.library_key(target)
+            spec, value = module_cfg_to_value(pulse)
+            value.with_field("waveform.length", length)
+            items.append(
+                ModuleWriteback(
+                    target_name=target,
+                    description=description,
+                    edit_schema=CfgSchema(spec=spec, value=value),
                 )
-
+            )
+            items.append(
+                ParameterWriteback(
+                    target_name=slot,
+                    description=f"{description} slot",
+                    proposed_value=key,
+                )
+            )
+        items.append(
+            ParameterWriteback(
+                target_name="$qubit.ext.pi_product",
+                description="Pi pulse gain times length (a.u. * us)",
+                proposed_value=gain * result.pi_len,
+            )
+        )
         return items
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:

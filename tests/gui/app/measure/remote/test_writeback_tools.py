@@ -2,7 +2,7 @@
 
 Drives the handlers against pane-qualified snapshot and writeback controls
 with crafted persistent items, so we can assert preview serialization and the
-pane-qualified edit path (selected/target_name, the metadict
+pane-qualified edit path (selected/target_name, the parameter
 ``proposed_value`` facet and the module/waveform ``edits`` facet with its
 internalized editor identity), without a full run+analyze pipeline.
 """
@@ -16,8 +16,8 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.app.measure.services.ports import (
@@ -32,10 +32,10 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 
 def _items() -> list[WritebackItem]:
-    md = MetaDictWriteback(
+    md = ParameterWriteback(
         target_name="r_f", description="Resonator freq", proposed_value=6012.3
     )
-    md.session_id = "md-1"
+    md.session_id = "param-1"
     mod = ModuleWriteback(
         target_name="readout_rf",
         description="readout module",
@@ -62,7 +62,6 @@ def _snapshot(
         result=object(),
         figures=None,
         writeback_items=tuple(items),
-        image_paths={},
         has_writeback_draft=has_writeback_draft,
     )
     post = PostAnalysisPaneSnapshot(
@@ -70,7 +69,6 @@ def _snapshot(
         result=None,
         figures=None,
         writeback_items=tuple(),
-        image_paths={},
     )
     return TabSnapshot(
         adapter_name="fake",
@@ -82,7 +80,6 @@ def _snapshot(
         analysis=ana,
         post_analysis=post,
         save=None,
-        paths=None,
     )
 
 
@@ -108,8 +105,15 @@ def _ctrl() -> MagicMock:
     wc.has_tab.return_value = True
     wc.get_context_version.return_value = 7
     wc.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=6000.0, proposed=6012.3),
-        "ml-1": WritebackValues(current=None, proposed={"type": "pulse", "gain": 0.5}),
+        "param-1": WritebackValues(
+            actual_path="r_f", current=6000.0, proposed=6012.3, unit=None
+        ),
+        "ml-1": WritebackValues(
+            actual_path="readout_rf",
+            current=None,
+            proposed={"type": "pulse", "gain": 0.5},
+            unit=None,
+        ),
     }
     wc.set_writeback_item_for_pane.return_value = {
         "valid": True,
@@ -117,8 +121,8 @@ def _ctrl() -> MagicMock:
         "added": [],
     }
     wc.apply_writeback_for_pane.return_value = {
-        "applied_ids": ["md-1"],
-        "written": {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []},
+        "applied_ids": ["param-1"],
+        "written": {"parameter": ["r_f"], "ml_modules": [], "ml_waveforms": []},
     }
     wc.get_tab_snapshot = ctrl.get_tab_snapshot
     # attach to ctrl for dispatch helper fallback
@@ -135,17 +139,18 @@ def _ctrl() -> MagicMock:
 from ._helpers import dispatch_handler as _dispatch  # noqa: E402
 
 
-def test_preview_serializes_metadict_and_module():
+def test_preview_serializes_parameter_and_module():
     ctrl = _ctrl()
     res = _dispatch(
         ctrl, "tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    item_list = list(res["items"])  # type: ignore[call-overload]
+    item_list = res["items"]
+    assert isinstance(item_list, list)
     items = {it["id"]: it for it in item_list}
 
-    md = items["md-1"]
-    assert md["kind"] == "metadict"
-    assert md["id"] == "md-1"
+    md = items["param-1"]
+    assert md["kind"] == "parameter"
+    assert md["id"] == "param-1"
     assert md["target_name"] == "r_f"
     assert "key" not in md
     assert md["proposed_value"] == 6012.3
@@ -165,8 +170,8 @@ def test_preview_serializes_full_service_values_at_the_requested_pane():
     )
     assert isinstance(result["items"], list)
     items = {item["id"]: item for item in result["items"]}
-    assert items["md-1"]["current"] == 6000.0
-    assert items["md-1"]["proposed"] == 6012.3
+    assert items["param-1"]["current"] == 6000.0
+    assert items["param-1"]["proposed"] == 6012.3
     assert items["ml-1"]["current"] is None
     assert items["ml-1"]["proposed"] == {"type": "pulse", "gain": 0.5}
     ctrl.writeback_control.get_writeback_values_for_pane.assert_called_once_with(
@@ -198,9 +203,13 @@ def test_apply_reads_persistent_draft():
     res = _dispatch(
         ctrl, "tab.writeback_apply", {"tab_id": "t", "subtab_id": "analysis"}
     )
-    assert res["applied_ids"] == ["md-1"]
+    assert res["applied_ids"] == ["param-1"]
     # apply now enriches: written (by kind) + post-apply context version + destination_context.
-    assert res["written"] == {"md": ["r_f"], "ml_modules": [], "ml_waveforms": []}
+    assert res["written"] == {
+        "parameter": ["r_f"],
+        "ml_modules": [],
+        "ml_waveforms": [],
+    }
     assert res["context_version"] == 7
     assert "destination_context" in res
     ctrl.writeback_control.apply_writeback_for_pane.assert_called_once_with(
@@ -208,7 +217,7 @@ def test_apply_reads_persistent_draft():
     )
 
 
-@pytest.mark.parametrize("ids", [["md-1"], []])
+@pytest.mark.parametrize("ids", [["param-1"], []])
 def test_apply_passes_explicit_ids_without_editing_selection(ids):
     ctrl = _ctrl()
     _dispatch(
@@ -226,7 +235,7 @@ def test_apply_passes_explicit_ids_without_editing_selection(ids):
     ctrl.writeback_control.set_writeback_item_for_pane.assert_not_called()
 
 
-@pytest.mark.parametrize("ids", [None, "md-1", [""], [1]])
+@pytest.mark.parametrize("ids", [None, "param-1", [""], [1]])
 def test_apply_rejects_malformed_ids_before_service(ids):
     ctrl = _ctrl()
     with pytest.raises(RemoteError):
@@ -291,13 +300,15 @@ def test_set_delegates_to_writeback_control_without_ctrl_fallback():
     res = _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "param-1", "selected": False},
     )
 
-    assert res["item"]["id"] == "md-1"  # type: ignore[index]
+    item = res["item"]
+    assert isinstance(item, dict)
+    assert item["id"] == "param-1"
     writeback_control.has_tab.assert_called_once_with("t")
     writeback_control.set_writeback_item_for_pane.assert_called_once_with(
-        "t", "analysis", "md-1", selected=False
+        "t", "analysis", "param-1", selected=False
     )
     ctrl.has_tab.assert_not_called()
 
@@ -324,7 +335,7 @@ def test_apply_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl.has_tab.assert_not_called()
 
 
-def test_set_edits_metadict_item():
+def test_set_edits_parameter_item():
     ctrl = _ctrl()
     res = _dispatch(
         ctrl,
@@ -332,18 +343,20 @@ def test_set_edits_metadict_item():
         {
             "tab_id": "t",
             "subtab_id": "analysis",
-            "id": "md-1",
+            "id": "param-1",
             "selected": False,
             "proposed_value": 6015.0,
         },
     )
     ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once()
     args, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
-    assert args[:3] == ("t", "analysis", "md-1")
+    assert args[:3] == ("t", "analysis", "param-1")
     assert kwargs["selected"] is False
     assert kwargs["proposed_value"] == 6015.0
     # The reply echoes the (re-read) edited item.
-    assert res["item"]["id"] == "md-1"  # type: ignore[index]
+    item = res["item"]
+    assert isinstance(item, dict)
+    assert item["id"] == "param-1"
 
 
 def test_set_module_cfg_edits_facet():
@@ -381,7 +394,7 @@ def test_set_proposed_value_and_edits_mutually_exclusive():
             {
                 "tab_id": "t",
                 "subtab_id": "analysis",
-                "id": "md-1",
+                "id": "param-1",
                 "proposed_value": 1.0,
                 "edits": [{"path": "p", "value": 1}],
             },
@@ -432,7 +445,7 @@ def test_set_deselect_flows_through():
     _dispatch(
         ctrl,
         "tab.writeback_set",
-        {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "selected": False},
+        {"tab_id": "t", "subtab_id": "analysis", "id": "param-1", "selected": False},
     )
     _, kwargs = ctrl.writeback_control.set_writeback_item_for_pane.call_args
     assert kwargs == {"selected": False}
@@ -443,7 +456,7 @@ def test_set_ignores_null_optionals():
 
     A retarget-only call on a module item must not forward ``selected`` or
     ``proposed_value`` just because they arrive as null — otherwise it flips the
-    selection off and trips the metadict-only guard on a module item.
+    selection off and trips the parameter-only guard on a module item.
     """
     ctrl = _ctrl()
     _dispatch(
@@ -470,7 +483,12 @@ def test_set_empty_target_name_rejected():
         _dispatch(
             ctrl,
             "tab.writeback_set",
-            {"tab_id": "t", "subtab_id": "analysis", "id": "md-1", "target_name": ""},
+            {
+                "tab_id": "t",
+                "subtab_id": "analysis",
+                "id": "param-1",
+                "target_name": "",
+            },
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
@@ -484,32 +502,42 @@ def test_set_unknown_id_rejected():
         _dispatch(
             ctrl,
             "tab.writeback_set",
-            {"tab_id": "t", "subtab_id": "analysis", "id": "md-99", "selected": True},
+            {
+                "tab_id": "t",
+                "subtab_id": "analysis",
+                "id": "param-99",
+                "selected": True,
+            },
         )
     assert exc.value.code is ErrorCode.INVALID_PARAMS
 
 
 # ---------------------------------------------------------------------------
-# Complex writeback scalar wire round-trip (WIRE 23). A complex metadict
+# Complex writeback scalar wire round-trip (WIRE 23). A complex parameter
 # proposed_value serializes losslessly as {"__complex__": [re, im]} and a
 # matching tag on tab.writeback_set coerces back to a Python complex.
 # ---------------------------------------------------------------------------
 
 
 def _complex_items() -> list[WritebackItem]:
-    md = MetaDictWriteback(
+    md = ParameterWriteback(
         target_name="g_center",
         description="|g> IQ centre",
         proposed_value=complex(1.5, -2.25),
     )
-    md.session_id = "md-1"
+    md.session_id = "param-1"
     return [md]
 
 
 def test_preview_serializes_complex_as_tag():
     ctrl = _ctrl()
     ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=None, proposed=complex(1.5, -2.25)),
+        "param-1": WritebackValues(
+            actual_path="g_center",
+            current=None,
+            proposed=complex(1.5, -2.25),
+            unit=None,
+        ),
     }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _complex_items(), has_writeback_draft=True
@@ -530,7 +558,7 @@ def test_set_coerces_complex_tag_back_to_complex():
         {
             "tab_id": "t",
             "subtab_id": "analysis",
-            "id": "md-1",
+            "id": "param-1",
             "proposed_value": {"__complex__": [1.5, -2.25]},
         },
     )
@@ -556,7 +584,7 @@ def test_complex_preview_set_round_trip_is_lossless():
         {
             "tab_id": "t",
             "subtab_id": "analysis",
-            "id": "md-1",
+            "id": "param-1",
             "proposed_value": wire_value,
         },
     )
@@ -575,19 +603,21 @@ _CONFUSION = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
 
 
 def _matrix_items() -> list[WritebackItem]:
-    md = MetaDictWriteback(
+    md = ParameterWriteback(
         target_name="confusion_matrix",
         description="3x3 confusion matrix",
         proposed_value=_CONFUSION,
     )
-    md.session_id = "md-1"
+    md.session_id = "param-1"
     return [md]
 
 
 def test_preview_serializes_nested_list_verbatim():
     ctrl = _ctrl()
     ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
-        "md-1": WritebackValues(current=None, proposed=_CONFUSION),
+        "param-1": WritebackValues(
+            actual_path="confusion_matrix", current=None, proposed=_CONFUSION, unit=None
+        ),
     }
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _matrix_items(), has_writeback_draft=True
@@ -608,7 +638,7 @@ def test_set_passes_nested_list_through_untouched():
         {
             "tab_id": "t",
             "subtab_id": "analysis",
-            "id": "md-1",
+            "id": "param-1",
             "proposed_value": _CONFUSION,
         },
     )
@@ -633,7 +663,7 @@ def test_nested_list_preview_set_round_trip_is_lossless():
         {
             "tab_id": "t",
             "subtab_id": "analysis",
-            "id": "md-1",
+            "id": "param-1",
             "proposed_value": wire_value,
         },
     )

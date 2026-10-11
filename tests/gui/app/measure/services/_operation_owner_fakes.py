@@ -50,11 +50,6 @@ class DeviceOperationOwner:
         self.on_cancel(name)
 
 
-class SaveOperationOwner:
-    def active_save_operations(self) -> tuple[()]:
-        return ()
-
-
 class UnusedProgress:
     def bars_for_operation(
         self, operation_id: int

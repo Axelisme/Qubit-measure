@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
+from zcu_tools.gui.cfg.resource import CfgObservation, CfgRef
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.types import ParameterContext
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -21,7 +23,13 @@ if TYPE_CHECKING:
 class TabControlPort(Protocol):
     """App-facing tab resource surface for driving adapters."""
 
-    def new_tab(self, adapter_name: str) -> str: ...
+    def new_tab(self, adapter_name: str) -> str:
+        """Create/activate a tab whose cfg uses current global sources.
+
+        Adapter/default-cfg failures propagate before registration.
+        """
+        ...
+
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
@@ -41,6 +49,28 @@ class TabControlPort(Protocol):
         self, adapter_name: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
+
+    def capture_parameters(
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext | None:
+        """Freeze current sources with optional named aliases overrides.
+
+        aliases maps alias names to concrete components. None and {} use global
+        rows. Unknown tab and source/alias errors propagate. EMPTY returns None
+        without overrides and rejects nonempty overrides with no_context. No tab/session mutation or guard observation occurs.
+        """
+        ...
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+    ) -> CfgObservation:
+        """Resolve exact observed inputs with named aliases without publication.
+
+        Stale identity/revision, notification and source/alias errors propagate.
+        None and {} return the cached observation. Nonempty aliases returns
+        Valid or Invalid with the same ref and temporary source basis.
+        """
+        ...
 
 
 class TabControlFacet:
@@ -64,6 +94,7 @@ class TabControlFacet:
         self._access = access if access is not None else ExperimentAccess()
 
     def new_tab(self, adapter_name: str) -> str:
+        """Create/activate using current sources; see TabControlPort.new_tab."""
         self._access.require_available()
         return self._workspace.new_tab(adapter_name)
 
@@ -124,3 +155,15 @@ class TabControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
+
+    def capture_parameters(
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
+    ) -> ParameterContext | None:
+        """Freeze current sources; see TabControlPort.capture_parameters."""
+        return self._tab.capture_parameters(tab_id, aliases=aliases)
+
+    def preview_cfg(
+        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+    ) -> CfgObservation:
+        """Read temporary cfg; see TabControlPort.preview_cfg."""
+        return self._tab.preview_cfg(tab_id, expected, aliases=aliases)

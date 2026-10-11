@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
-    MetaDictWriteback,
     ModuleWriteback,
+    ParameterWriteback,
     WaveformWriteback,
     WritebackItem,
 )
@@ -60,8 +60,8 @@ def _writeback_item_wire(item) -> dict[str, object]:
         "description": item.description,
         "selected": bool(item.selected),
     }
-    if isinstance(item, MetaDictWriteback):
-        base["kind"] = "metadict"
+    if isinstance(item, ParameterWriteback):
+        base["kind"] = "parameter"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
     elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
         is_module = isinstance(item, ModuleWriteback)
@@ -80,7 +80,9 @@ def h_tab_writeback_preview(
     """Pure read of a pane's persistent writeback draft (not a dry-run).
 
     Requires (tab_id, subtab_id) with closed values analysis|post_analysis.
-    Projects current destination context at reply time; draft stores no source.
+    Each item includes the service-owned captured actual_path and existing
+    stderr (working units, or None). destination_context is the active context
+    at reply time, not the draft's captured destination.
     """
     tab_id = str(params["tab_id"])
     subtab_id = str(params["subtab_id"])
@@ -127,6 +129,8 @@ def h_tab_writeback_preview(
         "items": [
             {
                 **_writeback_item_wire(item),
+                "actual_path": values[item.session_id].actual_path,
+                "stderr": item.stderr,
                 "current": _writeback_wire_value(values[item.session_id].current),
                 "proposed": _writeback_wire_value(values[item.session_id].proposed),
             }
@@ -154,7 +158,7 @@ def h_tab_writeback_set(
     # The wire collapses "omitted optional" and "explicit JSON null" to the same
     # thing (a null-valued key), so a null here means "not provided" — never a
     # value to write. ``selected``/``target_name`` can never legitimately be null.
-    # ``proposed_value`` is only forwarded when present *and* non-null; a metadict
+    # ``proposed_value`` is only forwarded when present *and* non-null; a parameter
     # item that genuinely needs a null value is out of scope for this surface.
     changes: dict[str, object] = {}
     if params.get("selected") is not None:
@@ -171,7 +175,7 @@ def h_tab_writeback_set(
     if has_proposed and has_edits:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            "'proposed_value' (metadict) and 'edits' (module/waveform) are "
+            "'proposed_value' (parameter) and 'edits' (module/waveform) are "
             "mutually exclusive",
         )
     if has_proposed:

@@ -6,8 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from qtpy.QtWidgets import QPushButton
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.session.events import DeviceChangedPayload
+from zcu_tools.gui.session.expression import EvalRef
 from zcu_tools.gui.session.services.device import DeviceEntry
 from zcu_tools.gui.session.services.predictor import (
     CalibrateFluxBiasRequest,
@@ -19,6 +21,7 @@ from zcu_tools.gui.session.services.predictor import (
     SetModelParamsRequest,
 )
 from zcu_tools.gui.session.state import DeviceStatus
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_dialog import (
     _COL_FREQ,
     _COL_MAG_N,
@@ -33,6 +36,8 @@ from zcu_tools.gui.session.ui.predictor_dialog import (
     PredictorDialog,
     PredictorDialogState,
 )
+
+from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
 def _make_freq_result(
@@ -460,38 +465,47 @@ def test_predictor_dialog_apply_surfaces_service_error(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_predictor_dialog_calibration_defaults_to_q_f_and_requires_single_selection(
-    qapp,
-):
-    from zcu_tools.resources.context import MetaDict
+def _calibration_field(dialog: PredictorDialog) -> EvalNumericField:
+    field = dialog.findChild(EvalNumericField)
+    assert field is not None
+    return field
 
-    md = MetaDict()
-    md.q_f = 4567.0
 
+def _calibrate_button(dialog: PredictorDialog) -> QPushButton:
+    return next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Calibrate"
+    )
+
+
+def test_predictor_dialog_calibration_requires_resolved_path_and_single_selection(qapp):
+    parameters = make_parameters({"frequency_mhz": 4567.0})
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
-
-    assert dialog._calibration_freq_field._mode == "eval"
-    assert dialog._calibration_freq_field._line_edit.text() == "q_f"
-    assert not dialog._calibrate_btn.isEnabled()
+    dialog = PredictorDialog(ctrl, parameter_provider=lambda: parameters)
+    field = dialog.findChild(EvalNumericField)
+    assert field is not None
+    assert isinstance(field.read_raw(), EvalRef)
+    assert not _calibrate_button(dialog).isEnabled()
 
     dialog._table.selectRow(0)
+    assert not _calibrate_button(dialog).isEnabled()
+    assert "unresolved" in _calibrate_button(dialog).toolTip()
 
-    assert dialog._calibrate_btn.isEnabled()
+    field.load_expression("general.ext.frequency_mhz")
+    assert _calibrate_button(dialog).isEnabled()
 
 
 def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.q_f = 4567.0
+    parameters = make_parameters({"frequency_mhz": 4567.0})
 
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog = PredictorDialog(ctrl, parameter_provider=lambda: parameters)
+    _calibration_field(dialog).load_expression("general.ext.frequency_mhz")
     dialog._predict_value_spin.setValue(0.25)
     dialog._table.selectRow(2)
 
-    dialog._on_calibrate_clicked()
+    _calibrate_button(dialog).click()
 
     ctrl.calibrate_flux_bias.assert_called_once()
     (req,) = ctrl.calibrate_flux_bias.call_args.args
@@ -504,32 +518,29 @@ def test_predictor_dialog_calibrate_resolves_expression_and_updates_bias(qapp):
 
 
 def test_predictor_dialog_calibrate_requires_loaded_predictor(qapp):
-    from zcu_tools.resources.context import MetaDict
-
-    md = MetaDict()
-    md.q_f = 4567.0
+    parameters = make_parameters({"frequency_mhz": 4567.0})
 
     ctrl = _make_ctrl(has_predictor=False)
-    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog = PredictorDialog(ctrl, parameter_provider=lambda: parameters)
+    _calibration_field(dialog).load_expression("general.ext.frequency_mhz")
     dialog._table.selectRow(0)
 
-    assert not dialog._calibrate_btn.isEnabled()
+    assert not _calibrate_button(dialog).isEnabled()
 
-    dialog._on_calibrate_clicked()
+    _calibrate_button(dialog).click()
 
     ctrl.calibrate_flux_bias.assert_not_called()
-    assert "Load a predictor" in dialog._status_label.text()
+    assert "Load a predictor" in _calibrate_button(dialog).toolTip()
 
 
 def test_predictor_dialog_calibrate_requires_single_selected_transition(qapp):
     from qtpy.QtWidgets import QTableWidgetSelectionRange  # type: ignore[attr-defined]
-    from zcu_tools.resources.context import MetaDict
 
-    md = MetaDict()
-    md.q_f = 4567.0
+    parameters = make_parameters({"frequency_mhz": 4567.0})
 
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
-    dialog = PredictorDialog(ctrl, md_provider=lambda: md)
+    dialog = PredictorDialog(ctrl, parameter_provider=lambda: parameters)
+    _calibration_field(dialog).load_expression("general.ext.frequency_mhz")
     dialog._table.setRangeSelected(
         QTableWidgetSelectionRange(0, 0, 0, dialog._table.columnCount() - 1), True
     )
@@ -537,12 +548,12 @@ def test_predictor_dialog_calibrate_requires_single_selected_transition(qapp):
         QTableWidgetSelectionRange(2, 0, 2, dialog._table.columnCount() - 1), True
     )
 
-    assert not dialog._calibrate_btn.isEnabled()
+    assert not _calibrate_button(dialog).isEnabled()
 
-    dialog._on_calibrate_clicked()
+    _calibrate_button(dialog).click()
 
     ctrl.calibrate_flux_bias.assert_not_called()
-    assert "exactly one transition" in dialog._status_label.text()
+    assert "exactly one transition" in _calibrate_button(dialog).toolTip()
 
 
 def test_predictor_dialog_calibrate_expression_error_fast_fails(qapp):
@@ -550,12 +561,12 @@ def test_predictor_dialog_calibrate_expression_error_fast_fails(qapp):
     dialog = PredictorDialog(ctrl)
     dialog._table.selectRow(0)
 
-    assert not dialog._calibrate_btn.isEnabled()
+    assert not _calibrate_button(dialog).isEnabled()
 
-    dialog._on_calibrate_clicked()
+    _calibrate_button(dialog).click()
 
     ctrl.calibrate_flux_bias.assert_not_called()
-    assert "Calibration frequency is unresolved" in dialog._status_label.text()
+    assert "Calibration frequency is unresolved" in _calibrate_button(dialog).toolTip()
 
 
 # ---------------------------------------------------------------------------

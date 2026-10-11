@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import (
     _PreviewCanvas,
 )
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
@@ -487,8 +486,7 @@ def test_save_button_persists_without_remote_png(
     monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     state = State(
         SessionEnv(
-            md=MetaDict(),
-            ml=ModuleLibrary(),
+            parameters=None,
             soc=None,
             soccfg=None,
             database_path=str(tmp_path),

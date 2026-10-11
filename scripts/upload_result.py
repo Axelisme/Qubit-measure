@@ -330,12 +330,12 @@ def process_upload_task(creds, task):
 def main():
     """Main function to parse arguments and trigger the upload."""
     parser = argparse.ArgumentParser(
-        description="Upload qubit measurement results to a specified Google Drive folder."
+        description="Upload result entries from results/<name> to a specified Google Drive folder."
     )
     parser.add_argument(
-        "qubit_names",
+        "entry_names",
         nargs="+",
-        help="The names of the qubits (e.g., Si001 Si002). These correspond to folders inside the 'result/' directory, which will be uploaded.",
+        help="Result entry names (e.g., Si001 Si002). Each repo results/<name> directory will be uploaded.",
     )
     parser.add_argument(
         "-j",
@@ -365,25 +365,25 @@ def main():
     drive_service, creds = authenticate_drive()
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    for qubit_name in args.qubit_names:
-        print(f"\nProcessing qubit: {qubit_name}")
-        source_folder = os.path.join(project_root, "result", qubit_name)
+    for entry_name in args.entry_names:
+        print(f"\nProcessing entry: {entry_name}")
+        source_folder = os.path.join(project_root, "results", entry_name)
 
         if not os.path.isdir(source_folder):
             print(f"Error: Source folder '{source_folder}' not found. Skipping.")
             continue
 
-        qubit_folder_id = find_or_create_folder(
-            drive_service, qubit_name, parent_folder_id
+        entry_folder_id = find_or_create_folder(
+            drive_service, entry_name, parent_folder_id
         )
 
-        if qubit_folder_id:
+        if entry_folder_id:
             # Collect all upload tasks
             tasks = []
             collect_upload_tasks(
                 drive_service,
                 source_folder,
-                qubit_folder_id,
+                entry_folder_id,
                 tasks,
                 prune=args.prune,
             )
@@ -396,9 +396,9 @@ def main():
                 Parallel(n_jobs=args.jobs, backend="threading")(
                     delayed(process_upload_task)(creds, task) for task in tasks
                 )
-                print(f"Operation complete for {qubit_name}.")
+                print(f"Operation complete for {entry_name}.")
             else:
-                print(f"No files to upload for {qubit_name}.")
+                print(f"No files to upload for {entry_name}.")
 
 
 if __name__ == "__main__":

@@ -50,6 +50,56 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
     )
 
 
+def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    value = complex(0.012345678901234567, -0.03456789012345678)
+    tag = {"__complex__": [value.real, value.imag]}
+    write = AcceptedWrite.model_validate(
+        {"path": "Q1.ext.readout_cal.g_center", "value": value}
+    )
+    assert write.value == tag
+    payload = AcceptedPayload.model_validate(
+        {
+            "writes": [
+                {"path": "Q1.ext.readout_cal.g_center", "value": value},
+                {"path": "Q1.ext.readout_cal.fidelity", "value": 0.93},
+                {"path": "Q1.ext.readout_cal.confusion_matrix", "value": [[1, 0]]},
+            ],
+            "analysis_summary": {},
+        }
+    )
+    assert [item.value for item in payload.writes] == [tag, 0.93, [[1, 0]]]
+    event = LedgerEvent(
+        id=str(uuid4()),
+        kind="accepted",
+        at=_AT,
+        entry_id=entry.entry_id,
+        origin="notebook",
+        payload=payload,
+    )
+    entry.ledger.append(event)
+    persisted = RecordsLedger(records, entry_id=entry.entry_id).get(event.id).event
+    assert isinstance(persisted.payload, AcceptedPayload)
+    assert persisted.payload.writes == payload.writes
+    assert persisted.model_dump(mode="json")["payload"]["writes"][0]["value"] == tag
+
+
+@pytest.mark.parametrize(
+    "value",
+    [complex(float("inf"), 1), complex(1, float("nan")), [1 + 2j]],
+)
+def test_accepted_complex_rejects_nonfinite_and_nested_values(value: object) -> None:
+    with pytest.raises(ValueError, match="strict JSON"):
+        AcceptedWrite.model_validate({"path": "Q1.ext.center", "value": value})
+
+
+def test_accepted_string_remains_json_string() -> None:
+    write = AcceptedWrite.model_validate({"path": "Q1.ext.center", "value": "(1+2j)"})
+    assert write.value == "(1+2j)"
+
+
 def test_empty_entry_and_independent_handles_observe_first_append(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
@@ -116,7 +166,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         at=_AT,
         entry_id=entry.entry_id,
         origin="mcp",
-        call_id="call-1",
         payload=AnalyzedPayload(
             analysis_kind="fit",
             run_ids=("run-1",),
@@ -273,8 +322,6 @@ def test_constructor_requires_records_directory_and_uuid(tmp_path: Path) -> None
         {"kind": "unknown"},
         {"at": "2026-10-06T02:00:00"},
         {"at": "2026-10-06T02:00:00+01:00"},
-        {"origin": "mcp", "call_id": None},
-        {"origin": "gui", "call_id": "extra"},
         {"unexpected": True},
         {"kind": "saved"},
     ],
@@ -286,9 +333,7 @@ def test_event_model_rejects_invalid_header_origin_and_payload_pair(
     entry, _records = entry_records
     data = _accepted(entry.entry_id).model_dump(mode="json")
     data.update(change)
-    with pytest.raises(
-        ValueError, match="format|id|origin|kind|at|call_id|unexpected|payload"
-    ):
+    with pytest.raises(ValueError, match="format|id|origin|kind|at|unexpected|payload"):
         LedgerEvent.model_validate(data)
 
 

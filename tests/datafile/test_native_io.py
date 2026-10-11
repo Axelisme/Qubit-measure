@@ -5,6 +5,7 @@ import os
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import h5py as h5
 import numpy as np
@@ -14,6 +15,7 @@ from zcu_tools.datafile import (
     AxisSchema,
     DataVariable,
     ExperimentPayload,
+    JsonObject,
     LabberMetadata,
     LabberPayload,
     SoftwareProvenance,
@@ -108,7 +110,7 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
 
     with h5.File(destination, "r") as file:
         assert file.attrs["format"] == "zcu.experiment-data"
-        assert file.attrs["format_version"] == "1.0"
+        assert file.attrs["format_version"] == "2.0"
         signal = hdf_dataset(file, "data/readout/signal")
         assert signal.attrs["units"] == "V"
         assert signal.id.get_type().get_member_name(0) == b"r"
@@ -131,6 +133,26 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
             dataset.coords["frequency"].values, recovered.axes[0].values
         )
         assert dataset["signal"].attrs["units"] == "V"
+
+
+def test_readonly_metadata_mappings_round_trip_through_native_io(
+    tmp_path: Path,
+) -> None:
+    metadata = native_metadata()
+    metadata = replace(
+        metadata,
+        snapshot=replace(metadata.snapshot, roles=MappingProxyType({"driver": "Q1"})),
+        provenance=replace(
+            metadata.provenance,
+            software_versions=MappingProxyType({"zcu_tools": "1.0"}),
+        ),
+    )
+    destination = tmp_path / "readonly.h5"
+    save_run_data(destination, native_payload(), metadata, cfg=native_cfg())
+    restored = load_run_data(destination).metadata
+    assert restored.snapshot.roles == {"driver": "Q1"}
+    assert restored.provenance.software_versions == {"zcu_tools": "1.0"}
+    assert restored == metadata
 
 
 @pytest.mark.parametrize("count", [1, 2])
@@ -241,7 +263,7 @@ def test_missing_provenance_is_not_silently_unknown(
 @pytest.mark.parametrize(
     "location,attribute,value",
     [
-        ("/", "format_version", "2.0"),
+        ("/", "format_version", "1.0"),
         ("/", "completion", "finished"),
         ("/", "started_at", "not-a-time"),
         ("/data/readout/signal", "units", "A"),
@@ -446,3 +468,62 @@ def test_exact_destination_conflict_replace_and_validation_failure(
         save_run_data(path, invalid, native_metadata(), cfg=native_cfg(), replace=True)
     assert path.read_bytes() == updated
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize(
+    "devices",
+    [None, {}, {"flux": {"type": "FakeDevice", "value": 0.25, "output": "on"}}],
+)
+def test_native_device_snapshot_distinguishes_absent_empty_and_settings(
+    tmp_path: Path, devices: dict[str, JsonObject] | None
+) -> None:
+    metadata = replace(native_metadata(), device_snapshot=devices)
+    path = tmp_path / "devices.h5"
+    save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    restored = load_run_data(path).metadata
+    assert restored.device_snapshot == devices
+    with h5.File(path, "r") as file:
+        if devices is not None:
+            assert json.loads(hdf_json_text(file, "device")) == devices
+        assert json.loads(hdf_json_text(file, "context"))["roles"] == dict(
+            metadata.snapshot.roles
+        )
+    # Generic rewrites preserve the distinction without a live device registry.
+    save_run_data(path, native_payload(), restored, cfg=native_cfg(), replace=True)
+    assert load_run_data(path).metadata.device_snapshot == devices
+
+
+@pytest.mark.parametrize(
+    "text", ["null", "[]", '{"flux": 1}', '{"flux": {"value": NaN}}']
+)
+def test_native_device_snapshot_rejects_malformed_recorded_settings(
+    tmp_path: Path, text: str
+) -> None:
+    path = tmp_path / "bad-device.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file.create_dataset("device", data=text, dtype=h5.string_dtype("utf-8"))
+    with pytest.raises(ValueError, match="/device") as error:
+        load_run_data(path)
+    assert str(path) in str(error.value)
+
+
+def test_native_device_snapshot_rejects_external_settings_link(tmp_path: Path) -> None:
+    path = tmp_path / "external-device.h5"
+    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(path, "r+") as file:
+        file["device"] = h5.ExternalLink("missing-device.h5", "/settings")
+    with pytest.raises(ValueError, match="/device"):
+        load_run_data(path)
+
+
+def test_native_device_snapshot_rejects_nonfinite_before_publication(
+    tmp_path: Path,
+) -> None:
+    metadata = replace(
+        native_metadata(), device_snapshot={"flux": {"value": float("inf")}}
+    )
+    path = tmp_path / "invalid-device.h5"
+    with pytest.raises(ValueError, match="/device"):
+        save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+    assert list(tmp_path.iterdir()) == []

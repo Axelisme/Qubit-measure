@@ -4,21 +4,83 @@ import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import asdict, replace
 from threading import Event
 from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.raw_save import SaveArtifact, SaveOutput, SaveReport
+from zcu_tools.mcp.measure.recipe import RecipeAnalysis, RecipeRun, RecipeSession
+from zcu_tools.mcp.measure.session import GuiRpcError
 
-from ._recipe_support import PNG, LookbackGui, scalar
+from ._recipe_actual_support import cfg_value
+from ._recipe_support import PNG, LookbackGui, publish_reference_locks, scalar
 from ._support import MeasureClient, full_execution_reply, make_client
+
+RAW_REPORT = SaveReport(
+    "run-a",
+    {
+        "raw": {
+            "data": SaveArtifact(
+                "Saved",
+                {
+                    "data": [
+                        SaveOutput("data_h5", "/runs/run-a/data.h5", "saved"),
+                        SaveOutput("labber", "/labber/raw.hdf5", "saved"),
+                    ]
+                },
+            )
+        }
+    },
+)
+PRIMARY_REPORT = SaveReport(
+    "run-a",
+    {
+        "analysis": {
+            "results": SaveArtifact(
+                "Saved",
+                {
+                    "analysis:primary": [
+                        SaveOutput("json", "/runs/run-a/analysis/results.json", "saved")
+                    ],
+                    "figure:trace": [
+                        SaveOutput("png", "/runs/run-a/analysis/trace.png", "saved")
+                    ],
+                },
+            )
+        }
+    },
+)
+POST_REPORT = SaveReport(
+    "run-a",
+    {
+        "post_analysis": {
+            "results": SaveArtifact(
+                "Saved",
+                {
+                    "analysis:post": [
+                        SaveOutput(
+                            "json", "/runs/run-a/post_analysis/results.json", "saved"
+                        )
+                    ],
+                    "figure:cloud": [
+                        SaveOutput(
+                            "png", "/runs/run-a/post_analysis/cloud.png", "saved"
+                        )
+                    ],
+                },
+            )
+        }
+    },
+)
 
 
 def start_ge(client: MeasureClient) -> ToolReply:
     """Start GE through public admission with a short local wait for blocked RPCs."""
     return client.context.session.recipes.start(
-        client.context, "singleshot_ge", {"pi_ref": "pi"}
+        client.context, "singleshot_ge", {"pi_ref": "Q1.pulses.pi"}
     ).wait(0.01)
 
 
@@ -43,8 +105,8 @@ class GeGui(LookbackGui):
         self.done = {"primary": Event(), "post": Event()}
         self.writes: list[dict[str, object]] = []
         self.calls = []
-        self.library = {"pi": {}, "readout": {}}
-        self.md = {"r_f": 5100.0}
+        self.library = {"Q1.pulses.pi": {}, "R1.readout.readout": {}}
+        self.md = {"$resonator.freq": 5100.0}
         self.publication["tree"]["children"]["shots"] = scalar(7000)
         self.publication["tree"]["children"]["reps"] = scalar(1)
         self.publication["tree"]["children"]["rounds"] = scalar(1)
@@ -52,10 +114,12 @@ class GeGui(LookbackGui):
         modules["probe_pulse"] = {
             "kind": "reference",
             "valid": True,
+            "readonly": False,
             "ref": "<Custom:Pulse>",
             "error": None,
             "children": {"freq": scalar(6100.0)},
         }
+        publish_reference_locks(modules["probe_pulse"])
 
     def _observations(self):
         observations = super()._observations()
@@ -89,7 +153,7 @@ class GeGui(LookbackGui):
                 "written": [
                     {
                         "id": item["id"],
-                        "kind": "md",
+                        "kind": "parameter",
                         "target": item["id"],
                         "before": {"value": 0.0},
                         "after": {"value": 1.0},
@@ -115,8 +179,8 @@ class GeGui(LookbackGui):
                 "has_draft": True,
                 "items": [
                     {
-                        "id": "md-1",
-                        "kind": "metadict",
+                        "id": "param-1",
+                        "kind": "parameter",
                         "target_name": "predict_offset",
                         "proposed": 0.24,
                         "current": 0.0,
@@ -165,7 +229,7 @@ class GeGui(LookbackGui):
             self._edit_references(reply, params)
         if method == "tab.writeback_preview":
             reply["items"][0].update(
-                kind="metadict",
+                kind="parameter",
                 target_name="predict_offset",
                 current=0.0,
                 selected=False,
@@ -189,10 +253,41 @@ class GeGui(LookbackGui):
                     ].update(valid=False, error="unknown library")
 
     def _post_result(self, method, params):
+        if method == "tab.save_artifacts":
+            assert params == {
+                "tab_id": "t",
+                "artifacts": [{"section": "post_analysis", "name": "results"}],
+                "operation_id": 104,
+            }
+            return {
+                "run_id": "run-a",
+                "artifacts": {
+                    "post_analysis": {
+                        "results": {
+                            "status": "Saved",
+                            "members": {
+                                "analysis:post": [
+                                    {
+                                        "format": "json",
+                                        "path": "/runs/run-a/post_analysis/results.json",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                                "figure:cloud": [
+                                    {
+                                        "format": "png",
+                                        "path": "/runs/run-a/post_analysis/cloud.png",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                },
+            }
         assert params["subtab_id"] == "post_analysis"
-        if method == "tab.save_image":
-            assert params["figure_name"] in ("cloud", "histogram")
-            return {"image_path": f"/actual/{params['figure_name']}.png"}
         if method == "tab.get_figure":
             return {"png_b64": base64.b64encode(PNG).decode()}
         if method == "tab.writeback_preview":
@@ -201,7 +296,7 @@ class GeGui(LookbackGui):
                 "items": [
                     {
                         "id": "classifier",
-                        "kind": "metadict",
+                        "kind": "parameter",
                         "target_name": "classifier",
                         "proposed": 0.98,
                         "current": 0.0,
@@ -221,89 +316,6 @@ def ge_client(tmp_path):
         yield gui, client
     finally:
         client.context.session.close()
-
-
-def test_ge_estimates_preserve_three_native_fit_stages_without_post_refit(ge_client):
-    gui, client = ge_client
-    quality = {
-        "joint": {
-            "r2": None,
-            "normalized_residual_rms": 0.1,
-            "relative_parameter_errors": {"sigma": 0.2},
-            "invalid": [
-                {"path": "summary.fit_quality.joint.r2", "reason": "non_finite"}
-            ],
-        },
-        "ground": {
-            "r2": 0.85,
-            "normalized_residual_rms": 0.02,
-            "relative_parameter_errors": {"p0": None},
-            "invalid": [
-                {
-                    "path": "summary.fit_quality.ground.relative_parameter_errors.p0",
-                    "reason": "zero_parameter",
-                }
-            ],
-        },
-        "excited": {
-            "r2": 0.9,
-            "normalized_residual_rms": None,
-            "relative_parameter_errors": {"p0": 0.3},
-            "invalid": [
-                {
-                    "path": "summary.fit_quality.excited.normalized_residual_rms",
-                    "reason": "zero_range",
-                }
-            ],
-        },
-    }
-
-    def result(params):
-        reply = gui("tab.get_analyze_result", params)
-        reply["summary"] = {
-            "fidelity": 0.98,
-            "theta": 0.2,
-            "threshold": -0.1,
-            "ge_s": 0.42,
-            "init_pops": [[0.9, 0.1], [0.05, 0.95]],
-            "fit_quality": quality,
-        }
-        reply["invalid"] = quality["joint"]["invalid"]
-        return {"ok": True, "result": reply}
-
-    client.transport.replies["tab.get_analyze_result"] = result
-    initial = skip_writeback(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
-    assert initial.data["status"] == "finished", initial.data
-    key = initial.data["execution"]
-    before = len(client.transport.sent)
-    summary = client.call("status", {"execution": key})
-    full = client.call("status", {"execution": key, "detail": "full"})
-    assert len(client.transport.sent) == before
-    assert full["analysis"]["result"]["summary"]["fit_quality"] == quality
-    primary = summary["analysis"]["primary"]
-    assert set(primary["estimates"]) == {"fidelity", "theta", "threshold", "ge_s"}
-    for name, estimate in primary["estimates"].items():
-        stages = estimate["quality"]
-        assert set(stages) == {"joint", "ground", "excited"}
-        assert stages["joint"]["r2"] is None
-        assert stages["ground"]["r2"] == 0.85
-        assert stages["excited"]["relative_parameter_errors"]["p0"] == 0.3
-        issue = {
-            "path": f"analysis.primary.estimates.{name}.quality.joint.r2",
-            "reason": "non_finite",
-        }
-        assert stages["joint"]["invalid"] == [issue]
-        assert summary["invalid"].count(issue) == 1
-        assert all(
-            issue["path"].startswith(f"analysis.primary.estimates.{name}.quality.")
-            for stage in stages.values()
-            for issue in stage["invalid"]
-        )
-    assert len(summary["invalid"]) == 12
-    assert primary["details"] == {"init_pops": [[0.9, 0.1], [0.05, 0.95]]}
-    assert summary["analysis"]["post"]["estimates"]["fidelity"]["quality"] is None
-    json.dumps(summary, allow_nan=False)
-    json.dumps(full, allow_nan=False)
 
 
 @pytest.fixture()
@@ -345,11 +357,12 @@ def test_ge_unconfirmed_analysis_start_retains_unknown_and_saved_prefix(
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["steps"]["analysis"][stage]["status"] == "unknown"
         assert full["analysis_starts"][stage]["status"] == "unknown"
-        assert summary["artifacts"]["raw"]["data"]["members"]["data"] == [
-            {"path": "/actual/raw.h5", "status": "saved"}
-        ]
+        assert (
+            summary["artifacts"]["raw"]["data"]["members"]["data"]
+            == asdict(RAW_REPORT)["artifacts"]["raw"]["data"]["members"]["data"]
+        )
         if stage == "post":
-            assert summary["artifacts"]["analysis"]["trace"]["status"] == "saved"
+            assert summary["artifacts"]["analysis"]["results"]["status"] == "Saved"
         assert len(client.transport.sent) == before
         if receipt == "delayed":
             release.set()
@@ -420,11 +433,11 @@ def test_ge_cancel_during_writeback_retains_stage_and_prevents_next_admission(
         )
         data = terminal.data
         assert data["status"] == "cancelled", data
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["analysis"]["status"] == (
             "cancelled" if stage == "primary" else "finished"
         )
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == (1 if stage == "primary" else 2)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.post_analyze") == (0 if stage == "primary" else 1)
@@ -492,7 +505,7 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         assert current["status"] == outcome
         assert current["cancel_requested"]
         assert current["operation_outcome"]["status"] == outcome
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == (1 if stage == "post" else 0)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
@@ -500,7 +513,7 @@ def test_ge_cancel_targets_late_stage_receipt_and_joins_true_outcome(
         assert methods.count("tab.get_post_analyze_result") == 0
         if stage == "post":
             assert data["analysis"]["status"] == "finished"
-            assert data["writeback"]["items"][0]["id"] == "md-1"
+            assert data["writeback"]["items"][0]["id"] == "param-1"
     finally:
         release.set()
         stopped.set()
@@ -526,9 +539,9 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
                         "message": "save failed after cancellation",
                     },
                 }
-        return {"ok": True, "result": gui("tab.save_image", params)}
+        return {"ok": True, "result": gui("tab.save_artifacts", params)}
 
-    client.transport.replies["tab.save_image"] = save
+    client.transport.replies["tab.save_artifacts"] = save
     client.transport.replies["operation.cancel"] = {
         "ok": True,
         "result": {"status": "finished"},
@@ -560,13 +573,11 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
         assert data["post_analysis"]["save_status"] == (
             "incomplete" if save_failed else "saved"
         )
-        assert data["post_analysis"]["saved_images"] == (
-            []
-            if save_failed
-            else [{"figure_name": "cloud", "image_path": "/actual/cloud.png"}]
+        assert data["post_analysis"]["save_report"] == (
+            None if save_failed else asdict(POST_REPORT)
         )
         assert data["analysis"]["status"] == "finished"
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert len(terminal.images) == 1
         assert data["post_writeback"] is None
         assert not any(
@@ -583,7 +594,7 @@ def test_ge_cancel_during_post_save_preserves_real_save_outcome(
     [
         ("tab.writeback_preview", 93),
         ("tab.post_analyze", None),
-        ("tab.save_image", 104),
+        pytest.param("tab.save_artifacts", 104, id="tab.save_image-104"),
     ],
 )
 def test_ge_close_stops_stage_admission_without_reconnect(
@@ -616,16 +627,14 @@ def test_ge_close_stops_stage_admission_without_reconnect(
         assert data["status"] == "cancelled", data
         assert data["phase"] == "terminal"
         assert data["error"] is None
-        assert data["raw_save"]["path"] == "/actual/raw.h5"
+        assert data["raw_save"] == asdict(RAW_REPORT)
         assert data["analysis"]["status"] == (
             "failed" if method_pending == "tab.writeback_preview" else "finished"
         )
         if method_pending == "tab.writeback_preview":
             assert data["analysis"]["error"]["phase"] == "writeback_read"
             assert data["analysis"]["writeback"] is None
-        assert data["analysis"]["saved_images"] == [
-            {"figure_name": "trace", "image_path": "/actual/trace.png"}
-        ]
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
         assert len(client.transport.sent) == before
         client.context.session.close()
     finally:
@@ -651,40 +660,44 @@ def test_ge_preserves_calibrated_library_and_gui_shots_defaults(ge_client, expli
     gui.md.clear()
     modules = gui.publication["tree"]["children"]["modules"]["children"]
     if not explicit:
-        modules["probe_pulse"]["ref"] = "pi"
-        modules["readout"]["ref"] = "readout"
-    arguments = {"pi_ref": "pi", "readout_ref": "readout"} if explicit else {}
+        modules["probe_pulse"]["ref"] = "Q1.pulses.pi"
+        modules["readout"]["ref"] = "R1.readout.readout"
+    arguments = (
+        {"pi_ref": "Q1.pulses.pi", "readout_ref": "R1.readout.readout"}
+        if explicit
+        else {}
+    )
     data = full_execution_reply(
         client, skip_writeback(client, client.call("singleshot_ge", arguments))
     ).data
     assert data["status"] == "finished", data
-    fields = data["actual"]["fields"]
-    assert fields["shots"]["value"] == 7000
+    fields = data["actual"]
+    assert cfg_value(gui.publication, "shots") == 7000
     assert fields["shots"]["source"] == "gui_default"
-    assert fields["modules.readout.ro_cfg.ro_freq"]["value"] == 5000.0
-    assert fields["modules.readout.ro_cfg.ro_freq"]["source"] == "library:readout"
-    assert fields["modules.probe_pulse"]["value"] == "pi"
-    assert fields["modules.probe_pulse"]["source"] == (
-        "explicit" if explicit else "gui_default"
-    )
+    assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == 5000.0
+    assert fields["ro_frequency_mhz"]["source"] == "library:R1.readout.readout"
+    assert cfg_value(gui.publication, "modules.probe_pulse") == "Q1.pulses.pi"
+    if not explicit:
+        assert fields["pi_ref"]["source"] == "gui_default"
 
 
 @pytest.mark.parametrize("reuse", [False, True])
 def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse):
     gui, client = ge_client
-    gui.library.update(reset={}, init={})
+    gui.library.update({"Q1.reset.reset": {}, "init": {}})
+    # This init literal exercises wire passthrough, not native admission.
     modules = gui.publication["tree"]["children"]["modules"]["children"]
     modules["reset"]["ref"] = "old_reset"
     modules["init_pulse"]["ref"] = "old_init"
     arguments = {
-        "pi_ref": "pi",
+        "pi_ref": "Q1.pulses.pi",
         "reuse_tab_id": "t" if reuse else None,
-        "use_reset": None if reuse else "reset",
+        "use_reset": None if reuse else "Q1.reset.reset",
         "init_pulse_ref": None if reuse else "init",
     }
     data = skip_writeback(client, client.call("singleshot_ge", arguments)).data
     assert data["status"] == "finished", data
-    assert modules["reset"]["ref"] == (None if reuse else "reset")
+    assert modules["reset"]["ref"] == (None if reuse else "Q1.reset.reset")
     assert modules["init_pulse"]["ref"] == (None if reuse else "init")
     assert sum(method == "tab.run_start" for method, _ in gui.calls) == 1
 
@@ -694,7 +707,9 @@ def test_ge_optional_refs_are_explicit_and_omission_resets_them(ge_client, reuse
 )
 def test_ge_does_not_replace_missing_explicit_library_refs(ge_client, parameter):
     gui, client = ge_client
-    data = client.call("singleshot_ge", {"pi_ref": "pi", parameter: "missing"}).data
+    data = client.call(
+        "singleshot_ge", {"pi_ref": "Q1.pulses.pi", parameter: "missing"}
+    ).data
     assert data["status"] == "failed", data
     assert data["error"]["reason"] == "invalid_cfg"
     assert not gui.ran
@@ -724,7 +739,7 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
         "start": "tab.analyze" if stage == "primary" else "tab.post_analyze",
         "analysis": "operation.await",
         "result": result_method,
-        "save": "tab.save_image",
+        "save": "tab.save_artifacts",
         "png": "tab.get_figure",
         "writeback": "tab.writeback_preview",
     }[failure]
@@ -740,8 +755,6 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
 
     def failure_reply(params):
         is_target = failure == "start" or params.get("operation_id") == operation
-        if failure == "save" and stage == "post":
-            is_target = is_target and params["figure_name"] == "histogram"
         if not is_target:
             return {"ok": True, "result": gui(failing_method, params)}
         if failure == "analysis":
@@ -764,11 +777,13 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
 
     client.transport.replies[result_method] = result_reply
     client.transport.replies[failing_method] = failure_reply
-    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
+    reply = full_execution_reply(
+        client, client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
+    )
     data = reply.data
     assert data["status"] == "failed", data
     assert data["tab"] == "t"
-    assert data["raw_save"]["path"] == "/actual/raw.h5"
+    assert data["raw_save"] == asdict(RAW_REPORT)
     assert data["analysis_stage"] == stage
     methods = [method for method, _ in client.transport.sent]
     assert methods.count("tab.run_start") == 1
@@ -776,10 +791,8 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
     assert data["post_writeback"] is None
     if stage == "post":
         assert data["analysis"]["status"] == "finished"
-        assert data["analysis"]["saved_images"] == [
-            {"figure_name": "trace", "image_path": "/actual/trace.png"}
-        ]
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
+        assert data["writeback"]["items"][0]["id"] == "param-1"
     else:
         assert data["writeback"] is None
         assert data["post_analysis"] is None
@@ -791,13 +804,12 @@ def test_ge_stage_failure_preserves_completed_prefix(ge_client, stage, failure):
             "reason": "result_superseded",
         }
         assert current["op"] is None
-    elif failure == "save" and stage == "post":
-        assert current["saved_images"] == [
-            {"figure_name": "cloud", "image_path": "/actual/cloud.png"}
-        ]
-        assert current["remaining_images"] == ["histogram"]
+    elif failure == "save":
+        assert current["save_report"] is None
     elif failure in ("png", "writeback"):
-        assert len(current["saved_images"]) == (2 if stage == "post" else 1)
+        assert current["save_report"] == (
+            asdict(POST_REPORT) if stage == "post" else asdict(PRIMARY_REPORT)
+        )
     assert len(reply.images) == (1 if stage == "post" else 0) + (
         1 if failure == "writeback" else 0
     )
@@ -824,7 +836,7 @@ def test_ge_gui_cfg_rejection_stops_before_run(tmp_path, failure):
             },
         }
     try:
-        data = client.call("singleshot_ge", {"pi_ref": "pi"}).data
+        data = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"}).data
         assert data["status"] == "failed", data
         assert data["error"]["reason"] == "invalid_cfg"
         assert not gui.ran
@@ -854,11 +866,12 @@ def test_ge_rejects_invalid_arguments_before_preparing(tmp_path, arguments):
     gui = GeGui()
     client = make_client(tmp_path, gui)
     try:
-        data = client.call("singleshot_ge", {"pi_ref": "pi", **arguments}).data
+        data = client.call(
+            "singleshot_ge", {"pi_ref": "Q1.pulses.pi", **arguments}
+        ).data
         assert data["status"] == "failed", data
         assert not any(method == "tab.run_start" for method, _ in client.transport.sent)
         assert not gui.ran
-        assert not any(method == "context.snapshot" for method, _ in gui.calls)
     finally:
         client.context.session.close()
 
@@ -886,11 +899,13 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
             return {"ok": True, "result": observed}
 
         client.transport.replies[method] = result
-    reply = full_execution_reply(client, client.call("singleshot_ge", {"pi_ref": "pi"}))
+    reply = full_execution_reply(
+        client, client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
+    )
     reply = full_execution_reply(client, skip_writeback(client, reply))
     data = json.loads(json.dumps(reply.data, allow_nan=False))
     assert data["status"] == "finished"
-    assert data["raw_save"]["path"] == "/actual/raw.h5"
+    assert data["raw_save"] == asdict(RAW_REPORT)
     for stage, summary, image in (
         ("analysis", {"offset": 0.24, "stderr": None}, "trace"),
         ("post_analysis", {"fidelity": 0.98, "stderr": None}, "cloud"),
@@ -899,9 +914,9 @@ def test_ge_preserves_invalid_analysis_and_saved_paths_without_accepting(ge_clie
         assert data[stage]["result"]["invalid"] == [
             {"path": "summary.stderr", "reason": "non_finite"}
         ]
-        assert data[stage]["saved_images"] == [
-            {"figure_name": image, "image_path": f"/actual/{image}.png"}
-        ]
+        assert data[stage]["save_report"] == (
+            asdict(PRIMARY_REPORT) if image == "trace" else asdict(POST_REPORT)
+        )
     assert "tab.writeback_apply" not in [method for method, _ in client.transport.sent]
 
 
@@ -913,7 +928,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
     gui = GeGui(interactive=interactive)
     client = make_client(tmp_path, gui)
     try:
-        reply = client.call("singleshot_ge", {"pi_ref": "pi"})
+        reply = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
         execution = reply.data["execution"]
         if interactive:
             assert reply.data["status"] == "interactive"
@@ -930,11 +945,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
         assert reply.data["question_items"] == ("predict_offset", "classifier")
         assert reply.data["writeback"]["receipts"] == ()
         assert len(reply.images) == 2
-        assert (
-            len(reply.data["previews"]["primary"])
-            == len(reply.data["previews"]["post"])
-            == 1
-        )
+        assert [image.data for image in reply.images] == [PNG, PNG]
         assert gui.writes == []
         before = list(client.transport.sent)
         summary = client.call("status", {"execution": execution})
@@ -951,7 +962,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
                 "post_analysis",
             ]
             assert [request["write"] for request in gui.writes] == [
-                [{"id": "md-1"}],
+                [{"id": "param-1"}],
                 [{"id": "classifier"}],
             ]
             assert len(receipts) == 1
@@ -967,7 +978,7 @@ def test_ge_writeback_waits_for_both_stages_and_reports_actual_receipts(
 
 def test_ge_answer_failure_keeps_confirmed_primary_write_and_all_previews(ge_client):
     gui, client = ge_client
-    question = client.call("singleshot_ge", {"pi_ref": "pi"})
+    question = client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi"})
     assert question.data["status"] == "awaiting_answer", question.data
 
     def write(params):
@@ -996,7 +1007,7 @@ def test_ge_answer_failure_keeps_confirmed_primary_write_and_all_previews(ge_cli
     full = client.call(
         "status", {"execution": failed.data["execution"], "detail": "full"}
     )
-    assert full["raw_save"]["path"] == "/actual/raw.h5"
+    assert full["raw_save"] == asdict(RAW_REPORT)
     assert full["analysis"]["status"] == full["post_analysis"]["status"] == "finished"
 
 
@@ -1024,7 +1035,8 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         reply = full_execution_reply(
             client,
             skip_writeback(
-                client, client.call("singleshot_ge", {"pi_ref": "pi", "shots": 1234})
+                client,
+                client.call("singleshot_ge", {"pi_ref": "Q1.pulses.pi", "shots": 1234}),
             ),
         )
         data = reply.data
@@ -1041,35 +1053,30 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
         before = len(client.transport.sent)
         summary = client.call("status", {"execution": data["execution"]})
         assert len(client.transport.sent) == before
-        assert summary["analysis"]["primary"]["details"] == {
+        assert summary["analysis"]["primary"]["summary"] == {
             "centers": {"ground": [0.1, 0.2], "excited": [0.8, 0.9]}
         }
         assert summary["analysis"]["post"]["estimates"]["fidelity"] == {
             "value": 0.98,
             "stderr": None,
             "unit": None,
-            "quality": None,
         }
-        assert summary["analysis"]["post"]["details"] == {
+        assert summary["analysis"]["post"]["summary"] == {
+            "fidelity": 0.98,
             "populations": {"ground": 0.97, "excited": 0.03},
         }
-        assert summary["artifacts"]["analysis"]["trace"]["members"]["image"] == [
-            {"path": "/actual/trace.png", "status": "saved"}
-        ]
-        assert summary["artifacts"]["post_analysis"]["cloud"]["members"]["image"] == [
-            {"path": "/actual/cloud.png", "status": "saved"}
-        ]
-        assert data["analysis"]["saved_images"] == [
-            {"figure_name": "trace", "image_path": "/actual/trace.png"}
-        ]
-        assert data["post_analysis"]["saved_images"] == [
-            {"figure_name": "cloud", "image_path": "/actual/cloud.png"}
-        ]
-        assert data["writeback"]["items"][0]["id"] == "md-1"
+        assert summary["artifacts"] == {
+            **asdict(RAW_REPORT)["artifacts"],
+            **asdict(PRIMARY_REPORT)["artifacts"],
+            **asdict(POST_REPORT)["artifacts"],
+        }
+        assert data["analysis"]["save_report"] == asdict(PRIMARY_REPORT)
+        assert data["post_analysis"]["save_report"] == asdict(POST_REPORT)
+        assert data["writeback"]["items"][0]["id"] == "param-1"
         assert data["post_writeback"]["items"][0]["id"] == "classifier"
         assert len(reply.images) == 2
-        assert data["actual"]["fields"]["shots"]["value"] == 1234
-        assert modules["probe_pulse"]["ref"] == "pi"
+        assert cfg_value(gui.publication, "shots") == 1234
+        assert modules["probe_pulse"]["ref"] == "Q1.pulses.pi"
         assert modules["reset"]["ref"] is None
         assert modules["init_pulse"]["ref"] is None
         stages = {
@@ -1077,7 +1084,7 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
             "tab.save_data",
             "tab.analyze",
             "tab.post_analyze",
-            "tab.save_image",
+            "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
         }
@@ -1085,13 +1092,136 @@ def test_ge_saves_and_delivers_primary_then_post_without_rerun(tmp_path):
             "tab.run_start",
             "tab.save_data",
             "tab.analyze",
-            "tab.save_image",
+            "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
             "tab.post_analyze",
-            "tab.save_image",
+            "tab.save_artifacts",
             "tab.get_figure",
             "tab.writeback_preview",
+        ]
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("outcome", ["saved", "partial", "transport", "png"])
+def test_ge_author_post_capture_retains_reports_images_and_original_sources(
+    tmp_path, outcome
+):
+    gui = GeGui()
+    client = make_client(tmp_path, gui)
+    try:
+        run, status = (
+            RecipeSession(client.context)
+            .open_tab("singleshot/ge")
+            .run()
+            .complete_in_current_worker()
+        )
+        assert isinstance(run, RecipeRun) and status == "completed"
+        assert run.save_raw() == RAW_REPORT
+        primary, status = run.analyze("primary").complete_in_current_worker()
+        assert isinstance(primary, RecipeAnalysis) and status == "completed"
+        assert primary.snapshot.save_report == PRIMARY_REPORT
+        expected = deepcopy(POST_REPORT)
+        if outcome == "partial":
+            artifact = expected.artifacts["post_analysis"]["results"]
+            artifact.members["figure:cloud"].append(
+                SaveOutput("png", "/copies/cloud.png", "failed", "copy unavailable")
+            )
+            expected.artifacts["post_analysis"]["results"] = replace(
+                artifact, status="Partially saved"
+            )
+
+        def save(params):
+            assert params == {
+                "tab_id": "t",
+                "artifacts": [{"section": "post_analysis", "name": "results"}],
+                "operation_id": 104,
+            }
+            if outcome == "transport":
+                return {
+                    "ok": False,
+                    "error": {
+                        "code": "precondition_failed",
+                        "reason": "result_superseded",
+                        "message": "source replaced",
+                    },
+                }
+            return {"ok": True, "result": asdict(expected)}
+
+        if outcome in ("partial", "transport"):
+            client.transport.replies["tab.save_artifacts"] = save
+        if outcome == "png":
+            client.transport.replies["tab.get_figure"] = {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "result_superseded",
+                    "message": "source replaced",
+                },
+            }
+        post = run.analyze("post")
+        if outcome in ("transport", "png"):
+            with pytest.raises(GuiRpcError) as failure:
+                post.complete_in_current_worker()
+            assert failure.value.reason == "result_superseded"
+        else:
+            result, status = post.complete_in_current_worker()
+            assert isinstance(result, RecipeAnalysis) and status == "completed"
+        capture = post.snapshot()
+        assert capture is not None
+        assert capture.status == (
+            "failed" if outcome in ("transport", "png") else "finished"
+        )
+        assert capture.result is not None
+        assert capture.result.summary == {"fidelity": 0.98}
+        assert capture.save_report == (None if outcome == "transport" else expected)
+        assert capture.save_status == (
+            "incomplete" if outcome in ("partial", "transport") else "saved"
+        )
+        assert [image.data for image in post.preview_images()] == (
+            [] if outcome in ("transport", "png") else [PNG]
+        )
+        assert (capture.writeback is None) == (outcome in ("transport", "png"))
+        assert run.snapshot().raw_save == RAW_REPORT
+        assert run.snapshot().analyses == {"primary": primary.snapshot, "post": capture}
+        before = list(client.transport.sent)
+        assert post.snapshot() == capture
+        assert client.transport.sent == before
+        methods = [method for method, _ in client.transport.sent]
+        assert {
+            method: methods.count(method)
+            for method in (
+                "tab.run_start",
+                "tab.save_data",
+                "tab.save_artifacts",
+                "tab.post_analyze",
+            )
+        } == {
+            "tab.run_start": 1,
+            "tab.save_data": 1,
+            "tab.save_artifacts": 2,
+            "tab.post_analyze": 1,
+        }
+        assert (
+            "tab.post_analyze",
+            {"tab_id": "t", "updates": {}, "operation_id": 93, "run_operation_id": 71},
+        ) in client.transport.sent
+        assert [
+            params
+            for method, params in client.transport.sent
+            if method == "tab.save_artifacts"
+        ] == [
+            {
+                "tab_id": "t",
+                "artifacts": [{"section": "analysis", "name": "results"}],
+                "operation_id": 93,
+            },
+            {
+                "tab_id": "t",
+                "artifacts": [{"section": "post_analysis", "name": "results"}],
+                "operation_id": 104,
+            },
         ]
     finally:
         client.context.session.close()

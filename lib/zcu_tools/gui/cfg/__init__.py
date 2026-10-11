@@ -2,9 +2,7 @@
 
 from .codec import (
     SessionCodecError,
-    decode_complex,
     decode_eval_wire,
-    encode_complex,
     raw_to_schema,
     schema_to_raw,
 )
@@ -16,7 +14,7 @@ from .inheritance import (
 )
 from .lowering import (
     ExpressionResolver,
-    RangeFactory,
+    LoweredData,
     ReferenceResolver,
     lower_finished_cfg,
     validate_finished_cfg,
@@ -79,8 +77,6 @@ __all__ = [
     "ChoiceBinding",
     "ChoiceSectionSpec",
     "DirectValue",
-    "decode_complex",
-    "encode_complex",
     "EvalValue",
     "ExpressionResolver",
     "FloatSpec",
@@ -88,7 +84,7 @@ __all__ = [
     "LiteralSpec",
     "ReferenceSpec",
     "ReferenceValue",
-    "RangeFactory",
+    "LoweredData",
     "RAW_MISSING",
     "RawMissing",
     "ReferenceMaterialization",

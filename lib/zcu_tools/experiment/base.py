@@ -34,9 +34,15 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
     #: Single or grouped mapping required by both explicit persistence formats.
     AXES_SPEC: ClassVar[AxesSpec[Any, Any] | GroupedAxesSpec[Any, Any] | None] = None
 
-    def _spec(
+    def persistence_spec(
         self,
     ) -> AxesSpec[T_Result, T_Config] | GroupedAxesSpec[T_Result, T_Config]:
+        """Return this experiment's declared single or grouped persistence mapping.
+
+        The declaration supplies Result/cfg types, variable identities and unit
+        conversions to typed persistence callers. No I/O or live capture occurs.
+        Missing AXES_SPEC raises NotImplementedError; no fallback is inferred.
+        """
         spec = type(self).AXES_SPEC
         if spec is None:
             raise NotImplementedError(
@@ -64,7 +70,11 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         from .native_persistence import save_run
 
         save_run(
-            source, destination, spec=self._spec(), metadata=metadata, replace=replace
+            source,
+            destination,
+            spec=self.persistence_spec(),
+            metadata=metadata,
+            replace=replace,
         )
 
     def load_run(
@@ -79,7 +89,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         """
         from .native_persistence import load_run
 
-        return load_run(source, spec=self._spec())
+        return load_run(source, spec=self.persistence_spec())
 
     def _validate_canonical_labber_data(
         self, data: LabberData, spec: AxesSpec[T_Result, T_Config]
@@ -123,7 +133,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         )
         from zcu_tools.experiment.utils import make_labber_cfg_snapshot
 
-        spec = self._spec()
+        spec = self.persistence_spec()
         if isinstance(spec, GroupedAxesSpec):
             spec.save(source, destination, comment=comment, tag=tag)
             return
@@ -165,7 +175,7 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         from zcu_tools.datafile import load_labber_data
         from zcu_tools.experiment.utils import parse_comment
 
-        spec = self._spec()
+        spec = self.persistence_spec()
         if isinstance(spec, GroupedAxesSpec):
             return spec.load(source)
 

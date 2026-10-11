@@ -6,7 +6,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
     default_boolean,
-    optional_string,
     required_integer,
     required_object,
     required_string,
@@ -48,38 +47,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             (),
         ),
         agent=AgentMethodPolicy(operation_key="simulation", refresh_after_write=True),
-    ),
-    method_entry(
-        "project.apply",
-        "connection_device:h_project_apply",
-        MethodSpec(
-            30.0,
-            "Atomically update project chip / qubit / resonator names; omitted names "
-            "inherit an already applied project. Without a project all three names "
-            "are required. scope_id selects a discovered result scope; when omitted "
-            "after a chip/qubit change, the GUI uses the new identity's generated "
-            "scope; otherwise it retains the old scope. Effective changes deactivate "
-            "the selected context; no-op/failed updates leave it selected. Explicit "
-            "result_dir/database_path overrides are not accepted. Echoes the resolved "
-            "project: {chip_name, qub_name, res_name, result_dir, database_path, "
-            "params_path, scope_id}.",
-            (
-                optional_string(
-                    "chip_name", "Chip identity; required for first project"
-                ),
-                optional_string(
-                    "qub_name", "Qubit identity; required for first project"
-                ),
-                optional_string(
-                    "res_name", "Resonator identity; required for first project"
-                ),
-                optional_string(
-                    "scope_id",
-                    "Optional scope_id returned by result_scope.list",
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "device.connect",
@@ -160,13 +127,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:h_device_setup",
         MethodSpec(
             30.0,
-            "Apply 'updates' to a connected device by name via rpc_call. "
-            "The GUI starts an asynchronous setup operation; MCP returns a "
-            "handle. Use wait(op=handle) for terminal status and Stop feedback, "
-            "then rpc_call on device.snapshot for current values.",
+            "Apply a complete Info cfg to a device by name via rpc_call. "
+            "All model-required fields must be supplied; defaults follow that Info "
+            "constructor, never cached values. Extra fields and validator errors "
+            "are rejected before setup. YOKO requires mode; omitted value_unit "
+            "is generated from mode. The GUI starts an asynchronous operation; "
+            "MCP returns a handle. Use wait(op=handle) for terminal status, then "
+            "device.snapshot for cached facts. For partial cfg and a fixed bounded "
+            "wait use the device_setup tool.",
             (
                 required_string("name", "Device name"),
-                required_object("updates", "Field updates"),
+                required_object("cfg", "Complete Info constructor cfg"),
             ),
         ),
         agent=AgentMethodPolicy(
@@ -178,7 +149,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "connection_device:h_device_setup_spec",
         MethodSpec(
             5.0,
-            "List the fields accepted by device.setup's 'updates' for a connected "
+            "List the Info fields used by device.setup's complete cfg for a connected "
             "device: {fields: [{name, type, current, settable, choices?}, ...]} — each "
             "field's name, type, choices (for enum/Literal fields like output/mode), "
             "current value, and whether it is settable (the protected type/address are "

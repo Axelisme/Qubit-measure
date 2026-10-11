@@ -57,10 +57,9 @@ def test_metadict_rejects_invalid_complex_tag(tmp_path) -> None:
 def test_metadict_rejects_protected_attribute_data_keys(tmp_path) -> None:
     md = MetaDict()
 
-    with pytest.raises(AttributeError, match="protected MetaDict attribute"):
-        setattr(md, "has_persistence", False)
-    with pytest.raises(AttributeError, match="protected MetaDict attribute"):
-        setattr(md, "dump", "not a method")
+    for name, value in (("has_persistence", False), ("dump", "not a method")):
+        with pytest.raises(AttributeError, match="protected MetaDict attribute"):
+            setattr(md, name, value)
     with pytest.raises(AttributeError, match="protected MetaDict attribute"):
         md.update({"has_persistence": "shadow"})
     with pytest.raises(TypeError, match="MetaDict keys must be str"):
@@ -115,6 +114,18 @@ def test_experiment_manager_str_without_active_context(tmp_path) -> None:
     em = ContextManager(tmp_path)
 
     assert "active=None" in str(em)
+
+
+def test_snapshot_uses_published_memory_and_isolates_later_edits(tmp_path) -> None:
+    path = tmp_path / "metadata.json"
+    md = MetaDict(path)
+    md.update(offset=1.0)
+    path.write_text('{"offset": 9.0}', encoding="utf-8")
+    copied = md.snapshot()
+    assert copied.get("offset") == 1.0
+    assert not copied.has_persistence
+    copied.update(offset=3.0)
+    assert md.snapshot().get("offset") == 1.0
 
 
 def test_replace_contents_persists_complete_mapping_once(tmp_path, monkeypatch):

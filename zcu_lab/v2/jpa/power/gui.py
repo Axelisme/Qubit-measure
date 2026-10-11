@@ -7,19 +7,20 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
@@ -29,8 +30,6 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.ctx_helpers import md_has_key
-from zcu_lab.v2._support.measure.jpa_shared import lower_jpa_rf_power_dev
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
@@ -41,31 +40,20 @@ from zcu_lab.v2.jpa.power.core import PowerCfg, PowerExp, PowerResult
 JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 _JPA_POWER_SWEEP_EXPTS = 101
-# Conservative low-power survey: the low-power portion (-20..-5 dBm) of the
-# notebook's JPA power sweep (single_qubit.md, -20..1 dBm), compressed to 101
-# points. These are inspectable starting bounds, NOT safety certification —
-# the operator must review device and sweep.
-_JPA_POWER_SEED_START_DBM = -20.0
-_JPA_POWER_SEED_STOP_DBM = -5.0
-# Refinement span around a previously accepted best_jpa_power (dBm).
 _JPA_POWER_SEED_SPAN_DB = 5.0
 
 
 def jpa_power_sweep_seed(
     ctx: SessionEnv, *, expts: int = _JPA_POWER_SWEEP_EXPTS
 ) -> SweepValue:
-    """JPA pump sweep seed: centred on ``best_jpa_power`` when known, else a
-    conservative low-power notebook-derived survey (-20..-5 dBm)."""
+    """Store a ±5 dB sweep around $jpa.pump_power without reading ctx.
 
-    if md_has_key(ctx, "best_jpa_power"):
-        return SweepValue(
-            start=EvalValue(expr=f"best_jpa_power - {_JPA_POWER_SEED_SPAN_DB}"),
-            stop=EvalValue(expr=f"best_jpa_power + {_JPA_POWER_SEED_SPAN_DB}"),
-            expts=expts,
-        )
+    Missing aliases/calibration become Invalid during cfg resolution.
+    """
+    del ctx  # Defaults retain expressions; the resource owns source reads.
     return SweepValue(
-        start=_JPA_POWER_SEED_START_DBM,
-        stop=_JPA_POWER_SEED_STOP_DBM,
+        start=EvalValue(expr=f"$jpa.pump_power - {_JPA_POWER_SEED_SPAN_DB}"),
+        stop=EvalValue(expr=f"$jpa.pump_power + {_JPA_POWER_SEED_SPAN_DB}"),
         expts=expts,
     )
 
@@ -105,17 +93,16 @@ class JpaPowerAdapter(
             "safety limits, and the run commands the selected device."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_power' — a "
-            "previously accepted JPA pump power, preferred as the sweep "
-            "centre; 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' — "
-            "cable time-of-flight for the trigger offset; 'q_f' / 'qub_ch' — "
-            "qubit frequency / drive channel for the g↔e pi pulse."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA pump power into MetaDict "
@@ -159,17 +146,12 @@ class JpaPowerAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> PowerCfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = lower_jpa_rf_power_dev(cfg_raw, req.device_snapshot)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        # Pure preflight over the detached request snapshot.
-        lower_jpa_rf_power_dev(raw_cfg, req.device_snapshot)
-
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> JpaPowerRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, PowerExp().run(cfg, context=context))
@@ -185,7 +167,7 @@ class JpaPowerAdapter(
         self, req: WritebackRequest[JpaPowerRunResult, JpaPowerAnalyzeResult]
     ) -> Sequence[WritebackItem]:
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,

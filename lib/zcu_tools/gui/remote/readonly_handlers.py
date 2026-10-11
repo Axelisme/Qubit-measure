@@ -1,21 +1,14 @@
 """Generic read-only RPC handlers shared by the observe-only GUI apps.
 
-The three read-only apps (``fluxdep`` / ``dispersive`` / ``autofluxdep``) each
-expose a dispatch table of pure ``(adapter, params) -> wire dict`` handlers. A few
-of those are byte-identical across apps because they only touch the shared
-``ctrl.state`` surface:
-
-  - :func:`h_resources_versions` reads ``ctrl.state.version`` (every app's State
-    carries the same VersionTable) — shared by all three.
-  - :func:`h_project_info` returns the shared :func:`gui.project.project_info_payload`
-    for ``ctrl.state.project`` — shared by ``fluxdep`` / ``dispersive`` only.
-    ``autofluxdep``'s ProjectInfo has a different shape (``params_path``, nullable),
-    so it keeps an app-local handler.
+Fluxdep and dispersive expose dispatch tables of pure
+``(adapter, params) -> wire dict`` handlers. Shared handlers only touch
+``ctrl.state``: resource versions read its VersionTable, and project info uses
+``gui.project.project_info_payload``.
 
 These take an ``adapter`` typed loosely (``Any``) because they only reach the
 common ``adapter.ctrl.state`` path; each app registers them under its own dotted
-method name in its dispatch table. App-specific handlers (every ``state.check``,
-autofluxdep's ``project.info``) stay in the app's ``dispatch.py``.
+method name in its dispatch table. App-specific handlers such as ``state.check``
+stay in the app's ``dispatch.py``.
 """
 
 from __future__ import annotations

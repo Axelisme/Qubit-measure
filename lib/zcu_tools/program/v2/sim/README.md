@@ -1,6 +1,6 @@
 # sim/ — physical simulation for the mock soc (mocksim)
 
-**Last updated:** 2026-10-08 — hardware-clock time quantization
+**Last updated:** 2026-10-09，native arb path、worker GIL yield 與 hardware-clock time quantization
 
 High-level cheat-sheet for `program/v2/sim/`. Read before touching this package.
 Implementation detail lives in the code and its docstrings; this file is concept,
@@ -94,9 +94,9 @@ qubit-drive sweeps also compute distinct chains because their propagators differ
 These readout/evolution/population caches are private `SimEngine` implementation
 details, not seams exposed to callers or sibling modules.
 
-**Mocksim CPU loops yield the process GIL cooperatively.** Autofluxdep RUN work is
-submitted to a dedicated `QThread`, but a Python/C-extension-heavy mock simulator
-still shares the same interpreter and can delay the Qt main thread's Python slots.
+**Mocksim CPU loops yield the process GIL cooperatively.** A Python/C-extension-heavy
+mock simulator shares the interpreter with the Qt main thread even when acquisition
+runs in a worker thread. Its CPU work can delay the main thread's Python slots.
 Long signal-grid loops use a time-based `sleep(0)` yield so queued UI progress and
 redraw events can run while the worker continues computing. This is only a
 responsiveness boundary; it does not make the mocksim path Qt-dependent or change
@@ -171,8 +171,10 @@ Each soc keeps its own copied parameters and source binding.
   lowering cannot represent faithfully.
 - `waveforms.py` — shared peak-normalized envelope sampling for both lowering and
   decimated readout. `ArbWaveform` uses the asset's stored reference time axis and
-  asset duration (`time[-1]`) as its playback length; config no longer supplies a
-  separate arb waveform length.
+  asset duration (`time[-1]`) as its playback length. Native cfg supplies a
+  required absolute path and logical key. The sampler decodes path bytes through
+  core.waveform_format without global repository lookup or formula interpretation.
+  Config does not supply a separate arb waveform length.
 - `readout.py` — dispersive readout: physical quantities -> complex IQ.
   `resonator_freqs` is the eigensolve (flux -> `rf_g` / `rf_e`); `s21` is the pure,
   eigh-free per-state hanger response (the engine calls it twice per point for the

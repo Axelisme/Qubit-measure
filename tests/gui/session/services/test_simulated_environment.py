@@ -70,9 +70,7 @@ class DeferredBackground:
 
 class Session:
     def __init__(self) -> None:
-        self.state = State(
-            SessionEnv(md=MagicMock(), ml=MagicMock(), soc=None, soccfg=None)
-        )
+        self.state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         self.bus = BaseEventBus()
         self.gate = RunBlocksHardwareGate(run_kind="run", bus=self.bus)
         self.handles = OperationHandles()

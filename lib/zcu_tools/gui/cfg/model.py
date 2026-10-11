@@ -136,7 +136,7 @@ def FloatSpec(
 class LiteralSpec:
     """A fixed-value field: no widget shown, value is always spec.value."""
 
-    value: Any
+    value: object
     label: str = ""
 
 
@@ -343,7 +343,7 @@ class DirectValue:
     runtime metadata; persistence stores only the input.
     The wrapper also preserves direct mode while unset or invalid."""
 
-    value: Any | None = None
+    value: object = None
     raw: str | None = field(default=None, kw_only=True)
     error: str | None = field(default=None, kw_only=True)
     validation_error: str | None = field(default=None, kw_only=True, repr=False)
@@ -488,12 +488,17 @@ class CenteredSweepValue:
 
 @dataclass
 class ReferenceValue:
+    """Reference input or publication for a custom shape or source key.
+
+    chosen_key is a canonical custom key or a catalog/role path. value is its
+    section payload; an empty linked section can await catalog resolution.
+    Custom keys select editable inline content; all other keys follow a readonly source.
+    resolved_label names the published shape, or None when unresolved. error
+    is a publication diagnostic, or None.
+    """
+
     chosen_key: str
     value: CfgSectionValue
-    # True when chosen_key names a library entry but the user has edited value
-    # away from the library snapshot (LibraryBindingState.MODIFIED). Persisted so
-    # the override survives reload; False for pure library refs and <Custom:> refs.
-    is_overridden: bool = False
     # Resolution metadata belongs to the displayed snapshot, not the live catalog.
     resolved_label: str | None = field(default=None, kw_only=True)
     error: str | None = field(default=None, kw_only=True)

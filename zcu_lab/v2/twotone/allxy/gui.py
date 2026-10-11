@@ -7,9 +7,11 @@ fits power and detuning errors; the summary reports them.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -26,7 +28,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2._support.measure import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    scaled_md,
+    scaled_path_seed,
 )
 from zcu_lab.v2.twotone.allxy.core import (
     AllXY_Exp,
@@ -109,14 +111,18 @@ class AllXYAdapter(
             .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
             .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=30.5))
+            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
             .reps(1000)
             .rounds(100)
             .build()
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> AllXYRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg=cfg, result=AllXY_Exp().run(cfg, context=context))

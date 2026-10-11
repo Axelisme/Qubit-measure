@@ -23,75 +23,6 @@ from ._support import make_client
 pytestmark = pytest.mark.uses_wall_clock
 
 
-def test_session_close_retires_pngs_and_refuses_future_work(tmp_path: Path) -> None:
-    client = make_client(tmp_path)
-    session = client.context.session
-    session.bind()
-    image = session.write_png(b"validated-image")
-    try:
-        assert image.read_bytes() == b"validated-image"
-        session.close()
-        session.close()
-        assert not image.exists()
-        assert not image.parent.exists()
-        assert not client.transport.is_open
-        for action in (
-            lambda: session.write_png(b"later-image"),
-            session.new_png_path,
-            session.bind,
-            lambda: session.connect_to_gui(port=None, launch="never", clean=False),
-        ):
-            with pytest.raises(GuiRpcError) as error:
-                action()
-            assert error.value.reason == "session_closed"
-        assert not image.parent.exists()
-    finally:
-        client.context.bridge.disconnect()
-        session.cleanup_pngs()
-
-
-def test_close_waits_for_owned_png_write_and_prevents_directory_recreation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    client = make_client(tmp_path)
-    session = client.context.session
-    entered, release, disconnected = (
-        threading.Event(),
-        threading.Event(),
-        threading.Event(),
-    )
-    real_write = Path.write_bytes
-    real_close = client.transport.close
-
-    def write(path: Path, data: bytes) -> int:
-        entered.set()
-        assert release.wait(3), "test did not release admitted PNG write"
-        return real_write(path, data)
-
-    def disconnect() -> None:
-        real_close()
-        disconnected.set()
-
-    monkeypatch.setattr(Path, "write_bytes", write)
-    monkeypatch.setattr(client.transport, "close", disconnect)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        writing = pool.submit(session.write_png, b"admitted-image")
-        try:
-            assert entered.wait(1)
-            closing = pool.submit(session.close)
-            assert disconnected.wait(1)
-            later_write = pool.submit(session.write_png, b"too-late-image")
-        finally:
-            release.set()
-        image = writing.result(timeout=1)
-        closing.result(timeout=1)
-        with pytest.raises(GuiRpcError) as error:
-            later_write.result(timeout=1)
-        assert error.value.reason == "session_closed"
-    assert not image.exists()
-    assert not image.parent.exists()
-
-
 def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -554,10 +485,10 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
     next_transport.replies["rpc.catalog"] = {
         "ok": True,
         "result": {
-            "methods": [{**CATALOG[0], "method": "project.info"}],
+            "methods": [{**CATALOG[0], "method": "entry.info"}],
         },
     }
-    next_transport.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    next_transport.replies["entry.info"] = {"ok": True, "result": {"chip": "new"}}
     transports = iter((first, next_transport))
     ports: list[int] = []
 
@@ -572,7 +503,7 @@ def test_reconnect_replaces_catalog_without_replaying_previous_mutation(
         "adapters": ["old"]
     }
     client.context.bridge.disconnect()
-    assert client.call("rpc_call", {"method": "project.info", "params": {}}) == {
+    assert client.call("rpc_call", {"method": "entry.info", "params": {}}) == {
         "chip": "new"
     }
     with pytest.raises(RuntimeError) as error:
@@ -630,11 +561,11 @@ def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
         "ok": True,
         "result": {
             "methods": [
-                {**CATALOG[0], "method": "project.info"},
+                {**CATALOG[0], "method": "entry.info"},
             ]
         },
     }
-    second.replies["project.info"] = {"ok": True, "result": {"chip": "new"}}
+    second.replies["entry.info"] = {"ok": True, "result": {"chip": "new"}}
     client.context.session.ensure_connected()
     real_send = client.context.bridge.send_rpc_raw
     attempted: list[str] = []
@@ -657,7 +588,7 @@ def test_ambiguous_mutation_timeout_does_not_replay_on_reconnect(
     with pytest.raises(RuntimeError) as error:
         client.call("rpc_call", {"method": "adapter.list", "params": {}})
     assert getattr(error.value, "reason", None) == "gui_transport_timeout"
-    assert client.call("rpc_call", {"method": "project.info"}) == {"chip": "new"}
+    assert client.call("rpc_call", {"method": "entry.info"}) == {"chip": "new"}
     assert attempted == ["adapter.list"]
     assert all(method != "adapter.list" for method, _ in second.sent)
 
@@ -703,7 +634,7 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
         "ok": True,
         "result": {
             "methods": [
-                {**CATALOG[0], "method": "project.info"},
+                {**CATALOG[0], "method": "entry.info"},
             ]
         },
     }
@@ -723,7 +654,7 @@ def test_connect_switches_an_explicit_port_and_expires_operation_handles(
     assert ports == [9911, 9912]
     assert not client.context.session.operation_handles
     assert client.call("rpc_list", {})["methods"] == [
-        {"method": "project.info", "description": "List adapters", "tool_names": []},
+        {"method": "entry.info", "description": "List adapters", "tool_names": []},
     ]
 
 

@@ -46,14 +46,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
     has_soc = bool(session.read_internal("state.has_soc", {})["value"])
 
-    project: dict[str, Any] | None = None
-    if has_project:
-        info = session.read_internal("project.info", {})
-        project = {
-            "chip": info["chip_name"],
-            "qubit": info["qub_name"],
-            "resonator": info["res_name"],
-        }
+    entry = session.read_internal("entry.info", {})["entry"] if has_project else None
     soc = {"connected": has_soc, "mock": False}
     if has_soc:
         soc["mock"] = bool(session.read_internal("soc.info", {})["is_mock"])
@@ -68,7 +61,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     ]
     missing = []
     if not has_project:
-        missing.append("project")
+        missing.append("entry")
     if not has_context:
         missing.append("active_context")
     if not has_soc:
@@ -82,7 +75,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         definition.name: definition for definition in ctx.session.recipes.definitions
     }
     return {
-        "project": project,
+        "entry": entry,
         "soc": soc,
         "context": {"active": session.read_internal("context.active", {})["label"]},
         "devices": [
@@ -261,7 +254,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions. Summary previews.run/primary/post are full path lists for session-only PNGs, not persistent saved artifacts. Queries do not refresh guards or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -280,7 +273,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel. Execution summaries include previews.run/primary/post as full session-only PNG path lists. Confirmed persistent outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
+            "description": "Wait for one operation or execution; timeout does not cancel. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

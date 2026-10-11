@@ -1,23 +1,21 @@
-"""SetupDialog — combined project setup and ZCU connection in one resizable dialog."""
+"""SetupDialog — explicit result entry binding and ZCU connection."""
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
-
-from qtpy.QtCore import QStringListModel, Qt  # type: ignore[attr-defined]
-from qtpy.QtGui import QFont, QShowEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QShowEvent
+from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QCompleter,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -30,15 +28,20 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QWidget,
 )
 
-from zcu_tools.gui.session.services.project_settings import (
-    ConnectionPreferences,
-    ProjectRequest,
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryInfo,
+    EntryRequest,
+    PointCreateRequest,
+    PointUseRequest,
 )
+from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.result_scope import ResultScope
     from zcu_tools.gui.session.setup_control import SetupControlPort
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -49,7 +52,15 @@ class SocConfigProtocol(Protocol):
 
 
 class SetupDialog(QDialog):
-    """Resizable dialog combining project setup (left) and ZCU connection (right)."""
+    """Resizable result-entry and connection form over SetupControlPort.
+
+    Showing/reopening only prefills cached preferences and queries; it does not
+    open an entry or connect hardware. New/Open publish the owner binding and
+    display its paths. Working-point Switch/Create submit the exact label,
+    description and same-entry clone choice to the owner; failures remain
+    visible in the status label without retry. Track device only suggests an
+    editable label from cached value/unit, preserving manual edits and None.
+    """
 
     def __init__(
         self,
@@ -58,8 +69,6 @@ class SetupDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
-        self._result_scopes: tuple[ResultScope, ...] = ()
-        self._syncing_scope_selection = False
         self.setWindowTitle("Setup")
         self.resize(900, 600)
 
@@ -75,56 +84,41 @@ class SetupDialog(QDialog):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
-        # project identity and result scope
-        project_group = QGroupBox("Project / Result scope")
-        project_form = QFormLayout(project_group)
-
-        scope_row = QHBoxLayout()
-        self._scope_combo = QComboBox()
-        self._scope_combo.setMinimumWidth(260)
-        self._scope_combo.currentIndexChanged.connect(self._on_scope_selected)
-        scope_row.addWidget(self._scope_combo)
-        refresh_scopes_btn = QPushButton("↻")
-        refresh_scopes_btn.setFixedWidth(28)
-        refresh_scopes_btn.setToolTip("Refresh result scopes")
-        refresh_scopes_btn.clicked.connect(
-            lambda checked=False: self._refresh_result_scopes(checked, refresh=True)
+        # Entry binding is explicit; changing the selection only edits the form.
+        entry_group = QGroupBox("Result entry")
+        entry_form = QFormLayout(entry_group)
+        entry_row = QHBoxLayout()
+        self._entry_combo = QComboBox()
+        self._entry_combo.setObjectName("result_entry")
+        self._entry_combo.setMinimumWidth(260)
+        entry_row.addWidget(self._entry_combo)
+        refresh_entries_btn = QPushButton("↻")
+        refresh_entries_btn.setFixedWidth(28)
+        refresh_entries_btn.setToolTip("Refresh result entries")
+        refresh_entries_btn.clicked.connect(
+            lambda checked=False: self._refresh_entries(refresh=True)
         )
-        scope_row.addWidget(refresh_scopes_btn)
-        project_form.addRow("Scope:", scope_row)
+        entry_row.addWidget(refresh_entries_btn)
+        entry_form.addRow("Entry:", entry_row)
 
-        self._chip_edit = QLineEdit("unknown_chip")
-        self._chip_edit.setPlaceholderText("e.g. Q5_2D")
-        self._chip_edit.textChanged.connect(self._on_names_changed)
-        self._chip_completer_model = QStringListModel(self)
-        self._chip_completer = QCompleter(self._chip_completer_model, self)
-        self._chip_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
-        self._chip_edit.setCompleter(self._chip_completer)
-        project_form.addRow("Chip name:", self._chip_edit)
-
-        self._qub_edit = QLineEdit("unknown_qubit")
-        self._qub_edit.setPlaceholderText("e.g. Q1")
-        self._qub_edit.textChanged.connect(self._on_names_changed)
-        self._qub_completer_model = QStringListModel(self)
-        self._qub_completer = QCompleter(self._qub_completer_model, self)
-        self._qub_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)  # type: ignore[attr-defined]
-        self._qub_edit.setCompleter(self._qub_completer)
-        project_form.addRow("Qubit name:", self._qub_edit)
-
-        self._res_edit = QLineEdit("unknown_resonator")
-        self._res_edit.setPlaceholderText("e.g. R1")
-        project_form.addRow("Resonator name:", self._res_edit)
-
-        # apply project button
-        self._apply_btn = QPushButton("Apply project")
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
-        project_form.addRow("", self._apply_btn)
-        left_layout.addWidget(project_group)
+        entry_actions = QHBoxLayout()
+        new_entry_btn = QPushButton("New entry…")
+        new_entry_btn.clicked.connect(self._on_new_entry_clicked)
+        entry_actions.addWidget(new_entry_btn)
+        open_entry_btn = QPushButton("Open")
+        open_entry_btn.clicked.connect(self._on_open_entry_clicked)
+        entry_actions.addWidget(open_entry_btn)
+        entry_form.addRow("", entry_actions)
+        self._entry_paths = QLabel("")
+        self._entry_paths.setWordWrap(True)
+        entry_form.addRow(self._entry_paths)
+        left_layout.addWidget(entry_group)
 
         # context list
-        ctx_group = QGroupBox("Contexts (requires file-backed project)")
+        ctx_group = QGroupBox("Working points")
         ctx_layout = QVBoxLayout(ctx_group)
         self._ctx_list = QListWidget()
+        self._ctx_list.setObjectName("working_points")
         self._ctx_list.setMaximumHeight(120)
         ctx_layout.addWidget(self._ctx_list)
 
@@ -136,11 +130,12 @@ class SetupDialog(QDialog):
         left_layout.addWidget(ctx_group)
 
         # new context
-        new_group = QGroupBox("New context (requires file-backed project)")
+        new_group = QGroupBox("New working point")
         new_form = QFormLayout(new_group)
 
         device_row = QHBoxLayout()
         self._device_combo = QComboBox()
+        self._device_combo.setObjectName("track_device")
         self._device_combo.setMinimumWidth(160)
         self._device_combo.currentTextChanged.connect(self._on_device_changed)
         device_row.addWidget(self._device_combo)
@@ -151,20 +146,27 @@ class SetupDialog(QDialog):
         device_row.addWidget(refresh_dev_btn)
         new_form.addRow("Track device:", device_row)
 
-        self._unit_label = QLabel("—")
-        new_form.addRow("Unit:", self._unit_label)
+        self._label_edit = QLineEdit()
+        self._label_edit.setObjectName("point_label")
+        new_form.addRow("Label:", self._label_edit)
 
         self._clone_combo = QComboBox()
+        self._clone_combo.setObjectName("clone_from")
         self._clone_combo.setMinimumWidth(160)
         new_form.addRow("Clone from:", self._clone_combo)
 
-        self._new_ctx_btn = QPushButton("Create new context")
+        self._description_edit = QLineEdit()
+        self._description_edit.setObjectName("point_description")
+        new_form.addRow("Description:", self._description_edit)
+
+        self._new_ctx_btn = QPushButton("Create")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
         new_form.addRow("", self._new_ctx_btn)
         left_layout.addWidget(new_group)
 
         # project status label
         self._project_status = QLabel("")
+        self._project_status.setObjectName("setup_status")
         left_layout.addWidget(self._project_status)
 
         left_layout.addStretch()
@@ -220,8 +222,7 @@ class SetupDialog(QDialog):
         root_layout.addWidget(btn_box)
 
         # initialise
-        self._refresh_result_scopes(silent=True)
-        self._on_names_changed()
+        self._refresh_entries()
         self._prefill_from_preferences()
         self._refresh_device_list()
         self._refresh_context_list()
@@ -259,7 +260,7 @@ class SetupDialog(QDialog):
         self._bus_subs_active = False
 
     def showEvent(self, a0: QShowEvent | None) -> None:
-        """Re-seed the project form from State on every programmatic show.
+        """Re-seed entry/connection inputs from cached preferences on show.
 
         Reopening the dialog after a close (``show()`` on the kept instance)
         replaces any previously-typed-but-never-applied draft with the
@@ -276,13 +277,17 @@ class SetupDialog(QDialog):
             super().showEvent(a0)
             if a0.spontaneous():
                 return
-        self._refresh_result_scopes(silent=True)
+        self._refresh_entries()
         self._prefill_from_preferences()
         self._refresh_context_list()
 
     def _on_bus_context_switched(self, payload: object) -> None:
         del payload
         self._refresh_context_list()
+        info = self._ctrl.get_entry_info()
+        if info is not None:
+            self._select_entry_name(info.name)
+            self._show_entry_paths(info)
 
     def _on_bus_soc_changed(self, payload: object) -> None:
         from zcu_tools.gui.session.events import SocChangedPayload
@@ -308,135 +313,48 @@ class SetupDialog(QDialog):
 
     def _prefill_from_preferences(self) -> None:
         data = self._ctrl.get_setup_preferences()
-        if data.chip_name:
-            self._chip_edit.setText(data.chip_name)
-        if data.qub_name:
-            self._qub_edit.setText(data.qub_name)
-        if data.res_name:
-            self._res_edit.setText(data.res_name)
-        self._on_names_changed()
-        self._select_remembered_scope(data.scope_id)
+        if data.entry_name:
+            self._select_entry_name(data.entry_name)
         if data.ip:
             self._ip_edit.setText(data.ip)
         if data.port:
             self._port_spin.setValue(data.port)
+        info = self._ctrl.get_entry_info()
+        if info is not None:
+            self._show_entry_paths(info)
 
-    def _select_remembered_scope(self, scope_id: str) -> None:
-        if not scope_id:
-            return
-        idx = self._scope_combo.findData(scope_id)
+    def _select_entry_name(self, name: str) -> None:
+        idx = self._entry_combo.findText(name)
         if idx < 0:
-            return
-        self._scope_combo.setCurrentIndex(idx)
+            # Remembered preferences may outlive the cached discovery result.
+            self._entry_combo.addItem(name)
+            idx = self._entry_combo.count() - 1
+        self._entry_combo.setCurrentIndex(idx)
 
-    def _on_names_changed(self) -> None:
-        if self._syncing_scope_selection:
-            return
-        chip = self._chip_edit.text().strip()
-        qub = self._qub_edit.text().strip()
-        self._update_name_completers(chip)
-        self._update_scope_options(chip, qub)
-
-    def _refresh_result_scopes(
-        self,
-        _checked: bool = False,
-        *,
-        silent: bool = False,
-        refresh: bool = False,
-    ) -> None:
+    def _refresh_entries(self, *, refresh: bool = False) -> None:
         try:
-            self._result_scopes = tuple(self._ctrl.list_result_scopes(refresh=refresh))
+            names = self._ctrl.list_entries(refresh=refresh)
         except Exception as exc:
-            logger.warning("Failed to list result scopes: %s", exc)
-            self._result_scopes = ()
-            if not silent:
-                self._set_project_status(
-                    f"Failed to refresh result scopes: {exc}", True
-                )
-        logger.debug(
-            "SetupDialog: refreshed %d result scope(s)", len(self._result_scopes)
-        )
-        self._on_names_changed()
-
-    def _update_name_completers(self, chip: str) -> None:
-        chips = sorted({scope.chip_name for scope in self._result_scopes})
-        qubs = sorted(
-            {
-                scope.qub_name
-                for scope in self._result_scopes
-                if not chip or scope.chip_name == chip
-            }
-        )
-        self._chip_completer_model.setStringList(chips)
-        self._qub_completer_model.setStringList(qubs)
-
-    def _update_scope_options(self, chip: str, qub: str) -> None:
-        self._scope_combo.blockSignals(True)
-        prev_scope_id = self._scope_combo.currentData()
-        self._scope_combo.clear()
-
-        generated_index = -1
-        has_names = bool(chip and qub)
-        if has_names:
-            self._scope_combo.addItem("(new generated scope)", userData=None)
-            generated_index = 0
-
-        for scope in self._result_scopes:
-            self._scope_combo.addItem(
-                f"{scope.chip_name}/{scope.qub_name}",
-                userData=scope.scope_id,
+            # Keep discovery failures visible without escaping the Qt callback.
+            logger.exception("Failed to list result entries")
+            self._set_project_status(
+                f"Failed to refresh result entries: {exc}", error=True
             )
-
-        if has_names:
-            matching_ids = {
-                scope.scope_id
-                for scope in self._result_scopes
-                if scope.chip_name == chip and scope.qub_name == qub
-            }
-            if prev_scope_id in matching_ids:
-                idx = self._scope_combo.findData(prev_scope_id)
-            else:
-                idx = -1
-                for scope_id in matching_ids:
-                    idx = self._scope_combo.findData(scope_id)
-                    if idx >= 0:
-                        break
-            self._scope_combo.setCurrentIndex(idx if idx >= 0 else generated_index)
-        elif self._result_scopes:
-            idx = self._scope_combo.findData(prev_scope_id)
-            self._scope_combo.setCurrentIndex(max(idx, 0))
-        else:
-            self._scope_combo.addItem("(enter chip and qubit)", userData=None)
-
-        self._scope_combo.blockSignals(False)
-
-    def _current_scope(self) -> ResultScope | None:
-        scope_id = self._scope_combo.currentData()
-        if not scope_id:
-            return None
-        for scope in self._result_scopes:
-            if scope.scope_id == scope_id:
-                return scope
-        return None
-
-    def _on_scope_selected(self, _index: int) -> None:
-        chip = self._chip_edit.text().strip()
-        qub = self._qub_edit.text().strip()
-        scope = self._current_scope()
-        if scope is not None:
-            self._syncing_scope_selection = True
-            try:
-                self._chip_edit.setText(scope.chip_name)
-                self._qub_edit.setText(scope.qub_name)
-            finally:
-                self._syncing_scope_selection = False
-            chip = scope.chip_name
-            qub = scope.qub_name
-        if not chip or not qub:
             return
+        current = self._entry_combo.currentText()
+        self._entry_combo.clear()
+        self._entry_combo.addItems(list(names))
+        idx = self._entry_combo.findText(current)
+        if idx >= 0:
+            self._entry_combo.setCurrentIndex(idx)
+
+    def _show_entry_paths(self, info: EntryInfo) -> None:
+        self._entry_paths.setText(
+            f"Result: {info.result_path}\nDatabase: {info.database_path}"
+        )
 
     def _refresh_device_list(self) -> None:
-        entries = self._ctrl.list_devices()
+        entries = self._ctrl.devices.list_devices()
 
         current = self._device_combo.currentText()
         self._device_combo.blockSignals(True)
@@ -457,94 +375,107 @@ class SetupDialog(QDialog):
         self._on_device_changed(self._device_combo.currentText())
 
     def _on_device_changed(self, _text: str) -> None:
-        device_name = self._device_combo.currentData()
-        if device_name:
-            self._unit_label.setText(self._ctrl.get_device_unit(device_name))
-        else:
-            self._unit_label.setText("—")
-
-    def _on_apply_clicked(self) -> None:
-        chip = self._chip_edit.text().strip() or "unknown_chip"
-        qub = self._qub_edit.text().strip() or "unknown_qubit"
-        res = self._res_edit.text().strip() or "unknown_resonator"
-        scope_id = self._scope_combo.currentData()
-        result = self._ctrl.apply_project(
-            ProjectRequest(
-                chip_name=chip,
-                qub_name=qub,
-                res_name=res,
-                scope_id=str(scope_id) if scope_id else None,
-            )
-        )
-        if not result:
+        if self._label_edit.isModified():
             return
-        self._set_project_status(f"Project applied: {chip}/{qub} (res={res})")
-        logger.info(
-            "SetupDialog: project applied chip=%r qub=%r res=%r",
-            chip,
-            qub,
-            res,
-        )
+        name: str | None = self._device_combo.currentData()
+        if name is None:
+            return
+        value = self._ctrl.devices.get_cached_device_value(name)
+        if value is None:
+            return
+        unit = self._ctrl.devices.get_device_unit(name)
+        self._label_edit.setText(f"{value}{unit}")
 
-        self._refresh_result_scopes(silent=True)
+    def _on_new_entry_clicked(self) -> None:
+        name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
+        if not accepted:
+            return
+        try:
+            info = self._ctrl.new_entry(EntryRequest(name))
+        except Exception as exc:
+            # Isolate the Qt callback; the owner preserves binding and recovery.
+            logger.exception("Failed to create result entry")
+            self._set_project_status(str(exc), True)
+            return
+        self._entry_installed(info)
+
+    def _on_open_entry_clicked(self) -> None:
+        name = self._entry_combo.currentText()
+        if not name:
+            self._set_project_status("Select an entry first", True)
+            return
+        try:
+            info = self._ctrl.open_entry(EntryRequest(name))
+        except Exception as exc:
+            # Isolate the Qt callback without hiding the owner's failure.
+            logger.exception("Failed to open result entry")
+            self._set_project_status(str(exc), True)
+            return
+        self._entry_installed(info)
+
+    def _entry_installed(self, info: EntryInfo) -> None:
+        self._refresh_entries()
+        self._select_entry_name(info.name)
+        self._show_entry_paths(info)
         self._refresh_context_list()
+        self._set_project_status(f"Opened entry: {info.name}")
 
     def _on_switch_clicked(self) -> None:
         item = self._ctx_list.currentItem()
         if item is None:
-            self._set_project_status("Select a context first", error=True)
+            self._set_project_status("Select a working point first", error=True)
             return
         label = item.data(Qt.ItemDataRole.UserRole)  # type: ignore[attr-defined]
-        self._ctrl.use_context(label)
+        try:
+            self._ctrl.use_point(PointUseRequest(label))
+        except Exception as exc:
+            # Keep owner rejection visible without escaping the Qt callback.
+            logger.exception("Failed to switch working point")
+            self._set_project_status(
+                f"Failed to switch working point: {exc}", error=True
+            )
+            return
         self._refresh_context_list()
-        self._set_project_status(f"Switched to context: {label}")
-        logger.info("SetupDialog: switched to context=%r", label)
+        self._set_project_status(f"Switched to working point: {label}")
 
     def _on_new_ctx_clicked(self) -> None:
-        device_name: str | None = self._device_combo.currentData()
-        # Clone source picked from the dropdown ("(none)" -> None). The
-        # Controller resolves unit/value from bind_device internally.
-        clone_from: str | None = self._clone_combo.currentData()
-        self._ctrl.new_context(bind_device=device_name, clone_from=clone_from)
+        request = PointCreateRequest(
+            label=self._label_edit.text(),
+            description=self._description_edit.text(),
+            origin=CommandOrigin("gui"),
+            clone_from=self._clone_combo.currentData(),
+        )
+        try:
+            self._ctrl.new_point(request)
+        except Exception as exc:
+            # PointBindingError may retain a created resource; do not retry New.
+            logger.exception("Failed to create working point")
+            self._refresh_context_list()
+            self._set_project_status(
+                f"Failed to create working point: {exc}", error=True
+            )
+            return
         self._refresh_context_list()
-        self._set_project_status(
-            f"Created new context (device={device_name or 'none'})"
-        )
-        logger.info(
-            "SetupDialog: new_context bind_device=%r clone_from=%r",
-            device_name,
-            clone_from,
-        )
+        self._set_project_status(f"Created working point: {request.label}")
 
     def _refresh_context_list(self) -> None:
         self._ctx_list.clear()
-        labels = self._ctrl.get_context_labels()
-        active = self._ctrl.get_active_context_label()
-        bold_font = QFont()
-        bold_font.setBold(True)
-        active_idx = -1
-        for i, label in enumerate(labels):
-            is_active = label == active
-            display = f"▶ {label}" if is_active else f"   {label}"
-            item = QListWidgetItem(display)
-            item.setData(Qt.ItemDataRole.UserRole, label)  # type: ignore[attr-defined]
-            if is_active:
-                item.setFont(bold_font)
-                active_idx = i
+        points = self._ctrl.list_points()
+        labels = [point.label for point in points]
+        for point in points:
+            item = QListWidgetItem(f"{point.label} — {point.description}")
+            item.setData(Qt.ItemDataRole.UserRole, point.label)
             self._ctx_list.addItem(item)
-        if active_idx >= 0:
-            self._ctx_list.setCurrentRow(active_idx)
-        elif self._ctx_list.count() > 0:
+        if self._ctx_list.count() > 0:
             self._ctx_list.setCurrentRow(0)
         self._refresh_clone_combo(labels)
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
-        # Clone source = any existing context under the active project; default
-        # "(none)" -> clone_from=None. Same label set as the context list above.
+        # "(empty)" uses the owner's setup seed and empty library, not memory DRAFT.
         prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()
-        self._clone_combo.addItem("(none)", userData=None)
+        self._clone_combo.addItem("(empty)", userData=None)
         for label in labels:
             self._clone_combo.addItem(label, userData=label)
         self._clone_combo.blockSignals(False)

@@ -1,6 +1,7 @@
-"""Cross-tab source publication and notification restrictions at public seams."""
+"""Cross-tab publications retain captures and isolate source failures."""
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 from zcu_tools.gui.app.measure.state import SessionEnv, State
@@ -17,39 +18,45 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionReason,
     CfgStatus,
 )
-from zcu_tools.resources.context import MetaDict, ModuleLibrary
 
-from tests.gui.app.measure._cfg_fakes import cfg_resources
+from tests.gui.app.measure._cfg_fakes import (
+    PublishedHost,
+    cfg_resolution,
+    cfg_resources,
+    parameter_capture,
+)
 
 
 def source_state() -> State:
-    md = MetaDict(None)
-    md.update(x=1.0)
-    return State(SessionEnv(md=md, ml=ModuleLibrary(None), soc=None, soccfg=None))
+    return State(SessionEnv(parameters=parameter_capture(x=1.0), soc=None, soccfg=None))
 
 
 def expression_schema() -> CfgSchema:
     return CfgSchema(
         CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
-        CfgSectionValue(fields={"value": EvalValue("x")}),
+        CfgSectionValue(fields={"value": EvalValue("general.ext.x")}),
     )
 
 
 def test_source_refresh_publishes_all_tabs_before_any_notification() -> None:
     state = source_state()
+    capture = state.session_env.parameters
+
+    def resolution():
+        return cfg_resolution(state, capture)
+
     owner = cfg_resources(state)
-    first = owner.create("first", expression_schema)
-    second = owner.create("second", expression_schema)
+    first = owner.create("first", expression_schema, resolution=resolution)
+    second = owner.create("second", expression_schema, resolution=resolution)
     observations = []
     initial = first.observe().ref
 
     def observe_pair(publication) -> None:
-        if publication.ref == initial:
-            return
-        observations.append((first.observe(), second.observe()))
+        if publication.ref != initial:
+            observations.append((first.observe(), second.observe()))
 
     unsubscribe = first.watch(observe_pair)
-    state.session_env.md.update(x=9.0)
+    state.set_context(replace(state.session_env, parameters=parameter_capture(x=9.0)))
     state.version.bump("context")
     publications = owner.refresh_all()
     unsubscribe()
@@ -58,16 +65,21 @@ def test_source_refresh_publishes_all_tabs_before_any_notification() -> None:
     assert observations[0] == publications
     assert publications[0].source_basis == publications[1].source_basis
     assert publications[0].ref.revision == publications[1].ref.revision == 1
-    assert first.accept(publications[0].ref.revision).values == {"value": 9.0}
-    assert second.accept(publications[1].ref.revision).values == {"value": 9.0}
+    assert first.accept(publications[0].ref.revision).values == {"value": 1.0}
+    assert second.accept(publications[1].ref.revision).values == {"value": 1.0}
 
 
 @pytest.mark.parametrize("batch", [False, True])
 def test_notification_blocks_other_tab_commands_and_lifetime(batch: bool) -> None:
     state = source_state()
+    capture = state.session_env.parameters
+
+    def resolution():
+        return cfg_resolution(state, capture)
+
     owner = cfg_resources(state)
-    first = owner.create("first", expression_schema)
-    second = owner.create("second", expression_schema)
+    first = owner.create("first", expression_schema, resolution=resolution)
+    second = owner.create("second", expression_schema, resolution=resolution)
     initial = first.observe().ref
     failures = []
 
@@ -80,7 +92,7 @@ def test_notification_blocks_other_tab_commands_and_lifetime(batch: bool) -> Non
             ),
             lambda: second.accept(second.observe().ref.revision),
             lambda: owner.retire("second"),
-            lambda: owner.create("third", expression_schema),
+            lambda: owner.create("third", expression_schema, resolution=resolution),
             lambda: owner.refresh_all(),
         )
         for command in commands:
@@ -100,16 +112,21 @@ def test_notification_blocks_other_tab_commands_and_lifetime(batch: bool) -> Non
     second.edit(second.observe().ref.revision, (CfgEdit(("value",), 5.0),))
     assert second.accept(second.observe().ref.revision).values == {"value": 5.0}
     owner.retire("second")
-    owner.create("third", expression_schema)
+    owner.create("third", expression_schema, resolution=resolution)
 
 
 def test_source_fault_publishes_unavailable_for_every_tab_then_recovers(
     monkeypatch,
 ) -> None:
     state = source_state()
+    capture = state.session_env.parameters
+
+    def resolution():
+        return cfg_resolution(state, capture)
+
     owner = cfg_resources(state)
-    first = owner.create("first", expression_schema)
-    second = owner.create("second", expression_schema)
+    first = owner.create("first", expression_schema, resolution=resolution)
+    second = owner.create("second", expression_schema, resolution=resolution)
     initial = first.observe().ref
     observations = []
 
@@ -117,13 +134,12 @@ def test_source_fault_publishes_unavailable_for_every_tab_then_recovers(
         if publication.ref != initial:
             observations.append((first.observe().status, second.observe().status))
 
+    def fail_options(self):
+        raise RuntimeError("Published source is unavailable")
+
     unsubscribe = first.watch(subscriber)
     with monkeypatch.context() as patch:
-
-        def fail_snapshot():
-            raise RuntimeError("Published source is unavailable")
-
-        patch.setattr(MetaDict, "snapshot", lambda self: fail_snapshot())
+        patch.setattr(PublishedHost, "list_device_names", fail_options)
         publications = owner.refresh_all()
     unsubscribe()
 

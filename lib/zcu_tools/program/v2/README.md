@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-10 — typed mock interfaces
+**Last updated:** 2026-10-11，native arb path、core conversion 與 typed mock interfaces
 
 ## Testing & Type Checking Conventions
 
@@ -128,4 +128,6 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 
 ## ArbWaveform reference time axis
 
-`ArbWaveformDatabase` 的 `time` array 是 arbitrary waveform data 的 reference time axis。`ArbWaveformCfg` 只存 asset `data` key；`length` 是由 `ArbWaveformDatabase.inspect(data).duration` 得到的屬性（即 `time[-1]`），不寫入 ModuleLibrary waveform config。`ArbWaveform.make_iqdata()` 在 asset duration 上插值取樣，不把 stored data stretch/compress，也不提供 config-level truncation；要改播放長度就改 asset arrays 或 formula recipe。
+Native ArbWaveformCfg 保存邏輯 data key 與必填本機絕對 path。Length 是 path 指定 NPZ 的 time[-1]，不存另一個播放長度。ModuleCfgFactory.from_core 使用明示 context.assets.path_for 轉換 nested arb，成品不持有 provider。
+
+Program 與 sim 從 path 讀 bytes，交 core.waveform_format 解碼 samples，不查 global DB 或解讀 formula。ArbWaveform.make_iqdata 在完整 reference time axis 插值到硬體 timing，不伸縮或裁切。覆寫同 path 會改變之後的播放內容。

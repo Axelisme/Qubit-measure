@@ -29,7 +29,6 @@ _UNRESOLVED = object()
 
 class LibraryBindingState(Enum):
     LINKED = "linked"
-    MODIFIED = "modified"
     CUSTOM = "custom"
 
 
@@ -52,7 +51,16 @@ def _binding_state_for_key(chosen_key: str) -> LibraryBindingState:
 
 
 class ReferenceField(CfgField):
-    """Reference binding with recoverable linked, modified, and missing states."""
+    """Reference binding with editable inline and readonly source-key modes.
+
+    spec defines kind, allowed shapes, discriminator and optionality. The supplied
+    evaluator, option provider and catalog resolve this fixed binding source.
+    initial_val is a ReferenceValue or None (disabled when optional). An empty
+    section on a linked key may await its catalog shape; a missing
+    entry is Invalid; an unknown shape has no fabricated children. Inline and
+    nonempty values require a compatible shape and declared fields. Malformed values
+    or failed catalog calls raise rather than falling back.
+    """
 
     spec: ReferenceSpec
 
@@ -67,7 +75,10 @@ class ReferenceField(CfgField):
     ) -> None:
         super().__init__(spec)
         initial_spec: CfgSectionSpec | None = None
-        if isinstance(initial_val, ReferenceValue):
+        if isinstance(initial_val, ReferenceValue) and not (
+            _binding_state_for_key(initial_val.chosen_key) is LibraryBindingState.LINKED
+            and not initial_val.value.fields
+        ):
             initial_spec = select_ref_value_spec(spec, initial_val)
             validate_section_keys(
                 initial_spec,
@@ -79,19 +90,15 @@ class ReferenceField(CfgField):
         self._references = references
         self._available_keys = self._load_available_keys()
 
-        init_overridden = False
         if isinstance(initial_val, ReferenceValue):
             self._chosen_key = initial_val.chosen_key
             initial_section: CfgSectionValue | None = initial_val.value
-            init_overridden = initial_val.is_overridden
         else:
             first_label = spec.allowed[0].label
             self._chosen_key = make_custom_reference_key(first_label or "Custom")
             initial_section = None
 
         self._binding_state = _binding_state_for_key(self._chosen_key)
-        if init_overridden and self._binding_state is LibraryBindingState.LINKED:
-            self._binding_state = LibraryBindingState.MODIFIED
         self.sub_field: SectionField | None = None
         self._missing_library_ref = False
         self._is_enabled = not (spec.optional and initial_val is None)
@@ -101,7 +108,6 @@ class ReferenceField(CfgField):
             binding_state=self._binding_state,
             is_enabled=self._is_enabled,
             hint=initial_section,
-            chosen_resolution=(initial_spec, None) if init_overridden else _UNRESOLVED,
         )
         self._commit_rebuild(prepared)
 
@@ -123,10 +129,6 @@ class ReferenceField(CfgField):
         allowed_labels = frozenset(item.label for item in self.spec.allowed)
         return tuple(self._references.keys(self.spec.kind, allowed_labels))
 
-    def is_modified(self) -> bool:
-        self._require_open()
-        return self._binding_state is LibraryBindingState.MODIFIED
-
     def has_missing_library_ref(self) -> bool:
         self._require_open()
         return self._missing_library_ref
@@ -137,7 +139,8 @@ class ReferenceField(CfgField):
 
     def set_chosen_key(self, key: str) -> None:
         self._require_open()
-        if key != self._chosen_key or self.is_modified():
+        self._require_writable()
+        if key != self._chosen_key:
             resolved = self._resolve_key(key)
             prepared = self._prepare_rebuild(
                 chosen_key=key,
@@ -150,6 +153,7 @@ class ReferenceField(CfgField):
 
     def set_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - binding API
         self._require_open()
+        self._require_writable()
         if not self.spec.optional:
             return
         if enabled != self.is_enabled:
@@ -166,7 +170,6 @@ class ReferenceField(CfgField):
         return ReferenceValue(
             chosen_key=self._chosen_key,
             value=sub_value,
-            is_overridden=self.is_modified(),
             resolved_label=(
                 self.sub_field.spec.label
                 if self.sub_field is not None and not self._missing_library_ref
@@ -180,7 +183,7 @@ class ReferenceField(CfgField):
         )
 
     def set_value(self, value: object) -> None:
-        self._require_open()
+        self._require_writable()
         if value is None:
             self.set_enabled(False)
             return
@@ -195,21 +198,7 @@ class ReferenceField(CfgField):
             path=self.spec.label or "<reference>",
         )
         binding_state = _binding_state_for_key(value.chosen_key)
-        if binding_state is LibraryBindingState.LINKED and (
-            value.is_overridden
-            or (
-                value.chosen_key == self._chosen_key
-                and self._binding_state is LibraryBindingState.LINKED
-                and self.sub_field is not None
-                and self.sub_field.get_value() != value.value
-            )
-        ):
-            binding_state = LibraryBindingState.MODIFIED
-        resolved = (
-            (chosen_spec, None)
-            if binding_state is LibraryBindingState.MODIFIED
-            else self._resolve_key(value.chosen_key)
-        )
+        resolved = self._resolve_key(value.chosen_key)
         prepared = self._prepare_rebuild(
             chosen_key=value.chosen_key,
             binding_state=binding_state,
@@ -234,24 +223,11 @@ class ReferenceField(CfgField):
 
     def refresh_references(self, kind: str | None = None) -> None:
         self._require_open()
-        if self._binding_state in (
-            LibraryBindingState.CUSTOM,
-            LibraryBindingState.MODIFIED,
-        ):
+        if self._binding_state is LibraryBindingState.CUSTOM:
             if kind is None or kind == self.spec.kind:
                 new_keys = self._load_available_keys()
                 changed = new_keys != self._available_keys
                 self._available_keys = new_keys
-                if (
-                    self._binding_state is LibraryBindingState.MODIFIED
-                    and self._chosen_key not in new_keys
-                    and self.sub_field is not None
-                ):
-                    self._chosen_key = make_custom_reference_key(
-                        self.sub_field.spec.label
-                    )
-                    self._binding_state = LibraryBindingState.CUSTOM
-                    changed = True
                 if changed:
                     self.on_change.emit()
             if self.sub_field:
@@ -354,6 +330,7 @@ class ReferenceField(CfgField):
         self._missing_library_ref = prepared.missing_library_ref
         self._is_enabled = prepared.is_enabled
         self.sub_field = prepared.sub_field
+        self.set_readonly(readonly=self.readonly)
         if self.sub_field is not None:
             self.sub_field.on_change.connect(self._on_sub_change)
             self.sub_field.on_validity_changed.connect(self._on_sub_validity_change)
@@ -413,18 +390,41 @@ class ReferenceField(CfgField):
                 return None
         return None
 
-    def detach(self) -> None:
-        """Preserve current input without following this reference's source key."""
-        self._require_open()
-        if self._binding_state is LibraryBindingState.LINKED:
-            self._binding_state = LibraryBindingState.MODIFIED
-            self.on_change.emit()
+    def convert_reference_to_inline(self) -> None:
+        """Copy this valid ref's published actual values into the same inline shape.
+
+        Nested ref/Eval values freeze recursively, without querying sources.
+        Disabled, inline, missing or Invalid values raise CfgInputError INVALID_VALUE.
+        A ref ancestor prevents conversion with READONLY.
+        """
+        from ..resolved import freeze_resolved_value
+        from ..resource import CfgInputError, CfgInputReason
+
+        self._require_writable()
+        if (
+            not self.is_enabled
+            or self._binding_state is not LibraryBindingState.LINKED
+            or not self.is_valid()
+        ):
+            raise CfgInputError(
+                CfgInputReason.INVALID_VALUE, "conversion requires a valid ref"
+            )
+        try:
+            value = freeze_resolved_value(self.get_value())
+        except RuntimeError as exc:
+            raise CfgInputError(CfgInputReason.INVALID_VALUE, str(exc)) from exc
+        self.set_value(value)
+
+    def set_readonly(self, *, readonly: bool) -> None:
+        """Propagate the ancestor lock, retaining this ref mode's own child lock."""
+        super().set_readonly(readonly=readonly)
+        if self.sub_field is not None:
+            self.sub_field.set_readonly(
+                readonly=readonly or self._binding_state is LibraryBindingState.LINKED
+            )
 
     def _on_sub_change(self, *_: object) -> None:
-        if self._binding_state is LibraryBindingState.LINKED:
-            self.detach()
-        else:
-            self.on_change.emit()
+        self.on_change.emit()
 
     def _on_sub_validity_change(self, *_: object) -> None:
         self._refresh_validity()

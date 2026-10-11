@@ -132,13 +132,19 @@ def _validate_header(envelope: _EvidenceEnvelope) -> None:
         raise ValueError(f"format_version: unsupported major {version[1]}")
 
 
-def _utc_time(value: str, location: str) -> datetime:
+def parse_utc_time(value: str, location: str) -> datetime:
+    """Parse a timezone-aware UTC ISO timestamp into a datetime.
+
+    value is the historical timestamp; location names its evidence field for
+    errors. Raise a located ValueError for malformed or non-UTC values. Do not
+    infer timezone or substitute a current time.
+    """
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(f"{location}: expected UTC ISO acquisition time") from exc
+        raise ValueError(f"{location}: expected UTC ISO timestamp") from exc
     if parsed.utcoffset() != timedelta(0):
-        raise ValueError(f"{location}: expected UTC ISO acquisition time")
+        raise ValueError(f"{location}: expected UTC ISO timestamp")
     return parsed
 
 
@@ -157,9 +163,9 @@ def _validate_entry(entry: LegacyRunEvidence, index: int) -> None:
         raise ValueError(f"{location}.source_hash: expected lowercase SHA256")
     if not entry.experiment:
         raise ValueError(f"{location}.experiment: expected a declared nonempty tag")
-    started = _utc_time(entry.started_at, f"{location}.started_at")
+    started = parse_utc_time(entry.started_at, f"{location}.started_at")
     if entry.finished_at is not None:
-        finished = _utc_time(entry.finished_at, f"{location}.finished_at")
+        finished = parse_utc_time(entry.finished_at, f"{location}.finished_at")
         if finished < started:
             raise ValueError(f"{location}.finished_at: precedes started_at")
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
-from zcu_tools.gui.app.measure.services.ports import TabPathsSnapshot
+from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
@@ -17,7 +18,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ..artifact_keys import artifact_key_wire
+from ..save_types import project_save_snapshot
 from ._common import follow_tab, render_view
 
 
@@ -112,7 +113,6 @@ def tab_operation_state(
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
             "is_analyzing": bool(interaction.is_analyzing),
-            "is_saving_data": bool(interaction.is_saving_data),
             "has_context": bool(interaction.has_context),
             "has_active_context": bool(interaction.has_active_context),
             "has_soc": bool(interaction.has_soc),
@@ -121,19 +121,9 @@ def tab_operation_state(
             "has_post_analyze_result": bool(interaction.has_post_analyze_result),
             "has_figure": bool(interaction.has_figure),
         },
-        "save_paths": _save_paths_wire(snap.paths),
-        "artifacts": [
-            {
-                "key": artifact_key_wire(artifact.key),
-                "kind": artifact.key.kind.value,
-                "figure_name": artifact.key.figure_name,
-                "status": artifact.status.value,
-                "default_path": artifact.default_path,
-                "last_saved_path": artifact.last_saved_path,
-                "is_saveable": artifact.is_saveable,
-            }
-            for artifact in snap.artifacts
-        ],
+        **project_save_snapshot(snap.artifacts, run_id=snap.run.run_id).model_dump(
+            mode="json"
+        ),
         "result_source_path": snap.run.source_path,
         # Revisions distinguish replacements even when availability and source
         # path stay unchanged. Payload arrays remain with the application owner.
@@ -176,28 +166,146 @@ def h_tab_snapshot(
     return {"tabs": [tab_operation_state(adapter, tid) for tid in tab_ids]}
 
 
-def _save_paths_wire(paths: TabPathsSnapshot | None) -> dict[str, object] | None:
-    if paths is None:
+class TabParameterRead(TypedDict):
+    """Requested values and module references from one current source capture.
+
+    values maps requested logical paths to YAML values. Absent leaves are
+    omitted; explicit null is retained. modules maps each requested reference
+    to its existing canonical library root, or None for custom/missing roots.
+    Both use current point/library/aliases, with optional temporary aliases.
+    Neither mapping refreshes the live context or operation guards.
+    """
+
+    values: dict[str, YamlValue]
+    modules: dict[str, str | None]
+
+
+def _parameter_query_strings(params: Mapping[str, object], name: str) -> list[str]:
+    """Validate a requested parameter path/reference array at the wire boundary."""
+    items = params.get(name)
+    if not isinstance(items, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"{name} must be a string array")
+    strings: list[str] = []
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"{name} must contain non-empty strings"
+            )
+        strings.append(item)
+    return strings
+
+
+def h_tab_parameter_read(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> TabParameterRead:
+    """Read paths and module_refs through current sources for the named tab.
+
+    tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
+    strings, with $alias.path distinct from concrete component paths. Optional
+    aliases maps alias names to concrete components without changing globals.
+    None and {} mean no override.
+    Query only these requested data.
+    Missing leaves and explicit null follow TabParameterRead. Module lookup uses
+    the parameter owner's role/slot resolution and library membership. Unknown
+    roles, malformed paths, unavailable sources and owner I/O errors propagate.
+    Without current parameter sources, only empty arrays are accepted; otherwise
+    precondition_failed.
+    This read does not refresh any live-context or operation observation guard.
+    """
+    tab_id = params.get("tab_id")
+    if not isinstance(tab_id, str) or not adapter.tab_control.has_tab(tab_id):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    paths = _parameter_query_strings(params, "paths")
+    module_refs = _parameter_query_strings(params, "module_refs")
+    aliases = temporary_aliases(params)
+    parameters = adapter.tab_control.capture_parameters(tab_id, aliases=aliases)
+    if parameters is None:
+        if paths or module_refs:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED, "Parameter sources are unavailable"
+            )
+        return {"values": {}, "modules": {}}
+    values: dict[str, YamlValue] = {}
+    for path in paths:
+        result = parameters.lookup(path)
+        if result.present:
+            values[path] = result.value
+    modules: dict[str, str | None] = {}
+    module_keys = parameters.library.module_keys() if module_refs else ()
+    for reference in module_refs:
+        if is_custom_reference_key(reference):
+            modules[reference] = None
+            continue
+        try:
+            root = parameters.library_key(reference)
+        except AttributeError:
+            # library_key reports only unset/dangling captured module slots here.
+            modules[reference] = None
+        else:
+            modules[reference] = root if root in module_keys else None
+    return {"values": values, "modules": modules}
+
+
+def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
+    """Decode optional named component overrides; None and {} mean no override.
+
+    Reject malformed objects or empty/non-string keys and values with
+    invalid_aliases. Identifier and source errors belong to the context owner.
+    """
+    raw = params.get("aliases")
+    if raw is None:
         return None
-    return {
-        "data_path": paths.data.path,
-        "analysis_images": {
-            name: path.path for name, path in paths.analysis_images.items()
-        },
-        "post_analysis_images": {
-            name: path.path for name, path in paths.post_analysis_images.items()
-        },
-    }
+    if not isinstance(raw, dict):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "aliases must be an object",
+            reason="invalid_aliases",
+        )
+    aliases: dict[str, str] = {}
+    for alias, component in raw.items():
+        if (
+            not isinstance(alias, str)
+            or not alias.strip()
+            or not isinstance(component, str)
+            or not component.strip()
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "aliases must map non-empty names to components",
+                reason="invalid_aliases",
+            )
+        aliases[alias] = component
+    return aliases or None
 
 
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..cfg_observation import build_resource_observation
+    """Read cached cfg, or preview named aliases at the mandatory expected CfgRef.
 
-    return build_resource_observation(
-        adapter.cfg_lookup(str(params["tab_id"])).observe()
-    )
+    aliases maps alias names to concrete components. None and {} read cached
+    cfg without requiring expected. Nonempty aliases returns the same observation
+    shape/ref without publication or Run. Missing expected, malformed aliases,
+    stale refs and source failures reject.
+    Ordinary reads do not query sources or refresh observation guards.
+    """
+    from ..cfg_observation import build_resource_observation, cfg_error_to_remote
+
+    aliases = temporary_aliases(params)
+    tab_id = str(params["tab_id"])
+    if not aliases:
+        return build_resource_observation(adapter.cfg_lookup(tab_id).observe())
+    if "expected" not in params:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "aliases preview requires expected cfg_ref"
+        )
+    try:
+        observation = adapter.tab_control.preview_cfg(
+            tab_id, decode_ref(params["expected"]), aliases=aliases
+        )
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
+    return build_resource_observation(observation)
 
 
 def h_tab_reset_cfg(

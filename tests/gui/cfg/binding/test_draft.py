@@ -275,7 +275,7 @@ def test_close_invalidates_reference_public_surface_and_nested_field() -> None:
     operations = (
         reference.available_keys,
         reference.available_options,
-        reference.is_modified,
+        reference.convert_reference_to_inline,
         reference.has_missing_library_ref,
         reference.get_chosen_key,
         lambda: reference.is_enabled,

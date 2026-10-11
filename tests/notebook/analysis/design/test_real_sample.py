@@ -56,7 +56,9 @@ def _scatter_traces(fig: Figure) -> list[Scatter]:
 def _actual_t1_trace(fig: Figure) -> Scatter:
     traces = [trace for trace in _scatter_traces(fig) if trace.mode == "markers+text"]
     assert len(traces) == 1
-    return traces[0]
+    trace = traces[0]
+    assert isinstance(trace, Scatter)
+    return trace
 
 
 def _y_values(trace: Scatter) -> NDArray[np.float64]:
@@ -281,7 +283,5 @@ def test_empty_table_fails_before_physics(result_dir: str) -> None:
     assert _PHYSICS_CALLS["physics"] == 0
 
 
-def _new_fig():
-    import plotly.graph_objects as go
-
-    return go.Figure()
+def _new_fig() -> Figure:
+    return Figure()

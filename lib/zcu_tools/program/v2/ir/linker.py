@@ -18,7 +18,7 @@ class IRLinker:
 
     def link(
         self, inst_list: list[Instruction]
-    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
+    ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, Any]], IRCursor]:
         """Link a flat instruction list into QICK-compatible dicts."""
         prog_list: list[dict[str, object]] = []
         labels: dict[str, str] = {}

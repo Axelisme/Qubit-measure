@@ -10,6 +10,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
+    SessionEnv,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
@@ -17,18 +18,15 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import DirectValue
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from zcu_lab.definitions import ADAPTERS, register_all
 from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
 
 
-def _make_ctx():
-    ctx = MagicMock()
-    ctx.md = MagicMock()
-    ctx.ml = MagicMock()
-    ctx.soc = MagicMock()
-    ctx.soccfg = MagicMock()
-    ctx.ml.get_module.side_effect = lambda name, override=None: {"name": name}
-    return ctx
+def _make_ctx() -> SessionEnv:
+    return SessionEnv(
+        parameters=parameter_capture(), soc=MagicMock(), soccfg=MagicMock()
+    )
 
 
 def test_fake_adapter_full_flow():
@@ -40,18 +38,18 @@ def test_fake_adapter_full_flow():
     assert schema is not None
 
     # 2. schema_to_dict
-    cfg_dict = schema_to_raw_dict(schema, None, ctx.ml)
+    cfg_dict = schema_to_raw_dict(schema, None)
     assert "reps" in cfg_dict
     assert cfg_dict["reps"] == 100
     assert "sweep" in cfg_dict
 
     # 3. run
     schema.value.fields["noise_scale"] = DirectValue(0.05)
-    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, device_snapshot={})
+    run_req = RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None)
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
         run_req,
-        schema_to_raw_dict(schema, ctx.md, ctx.ml),
+        schema_to_raw_dict(schema, ctx.parameters),
         context=RunContext(
             ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
         ),
@@ -67,8 +65,7 @@ def test_fake_adapter_full_flow():
         AnalyzeRequest(
             run_result=result,
             analyze_params=FakeAnalyzeParams(threshold=0.0),
-            md=ctx.md,
-            ml=ctx.ml,
+            parameters=ctx.parameters,
             predictor=getattr(ctx, "predictor", None),
         ),
         plots=analyze_plots,
@@ -82,7 +79,7 @@ def test_fake_adapter_full_flow():
         WritebackRequest(run_result=result, analyze_result=analyze_result, ctx=ctx)
     )
     assert len(items) == 1
-    assert items[0].target_name == "fake_peak"
+    assert items[0].target_name == "general.ext.fake_peak"
     assert items[0].proposed_value == analyze_result.peak
 
 

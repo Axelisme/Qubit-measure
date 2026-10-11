@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,7 +25,7 @@ from zcu_lab.v2._support.measure import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     SweepDefault,
-    scaled_md,
+    scaled_path_seed,
 )
 from zcu_lab.v2.twotone.rb.core import RB_Exp, RB_Result, RBCfg
 
@@ -77,7 +79,9 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
             .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
             .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
             .readout()
-            .relax_delay(scaled_md("t1", factor=5.0, fallback_value=200.0))
+            .relax_delay(
+                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=200.0)
+            )
             .sweep(
                 "depth",
                 label="Clifford depth",
@@ -92,7 +96,11 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
         )
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> RBRunResult:
         """Execute the accepted cfg; propagate acquisition failures to the GUI."""
         cfg = self.build_exp_cfg(raw_cfg, req)

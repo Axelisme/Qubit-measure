@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
+from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
 from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -26,24 +29,20 @@ from zcu_tools.gui.session.state import (
 from zcu_tools.gui.session.state import (
     SessionState,
 )
-from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
+from zcu_tools.resources.entry import ArtifactKey, PointStorageBinding, SaveLayout
 
 from .adapter import (
-    AnalysisMode,
     ExpAdapterProtocol,
-    SavePaths,
     T_AnalyzeParams,
     T_Cfg,
 )
-from .artifact_paths import named_image_path
 from .artifact_tracker import (
-    ArtifactKey,
-    ArtifactKind,
-    ArtifactObservation,
-    ArtifactSnapshot,
+    ArtifactDeclaration,
+    ArtifactSectionSnapshot,
     ArtifactTracker,
 )
 
@@ -67,9 +66,30 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 # WritebackService remains the owner of the opaque draft itself.
 @dataclass
 class RunPaneState(Generic[T_Result]):
+    """One result and its historical acquisition evidence.
+
+    result is the adapter-owned record or None. source_path identifies loaded
+    data, not an acquisition destination. source_operation_id identifies the
+    publishing GUI operation. metadata is evidence from Run or native Load, or
+    None when no native evidence exists; Load retains the file's original history.
+    confirmed_run_id is None until a complete Save report confirms at least one
+    persistent output. It survives failed resaves of this Run, but replacement
+    or a new Run resets it; it is identity, not a successful-output history.
+    parameters fixes analysis/WB values and target. Run uses admission values;
+    native Load reads its historical point once using its resolved alias names.
+    None means no readable analysis source, never a live-context fallback.
+    storage fixes the Save capability: Run admission or Load request storage.
+    None means no Save destination. Native Load may have a different analysis
+    target; Save still checks this capability against file history.
+    """
+
     result: T_Result | None = None
     source_path: str | None = None
     source_operation_id: int | None = None
+    metadata: RunMetadata | None = None
+    confirmed_run_id: str | None = None
+    parameters: ParameterContext | None = None
+    storage: PointStorageBinding | None = None
 
 
 @dataclass
@@ -78,7 +98,6 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     result: T_AnalyzeResult | None = None
     plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
@@ -89,16 +108,14 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     result: T_AnalyzeResult | None = None
     plots: Plots | None = None
     writeback_draft: object | None = None
-    image_path_overrides: dict[str, str] = field(default_factory=dict)
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
 
 
 @dataclass
 class SavePaneState:
-    """Save owns the data path and comment drafts; image paths belong to image panes."""
+    """Current annotation; destinations and evidence belong to ArtifactTracker."""
 
-    data_path_override: str | None = None
     comment: str = ""
 
 
@@ -180,7 +197,6 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 
     # State flags are tab interaction resources, not result ownership.
     is_analyzing: bool = False
-    is_saving_data: bool = False
 
     # -- predicates (the entity answers questions about itself) ------------
 
@@ -196,51 +212,12 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     def has_figure(self) -> bool:
         return self.analysis.plots is not None and bool(self.analysis.plots)
 
-    def _adapter_save_paths(self, ctx: SessionEnv) -> SavePaths | None:
-        if not ctx.database_path or not ctx.result_dir or not ctx.active_label:
-            return None
-        return self.adapter.make_save_paths(ctx)
-
-    def effective_data_path(self, ctx: SessionEnv) -> str | None:
-        if self.save.data_path_override is not None:
-            return self.save.data_path_override
-        paths = self._adapter_save_paths(ctx)
-        return None if paths is None else paths.data_path
-
-    def image_pane(
-        self, key: ArtifactKey
-    ) -> AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any]:
-        if key.kind is ArtifactKind.ANALYSIS:
-            return self.analysis
-        if key.kind is ArtifactKind.POST_ANALYSIS:
-            return self.post_analysis
-        raise ValueError("Data artifacts have no image pane")
-
-    def effective_image_path(self, ctx: SessionEnv, key: ArtifactKey) -> str | None:
-        pane = self.image_pane(key)
-        name = key.figure_name
-        if name is None or pane.plots is None or name not in pane.plots:
-            raise KeyError(f"No current image artifact {key!r}")
-        override = pane.image_path_overrides.get(name)
-        if override is not None:
-            return override
-        paths = self._adapter_save_paths(ctx)
-        if paths is None:
-            return None
-        try:
-            name.encode("utf-8")
-        except UnicodeEncodeError:
-            # Keep the artifact visible; save preflight rejects this name before I/O.
-            return None
-        return named_image_path(paths.image_path, key)
-
 
 @dataclass(frozen=True)
 class TabInteractionState:
     global_run_active: bool
     is_running: bool
     is_analyzing: bool
-    is_saving_data: bool
     has_context: bool
     has_active_context: bool
     has_soc: bool
@@ -384,20 +361,6 @@ class State(SessionState):
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
 
-    @staticmethod
-    def _empty_analysis_like(
-        pane: AnalysisPaneState[Any, Any] | PostAnalysisPaneState[Any, Any],
-    ) -> AnalysisPaneState[Any, Any]:
-        return AnalysisPaneState(image_path_overrides=dict(pane.image_path_overrides))
-
-    @staticmethod
-    def _empty_post_analysis_like(
-        pane: PostAnalysisPaneState[Any, Any] | AnalysisPaneState[Any, Any],
-    ) -> PostAnalysisPaneState[Any, Any]:
-        return PostAnalysisPaneState(
-            image_path_overrides=dict(pane.image_path_overrides)
-        )
-
     def _replace_run_pane(
         self,
         tab_id: str,
@@ -405,16 +368,30 @@ class State(SessionState):
     ) -> RetiredPaneResources:
         """Commit one complete run replacement and invalidate its dependents.
 
-        No cleanup, adapter call, or validation occurs here. All potentially
-        fallible work belongs before this owner-thread swap; the returned object
-        is the complete detached-resource list for post-commit teardown.
+        Historical storage and all declaration paths are prepared before the
+        owner-thread swap. Preparation failure retains the old panes and tracker.
+        The returned resources are detached for post-commit cleanup.
         """
         self._assert_owner()
         tab = self.tabs[tab_id]
+        layout = self._save_layout(pane)
+        artifacts = ArtifactTracker()
+        if pane.result is not None and layout is not None:
+            artifacts.replace_section(
+                "run",
+                (
+                    ArtifactDeclaration(
+                        ArtifactRef("run", "measurement_data"),
+                        (ArtifactKey("run", "measurement_data", "data"),),
+                    ),
+                ),
+                layout=layout,
+            )
         retired = self._retired_all(tab)
+        tab.artifacts = artifacts
         tab.run = pane
-        tab.analysis = self._empty_analysis_like(tab.analysis)
-        tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
+        tab.analysis = AnalysisPaneState()
+        tab.post_analysis = PostAnalysisPaneState()
         self.version.bump(f"tab:{tab_id}:result")
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
@@ -448,19 +425,57 @@ class State(SessionState):
         return self._replace_run_pane(tab_id, RunPaneState())
 
     def update_tab_result(
-        self, tab_id: str, result: object, *, source_operation_id: int | None = None
+        self,
+        tab_id: str,
+        result: object,
+        *,
+        source_operation_id: int | None = None,
+        metadata: RunMetadata | None = None,
+        parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
+        """Replace result/evidence together and invalidate dependent panes.
+
+        metadata must describe this result, never the current session. Omit it
+        for non-acquisition replacement. parameters is this result's accepted
+        source, or None for context-free data, never a current-context fallback.
+        Returns detached resources for cleanup;
+        unknown tabs raise KeyError, and off-owner calls fail before mutation.
+        """
         self._assert_owner()
         logger.debug(
             "update_tab_result: tab_id=%r result_type=%s", tab_id, type(result).__name__
         )
         return self._replace_run_pane(
-            tab_id, RunPaneState(result=result, source_operation_id=source_operation_id)
+            tab_id,
+            RunPaneState(
+                result=result,
+                source_operation_id=source_operation_id,
+                metadata=metadata,
+                parameters=parameters,
+                storage=None if parameters is None else parameters.storage,
+            ),
         )
 
     def update_tab_loaded_result(
-        self, tab_id: str, result: object, source_path: str
+        self,
+        tab_id: str,
+        result: object,
+        source_path: str,
+        *,
+        metadata: RunMetadata,
+        parameters: ParameterContext | None = None,
+        storage: PointStorageBinding | None = None,
     ) -> RetiredPaneResources:
+        """Replace loaded data, native history and fixed analysis/Save sources.
+
+        source_path is the exact loaded file, not a saving destination. metadata
+        is the original native history, never a new acquisition. parameters is
+        its fixed historical-point analysis source, or None when not readable.
+        storage is the Load request's Save capability, or None without one.
+        Do not derive storage from parameters: their targets may differ.
+        Clear dependent panes, Run token and Save confirmation; return retired
+        resources. Unknown tabs raise KeyError; off-owner calls fail before mutation.
+        """
         self._assert_owner()
         logger.debug(
             "update_tab_loaded_result: tab_id=%r source_path=%r result_type=%s",
@@ -468,11 +483,16 @@ class State(SessionState):
             source_path,
             type(result).__name__,
         )
-        retired = self._replace_run_pane(
-            tab_id, RunPaneState(result=result, source_path=source_path)
+        return self._replace_run_pane(
+            tab_id,
+            RunPaneState(
+                result=result,
+                source_path=source_path,
+                metadata=metadata,
+                parameters=parameters,
+                storage=storage,
+            ),
         )
-        self.tabs[tab_id].artifacts.reset_for_load()
-        return retired
 
     def swap_analysis_pane(
         self,
@@ -491,14 +511,16 @@ class State(SessionState):
             analysis=State._retired_analysis(tab.analysis),
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        if not pane.image_path_overrides and pane.plots is not None:
-            pane.image_path_overrides = {
-                name: path
-                for name, path in tab.analysis.image_path_overrides.items()
-                if name in pane.plots
-            }
+        layout = self._save_layout(tab.run)
+        if layout is not None:
+            tab.artifacts.replace_section(
+                "analysis",
+                self._pane_declarations("analysis", pane),
+                layout=layout,
+            )
+            tab.artifacts.replace_section("post_analysis", (), layout=layout)
         tab.analysis = pane
-        tab.post_analysis = self._empty_post_analysis_like(tab.post_analysis)
+        tab.post_analysis = PostAnalysisPaneState()
         self.version.bump(f"tab:{tab_id}:analyze")
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
@@ -511,7 +533,6 @@ class State(SessionState):
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit an Analysis carrier in one State transition."""
         return self.swap_analysis_pane(
@@ -521,9 +542,6 @@ class State(SessionState):
                 result=result,
                 plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_overrides=(
-                    {} if image_path_overrides is None else dict(image_path_overrides)
-                ),
             ),
         )
 
@@ -564,13 +582,13 @@ class State(SessionState):
     @staticmethod
     def _reset_tab_derived(tab: Session[Any, Any, Any, Any]) -> None:
         """Clear state derived from a tab's current run result."""
-        tab.analysis = State._empty_analysis_like(tab.analysis)
-        tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
+        tab.analysis = AnalysisPaneState()
+        tab.post_analysis = PostAnalysisPaneState()
 
     @staticmethod
     def _invalidate_post_analyze(tab: Session[Any, Any, Any, Any]) -> None:
-        """Drop Post resources while preserving its independent image path."""
-        tab.post_analysis = State._empty_post_analysis_like(tab.post_analysis)
+        """Drop resources derived from the replaced primary Analysis."""
+        tab.post_analysis = PostAnalysisPaneState()
 
     def swap_post_analysis_pane(
         self,
@@ -588,12 +606,13 @@ class State(SessionState):
         retired = RetiredPaneResources(
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        if not pane.image_path_overrides and pane.plots is not None:
-            pane.image_path_overrides = {
-                name: path
-                for name, path in tab.post_analysis.image_path_overrides.items()
-                if name in pane.plots
-            }
+        layout = self._save_layout(tab.run)
+        if layout is not None:
+            tab.artifacts.replace_section(
+                "post_analysis",
+                self._pane_declarations("post_analysis", pane),
+                layout=layout,
+            )
         tab.post_analysis = pane
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired
@@ -606,7 +625,6 @@ class State(SessionState):
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
-        image_path_overrides: dict[str, str] | None = None,
     ) -> RetiredPaneResources:
         """Build and commit a Post carrier in one State transition."""
         return self.swap_post_analysis_pane(
@@ -616,9 +634,6 @@ class State(SessionState):
                 result=result,
                 plots=plots,
                 writeback_draft=writeback_draft,
-                image_path_overrides=(
-                    {} if image_path_overrides is None else dict(image_path_overrides)
-                ),
             ),
         )
 
@@ -668,50 +683,86 @@ class State(SessionState):
         )
         self.tabs[tab_id].post_analysis.params = instance
 
-    def get_artifact_snapshots(self, tab_id: str) -> tuple[ArtifactSnapshot, ...]:
-        """Observe current panes and shared path/comment drafts on the owner thread.
+    def commit_save_report(self, tab_id: str, report: SaveReport) -> None:
+        """Publish complete outputs and confirmed identity on State's owner thread.
 
-        Include only capability-declared artifacts, in Data/Analysis/Post order.
-        This is the single read model for Qt and the remote tab projection.
+        Missing historical RunMetadata raises ValueError before mutation;
+        unknown tabs raise KeyError. At least one saved output confirms run_id;
+        a failed resave keeps that identity. Unselected artifacts and acquisition
+        identity/times stay unchanged. This command owns no operation handle.
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
-        observations = [
-            ArtifactObservation(
-                key=ArtifactKey(ArtifactKind.DATA),
-                result=tab.run.result,
-                figure=None,
-                path=tab.effective_data_path(self.session_env),
-                comment=tab.save.comment,
+        metadata = tab.run.metadata
+        if metadata is None:
+            raise ValueError("Save report requires historical RunMetadata")
+        tab.artifacts.apply_report(report)
+        if any(item.status == "saved" for item in report.outputs):
+            tab.run.confirmed_run_id = report.run_id
+        for item in report.outputs:
+            if (
+                item.key.section == "run"
+                and item.output.format == "labber"
+                and item.status == "saved"
+            ):
+                tab.run.metadata = replace(metadata, labber_path=str(item.output.path))
+        self.version.bump(f"tab:{tab_id}:save")
+
+    def get_artifact_snapshots(
+        self, tab_id: str
+    ) -> tuple[ArtifactSectionSnapshot, ...]:
+        """Read the committed section model without adapter calls or path planning."""
+        self._assert_owner()
+        return self.get_tab(tab_id).artifacts.snapshot()
+
+    @staticmethod
+    def _save_layout(run: RunPaneState[T_Result]) -> SaveLayout | None:
+        """Plan against this result's source, never tab birth or live selection."""
+        metadata = run.metadata
+        storage = run.storage
+        if metadata is None or storage is None:
+            return None
+        return SaveLayout(
+            result_path=storage.result_path,
+            database_path=storage.database_path,
+            run_id=metadata.run_id,
+            point=metadata.snapshot.point,
+            saved_at=datetime.now().astimezone(),
+        )
+
+    @staticmethod
+    def _pane_declarations(
+        section: str,
+        pane: AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams]
+        | PostAnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams],
+    ) -> tuple[ArtifactDeclaration, ...]:
+        """Declare successful pane figures and JSON, including JSON-only results."""
+        if pane.result is None:
+            return ()
+        ref = ArtifactRef(section, "results")
+        figures = (
+            ()
+            if pane.plots is None
+            else tuple(
+                ArtifactKey(section, ref.name, "figure", name) for name in pane.plots
             )
-        ]
-        capabilities = tab.adapter.capabilities
-        for kind, pane, available in (
-            (
-                ArtifactKind.ANALYSIS,
-                tab.analysis,
-                capabilities.analysis is not AnalysisMode.NONE,
+        )
+        return (
+            ArtifactDeclaration(
+                ref,
+                figures + (ArtifactKey(section, ref.name, "analysis", section),),
             ),
-            (ArtifactKind.POST_ANALYSIS, tab.post_analysis, capabilities.post_analysis),
-        ):
-            if not available or pane.plots is None or pane.result is None:
-                continue
-            for name, figure in pane.plots.items():
-                key = ArtifactKey(kind, name)
-                observations.append(
-                    ArtifactObservation(
-                        key=key,
-                        result=pane.result,
-                        figure=figure,
-                        path=tab.effective_image_path(self.session_env, key),
-                    )
-                )
-        return tab.artifacts.project(observations)
+        )
 
     def update_tab_comment(self, tab_id: str, comment: str) -> None:
         """Publish the Data comment draft shared by GUI and remote saves."""
         self._assert_owner()
-        self.tabs[tab_id].save.comment = comment
+        tab = self.tabs[tab_id]
+        if tab.save.comment == comment:
+            return
+        tab.save.comment = comment
+        if any(section.section == "run" for section in tab.artifacts.snapshot()):
+            tab.artifacts.mark_dirty(ArtifactRef("run", "measurement_data"))
         self.version.bump(f"tab:{tab_id}:save")
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
@@ -722,34 +773,6 @@ class State(SessionState):
             type(instance).__name__,
         )
         self.tabs[tab_id].analysis.params = instance
-
-    def _bump_path_versions(self, tab_id: str, *resources: str) -> None:
-        for resource in resources:
-            self.version.bump(f"tab:{tab_id}:path:{resource}")
-
-    def update_tab_data_path_override(self, tab_id: str, data_path: str | None) -> None:
-        self._assert_owner()
-        self.tabs[tab_id].save.data_path_override = data_path
-        self._bump_path_versions(tab_id, "data")
-
-    def update_tab_image_path_override(
-        self, tab_id: str, key: ArtifactKey, image_path: str | None
-    ) -> None:
-        self._assert_owner()
-        pane = self.tabs[tab_id].image_pane(key)
-        name = key.figure_name
-        if name is None or pane.plots is None or name not in pane.plots:
-            raise KeyError(f"No current image artifact {key!r}")
-        if image_path is None:
-            pane.image_path_overrides.pop(name, None)
-        else:
-            pane.image_path_overrides[name] = image_path
-        stage = (
-            "analysis_image"
-            if key.kind is ArtifactKind.ANALYSIS
-            else "post_analysis_image"
-        )
-        self._bump_path_versions(tab_id, stage)
 
     def set_tab_running(self, tab_id: str, *, running: bool) -> None:
         """Set or clear this existing tab's run ownership on the owner thread.
@@ -788,18 +811,6 @@ class State(SessionState):
         logger.debug("set_tab_analyzing: tab_id=%r analyzing=%s", tab_id, analyzing)
         self.tabs[tab_id].is_analyzing = analyzing
 
-    def set_tab_saving_data(self, tab_id: str, *, saving_data: bool) -> None:
-        """Set this existing tab's save busy flag on the owner thread.
-
-        True marks saving active; False clears it. Raise KeyError for an
-        unknown tab and RuntimeError off-owner. Do not bump resource versions.
-        """
-        self._assert_owner()
-        logger.debug(
-            "set_tab_saving_data: tab_id=%r saving_data=%s", tab_id, saving_data
-        )
-        self.tabs[tab_id].is_saving_data = saving_data
-
     def is_run_active(self) -> bool:
         return self.running_tab_id is not None
 
@@ -810,9 +821,6 @@ class State(SessionState):
     def is_tab_analyzing(self, tab_id: str) -> bool:
         return self.tabs[tab_id].is_analyzing
 
-    def is_tab_saving_data(self, tab_id: str) -> bool:
-        return self.tabs[tab_id].is_saving_data
-
     def is_tab_busy(self, tab_id: str) -> bool:
         tab = self.tabs[tab_id]
-        return self.running_tab_id == tab_id or tab.is_analyzing or tab.is_saving_data
+        return self.running_tab_id == tab_id or tab.is_analyzing

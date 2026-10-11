@@ -79,6 +79,7 @@ class MainWindowToolbar:
         self._add_dialog_button("Devices…", DialogName.DEVICE)
         self._add_dialog_button("Predictor…", DialogName.PREDICTOR)
         self._add_dialog_button("Inspect…", DialogName.INSPECT)
+        self._add_dialog_button("Aliases…", DialogName.ALIASES)
 
     @property
     def layout(self) -> QHBoxLayout:

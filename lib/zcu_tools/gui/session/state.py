@@ -110,6 +110,8 @@ class SessionPreferences:
     not versioned (no guarded op depends on it).
     """
 
+    # Remembered ResultEntry name for Setup prefill, not an opened entry.
+    entry_name: str = ""
     chip_name: str = ""
     qub_name: str = ""
     res_name: str = ""

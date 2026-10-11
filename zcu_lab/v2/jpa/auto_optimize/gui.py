@@ -12,33 +12,29 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from matplotlib.figure import Figure
-from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    MetaDictWriteback,
     NoAnalyzeParams,
+    ParameterWriteback,
     RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.cfg import EvalValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.jpa_shared import (
-    lower_jpa_flux_dev,
-    lower_jpa_rf_dev,
-    lower_jpa_rf_power_dev,
-)
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_lab.v2._support.measure.seeds import custom, literal
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
@@ -52,33 +48,6 @@ JpaAutoRunResult = RunRecord[JPAOptCfg, JPAOptimizeResult]
 
 # Bring-up iteration budget (contract: GUI default may use 1001).
 _JPA_AUTO_NUM_POINTS_DEFAULT = 1001
-
-
-def _lower_jpa_auto_devs(
-    raw_cfg: Mapping[str, object],
-    device_snapshot: Mapping[str, DeviceInfo],
-) -> dict[str, dict[str, str]]:
-    """Lower both JPA selectors for the joint optimization.
-
-    The RF device must support both the frequency and the power knob (the
-    optimizer commands both on the same device); the flux device must support
-    the flux knob. All checks run over the cached snapshot only — never a
-    live device. A device cannot carry both roles at once: two different JPA
-    roles on the same device would collapse the labeled patches, so a
-    repeated selection fast-fails.
-    """
-    rf_patch = lower_jpa_rf_dev(raw_cfg, device_snapshot)
-    # The same RF device must also carry the power knob.
-    lower_jpa_rf_power_dev(raw_cfg, device_snapshot)
-    flux_patch = lower_jpa_flux_dev(raw_cfg, device_snapshot)
-    (rf_name,) = rf_patch
-    (flux_name,) = flux_patch
-    if rf_name == flux_name:
-        raise ValueError(
-            "JPA auto_optimize requires distinct RF and flux devices; "
-            f"{rf_name!r} is selected for both 'jpa_rf_dev' and 'jpa_flux_dev'"
-        )
-    return {**rf_patch, **flux_patch}
 
 
 def _relabel_auto_figure(fig: Figure) -> None:
@@ -121,22 +90,16 @@ class JpaAutoOptimizeAdapter(
             "limits."
         ),
         expects_md=(
-            "Reads from the MetaDict (all optional): 'best_jpa_flux' — a "
-            "previously accepted JPA flux device value, preferred as the flux "
-            "search centre; 'best_jpa_freq' — a previously accepted pump "
-            "frequency, preferred as the frequency search centre; "
-            "'best_jpa_power' — a previously accepted pump power, preferred "
-            "as the power search centre; 'r_f' — resonator frequency, "
-            "seeding the pump search near 2*r_f; 'res_ch' / 'ro_ch' — drive "
-            "/ ADC channels; 'timeFly' — cable time-of-flight for the trigger "
-            "offset; 'q_f' / 'qub_ch' — qubit frequency / drive channel for "
-            "the g↔e pi pulse."
+            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
+            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
+            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
+            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
+            "Missing aliases or calibration leave cfg Invalid; no static fallback."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
+            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
+            "optional $qubit.module.reset. Inline readout uses resonator scalar "
+            "and wiring calibration; module waveforms follow their module source."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
@@ -169,6 +132,13 @@ class JpaAutoOptimizeAdapter(
         )
         return (
             MeasureCfgBuilder()
+            .choice(
+                "flux_unit",
+                label="Flux unit",
+                choices=("A", "V", "native"),
+                default="A",
+                tooltip="Working unit for the selected flux driver; no conversion.",
+            )
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()
@@ -182,7 +152,7 @@ class JpaAutoOptimizeAdapter(
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default="",
+                default=literal(EvalValue("$flux_dev")),
                 required=False,
             )
             .sweep(
@@ -226,17 +196,18 @@ class JpaAutoOptimizeAdapter(
             .build()
         )
 
-    def build_exp_cfg(self, raw_cfg: dict[str, object], req: RunRequest) -> JPAOptCfg:
-        cfg_raw = dict(raw_cfg)
-        cfg_raw["dev"] = _lower_jpa_auto_devs(cfg_raw, req.device_snapshot)
-        return super().build_exp_cfg(cfg_raw, req)
-
-    def validate_run_request(self, req: RunRequest, raw_cfg: dict[str, object]) -> None:
-        # Pure preflight over the detached request snapshot.
+    def validate_run_request(
+        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
+    ) -> None:
+        # Pure local cfg/schema validation; no device availability/settings checks.
         self.build_exp_cfg(raw_cfg, req)
 
     def run(
-        self, req: RunRequest, raw_cfg: dict[str, object], *, context: RunContext
+        self,
+        req: RunRequest,
+        raw_cfg: Mapping[str, ExperimentCfgValue],
+        *,
+        context: RunContext,
     ) -> JpaAutoRunResult:
         cfg = self.build_exp_cfg(raw_cfg, req)
         return RunRecord(cfg, AutoOptimizeExp().run(cfg, context=context))
@@ -257,17 +228,17 @@ class JpaAutoOptimizeAdapter(
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_flux",
                 description="Best JPA flux device value",
                 proposed_value=result.best_flux,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
-            MetaDictWriteback(
+            ParameterWriteback(
                 target_name="best_jpa_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=result.best_power,

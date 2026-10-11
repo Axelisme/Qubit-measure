@@ -8,6 +8,8 @@ Python references (``MetaDict``, ``ModuleLibrary``, ``SocHandle``,
 listing the RPC method(s) the client should call to obtain current state. The
 measure-gui EventBus subscribes by payload type (not an event enum), so the
 registry is keyed by type; ``payload.EVENT.value`` gives the wire name.
+``aliases_changed`` carries ``{requery: ["tab.get_cfg"]}``; it never sends
+live source objects or changes historical Run captures.
 
 Adding a new event:
   1. Confirm the payload dataclass exists (tab events in
@@ -33,6 +35,7 @@ from zcu_tools.gui.event_bus import BasePayload
 from zcu_tools.gui.remote.events import EventSerializer, WirePayload
 from zcu_tools.gui.remote.events import wire_event_name as wire_event_name
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
     DeviceChangedPayload,
     DeviceSetupFinishedPayload,
@@ -124,13 +127,18 @@ def _ser_context_switched(payload: BasePayload) -> WirePayload:
 def _ser_md_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MdChangedPayload)
     del payload
-    return {"requery": ["context.md_get_attr"]}
+    return {"requery": ["context.snapshot"]}
+
+
+def _ser_aliases_changed(payload: BasePayload) -> WirePayload:
+    assert isinstance(payload, AliasesChangedPayload)
+    return {"requery": ["tab.get_cfg"]}
 
 
 def _ser_ml_changed(payload: BasePayload) -> WirePayload:
     assert isinstance(payload, MlChangedPayload)
     del payload
-    return {"requery": ["context.ml_get"]}
+    return {"requery": ["context.snapshot"]}
 
 
 def _ser_soc_changed(payload: BasePayload) -> WirePayload:
@@ -156,6 +164,7 @@ EVENT_SERIALIZERS: dict[type[BasePayload], EventSerializer] = {
     DeviceSetupFinishedPayload: _ser_device_setup_finished,
     ContextSwitchedPayload: _ser_context_switched,
     MdChangedPayload: _ser_md_changed,
+    AliasesChangedPayload: _ser_aliases_changed,
     MlChangedPayload: _ser_ml_changed,
     SocChangedPayload: _ser_soc_changed,
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from threading import Event
 
 import pytest
@@ -18,7 +19,7 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.cfg.edit_codec import encode_ref
-from zcu_tools.gui.cfg.resource import CfgEdit, CfgStaleError
+from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -69,7 +70,7 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         }
     )
     tab_id = "tab-agent-cfg-read"
-    fixture.prepare_tab(
+    resource = fixture.prepare_tab(
         tab_id, FakeAdapter(), CfgSchema(spec, make_default_value(spec))
     )
     fixture.start()
@@ -80,7 +81,14 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         invoke("connect", {"port": fixture.service.port})
         before = call(sock, "tab.list_all")
         result = invoke(
-            "rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab_id}}
+            "rpc_call",
+            {
+                "method": "tab.get_cfg",
+                "params": {
+                    "tab_id": tab_id,
+                    "expected": encode_ref(resource.observe().ref),
+                },
+            },
         )
         children = result["tree"]["children"]
         assert children["axis"]["kind"] == "centered_sweep"
@@ -90,7 +98,14 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
         assert children["nqz"]["choices"] == [1, 2]
         assert children["drive"]["kind"] == "reference"
         assert children["drive"]["choices"] == ["Pulse"]
-        assert result == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        assert (
+            result
+            == call(
+                sock,
+                "tab.get_cfg",
+                {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+            )["result"]
+        )
         assert (
             call(sock, "tab.list_all")["result"]["active_tab_id"]
             == before["result"]["active_tab_id"]
@@ -172,33 +187,6 @@ def test_reset_mcp_restores_gui_defaults_and_advances_one_revision(mcp_tab):
     )
 
 
-def test_reset_stale_revision_preserves_the_edited_publication(mcp_tab):
-    _, tab_id, invoke, sock = mcp_tab
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-    edited = invoke(
-        "rpc_call",
-        {
-            "method": "tab.edit_cfg",
-            "params": {
-                "tab_id": tab_id,
-                "expected": before["cfg_ref"],
-                "edits": [{"path": ["gain"], "value": 0.75}],
-            },
-        },
-    )
-
-    with pytest.raises(GuiRpcError) as failure:
-        invoke(
-            "rpc_call",
-            {
-                "method": "tab.reset_cfg",
-                "params": {"tab_id": tab_id, "expected": before["cfg_ref"]},
-            },
-        )
-    assert failure.value.reason == "stale_revision"
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == edited
-
-
 def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
     fixture, tab_id = live_tab
     release = Event()
@@ -256,107 +244,6 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
     assert raised.value.code == "invalid_params"
     assert raised.value.reason == "invalid_value"
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
-
-
-def test_stale_reference_returns_expected_actual_and_never_retries(mcp_tab):
-    _, tab_id, invoke, sock = mcp_tab
-    expected = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"]
-    actual = invoke(
-        "rpc_call",
-        {
-            "method": "tab.edit_cfg",
-            "params": {
-                "tab_id": tab_id,
-                "expected": expected,
-                "edits": [{"path": ["gain"], "value": 0.25}],
-            },
-        },
-    )
-    rejected = call(
-        sock,
-        "tab.edit_cfg",
-        {
-            "tab_id": tab_id,
-            "expected": expected,
-            "edits": [{"path": ["gain"], "value": 0.5}],
-        },
-    )
-    assert rejected["error"]["code"] == "precondition_failed"
-    assert rejected["error"]["reason"] == "stale_revision"
-    assert rejected["error"]["data"] == {
-        "expected": expected,
-        "actual": actual["cfg_ref"],
-    }
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == actual
-
-
-@pytest.mark.parametrize(
-    "remote_first", [False, True], ids=["gui-first", "remote-first"]
-)
-def test_gui_and_remote_competing_edits_preserve_the_first_publication(
-    mcp_tab, remote_first
-):
-    fixture, tab_id, _, sock = mcp_tab
-    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-    base = owner.observe().ref
-    params = {
-        "tab_id": tab_id,
-        "expected": before["cfg_ref"],
-        "edits": [{"path": ["gain"], "value": 0.25}],
-    }
-    if remote_first:
-        winner = call(sock, "tab.edit_cfg", params)["result"]
-        with pytest.raises(CfgStaleError) as raised:
-            owner.edit(base.revision, (CfgEdit(("gain",), DirectValue(0.5)),))
-        assert encode_ref(raised.value.expected) == before["cfg_ref"]
-        assert encode_ref(raised.value.actual) == winner["cfg_ref"]
-    else:
-        owner.edit(base.revision, (CfgEdit(("gain",), DirectValue(0.5)),))
-        winner = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        rejected = call(sock, "tab.edit_cfg", params)
-        assert rejected["error"]["reason"] == "stale_revision"
-        assert rejected["error"]["data"] == {
-            "expected": before["cfg_ref"],
-            "actual": winner["cfg_ref"],
-        }
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == winner
-    assert winner["tree"]["children"]["gain"]["input"]["resolved"] == (
-        0.25 if remote_first else 0.5
-    )
-
-
-@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
-def test_recreated_tab_rejects_the_retired_cfg_identity(live_tab, method):
-    fixture, tab_id = live_tab
-    sock = open_client(fixture.service.port)
-    try:
-        old = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        fixture.ctrl.close_tab(tab_id)
-        replacement = fixture.prepare_tab(
-            tab_id,
-            FakeAdapter(),
-            FakeAdapter().make_default_cfg(fixture.state.session_env),
-        )
-        current = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        assert current["cfg_ref"]["cfg_id"] != old["cfg_ref"]["cfg_id"]
-        if method == "tab.run_start":
-            observe_run_inputs(
-                fixture, tab_id, lambda name, params: call(sock, name, params)["result"]
-            )
-        params = {"tab_id": tab_id, "expected": old["cfg_ref"]}
-        if method == "tab.edit_cfg":
-            params["edits"] = [{"path": ["gain"], "value": 0.25}]
-        rejected = call(sock, method, params)
-        assert rejected["error"]["reason"] == "stale_revision"
-        assert rejected["error"]["data"] == {
-            "expected": old["cfg_ref"],
-            "actual": current["cfg_ref"],
-        }
-        assert encode_ref(replacement.observe().ref) == current["cfg_ref"]
-        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == current
-    finally:
-        sock.close()
 
 
 @pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
@@ -522,7 +409,11 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
     fixture.start()
     sock = open_client(fixture.service.port)
     try:
-        before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
+        before = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(owner.observe().ref)},
+        )["result"]
         text = "x" * (4 * 1024 * 1024)
         # The read helper switches to nonblocking; a large request needs sendall
         # to wait for the server's reader thread before pumping owner events.
@@ -541,24 +432,14 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
         current = owner.observe().ref
         assert encode_ref(current) != before["cfg_ref"]
         assert owner.accept(current.revision).values == {"text": text}
-        deliberate_retry = call(
-            sock,
-            "tab.edit_cfg",
-            {
-                "tab_id": tab_id,
-                "expected": before["cfg_ref"],
-                "edits": [{"path": ["text"], "value": "do not overwrite"}],
-            },
-        )
-        assert deliberate_retry["error"]["reason"] == "stale_revision"
-        assert deliberate_retry["error"]["data"]["actual"] == encode_ref(current)
-        assert owner.observe().ref == current
         restored = owner.edit(
             current.revision, (CfgEdit(("text",), DirectValue("small")),)
         )
-        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"] == (
-            encode_ref(restored.ref)
-        )
+        assert call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(owner.observe().ref)},
+        )["result"]["cfg_ref"] == (encode_ref(restored.ref))
     finally:
         sock.close()
         fixture.stop()
@@ -610,7 +491,10 @@ def test_malformed_envelope_precedes_resource_lookup(live_tab):
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
     sock = open_client(fixture.service.port)
     try:
         result = call(
@@ -655,7 +539,10 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
 
     fixture, _ = live_tab
     schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
-    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(schema, gc=False)
+    parameters = fixture.ctrl.read_context()
+    editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
+        schema, parameters=parameters, gc=False
+    )
 
     def reject(*_args):
         if failure == "unavailable":
@@ -690,5 +577,80 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
         )
         tree = call(sock, "editor.get", {"editor_id": editor_id})["result"]["tree"]
         assert tree["children"]["gain"]["input"]["resolved"] == 0.25
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("aliases_mode", ["omitted", "null", "empty"])
+def test_cached_cfg_read_without_expected_preserves_publication(
+    live_tab, aliases_mode, record_property
+):
+    fixture, tab_id = live_tab
+    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
+    before = owner.observe().ref
+    expected = encode_ref(before)
+    sock = open_client(fixture.service.port)
+    try:
+        witness = call(sock, "tab.get_cfg", {"tab_id": tab_id, "expected": expected})
+        record_property("legal_publication_witness", json.dumps(witness))
+        assert witness["ok"] is True, witness
+        publication = witness["result"]
+        assert set(publication) == {
+            "cfg_ref",
+            "status",
+            "tree",
+            "source_basis",
+            "diagnostics",
+        }
+        assert publication["cfg_ref"] == expected
+        assert publication["status"] == "Valid"
+        assert publication["tree"]["children"]["gain"]["input"]["resolved"] == 0.1
+        assert publication["tree"]["children"]["sweep"]["kind"] == "sweep"
+        assert owner.observe().ref == before
+
+        params = {"tab_id": tab_id}
+        if aliases_mode == "null":
+            params["aliases"] = None
+        elif aliases_mode == "empty":
+            params["aliases"] = {}
+        reply = call(sock, "tab.get_cfg", params)
+        record_property("target_reply", json.dumps(reply))
+        assert reply["ok"] is True, reply
+        assert reply["result"] == publication
+        assert owner.observe().ref == before
+    finally:
+        sock.close()
+
+
+def test_nonempty_alias_preview_without_expected_names_the_missing_reference(
+    live_tab, record_property
+):
+    fixture, tab_id = live_tab
+    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
+    before = owner.observe().ref
+    sock = open_client(fixture.service.port)
+    try:
+        witness = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(before)},
+        )
+        record_property("legal_publication_witness", json.dumps(witness))
+        assert witness["ok"] is True, witness
+        rejected = call(
+            sock, "tab.get_cfg", {"tab_id": tab_id, "aliases": {"driver": "Q1"}}
+        )
+        record_property("target_reply", json.dumps(rejected))
+        assert rejected["ok"] is False, rejected
+        assert rejected["error"]["code"] == "invalid_params"
+        assert "expected" in rejected["error"]["message"]
+        assert owner.observe().ref == before
+        current = call(
+            sock,
+            "tab.get_cfg",
+            {"tab_id": tab_id, "expected": encode_ref(before)},
+        )
+        assert current["ok"] is True, current
+        assert current["result"] == witness["result"]
     finally:
         sock.close()

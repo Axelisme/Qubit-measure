@@ -20,7 +20,6 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -102,12 +101,6 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
     ) -> FreqGainResult:
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        setup_devices(
-            cfg,
-            context.devices,
-            progress=True,
-            cancel_signal=context.cancel_signal,
-        )
         modules = cfg.modules
 
         freqs = sweep2array(
@@ -162,7 +155,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
                     **(acquire_kwargs or {}),
                 )
             )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return FreqGainResult(freqs, gains, signals)
 
