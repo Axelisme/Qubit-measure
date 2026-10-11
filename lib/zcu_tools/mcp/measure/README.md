@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11, generic recipe cfg operations and filtered actual
+**Last updated:** 2026-10-11, complete device RPC, bounded partial setup, generic recipe cfg operations and filtered actual
 
 # `zcu_tools/mcp/measure/`
 
@@ -6,15 +6,19 @@ Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。G
 
 ## 固定工具與 RPC
 
-`scripts/run_measure_mcp.py` 把使用者的 recipe definitions 注入 session 與 `assembly.py`。Registry 驗證名稱、手寫 schema 與 callback，工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `simulation_initialize`、`device_set_value`、`recipe_guide`。
+`scripts/run_measure_mcp.py` 把使用者的 recipe definitions 注入 session 與 `assembly.py`。Registry 驗證名稱、手寫 schema 與 callback，工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`finish_early`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `simulation_initialize`、`device_setup`、`recipe_guide`。
 
 ## Setup 工具
 
 `recipe_guide(recipe)` 使用 registry 的 adapter mapping 讀原生 guide，不從 recipe 名稱猜 adapter。`simulation_initialize` 接現行 GUI coordinator，重用有效 simulation，切換時可能斷開真實裝置。它不套用 project，也不連真實硬體。Caller 仍須取得切換授權。
 
-`device_set_value(name, value, unit)` 先讀裝置 snapshot，只送 value 更新，再等待和核對 actual native value。它不更改 output、mode 或 rampstep。實體 unit 必須與 snapshot 相同。Snapshot unit=native 只接受明確的 native，不換算工作座標。
+`device_setup(name, cfg)` 接受 partial Info patch。工具先讀 before snapshot，合併 before.info 與 caller patch，再送一次完整 `device.setup(name, cfg)` RPC。YOKO patch 含 value 時，caller 必須明填 value_unit，不能借 before 的 unit。只改 output／rampstep 不需要 unit。欄位必填、extra、mode/unit 與 limits 由 RPC 的同一 Info model validator 拒絕，connected admission 由 GUI DeviceService 擁有。非 YOKO 沿各自的 Info 契約，不加 flux 規則或單位換算。
 
-兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after、native operation 及 verification。step completed 只表示該步成功。等待逾時不取消 operation，snapshot 有目標值也不代表 operation 完成。Start receipt 不確定時保留 unknown，明確 stale 拒絕時停止。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+Raw RPC 是非同步完整 cfg 入口，不接受 partial updates、不補 cached 舊值。Caller 先讀 `device.snapshot`，修改完整 Info cfg，呼叫 `device.setup`，用 `wait(op)` 等待，再讀 snapshot。全部 model-required 欄位必須提供，default 欄位沿 Info constructor。YOKO mode 必填；raw RPC 可省略 value_unit，由 Info 依 mode 產生。這不取代固定工具對 value patch 的明填要求。
+
+`device_setup` 沒有 timeout 參數，固定最多等待 300 秒。逾時回 running 與已知 op，不取消；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。`simulation_initialize` 保留原可調 timeout 與 verification.ready。
+
+兩個 mutation 工具保留 pre_read、start、wait、post_read、requested、before/after 與 native operation。Device requested 是 `{name, cfg}`，cfg 在 before-read 與合併完成前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時不能合併，pre_read failed。Before 有 Info 則送一次 RPC，由 service 拒絕未連線裝置，回 start failed、完整 candidate、before facts 與 null after。Device 不做 verification；snapshot 有目標值不代表 operation finished。Native finished／failed／cancelled、driver error 與 unknown 原樣保留。Step completed 只表示該步成功。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
 
 ## 日常與細部操作
 
@@ -26,7 +30,11 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
-`onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 dev.flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。\n\n`twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。\n\n`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar／sweep label，不發 RPC、不改 cfg 或 revision。Framework 不解讀 calibration、角色或 linewidth。
+`onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 dev.flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
+
+`twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
+
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar／sweep label，不發 RPC、不改 cfg 或 revision。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 

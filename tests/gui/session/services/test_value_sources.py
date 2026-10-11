@@ -17,11 +17,13 @@ from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
 
+from tests.gui.app.measure.remote._helpers import make_ctx
+
 
 def _state() -> State:
     return State(
         SessionEnv(
-            parameters=None,
+            parameters=make_ctx().parameters,
             soc=None,
             soccfg=None,
             chip_name="chip",
