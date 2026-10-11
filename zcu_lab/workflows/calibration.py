@@ -131,6 +131,25 @@ class Calibrated:
 
 
 @dataclass(frozen=True)
+class CalibratedPi2(Calibrated):
+    """Successful calibration with a fitted pi/2 duration for Echo and Ramsey.
+
+    The original four Calibrated scalars retain their meanings and validation.
+    pi2_length_us is a positive finite, phase-aware Length-Rabi fit duration in
+    microseconds at the selected template's gain and waveform. It is neither
+    half pi_length_us nor an initial seed; callers obtain it from calibrate.
+    Invalid original scalars or pi2 duration raise ValueError at construction.
+    """
+
+    pi2_length_us: float
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not math.isfinite(self.pi2_length_us) or self.pi2_length_us <= 0:
+            raise ValueError("pi2_length_us must be positive and finite")
+
+
+@dataclass(frozen=True)
 class CalibrationFailed:
     """Rejected calibration stage and human-readable reason; no partial values.
 
@@ -368,7 +387,7 @@ def calibrate(
     carry: CalCarry,
     t1_estimate_us: float,
     savers: CalibrationSavers,
-) -> Generator[Effect, None, Calibrated | CalibrationFailed]:
+) -> Generator[Effect, None, CalibratedPi2 | CalibrationFailed]:
     """Acquire native calibration stages and update carry only on full success.
 
     Use yield from inside a workflow step, passing env positionally and all
@@ -397,7 +416,10 @@ def calibrate(
     error/pi replacing error/FWHM. Readout scans
     on first success and then at n_calibrated % ro_every == 0; its finite maximum
     SNR must meet min_readout_snr. Other calls retain prior readout values.
-    Schedule failures and rejection return CalibrationFailed without modifying
+    Successful calibration returns CalibratedPi2, retaining the fitted pi/2
+    duration at the same selected drive waveform/gain; the four-field seed is
+    unchanged. Invalid fitted pi/2 durations raise, without inventing a seed or
+    changing fit acceptance. Schedule failures and rejection return CalibrationFailed without modifying
     carry. Adapter, fitting, saver and plot errors propagate. Cancel never
     returns a value; Engine discards the generator and its step state.
     Completed acquisition files remain even if a later stage fails.
@@ -472,7 +494,9 @@ def calibrate(
         ro_freq = float(ro_result.result.freqs[row])
         ro_gain = float(ro_result.result.gains[column])
 
-    cal = Calibrated(f01, rabi_fit.pi_length_us, ro_freq, ro_gain)
+    cal = CalibratedPi2(
+        f01, rabi_fit.pi_length_us, ro_freq, ro_gain, rabi_fit.pi2_length_us
+    )
     carry.last = cal
     carry.f01_by_flux.append((flux, f01))
     carry.n_calibrated += 1

@@ -3,30 +3,25 @@
 from collections.abc import Mapping
 from typing import Literal
 
-import numpy as np
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import (
-    ModuleCfgFactory,
-    PulseReadoutSpec,
-    PulseSpec,
-)
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import (
-    ExplicitList,
     FormEnv,
     FormErrors,
     FormModel,
     FormPath,
     ModuleInput,
-    ModuleRef,
     RangeInput,
 )
-from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
-from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
-from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
-from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.t1 import T1Plan
+
+from .calibration_modules import (
+    calibration_choices,
+    calibration_defaults,
+    expand_fluxes,
+    resolve_calibration_modules,
+)
 
 
 class T1PlanForm(FormModel):
@@ -74,25 +69,7 @@ class T1PlanForm(FormModel):
         values produce ordinary field validation errors, not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
-        data = super().defaults(env, previous)
-        data["flux_dev"] = {"expr": "$flux_dev"}
-        if previous or env.parameters is None:
-            return data
-        try:
-            path = env.parameters.resolve_path("$qubit.module.x180.waveform.length")
-            value = env.parameters.lookup(path)
-        except (
-            AttributeError,
-            ValueError,
-            TypeError,
-            RoleResolutionError,
-            ContextSourceUnavailableError,
-        ):
-            # An unreadable optional default stays required, per the Start contract.
-            return data
-        if value.present and value.value is not None:
-            data["pi_length_us"] = {"expr": path}
-        return data
+        return calibration_defaults(super().defaults(env, previous), env, previous)
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
@@ -101,20 +78,7 @@ class T1PlanForm(FormModel):
         Inline-only source-free drafts need no library. A used reference still
         requires the core ModuleRef source check; no live lookup or fallback.
         """
-        if env.library is None:
-            return {}
-        return {
-            ("qub_pulse", "name"): tuple(
-                key
-                for key in env.library.module_keys()
-                if isinstance(env.library.module_spec(key), PulseSpec)
-            ),
-            ("readout", "name"): tuple(
-                key
-                for key in env.library.module_keys()
-                if isinstance(env.library.module_spec(key), PulseReadoutSpec)
-            ),
-        }
+        return calibration_choices(env)
 
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> T1Plan | FormErrors:
         """Resolve selections and expand setpoints into a static native plan.
@@ -132,59 +96,17 @@ class T1PlanForm(FormModel):
         cfg, tunables, timing/grid generation, capture, submission or extra copy
         layer is involved; Engine owns plan isolation.
         """
-        context = env.library.validation_context() if env.library is not None else None
-        errors: dict[FormPath, str] = {}
-        qub_pulse = None
-        readout = None
-        try:
-            drive = ModuleCfgFactory.from_raw(
-                self.qub_pulse.name
-                if isinstance(self.qub_pulse, ModuleRef)
-                else self.qub_pulse.module,
-                context=context,
-            )
-            native_drive = NativeModuleCfgFactory.from_core(drive, context=context)
-            if not isinstance(native_drive, PulseCfg):
-                raise ValueError("T1 drive selection must be a pulse")
-            if isinstance(native_drive.waveform, ArbWaveformCfg):
-                raise ValueError(
-                    "T1 workflow uses Length-Rabi calibration; pure arb drive cannot "
-                    "change length and is unsupported"
-                )
-            qub_pulse = native_drive
-        except ValueError as exc:
-            errors[("qub_pulse",)] = str(exc)
-        try:
-            ro = ModuleCfgFactory.from_raw(
-                self.readout.name
-                if isinstance(self.readout, ModuleRef)
-                else self.readout.module,
-                context=context,
-            )
-            native_readout = NativeModuleCfgFactory.from_core(ro, context=context)
-            if not isinstance(native_readout, PulseReadoutCfg):
-                raise ValueError("T1 readout selection must support pulse gain control")
-            readout = native_readout
-        except ValueError as exc:
-            errors[("readout",)] = str(exc)
-        if qub_pulse is None or readout is None:
-            return FormErrors(errors)
-        fluxes = (
-            self.fluxes.values
-            if isinstance(self.fluxes, ExplicitList)
-            else tuple(
-                float(value)
-                for value in np.linspace(
-                    self.fluxes.start, self.fluxes.stop, self.fluxes.n
-                )
-            )
+        modules = resolve_calibration_modules(
+            qub_pulse=self.qub_pulse, readout=self.readout, env=env
         )
+        if isinstance(modules, FormErrors):
+            return modules
         return T1Plan(
             flux_dev=self.flux_dev,
             flux_unit=self.flux_unit,
-            fluxes=fluxes,
+            fluxes=expand_fluxes(self.fluxes),
             points=self.points,
-            qub_pulse=qub_pulse,
-            readout=readout,
+            qub_pulse=modules.qub_pulse,
+            readout=modules.readout,
             snapshot=snapshot,
         )

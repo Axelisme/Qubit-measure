@@ -42,7 +42,11 @@ from zcu_lab.workflows.acquire import (
     RabiAcquisition,
     ReadoutAcquisition,
 )
-from zcu_lab.workflows.analysis import FrequencyFit, analyze_qubit_freq
+from zcu_lab.workflows.analysis import (
+    FrequencyFit,
+    analyze_len_rabi,
+    analyze_qubit_freq,
+)
 from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
@@ -263,6 +267,34 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
     assert len(records[0].run_files) == 3
     for run_file in records[0].run_files:
         assert (tmp_path / "data" / records[0].iteration_dir / run_file).is_file()
+
+
+def test_calibration_transports_fitted_pi2_without_changing_seed_or_template(
+    inputs: Inputs, tmp_path: Path
+) -> None:
+    rig = Rig(inputs, tmp_path)
+    original = rig.plan.model_copy(deep=True)
+    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
+
+    status = rig.engine.execute("calibration")
+
+    assert status.lifecycle == "done", status.reason
+    result = rig.results[0]
+    assert hasattr(result, "pi2_length_us"), "Accepted calibration must retain pi2"
+    assert isinstance(result, calibration.CalibratedPi2)
+    source = rig.rabis[0]
+    fitted = analyze_len_rabi(source.result)
+    assert result.pi2_length_us == fitted.pi2_length_us
+    assert result.pi_length_us == fitted.pi_length_us
+    assert rig.carries[0].last == result
+    assert source.cfg.modules.qub_pulse.gain == original.qub_pulse.gain
+    assert (
+        source.cfg.modules.qub_pulse.waveform.style == original.qub_pulse.waveform.style
+    )
+    assert rig.plan == original
+    assert rig.seed == Calibrated(
+        rig.seed.f01_mhz, 0.4, rig.seed.readout_freq_mhz, rig.seed.readout_gain
+    )
 
 
 def test_readout_scan_uses_the_calibrated_rabi_drive(
