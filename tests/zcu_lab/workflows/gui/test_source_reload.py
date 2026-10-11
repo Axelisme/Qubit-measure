@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.catalog_loader import CatalogReloadError
 from zcu_tools.gui.form import FormErrors
 
 from tests.gui.app.workflows._start_fakes import StartHarness
@@ -65,3 +66,31 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert any(
         item == {"path": ["guess_us"], "value": 32.0} for item in knobs["values"]
     )
+
+
+def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
+    source: ReloadSource,
+) -> None:
+    harness = StartHarness()
+    window = source.open(harness)
+    window.plan_panel.state.write(
+        {("pi_length_us",): {"expr": "1 / 4"}}, window.plan_panel.env
+    )
+    saved = window.capture_persisted_state()
+    plan, knobs = window.plan_panel, window.tunables_panel
+    source.write(2, failure='raise ValueError("broken import")')
+    with pytest.raises(CatalogReloadError, match="broken import"):
+        window.reload_source()
+    assert window.plan_panel is plan and window.tunables_panel is knobs
+    assert window.capture_persisted_state() == saved
+    with pytest.raises(CatalogReloadError, match="unavailable"):
+        window.start("blocked")
+    source.write(2)
+    report = window.reload_source()
+    assert report.plan_dropped == (("legacy",),)
+    assert window.capture_persisted_state().plan["pi_length_us"] == {"expr": "1 / 4"}
+    assert window.plan_panel is not plan
+    # Successful retry clears reload admission; ordinary EMPTY-source admission
+    # is now the only reason Start cannot run this source-free view.
+    with pytest.raises(RuntimeError, match="parameter"):
+        window.start("empty")
