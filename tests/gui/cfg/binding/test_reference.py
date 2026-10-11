@@ -101,6 +101,34 @@ def _field(draft: CfgDraft) -> ReferenceField:
     return cast(ReferenceField, draft.root.fields["drive"])
 
 
+def test_reference_children_reject_edit_until_explicit_conversion() -> None:
+    from zcu_tools.gui.cfg.resource import CfgInputError, CfgInputReason
+
+    ports = BindingPorts()
+    ports.references[("module", "drive_lib")] = ResolvedReference("Pulse", _value(0.25))
+    draft = _draft(ports, ReferenceValue("drive_lib", _value(0.25)))
+    reference = _field(draft)
+    try:
+        assert reference.sub_field is not None
+        gain = reference.sub_field.fields["gain"]
+        with pytest.raises(CfgInputError) as rejected:
+            gain.set_value(0.75)
+        assert rejected.value.reason is CfgInputReason.READONLY
+        reference.convert_reference_to_inline()
+        assert reference.get_chosen_key() == "<Custom:Pulse>"
+        assert reference.sub_field is not None
+        reference.sub_field.fields["gain"].set_value(0.75)
+        ports.references.clear()
+        draft.refresh_references()
+        assert draft.snapshot().value.fields["drive"] == ReferenceValue(
+            "<Custom:Pulse>",
+            _value(0.75),
+            resolved_label="Pulse",
+        )
+    finally:
+        draft.close()
+
+
 def test_reference_catalog_supplies_compatible_keys_and_linked_snapshot() -> None:
     ports = BindingPorts()
     ports.references[("module", "drive_lib")] = ResolvedReference(

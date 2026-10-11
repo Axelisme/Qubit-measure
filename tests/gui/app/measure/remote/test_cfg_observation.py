@@ -145,12 +145,25 @@ def test_cfg_observation_projects_reference_and_centered_range_state() -> None:
         assert children["axis"]["inputs"]["span"]["raw"] == "1e"
         assert children["axis"]["inputs"]["span"]["error"] is not None
         drive = children["drive"]
+        assert drive["mode"] == "inline"
+        assert not drive["readonly"]
+        assert not drive["children"]["gain"]["readonly"]
         assert drive["resolved_label"] == "Pulse"
         assert drive["choices"] == ["Pulse"]
         assert drive["children"]["gain"]["input"]["resolved"] == 0.25
         assert build_cfg_observation(draft, "drive.ref") == drive
         reference = draft.root.fields["drive"]
         assert isinstance(reference, ReferenceField)
+        from zcu_tools.gui.cfg.binding.ports import ResolvedReference
+
+        catalog.resolve.return_value = ResolvedReference(
+            "Pulse", CfgSectionValue({"gain": DirectValue(0.5)})
+        )
+        reference.set_chosen_key("saved")
+        linked = build_cfg_observation(draft, "drive")
+        assert linked["mode"] == "ref"
+        assert not linked["readonly"]
+        assert linked["children"]["gain"]["readonly"]
         reference.set_enabled(False)
         disabled = build_cfg_observation(draft, "drive")
         assert disabled["ref"] is None
