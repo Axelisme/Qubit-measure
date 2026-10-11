@@ -34,7 +34,9 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
     EntryRequest,
+    PointCreateRequest,
 )
 from zcu_tools.resources.entry import component_registry
 
@@ -96,6 +98,9 @@ def application(
             state, registry, None, BaseEventBus(), project_root=str(tmp_path)
         )
         controller.setup_control.new_entry(EntryRequest("entry"))
+        controller.setup_control.new_point(
+            PointCreateRequest("working", "", CommandOrigin("gui"))
+        )
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "R1"})
         context.add_component(

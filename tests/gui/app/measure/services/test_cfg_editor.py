@@ -25,7 +25,12 @@ from zcu_tools.gui.cfg.binding import SettablePathError
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import LibraryChange, PointUseRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    LibraryChange,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
@@ -429,6 +434,7 @@ def test_replace_rejects_an_entry_switch_and_keeps_the_draft(
         service.replace(editor_id, "Q1.pulses.seed", "Q1.pulses.renamed")
     assert service.get_draft(editor_id) is draft
     assert draft.snapshot().value.fields["freq"] == DirectValue(5000.0)
+    control.new_point(PointCreateRequest("working", "", CommandOrigin("gui")))
     assert control.read_context().library.module_keys() == ()
 
 

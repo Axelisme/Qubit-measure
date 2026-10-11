@@ -146,7 +146,8 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
             "rpc_call", {"method": "entry.new", "params": {"name": "chip-b"}}
         )
         assert changed["name"] == "chip-b"
-        assert control.get_entry_info().entry_id == changed["entry_id"]
+        info = control.get_entry_info()
+        assert info is not None and info.entry_id == changed["entry_id"]
         with pytest.raises(FailedPreconditionError) as caught:
             control.read_context()
         assert caught.value.reason_code == "no_context"

@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode
-from zcu_tools.gui.session.context_types import EntryRequest, SavedPoint
+from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry

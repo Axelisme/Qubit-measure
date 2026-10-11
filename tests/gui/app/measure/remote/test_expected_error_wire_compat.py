@@ -66,7 +66,7 @@ def test_library_structure_empty_context_uses_owner_error_projection(
     assert reply["ok"] is False, reply
     assert reply["error"] == {
         "code": ErrorCode.PRECONDITION_FAILED,
-        "message": "No parameter context is installed",
+        "message": "Select or create a working point first",
         "reason": "no_context",
     }
     assert application.controller.get_session_env().parameters is None

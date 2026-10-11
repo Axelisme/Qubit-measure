@@ -529,49 +529,11 @@ def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
     assert session.state.version.get("context") == version
 
 
-def test_selected_draft_writeback_requires_saved_point_without_side_effects(
+def test_shared_writeback_entry_uses_detached_saved_target(
     session: _Session,
 ) -> None:
     from zcu_tools.resources.entry import writeback
 
-    capture = session.control.read_context()
-    version = session.state.version.get("context")
-    events: list[object] = []
-    session.bus.subscribe(MdChangedPayload, events.append)
-    session.bus.subscribe(MlChangedPayload, events.append)
-    with pytest.raises(
-        FailedPreconditionError, match="select or create a working point"
-    ) as caught:
-        session.control.apply_writeback(
-            capture.target,
-            (
-                writeback.ParameterWriteback("general.description", "must not commit"),
-                writeback.WaveformWriteback(
-                    "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
-                ),
-                writeback.SampleWriteback("Q1", {"t1_us": 20.09}),
-            ),
-            evidence=writeback.WritebackEvidence(
-                kind="test/draft", origin="gui", run_id="run-1"
-            ),
-        )
-    assert caught.value.reason_code == "storage_unavailable"
-    assert session.entry.ledger.events() == ()
-    current = session.control.read_context()
-    assert current.document() == capture.document()
-    assert current.library.document() == capture.library.document()
-    assert session.entry.samples("Q1").read().empty
-    assert session.entry.list_points() == []
-    assert events == []
-    assert session.state.version.get("context") == version
-
-
-def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
-    session: _Session,
-) -> None:
-    from zcu_tools.resources.entry import writeback
-
-    draft = session.control.read_context().target
     first = _select(session, "a")
     second = _select(session, "b")
     version = session.state.version.get("context")
@@ -582,11 +544,6 @@ def test_shared_writeback_entry_uses_detached_target_and_rejects_stale_draft(
     assert session.control.read_context().target == second
     assert session.state.version.get("context") == version
     assert session.entry.ledger.get(event_id).event.origin == "mcp"
-    before = session.entry.ledger.events()
-    with pytest.raises(FailedPreconditionError) as caught:
-        session.control.apply_writeback(draft, (item,), evidence=evidence)
-    assert caught.value.reason_code == "draft_not_selected"
-    assert session.entry.ledger.events() == before
 
 
 def test_saved_point_samples_persist_and_replace_latest_run_row(
