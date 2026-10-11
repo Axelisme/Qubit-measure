@@ -126,7 +126,7 @@ def calc_branch_population_over_flux(
         branchs = list(range(qub_dim))
 
     hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g)
-    fluxonium, resonator = hilbertspace.subsystem_list
+    fluxonium, _resonator = hilbertspace.subsystem_list
 
     def update_hilbertspace(flux: float) -> None:
         fluxonium.flux = flux  # type: ignore
@@ -148,7 +148,7 @@ def calc_branch_population_over_flux(
         )
 
         def _calc_branch_populations(
-            paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
+            paramsweep: ParameterSweep, paramindex_tuple: tuple[int, ...], **kwargs
         ) -> NDArray[np.float64]:
             # There are qub_dim * res_dim eigenvectors, each with shape
             # (qub_dim * res_dim, 1).

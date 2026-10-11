@@ -150,10 +150,8 @@ def align_locked_literals(
         elif isinstance(node_spec, ReferenceSpec) and isinstance(
             node_val, ReferenceValue
         ):
-            if (
-                not node_val.is_overridden
-                and not node_val.value.fields
-                and not is_custom_reference_key(node_val.chosen_key)
+            if not node_val.value.fields and not is_custom_reference_key(
+                node_val.chosen_key
             ):
                 # An unresolved linked input has no shape to align yet.
                 continue
@@ -222,7 +220,6 @@ def _inherit_reference(
     return ReferenceValue(
         old_value.chosen_key,
         inherit_from(old_value.value, old_shape, new_shape),
-        is_overridden=old_value.is_overridden,
     )
 
 

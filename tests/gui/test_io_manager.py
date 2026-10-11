@@ -7,8 +7,6 @@ tests — this file is IOManager-only.
 
 from __future__ import annotations
 
-import pytest
-from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.session.services.io_manager import IOManager
 
 # ---------------------------------------------------------------------------
@@ -19,12 +17,6 @@ from zcu_tools.gui.session.services.io_manager import IOManager
 def test_iomanager_not_setup_returns_empty_contexts():
     io = IOManager()
     assert io.list_contexts() == []
-
-
-def test_iomanager_not_setup_raises_on_use_context():
-    io = IOManager()
-    with pytest.raises(RuntimeError, match="not set up"):
-        io.use_context("anything", SessionEnv(parameters=None, soc=None, soccfg=None))
 
 
 def test_iomanager_not_setup_returns_none_label():

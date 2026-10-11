@@ -18,9 +18,9 @@ class IRLinker:
 
     def link(
         self, inst_list: list[Instruction]
-    ) -> tuple[list[dict], dict[str, str], list[dict[str, Any]], IRCursor]:
+    ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, Any]], IRCursor]:
         """Link a flat instruction list into QICK-compatible dicts."""
-        prog_list: list[dict] = []
+        prog_list: list[dict[str, object]] = []
         labels: dict[str, str] = {}
         meta_infos: list[dict[str, Any]] = []
 
@@ -79,7 +79,7 @@ class IRLinker:
             raise ValueError(msg)
 
         # Group tracked markers by p_addr
-        markers_by_addr: dict[int, list[dict]] = defaultdict(list)
+        markers_by_addr: dict[int, list[dict[str, object]]] = defaultdict(list)
         for m in meta_infos:
             markers_by_addr[m["p_addr"]].append(m)
 

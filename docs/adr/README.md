@@ -20,7 +20,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用機制、measure tab resource 的原子 publication／固定 Run acceptance、唯讀 ref／顯式 inline 轉換、Custom reference 繼承及獨立 draft 的現況分界；library conversion、selected Apply 與其他 app 的剩餘目標見 [Cfg draft](draft/cfg-editing-boundaries.md)，measure slice 的設計與驗收邊界見 [resource contract](draft/cfg-resource-contract.md)。
 - [0008 — Measure CfgEditor session](0008-cfg-editor-session.md)：measure headless session 與 opaque writeback 的局部契約仍有效；其中 tab auto-commit／雙樹不是共用目標。
 - [0009 — Spec/Value fluent + LiteralSpec lock](0009-spec-value-fluent-and-literal-lock.md)：Spec／Value 和角色預設的局部契約，概要見 [cfg owner](../../lib/zcu_tools/gui/cfg/README.md)。
 - [0010 — Complete value tree](0010-value-tree-complete-none-for-empty.md)：完整 Value tree 與停用表示的局部契約。

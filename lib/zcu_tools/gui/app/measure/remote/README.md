@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-11, complete Info device setup RPC
+**Last updated:** 2026-10-11, complete device setup and reference modes
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects measure's resource
@@ -114,7 +114,9 @@ Qt widgets.
 
 Event push is still available on the wire for GUI/internal consumers. Event
 payloads use requery hints for complex objects; live Python objects never cross
-the wire. `aliases_changed` directs subscribers to `tab.get_cfg` after the
+the wire. Parameter／library 變更事件以 `context.snapshot` 提示訂閱者重新讀取目前
+工作單位的 native 文件。這次讀取不改歷史 Run 的固定來源。
+`aliases_changed` directs subscribers to `tab.get_cfg` after the
 committed global table refreshes current cfg publications. It does not change
 historical Run sources. MCP completion still uses operation replies, not events.
 EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
@@ -169,13 +171,27 @@ rejects off-main observations at construction. Measure keeps only the writeback
 pane alias mapping and app-specific lifetime hooks. Missing observations, including
 version zero, are stale. Wire methods do not accept `expected_versions`.
 
-Run uses the explicit cfg ref and observed device snapshots, not live md/ml.
+Run uses the explicit cfg ref and fixed ParameterContext, not live md/ml.
+Cfg.dev contains role-to-device names, not settings patches. Run does not precheck
+whether those names exist. Core lookup of context.devices[name] reports a missing
+name when the device is used, and the error names that device. Cfg format and required
+unit validation remain. Device seen guards remain connection-local observations;
+they do not validate every cfg.dev name or supply RunMetadata.device_snapshot.
+After the hardware lease and before adapter.run, the Run framework separately reads
+get_info once from every connected device. Any failure rejects Run without hardware
+writes or cache fallback; no devices produce `{}`. Save uses that fixed pre-experiment
+snapshot and never re-reads hardware.
 Cfg admission uses only the resource identity and revision. A ref observed by
 another connection is valid, but tab, SoC and device seen guards still belong to
 the requesting connection. Run and existing-tab native Load do not require exporting
-active context. Load reads the tab capture and preserves the file's original metadata;
-it guards tab/result/analysis revisions, not session focus. Editor commit and writeback
-retain their existing context guards.
+active context. Load 在 adapter 呼叫前固定 Load-time selection，並獨立捕捉 Save storage。
+它不讀 tab birth 或後來的 selection。同 opened entry 且可定位歷史 point 時，
+context owner 按 native 檔案的 point 與 resolved alias names 一次讀取持久 point／library。
+這份固定 ParameterContext 供 Analyze／Post／Writeback 使用，是 Load 時的持久值，
+不是原始量測的參數版本。跨 entry、EMPTY 或無歷史 point 時，analysis source 為 None；
+context-free analysis 仍可用，不回退目前 alias。同 entry 的來源讀取失敗在替換結果前傳遞，
+舊結果不變。Load preserves the file's original metadata; it guards tab/result/analysis revisions,
+not session focus. Editor commit and writeback retain their existing context guards.
 
 GUI owns observation and write tracking:
 
@@ -214,7 +230,7 @@ GUI owns observation and write tracking:
   a failed alias has `resolved=null` and `error`. The public capture owner resolves
   each row against its fixed point without consumer kind checks. Alias failures
   do not hide source failures. Optional `summaries=true` preserves dict trees and
-  scalars, replacing array/list leaves with the former md_get descriptions.
+  scalars, replacing array/list leaves with array/matrix/items descriptions.
   Optional `path` takes priority and returns `{target, aliases, path, value}` with
   a complete value. Dotted paths start with `target`, `point`, `library` or
   `aliases`; mapping segments are literal keys and list indices are canonical
@@ -274,7 +290,9 @@ The wire surface is grouped by ownership:
   no structured data. Setup and clone collision rejection preserve selection,
   filesystem, ledger and versions. Other I/O is not classified as invalid input.
 - `context.*`：published parameter capture, snapshot and point-label queries through
-  `ContextControlPort`. Library editing and template create/list use the app controller;
+  `ContextControlPort`. `context.snapshot` returns native `{target, point, library, aliases}`
+  from the current fixed projection, not a historical Run's parameters. Callers do not use
+  old flattened md keys or an ml runtime index. Library editing and template create/list use the app controller;
   `editor.*` provides independent library-entry drafts.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc and installs a predictor if absent. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
@@ -344,10 +362,13 @@ blocks manual edits, reset, replacement and close on that tab; source publicatio
 and edits to other tabs remain allowed. Close becomes available after termination.
 
 `editor.get` and `editor.new` retain the independent draft tree with dotted paths.
-Nodes contain kind/path/label/valid. Sections and active references have named
+Nodes contain kind/path/label/valid/readonly. Sections and active references have named
 children, including locked literals. Scalar/literal input and sweep inputs retain
 mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
-cached shape label, error, override flag, and choices. Reads do not resolve sources.
+cached shape label, error, mode inline/ref or null when disabled, and choices.
+Ref descendants are readonly; library selection creates ref rather than an override.
+The local cfg owner exposes explicit inline conversion, without a new RPC endpoint.
+Reads do not resolve sources.
 Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
 complex numbers use the shared reversible tag, with no string fallback.
 
