@@ -8,14 +8,20 @@ import pytest
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
-from zcu_tools.experiment.workflows import CommittedRecord, Engine, EnginePorts, RunIdentity, RunPaths
+from zcu_tools.experiment.workflows import (
+    CommittedRecord,
+    Engine,
+    EnginePorts,
+    RunIdentity,
+    RunPaths,
+)
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.experiment.workflows._engine_fakes import RecordingBar, RecordingDevices
+from zcu_lab import workflows
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
-from zcu_lab import workflows
 
 from ._sim_inputs import Inputs, make_snapshot
 
@@ -40,16 +46,32 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
     driver = FakeDevice(fast_mode=True)
     devices.drivers["flux"] = driver
     paths = RunPaths(tmp_path / "metadata", tmp_path / "data")
-    engine = Engine[None](EnginePorts(
-        Plots(NonPresentingHost()), RecordingBar, UtcClock(),
-        soc=inputs.soc, soccfg=inputs.soccfg, devices=devices,
-    ))
+    engine = Engine[None](
+        EnginePorts(
+            Plots(NonPresentingHost()),
+            RecordingBar,
+            UtcClock(),
+            soc=inputs.soc,
+            soccfg=inputs.soccfg,
+            devices=devices,
+        )
+    )
     engine.start(
-        workflows.overnight, plan=plan, tunables=tun, paths=paths,
-        identity=RunIdentity("overnight", SoftwareProvenance(
-            software_versions={}, git_commit=None, git_dirty=None,
-            qick_version=None, soc_fingerprint=None, hostname="offline",
-        )),
+        workflows.overnight,
+        plan=plan,
+        tunables=tun,
+        paths=paths,
+        identity=RunIdentity(
+            "overnight",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
     before = datetime.now(UTC)
     try:
@@ -76,22 +98,33 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
             assert data["t1_reason"] is None and data["t2_reason"] is None
             assert len(record.run_files) == 2
             assert_native_pair(paths, record, plan, tun)
-        journal = [json.loads(line) for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()]
+        journal = [
+            json.loads(line)
+            for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()
+        ]
         commits = [event for event in journal if event["kind"] == "step_committed"]
         assert len(commits) == 3
-        assert [event["run_files"] for event in commits] == [list(record.run_files) for record in records]
+        assert [event["run_files"] for event in commits] == [
+            list(record.run_files) for record in records
+        ]
     finally:
         driver.close()
 
 
 def assert_native_pair(
-    paths: RunPaths, record: CommittedRecord, plan: workflows.OvernightPlan,
+    paths: RunPaths,
+    record: CommittedRecord,
+    plan: workflows.OvernightPlan,
     tun: workflows.OvernightTunables,
 ) -> None:
     """Read both native members and verify fixed cfg and acquisition metadata."""
     root = paths.data_root / record.iteration_dir
-    t1, t1_metadata = load_run_with_metadata(root / record.run_files[0], spec=T1Exp().persistence_spec())
-    t2, t2_metadata = load_run_with_metadata(root / record.run_files[1], spec=T2EchoExp().persistence_spec())
+    t1, t1_metadata = load_run_with_metadata(
+        root / record.run_files[0], spec=T1Exp().persistence_spec()
+    )
+    t2, t2_metadata = load_run_with_metadata(
+        root / record.run_files[1], spec=T2EchoExp().persistence_spec()
+    )
     assert "run_t1" in record.run_files[0]
     assert "run_t2echo" in record.run_files[1]
     assert t1_metadata.device_snapshot is not None

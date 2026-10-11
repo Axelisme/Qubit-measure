@@ -25,11 +25,17 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainResult,
 )
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
+from zcu_lab.v2.twotone.time_domain.t2echo.core import (
+    T2EchoCfg,
+    T2EchoExp,
+    T2EchoResult,
+)
 from zcu_lab.workflows.acquire import (
     FrequencyAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
     T1Acquisition,
+    T2EchoAcquisition,
 )
 
 
@@ -140,6 +146,29 @@ def save_t1(
         record,
         destination,
         spec=T1Exp().persistence_spec(),
+        snapshot=snapshot,
+        evidence=source.result.evidence,
+    )
+
+
+def save_t2echo(
+    source: Completed[T2EchoCfg, T2EchoAcquisition],
+    destination: Path,
+    *,
+    snapshot: RunSnapshot,
+) -> None:
+    """Write zero-detune Echo to Engine's exact, not-yet-existing native path.
+
+    source owns cfg/result and fixed acquisition/device evidence. snapshot is
+    historical entry/point/roles. Preserve native time-to-disk mapping and
+    persistence declaration. Parent must exist; schema/collision/I/O errors
+    propagate without recapture, layout selection or retry.
+    """
+    record: RunRecord[T2EchoCfg, T2EchoResult] = RunRecord(source.cfg, source.result)
+    _save(
+        record,
+        destination,
+        spec=T2EchoExp().persistence_spec(),
         snapshot=snapshot,
         evidence=source.result.evidence,
     )
