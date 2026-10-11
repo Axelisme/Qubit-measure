@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QInputDialog, QMessageBox, QPushButton, QTreeWidget
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -74,14 +75,13 @@ def test_library_button_persists_selected_entry(
     tree = next(
         tree
         for tree in dialog.findChildren(QTreeWidget)
-        if tree.topLevelItemCount() and tree.topLevelItem(0).text(0) == "modules"
+        if tree.findItems(group, Qt.MatchFlag.MatchExactly)
     )
-    parent = next(
-        tree.topLevelItem(index)
-        for index in range(tree.topLevelItemCount())
-        if tree.topLevelItem(index).text(0) == group
+    tree.setCurrentItem(
+        tree.findItems(source, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive)[
+            0
+        ]
     )
-    tree.setCurrentItem(parent.child(0))
     errors: list[str] = []
     monkeypatch.setattr(QInputDialog, "getText", lambda *_a, **_k: (destination, True))
     monkeypatch.setattr(

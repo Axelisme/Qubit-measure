@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
+from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
@@ -626,10 +627,12 @@ class InspectDialog(InspectDialogBase):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         try:
-            if group == "modules":
-                self._app_ctrl.del_ml_module(name)
-            else:
-                self._app_ctrl.del_ml_waveform(name)
+            self._app_ctrl.apply_library_change(
+                self._ctrl.read_context(),
+                LibraryChange(
+                    "module" if group == "modules" else "waveform", "delete", name
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — surface domain failures
             QMessageBox.warning(self, "Delete failed", str(exc))
             return

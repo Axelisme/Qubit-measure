@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (
     QApplication,
     QMessageBox,
     QPushButton,
