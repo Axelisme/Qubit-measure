@@ -1,5 +1,6 @@
 """Inspect library buttons persist structural changes through the real owner."""
 
+import sys
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,7 +64,6 @@ def test_library_button_persists_selected_entry(
     inspector: _Inspector,
     kind: Literal["module", "waveform"],
     action: str,
-    qtbot,
     monkeypatch,
 ) -> None:
     dialog, control, entry = inspector.dialog, inspector.control, inspector.entry
@@ -95,8 +95,11 @@ def test_library_button_persists_selected_entry(
         button for button in dialog.findChildren(QPushButton) if button.text() == text
     )
     assert button.isEnabled()
-    with qtbot.captureExceptions() as exceptions:
-        button.click()
+    exceptions: list[BaseException] = []
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _type, error, _trace: exceptions.append(error)
+    )
+    button.click()
     assert errors == [], f"Inspect reported a library command failure: {errors}"
     assert exceptions == [], f"Inspect library command raised: {exceptions}"
     # A fresh resource handle reads the persisted file, not the session projection.
