@@ -85,12 +85,13 @@ class LookbackGui:
         self.md: dict[str, Any] = {}
         self.library: dict[str, Any] = {}
 
-    def evaluate_expression(self, expression: str) -> int | float | complex:
+    def evaluate_expression(self, expression: str) -> int | float | complex | str:
         """Evaluate GUI formulas with native models and a fixed public context.
 
         The recording parameter-read wire below deliberately retains malformed
         values for caller rejection coverage; it does not claim native admission.
-        Formula evaluation, unlike that wire, uses the real numeric owner.
+        Formula evaluation, unlike that wire, uses the real scalar expression owner.
+        Bare aliases return resolved names; arithmetic returns numeric values.
         Direct native model construction requires no process-global registry.
         """
         resonator = ResonatorSchema.model_validate(
