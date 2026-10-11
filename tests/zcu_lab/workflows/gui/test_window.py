@@ -196,6 +196,74 @@ def settlements(
     return tokens
 
 
+def test_window_services_run_and_progress_share_session(
+    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    inputs: Inputs,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _existing_window, harness, _entry = run_attachment
+    closed: list[str] = []
+    window = T1WorkflowWindow(
+        harness.state,
+        harness.services,
+        harness.owner,
+        parent=None,
+        on_close=lambda: closed.append("closed"),
+    )
+    window.plan_panel.state.reset(inline_input(inputs))
+
+    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+        return None
+
+    @workflow("session-progress", plan=T1Plan, tunables=T1Tunables, init=init)
+    def step(
+        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+    ) -> Step[None, int]:
+        del plan, tun, state
+        bar = env.pbar("session work", 4)
+        bar.set_progress(2)
+        bar.refresh()
+        window.pause("session-services")
+        yield from env.wait_until(env.started_at)
+        return Done()
+
+    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    try:
+        token = window.start("session-services")
+        assert isinstance(token, int)
+        assert harness.handles.live_count() == 1
+        harness.complete_segment()
+        status = window.controller.status()
+        assert status is not None and status.lifecycle == "paused"
+        assert window.controller.operation_id == token
+        assert harness.handles.known_outcome(token) is None
+        bars = harness.services.progress.bars_for_operation(token)
+        assert [(bar.label, bar.total, bar.n) for _, bar in bars] == [
+            ("session work", 4, 2)
+        ]
+        assert harness.services.progress.bars_for_owner("t1-workflow") == bars
+        stop_button = window.findChild(QPushButton, "workflow.run.stop")
+        assert stop_button is not None
+        stop_button.click()
+        status = window.controller.status()
+        assert status is not None and status.lifecycle == "cancelled"
+        assert harness.handles.known_outcome(token) is not None
+        assert harness.services.progress.bars_for_operation(token) == ()
+        assert not harness.gate.snapshot()
+        assert window.close()
+        assert closed == ["closed"]
+    finally:
+        if harness.background.work is not None:
+            run_id = window.controller.run_id
+            assert run_id is not None
+            window.stop(run_id)
+            harness.complete_segment()
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_invalid_pi_does_not_submit_or_create_workflow_directories(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:

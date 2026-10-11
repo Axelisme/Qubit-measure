@@ -43,6 +43,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui._completion_helpers import on_device_connected
+from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
@@ -123,6 +124,48 @@ def open_point(
     captured = app.services.context.read_context()
     assert captured.resolve_path("$qubit.kind") == "Q1.kind"
     return entry
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_window_parent_and_close_callback_retry(
+    qapp: QApplication, embedded: bool
+) -> None:
+    harness = StartHarness()
+    parent = QWidget() if embedded else None
+    attempts: list[int] = []
+
+    def on_close() -> None:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise RuntimeError("session close refused")
+
+    window = T1WorkflowWindow(
+        harness.state,
+        harness.services,
+        harness.owner,
+        parent=parent,
+        on_close=on_close,
+    )
+    try:
+        assert window.parentWidget() is parent
+        assert window.isWindow() is (not embedded)
+        if parent is not None:
+            parent.show()
+        window.show()
+        assert not window.close()
+        assert window.isVisible()
+        message = window.findChild(QLabel, "workflow.run.message")
+        assert message is not None and message.text() == "session close refused"
+        assert attempts == [1]
+        assert window.close()
+        assert not window.isVisible()
+        assert attempts == [1, 2]
+    finally:
+        window.close()
+        window.deleteLater()
+        if parent is not None:
+            parent.deleteLater()
+        qapp.processEvents()
 
 
 def test_empty_assembly_uses_one_native_owner_without_source(
