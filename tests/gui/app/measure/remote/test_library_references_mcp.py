@@ -54,6 +54,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
 ):
     kind, spec, value, field, path = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
+    fx.ctrl.context_control.add_component("Q1", "qubit/transmon", {})
     fx.ctrl.apply_library_change(
         fx.ctrl.read_context(),
         LibraryChange(kind, "put", path, schema=CfgSchema(spec, value)),

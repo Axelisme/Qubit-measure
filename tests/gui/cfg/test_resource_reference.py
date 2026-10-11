@@ -834,7 +834,6 @@ def test_shape_switch_preserves_expression_and_nested_link_input(
     assert number.expr == "dynamic"
     assert isinstance(child, ReferenceValue)
     assert child.chosen_key == "child"
-    assert child.chosen_key == "rise"
 
 
 @pytest.mark.parametrize("unavailable", ["disabled", "missing"])

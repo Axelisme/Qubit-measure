@@ -156,7 +156,7 @@ def test_ref_range_edge_controls_reject_direct_binding_edits() -> None:
         inline_axis = reference.sub_field.fields["axis"]
         assert isinstance(inline_axis, SweepField)
         inline_axis.start_field.set_value(0.2)
-        assert inline_axis.get_value().start == DirectValue(0.2)
+        assert inline_axis.get_value().start == 0.2
     finally:
         draft.close()
 

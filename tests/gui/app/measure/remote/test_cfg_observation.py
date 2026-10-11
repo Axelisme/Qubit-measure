@@ -165,7 +165,7 @@ def test_cfg_observation_projects_reference_and_centered_range_state() -> None:
         assert not linked["readonly"]
         linked_children = linked["children"]
         assert isinstance(linked_children, dict)
-        assert linked_children["gain"]["readonly]
+        assert linked_children["gain"]["readonly"]
         reference.set_enabled(False)
         disabled = build_cfg_observation(draft, "drive")
         assert disabled["ref"] is None
