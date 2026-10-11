@@ -97,6 +97,32 @@ class _SelectedInteractive(_Interactive):
     """A frontend type selected for removal while other frontends remain."""
 
 
+class _RecordingInteractive(_Interactive):
+    """Record authority projections delivered to a mounted plugin view."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.read_only_changes: list[bool] = []
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        self.read_only_changes.append(read_only)
+
+
+def test_unmounted_interactive_frontend_stops_authority_projection(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+) -> None:
+    _session, ctrl, window, tab_id = live_ui
+    widget = _RecordingInteractive()
+    window.mount_interactive_analysis(tab_id, lambda _env: widget)
+    assert widget.read_only_changes == [False]
+
+    window.unmount_interactive_analysis(tab_id)
+    ctrl.control_identity.connect("agent", "retired-view-check", "owner")
+
+    assert widget.stopped is True
+    assert widget.read_only_changes == [False]
+
+
 def test_interactive_widget_lifecycle_is_owned_by_tab(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
 ) -> None:
