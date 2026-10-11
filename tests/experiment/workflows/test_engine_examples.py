@@ -19,12 +19,9 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_lab.workflows.v0 import (
     CalTunables,
     DemoContext,
-    FluxPlan,
     OvernightPlan,
     OvernightTunables,
-    T2EchoTunables,
     t1_overnight,
-    t2echo_fluxdep,
 )
 
 from ._engine_fakes import (
@@ -82,52 +79,34 @@ def execute_example[P: BaseModel, T: BaseModel, S, R](
     return records, clock, devices
 
 
-@pytest.mark.parametrize("name", ["echo", "overnight"])
 @pytest.mark.parametrize("unit", ["A", "V", "native", None, "mA"])
 def test_v0_plan_requires_explicit_flux_unit_and_forwards_it(
-    tmp_path: Path, name: str, unit: str | None
+    tmp_path: Path, unit: str | None
 ) -> None:
-    data: dict[str, object] = {"flux_dev": "flux", "points": 7}
+    data: dict[str, object] = {
+        "flux_dev": "flux",
+        "points": 7,
+        "flux": 0.2,
+        "rounds": 1,
+    }
     if unit is not None:
         data["flux_unit"] = unit
-    if name == "echo":
-        data["fluxes"] = (0.1, 0.2)
-        if unit not in ("A", "V", "native"):
-            with pytest.raises(ValidationError, match="flux_unit"):
-                FluxPlan.model_validate(data)
-            return
-        plan = FluxPlan.model_validate(data)
-        if unit != "native":
-            return  # A/V are valid plan coordinates, not Fake success paths.
-        _, _, devices = execute_example(
-            tmp_path, t2echo_fluxdep, plan, T2EchoTunables()
-        )
-        assert devices.values == [("flux", 0.1), ("flux", 0.2)]
-        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [
-            unit,
-            unit,
-        ]
-    else:
-        data.update(flux=0.2, rounds=1)
-        if unit not in ("A", "V", "native"):
-            with pytest.raises(ValidationError, match="flux_unit"):
-                OvernightPlan.model_validate(data)
-            return
-        overnight = OvernightPlan.model_validate(data)
-        if unit != "native":
-            return  # A/V are valid plan coordinates, not Fake success paths.
-        _, _, devices = execute_example(
-            tmp_path, t1_overnight, overnight, OvernightTunables()
-        )
-        assert devices.values == [("flux", 0.2)]
-        assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [unit]
+    if unit not in ("A", "V", "native"):
+        with pytest.raises(ValidationError, match="flux_unit"):
+            OvernightPlan.model_validate(data)
+        return
+    overnight = OvernightPlan.model_validate(data)
+    if unit != "native":
+        return  # A/V are valid plan coordinates, not Fake success paths.
+    _, _, devices = execute_example(
+        tmp_path, t1_overnight, overnight, OvernightTunables()
+    )
+    assert devices.values == [("flux", 0.2)]
+    assert [cfg.model_dump()["value_unit"] for cfg in devices.configs] == [unit]
 
 
-@pytest.mark.parametrize("name", ["echo", "overnight"])
 @pytest.mark.parametrize("port", ["devices", "context"])
-def test_demo_workflows_check_ports_before_effects(
-    tmp_path: Path, name: str, port: str
-) -> None:
+def test_demo_workflows_check_ports_before_effects(tmp_path: Path, port: str) -> None:
     clock, devices, plots = (
         ManualClock(),
         RecordingDevices(),
@@ -157,29 +136,20 @@ def test_demo_workflows_check_ports_before_effects(
             hostname="offline",
         ),
     )
-    if name == "echo":
-        engine.start(
-            t2echo_fluxdep,
-            plan=FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1,), points=7),
-            tunables=T2EchoTunables(),
-            paths=paths,
-            identity=identity,
-        )
-    else:
-        engine.start(
-            t1_overnight,
-            plan=OvernightPlan(
-                flux_dev="flux",
-                flux_unit="native",
-                flux=0.2,
-                period_s=10,
-                rounds=1,
-                points=7,
-            ),
-            tunables=OvernightTunables(),
-            paths=paths,
-            identity=identity,
-        )
+    engine.start(
+        t1_overnight,
+        plan=OvernightPlan(
+            flux_dev="flux",
+            flux_unit="native",
+            flux=0.2,
+            period_s=10,
+            rounds=1,
+            points=7,
+        ),
+        tunables=OvernightTunables(),
+        paths=paths,
+        identity=identity,
+    )
     status = engine.execute("example")
     assert status.lifecycle == "failed"
     assert f"Missing workflow capability: {port}" in str(status.reason)
@@ -188,24 +158,6 @@ def test_demo_workflows_check_ports_before_effects(
     assert len(plots) == 0
     assert engine.records("example") == ()
     assert not tuple(paths.data_root.glob("iter/*/runs/*.h5"))
-
-
-def test_t2echo_fluxdep_uses_the_same_core_with_its_own_typed_record(
-    tmp_path: Path,
-) -> None:
-    records, _, _ = execute_example(
-        tmp_path,
-        t2echo_fluxdep,
-        FluxPlan(flux_dev="flux", flux_unit="native", fluxes=(0.1, 0.2), points=7),
-        T2EchoTunables(),
-    )
-    assert len(records) == 2
-    for record in records:
-        point = record.encoded_record.value
-        assert isinstance(point, dict)
-        value = point["t2echo"]
-        assert isinstance(value, dict)
-        assert value["value_us"] == pytest.approx(30.0)
 
 
 def test_overnight_waits_absolute_round_deadlines_and_reuses_calibration(

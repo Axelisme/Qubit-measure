@@ -3,7 +3,7 @@
 Calibration values and traces are fake deterministic values, not physical policy.
 The JSON savers only exercise the exact-path saver seam, even for .h5 paths.
 They are not the official/native data format. Native T1_fluxdep lives in t1.py.
-Phase 3 replaces echo/overnight and removes fake calibration before retirement.
+Native Echo fluxdep lives in t2.py. Overnight retirement is independent.
 Import declares functions only; it does not register workflows or start a run.
 """
 
@@ -46,26 +46,6 @@ class DemoContext:
     readout_freq_mhz: float
 
 
-class FluxPlan(BaseModel):
-    """Ordered absolute setpoints, explicit A/V/native unit and sample count.
-
-    flux_unit is required and forwarded unchanged; the host rejects a mismatch
-    with driver units. No conversion, hardware inference or default is applied.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    flux_dev: str = Field(min_length=1, description="Connected flux device name")
-    flux_unit: Literal["A", "V", "native"] = Field(
-        description="Explicit setpoint unit: A, V or native (Fake); no conversion"
-    )
-    fluxes: tuple[float, ...] = Field(
-        description="Ordered absolute setpoints in device units"
-    )
-    points: int = Field(
-        default=51, ge=3, description="Samples per decay curve for this run"
-    )
-
-
 class CalTunables(BaseModel):
     """Calibration knobs captured once per workflow step.
 
@@ -99,23 +79,6 @@ class DecayKnobs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reps: int = Field(default=100, ge=1, le=10000)
     rounds: int = Field(default=10, ge=1, le=1000)
-
-
-class T2EchoTunables(BaseModel):
-    """Echo generation and acceptance knobs.
-
-    cal controls calibration; t2echo controls acquire averaging. guess_us seeds
-    the lifetime estimate. sweep_factor/relax_factor scale that estimate into
-    timing. max_rel_err is the strict upper bound on relative fit uncertainty.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    cal: CalTunables = Field(default_factory=CalTunables)
-    t2echo: DecayKnobs = Field(default_factory=DecayKnobs)
-    guess_us: float = Field(default=30.0, ge=1.0, le=1000.0)
-    sweep_factor: float = Field(default=5.0, ge=2.0, le=10.0)
-    relax_factor: float = Field(default=3.0, ge=1.0, le=10.0)
-    max_rel_err: float = Field(default=0.3, ge=0.01, le=1.0)
 
 
 @dataclass(frozen=True)
@@ -190,14 +153,14 @@ class CalResult:
 
 @dataclass(frozen=True)
 class DecayCfg:
-    """Fake decay input; kind selects t1 or t2echo and cal holds calibration.
+    """Fake T1 decay input; kind is t1 and cal holds calibration.
 
     points is the sample count. stop_us is the final delay and relax_delay_us
     is the relaxation wait. reps/rounds describe acquire averaging, not outer
     workflow iterations. All timing is in microseconds.
     """
 
-    kind: Literal["t1", "t2echo"]
+    kind: Literal["t1"]
     cal: Calibrated
     points: int
     stop_us: float
@@ -255,11 +218,6 @@ def fake_decay(run: Run[DecayCfg], lifetime_us: float) -> DecayResult:
 def run_t1(run: Run[DecayCfg]) -> DecayResult:
     """Offline T1 acquire with a known 20 us lifetime."""
     return fake_decay(run, 20.0)
-
-
-def run_t2echo(run: Run[DecayCfg]) -> DecayResult:
-    """Offline echo acquire with a known 30 us lifetime."""
-    return fake_decay(run, 30.0)
 
 
 def save_cal(source: Completed[CalCfg, CalResult], destination: Path) -> None:
@@ -322,23 +280,6 @@ def smooth_last(values: list[float], default: float, *, alpha: float = 0.5) -> f
     for value in values:
         estimate = alpha * value + (1 - alpha) * estimate
     return estimate
-
-
-def redraw(
-    env: WorkflowEnv[DemoContext], name: str, points: list[tuple[float, float]]
-) -> None:
-    """Rebuild a scatter plot from committed workflow data."""
-    if name not in env.plots:
-        env.plots.subplots(name)
-
-    def draw(figure: Figure) -> None:
-        figure.clear()
-        ax = figure.subplots()
-        if points:
-            x, y = zip(*points, strict=True)
-            ax.scatter(x, y)
-
-    env.plots.draw(name, draw)
 
 
 def calibrate(
@@ -422,107 +363,6 @@ def calibrate(
     carry.n_calibrated += 1
     stages.set_progress(3)
     return cal
-
-
-@dataclass(frozen=True)
-class T2EchoPoint:
-    """One attempted echo point.
-
-    index is zero-based; flux is the native setpoint. cal records calibration
-    success/failure. t2echo is accepted or None; reason explains missing values
-    and is None on success.
-    """
-
-    index: int
-    flux: float
-    cal: Calibration
-    t2echo: DecayValue | None
-    reason: str | None
-
-
-@dataclass
-class T2EchoState:
-    """Echo loop state: remaining native setpoints and calibration carry in cal.
-
-    t2echo_by_flux contains ordered (setpoint, accepted lifetime in us) pairs.
-    """
-
-    remaining: list[float]
-    cal: CalCarry
-    t2echo_by_flux: list[tuple[float, float]]
-
-
-def init_echo(env: InitEnv[DemoContext], plan: FluxPlan) -> T2EchoState:
-    """Create detached echo state from the fixed plan and initial host context."""
-    return T2EchoState(list(plan.fluxes), initial_carry(env), [])
-
-
-@workflow(
-    "T2echo_fluxdep",
-    plan=FluxPlan,
-    tunables=T2EchoTunables,
-    init=init_echo,
-)
-def t2echo_fluxdep(
-    env: WorkflowEnv[DemoContext],
-    plan: FluxPlan,
-    tun: T2EchoTunables,
-    state: T2EchoState,
-) -> Step[T2EchoState, T2EchoPoint]:
-    """Attempt the next echo point; commit missing fits with an explicit reason.
-
-    The engine supplies detached state and captured tunables. Effects acquire
-    and save offline traces. Return Done after the fixed setpoints are exhausted.
-    Adapter, plotting, analysis, and saver errors propagate to the engine.
-    """
-    # Check required ports before plots or any hardware effect.
-    _ = env.devices
-    _ = env.context
-    index = len(plan.fluxes) - len(state.remaining)
-    env.pbar("echo points", total=len(plan.fluxes)).set_progress(index)
-    redraw(env, "t2echo/vs_flux", state.t2echo_by_flux)
-    if not state.remaining:
-        return Done()
-    flux = state.remaining.pop(0)
-    yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    cal = yield from calibrate(env, tun.cal, flux, state.cal)
-    if isinstance(cal, CalibrationFailed):
-        return Next(T2EchoPoint(index, flux, cal, None, cal.reason), state)
-
-    guess = smooth_last([v for _, v in state.t2echo_by_flux], tun.guess_us)
-    cfg = DecayCfg(
-        "t2echo",
-        cal,
-        plan.points,
-        tun.sweep_factor * guess,
-        tun.relax_factor * guess,
-        tun.t2echo.reps,
-        tun.t2echo.rounds,
-    )
-    name = "t2echo/decay"
-    axes = None
-    if name in env.plots:
-
-        def rebuild(figure: Figure) -> None:
-            figure.clear()
-            figure.subplots()
-
-        env.plots.draw(name, rebuild)
-        axes = env.plots[name].axes[0]
-    decay_plot = env.plots.liveplot_1d(name, "Time (us)", "Signal", axes=axes)
-    outcome = yield from env.run(
-        run_t2echo,
-        cfg,
-        save=save_decay,
-        live=lambda axes, samples: decay_plot.update(axes[0], samples.real),
-    )
-    if isinstance(outcome, Failed):
-        return Next(T2EchoPoint(index, flux, cal, None, outcome.reason), state)
-    fit = analyze_decay(outcome.cfg, outcome.result)
-    if fit is None or fit.rel_err >= tun.max_rel_err:
-        return Next(T2EchoPoint(index, flux, cal, None, "fit rejected"), state)
-    state.t2echo_by_flux.append((flux, fit.value_us))
-    return Next(T2EchoPoint(index, flux, cal, fit, None), state)
 
 
 class OvernightPlan(BaseModel):
@@ -656,10 +496,9 @@ def t1_overnight(
 
 
 def register_all(registry: WorkflowRegistry) -> None:
-    """Add the echo/overnight offline demonstrations to a host-owned catalog.
+    """Add the remaining overnight offline demonstration to a host-owned catalog.
 
     Import does not create a registry. Duplicate names raise ValueError from the
     supplied registry; the host creates a fresh registry for each reload.
     """
-    registry.add(t2echo_fluxdep)
     registry.add(t1_overnight)
