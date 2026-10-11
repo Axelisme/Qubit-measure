@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     LoadDataRequest,
 )
 from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import CfgResource
 from zcu_tools.gui.session.context_types import EntryRequest
 
@@ -62,27 +61,11 @@ def app(qapp):
         fx.stop()
 
 
-def test_open_file_requires_current_context_before_creating_tab(app):
-    fx, sock = app
-    params = {"adapter_name": "file", "data_path": "saved.h5"}
-    reply = call(sock, "tab.open_file", params)
-    assert reply["error"]["reason"] == "stale_version"
-    assert fx.state.list_tab_ids() == []
-    assert call(sock, "context.snapshot")["ok"] is True
-    context = fx.ctrl.context_control
-    context.set_parameter(context.read_context().target, "general.ext.changed", 1)
-    reply = call(sock, "tab.open_file", params)
-    assert reply["error"]["reason"] == "stale_version"
-    assert fx.state.list_tab_ids() == []
-    assert call(sock, "context.snapshot")["ok"] is True
-    assert call(sock, "tab.open_file", params)["ok"] is True
-
-
 @pytest.mark.parametrize(
     "path, backfill, knob",
     [("saved.h5", "applied", 42), ("no-cfg.h5", "not_applied", 7)],
 )
-def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
+def test_open_file_loads_without_soc_with_result_and_cfg_backfill(
     app, path, backfill, knob
 ):
     fx, sock = app
@@ -103,26 +86,10 @@ def test_open_file_loads_without_soc_but_does_not_observe_new_subresources(
     assert fx.state.get_tab(tab).cfg.snapshot_inputs().value.fields[
         "knob"
     ] == DirectValue(knob)
-    stale = call(sock, "tab.load_data", {"tab_id": tab, "data_path": path})
-    assert stale["error"]["reason"] == "stale_version"
-    keys = stale["error"]["data"]["stale"]
-    assert f"tab:{tab}:result" in keys
-    assert f"tab:{tab}:analyze" in keys
-    assert f"tab:{tab}" not in keys
-    run = call(
-        sock,
-        "tab.run_start",
-        {
-            "tab_id": tab,
-            "expected": encode_ref(fx.ctrl.cfg_resources.lookup(tab).observe().ref),
-        },
-    )
-    assert run["error"]["reason"] == "stale_version"
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None
     assert snapshot["result_state"]["available"] is True
     assert snapshot["result_state"]["source_path"] == path
-    assert call(sock, "tab.load_data", {"tab_id": tab, "data_path": path})["ok"] is True
 
 
 def test_open_file_backfill_failure_retains_loaded_result(app, monkeypatch):

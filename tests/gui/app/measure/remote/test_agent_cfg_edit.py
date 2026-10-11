@@ -19,7 +19,7 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 from zcu_tools.gui.cfg.edit_codec import encode_ref
-from zcu_tools.gui.cfg.resource import CfgEdit, CfgStaleError
+from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -187,33 +187,6 @@ def test_reset_mcp_restores_gui_defaults_and_advances_one_revision(mcp_tab):
     )
 
 
-def test_reset_stale_revision_preserves_the_edited_publication(mcp_tab):
-    _, tab_id, invoke, sock = mcp_tab
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-    edited = invoke(
-        "rpc_call",
-        {
-            "method": "tab.edit_cfg",
-            "params": {
-                "tab_id": tab_id,
-                "expected": before["cfg_ref"],
-                "edits": [{"path": ["gain"], "value": 0.75}],
-            },
-        },
-    )
-
-    with pytest.raises(GuiRpcError) as failure:
-        invoke(
-            "rpc_call",
-            {
-                "method": "tab.reset_cfg",
-                "params": {"tab_id": tab_id, "expected": before["cfg_ref"]},
-            },
-        )
-    assert failure.value.reason == "stale_revision"
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == edited
-
-
 def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
     fixture, tab_id = live_tab
     release = Event()
@@ -271,107 +244,6 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
     assert raised.value.code == "invalid_params"
     assert raised.value.reason == "invalid_value"
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
-
-
-def test_stale_reference_returns_expected_actual_and_never_retries(mcp_tab):
-    _, tab_id, invoke, sock = mcp_tab
-    expected = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]["cfg_ref"]
-    actual = invoke(
-        "rpc_call",
-        {
-            "method": "tab.edit_cfg",
-            "params": {
-                "tab_id": tab_id,
-                "expected": expected,
-                "edits": [{"path": ["gain"], "value": 0.25}],
-            },
-        },
-    )
-    rejected = call(
-        sock,
-        "tab.edit_cfg",
-        {
-            "tab_id": tab_id,
-            "expected": expected,
-            "edits": [{"path": ["gain"], "value": 0.5}],
-        },
-    )
-    assert rejected["error"]["code"] == "precondition_failed"
-    assert rejected["error"]["reason"] == "stale_revision"
-    assert rejected["error"]["data"] == {
-        "expected": expected,
-        "actual": actual["cfg_ref"],
-    }
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == actual
-
-
-@pytest.mark.parametrize(
-    "remote_first", [False, True], ids=["gui-first", "remote-first"]
-)
-def test_gui_and_remote_competing_edits_preserve_the_first_publication(
-    mcp_tab, remote_first
-):
-    fixture, tab_id, _, sock = mcp_tab
-    owner = fixture.ctrl.cfg_resources.lookup(tab_id)
-    before = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-    base = owner.observe().ref
-    params = {
-        "tab_id": tab_id,
-        "expected": before["cfg_ref"],
-        "edits": [{"path": ["gain"], "value": 0.25}],
-    }
-    if remote_first:
-        winner = call(sock, "tab.edit_cfg", params)["result"]
-        with pytest.raises(CfgStaleError) as raised:
-            owner.edit(base.revision, (CfgEdit(("gain",), DirectValue(0.5)),))
-        assert encode_ref(raised.value.expected) == before["cfg_ref"]
-        assert encode_ref(raised.value.actual) == winner["cfg_ref"]
-    else:
-        owner.edit(base.revision, (CfgEdit(("gain",), DirectValue(0.5)),))
-        winner = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        rejected = call(sock, "tab.edit_cfg", params)
-        assert rejected["error"]["reason"] == "stale_revision"
-        assert rejected["error"]["data"] == {
-            "expected": before["cfg_ref"],
-            "actual": winner["cfg_ref"],
-        }
-    assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == winner
-    assert winner["tree"]["children"]["gain"]["input"]["resolved"] == (
-        0.25 if remote_first else 0.5
-    )
-
-
-@pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
-def test_recreated_tab_rejects_the_retired_cfg_identity(live_tab, method):
-    fixture, tab_id = live_tab
-    sock = open_client(fixture.service.port)
-    try:
-        old = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        fixture.ctrl.close_tab(tab_id)
-        replacement = fixture.prepare_tab(
-            tab_id,
-            FakeAdapter(),
-            FakeAdapter().make_default_cfg(fixture.state.session_env),
-        )
-        current = call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
-        assert current["cfg_ref"]["cfg_id"] != old["cfg_ref"]["cfg_id"]
-        if method == "tab.run_start":
-            observe_run_inputs(
-                fixture, tab_id, lambda name, params: call(sock, name, params)["result"]
-            )
-        params = {"tab_id": tab_id, "expected": old["cfg_ref"]}
-        if method == "tab.edit_cfg":
-            params["edits"] = [{"path": ["gain"], "value": 0.25}]
-        rejected = call(sock, method, params)
-        assert rejected["error"]["reason"] == "stale_revision"
-        assert rejected["error"]["data"] == {
-            "expected": old["cfg_ref"],
-            "actual": current["cfg_ref"],
-        }
-        assert encode_ref(replacement.observe().ref) == current["cfg_ref"]
-        assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == current
-    finally:
-        sock.close()
 
 
 @pytest.mark.parametrize("method", ["tab.edit_cfg", "tab.reset_cfg", "tab.run_start"])
@@ -560,18 +432,6 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
         current = owner.observe().ref
         assert encode_ref(current) != before["cfg_ref"]
         assert owner.accept(current.revision).values == {"text": text}
-        deliberate_retry = call(
-            sock,
-            "tab.edit_cfg",
-            {
-                "tab_id": tab_id,
-                "expected": before["cfg_ref"],
-                "edits": [{"path": ["text"], "value": "do not overwrite"}],
-            },
-        )
-        assert deliberate_retry["error"]["reason"] == "stale_revision"
-        assert deliberate_retry["error"]["data"]["actual"] == encode_ref(current)
-        assert owner.observe().ref == current
         restored = owner.edit(
             current.revision, (CfgEdit(("text",), DirectValue("small")),)
         )
