@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import JsonValue, TypeAdapter
 from ruamel.yaml import YAML
-
 from zcu_tools.cfg_model import (
     module_spec_from_raw,
     remap_module_references,

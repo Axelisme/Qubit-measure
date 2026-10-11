@@ -11,14 +11,14 @@ from pathlib import Path
 
 from zcu_tools.datafile import CfgSnapshot
 from zcu_tools.resources.entry import component_registry
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     MigrationInputError,
     MigrationRequest,
     load_run_evidence,
     migrate_storage,
     report_json,
 )
-
 from zcu_lab.components import register_all
 from zcu_lab.migration_experiments import MIGRATION_EXPERIMENTS
 from zcu_lab.storage_migration import build_mapping

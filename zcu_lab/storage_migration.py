@@ -10,7 +10,8 @@ from collections.abc import Mapping
 from typing import Literal
 
 from zcu_tools.datafile import VariableSchema
-from zcu_tools.resources.storage_migration import KeyRule, MigrationMapping, ModuleRule
+
+from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 
 # Reviewed decisions: D120-D129, D133-D134. Changes to any rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.

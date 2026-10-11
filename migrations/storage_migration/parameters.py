@@ -4,7 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter
-
 from zcu_tools.datafile import (
     JsonObject,
 )

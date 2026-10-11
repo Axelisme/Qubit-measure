@@ -4,14 +4,14 @@ import json
 from dataclasses import replace
 
 import pytest
-from zcu_tools.resources.storage_migration import (
+
+from migrations.storage_migration import (
     MigrationInputError,
     MigrationMapping,
     MigrationRequest,
     migrate_storage,
 )
-
-from tests.resources.storage_migration.fakes import (
+from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
     validate_cfg,

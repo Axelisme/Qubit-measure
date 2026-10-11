@@ -1,4 +1,4 @@
-"""Migration-only Labber reading through the public datafile contract."""
+"""Migration-only Labber reading through the public offline contract."""
 
 from pathlib import Path
 
@@ -12,9 +12,10 @@ from zcu_tools.datafile import (
     LabberMetadata,
     LabberPayload,
     VariableSchema,
-    load_legacy_labber_payload,
     write_labber,
 )
+
+from migrations.legacy_labber import load_legacy_labber_payload
 
 
 @pytest.mark.parametrize("representation", ["single", "grouped"])
