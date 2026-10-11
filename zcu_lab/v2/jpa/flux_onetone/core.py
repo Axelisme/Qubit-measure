@@ -119,6 +119,6 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     .declare_sweep("freq", step.cfg.sweep.freq)
                     .build_and_acquire()
                 )
-            signals = signals_buffer.array
+        signals = signals_buffer.array
 
         return OneToneFluxResult(fluxes=jpa_fluxs, freqs=freqs, signals=signals)
