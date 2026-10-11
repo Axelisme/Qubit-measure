@@ -1,11 +1,13 @@
 """Native overnight pairs through Engine, FakeDevice and simulator persistence."""
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 
 import pytest
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.workflows import (
@@ -226,3 +228,59 @@ def test_overrun_restarts_interval_from_actual_start_without_catchup(
     assert (
         pair_time(third, "scheduled_start") - pair_time(second, "actual_start")
     ).total_seconds() >= 1.0
+
+
+class ControlledDevices(RecordingDevices):
+    """Allow public device captures to request run control between native members."""
+
+    on_capture: Callable[[], None] | None = None
+
+    def capture_snapshot(self) -> dict[str, JsonObject]:
+        snapshot = super().capture_snapshot()
+        if self.on_capture is not None:
+            self.on_capture()
+        return snapshot
+
+
+@pytest.mark.uses_wall_clock
+def test_pause_discards_incomplete_pair_and_resume_redoes_then_stop_keeps_commits(
+    inputs: Inputs,
+    tmp_path: Path,
+) -> None:
+    devices = ControlledDevices()
+    engine = start_overnight(inputs, tmp_path, devices)
+
+    def control_between_members() -> None:
+        if devices.captures == 4:
+            engine.pause("overnight")
+        elif devices.captures == 7:
+            engine.stop("overnight")
+
+    devices.on_capture = control_between_members
+    paused = engine.execute("overnight")
+    assert paused.lifecycle == "paused"
+    prior = engine.records("overnight")
+    assert len(prior) == 1
+    assert paused.committed_seq == 1
+    assert any(
+        p.name == "overnight rounds" and p.completed == 1 for p in paused.progress
+    )
+    # T1 of the cancelled second pair remains native evidence but is not a commit.
+    discarded = tmp_path / "data" / "iter" / "000002"
+    assert len(tuple(discarded.glob("runs/*run_t1.h5"))) == 1
+    Event().wait(0.3)
+    resumed_at = datetime.now(UTC)
+    engine.resume("overnight")
+    stopped = engine.execute("overnight")
+    assert stopped.lifecycle == "stopped"
+    assert stopped.committed_seq == 2
+    records = engine.records("overnight")
+    assert records[0] == prior[0]
+    assert len(records) == 2
+    assert records[1].call_seq == 3
+    assert len(records[1].run_files) == 2
+    assert pair_time(records[1], "scheduled_start") >= resumed_at
+    assert pair_time(records[1], "actual_start") >= resumed_at
+    assert any(
+        p.name == "overnight rounds" and p.completed == 2 for p in stopped.progress
+    )
