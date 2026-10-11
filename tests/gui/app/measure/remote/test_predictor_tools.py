@@ -19,13 +19,46 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
     PointUseRequest,
 )
+from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import component_registry
 
 import zcu_lab.components as components
+from tests.gui._predictor_fakes import FailingPredictorService
 
 from ._helpers import call, mcp_client, open_client
+
+
+@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ValueError("solver invariant"),
+        ValueError("Spectrum must be finite"),
+        RuntimeError("solver failed"),
+    ],
+)
+def test_numerical_failures_are_unexpected_with_traceback(
+    simulator, caplog, method, failure
+):
+    _, adapter, sock = simulator
+    service = FailingPredictorService(failure)
+    adapter.predictor_control = PredictorControlFacet(service)
+    with caplog.at_level("ERROR"):
+        reply = call(
+            sock,
+            method,
+            {"params": COMPLETE, "device_value": 0.1, "frequency_mhz": 1707.0},
+        )
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "controller_error", reply
+    assert len(service.requests) == 1
+    assert any(
+        record.exc_info is not None and record.exc_info[1] is failure
+        for record in caplog.records
+    )
+
 
 COMPLETE = {
     "model": "fluxonium",

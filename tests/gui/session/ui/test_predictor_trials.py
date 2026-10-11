@@ -17,8 +17,67 @@ from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.transmon import TransmonParams
 
 import zcu_lab.components as components
+from tests.gui._predictor_fakes import FailingPredictorService
+
+
+def test_dialog_logs_unexpected_value_error_with_traceback(qapp, caplog) -> None:
+    failure = ValueError("solver invariant")
+    service = FailingPredictorService(failure)
+    with caplog.at_level("ERROR"):
+        dialog = PredictorDialog(
+            PredictorControlFacet(service),
+            params=FluxoniumParams(5.0, 1.0, 0.5, 0.0, 1.0, 0.0),
+        )
+    try:
+        assert service.requests
+        assert any(
+            record.exc_info is not None and record.exc_info[1] is failure
+            for record in caplog.records
+        )
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("model", ["fluxonium", "transmon"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        1e-13,
+        5e-324,
+        1e-200,
+        1.2345678901234567,
+        1e200,
+        1.7976931348623157e308,
+        -1e200,
+        None,
+    ],
+)
+def test_dialog_parameters_and_cache_preserve_finite_float_values(
+    qapp, tmp_path: Path, model, value
+) -> None:
+    # Leave EC unknown to avoid solving a spectrum while exercising editor range.
+    trial = (
+        FluxoniumParams(value, None, value, value, value, value)
+        if model == "fluxonium"
+        else TransmonParams(value, None, 0.12345678901234567, value, value, value)
+    )
+    port = PredictorControlFacet(PredictorService())
+    dialog = PredictorDialog(port, params=FluxoniumParams())
+    try:
+        dialog.enable_parameter_cache(cache_dir=tmp_path)
+        dialog.set_parameters(trial)
+        assert dialog.parameters() == trial
+    finally:
+        dialog.close()
+    reopened = PredictorDialog(port, params=FluxoniumParams())
+    try:
+        reopened.enable_parameter_cache(cache_dir=tmp_path)
+        assert reopened.parameters() == trial
+    finally:
+        reopened.close()
 
 
 def test_dialog_calibration_changes_only_local_trial(qapp) -> None:
