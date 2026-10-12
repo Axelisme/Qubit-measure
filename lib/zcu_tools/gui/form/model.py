@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
 
 from zcu_tools.cfg_model import ModuleSpec
-from zcu_tools.device import DeviceInfo
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
@@ -61,7 +61,9 @@ class FormEnv:
     parameters is the host's fixed ParameterContext, or None for source-free
     input and arithmetic. Parameter expressions use native point/library paths.
     library is the fixed LibrarySnapshot, or None when unused. devices maps
-    host device names to captured native DeviceInfo, or is empty when unused.
+    host device names to captured detached BaseDeviceInfo snapshots, including
+    custom driver infos, or is empty when unused. Shared tools read only the
+    names; a form that needs driver-specific fields narrows with isinstance.
     The frozen shell does not make these borrowed objects deeply immutable.
     Tools never mutate, load, refresh or poll them. A used missing capability
     fails with its field path, rather than being treated as an unfilled value.
@@ -69,7 +71,7 @@ class FormEnv:
 
     parameters: ParameterContext | None = None
     library: LibrarySnapshot | None = None
-    devices: Mapping[str, DeviceInfo] = field(default_factory=dict)
+    devices: Mapping[str, BaseDeviceInfo] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

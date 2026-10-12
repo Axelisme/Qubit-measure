@@ -12,6 +12,7 @@ root_packages =
     zcu_tools
     zcu_lab
     migrations
+    mcp_servers
 include_external_packages = True
 
 # Runtime code must not depend on offline data migration tools.

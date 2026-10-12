@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` 使用者 workflow
 
-**Last updated:** 2026-10-12，使用者 registry 與框架宿主分離
+**Last updated:** 2026-10-13，workflow 自有流程、繪圖與工具
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。
 Engine 擁有迭代、輸入副本、取消、revision 與提交。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -102,6 +102,6 @@ Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位
 核心只透過 env.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 Live 與 summary 只建立 enabled lifetime 的圖。圖形副作用不放進 carry。
 GUI forms、單一 Controller、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
-`scripts/run_coherence_fluxdep_sim.py` 使用現行 Coherence JSON inputs 與一個 flux-bound FakeDevice，不連硬體；single-experiment simulator 的科學契約不變。
+行為比對使用 workflows GUI 的模擬模式，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。
 
-`tests/experiment/workflows` 驗通用 Engine。`tests/zcu_lab/workflows` 在公開 Engine、獨立 stage、native reader 與 GUI／MCP 接縫驗真實 simulator、部分結果、獨立 history、取消與 revision。
+Framework 測試使用合成 workflow：`tests/experiment/workflows/` 驗通用 Engine，`tests/gui/app/workflows/` 與 `tests/mcp/workflows/` 驗宿主、RPC 與 MCP 接縫。不測本套件的科學流程或預設值，刪掉 `zcu_lab/` 後整套 pytest 仍須通過。

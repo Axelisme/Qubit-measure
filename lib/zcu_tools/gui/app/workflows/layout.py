@@ -10,7 +10,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -44,8 +43,7 @@ class WorkflowControls:
     plan_page and tunables_page are the layouts inside each tab's scroll area
     that hold the current Start panels; start/pause/resume/stop are the native
     run buttons fixed under the tabs. Right: message shows run/input/view
-    diagnostics above plot_stack; plot_stack and plot_placeholder are the
-    existing FigureContainer attachment.
+    diagnostics above the caller's figure area.
     Pause/resume start disabled; all other buttons start enabled. Window
     sets reload availability, selector items and all signal/admission policy.
     """
@@ -62,8 +60,6 @@ class WorkflowControls:
     reload: QPushButton
     plan_page: QVBoxLayout
     tunables_page: QVBoxLayout
-    plot_stack: QStackedWidget
-    plot_placeholder: QLabel
 
 
 def _button(text: str, name: str, parent: QWidget) -> QPushButton:
@@ -103,10 +99,8 @@ def _run_buttons(
     return start, pause, resume, stop
 
 
-def _figure_column(
-    splitter: QSplitter,
-) -> tuple[QWidget, QLabel, QStackedWidget, QLabel]:
-    """Return the right column, its run message, plot stack and stack placeholder."""
+def _figure_column(splitter: QSplitter, figures: QWidget) -> tuple[QWidget, QLabel]:
+    """Return the right column and its run message above the figure area."""
     column = QWidget(splitter)
     layout = QVBoxLayout(column)
     layout.setContentsMargins(4, 0, 0, 0)
@@ -114,25 +108,22 @@ def _figure_column(
     message.setObjectName("workflow.run.message")
     message.setWordWrap(True)
     layout.addWidget(message)
-    plot_stack = QStackedWidget(column)
-    plot_stack.setObjectName("workflow.figures")
-    placeholder = QLabel("Workflow plots", plot_stack)
-    placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    plot_stack.addWidget(placeholder)
-    layout.addWidget(plot_stack, 1)
-    return column, message, plot_stack, placeholder
+    layout.addWidget(figures, 1)
+    return column, message
 
 
 def build_workflow_layout(
     parent: QWidget,
     session: QWidget,
+    figures: QWidget,
     plan_panel: QWidget,
     tunables_panel: QWidget,
 ) -> WorkflowControls:
     """Build the controls and their layout once on the Qt owner with QApplication.
 
     parent is their Window. session is its already built strip of read-only
-    session chips. plan_panel/tunables_panel are the selected Start panels,
+    session chips; figures is its already built figure area, placed under the
+    run message. plan_panel/tunables_panel are the selected Start panels,
     placed in the Plan and Tunables tabs. Keeps every existing objectName and initial
     flag. Connects no signals and reads no state/source/hardware.
     Returned controls belong to parent; Window wires and applies admission policy.
@@ -171,7 +162,7 @@ def build_workflow_layout(
     for button in (start, pause, resume, stop):
         run_row.addWidget(button)
     left_layout.addLayout(run_row)
-    right, message, plot_stack, plot_placeholder = _figure_column(splitter)
+    right, message = _figure_column(splitter, figures)
 
     splitter.addWidget(left)
     splitter.addWidget(right)
@@ -192,6 +183,4 @@ def build_workflow_layout(
         reload,
         plan_page,
         tunables_page,
-        plot_stack,
-        plot_placeholder,
     )

@@ -70,7 +70,7 @@ def test_controls_share_state_tool_undo_and_nonterminal_apply(
     control(widget, QtWidgets.QPushButton, "Perform on all").click()
     assert not widget.get_result().selected.any()
     control(widget, QtWidgets.QPushButton, "Apply").click()
-    assert not cross_controller.state.selection.selected.any()
+    assert not cross_controller.state.selection_mask().any()
     assert cross_controller.interactive.current_cross_selection() is context
     control(widget, QtWidgets.QPushButton, "Undo").click()
     assert widget.get_result().selected.all()
@@ -202,7 +202,7 @@ def test_latest_error_is_visible_and_cannot_block_synchronous_apply(
     assert widget.preview_view() is None
     assert "latest failure" in control(widget, QtWidgets.QLabel, "Status").text()
     control(widget, QtWidgets.QPushButton, "Apply").click()
-    assert not cross_controller.state.selection.selected.any()
+    assert not cross_controller.state.selection_mask().any()
     assert context.session.can_undo()
 
 
@@ -218,7 +218,7 @@ def test_teardown_rejects_stale_apply_and_late_preview_without_cancelling_owner(
     job.on_error(RuntimeError("late failure"))
     assert widget.preview_view() is None
     apply_button.click()
-    assert cross_controller.state.selection.selected is None
+    assert cross_controller.state.selection_mask() is None
     assert cross_controller.interactive.current_cross_selection() is context
     with pytest.raises(FailedPreconditionError):
         widget.get_result()

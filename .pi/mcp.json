@@ -9,7 +9,20 @@
         "--no-sync",
         "--",
         "python",
-        "scripts/run_measure_mcp.py"
+        "mcp_servers/measure.py"
+      ],
+      "exposure": "deferred"
+    },
+    "workflows-gui": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        ".",
+        "--no-sync",
+        "--",
+        "python",
+        "mcp_servers/workflows.py"
       ],
       "exposure": "deferred"
     },

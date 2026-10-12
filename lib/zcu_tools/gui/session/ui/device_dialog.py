@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -307,6 +307,54 @@ class DeviceDialog(QDialog):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter, stretch=1)
 
+        splitter.addWidget(self._build_device_list())
+
+        splitter.addWidget(self._build_device_details())
+        splitter.setSizes([300, 500])
+
+        # Status & Progress
+        self._progress = ProgressStack()
+        layout.addWidget(self._progress)
+
+        self._event_unsubs = [
+            self._dev.on_device_changed(self._on_device_changed),
+            self._dev.on_device_setup_started(self._on_setup_started),
+            self._dev.on_device_setup_finished(self._on_setup_finished),
+        ]
+        self._event_subs_active = True
+        # Phase C: concurrent setups. Progress is now multi-owner — every device
+        # currently setting up has its own ProgressService subscription, keyed by
+        # device name. _sync_progress_subscriptions diffs the live setup set
+        # against these on every setup start/finish; _on_progress_changed merges
+        # all owners' bars into the single ProgressStack.
+        self._progress_unsubs: dict[str, Callable[[], None]] = {}
+        self.finished.connect(self._cleanup_event_subscriptions)
+        self.destroyed.connect(self._cleanup_event_subscriptions)
+
+        # Dialog-scoped + selection-scoped live poller (Phase 2): while the
+        # dialog is visible AND a device is selected, tick once a second and
+        # best-effort off-main read the selected device's real driver values,
+        # including setup/ramp current-value refreshes. The result flows
+        # back through DEVICE_CHANGED (only when it actually moved), which the
+        # Phase 1 repaint+preserve-selection path absorbs. Built stopped;
+        # _update_poll_timer (re)decides on every selection change and on
+        # show/hide.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(1000)
+        self._poll_timer.timeout.connect(self._on_poll_tick)
+
+        # Tracks the device name most recently loaded into the right panel. Used
+        # in _on_selection_changed to distinguish a poll repaint of the SAME device
+        # (name unchanged → preserve eval expressions, R3) from a device SWITCH
+        # (name changed → reset eval fields to direct mode before loading).
+        self._last_panel_device_name: str | None = None
+
+        self._refresh_list()
+        # Phase C: subscribe progress for every device already setting up (the
+        # dialog may open mid-setup, possibly with several concurrent setups).
+        self._sync_progress_subscriptions()
+
+    def _build_device_list(self) -> QWidget:
         # --- Left side: List + Management ---
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
@@ -354,8 +402,9 @@ class DeviceDialog(QDialog):
         add_form.addRow(self._add_status)
 
         left_layout.addWidget(self._add_box)
-        splitter.addWidget(left_widget)
+        return left_widget
 
+    def _build_device_details(self) -> QWidget:
         # --- Right side: Detail Panel Stack ---
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -365,9 +414,9 @@ class DeviceDialog(QDialog):
         # a live ghost preview while the user composes an expression.
         self._stack = QStackedWidget()
         self._stack.addWidget(QLabel("Select a device to configure."))  # Page 0: Idle
-        self._stack.addWidget(_FakeDevicePanel(parameter_provider))  # Page 1
-        self._stack.addWidget(_YOKOGS200Panel(parameter_provider))  # Page 2
-        self._stack.addWidget(_SGS100APanel(parameter_provider))  # Page 3
+        self._stack.addWidget(_FakeDevicePanel(self._parameter_provider))  # Page 1
+        self._stack.addWidget(_YOKOGS200Panel(self._parameter_provider))  # Page 2
+        self._stack.addWidget(_SGS100APanel(self._parameter_provider))  # Page 3
         self._memory_panel = _MemoryDevicePanel()
         self._stack.addWidget(self._memory_panel)  # Page 4: memory-only
         right_layout.addWidget(self._stack, stretch=1)
@@ -388,50 +437,7 @@ class DeviceDialog(QDialog):
         btn_row.addWidget(close_btn)
         right_layout.addLayout(btn_row)
 
-        splitter.addWidget(right_widget)
-        splitter.setSizes([300, 500])
-
-        # Status & Progress
-        self._progress = ProgressStack()
-        layout.addWidget(self._progress)
-
-        self._event_unsubs = [
-            self._dev.on_device_changed(self._on_device_changed),
-            self._dev.on_device_setup_started(self._on_setup_started),
-            self._dev.on_device_setup_finished(self._on_setup_finished),
-        ]
-        self._event_subs_active = True
-        # Phase C: concurrent setups. Progress is now multi-owner — every device
-        # currently setting up has its own ProgressService subscription, keyed by
-        # device name. _sync_progress_subscriptions diffs the live setup set
-        # against these on every setup start/finish; _on_progress_changed merges
-        # all owners' bars into the single ProgressStack.
-        self._progress_unsubs: dict[str, Callable[[], None]] = {}
-        self.finished.connect(self._cleanup_event_subscriptions)
-        self.destroyed.connect(self._cleanup_event_subscriptions)
-
-        # Dialog-scoped + selection-scoped live poller (Phase 2): while the
-        # dialog is visible AND a device is selected, tick once a second and
-        # best-effort off-main read the selected device's real driver values,
-        # including setup/ramp current-value refreshes. The result flows
-        # back through DEVICE_CHANGED (only when it actually moved), which the
-        # Phase 1 repaint+preserve-selection path absorbs. Built stopped;
-        # _update_poll_timer (re)decides on every selection change and on
-        # show/hide.
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(1000)
-        self._poll_timer.timeout.connect(self._on_poll_tick)
-
-        # Tracks the device name most recently loaded into the right panel. Used
-        # in _on_selection_changed to distinguish a poll repaint of the SAME device
-        # (name unchanged → preserve eval expressions, R3) from a device SWITCH
-        # (name changed → reset eval fields to direct mode before loading).
-        self._last_panel_device_name: str | None = None
-
-        self._refresh_list()
-        # Phase C: subscribe progress for every device already setting up (the
-        # dialog may open mid-setup, possibly with several concurrent setups).
-        self._sync_progress_subscriptions()
+        return right_widget
 
     def set_read_only(self, read_only: bool) -> None:
         """Switch the dialog to inspection mode without blocking read paths."""
@@ -782,12 +788,29 @@ class DeviceDialog(QDialog):
             self._add_status.setText(f"Reconnecting {name}...")
             return
 
+        self._apply_panel(name)
+
+    def _apply_panel(self, name: str) -> None:
         panel = self._stack.currentWidget()
         if not isinstance(panel, DevicePanelProtocol):
             return
 
         updates = panel.read()
 
+        resolved_updates = self._resolve_panel_updates(name, updates)
+        if resolved_updates is None:
+            return
+
+        info = self._dev.get_device_info(name)
+        if info is None:
+            return
+        new_info = info.with_updates(**resolved_updates)
+        self._dev.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
+
+    def _resolve_panel_updates(
+        self, name: str, updates: Mapping[str, object]
+    ) -> dict[str, object] | None:
+        """Resolve once for Apply; display input failures and return None to reject submission."""
         # Resolve any EvalRef markers against the current ParameterContext (Design 1:
         # apply-time resolve once, not per-keystroke). Only touch the controller's
         # ParameterContext when at least one field is in eval mode — direct-only applies
@@ -804,8 +827,8 @@ class DeviceDialog(QDialog):
             except Exception as exc:
                 self._add_status.setStyleSheet("color: red;")
                 self._add_status.setText(f"{name}: {exc}")
-                return
-            resolved_updates: dict[str, Any] = {}
+                return None
+            resolved_updates: dict[str, object] = {}
             for key, val in updates.items():
                 if isinstance(val, EvalRef):
                     try:
@@ -815,7 +838,7 @@ class DeviceDialog(QDialog):
                     except Exception as exc:
                         self._add_status.setStyleSheet("color: red;")
                         self._add_status.setText(f"{name}: field '{key}': {exc}")
-                        return
+                        return None
                     # Bounds check: eval must respect the same inclusive range as
                     # the direct spinbox path — prevents e.g. rampstep=0 reaching
                     # the driver where it would cause ZeroDivisionError.
@@ -825,7 +848,7 @@ class DeviceDialog(QDialog):
                             f"{name}: field '{key}': value {coerced} out of range"
                             f" [{val.minimum}, {val.maximum}]"
                         )
-                        return
+                        return None
                     resolved_updates[key] = coerced
                 else:
                     resolved_updates[key] = val
@@ -833,11 +856,7 @@ class DeviceDialog(QDialog):
             # All fields are direct values — pass through unchanged, no parameters access.
             resolved_updates = dict(updates)
 
-        info = self._dev.get_device_info(name)
-        if info is None:
-            return
-        new_info = info.with_updates(**resolved_updates)
-        self._dev.start_setup_device(SetupDeviceRequest(name=name, info=new_info))
+        return resolved_updates
 
     def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
         name = payload.name

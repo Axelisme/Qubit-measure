@@ -13,11 +13,12 @@ ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI�
 uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
 ```
 
-板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 `start_server.ipynb`；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘 GUI、資料處理與模擬入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。
+板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 `start_server.ipynb`；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 模擬使用 workflows GUI 的模擬模式。
 
 ## 從哪裡讀起
 
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
 - [領域詞彙](docs/CONTEXT.md) 與 [實驗層](lib/zcu_tools/experiment/README.md)與 [GUI](lib/zcu_tools/gui/README.md)的 README 提供實作定位；跨模組決策見 [ADR](docs/adr/README.md)。
 - [測試目錄與 fixture](tests/README.md) 說明案例歸屬；[程式碼品質](docs/code-quality.md) 說明 review 判準。
+- [Agent MCP 組合根](mcp_servers/README.md) 使用工作站 GUI/MCP profile，注入 lab 定義與 repo 啟動設定。使用者入口放在 `scripts/`，框架仍在 lib。
 - [品質工具](tools/README.md) 說明 gate、ratchet 與報表的執行及判讀。開發操作與環境仍依 [repo 操作指引](CLAUDE.md)。

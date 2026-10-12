@@ -30,6 +30,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows._form_io import inspect_form_input, prepare_start_form
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.figure_area import WorkflowFigureArea
 from zcu_tools.gui.app.workflows.layout import build_workflow_layout
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputRestoreReport,
@@ -51,8 +52,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormWritePath,
 )
-from zcu_tools.gui.plotting.container import FigureContainer
-from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -139,8 +138,13 @@ class WorkflowWindow[C](QWidget):
         )
         self._forms = WorkflowForms(current, env, self)
         self._session = WorkflowSessionStrip(services, self)
+        self._figure_area = WorkflowFigureArea(owner, self)
         self._controls = build_workflow_layout(
-            self, self._session, self.plan_panel, self.tunables_panel
+            self,
+            self._session,
+            self._figure_area,
+            self.plan_panel,
+            self.tunables_panel,
         )
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
@@ -156,11 +160,7 @@ class WorkflowWindow[C](QWidget):
         ):
             button.clicked.connect(slot)
         self._controls.reload.setEnabled(self._loader is not None)
-        self._plot_host = QtPlotHost(
-            FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
-            owner,
-        )
-        self._figure_views = WorkflowFigureViews()
+        self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
         self._poll = QTimer(self)
@@ -516,7 +516,7 @@ class WorkflowWindow[C](QWidget):
             database_path=storage.database_path,
             run_id=run_id,
         )
-        plots = Plots(self._plot_host)
+        plots = Plots(self._figure_area)
         ports, provenance = self._start_ports(
             session.soc, session.soccfg, plots, prepared.context
         )

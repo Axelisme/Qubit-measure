@@ -4,18 +4,39 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from math import log
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from iminuit import Minuit
 from numpy.typing import NDArray
-from scipy.optimize import OptimizeResult, minimize_scalar
+from scipy.optimize import OptimizeResult
 from scipy.special import expit
 
 from zcu_tools.analysis.fitting.singleshot import (
     transition_state_bin_probabilities,
     transition_state_circle_probabilities,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import TypedDict
+
+    class _BoundedScalarOptions(TypedDict):
+        """Options used by the bounded SciPy scalar minimizer."""
+
+        xatol: float
+        """Absolute tolerance for convergence in the scalar coordinate."""
+
+    # Pyright infers untyped SciPy return types from call sites, making them call-order dependent.
+    def _minimize_scalar(
+        fun: Callable[[float], float],
+        *,
+        bounds: tuple[float, float],
+        method: Literal["bounded"],
+        options: _BoundedScalarOptions | None = None,
+    ) -> OptimizeResult: ...
+else:
+    from scipy.optimize import minimize_scalar as _minimize_scalar
 
 _PARAMETER_NAMES = (
     "p_e0_u",
@@ -612,7 +633,7 @@ def _mixture_populations(
             return float(-np.sum(row * np.log(probabilities)))
 
         # The bounded method returns OptimizeResult; custom methods widen the inferred type.
-        optimum = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
+        optimum = _minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
         assert isinstance(optimum, OptimizeResult)
         p_e = float(optimum.x) if optimum.success else np.nan
         populations[index] = (1.0 - p_e, p_e, 0.0)
@@ -640,7 +661,7 @@ def _confusion_matrix(
         return condition if np.isfinite(condition) else _PENALTY
 
     # The bounded method returns OptimizeResult; custom methods widen the inferred type.
-    optimum = minimize_scalar(
+    optimum = _minimize_scalar(
         objective,
         bounds=(max_radius * 1e-6, max_radius),
         method="bounded",
