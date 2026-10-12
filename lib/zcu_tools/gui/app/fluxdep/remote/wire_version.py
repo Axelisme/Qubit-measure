@@ -20,10 +20,10 @@ from __future__ import annotations
 #   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
 #     any meaningful GUI change you want to be able to spot a reload of,
 #     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = (
-    6  # identity-only project setup, data_root, spectrum evidence and draft facts
-)
+# This unpublished interface revision includes identity-only project setup,
+# data_root, spectrum evidence/drafts and fit search_db/render/database_info.
+WIRE_VERSION = 6
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 8  # published alignment provenance
+GUI_VERSION = 8  # published alignment provenance, fit validation and shared overlay
