@@ -6,8 +6,13 @@ from typing import NoReturn
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.tab import TabService
+from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
+from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
+from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -22,7 +27,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 
-from ._point_application import PointApplication
+from ._point_application import PointAdapter, PointApplication
 
 
 def entry_resource(application: PointApplication) -> ResultEntry:
@@ -248,6 +253,25 @@ def parameter_writeback_pane(
         experiment_name="test/point-admission",
     )
     application.state.update_tab_analyze(tab_id, object(), None, writeback_draft=draft)
+    registry = Registry()
+    registry.register("pointed", PointAdapter)
+    tab = TabService(
+        application.state,
+        registry,
+        service,
+        TabCfgResources(
+            mutation_allowed=lambda tab_id: not application.state.is_tab_busy(tab_id)
+        ),
+        unused_resolution,
+        lambda aliases: control.read_context(aliases=aliases),
+    )
+    application.remote.tab_control = TabControlFacet(
+        state=application.state,
+        tab=tab,
+        workspace=WorkspaceService(application.state, tab, bus),
+        bus=bus,
+        load_tab_result=application.controller.run_analyze_control.load_tab_result,
+    )
     try:
         yield tab_id, captured
     finally:
