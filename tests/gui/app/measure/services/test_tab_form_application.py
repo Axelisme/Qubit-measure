@@ -114,3 +114,29 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         application.stop()
         for tab_id in tuple(application.ctrl.list_tab_ids()):
             application.ctrl.close_tab(tab_id)
+
+
+def test_public_restore_reports_dropped_inputs_and_keeps_compatible_values(
+    qapp: QApplication,
+) -> None:
+    application = Fixture(headless=True)
+    application.registry.register("trace", TraceAdapter, form=TraceAdapter.form)
+    try:
+        tab_id = application.ctrl.new_tab("trace")
+        resource = application.ctrl.cfg_resources.lookup(tab_id)
+        resource.write({("amount",): 7.0})
+        saved = application.ctrl.capture_persisted_state()
+        saved.session.tabs[0].form_input["retired"] = 9.0
+        application.ctrl.close_tab(tab_id)
+        report = application.ctrl.restore_persisted_state(saved)
+        assert report.restored_tabs == 1
+        assert report.dropped_inputs[0].adapter_name == "trace"
+        assert report.dropped_inputs[0].paths == (("retired",),)
+        restored = application.ctrl.cfg_resources.lookup(
+            application.ctrl.list_tab_ids()[0]
+        )
+        assert restored.result() == TraceCfg(amount=7.0)
+    finally:
+        application.stop()
+        for tab_id in tuple(application.ctrl.list_tab_ids()):
+            application.ctrl.close_tab(tab_id)
