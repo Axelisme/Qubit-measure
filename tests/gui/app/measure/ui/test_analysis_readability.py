@@ -263,8 +263,9 @@ def test_writeback_preview_failure_shows_reason_in_place(qapp, pane):
         assert message is not None and message.isVisible()
         assert str(error) in message.text()
         assert widget.findChildren(QCheckBox) == []
+        # Nothing is selectable, so the selection controls step aside.
         apply = widget.findChild(QPushButton, "writebackApply")
-        assert apply is not None and not apply.isEnabled()
+        assert apply is not None and not apply.isVisible()
 
         item = _proposal()
         item.proposed_value = 1.5
@@ -279,6 +280,7 @@ def test_writeback_preview_failure_shows_reason_in_place(qapp, pane):
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         assert widget.findChild(QLabel, "writebackPreviewUnavailable") is None
         assert len(widget.findChildren(QCheckBox)) == 1
+        assert apply.isVisible()
     finally:
         tab.close()
         tab.deleteLater()
