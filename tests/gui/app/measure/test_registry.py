@@ -8,8 +8,12 @@ from zcu_tools.gui.app.measure.registry import Registry
 
 
 @pytest.mark.parametrize("publish", [False, True])
-def test_registry_templates_are_detached_and_preserved_across_publication(publish: bool) -> None:
-    assert "templates" in signature(Registry).parameters, "Missing registry template injection"
+def test_registry_templates_are_detached_and_preserved_across_publication(
+    publish: bool,
+) -> None:
+    assert "templates" in signature(Registry).parameters, (
+        "Missing registry template injection"
+    )
     templates = {"square": TemplateDef(ConstWaveformCfg, "Square", {"length": 2})}
     registry = Registry(templates=templates)
     templates.clear()

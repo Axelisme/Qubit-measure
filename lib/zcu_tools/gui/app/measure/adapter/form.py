@@ -2,15 +2,15 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from operator import methodcaller
-from types import UnionType, new_class
-from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
+from types import new_class
+from typing import Annotated
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
 
 from zcu_tools.cfg_model import (
     AliasName,
+    CfgInputValue,
     ConfigBase,
     Expr,
     FormNode,
@@ -32,22 +32,15 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
+from ._form_modules import ModuleField, module_specs
+from ._form_types import literal_type, union_type
+from ._form_types import members as _members
+
 
 class SweepRange(LinRange):
     """Core sweep input uses n internally, with the user-facing label Expts."""
 
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
-
-
-def _members(annotation: object) -> tuple[object, ...]:
-    if isinstance(annotation, TypeAliasType):
-        return _members(annotation.__value__)
-    args = get_args(annotation)
-    if get_origin(annotation) is Annotated:
-        return _members(args[0])
-    if get_origin(annotation) in (UnionType, Union):
-        return tuple(member for arg in args for member in _members(arg))
-    return (annotation,)
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:
@@ -109,6 +102,7 @@ class _Section:
         self.tree = dict(tree)
         self.path = path
         self.children: dict[str, _Section] = {}
+        self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": __name__}
         annotations: dict[str, object] = {}
         program_fields = (
@@ -166,8 +160,15 @@ class _Section:
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
         if isinstance(node, Locked):
-            # Dynamic Literal parameters are not expressible as static annotations.
-            return methodcaller("__getitem__", node.value)(Literal)
+            return literal_type(node.value)
+        if module_specs(info.annotation):
+            field = ModuleField(info.annotation, (*self.path, name))
+            self.modules[name] = field
+            return (
+                union_type((field.annotation, type(None)))
+                if type(None) in _members(info.annotation)
+                else field.annotation
+            )
         if SweepCfg in _members(info.annotation):
             return SweepRange
         child_core = _section_type(info.annotation)
@@ -210,13 +211,22 @@ class _Section:
         return data
 
     def to_raw(
-        self, value: BaseModel, errors: dict[tuple[str | int, ...], str]
-    ) -> dict[str, JsonValue]:
-        raw = value.model_dump(mode="json")
+        self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
+    ) -> dict[str, CfgInputValue]:
+        raw: dict[str, CfgInputValue] = value.model_dump(mode="python")
         for name, child in self.children.items():
             item: object = getattr(value, name)
             if isinstance(item, BaseModel):
-                raw[name] = child.to_raw(item, errors)
+                raw[name] = child.to_raw(item, env, errors)
+        for name, field in self.modules.items():
+            item: object = getattr(value, name)
+            if item is None:
+                raw.pop(name, None)
+            elif isinstance(item, BaseModel):
+                try:
+                    raw[name] = field.materialize(item, env)
+                except (ValueError, TypeError) as exc:
+                    errors[(*self.path, name)] = str(exc)
         for name in self.core.model_fields:
             if name not in value.__class__.model_fields:
                 continue
@@ -306,11 +316,10 @@ class Form[C: ConfigBase]:
         mutate input or sources. Exceptions from the author-provided lower hook
         propagate; its result is validated again against core_cfg.
         """
-        del env
         if not isinstance(value, self.model):
             raise TypeError("to_cfg requires this form's generated model result")
         errors: dict[tuple[str | int, ...], str] = {}
-        raw = self._section.to_raw(value, errors)
+        raw = self._section.to_raw(value, env, errors)
         raw.pop("extras", None)
         if errors:
             return FormErrors(errors)
