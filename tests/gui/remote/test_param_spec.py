@@ -230,6 +230,15 @@ def test_json_schema_property_is_untyped_but_keeps_description():
     assert prop.get("description") == "any value"
 
 
+@pytest.mark.parametrize("kind", [JsonType.NUMBER, JsonType.INTEGER])
+@pytest.mark.parametrize("limits", [{"minimum": 0}, {"maximum": 5}, {"minimum": 0, "maximum": 5}])
+def test_numeric_limits_project_without_changing_optional_admission(kind, limits):
+    spec = ParamSpec("x", kind, required=False, **limits)
+    property_schema = build_input_schema((spec,))["properties"]["x"]
+    assert property_schema == {"type": kind.value, **limits}
+    assert validate_params((spec,), {}) == {"x": None}
+
+
 def test_non_json_schema_property_keeps_its_type():
     # The other kinds still render a concrete "type" (only JSON goes untyped).
     assert schema_property(ParamSpec("n", JsonType.NUMBER)).get("type") == "number"
