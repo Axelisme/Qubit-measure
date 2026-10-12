@@ -1,6 +1,5 @@
-"""Full native parameter-context reads and per-connection observations."""
+"""Full native parameter-context reads and error projections."""
 
-from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -193,12 +192,6 @@ def test_empty_snapshot_fails_without_unlocking_context(
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "no_context"
-    guarded = application.rpc(
-        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
-    )
-    error = guarded["error"]
-    assert isinstance(error, dict)
-    assert error["reason"] == "stale_version"
 
 
 @pytest.mark.parametrize("document", ["point", "module_cfg"])
@@ -228,12 +221,6 @@ def test_source_unavailable_snapshot_does_not_unlock_context(
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "source_unavailable"
-    guarded = application.rpc(
-        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
-    )
-    error = guarded["error"]
-    assert isinstance(error, dict)
-    assert error["reason"] == "stale_version"
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -251,12 +238,6 @@ def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "unserializable_context"
-    guarded = application.rpc(
-        "context.ml_edit", {"kind": "module", "name": "x", "edits": []}
-    )
-    error = guarded["error"]
-    assert isinstance(error, dict)
-    assert error["reason"] == "stale_version"
 
 
 def snapshot_mapping(value: object) -> dict[str, object]:
@@ -433,43 +414,6 @@ def test_snapshot_path_reads_complete_subtree_before_summaries(
 
 
 @pytest.mark.parametrize(
-    "params", [{"summaries": True}, {"summaries": False}, {"path": "point"}]
-)
-def test_partial_snapshot_does_not_establish_or_refresh_context_seen(
-    browse_context: PointApplication,
-    params: Mapping[str, object],
-) -> None:
-    application = browse_context
-    application.result("context.snapshot", params)
-    mutation = {"kind": "module", "name": "x", "edits": []}
-    assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"]).get(
-            "reason"
-        )
-        == "stale_version"
-    )
-    application.result("context.snapshot", {})
-    assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"])["code"]
-        == ErrorCode.INVALID_PARAMS
-    )
-    context = application.controller.context_control
-    context.set_parameter(context.read_context().target, "Q1.rate", 11.0)
-    application.result("context.snapshot", params)
-    assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"]).get(
-            "reason"
-        )
-        == "stale_version"
-    )
-    application.result("context.snapshot", {})
-    assert (
-        snapshot_mapping(application.rpc("context.ml_edit", mutation)["error"])["code"]
-        == ErrorCode.INVALID_PARAMS
-    )
-
-
-@pytest.mark.parametrize(
     "path, bad_segment",
     [
         ("point.components.missing.rate", "missing"),
@@ -494,10 +438,3 @@ def test_snapshot_invalid_path_names_first_bad_segment_and_does_not_reveal(
     error = snapshot_mapping(reply["error"])
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert bad_segment in str(error["message"])
-    mutation = {"kind": "module", "name": "x", "edits": []}
-    assert (
-        snapshot_mapping(browse_context.rpc("context.ml_edit", mutation)["error"])[
-            "reason"
-        ]
-        == "stale_version"
-    )

@@ -107,18 +107,11 @@ def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reu
         _, _ = yield tab.run()
 
     gui = LookbackGui()
+    gui.publication["status"] = "Invalid"
     with (
         recipe_client(tmp_path, gui) as client,
         registry(client.context, definition(sample)) as executions,
     ):
-        client.transport.replies["tab.get_cfg"] = {
-            "ok": False,
-            "error": {
-                "code": "precondition_failed",
-                "reason": "stale_cfg",
-                "message": "Changed",
-            },
-        }
         execution = executions.start(client.context, "sample", {})
         reply = execution.wait(5)
         assert reply.data["status"] == "failed"

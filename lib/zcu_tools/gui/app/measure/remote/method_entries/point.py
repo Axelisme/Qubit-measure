@@ -6,7 +6,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import optional_string, required_string
-from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
+from ._registry import RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -16,6 +16,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Refresh and return {entries: [name, ...]} from the result entry owner. "
             "Does not open an entry or reveal context content. Read errors propagate.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -25,7 +26,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Return {entry}: null before opening, otherwise entry_id/name/"
             "result_path/database_path from the cached owner identity. "
-            "Metadata only; establishes no full-context observation.",
+            "Returns metadata only.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -41,7 +43,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "not another New. No retry or rollback.",
             (required_string("name", "New single-segment result entry name"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "entry.open",
@@ -54,7 +55,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the old binding; never creates an entry or retries.",
             (required_string("name", "Existing single-segment result entry name"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "point.list",
@@ -64,6 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Return {entry, points}: entry is null or entry_id/name/result_path/"
             "database_path; points contains label/description. Refresh persisted "
             "metadata; read failures propagate. Does not reveal context content.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -91,7 +92,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "point.use",
@@ -103,6 +103,5 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "binding. Existing tabs retain their capture; new tabs use this point.",
             (required_string("label", "Existing single-segment point label"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

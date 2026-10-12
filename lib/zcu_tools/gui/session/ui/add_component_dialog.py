@@ -106,10 +106,13 @@ class AddComponentDialog(QDialog):
         current point. on_added receives the new component's name after the
         owner accepted it, before the dialog closes. The destination text
         reads control.current_point_label() once, here; callers open a new
-        dialog per Add.
+        dialog per Add. Finished retires these inputs; late submissions cannot
+        write after Cancel or Close.
         """
         super().__init__(parent)
         self._control = control
+        self._retired = False
+        self.finished.connect(self._retire_inputs)
         self._setup = setup
         self._on_added = on_added
         self._rows: list[_FieldRow] = []
@@ -122,6 +125,10 @@ class AddComponentDialog(QDialog):
         destination.setWordWrap(True)
         layout.addWidget(destination)
 
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(content, stretch=1)
         identity = QFormLayout()
         self._name_label = QLabel("Name *")
         self._name_label.setObjectName("label:add_name")
@@ -134,13 +141,13 @@ class AddComponentDialog(QDialog):
         self._kind.setObjectName("add_kind")
         self._kind.addItems(list(component_registry.kinds()))
         identity.addRow("Kind", self._kind)
-        layout.addLayout(identity)
+        content_layout.addLayout(identity)
 
         self._scroll = QScrollArea()
         self._scroll.setObjectName("add_fields")
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        layout.addWidget(self._scroll, stretch=1)
+        content_layout.addWidget(self._scroll, stretch=1)
 
         self._error = QLabel()
         self._error.setObjectName("add_error")
@@ -156,6 +163,10 @@ class AddComponentDialog(QDialog):
 
         self._kind.currentTextChanged.connect(self._rebuild_fields)
         self._rebuild_fields()
+
+    def _retire_inputs(self) -> None:
+        """Discard submissions delivered after this Add interaction closes."""
+        self._retired = True
 
     def _build_buttons(self) -> QDialogButtonBox:
         buttons = QDialogButtonBox()
@@ -298,6 +309,9 @@ class AddComponentDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_add(self) -> None:
+        # Submits delivered after close belong to retired inputs.
+        if self._retired:
+            return
         self._update_required()
         missing = [
             row.path

@@ -24,9 +24,9 @@ Binding path 指向 cfg 欄位，不是參數容器路徑。欄位中的 `$alias
 
 完整 cfg 讀取使用 `CfgDraft.observe()`。`CfgNodeObservation` 包含 locked literals、cached options、active reference children、validity，以及 raw／resolved／error value carriers。Binding 回傳 detached data，不重新解析來源。Settable listing 和 persistence encoding 都不能代替完整 observation。
 
-Remote 將 observation 序列化並套 prefix read policy，不 import field/editor classes 重建規則。只有無 prefix 的成功完整讀取揭露整個 cfg revision。Unknown objects 和 nonfinite values 使序列化失敗，不轉成 display string。Prefix 或裸版本不證明完整讀取。
+Remote 將 observation 序列化並套 prefix read policy，不 import field/editor classes 重建規則。Prefix 只選取回覆的子樹，不授權 mutation。Unknown objects 和 nonfinite values 使序列化失敗，不轉成 display string。部分投影不代替完整內容。
 
-獨立 draft batch 依序執行，首錯停止，不具原子性。Reference switch 可以先暴露下一個 path。Shape edit 才計算 path sets，在第一筆 shape edit 前和成功後各計算一次。回覆是排序後的最終 net diff，A→B→A 為空。失敗保留成功前綴，傳遞原 typed error，不做 after diff。每筆成功 edit 的版本更新與 [[0068]] 的 subscriber 投影保持原契約。
+獨立 draft batch 依序執行，首錯停止，不具原子性。Reference switch 可以先暴露下一個 path。Shape edit 才計算 path sets，在第一筆 shape edit 前和成功後各計算一次。回覆是排序後的最終 net diff，A→B→A 為空。失敗保留成功前綴，傳遞原 typed error，不做 after diff。每筆成功 edit 的 owner 更新與 [[0068]] 的 subscriber 投影保持原契約。
 
 ## 後果
 

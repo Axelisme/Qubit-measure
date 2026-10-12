@@ -165,8 +165,8 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("rounds",), 1),))
-    ctrl.start_run(tab_id, cfg.observe().ref)
+    cfg.edit((CfgEdit(("rounds",), 1),))
+    ctrl.start_run(tab_id)
 
     def wait_for(predicate: Callable[[], bool]) -> None:
         loop = QEventLoop()

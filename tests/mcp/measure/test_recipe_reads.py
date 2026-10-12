@@ -30,7 +30,7 @@ def test_read_value_tracks_sources_and_keeps_values_detached(tmp_path: Path) -> 
                 {"tab_id": "t", "paths": ["$custom.threshold"], "module_refs": []},
             ),
         ]
-        assert gui.publication["cfg_ref"]["revision"] == "2"
+
         assert not gui.ran
 
 

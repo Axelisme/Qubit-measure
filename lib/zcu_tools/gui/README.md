@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，shared source catalogs、entry alias 表與 workflow input restoration
+**Last updated:** 2026-10-12
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -24,7 +24,7 @@ Session services只依賴`submit` port，不持有另一份admission狀態。
 ## Remote response delivery (`remote/`)
 
 Shared framing 的 request/response 上限為 8 MiB UTF-8 bytes，不含換行。
-仍採單則 NDJSON 訊息，不分批；完整 context read 必須成功才建立 guard baseline。
+仍採單則 NDJSON 訊息，不分批；完整 context read 失敗不回部分資料。
 Per-client writer 在 socket backpressure 時保存尚未送出的 byte cursor，等待可寫後接續；
 不重送整則訊息，停止或斷線會退出等待並釋放連線。
 每個 client 的待送預算為16 MiB，包含 queue 與 writer 持有的完整 encoded frame；
@@ -39,21 +39,29 @@ Shared endpoint 無法編碼 RPC 回覆時送有界的 `internal` error，reason
 `VersionTable` owns the shared counter mechanism; apps own keys and semantic
 writes on their owner thread. Exact `retire(key)` makes an absent resource read
 as 0 while retaining its last counter. Same-key recreation advances beyond that
-counter, so reusable names cannot match an old observation. `drop_prefix` instead
-forgets both live and retired counters, and later bumps restart at 1. Owners
-choose retirement for reusable identities and forgetting only when key reuse
-cannot revive an old baseline. Counter history lasts only for the table lifetime.
+counter, so owner projections can distinguish replacements after name reuse.
+`drop_prefix` instead forgets both live and retired counters, and later bumps
+restart at 1. Owners choose whether replacement history must survive name reuse.
+These counters are not RPC mutation baselines. History lasts only for the table lifetime.
 
-## Remote resource observations
+## Control identity
 
-`gui.remote.RemoteControlServiceBase` owns per-connection seen maps, stale
-comparison, full-read observations and successful self-write tracking. Apps inject
-owner-thread version snapshots and `ResourceObservationPolicy` declarations; they
-retain resource keys, version producers and domain effects. Guard, handler and
-observation share one owner turn. Handler failure, timeout or unsuccessful reply
-delivery cannot establish a new observation. Observation rollback never rolls
-back business effects. Read-only apps omit this optional policy binding. MCP does
-not maintain another seen map. See ADR-0068 for the app-policy split.
+Measure and Fluxdep inject application-owned `ControlIdentity` into shared remote
+and Qt projections. Business RPCs require holder unless explicitly readonly.
+The owner loop checks current authority before domain effects. Reads provide
+current data, not per-connection version baselines. Authentication, domain busy,
+result provenance and operation lifetimes remain separate checks.
+
+The main window alone observes control identity. Its `set_writable` updates
+write controls and pushes availability into existing and new tabs/views. Domain
+busy/valid gates and pure viewing remain separate. Local modal dialogs refuse
+owner acquisition with `local_busy` and "Local 使用中" on the Qt owner turn.
+Choosers use non-native presentation so Qt can detect them. Dialogs do not
+subscribe to authority or recheck holder after choices. Remote Inspect/Device
+open with static read-only modes. Only Measure Run and device Stop reclaim
+locked Local before requesting cancellation. Main windows dispose their own
+watch on final teardown; domain sessions and background drains retain their
+existing lifetimes. See [ADR-0070](../../../docs/adr/0070-control-identity.md).
 
 ## Remote parameter declarations
 
@@ -212,19 +220,18 @@ EMPTY 只改 memory；失敗保舊表、舊檔與 draft。Apply 不關閉，Canc
 Measure 與 workflows 直接 import 同一 owner，不留 app-local re-export 或 wrapper。
 App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
-## Dialogs — always non-blocking
+## Dialog presentation and lifetime
 
-Every app embeds a control socket whose RPC handler runs on the Qt event loop,
-so **all dialogs (and message boxes) launch with `open()`, never `exec()`**.
-A blocking `exec()` would freeze the event loop until the user dismisses the
-dialog, stalling the control socket (and, for measure, deadlocking cross-thread
-marshalling). Read a dialog's outcome from its `accepted` / `finished` signal
-instead of `exec()`'s return value, set `WA_DeleteOnClose`, and hold an instance
-reference so `open()`'s immediate return does not let it be garbage-collected.
-The measure registry path (`MainWindow.open_dialog` / `close_dialog`) is detailed
-in `app/measure/remote/README.md`. The sole intentional `exec()` is the
-global unhandled-exception presenter in `app/measure/ui/error_handler.py`, where the
-process is already crashing and the message must block.
+Remote control does not change a dialog's modal presentation. Long-running flows
+use `open()` and their owner retains the dialog until accepted/finished cleanup.
+Short-lived modal choices may use a nested event loop, including measure's
+single RunLoadDialog interaction. The global unhandled-exception presenter also
+blocks while the process is crashing. Modal owner admission protects Local
+input, including file choosers and confirmations, without dialog control wiring.
+
+RunLoadDialog discards further input on finished. MainWindow rejects it before
+teardown, and a late file chooser cannot accept a new selection. Persistent
+dialogs that hide and reopen keep their existing owner lifetime.
 
 Short-lived modal confirmations, error reports, and text prompts are the
 deliberate exception. A synchronous `QMessageBox.question` / `.warning` /
@@ -254,8 +261,8 @@ cleanup runs.
 ## Shared Qt Cfg Widgets (`widgets/cfg/`)
 
 `ResourceCfgFormWidget` renders a caller-owned `CfgEditing` handle. Every input
-change, including each keystroke, is submitted at once against the owner's latest
-revision, so the form always shows the published cfg and the last input wins.
+change, including each keystroke, is submitted at once to the owner's current
+inputs, so the form shows the published cfg and the last input wins.
 A field whose text equals the publication keeps its cursor and selection. A
 rejected input shows its error below the tree and the controls return to the
 published values. Detach unsubscribes without revoking the resource or rerunning
@@ -274,7 +281,7 @@ app仍擁有visibility、target lookup、main-thread marshal與remote wire polic
 `SweepInputWidget`與`CenteredSweepInputWidget`同樣只提交edge輸入、顯示publication；
 Points／Step同步仍由cfg owner計算。既有range binding widgets共用這些presentation。
 `ReferenceInputWidget`只呈現已發布的選項、有效性與missing hint，提交Custom選擇、library key或None意圖；既有`ReferenceWidget`是共用renderer的binding adapter。Custom繼承與nested linkage由cfg owner負責，widget不另存可寫value tree。
-`ResourceCfgFormWidget`以`CfgEditing.observe/watch`建立同款dense tree，透過最新revision提交scalar、range與reference輸入；choice可見欄位只投影已發布selector。結構變更在Qt輸入signal結束後重建，穩定欄位則原位刷新。detach解除觀察但不revoke caller的owner；它不建立可寫`CfgDraft`鏡像。既有`CfgFormWidget`的binding caller維持原來路徑。
+`ResourceCfgFormWidget`以`CfgEditing.observe/watch`建立同款dense tree，向目前inputs提交scalar、range與reference輸入；choice可見欄位只投影已發布selector。結構變更在Qt輸入signal結束後重建，穩定欄位則原位刷新。detach解除觀察但不revoke caller的owner；它不建立可寫`CfgDraft`鏡像。既有`CfgFormWidget`的binding caller維持原來路徑。
 Measure tab 使用同一 caller-owned resource；view attach/detach 不建立或撤銷 tab cfg。
 
 Sweep renderers use one balanced two-column Range/Sampling grammar: `SweepWidget` places Start/Stop in the first row and Points/Step in the second, while `CenteredSweepWidget` places Center/Span in the first row and Points/Step in the second. The displayed Points label is presentation-only for the canonical `expts` value; field update methods continue to own synchronization and preserve validation, decoration, snapshot, lowering, and persistence behavior.

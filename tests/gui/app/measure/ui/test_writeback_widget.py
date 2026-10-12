@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
 
@@ -31,9 +30,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.cfg_schemas import waveform_cfg_to_value
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.writeback import (
-    WritebackService,
     WritebackValues,
 )
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
@@ -43,66 +40,12 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding.fields import ScalarField
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import SessionEnv as ParameterSessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 from zcu_lab.components import ResonatorSchema, WiringSchema
 from zcu_lab.v2.fake.freq.core import FakeFreqRunResult, HangerSimParams
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
-
-
-@pytest.fixture
-def waveform_writeback(tmp_path: Path):
-    before = registry_state()
-    draft = None
-    try:
-        register_fakes()
-        installed = registry_state()
-        entry = ResultEntry.create(
-            "entry",
-            result_root=tmp_path / "Result",
-            database_root=tmp_path / "Database",
-        )
-        bus = BaseEventBus()
-        context = ContextService(
-            SessionState(ParameterSessionEnv(parameters=None, soc=None, soccfg=None)),
-            bus,
-            bind_assets=ArbWaveformDatabase.info_at,
-        )
-        context.install_entry(entry)
-        control = ContextControlFacet(context=context)
-        entry.new_point("working")
-        control.use_point(PointUseRequest("working"))
-        control.add_component("Q1", "fake/drive/a", {})
-        target = control.read_context().target
-        control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.1))
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, control)
-        spec, value = waveform_cfg_to_value(ConstWaveformCfg(length=0.1))
-        draft = service.create_draft(
-            [
-                WaveformWriteback(
-                    "Q1.waveforms.base", "Waveform", edit_schema=CfgSchema(spec, value)
-                )
-            ],
-            parameters=control.read_context(),
-            experiment_name="test/writeback",
-        )
-        service.apply_draft(draft)
-        yield control, service, draft
-        assert registry_state() == installed
-    finally:
-        if draft is not None:
-            draft.teardown()
-        restore_registry(before)
 
 
 @pytest.fixture

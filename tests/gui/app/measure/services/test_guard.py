@@ -26,12 +26,7 @@ from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
 )
-from zcu_tools.gui.cfg.resource import (
-    CfgEdit,
-    CfgPreconditionError,
-    CfgRevision,
-    CfgStaleError,
-)
+from zcu_tools.gui.cfg.resource import CfgEdit, CfgPreconditionError
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import ParameterContext
 
@@ -107,7 +102,7 @@ def test_run_inputs_issued_for_active_valid_cfg():
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
     guard = _make_guard(state)
 
-    inputs = guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+    inputs = guard.capture_run_inputs(tab_id)
 
     assert isinstance(inputs, RunInputs)
     assert inputs.tab_id == tab_id
@@ -135,19 +130,16 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
     )
     state.get_tab(tab_id).cfg = cfg
     before = cfg.observe()
-    inputs = _make_guard(state).capture_run_inputs(
-        tab_id, expected_revision=before.ref.revision
-    )
+    inputs = _make_guard(state).capture_run_inputs(tab_id)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    cfg.refresh(before.ref.revision)
+    cfg.refresh()
 
     assert inputs.accepted_cfg.values == {"gain": 0.25}
-    assert inputs.accepted_cfg.ref == before.ref
     assert inputs.accepted_cfg.source_basis == before.source_basis
-    assert cfg.accept(cfg.observe().ref.revision).values == {"gain": 0.25}
+    assert cfg.accept().values == {"gain": 0.25}
 
 
 def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
@@ -161,9 +153,7 @@ def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
     )
     state.get_tab(tab_id).cfg = cfg
     with pytest.raises(CfgPreconditionError):
-        _make_guard(state).capture_run_inputs(
-            tab_id, expected_revision=cfg.observe().ref.revision
-        )
+        _make_guard(state).capture_run_inputs(tab_id)
     cast(
         MagicMock, state.get_tab(tab_id).adapter
     ).validate_run_request.assert_not_called()
@@ -191,25 +181,11 @@ def test_run_inputs_detaches_reference_shape_and_values() -> None:
         state=state,
     )
     state.get_tab(tab_id).cfg = cfg
-    inputs = _make_guard(state).capture_run_inputs(
-        tab_id, expected_revision=cfg.observe().ref.revision
-    )
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("asset", "gain"), 0.75),))
+    inputs = _make_guard(state).capture_run_inputs(tab_id)
+    cfg.edit((CfgEdit(("asset", "gain"), 0.75),))
     value.fields["gain"] = DirectValue(9.0)
     shape.fields.clear()
     assert inputs.accepted_cfg.values == {"asset": {"gain": 0.25}}
-
-
-def test_run_inputs_rejects_stale_revision_without_preflight() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    cfg = state.get_tab(tab_id).cfg
-    old = cfg.observe().ref
-    cfg.refresh(old.revision)
-    with pytest.raises(CfgStaleError):
-        _make_guard(state).capture_run_inputs(tab_id, expected_revision=old.revision)
-    cast(
-        MagicMock, state.get_tab(tab_id).adapter
-    ).validate_run_request.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -247,7 +223,6 @@ def test_run_inputs_admits_live_devices_without_valid_cached_settings(
     try:
         inputs = _make_guard(state).capture_run_inputs(
             tab_id,
-            expected_revision=CfgRevision(0),
         )
     except GuardError as error:
         admission_error = error
@@ -265,7 +240,7 @@ def test_run_inputs_translates_adapter_preflight_error() -> None:
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
-        guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+        guard.capture_run_inputs(tab_id)
 
     assert exc.value.reason_code == "invalid_cfg"
     assert exc.value.__cause__ is preflight_error
@@ -277,7 +252,7 @@ def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="active file-backed context") as exc:
-        guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+        guard.capture_run_inputs(tab_id)
     assert exc.value.reason_code == "no_active_context"
 
 
@@ -296,7 +271,7 @@ def test_run_inputs_rejected_on_invalid_cfg():
     guard = _make_guard(state)
 
     with pytest.raises(CfgPreconditionError, match="valid"):
-        guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+        guard.capture_run_inputs(tab_id)
     adapter.validate_run_request.assert_not_called()
 
 
@@ -308,7 +283,7 @@ def test_run_inputs_rejected_when_soc_required_but_missing():
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="soc"):
-        guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+        guard.capture_run_inputs(tab_id)
     adapter.validate_run_request.assert_not_called()
 
 
@@ -318,7 +293,7 @@ def test_run_inputs_issued_without_soc_when_capability_does_not_require():
     )
     guard = _make_guard(state)
 
-    inputs = guard.capture_run_inputs(tab_id, expected_revision=CfgRevision(0))
+    inputs = guard.capture_run_inputs(tab_id)
     assert isinstance(inputs, RunInputs)
 
 
@@ -327,7 +302,7 @@ def test_run_inputs_rejected_for_unknown_tab():
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="Unknown tab"):
-        guard.capture_run_inputs("does-not-exist", expected_revision=CfgRevision(0))
+        guard.capture_run_inputs("does-not-exist")
 
 
 # ---------------------------------------------------------------------------

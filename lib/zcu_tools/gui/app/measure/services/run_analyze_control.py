@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
-from zcu_tools.gui.cfg.resource import CfgRef, CfgStaleError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
@@ -85,7 +84,6 @@ class RunAnalyzeControlPort(Protocol):
     def start_run(
         self,
         tab_id: str,
-        expected: CfgRef,
         *,
         aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
@@ -199,15 +197,14 @@ class RunAnalyzeControlFacet:
     def start_run(
         self,
         tab_id: str,
-        expected: CfgRef,
         *,
         aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
-        """Start tab_id's observed inputs and return an asynchronous token.
+        """Start tab_id's current inputs and return an asynchronous token.
 
-        expected is the observed CfgRef; stale refs and unavailable/busy tabs
-        raise before start. None and {} accept the cached Valid publication.
+        Unavailable/busy tabs raise before start.
+        None and {} accept the cached Valid publication.
         Nonempty aliases maps alias names to concrete components and resolves
         these inputs against that fixed capture, even if the global publication
         is Invalid. Alias/source errors propagate before admission.
@@ -220,12 +217,7 @@ class RunAnalyzeControlFacet:
         No refresh, focus substitution, Save or automatic retry occurs.
         """
         self._access.require_available()
-        actual = self._state.get_tab(tab_id).cfg.observe().ref
-        if expected != actual:
-            raise CfgStaleError(expected, actual)
-        inputs = self._guard.capture_run_inputs(
-            tab_id, expected_revision=expected.revision, aliases=aliases
-        )
+        inputs = self._guard.capture_run_inputs(tab_id, aliases=aliases)
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None

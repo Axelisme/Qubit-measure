@@ -4,10 +4,11 @@ import json
 import socket
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
@@ -54,6 +55,19 @@ def test_session_close_wakes_an_inflight_rpc_without_waiting_for_rpc_lock(
     assert client.transport.sent == [("context.labels", {})]
 
 
+class LoopbackExchange(TypedDict):
+    """One wire request on a numbered socket attempt and its delivery outcome.
+
+    attempt starts at one for each incarnation. reply is None for deliberate
+    EOF; delivered is True only after the complete reply was sent.
+    """
+
+    attempt: int
+    request: Mapping[str, object]
+    reply: Mapping[str, object] | None
+    delivered: bool
+
+
 class LoopbackGui:
     """One disposable GUI wire incarnation, without a process or instrument."""
 
@@ -71,11 +85,13 @@ class LoopbackGui:
         self._stop = threading.Event()
         self._socket: socket.socket | None = None
         self.sent: list[str] = []
+        self.exchanges: list[LoopbackExchange] = []
         self.close_on: str | None = None
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 
     def _serve(self) -> None:
+        attempt = 0
         try:
             while not self._stop.is_set():
                 try:
@@ -85,12 +101,20 @@ class LoopbackGui:
                 except OSError:
                     return
                 self._socket = conn
+                attempt += 1
                 authenticated = self._token is None
                 with conn, conn.makefile("rb") as stream:
                     for line in stream:
                         if self._stop.is_set():
                             return
                         request = json.loads(line)
+                        exchange: LoopbackExchange = {
+                            "attempt": attempt,
+                            "request": request,
+                            "reply": None,
+                            "delivered": False,
+                        }
+                        self.exchanges.append(exchange)
                         method = request["method"]
                         self.sent.append(method)
                         if method == self.close_on:
@@ -122,8 +146,10 @@ class LoopbackGui:
                                 "ok": True,
                                 "result": self._result(method, request["params"]),
                             }
+                        exchange["reply"] = reply
                         try:
                             conn.sendall((json.dumps(reply) + "\n").encode())
+                            exchange["delivered"] = True
                         except OSError:
                             return
         finally:
@@ -133,6 +159,20 @@ class LoopbackGui:
         result: dict[str, Any]
         if method == "wire.version":
             result = {"wire_version": self._catalog["wire"], "gui_version": 83}
+        elif method in {"control.connect", "control.status"}:
+            expected = (
+                {"label": "agent", "mode": "owner"}
+                if method == "control.connect"
+                else {}
+            )
+            if params != expected:
+                raise AssertionError(f"Unexpected {method} params: {params}")
+            result = {
+                "holder": "rpc:agent",
+                "locked": False,
+                "online": True,
+                "me": True,
+            }
         elif method == "rpc.catalog":
             result = {"methods": self._catalog["methods"]}
         elif method == "resources.versions":
@@ -158,6 +198,107 @@ class LoopbackGui:
         self._server.close()
         self._thread.join(timeout=2)
         assert not self._thread.is_alive()
+
+
+def assert_loopback_exchanges(
+    exchanges: Sequence[LoopbackExchange],
+    requests: Sequence[tuple[str, Mapping[str, object]]],
+    replies: Sequence[Mapping[str, object]],
+) -> None:
+    """Compare a complete attempt's method/params, reply envelopes and delivery.
+
+    Expected replies omit the request id; each reply must match its own request.
+    """
+    assert [
+        (exchange["request"]["method"], exchange["request"]["params"])
+        for exchange in exchanges
+    ] == requests
+    assert len(exchanges) == len(replies)
+    for exchange, reply in zip(exchanges, replies, strict=True):
+        assert exchange["reply"] == {"id": exchange["request"]["id"], **reply}
+        assert exchange["delivered"] is True
+
+
+def assert_auth_transcript(
+    initial: Sequence[LoopbackExchange],
+    restarted: Sequence[LoopbackExchange],
+    *,
+    wire_version: int,
+    catalog: object,
+) -> None:
+    """Check this real socket composition's denied and successful auth attempts.
+
+    The bridge and session each read wire.version; neither read is projected out.
+    The initial valid attempt includes the connect tool's seven status reads.
+    """
+    assert {exchange["attempt"] for exchange in initial} == {1, 2, 3}
+    assert {exchange["attempt"] for exchange in restarted} == {1}
+    no_token, wrong_token, valid_token = (
+        [exchange for exchange in initial if exchange["attempt"] == attempt]
+        for attempt in (1, 2, 3)
+    )
+    wire = {
+        "ok": True,
+        "result": {"wire_version": wire_version, "gui_version": 83},
+    }
+    unauthorized = {
+        "ok": False,
+        "error": {"code": "unauthorized", "message": "auth required"},
+    }
+    identity = ("control.connect", {"label": "agent", "mode": "owner"})
+    assert_loopback_exchanges(
+        no_token,
+        [("wire.version", {}), ("wire.version", {}), identity],
+        [wire, wire, unauthorized],
+    )
+    assert_loopback_exchanges(
+        wrong_token, [("auth", {"token": "wrong"})], [unauthorized]
+    )
+    handshake = [
+        ("auth", {"token": "test-secret"}),
+        ("wire.version", {}),
+        ("wire.version", {}),
+        identity,
+        ("rpc.catalog", {}),
+    ]
+    handshake_replies = [
+        {"ok": True, "result": {}},
+        wire,
+        wire,
+        {
+            "ok": True,
+            "result": {
+                "holder": "rpc:agent",
+                "locked": False,
+                "online": True,
+                "me": True,
+            },
+        },
+        {"ok": True, "result": {"methods": catalog}},
+    ]
+    status_reads = [
+        "state.has_project",
+        "state.has_active_context",
+        "state.has_soc",
+        "tab.snapshot",
+        "context.active",
+        "device.list",
+        "operation.active",
+    ]
+    status_replies = [
+        {"ok": True, "result": overview_rpc(method, {})} for method in status_reads[:-1]
+    ] + [
+        {
+            "ok": True,
+            "result": {"operations": [{"op": 1, "tab": None, "kind": "device"}]},
+        }
+    ]
+    assert_loopback_exchanges(
+        valid_token,
+        handshake + [(method, {}) for method in status_reads],
+        handshake_replies + status_replies,
+    )
+    assert_loopback_exchanges(restarted, handshake, handshake_replies)
 
 
 CATALOG = [
@@ -229,7 +370,11 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
     assert result["launched"] is False
     assert result["versions"]["wire"] == client.context.config.wire_version
     assert result["status"]
-    assert client.transport.sent[:2] == [("wire.version", {}), ("rpc.catalog", {})]
+    assert client.transport.sent[:3] == [
+        ("wire.version", {}),
+        ("control.connect", {"label": "agent", "mode": "owner"}),
+        ("rpc.catalog", {}),
+    ]
     assert client.call("rpc_list", {"domain": "adapter"})["methods"] == [
         {"method": "adapter.list", "description": "List adapters", "tool_names": []},
         {
@@ -250,7 +395,7 @@ def test_connect_loads_catalog_and_rpc_tools_route_by_exposure(
     assert getattr(error.value, "reason", None) == "unknown_method"
     assert all(
         method not in {"adapter.guide", "rpc.catalog"}
-        for method, _ in client.transport.sent[2:]
+        for method, _ in client.transport.sent[3:]
     )
 
 
@@ -332,8 +477,7 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
         with pytest.raises(RuntimeError) as exc_info:
             client.call("connect", {"port": gui_a.port, "token": "wrong"})
         assert getattr(exc_info.value, "reason", None) == "unauthorized"
-        # The no-token attempt reaches catalog and is denied; bad auth never does.
-        assert gui_a.sent.count("rpc.catalog") == 1
+        rejected_catalog_count = gui_a.sent.count("rpc.catalog")
 
         connected = client.call("connect", {"port": gui_a.port, "token": "test-secret"})
         assert connected["port"] == gui_a.port
@@ -349,8 +493,17 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
             time.sleep(0.01)
         assert not client.context.bridge.is_connected
         assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+        # Join the reply producer before reading its final delivery record.
+        gui_b.stop()
         assert gui_b.sent.count("auth") == 1
         assert gui_b.sent.count("rpc.catalog") == 1
+        assert rejected_catalog_count == 0
+        assert_auth_transcript(
+            gui_a.exchanges,
+            gui_b.exchanges,
+            wire_version=client.context.config.wire_version,
+            catalog=catalog["methods"],
+        )
     finally:
         client.context.bridge.disconnect()
         gui_a.stop()

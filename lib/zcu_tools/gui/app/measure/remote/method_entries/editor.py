@@ -10,7 +10,7 @@ from ._params import (
     required_json,
     required_string,
 )
-from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
+from ._registry import RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
@@ -31,7 +31,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.set_field",
@@ -69,7 +68,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.set_fields",
@@ -88,7 +86,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_json("edits", "Ordered {path, value} edits"),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "editor.get",
@@ -104,9 +101,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "(e.g. 'modules.readout'); omit for the whole draft. No match → {}",
                 ),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            reveals=("editor:{editor_id}",), reveals_without=("prefix",)
+            readonly=True,
         ),
     ),
     method_entry(
@@ -126,9 +121,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("name", "ml entry name to register under"),
             ),
         ),
-        agent=AgentMethodPolicy(
-            guard_deps=("editor:{editor_id}", "context"), refresh_after_write=True
-        ),
     ),
     method_entry(
         "editor.discard",
@@ -139,6 +131,5 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "ModuleLibrary. Returns {}.",
             (required_string("editor_id"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

@@ -137,7 +137,7 @@ class SetupDialog(QDialog):
         root_layout = QVBoxLayout(self)
 
         # ── horizontal splitter: left = project, right = connection ──────
-        splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
@@ -284,7 +284,7 @@ class SetupDialog(QDialog):
         # soccfg description — hidden until connection succeeds
         self._cfg_text = QPlainTextEdit()
         self._cfg_text.setReadOnly(True)
-        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)  # type: ignore[attr-defined]
+        self._cfg_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self._cfg_text.setVisible(False)
         right_layout.addWidget(self._cfg_text, stretch=1)
 
@@ -294,7 +294,7 @@ class SetupDialog(QDialog):
         splitter.setSizes([450, 450])
 
         # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)  # type: ignore[attr-defined]
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btn_box.rejected.connect(self.reject)
         # Full-width status keeps long project messages to as few lines as possible.
         self._project_status = _wrapping_label("setup_status")

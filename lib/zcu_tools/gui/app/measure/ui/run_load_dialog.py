@@ -30,6 +30,10 @@ class RunLoadDialog(QDialog):
     Point/experiment filters are exact; time filter matches recorded_at text.
     Rows without data_path remain visible but cannot be loaded. Paths may have
     disappeared; the existing Load owner reports that failure after selection.
+    This is a single Load interaction; finished discards further selection input.
+    The owning window must reject it before window teardown. The caller reads
+    selected_path() after exec() and then schedules this dialog's deleteLater().
+    A file chooser returning after retirement cannot accept a new selection.
     """
 
     def __init__(
@@ -42,13 +46,17 @@ class RunLoadDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._runs = runs
+        self._interaction_finished = False
+        self.finished.connect(self._finish_interaction)
         self._visible_runs: tuple[SavedRunInfo, ...] = ()
         self._start_directory = start_directory
         self._selected_path: str | None = None
         self.setWindowTitle("Load Data")
         self.resize(850, 440)
         layout = QVBoxLayout(self)
-        layout.addLayout(self._build_filters(initial_point))
+        filters = QWidget()
+        filters.setLayout(self._build_filters(initial_point))
+        layout.addWidget(filters)
         self._table = QTableWidget(0, 5)
         self._table.setObjectName("load_runs")
         self._table.setHorizontalHeaderLabels(
@@ -69,9 +77,13 @@ class RunLoadDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.setObjectName("load_cancel")
         cancel.clicked.connect(self.reject)
-        buttons.addWidget(file_button)
-        buttons.addStretch()
-        buttons.addWidget(self._load)
+        commands = QWidget()
+        command_layout = QHBoxLayout(commands)
+        command_layout.setContentsMargins(0, 0, 0, 0)
+        command_layout.addWidget(file_button)
+        command_layout.addStretch()
+        command_layout.addWidget(self._load)
+        buttons.addWidget(commands)
         buttons.addWidget(cancel)
         layout.addLayout(buttons)
         self._point.currentIndexChanged.connect(self._refresh)
@@ -79,6 +91,9 @@ class RunLoadDialog(QDialog):
         self._time.textChanged.connect(self._refresh)
         self._table.itemSelectionChanged.connect(self._selection_changed)
         self._refresh()
+
+    def _finish_interaction(self) -> None:
+        self._interaction_finished = True
 
     def _build_filters(self, initial_point: str) -> QHBoxLayout:
         filters = QHBoxLayout()
@@ -151,6 +166,8 @@ class RunLoadDialog(QDialog):
         )
 
     def _load_selected(self) -> None:
+        if self._interaction_finished:
+            return
         row = self._table.currentRow()
         if not 0 <= row < len(self._visible_runs):
             return
@@ -161,12 +178,15 @@ class RunLoadDialog(QDialog):
         self.accept()
 
     def _open_file(self) -> None:
+        if self._interaction_finished:
+            return
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Load native data file",
             self._start_directory,
             "Native HDF5 (*.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if path:
+        if path and not self._interaction_finished:
             self._selected_path = path
             self.accept()

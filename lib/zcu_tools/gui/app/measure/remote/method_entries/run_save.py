@@ -5,7 +5,7 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-from ._params import optional_integer, required_object, required_string, save_comment
+from ._params import optional_integer, required_string, save_comment
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
@@ -14,11 +14,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "run_save:h_tab_run_start",
         MethodSpec(
             5.0,
-            "Start the observed cfg inputs without ref refresh or substitution. "
+            "Start the current cfg inputs with fixed execution values. "
             "Requires an explicitly selected or newly created working point. "
             "Nonempty aliases maps names to concrete components for this Run only. None and {} accept cached cfg, "
             "resolving its cfg and evidence from the same current source capture; "
-            "global aliases and tab publication do not change. Stale refs and "
+            "global aliases and tab publication do not change. Non-Valid cfg and "
             "unresolvable aliases reject admission. Use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
@@ -27,7 +27,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "tab.get_figure using subtab_id=run.",
             (
                 required_string("tab_id"),
-                required_object("expected", "Observed cfg_id and string revision"),
                 ParamSpec(
                     "aliases",
                     JsonType.OBJECT,
@@ -37,14 +36,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "soc",
-                "device:*",
-                "devices:__set__",
-            ),
             operation_key="tab:{tab_id}",
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -64,14 +56,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 required_string("data_path", "Exact native data.h5 file to load"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-            ),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -93,6 +77,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Current running tab",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -106,16 +91,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "fail, and the complete "
             "current artifacts with paths/status/error; no Save handle or await. "
             "Partial failures stay in the report. run_operation_id optionally "
-            "binds the Run source and does not replace seen guards.",
+            "binds the Run source.",
             (
                 required_string("tab_id"),
                 save_comment(),
                 optional_integer("run_operation_id"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=("tab:{tab_id}:result", "tab:{tab_id}:save"),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -140,16 +121,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "operation_id", "Require the selected analysis source"
                 ),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            refresh_after_write=True,
         ),
     ),
 )

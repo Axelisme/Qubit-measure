@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QLineEdit, QWidget
 from zcu_tools.gui.cfg import CfgSchema, DirectValue, ScalarSpec
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -71,7 +70,9 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
         tab = call(
             sock,
             "tab.get_cfg",
-            {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+            {
+                "tab_id": tab_id,
+            },
             rid="tab",
         )
         assert tab["ok"]
@@ -85,7 +86,9 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
         for method, params in (
             (
                 "tab.get_cfg",
-                {"tab_id": tab_id, "expected": encode_ref(resource.observe().ref)},
+                {
+                    "tab_id": tab_id,
+                },
             ),
         ):
             assert (
@@ -100,7 +103,6 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
                 method,
                 {
                     **params,
-                    "expected": encode_ref(resource.observe().ref),
                 }
                 if method == "tab.get_cfg"
                 else params,
@@ -111,9 +113,6 @@ def test_form_edit_publishes_complete_gui_and_mcp_cfg_then_blocks_run(
             "tab.run_start",
             {
                 "tab_id": tab_id,
-                "expected": encode_ref(
-                    fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                ),
             },
             rid="run",
         )

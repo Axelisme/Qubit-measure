@@ -18,10 +18,10 @@ from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgInputError,
     CfgInputReason,
+    CfgObservation,
     CfgPreconditionError,
     CfgResolution,
     CfgResource,
-    CfgRevision,
     CfgStatus,
 )
 from zcu_tools.gui.session.expression import validate_scalar_expr
@@ -31,9 +31,9 @@ from ._reference_support import Catalog, nested_waveform_resource, waveform_reso
 
 def test_select_custom_waveform_inherits_compatible_values_only() -> None:
     resource = waveform_resource()
-    before = resource.observe()
+    resource.observe()
 
-    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+    changed = resource.select_custom_reference(("ref",), "DRAG")
 
     selected = changed.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -45,16 +45,15 @@ def test_select_custom_waveform_inherits_compatible_values_only() -> None:
         "delta": DirectValue(0.0),
         "alpha": DirectValue(0.0),
     }
-    assert changed.ref.revision == before.ref.revision + 1
-    assert resource.accept(changed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "drag",
         "length": 0.8,
         "sigma": 0.2,
         "delta": 0.0,
         "alpha": 0.0,
     }
-    arb = resource.select_custom_reference(changed.ref.revision, ("ref",), "Arb")
-    restored = resource.select_custom_reference(arb.ref.revision, ("ref",), "Gauss")
+    resource.select_custom_reference(("ref",), "Arb")
+    restored = resource.select_custom_reference(("ref",), "Gauss")
     gauss = restored.tree.children["ref"].value
     assert isinstance(gauss, ReferenceValue)
     assert gauss.value.fields["length"] == DirectValue(0.0)
@@ -90,13 +89,13 @@ def test_select_custom_re_resolves_inherited_expression() -> None:
     assert isinstance(length, EvalValue) and length.resolved == 0.8
 
     sources["duration"] = 1.4
-    changed = resource.select_custom_reference(before.ref.revision, ("ref",), "DRAG")
+    changed = resource.select_custom_reference(("ref",), "DRAG")
 
     length = changed.tree.children["ref"].children["length"].value
     assert isinstance(length, EvalValue)
     assert length.expr == "duration"
     assert length.resolved == 1.4
-    assert resource.accept(changed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "drag",
         "length": 1.4,
         "sigma": 0.2,
@@ -108,19 +107,18 @@ def test_select_custom_re_resolves_inherited_expression() -> None:
 def test_select_custom_preserves_invalid_inherited_input() -> None:
     resource = waveform_resource()
     invalid = resource.edit(
-        resource.observe().ref.revision,
         (CfgEdit(("ref", "length"), DirectValue(None, raw="-")),),
     )
     assert invalid.status is CfgStatus.INVALID
 
-    switched = resource.select_custom_reference(invalid.ref.revision, ("ref",), "DRAG")
+    switched = resource.select_custom_reference(("ref",), "DRAG")
 
     assert switched.status is CfgStatus.INVALID
     length = switched.tree.children["ref"].children["length"].value
     assert isinstance(length, DirectValue)
     assert length.raw == "-" and length.error is not None
     with pytest.raises(CfgPreconditionError):
-        resource.accept(switched.ref.revision)
+        resource.accept()
 
 
 def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
@@ -129,20 +127,18 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert isinstance(parent, CfgSectionValue)
     parent.fields["length"] = DirectValue(1.6)
     catalog.entries["parent"] = ResolvedReference("FlatTop", parent)
-    current = resource.refresh(resource.observe().ref.revision)
-    published = resource.accept(current.ref.revision).values["ref"]
+    resource.refresh()
+    published = resource.accept().values["ref"]
     assert isinstance(published, dict) and published["length"] == 1.6
     catalog.failed_keys = frozenset({"parent"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        current.ref.revision, ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
     assert selected.chosen_key == "<Custom:FlatTop>"
-    published = resource.accept(switched.ref.revision).values["ref"]
+    published = resource.accept().values["ref"]
     assert isinstance(published, dict) and published["length"] == 1.6
     nested = selected.value.fields["raise_waveform"]
     assert isinstance(nested, ReferenceValue)
@@ -152,8 +148,8 @@ def test_select_custom_detaches_parent_but_keeps_nested_link() -> None:
     assert isinstance(rise, CfgSectionValue)
     rise.fields["length"] = DirectValue(0.7)
     catalog.entries["rise"] = ResolvedReference("Gauss", rise)
-    refreshed = resource.refresh(switched.ref.revision)
-    values = resource.accept(refreshed.ref.revision).values["ref"]
+    resource.refresh()
+    values = resource.accept().values["ref"]
     assert isinstance(values, dict)
     assert values["length"] == 1.6
     nested_values = values["raise_waveform"]
@@ -165,27 +161,19 @@ def test_select_custom_nested_waveform_rejects_ref_ancestor() -> None:
     resource, _ = nested_waveform_resource()
     current = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
-        resource.select_custom_reference(
-            current.ref.revision, ("ref", "raise_waveform"), "DRAG"
-        )
+        resource.select_custom_reference(("ref", "raise_waveform"), "DRAG")
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == current
 
 
 def test_select_custom_preserves_nested_inline_without_old_source() -> None:
     resource, catalog = nested_waveform_resource()
-    converted = resource.convert_reference_to_inline(
-        resource.observe().ref.revision, ("ref",)
-    )
-    edited = resource.edit(
-        converted.ref.revision, (CfgEdit(("ref", "raise_waveform", "length"), 0.6),)
-    )
+    resource.convert_reference_to_inline(("ref",))
+    resource.edit((CfgEdit(("ref", "raise_waveform", "length"), 0.6),))
     catalog.failed_keys = frozenset({"parent", "rise"})
     catalog.lookups.clear()
 
-    switched = resource.select_custom_reference(
-        edited.ref.revision, ("ref",), "FlatTop"
-    )
+    switched = resource.select_custom_reference(("ref",), "FlatTop")
 
     selected = switched.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
@@ -193,7 +181,7 @@ def test_select_custom_preserves_nested_inline_without_old_source() -> None:
     assert isinstance(nested, ReferenceValue)
     assert nested.chosen_key == "<Custom:Gauss>"
     assert catalog.lookups == []
-    values = resource.accept(switched.ref.revision).values["ref"]
+    values = resource.accept().values["ref"]
     assert isinstance(values, dict)
     nested_values = values["raise_waveform"]
     assert isinstance(nested_values, dict) and nested_values["length"] == 0.6
@@ -205,25 +193,23 @@ def test_select_custom_preparation_failure_preserves_publication() -> None:
     catalog.failed_keys = frozenset({"rise"})
 
     with pytest.raises(RuntimeError, match="reference resolver defect"):
-        resource.select_custom_reference(before.ref.revision, ("ref",), "FlatTop")
+        resource.select_custom_reference(("ref",), "FlatTop")
 
     assert resource.observe() == before
 
 
 def test_select_custom_notifies_once_and_rejects_reentrant_selection() -> None:
     resource = waveform_resource()
-    seen: list[int] = []
+    seen: list[CfgObservation] = []
 
     def subscriber(observation) -> None:
-        seen.append(observation.ref.revision)
+        seen.append(observation)
         with pytest.raises(CfgPreconditionError):
-            resource.select_custom_reference(observation.ref.revision, ("ref",), "DRAG")
+            resource.select_custom_reference(("ref",), "DRAG")
 
     unsubscribe = resource.watch(subscriber)
-    changed = resource.select_custom_reference(
-        resource.observe().ref.revision, ("ref",), "DRAG"
-    )
-    assert seen == [0, 1]
+    changed = resource.select_custom_reference(("ref",), "DRAG")
+    assert seen == [seen[0], changed]
     assert resource.observe() == changed
     unsubscribe()
 
@@ -245,11 +231,9 @@ def test_select_custom_uses_default_label_for_unnamed_shape() -> None:
         resolution=Catalog().snapshot,
     )
 
-    changed = resource.select_custom_reference(
-        resource.observe().ref.revision, ("ref",), "Custom"
-    )
+    resource.select_custom_reference(("ref",), "Custom")
 
-    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert resource.accept().values == {"ref": {"x": 7.0}}
 
 
 def test_select_custom_rejects_invalid_choice_without_publishing(
@@ -259,10 +243,5 @@ def test_select_custom_rejects_invalid_choice_without_publishing(
     before = resource.observe()
     for path, label in (((), "Second"), (("missing",), "Second"), (("ref",), "Other")):
         with pytest.raises(CfgInputError):
-            resource.select_custom_reference(before.ref.revision, path, label)
+            resource.select_custom_reference(path, label)
         assert resource.observe() == before
-    with pytest.raises(CfgPreconditionError):
-        resource.select_custom_reference(
-            CfgRevision(before.ref.revision + 1), ("ref",), "Second"
-        )
-    assert resource.observe() == before

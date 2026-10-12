@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；尚未落實的核准目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
-- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：資源版本 guard 與 RPC off-main handler 的局部／Remote 契約仍有效；operation handle 分界由 0066 承接。
+- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
 
 ## GUI Service Architecture
@@ -34,7 +34,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：四個 app 的共用傳輸、GUI seen mechanism 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、明確收回與 ref-free cfg acceptance。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、事件與錯誤投影、measure 固定工具及 live catalog、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、獨立 workflows app 的同一 GUI/MCP run。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
@@ -68,8 +69,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
-- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、revision 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
-- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與 explicit revision 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。
+- [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、當前 Valid acceptance 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
+- [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與固定 acceptance 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。
 - [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，shared source catalog、SavedPoint、Post-Analysis 與 flux device 的固定 direct 初值及 eval 解析
+**Last updated:** 2026-10-12
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -50,7 +50,7 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 session 受 LRU／disconnect 回收；由 UI owner 建立的 seeded session 由 owner
 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
 Tab cfg 由 `Session.cfg` 的 `CfgResource` 擁有，不建立 editor session 或
-`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交指定 revision 的命令。
+`State.cfg_schema` 鏡像。Qt 與 remote 都向同一資源提交作用於目前 inputs 的命令。
 `WritebackService` 以 opaque draft 保存候選項及 item-local editor
 session，不能把 preview 當成再次計算候選項的指令。`CfgDraft` 的共用
 Spec／Value、`None`、locked literal、reference binding 與 lowering 契約見
@@ -67,13 +67,12 @@ Run、Qt 與 remote 的資源契約現況見 Cfg ADR；library conversion、sele
 依用途讀 owner 的 read contract、單向呼叫 command 或訂閱已提交 fact。
 版本由資源 owner 發布，不以每次 emit 必然 bump 推導：
 `SessionState.refresh_device_info_cache()` 在 driver info 與快取相同時不 bump，
-不同時 bump device version，caller 再發布變更。Tab cfg edit／Run 使用明示
-`CfgRef`，不另要求每條連線的 cfg seen；它不取代 authentication 或其他 guards。
-其他受護 RPC 由 remote adapter 在 GUI owner thread 比對該連線的 seen 與目前
-版本，依賴與讀取揭露資源由 method entries 宣告。這些 key 未讀過時，即使
-版本為 0 也不能寫入。MCP 原樣轉送 supplied cfg ref，不保存第二份 seen，
-不傳 `expected_versions`，不隱藏預讀或自動重試。Stale 由 caller 明確重讀
-对应完整 publication／snapshot，再決定是否重送。
+不同時 bump device version，caller 再發布變更。這些 counters 描述來源與結果替換，
+不授權寫入。Tab cfg edit／Run 不收 ref。Remote adapter 在 GUI owner thread 檢查
+當下 holder，再呼叫 domain owner。明確 readonly methods 允許 observer；其他
+methods 要求 holder。Authentication、domain guards 和 result provenance 仍適用。
+MCP 不保存第二份 authority，不隱藏預讀或自動重試。Timeout 或斷線後，caller
+先核對現況，再決定下一步，不能假定命令沒有副作用。
 GUI 事件與 service 協作見 [GUI ADR](../../../../../docs/adr/0067-gui-application.md)，
 wire guard 與 off-owner await 見 [Remote README](remote/README.md)。
 
@@ -87,6 +86,27 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
 完成。保存邊界見 [Persistence ADR](../../../../../docs/adr/0063-persistence-ownership.md)，
 關閉與取消見 [Operation ADR](../../../../../docs/adr/0066-operation-lifecycle.md)
 及 [operation draft](../../../../../docs/adr/draft/operation-lifecycle-boundaries.md)。
+
+## Qt control identity
+
+`Controller.control_identity` 是 holder／lock／online 的唯一 owner。MainWindow 的指示燈
+透過 `gui.widgets.control_indicator.ControlIndicator` 投影它，點擊直接委派 `toggle_local`。
+Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次 domain interaction refresh
+同時套用 holder 和既有 busy/readiness 條件，不因背景事件自動收回。GUI 檢視 tab 不改 Remote
+holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
+
+MainWindow 是唯一 Qt authority 訂閱者。`set_writable` 更新主窗與目前 tabs，
+新 tab 建立時套用當下狀態。Tab 與 interactive frontend 只接收可寫狀態。
+Local modal 期間，Qt remote adapter 拒絕 owner 取得，回 `local_busy` 與「Local 使用中」。
+Chooser 使用非 native option。Dialog 不訂閱 control，也不在寫入前重查 holder。
+Inspect 與 Device 的查看入口提供靜態 read-only mode，Inspect 不開放 Add、
+library mutation 或 Arb Waveforms。Inspect Delete 先固定 `ParameterContext`，
+再用 `Controller.apply_library_change` 刪除該 target，不因確認期間 context switch 改寫新 point。
+Add 與 RunLoad 的 finished 仍退休單次輸入，晚到提交不能重新寫入。
+只有量測 Stop 和 device setup Stop 在 Remote 收回 Local locked 並請求 cancellation。
+收回本身不取消 operation。
+Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
+pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。
 
 ## Package Boundaries
 
@@ -105,7 +125,7 @@ capture／apply，shared cfg codec 轉換 cfg raw；`SingleFileCaretaker` 只
   `●` marker while Run is active; Run start/terminal EventBus reactions and tab insertion
   repaint from State, so the marker is never persisted or cached as a second busy state.
 - `ui/`：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
-  writeback view、feedback/prompt widgets；generic cfg form不屬於app package。
+  writeback view、feedback widgets；generic cfg form不屬於app package。
   `ExpTabWidget` owns capability-driven left subtab composition (fixed order Run |
   Analysis | Post-Analysis | Data | Guide, with optional Analysis/Post only when
   the adapter declares the capability) and per-pane `FigureContainer` routing
@@ -234,7 +254,7 @@ Shared layers:
 - `zcu_tools.gui.widgets.cfg`：shared `CfgFormWidget`、field renderers、decoration contract與
   instance-owned frozen exact renderer registry。
 - `zcu_tools.gui.session`：context、SoC、device、project settings、predictor、operation
-  handles、operation runner、notify channel、progress/shutdown service、shared dialogs。
+  handles、operation runner、progress/shutdown service、shared dialogs。
 - `zcu_tools.gui.remote`：NDJSON RPC endpoint、framing、wire errors、router base。
 - `zcu_tools.gui.plotting`：explicit figure host、container 與 export。
 - `zcu_tools.mcp.measure`：agent-facing MCP policy layer and tool surface。
@@ -397,10 +417,9 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    renders its params through the app-local 13 px ledger with whole-header
    folding and a full-width `Analyze` immediately below parameters.
 
-3. `Controller.start_run(tab_id, expected)` requires the observed `CfgRef`.
-   Qt supplies the form's displayed ref; remote callers supply their observed ref.
-   A different cfg identity or revision rejects Run without refresh or fallback.
-   `GuardService.capture_run_inputs` accepts that exact Valid revision and captures
+3. `Controller.start_run(tab_id)` accepts current Valid cfg without an expected ref.
+   Qt and remote use the same admission path.
+   `GuardService.capture_run_inputs` accepts fixed cfg and captures
    RunInputs with AcceptedConfig provenance, fixed ParameterContext and storage.
    Cfg.dev stores role-to-device names, not State-owned settings or setup patches.
    Cached observations used for cfg sources or remote guards are not the Run snapshot.
@@ -449,7 +468,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
 
 - `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
   缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
-  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource identity 並推進 revision。
+  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource lifetime。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
 dynamic selectors must match live options and the new complete draft must be valid
@@ -557,12 +576,12 @@ GUI flux adapter 表單的 `flux_unit` 是 A／V／native 三選一，初始 A�
 
 Measure Config uses `ResourceCfgFormWidget` and a State-owned cfg resource.
 The form submits every input change at once, so it always shows the published
-cfg. Run starts with the shown publication ref and only when it is Valid; an
+cfg. Run accepts current inputs only when their publication is Valid; an
 Invalid input never runs the previous values. Input that repairs an Invalid
 publication still cannot bypass busy, context or SoC gates. Library editors and writeback keep their existing `CfgDraft` binding behavior.
 
 `Session.cfg` 只引用該 tab 的 `CfgResource`，不保存另一份 live schema。
-CfgResource 擁有 input、resolution、revision、publication 與 acceptance。
+CfgResource 擁有 input、resolution、publication 與 acceptance。
 Qt、remote、reset 和 load 共用這個 owner。Edit 完整 batch 原子發布，合法未完成輸入
 發布 Invalid；拒絕不留下成功前綴。Observe、snapshot 和 Run acceptance 不重新讀取來源。
 `TabSnapshot.cfg_schema` 是 detached input memento，只供 snapshot／workspace restore。
@@ -584,8 +603,8 @@ Nonempty caller-owned `aliases` maps alias names to concrete names and
 resolves the same inputs against its temporary capture. It changes neither tab
 publication nor global rows. Omission, None and {} use cached acceptance.
 Recipe parameter/library queries and cfg preview use the same named overrides.
-Temporary preview requires the original full CfgRef and returns an observation
-without replacing it or publishing. Adapters do not declare parameter roles.
+Temporary preview resolves current inputs and returns an observation
+without replacing the cached publication. Adapters do not declare parameter roles.
 EMPTY app captures without overrides retain deferred None; nonempty overrides
 reject no_context. Native Load takes Save storage from that one Load-time capture
 and reads historical fixed names without expanding current alias links.
@@ -730,8 +749,6 @@ controlled fields.
 - Analyze and post-analyze use async handles but no hardware exclusion.
 - `OperationChannel` is the ordered cross-thread channel for terminal state
   and Stop requests with optional cancellation reasons.
-- `NotifyChannel` mirrors the same pattern for the `notify.open` / `notify.await`
-  RPC prompt. `notify.await` bounds the consumer wait so MCP transport stays alive.
 - Run reserves the existing tab busy state before cleanup and registration.
   Active-operation reads project domain-admitted handles. A startup reservation
   has no domain handle until submission succeeds; failed submission releases busy
@@ -781,8 +798,7 @@ commit explicitly clears canvases when the new State has no figure.
 
 `remote/` is the GUI-process driving adapter, peer to `ui/` rather than an
 application service. It owns app-specific request coercion and wire projection:
-method registry, event serialization, main-thread dispatch, resource-version
-guard, editor lifecycle, and diagnostics.
+method registry, event serialization, main-thread dispatch, holder admission, editor lifecycle, and diagnostics.
 It projects internal tab interaction/content facts to the coarse
 `{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
 pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
@@ -794,7 +810,7 @@ on the app controller façade for connection policy. Entry list/info/new/open RP
 use `SetupControlPort` and explicit entry names; there is no project identity mapping.
 
 `zcu_tools.mcp.measure` is the agent-facing bridge: fixed tool declarations,
-short waits and live catalog. The GUI remote adapter owns per-connection seen
+short waits and live catalog. The GUI remote adapter owns holder admission
 and operation outcomes; MCP only maps opaque agent handles to GUI operation IDs.
 New GUI RPC methods that should be agent-accessible need a live catalog policy and tests.
 
@@ -894,7 +910,7 @@ preview figure。Preview 失敗不撤銷已保存的資產或 revision。GUI 自
 remote handler 只將 owner 的 typed status／preview result 投影為 wire payload。
 Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩定 `reason` 的
 `RemoteError`，走失敗的 RPC/tool call，不將 `success=false` 當一般 payload。
-寫入受 `arb_waveforms` resource version 的 expected-version guard 約束；GUI 和 agent
+寫入受當下 holder admission 與資產 domain guards 約束；GUI 和 agent
 共用同一資產 owner，遠端只作錯誤和 payload 投影。共同錯誤類別見
 [Remote expected-error ADR](../../../../../docs/adr/0068-remote-transport.md)。
 

@@ -47,9 +47,7 @@ class RangeEditor:
 
     def submit(self, edge: str, value: DirectValue | EvalValue) -> None:
         self.submitted.append((edge, value))
-        self.resource.edit(
-            self.resource.observe().ref.revision, (CfgEdit(("range", edge), value),)
-        )
+        self.resource.edit((CfgEdit(("range", edge), value),))
 
     def display(self, observation: CfgObservation) -> None:
         value = observation.tree.children["range"].value
@@ -107,8 +105,7 @@ def test_sampling_round_trip_uses_owner_normalization(editor: RangeEditor):
     assert editor.submitted == [("step", DirectValue(None, raw="0.5"))]
     assert points.text() == "5"
     observation = editor.resource.observe()
-    assert observation.ref.revision == 1
-    assert editor.resource.accept(observation.ref.revision).values["range"] == {
+    assert editor.resource.accept().values["range"] == {
         "start": 0,
         "stop": 2,
         "expts": 5,
@@ -122,7 +119,6 @@ def test_sampling_round_trip_uses_owner_normalization(editor: RangeEditor):
     points.setText("9")
     observation = editor.resource.observe()
     assert observation.status is CfgStatus.VALID
-    assert observation.ref.revision == 3
     assert step.text() == "0.25"
     assert len(editor.submitted) == 3
 
@@ -131,11 +127,9 @@ def test_external_publication_updates_expression_without_resubmission(
     editor: RangeEditor,
 ):
     edge = "center" if isinstance(editor.widget, CenteredSweepInputWidget) else "start"
-    changed = editor.resource.edit(
-        editor.resource.observe().ref.revision,
+    editor.resource.edit(
         (CfgEdit(("range", edge), EvalValue("offset")),),
     )
-    assert changed.ref.revision == 1
     assert editor.submitted == []
     scalar = editor.widget.findChildren(ScalarInputWidget)[0]
     line = scalar.findChild(QLineEdit)
@@ -143,7 +137,6 @@ def test_external_publication_updates_expression_without_resubmission(
     assert line.text() == "offset"
     line.setText("offset ")
     assert editor.submitted == [(edge, EvalValue("offset"))]
-    assert editor.resource.observe().ref.revision == 2
 
 
 def test_endpoint_raw_input_is_not_parsed_by_presentation(editor: RangeEditor):
@@ -157,13 +150,11 @@ def test_endpoint_raw_input_is_not_parsed_by_presentation(editor: RangeEditor):
     assert line.text() == "1e-"
     line.setText("1e-1")
     assert editor.resource.observe().status is CfgStatus.VALID
-    assert editor.resource.observe().ref.revision == 2
 
 
 def test_expression_edge_tooltip_shows_full_expression(editor: RangeEditor):
     edge = "center" if isinstance(editor.widget, CenteredSweepInputWidget) else "start"
     editor.resource.edit(
-        editor.resource.observe().ref.revision,
         (CfgEdit(("range", edge), EvalValue("offset")),),
     )
     line = editor.widget.findChildren(ScalarInputWidget)[0].findChild(QLineEdit)

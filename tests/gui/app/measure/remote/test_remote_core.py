@@ -24,7 +24,6 @@ from zcu_tools.gui.app.measure.remote.wire_version import (
     GUI_VERSION,
     WIRE_VERSION,
 )
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.measure.assembly import build_measure_tools
@@ -116,7 +115,7 @@ def test_tab_new_list_close_roundtrip(fx):
             sock, {"id": "1", "method": "tab.new", "params": {"adapter_name": "fake"}}
         )
         resp = _recv_response(sock)
-        assert resp["ok"] is True
+        assert resp["ok"] is True, resp
         tab_id = resp["result"]["tab_id"]
         assert tab_id
 
@@ -358,9 +357,6 @@ def test_run_start_then_running_tab_then_finishes(fx):
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )

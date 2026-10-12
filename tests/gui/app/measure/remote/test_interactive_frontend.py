@@ -12,7 +12,9 @@ import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
+from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.resources.entry import component_registry
@@ -59,7 +61,7 @@ def mounted_fx(qapp, tmp_path):
         window.show()
         qapp.processEvents()
         yield fixture, window
-        fixture.ctrl._background_svc.quiesce()  # pyright: ignore[reportPrivateUsage] - owner deliveries before Qt teardown
+        fixture.ctrl.quiesce()
         fixture.stop()
         window.deleteLater()
         qapp.processEvents()
@@ -484,12 +486,19 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
     with open_client(fx.service.port) as sock:
         original = interact(sock, tab_id)["result"]["state"]
         assert window.interactive_presentation(tab_id) == (widget.figure, False)
+        assert rpc(sock, "control.release", {})["ok"] is True
         pointer(canvas, "button_press_event", original["flux_half"])
         pointer(canvas, "motion_notify_event", original["flux_half"] + 0.4)
+        presentation = window.interactive_presentation(tab_id)
+        assert presentation is not None
+        figure, preview_active = presentation
+        assert figure is widget.figure
+        assert preview_active is True
+        assert render_figure_png(figure).startswith(b"\x89PNG")
+        assert rpc(sock, "control.acquire", {})["ok"] is True
         preview = interact(sock, tab_id)["result"]
         assert preview["state"] == original
-        assert preview["preview_active"] is True
-        assert base64.b64decode(preview["figure"]["png_b64"]).startswith(b"\x89PNG")
+        assert preview["preview_active"] is False
         done = interact(sock, tab_id, {"command": "done"})
         assert done["ok"] is True
         assert done["result"]["state"] == original
@@ -499,7 +508,9 @@ def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
         assert committed["pick"] is not widget.figure
         assert window.interactive_presentation(tab_id) is None
         qapp.processEvents()
-        tab_widget = window._tab_widgets[tab_id]  # pyright: ignore[reportPrivateUsage] - locate the tested view
+        tab_widget = next(
+            tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
+        )
         assert (
             tab_widget.get_current_figure_for_pane("analysis")
             is fx.state.get_tab(tab_id).analysis.plots["pick"]
@@ -575,7 +586,9 @@ def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -
         assert window.interactive_presentation(first_id) is None
         qapp.processEvents()
         assert window.interactive_presentation(second_id)[0] is second_widget.figure
+        assert rpc(sock, "control.release", {})["ok"] is True
         button(second_widget, "Swap Lines").click()
+        assert rpc(sock, "control.acquire", {})["ok"] is True
         after = interact(sock, second_id)["result"]["state"]
         assert after["flux_half"] == before["flux_int"]
         moved = interact(

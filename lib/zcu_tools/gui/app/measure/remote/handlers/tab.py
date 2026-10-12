@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.cfg import is_custom_reference_key
-from zcu_tools.gui.cfg.edit_codec import decode_edits, decode_ref, encode_ref
+from zcu_tools.gui.cfg.edit_codec import decode_edits
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
     CfgPreconditionError,
-    CfgStaleError,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -108,7 +107,6 @@ def tab_operation_state(
     return {
         "tab_id": tab_id,
         "adapter_name": adapter.tab_control.get_tab_adapter_name(tab_id),
-        "cfg_ref": encode_ref(adapter.cfg_lookup(tab_id).observe().ref),
         "interaction": {
             "global_run_active": bool(interaction.global_run_active),
             "is_running": bool(interaction.is_running),
@@ -281,13 +279,12 @@ def temporary_aliases(params: Mapping[str, object]) -> dict[str, str] | None:
 def h_tab_get_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Read cached cfg, or preview named aliases at the mandatory expected CfgRef.
+    """Read cached cfg, or preview current inputs against named aliases.
 
     aliases maps alias names to concrete components. None and {} read cached
-    cfg without requiring expected. Nonempty aliases returns the same observation
-    shape/ref without publication or Run. Missing expected, malformed aliases,
-    stale refs and source failures reject.
-    Ordinary reads do not query sources or refresh observation guards.
+    cfg. Nonempty aliases resolves current inputs without publication or Run.
+    Malformed aliases and source failures reject. Ordinary reads do not query
+    sources or refresh observation guards.
     """
     from ..cfg_observation import build_resource_observation, cfg_error_to_remote
 
@@ -295,14 +292,8 @@ def h_tab_get_cfg(
     tab_id = str(params["tab_id"])
     if not aliases:
         return build_resource_observation(adapter.cfg_lookup(tab_id).observe())
-    if "expected" not in params:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "aliases preview requires expected cfg_ref"
-        )
     try:
-        observation = adapter.tab_control.preview_cfg(
-            tab_id, decode_ref(params["expected"]), aliases=aliases
-        )
+        observation = adapter.tab_control.preview_cfg(tab_id, aliases=aliases)
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     return build_resource_observation(observation)
@@ -315,12 +306,8 @@ def h_tab_reset_cfg(
 
     tab_id = str(params["tab_id"])
     try:
-        expected = decode_ref(params["expected"])
         editor = adapter.cfg_lookup(tab_id)
-        actual = editor.observe().ref
-        if expected != actual:
-            raise CfgStaleError(expected, actual)
-        result = editor.reset(expected.revision)
+        result = editor.reset()
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")
@@ -334,13 +321,9 @@ def h_tab_edit_cfg(
 
     tab_id = str(params["tab_id"])
     try:
-        expected = decode_ref(params["expected"])
         edits = decode_edits(params["edits"])
         editor = adapter.cfg_lookup(tab_id)
-        actual = editor.observe().ref
-        if expected != actual:
-            raise CfgStaleError(expected, actual)
-        result = editor.edit(expected.revision, edits)
+        result = editor.edit(edits)
     except (CfgInputError, CfgPreconditionError) as exc:
         raise cfg_error_to_remote(exc) from exc
     follow_tab(adapter, tab_id, "run")

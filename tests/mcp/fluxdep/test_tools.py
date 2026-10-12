@@ -12,11 +12,20 @@ from typing import Literal, NotRequired, TypedDict
 
 import pytest
 from PIL import Image
-from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
+from zcu_tools.mcp.core.bridge import (
+    GuiTransportTimeoutError,
+    McpBridge,
+    MCPBridgeConfig,
+)
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server
 
-from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
+from tests.mcp.fluxdep._support import (
+    Client,
+    GuiError,
+    GuiResponse,
+    RecordingTransport,
+)
 
 
 class TextContent(TypedDict):
@@ -378,41 +387,84 @@ def test_transport_timeout_has_no_reconnect_or_replay(
     assert client.transport.close_count == 1
 
 
-def test_connect_and_launch_delegate_explicit_lifecycle_arguments(
-    client: Client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    connects: list[tuple[int, str | None]] = []
-    launches: list[tuple[Path, int, str | None, bool]] = []
+class RecordingLifecycleBridge(McpBridge):
+    """Isolate connect/spawn IO while retaining real bridge RPC and correlation.
 
-    def connect(port: int, token: str | None = None) -> str:
-        connects.append((port, token))
+    connects contains (port, token) delegations. launches contains
+    (repo_root, port, token, auto_connect, extra_args) delegations; extra_args is
+    copied when present. These synthetic notes do not open sockets or processes.
+    """
+
+    def __init__(self, config: MCPBridgeConfig, transport: RecordingTransport) -> None:
+        super().__init__(config, transport=transport)
+        self.connects: list[tuple[int, str | None]] = []
+        self.launches: list[tuple[Path, int, str | None, bool, list[str] | None]] = []
+
+    def connect(self, port: int, token: str | None = None) -> str:
+        """Record the supplied port/token and return the synthetic connect note."""
+        self.connects.append((port, token))
         return "connected"
 
     def launch(
+        self,
         repo_root: Path,
         port: int,
         token: str | None = None,
         *,
         auto_connect: bool = True,
+        extra_args: list[str] | None = None,
     ) -> str:
-        launches.append((repo_root, port, token, auto_connect))
+        """Record all launch arguments and return the synthetic launch note."""
+        self.launches.append(
+            (
+                repo_root,
+                port,
+                token,
+                auto_connect,
+                None if extra_args is None else list(extra_args),
+            )
+        )
         return "launched"
 
-    monkeypatch.setattr(client.server.bridge, "connect", connect)
-    monkeypatch.setattr(client.server.bridge, "launch", launch)
-    assert (
-        client.server.tools["fluxdep_connect"]["handler"](
+
+def test_connect_and_launch_delegate_explicit_lifecycle_arguments(
+    client: Client, tmp_path: Path, record_property
+) -> None:
+    config = client.server.bridge.config
+    transport = RecordingTransport()
+    bridge = RecordingLifecycleBridge(config, transport)
+    server = build_fluxdep_server(config, tmp_path, bridge=bridge)
+    versions = {"wire_version": config.wire_version, "gui_version": 79}
+    control = {
+        "holder": "rpc:agent",
+        "locked": False,
+        "online": True,
+        "me": True,
+    }
+    transport.replies.extend(
+        (GuiResponse(result=versions), GuiResponse(result=control))
+    )
+    try:
+        assert server.tools["fluxdep_connect"]["handler"](
             {"port": 9876, "token": "test-token"}
+        ) == {"connection": "connected", "versions": versions, "control": control}
+        assert bridge.connects == [(9876, "test-token")]
+        assert [
+            (request["method"], request["params"]) for request in transport.requests
+        ] == [
+            ("wire.version", {}),
+            ("control.connect", {"label": "agent", "mode": "owner"}),
+        ]
+        requests = list(transport.requests)
+        record_property("handshake_requests", json.dumps(requests))
+        assert (
+            server.tools["fluxdep_launch"]["handler"](
+                {"port": 9877, "auto_connect": False}
+            )
+            == "launched"
         )
-        == "connected"
-    )
-    assert connects == [(9876, "test-token")]
-    assert (
-        client.server.tools["fluxdep_launch"]["handler"](
-            {"port": 9877, "auto_connect": False}
-        )
-        == "launched"
-    )
-    assert len(launches) == 1
-    assert launches[0][1:] == (9877, None, False)
-    assert client.transport.requests == []
+        assert bridge.launches == [(tmp_path, 9877, None, False, None)]
+        assert transport.requests == requests
+        assert not transport.replies
+    finally:
+        bridge.disconnect()

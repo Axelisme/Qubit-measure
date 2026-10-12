@@ -7,10 +7,7 @@ from zcu_tools.gui.cfg.edit_codec import (
     decode_edits,
     decode_input,
     decode_path,
-    decode_ref,
-    decode_revision,
     encode_input,
-    encode_ref,
 )
 from zcu_tools.gui.cfg.model import DirectValue, EvalValue
 from zcu_tools.gui.cfg.resource import CfgInput, CfgInputError, CfgInputReason
@@ -112,35 +109,6 @@ def test_nonfinite_wire_is_invalid_value(wire: object) -> None:
 def test_nonfinite_complex_cannot_be_encoded(value: complex) -> None:
     with pytest.raises(CfgInputError, match="finite"):
         encode_input(value)
-
-
-@pytest.mark.parametrize(
-    "wire", ["", "00", "01", "+1", "-1", " 1", "1 ", "1.0", "١", 1, True, None]
-)
-def test_revision_requires_canonical_decimal_string(wire: object) -> None:
-    with pytest.raises(CfgInputError, match="canonical decimal"):
-        decode_revision(wire)
-
-
-@pytest.mark.parametrize("wire", ["0", "1", str(2**100)])
-def test_revision_roundtrip_is_lossless(wire: str) -> None:
-    expected = {"cfg_id": "resource-a", "revision": wire}
-    assert encode_ref(decode_ref(expected)) == expected
-
-
-@pytest.mark.parametrize(
-    "wire",
-    [
-        None,
-        {},
-        {"cfg_id": "a"},
-        {"cfg_id": "", "revision": "0"},
-        {"cfg_id": 1, "revision": "0"},
-    ],
-)
-def test_ref_rejects_missing_or_invalid_identity(wire: object) -> None:
-    with pytest.raises(CfgInputError, match="cfg_id"):
-        decode_ref(wire)
 
 
 def test_path_preserves_literal_segments_and_root() -> None:

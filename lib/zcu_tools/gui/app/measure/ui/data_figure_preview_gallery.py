@@ -206,7 +206,7 @@ class _PreviewCard(QWidget):
         if vp.width() <= 0 or vp.height() <= 0:
             # Try card size minus margins, or assume minimal viewport.
             cw = self.width()
-            ch = self.height()
+            self.height()
             # Estimate inner label size: card width minus outer margins (12) and
             # card inner margins, label min 120.
             est_w = max(120, cw - 12) if cw > 0 else 396

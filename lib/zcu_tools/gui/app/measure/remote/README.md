@@ -1,10 +1,9 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12, entry metadata in EMPTY and captured SavedPoint contracts
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
-local NDJSON RPC surface over the live `Controller`, injects measure's resource
-observation declarations and owner version provider into shared remote dispatch,
+local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
 serializes selected events, and owns measure-specific editor lifecycle tracking.
 
 The agent-facing MCP bridge lives in `zcu_tools.mcp.measure`. This package does
@@ -13,7 +12,7 @@ not declare MCP tools and does not own stdio transport.
 ## Layout
 
 - `service.py`：`RemoteControlAdapter`, a measure-gui subclass of shared
-  `RemoteControlServiceBase`; injects observation policies and versions, and owns
+  `RemoteControlServiceBase`; injects control authority, and owns
   client editor context, writeback key aliases, diagnostics and editor cleanup.
 - `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
@@ -21,7 +20,7 @@ not declare MCP tools and does not own stdio transport.
   or render-view calls.
 - `method_specs.py`：Qt-free projection for wire method schema and timeouts.
 - `method_entries/`：single registration source for method name, handler ref,
-  `MethodSpec`, agent exposure/guard policy and `ParamSpec` shorthands. The
+  `MethodSpec`, agent exposure, readonly and operation policy and `ParamSpec` shorthands. The
   `rpc.catalog` projection uses those same entries; handler refs are resolved
   only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
@@ -62,8 +61,7 @@ these projections; no sample-specific RPC is added.
   Each client has a 16 MiB encoded-byte budget including its in-flight frame;
   exceeding it closes that client and releases its backlog. MCP rejects oversized
   requests before sending and closes on oversized incoming frames with an explicit error.
-- A failed full read does not advance the GUI connection's seen map. Large context
-  export is not a framing exception or an implicit partial read.
+- Large context export is not a framing exception or an implicit partial read.
 - Error codes are closed and typed in `gui.remote.errors`.
 - `wire.version` is available before auth; all other methods require auth when a
   token is configured. MCP `connect(token=...)` authenticates before catalog
@@ -71,6 +69,31 @@ these projections; no sample-specific RPC is added.
   wire-version mismatch.
 - Loopback without token means any same-user local process can control the GUI.
 
+## Control identity initialization
+
+After `wire.version` and optional `auth`, send `control.connect` with
+`{label: "agent", mode: "owner"}` (both values default as shown). Before this
+command a socket is an observer: explicit readonly methods and `rpc.catalog`
+are available, business writes return `not_holder`, and acquire/release return
+`readonly_connection`. Initialization fixes label and mode for that socket.
+An identical repeat is inert; a different label or mode returns `invalid_params`.
+Reconnect to change identity. Label is a trusted LAN identity, not a credential.
+
+Owner mode auto-acquires only unlocked Local. Readonly never acquires, even
+with the holder's label. `control.status`, `control.connect`, `control.acquire`
+and `control.release` return `{holder, locked, online, me}`. Local is always
+online; Remote is online while any initialized socket has its label. `me` is
+true only for an owner-mode holder. Disconnect does not release authority or
+cancel accepted operations. Acquire refuses `control_locked`, `control_held`
+(another label online), or `readonly_connection`. Release requires the holder
+and returns unlocked Local. GUI reclaim returns locked Local.
+
+Unmarked methods require holder at owner-loop execution, before domain effects and existing domain guards. `tab.interact` remains unmarked, including reads.
+A `not_holder` error includes `{holder, locked, online}`. `operation.await` is
+readonly; a new holder can cancel accepted work. Subscription methods only
+change connection-local observation subscriptions and remain available to
+observers. Measure and Fluxdep share this authority; Dispersive stays readonly.
+Cfg commands use current inputs without refs. See ADR-0070 for authority and GUI gates.
 ## Device setup
 
 `device.setup(name, cfg)` accepts a complete Info constructor cfg and returns
@@ -109,7 +132,6 @@ empty reply holder（ADR-0068）。
 Only bounded wait handlers run off-main:
 
 - `operation.await`
-- `notify.await`
 
 Off-main handlers only consume thread-safe channels. They do not read or mutate
 owner-thread state, version tables, controller objects, editor sessions, or
@@ -139,7 +161,7 @@ Qt reaction matrix. Their serializers deliberately omit those facts and preserve
 the existing event names and `{tab_id, requery}` shape.
 
 Cfg-editor change producers pass a payload factory rather than transport state.
-Editor versions still bump on every edit; `current_targets()` is materialized and projected once
+`current_targets()` is materialized and projected once
 only when an `editor_id` subscriber exists. `editor_closed` removes a client's
 subscription only after its close push is accepted by that client's queue.
 
@@ -152,9 +174,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 98`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 131`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 116`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 99`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 132`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 117`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -164,31 +186,29 @@ reload signal bump `GUI_VERSION`; MCP-only tool/policy changes bump
 `MCP_VERSION`. A GUI wire-contract change bumps both `WIRE_VERSION` and
 `GUI_VERSION`.
 
-## Resource-Version Guard
+## Current data and provenance
 
-Measure State maintains a monotonic resource version table for context, SoC,
-devices, tabs, results, save paths, and editor sessions. Shared `gui.remote`
-maintains each connection's initially empty seen map and compares it with the
-injected current versions on the State owner thread before calling the controller.
-`ResourceObservationPolicy` declares guard, full-read and write tracking; measure's
-`AgentMethodPolicy` adds agent exposure and operation metadata. Shared dispatch
-rejects off-main observations at construction. Measure keeps only the writeback
-pane alias mapping and app-specific lifetime hooks. Missing observations, including
-version zero, are stale. Wire methods do not accept `expected_versions`.
+Reads return current owner projections; they do not establish a per-connection
+mutation baseline. Holder admission replaces seen maps and resource-version
+comparison. Domain guards, result provenance, busy checks and lifetime still
+apply. RPCs are forwarded once, without hidden refresh, retry or rollback.
+Timeout or response failure may follow an accepted mutation.
 
-Run uses the explicit cfg ref and fixed ParameterContext, not live md/ml.
+Run accepts current Valid cfg and fixes its values and source basis.
+Result-bound `run_operation_id` and analysis `operation_id` protect the original
+source from replacement, returning `result_superseded` rather than reading a
+new result. These tokens are session-local provenance, not control credentials.
+Snapshot counters distinguish replacements, including reloads of the same file.
+Run fixes ParameterContext at current cfg acceptance, not live md/ml.
 Cfg.dev contains role-to-device names, not settings patches. Run does not precheck
 whether those names exist. Core lookup of context.devices[name] reports a missing
 name when the device is used, and the error names that device. Cfg format and required
-unit validation remain. Device seen guards remain connection-local observations;
-they do not validate every cfg.dev name or supply RunMetadata.device_snapshot.
+unit validation remain. Holder admission does not validate every cfg.dev name or supply RunMetadata.device_snapshot.
 After the hardware lease and before adapter.run, the Run framework separately reads
 get_info once from every connected device. Any failure rejects Run without hardware
 writes or cache fallback; no devices produce `{}`. Save uses that fixed pre-experiment
 snapshot and never re-reads hardware.
-Cfg admission uses only the resource identity and revision. A ref observed by
-another connection is valid, but tab, SoC and device seen guards still belong to
-the requesting connection. Run and existing-tab native Load do not require exporting
+Run and existing-tab native Load do not require exporting
 active context. Load 在 adapter 呼叫前固定 Load-time selection，並獨立捕捉 Save storage。
 它不讀 tab birth 或後來的 selection。同 opened entry 且可定位歷史 point 時，
 context owner 按 native 檔案的 point 與 resolved alias names 一次讀取持久 point／library。
@@ -196,99 +216,48 @@ context owner 按 native 檔案的 point 與 resolved alias names 一次讀取�
 不是原始量測的參數版本。跨 entry、EMPTY 或無歷史 point 時，analysis source 為 None；
 context-free analysis 仍可用，不回退目前 alias。同 entry 的來源讀取失敗在替換結果前傳遞，
 舊結果不變。Load preserves the file's original metadata; it guards tab/result/analysis revisions,
-not session focus. Editor commit and writeback retain their existing context guards.
+not session focus. Editor commit and writeback retain their captured context lifetime.
 
-GUI owns observation and write tracking:
+`tab.snapshot` reports availability, effective paths and published artifact
+state, not raw arrays or writeback contents. Its source operation ID identifies
+the Run that published raw data; loaded or empty results have null.
+Analysis result queries may bind to the original operation and return actual
+result params separately from the next-edit draft. Figure reads and image saves
+can also bind to that source. Finite summary values remain unchanged; non-finite
+values become null with `invalid` paths and reasons. Generic context reads do
+not use this analysis-only projection.
 
-- Successful full reads record only the keys named by `reveals`. Optional partial
-  parameters, including an explicit empty `prefix`, do not reveal the whole cfg.
-  The dispatcher preserves the original request to distinguish omission from defaults.
-- Successful writes advance only previously seen resources whose observations
-  match the handler's before-versions. Unseen consequential changes stay unseen.
-  New-tab identity certifies existence only, not cfg/result/analysis.
-- Handler failure or timeout does not establish seen. Reply encoding failure
-  rolls back its observation update on the owner thread before the next request.
-  This is not rollback of business effects or proof of client receipt.
-- `tab.snapshot(tab_id)` reveals existence, result/analysis/post revisions,
-  availability and effective paths. It does not serialize raw result arrays or
-  claim cfg/writeback contents. Its `result_state.source_operation_id` identifies
-  the Run that published the current raw result; Load and empty results have null.
-  Optional `run_operation_id` on `tab.save_data` and `tab.analyze` rejects another
-  source with `result_superseded`, even after a fresh snapshot. Omission or null
-  keeps current-result semantics. The source token is session-local and does not
-  unlock missing or stale observations. The all-tabs index reveals no per-tab state.
-- Primary and Post result getters preserve finite summary values and replace
-  NaN or Infinity with null. The `invalid` list records each summary path and
-  `non_finite` reason, including nested dict and array paths. Existing null values
-  add no reason. Warnings and errors remain in the summary. This projection only
-  applies to analysis results; full context reads still reject unsupported values.
-- Analysis result getters with an explicit `operation_id` verify the pane's
-  provenance and return its summary, actual result `params`, and complete
-  `operation_state`. Result params are distinct from the next-edit parameter
-  draft. Successful bound reads establish the same observations as a single-tab
-  snapshot. Ordinary summary queries and figure previews establish none. Bound figure reads and
-  image saves reject replaced results with `result_superseded`; image saves also
-  retain the existing seen guards. No failed read or stale write triggers a retry.
-- `soc.info(include_cfg=true)` reveals the full SoC cfg. `context.snapshot`
-  returns `{target, point, library, aliases}` from one published parameter capture.
-  Every successful reply includes complete ordered `{alias, value, resolved}` rows;
-  a failed alias has `resolved=null` and `error`. The public capture owner resolves
-  each row against its fixed point without consumer kind checks. Alias failures
-  do not hide source failures. Optional `summaries=true` preserves dict trees and
-  scalars, replacing array/list leaves with array/matrix/items descriptions.
-  Optional `path` takes priority and returns `{target, aliases, path, value}` with
-  a complete value. Dotted paths start with `target`, `point`, `library` or
-  `aliases`; mapping segments are literal keys and list indices are canonical
-  nonnegative decimals, such as `aliases.0.resolved`. Invalid/missing segments
-  return invalid input naming the first bad segment. There is no escaping or
-  domain-path alias. Only omission of both optional parameters establishes seen;
-  explicit `summaries=false` or an empty `path` cannot refresh the guard.
-  `target` is the `saved_point` locator. `point` and
-  `library` contain the complete working-unit native documents, including
-  headers, registered component fields and provenance. The library contains
-  persistent Specs; this read does not materialize references or open waveform
-  assets. EMPTY has parameters=None, so this parameter snapshot fails until a
-  point is explicitly selected or created; necessary source faults also fail.
-  Without an opened entry, entry metadata and source binding are absent. An
-  opened entry without a selected point is still EMPTY, but entry.info,
-  point.list and setup source binding remain readable. SoC, device and
-  independent predictor operations retain their own admission rules. Run,
-  writeback and current-point Inspect Set require a selected point at application
-  admission. Writeback retains its captured SavedPoint(E, A) after selecting B
-  in the same entry; a cross-entry destination is rejected.
-  Complex numbers retain the `{__complex__: [real, imag]}` wire projection.
-  Unsupported values, non-finite numbers and encoding failures reject the full
-  read and establish no baseline. These replies may be large or sensitive.
-- Off-main methods cannot declare guard/reveals or owner-thread write tracking.
-  Disconnection discards seen; reconnection requires explicit new reads.
+`context.snapshot` reads one published parameter capture: target, point,
+library and complete ordered alias rows. Alias resolution failures keep their
+error and a null resolved value. Summaries preserve dict trees and scalars,
+replacing array/list leaves with descriptions. Path selects one complete value;
+neither projection grants write authority. Target is the saved_point locator.
+Point and library contain native documents, headers, component fields and
+provenance. The library retains persistent Specs without materializing references
+or opening waveform assets. Complex values use the reversible wire tag.
+Unsupported values, non-finite numbers and encoding errors fail the read.
+Context replies may be large or sensitive.
 
-MCP forwards each RPC once and returns observed operation state to the agent.
-It does not keep a second seen map, consume write receipts, or perform hidden
-pre-reads to unlock a mutation. Snapshot revisions distinguish successive results,
-including replacements from the same source file.
+Entry new/open publishes metadata without selecting a point. Parameters remain
+None and readiness stays EMPTY until point.use or point.new. Entry metadata,
+point.list and setup source binding remain readable in EMPTY. Run, writeback and
+current-point Inspect Set require a selected point at application admission.
+SoC, device and independent predictor operations retain their own rules.
+Writeback keeps its captured SavedPoint after selecting another point in the
+same entry; a cross-entry destination is rejected.
 
-A stale guarded mutation has one wire-level recovery contract. The server returns
-`PRECONDITION_FAILED` with `data={"stale": [...]}`, where `stale` lists every
-resource whose current version no longer matches the caller baseline. The client
-must re-snapshot each listed resource through its corresponding read method,
-then decide whether to retry. It must not retry against the old snapshots. Stale conflicts
-do not add another `ErrorCode`; a future Web adapter may translate this existing
-failure into an HTTP-specific status without changing the wire enum (ADR-0068).
-
-`tab.open_file` creates a new tab and reuses the application load operation,
-including cfg backfill, cleanup on load failure and focus restoration. It requires
-an explicitly observed context, not observations of a tab that does not yet exist.
-Backfill failure retains the result and reports `not_applied`; cleanup failure
-reports `cleanup_failed`. Existing-tab `tab.load_data` requires an observed tab snapshot,
-not active context. Native Load restores historical metadata without acquired events
-or Save confirmation. Save rejects an entry mismatch before mapping or output I/O. Within the same
-entry, saving a loaded Run uses its captured historical point, not the tab birth point.
+Native Load restores historical metadata, uses the same application operation
+and performs cfg backfill without acquired events or Save confirmation.
+Backfill failure retains the result and reports not_applied; failed new-tab
+cleanup reports cleanup_failed. Existing-tab Load checks its captured owner
+and result lifecycle, not a connection observation. Save rejects entry mismatch
+before output I/O; within the same entry it uses a loaded Run's historical point.
 
 ## Method Surface
 
 The wire surface is grouped by ownership:
 
-- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布 entry metadata，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不建立 context observation。
+- `entry.list/new/open/info`：entry owner discovery、明確建立／開啟與 cached EntryInfo。New／Open 成功發布 entry metadata，不選 point、不碰硬體。Open 不建立資源；New 安裝失敗保留 entry，使用 Open 恢復。Metadata reads 不授權寫入。
 - `point.list/new/use`：saved points in the opened entry. `point.new` rejects unsafe
   destination labels before source reads or writes, for setup seeds and clones
   alike. Empty strings fail the existing required-string wire validation with
@@ -319,10 +288,10 @@ For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or
 
 - `tab.*`：tab lifecycle、cfg、run、load與save。`tab.save_artifacts`接受 `all` 或唯一的 `{section,name}` refs，保存完整 artifact，不接受 caller paths。`tab.save_data` 與 `tab.save_artifacts` 同步回傳原 Run 的 run_id，即使全部輸出失敗也保留同一 ID，以及本次完整 paths/status/error，不建立 Save operation id。`tab.snapshot` 投影已提交的 sections/member/output 狀態，不計畫新路徑。Run screenshot 讀 live FigureContainer；analysis/post screenshot 讀目前選中的具名圖。
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
-- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 不使用 seen guard；同一 owner loop 的較晚提交勝出。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
+- `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 的純讀與 command 都要求 holder；同一 owner loop 的較晚提交生效。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
 - `editor.*`：headless cfg-editor session lifecycle.
-- `operation.*` / `notify.*`：live operation indexing, bounded wait, domain-owned cancellation, progress and prompt replies.
+- `operation.*`：live operation indexing, bounded wait, domain-owned cancellation and progress.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
 
@@ -336,7 +305,7 @@ unit selection matches this snapshot exactly, including native, and rejects a
 mismatch before editing cfg. Remote cfg updates may include `value_unit`; Info
 validation rejects conflicting mode/unit pairs. The GUI panel does not expose
 an independent unit editor. `method_entries/` owns the wire method
-name, handler ref, schema, agent exposure and guard/reveal/operation policy.
+name, handler ref, schema, agent exposure, readonly and operation policy.
 Adding a wire method requires one entry; MCP receives the projection through
 `rpc.catalog` after its version handshake. Descriptions direct the caller to
 currently available `rpc_call` methods and to `wait(op)` for asynchronous
@@ -349,30 +318,24 @@ terminal status, not removed aliases. No tool inventory is generated from
 changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
 field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
-`tab.get_cfg` returns cfg_ref, status, tree, source_basis and diagnostics from the
-persistent tab resource. It has no prefix or widget prerequisite. Ordinary reads
-with `aliases` omitted, null or {} need no `expected` ref and return cached cfg.
-Nonempty `aliases` previews still require `expected` with cfg_id and revision;
-missing or null refs fail with an input error naming `expected`.
-Tree paths are string arrays. `tab.edit_cfg` requires expected cfg_id and canonical decimal-string
-revision, decodes the common editing codec, then performs one atomic batch.
-Stale errors include expected/actual; input errors can include path/edit_index.
+`tab.get_cfg` returns status, tree, source_basis and diagnostics from the
+persistent tab resource. It has no prefix or widget prerequisite. Tree paths are
+string arrays. `tab.edit_cfg` decodes the common editing codec and applies one
+atomic batch to current inputs. Input errors can include path/edit_index.
 The adapter does not retry or publish a successful prefix. Plain strings are typed
 strings; __text, __expr, __complex and __ref carry the declared editing intents.
-Source publications advance revision and update all affected cfg before notification.
+Source publications update all affected cfg before notification.
 
-`tab.reset_cfg` uses the same explicit cfg_ref contract. The tab resource obtains
-current adapter defaults and publishes one new revision, even for unchanged inputs.
-Reset can publish Invalid and returns the complete observation. It preserves results
-and saved files, adds no unsaved guard, and follows the Run pane only after success.
+`tab.reset_cfg` obtains current adapter defaults and publishes a complete
+observation, even for unchanged inputs. Reset can publish Invalid. It preserves
+results and saved files, adds no unsaved guard, and follows the Run pane only
+after success.
 
-`tab.run_start` requires the observed cfg_ref as `expected`. Cfg admission does
-not require a second per-connection cfg observation. Tab, SoC, device and
-authentication guards remain independent. A stale identity or revision returns expected/actual
-without starting an operation. Optional `aliases` maps alias names to concrete
-components for parameter/library reads, cfg preview and Run acceptance. Omission,
-None and {} mean no override and use cached cfg. Nonempty preview requires the
-original expected ref and resolves current inputs without publication. Run uses
+`tab.run_start` accepts current Valid cfg without an expected ref.
+Domain readiness, SoC/device safety and authentication checks remain independent. Optional `aliases`
+maps alias names to concrete components for parameter/library reads, cfg preview
+and Run acceptance. Omission, None and {} mean no override and use cached cfg.
+Nonempty preview resolves current inputs without publication. Run uses
 that same mapping for its cfg and fixed metadata capture. An Invalid publication
 cannot run without a valid temporary resolution. Global rows and tab state never
 retain these overrides. Active Run
@@ -391,8 +354,7 @@ Unknown objects, non-string object keys, and nonfinite numbers fail serializatio
 complex numbers use the shared reversible tag, with no string fallback.
 
 Independent editor prefix reads select a node while preserving its full path;
-sweep edges and reference keys select their parent node. Unknown prefixes return an empty object. Only a
-successful read with no prefix parameter establishes the full cfg observation.
+sweep edges and reference keys select their parent node. Unknown prefixes return an empty object. Prefix selection does not grant mutation authority.
 Wire keys children/input/inputs are not mutation-path segments.
 
 Scalar values may be direct values, tagged eval values, or tagged value refs.
@@ -405,9 +367,9 @@ exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
 accepts dotted edge paths from the editor read model. Tab cfg observations and
 `tab.edit_cfg` use string-array paths instead.
 
-`TabCfgResources` owns tab cfg identity. Tab creation provides the resource before
-any view attaches; close revokes its identity. Qt detach only stops watching.
-Load backfill preserves cfg_id and advances revision on the same resource.
+`TabCfgResources` owns tab cfg lifetime. Tab creation provides the resource before
+any view attaches; close revokes old handles. Qt detach only stops watching.
+Load backfill publishes on the same resource.
 `CfgEditorService` owns separate library, inspect and writeback drafts.
 Agent-created sessions are garbage-collected on commit/discard/client drop;
 UI-owned independent drafts follow their own owner lifetime.
@@ -453,3 +415,7 @@ The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
 exiting MCP disconnects without closing the GUI.
 
 Entry open/new leaves point selection empty. Select or create a working point before Run, WB or current-point Inspect writes. Unselected application commands fail with existing failed-precondition categories; wire rejection retains the existing dispatch policy. Selection admits WB but never replaces its captured SavedPoint destination. Cfg/editor drafts and WB proposal previews remain available under their own contracts.
+
+Local modal dialogs refuse owner acquisition with `local_busy` and "Local 使用中".
+Qt app adapters query the active modal on the owner turn; shared control remains
+Qt-free. Readonly and existing Remote holder reconnects keep their contracts.

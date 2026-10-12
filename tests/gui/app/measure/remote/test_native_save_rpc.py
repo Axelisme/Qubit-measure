@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import AcquiredPayload
@@ -216,11 +215,6 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
                 AnalysisSavingAdapter, "get_analyze_params", unavailable
             )
         request = {"adapter_name": "saving", "data_path": str(path)}
-        before = session.state.list_tab_ids()
-        unseen = call(sock, "tab.open_file", request)
-        assert unseen["ok"] is False
-        assert unseen["error"]["reason"] == "stale_version"
-        assert session.state.list_tab_ids() == before
         assert call(sock, "context.snapshot", {})["ok"] is True
 
         reply = call(sock, "tab.open_file", request)
@@ -305,7 +299,6 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
             "tab.run_start",
             {
                 "tab_id": "tab",
-                "expected": encode_ref(session.state.get_tab("tab").cfg.observe().ref),
             },
         )
         assert started["ok"] is True, started
@@ -421,86 +414,6 @@ def test_save_rpc_reports_partial_and_initial_all_failed_identity(
         )
         assert artifact.status == ("Not saved" if block_native else "Partially saved")
         assert all(output.error for output in outputs if output.status == "failed")
-
-
-@pytest.mark.parametrize("method", ["tab.save_data", "tab.save_artifacts"])
-def test_save_rpc_requires_each_connections_own_snapshot(
-    tmp_path: Path, qapp: QApplication, method: str
-) -> None:
-    with native_save_rpc(tmp_path, qapp) as (session, sock):
-        session.state.update_tab_comment("tab", "unchanged")
-        params = {
-            "tab_id": "tab",
-            "comment": "must not publish",
-            "run_operation_id": 101,
-        }
-        unseen = call(sock, method, params)
-        assert unseen["ok"] is False
-        assert unseen["error"]["code"] == "precondition_failed"
-        assert unseen["error"]["reason"] == "stale_version"
-        assert "tab:tab:result" in unseen["error"]["data"]["stale"]
-        assert "tab:tab:save" in unseen["error"]["data"]["stale"]
-        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
-        fresh = open_client(sock.getpeername()[1])
-        try:
-            rejected = call(fresh, method, params)
-            assert rejected["ok"] is False
-            assert rejected["error"]["reason"] == "stale_version"
-        finally:
-            reset_inbox(fresh)
-            fresh.close()
-        assert session.state.get_tab("tab").save.comment == "unchanged"
-        assert session.entry.ledger.events() == ()
-        assert not (session.entry.database_path / "runs").exists()
-        assert not (session.entry.database_path / "Labber").exists()
-        assert call(sock, method, params)["ok"] is True
-
-
-@pytest.mark.parametrize(
-    ("method", "resource"),
-    [
-        ("tab.save_data", "save"),
-        ("tab.save_data", "result"),
-        ("tab.save_artifacts", "save"),
-        ("tab.save_artifacts", "result"),
-        ("tab.save_artifacts", "analyze"),
-        ("tab.save_artifacts", "post_analyze"),
-    ],
-)
-def test_save_rpc_rejects_stale_snapshot_without_publishing_comment_or_outputs(
-    tmp_path: Path, qapp: QApplication, method: str, resource: str
-) -> None:
-    with native_save_rpc(tmp_path, qapp) as (session, sock):
-        session.state.update_tab_comment("tab", "local note")
-        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
-        tab = session.state.get_tab("tab")
-        if resource == "save":
-            session.state.update_tab_comment("tab", "new local note")
-        elif resource == "result":
-            session.state.update_tab_result(
-                "tab",
-                tab.run.result,
-                source_operation_id=101,
-                metadata=session.metadata,
-                parameters=tab.run.parameters,
-            )
-        elif resource == "analyze":
-            session.state.swap_analysis_pane("tab", replace(tab.analysis))
-        else:
-            session.state.swap_post_analysis_pane("tab", replace(tab.post_analysis))
-        reply = call(sock, method, {"tab_id": "tab", "comment": "must not publish"})
-        assert reply["ok"] is False
-        assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"]["reason"] == "stale_version"
-        assert f"tab:tab:{resource}" in reply["error"]["data"]["stale"]
-        assert session.state.get_tab("tab").save.comment == (
-            "new local note" if resource == "save" else "local note"
-        )
-        assert session.entry.ledger.events() == ()
-        assert not (session.entry.database_path / "runs").exists()
-        assert not (session.entry.database_path / "Labber").exists()
-        assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
-        assert call(sock, method, {"tab_id": "tab"})["ok"] is True
 
 
 @pytest.mark.parametrize("selection", ["data", "all", "analysis", "post_analysis"])

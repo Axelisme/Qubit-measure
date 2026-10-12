@@ -29,8 +29,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionReason,
     CfgResolution,
     CfgResource,
-    CfgRevision,
-    CfgStaleError,
     CfgStatus,
     SourceRevision,
 )
@@ -67,7 +65,7 @@ class Sources:
             return values[expression]
 
         return CfgResolution(
-            (SourceRevision("md", CfgRevision(self.revision)),),
+            (SourceRevision("md", self.revision),),
             evaluate,
             lambda source_id: (),
             EmptyReferences(),
@@ -129,7 +127,7 @@ def test_invalid_sweep_endpoint_error_is_published_in_diagnostics(
         expected = f"Invalid {edge} endpoint" if mode == "direct" else "$qubit.freq"
         assert any(expected in item.message for item in observation.diagnostics)
         with pytest.raises(CfgPreconditionError):
-            resource.accept(observation.ref.revision)
+            resource.accept()
     finally:
         resource.revoke()
 
@@ -145,18 +143,17 @@ def test_restore_skips_defaults_until_reset_and_detaches_input_snapshot() -> Non
     initial.value.fields["a"] = DirectValue(7.0)
     source = Sources()
     resource = CfgResource(fresh_defaults, initial=initial, resolution=source.read)
-    before = resource.observe()
+    resource.observe()
     initial.value.fields["a"] = DirectValue(99.0)
-    assert resource.accept(before.ref.revision).values["a"] == 7.0
+    assert resource.accept().values["a"] == 7.0
     reads = source.reads
     snapshot = resource.snapshot_inputs()
     snapshot.value.fields["a"] = DirectValue(99.0)
     assert resource.snapshot_inputs().value.fields["a"] == DirectValue(7.0)
     assert source.reads == reads
     assert calls == []
-    reset = resource.reset(before.ref.revision)
-    assert reset.ref.cfg_id == before.ref.cfg_id
-    assert resource.accept(reset.ref.revision).values["a"] == 1.0
+    resource.reset()
+    assert resource.accept().values["a"] == 1.0
     assert calls == ["defaults"]
 
 
@@ -164,20 +161,18 @@ def test_owner_replacement_publishes_incomplete_input_once_without_new_identity(
     None
 ):
     resource = make_resource()
-    before = resource.observe()
+    resource.observe()
     seen: list[CfgObservation] = []
     resource.watch(seen.append)
     schema = defaults()
     schema.value.fields["a"] = DirectValue(None, raw="-")
-    changed = resource.replace_inputs(before.ref.revision, schema)
+    changed = resource.replace_inputs(schema)
     assert changed.status is CfgStatus.INVALID
-    assert changed.ref.cfg_id == before.ref.cfg_id
-    assert changed.ref.revision == before.ref.revision + 1
     assert len(seen) == 2
     schema.value.fields["a"] = DirectValue(9.0)
     assert resource.snapshot_inputs().value.fields["a"] == DirectValue(None, raw="-")
     with pytest.raises(CfgPreconditionError) as caught:
-        resource.accept(changed.ref.revision)
+        resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
 
 
@@ -196,7 +191,7 @@ def test_owner_replacement_failure_preserves_publication_and_inputs(fault: str) 
     else:
         source.fail = True
     with pytest.raises(RuntimeError, match="definition|source snapshot failure"):
-        resource.replace_inputs(before.ref.revision, candidate)
+        resource.replace_inputs(candidate)
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert len(seen) == 1
@@ -209,19 +204,17 @@ def test_owner_replacement_obeys_revision_busy_reentry_and_revocation() -> None:
         resolution=Sources().read,
         mutation_allowed=lambda: allowed,
     )
-    before = resource.observe()
-    with pytest.raises(CfgStaleError):
-        resource.replace_inputs(CfgRevision(before.ref.revision + 1), defaults())
+    resource.observe()
     allowed = False
     with pytest.raises(CfgPreconditionError) as busy:
-        resource.replace_inputs(before.ref.revision, defaults())
+        resource.replace_inputs(defaults())
     assert busy.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
     allowed = True
     errors: list[CfgPreconditionReason] = []
 
     def reenter(observation: CfgObservation) -> None:
         with pytest.raises(CfgPreconditionError) as caught:
-            resource.replace_inputs(observation.ref.revision, defaults())
+            resource.replace_inputs(defaults())
         errors.append(caught.value.reason)
 
     unsubscribe = resource.watch(reenter)
@@ -230,7 +223,7 @@ def test_owner_replacement_obeys_revision_busy_reentry_and_revocation() -> None:
     resource.revoke()
     for operation in (
         resource.snapshot_inputs,
-        lambda: resource.replace_inputs(before.ref.revision, defaults()),
+        lambda: resource.replace_inputs(defaults()),
     ):
         with pytest.raises(CfgPreconditionError) as gone:
             operation()
@@ -242,7 +235,6 @@ def test_batch_is_atomic_and_literal_path_is_not_split() -> None:
     before = resource.observe()
     with pytest.raises(CfgInputError, match="unknown field") as caught:
         resource.edit(
-            before.ref.revision,
             (
                 CfgEdit(("a",), 7.0),
                 CfgEdit(("missing",), 2.0),
@@ -252,59 +244,49 @@ def test_batch_is_atomic_and_literal_path_is_not_split() -> None:
     assert caught.value.edit_index == 1
     assert caught.value.reason is CfgInputReason.UNKNOWN_PATH
     assert resource.observe() == before
-    changed = resource.edit(before.ref.revision, (CfgEdit(("literal.dot",), 3.0),))
-    assert resource.accept(changed.ref.revision).values["literal.dot"] == 3.0
+    resource.edit((CfgEdit(("literal.dot",), 3.0),))
+    assert resource.accept().values["literal.dot"] == 3.0
 
 
 def test_success_same_value_and_empty_batch_each_publish() -> None:
     resource = make_resource()
-    for expected, edits in enumerate(
-        [
-            (CfgEdit(("a",), 8.0),),
-            (CfgEdit(("a",), 8.0),),
-            (),
-        ],
-        start=1,
-    ):
-        observation = resource.edit(CfgRevision(expected - 1), edits)
-        assert observation.ref.revision == expected
-    observation = resource.observe()
-    with pytest.raises(CfgStaleError, match="Expected cfg revision") as caught:
-        resource.edit(CfgRevision(0), ())
-    assert caught.value.expected.revision == 0
-    assert caught.value.actual == observation.ref
-    assert resource.observe().ref == observation.ref
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    for edits in ((CfgEdit(("a",), 8.0),), (CfgEdit(("a",), 8.0),), ()):
+        observation = resource.edit(edits)
+        assert seen[-1] == observation
+    assert len(seen) == 4
 
 
 def test_incomplete_text_is_published_invalid_and_blocks_acceptance() -> None:
     resource = make_resource()
-    changed = resource.edit(CfgRevision(0), (CfgEdit(("a",), DirectValue(raw="1e-")),))
+    changed = resource.edit((CfgEdit(("a",), DirectValue(raw="1e-")),))
     assert changed.status is CfgStatus.INVALID
     assert changed.diagnostics[0].path == ("a",)
     assert changed.tree.children["a"].value == DirectValue(
         None, raw="1e-", error="could not convert string to float: '1e-'"
     )
     with pytest.raises(CfgPreconditionError, match="not valid") as caught:
-        resource.accept(changed.ref.revision)
+        resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
 
 
 def test_observe_and_accept_never_read_sources_and_accept_is_detached() -> None:
     sources = Sources()
     resource = make_resource(sources)
-    changed = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    changed = resource.edit((CfgEdit(("a",), EvalValue("frequency")),))
     reads = sources.reads
-    accepted = resource.accept(changed.ref.revision)
+    accepted = resource.accept()
     assert accepted.values["a"] == 2.0
     sources.values["frequency"] = 10.0
     sources.revision = 1
     changed.tree.children.clear()
     assert resource.observe().tree.children
     accepted.values["a"] = 100.0
-    assert resource.accept(accepted.ref.revision).values["a"] == 2.0
+    assert resource.accept().values["a"] == 2.0
     assert sources.reads == reads
-    refreshed = resource.refresh(accepted.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values["a"] == 10.0
+    refreshed = resource.refresh()
+    assert resource.accept().values["a"] == 10.0
     assert accepted.source_basis[0].revision == 0
     assert refreshed.source_basis[0].revision == 1
 
@@ -326,48 +308,43 @@ def test_one_off_acceptance_resolves_invalid_inputs_without_publication() -> Non
     seen: list[CfgObservation] = []
     resource.watch(seen.append)
     temporary = Sources(revision=7, values={"$qubit.t1": 9.0}).read()
-    preview = resource.preview(before.ref.revision, resolution=temporary)
-    assert preview.ref == before.ref
+    preview = resource.preview(resolution=temporary)
     assert preview.status is CfgStatus.VALID
     assert preview.source_basis == temporary.source_basis
     value = preview.tree.children["a"].value
     assert isinstance(value, EvalValue)
     assert value.resolved == 9.0
-    assert (
-        resource.preview(before.ref.revision, resolution=published).status
-        is CfgStatus.INVALID
-    )
+    assert resource.preview(resolution=published).status is CfgStatus.INVALID
 
-    accepted = resource.accept(before.ref.revision, resolution=temporary)
+    accepted = resource.accept(resolution=temporary)
 
-    assert accepted.ref == before.ref
     assert accepted.source_basis == temporary.source_basis
     assert accepted.values["a"] == 9.0
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert seen == [before]
     accepted.values["a"] = 99.0
-    assert resource.accept(before.ref.revision, resolution=temporary).values["a"] == 9.0
+    assert resource.accept(resolution=temporary).values["a"] == 9.0
     with pytest.raises(CfgPreconditionError) as caught:
-        resource.accept(before.ref.revision)
+        resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
 
 
 def test_one_off_acceptance_does_not_replace_cached_values_or_read_factory() -> None:
     sources = Sources()
     resource = make_resource(sources)
-    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    before = resource.edit((CfgEdit(("a",), EvalValue("frequency")),))
     inputs = resource.snapshot_inputs()
     seen: list[CfgObservation] = []
     resource.watch(seen.append)
     reads = sources.reads
     temporary = Sources(revision=3, values={"frequency": 12.0}).read()
 
-    accepted = resource.accept(before.ref.revision, resolution=temporary)
+    accepted = resource.accept(resolution=temporary)
 
     assert accepted.values["a"] == 12.0
     assert accepted.source_basis == temporary.source_basis
-    assert resource.accept(before.ref.revision).values["a"] == 2.0
+    assert resource.accept().values["a"] == 2.0
     assert sources.reads == reads
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
@@ -379,7 +356,7 @@ def test_one_off_acceptance_failure_keeps_inputs_and_publication(
     unexpected: bool,
 ) -> None:
     resource = make_resource()
-    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    before = resource.edit((CfgEdit(("a",), EvalValue("frequency")),))
     inputs = resource.snapshot_inputs()
     seen: list[CfgObservation] = []
     resource.watch(seen.append)
@@ -392,18 +369,20 @@ def test_one_off_acceptance_failure_keeps_inputs_and_publication(
     temporary = replace(Sources().read(), evaluate_expression=fail)
     if unexpected:
         with pytest.raises(RuntimeError, match="resolver bug"):
-            resource.accept(before.ref.revision, resolution=temporary)
+            resource.accept(resolution=temporary)
     else:
         with pytest.raises(CfgPreconditionError) as caught:
-            resource.accept(before.ref.revision, resolution=temporary)
+            resource.accept(resolution=temporary)
         assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+        assert caught.value.path == ("a",)
+        assert "Unavailable alias in frequency" in str(caught.value)
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert seen == [before]
-    assert resource.accept(before.ref.revision).values["a"] == 2.0
+    assert resource.accept().values["a"] == 2.0
 
 
-@pytest.mark.parametrize("guard", ["stale", "revoked", "notification"])
+@pytest.mark.parametrize("guard", ["revoked", "notification"])
 def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
     notification_active = False
     resource = CfgResource(
@@ -411,7 +390,7 @@ def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
         resolution=Sources().read,
         notification_active=lambda: notification_active,
     )
-    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    resource.edit((CfgEdit(("a",), EvalValue("frequency")),))
     evaluations: list[str] = []
 
     def evaluate(expression: str) -> float:
@@ -419,21 +398,17 @@ def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
         return 12.0
 
     temporary = replace(Sources().read(), evaluate_expression=evaluate)
-    expected = before.ref.revision
     reason = CfgPreconditionReason.REENTRANT_MUTATION
-    if guard == "stale":
-        expected = CfgRevision(expected + 1)
-        reason = CfgPreconditionReason.STALE_REVISION
-    elif guard == "revoked":
+    if guard == "revoked":
         resource.revoke()
         reason = CfgPreconditionReason.RESOURCE_GONE
     else:
         notification_active = True
     with pytest.raises(CfgPreconditionError) as caught:
-        resource.accept(expected, resolution=temporary)
+        resource.accept(resolution=temporary)
     assert caught.value.reason is reason
     with pytest.raises(CfgPreconditionError) as preview_error:
-        resource.preview(expected, resolution=temporary)
+        resource.preview(resolution=temporary)
     assert preview_error.value.reason is reason
     assert evaluations == []
 
@@ -441,9 +416,9 @@ def test_one_off_acceptance_guards_precede_evaluation(guard: str) -> None:
 def test_one_off_acceptance_can_resolve_unavailable_publication() -> None:
     sources = Sources()
     resource = make_resource(sources)
-    observed = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("frequency")),))
+    resource.edit((CfgEdit(("a",), EvalValue("frequency")),))
     sources.fail = True
-    before = resource.refresh(observed.ref.revision)
+    before = resource.refresh()
     assert before.status is CfgStatus.UNAVAILABLE
     inputs = resource.snapshot_inputs()
     seen: list[CfgObservation] = []
@@ -451,9 +426,8 @@ def test_one_off_acceptance_can_resolve_unavailable_publication() -> None:
     reads = sources.reads
     temporary = Sources(revision=8, values={"frequency": 15.0}).read()
 
-    accepted = resource.accept(before.ref.revision, resolution=temporary)
+    accepted = resource.accept(resolution=temporary)
 
-    assert accepted.ref == before.ref
     assert accepted.values["a"] == 15.0
     assert accepted.source_basis == temporary.source_basis
     assert resource.observe() == before
@@ -461,7 +435,7 @@ def test_one_off_acceptance_can_resolve_unavailable_publication() -> None:
     assert sources.reads == reads
     assert seen == [before]
     with pytest.raises(CfgPreconditionError) as caught:
-        resource.accept(before.ref.revision)
+        resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
 
 
@@ -472,11 +446,11 @@ def test_one_off_acceptance_rejects_subscriber_reentry() -> None:
 
     def reenter(observation: CfgObservation) -> None:
         with pytest.raises(CfgPreconditionError) as caught:
-            resource.accept(observation.ref.revision, resolution=temporary)
+            resource.accept(resolution=temporary)
         reasons.append(caught.value.reason)
 
     resource.watch(reenter)
-    resource.edit(resource.observe().ref.revision, ())
+    resource.edit(())
     assert reasons == [
         CfgPreconditionReason.REENTRANT_MUTATION,
         CfgPreconditionReason.REENTRANT_MUTATION,
@@ -487,15 +461,15 @@ def test_watch_initial_order_fault_isolation_and_reentry(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     resource = make_resource()
-    seen: list[int] = []
+    seen: list[CfgObservation] = []
     rejected: list[CfgPreconditionReason] = []
 
     def reenter(observation: CfgObservation) -> None:
         for action in (
-            lambda: resource.edit(observation.ref.revision, ()),
-            lambda: resource.reset(observation.ref.revision),
-            lambda: resource.refresh(observation.ref.revision),
-            lambda: resource.accept(observation.ref.revision),
+            lambda: resource.edit(()),
+            lambda: resource.reset(),
+            lambda: resource.refresh(),
+            lambda: resource.accept(),
             resource.revoke,
         ):
             with pytest.raises(CfgPreconditionError, match="forbidden") as caught:
@@ -505,19 +479,18 @@ def test_watch_initial_order_fault_isolation_and_reentry(
         raise RuntimeError("subscriber bug")
 
     resource.watch(reenter)
-    unsubscribe = resource.watch(
-        lambda observation: seen.append(observation.ref.revision)
-    )
-    changed = resource.edit(CfgRevision(0), ())
-    assert seen == [0, 1]
+    unsubscribe = resource.watch(seen.append)
+    changed = resource.edit(())
+    assert len(seen) == 2
+    assert seen[-1] == changed
     assert len(rejected) == 10
     assert set(rejected) == {CfgPreconditionReason.REENTRANT_MUTATION}
     assert changed.tree.children
     assert "subscriber bug" in caplog.text
     unsubscribe()
     unsubscribe()
-    resource.edit(CfgRevision(1), ())
-    assert seen == [0, 1]
+    resource.edit(())
+    assert len(seen) == 2
 
 
 def test_reset_failure_keeps_publication_and_does_not_notify() -> None:
@@ -529,17 +502,18 @@ def test_reset_failure_keeps_publication_and_does_not_notify() -> None:
         return defaults()
 
     resource = CfgResource(create_defaults, resolution=Sources().read)
-    seen: list[int] = []
-    resource.watch(lambda observation: seen.append(observation.ref.revision))
-    before = resource.edit(CfgRevision(0), (CfgEdit(("a",), 9.0),))
+    seen: list[CfgObservation] = []
+    resource.watch(seen.append)
+    before = resource.edit((CfgEdit(("a",), 9.0),))
     fail = True
     with pytest.raises(RuntimeError, match="defaults failure"):
-        resource.reset(before.ref.revision)
+        resource.reset()
     assert resource.observe() == before
-    assert seen == [0, 1]
+    assert len(seen) == 2
+    assert seen[-1] == before
     fail = False
-    reset = resource.reset(before.ref.revision)
-    assert resource.accept(reset.ref.revision).values["a"] == 1.0
+    resource.reset()
+    assert resource.accept().values["a"] == 1.0
 
 
 def test_busy_policy_is_owned_by_resource_and_acceptance_is_separate() -> None:
@@ -548,11 +522,11 @@ def test_busy_policy_is_owned_by_resource_and_acceptance_is_separate() -> None:
         resolution=Sources().read,
         mutation_allowed=lambda: False,
     )
-    before = resource.observe()
+    resource.observe()
     with pytest.raises(CfgPreconditionError, match="blocked") as caught:
-        resource.edit(before.ref.revision, ())
+        resource.edit(())
     assert caught.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
-    assert resource.accept(before.ref.revision).values["a"] == 1.0
+    assert resource.accept().values["a"] == 1.0
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -566,25 +540,24 @@ def test_source_refresh_is_not_blocked_by_manual_edit_policy(failed: bool) -> No
         resolution=sources.read,
         mutation_allowed=lambda: False,
     )
-    before = resource.observe()
-    accepted = resource.accept(before.ref.revision)
+    resource.observe()
+    accepted = resource.accept()
     sources.values["frequency"] = 7.0
     sources.revision += 1
     sources.fail = failed
-    changed = resource.refresh(before.ref.revision)
-    assert changed.ref.revision == before.ref.revision + 1
+    changed = resource.refresh()
     assert changed.status is (CfgStatus.UNAVAILABLE if failed else CfgStatus.VALID)
     assert accepted.values["a"] == 2.0
     if not failed:
-        assert resource.accept(changed.ref.revision).values["a"] == 7.0
+        assert resource.accept().values["a"] == 7.0
     with pytest.raises(CfgPreconditionError) as blocked:
-        resource.edit(changed.ref.revision, ())
+        resource.edit(())
     assert blocked.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
 
 
 def test_revocation_invalidates_handles_and_never_reuses_identity() -> None:
     resource = make_resource()
-    before = resource.observe()
+    resource.observe()
     unsubscribe = resource.watch(lambda observation: None)
     resource.revoke()
     unsubscribe()
@@ -592,13 +565,12 @@ def test_revocation_invalidates_handles_and_never_reuses_identity() -> None:
     for action in (
         resource.observe,
         lambda: resource.watch(lambda observation: None),
-        lambda: resource.edit(before.ref.revision, ()),
-        lambda: resource.accept(before.ref.revision),
+        lambda: resource.edit(()),
+        lambda: resource.accept(),
     ):
         with pytest.raises(CfgPreconditionError, match="revoked") as caught:
             action()
         assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
-    assert make_resource().observe().ref.cfg_id != before.ref.cfg_id
 
 
 @dataclass
@@ -646,7 +618,7 @@ class ExpressionSources:
             return captured[name]
 
         return CfgResolution(
-            (SourceRevision("snapshot", CfgRevision(self.revision)),),
+            (SourceRevision("snapshot", self.revision),),
             evaluate,
             lambda source_id: (),
             EmptyReferences(),
@@ -679,18 +651,17 @@ def test_capture_groups_negative_power_and_keeps_dynamic_dependencies(
 ) -> None:
     resource, sources = captured_resource
     changed = resource.edit(
-        CfgRevision(0),
         (CfgEdit(("a",), EvalValue("@{device.value} ** 2 + general.ext.offset")),),
     )
-    assert resource.accept(changed.ref.revision).values["a"] == 5.0
+    assert resource.accept().values["a"] == 5.0
     value = changed.tree.children["a"].value
     assert isinstance(value, EvalValue)
     assert value.expr == "(-2) ** 2 + general.ext.offset"
     sources.captured["device.value"] = 100
     sources.names["offset"] = 3.0
     sources.revision += 1
-    refreshed = resource.refresh(changed.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values["a"] == 7.0
+    resource.refresh()
+    assert resource.accept().values["a"] == 7.0
     assert sources.capture_reads == ["device.value"]
 
 
@@ -700,14 +671,13 @@ def test_capture_uses_real_functions_complex_and_integer_semantics(
     resource, sources = captured_resource
     sources.captured.update({"z": 1 + 1j, "flags": 6, "angle": 0.0})
     changed = resource.edit(
-        CfgRevision(0),
         (
             CfgEdit(("z",), EvalValue("@{z} * @{z}")),
             CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
             CfgEdit(("a",), EvalValue("cos(@{angle}) + log(e)")),
         ),
     )
-    values = resource.accept(changed.ref.revision).values
+    values = resource.accept().values
     assert values["z"] == 2j
     assert values["flags"] == 5
     assert values["a"] == 2.0
@@ -721,14 +691,13 @@ def test_capture_complex_tag_and_large_integer_preserve_literal_types(
     resource, sources = captured_resource
     integer = 2**80 + 1
     sources.captured.update({"z": {"__complex__": [1.0, 2.0]}, "flags": integer})
-    publication = resource.edit(
-        CfgRevision(0),
+    resource.edit(
         (
             CfgEdit(("z",), EvalValue("@{z}")),
             CfgEdit(("flags",), EvalValue("@{flags} ^ 3")),
         ),
     )
-    values = resource.accept(publication.ref.revision).values
+    values = resource.accept().values
     assert values["z"] == 1.0 + 2.0j
     assert isinstance(values["z"], complex)
     assert values["flags"] == integer ^ 3
@@ -755,7 +724,6 @@ def test_invalid_capture_structure_rejects_batch_before_reading_sources(
     before = resource.observe()
     with pytest.raises(CfgInputError, match=".") as caught:
         resource.edit(
-            before.ref.revision,
             (
                 CfgEdit(("literal.dot",), 10.0),
                 CfgEdit(("a",), EvalValue(expression)),
@@ -774,7 +742,6 @@ def test_capture_missing_source_rejects_without_publishing_prefix(
     before = resource.observe()
     with pytest.raises(CfgPreconditionError, match="unavailable") as caught:
         resource.edit(
-            before.ref.revision,
             (
                 CfgEdit(("a",), 10.0),
                 CfgEdit(("literal.dot",), EvalValue("@{missing}")),
@@ -793,9 +760,8 @@ def test_capture_rejects_non_literal_values(captured_resource, value: object) ->
     resource, sources = captured_resource
     sources.captured["device.value"] = value
     with pytest.raises(CfgInputError, match="numeric|finite") as caught:
-        resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue("@{device.value}")),))
+        resource.edit((CfgEdit(("a",), EvalValue("@{device.value}")),))
     assert caught.value.reason is CfgInputReason.INVALID_VALUE
-    assert resource.observe().ref.revision == 0
 
 
 @pytest.mark.parametrize(
@@ -805,7 +771,7 @@ def test_without_capture_tokens_incomplete_or_invalid_expression_is_saved(
     captured_resource, expression: str
 ) -> None:
     resource, sources = captured_resource
-    changed = resource.edit(CfgRevision(0), (CfgEdit(("a",), EvalValue(expression)),))
+    changed = resource.edit((CfgEdit(("a",), EvalValue(expression)),))
     assert changed.status is CfgStatus.INVALID
     value = changed.tree.children["a"].value
     assert isinstance(value, EvalValue)
@@ -817,7 +783,6 @@ def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) ->
     resource, sources = captured_resource
     sources.names["device_value"] = 10.0
     changed = resource.edit(
-        CfgRevision(0),
         (
             CfgEdit(
                 ("a",),
@@ -833,8 +798,8 @@ def test_capture_token_boundaries_and_missing_dynamic_name(captured_resource) ->
     assert value.expr == "(-2) + general.ext.device_value + general.ext.missing"
     sources.names["missing"] = 1.0
     sources.captured["device.value"] = 99
-    changed = resource.refresh(changed.ref.revision)
-    assert resource.accept(changed.ref.revision).values["a"] == 9.0
+    changed = resource.refresh()
+    assert resource.accept().values["a"] == 9.0
     assert sources.capture_reads == ["device.value"]
 
 
@@ -843,16 +808,13 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     captured_resource, fault: str
 ) -> None:
     resource, sources = captured_resource
-    before = resource.edit(
-        CfgRevision(0), (CfgEdit(("a",), EvalValue("general.ext.offset")),)
-    )
+    before = resource.edit((CfgEdit(("a",), EvalValue("general.ext.offset")),))
     seen: list[CfgStatus] = []
     resource.watch(lambda observation: seen.append(observation.status))
     sources.fail_read = fault == "source"
     sources.fail_evaluation = fault == "resolver"
     sources.revision += 1
-    unavailable = resource.refresh(before.ref.revision)
-    assert unavailable.ref.revision == before.ref.revision + 1
+    unavailable = resource.refresh()
     assert unavailable.status is CfgStatus.UNAVAILABLE
     assert unavailable.diagnostics[0].reason == (
         "source_failure" if fault == "source" else "resolution_failure"
@@ -864,7 +826,7 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     assert not unavailable.tree.valid
     assert not unavailable.tree.children["a"].valid
     with pytest.raises(CfgPreconditionError, match="not valid"):
-        resource.accept(unavailable.ref.revision)
+        resource.accept()
     assert seen == [CfgStatus.VALID, CfgStatus.UNAVAILABLE]
     old_value = before.tree.children["a"].value
     assert isinstance(old_value, EvalValue)
@@ -872,8 +834,8 @@ def test_refresh_fault_publishes_unavailable_without_old_resolution(
     sources.fail_read = False
     sources.fail_evaluation = False
     sources.names["offset"] = 8.0
-    recovered = resource.refresh(unavailable.ref.revision)
-    assert resource.accept(recovered.ref.revision).values["a"] == 8.0
+    resource.refresh()
+    assert resource.accept().values["a"] == 8.0
     assert seen[-1] is CfgStatus.VALID
 
 
@@ -891,8 +853,8 @@ def test_separate_range_edits_preserve_command_order(
     step = CfgEdit(("range", "step"), 0.5)
     geometry = CfgEdit(("range", "span" if centered else "stop"), 4.0)
     edits = (step, geometry) if step_first else (geometry, step)
-    changed = resource.edit(resource.observe().ref.revision, edits)
-    assert resource.accept(changed.ref.revision).values["range"] == {
+    resource.edit(edits)
+    assert resource.accept().values["range"] == {
         "start": -1.0 if centered else 0.0,
         "stop": 3.0 if centered else 4.0,
         "expts": 5 if step_first else 9,
@@ -924,7 +886,7 @@ def test_range_intent_preserves_unexpected_source_fault() -> None:
     before = resource.observe()
     broken = True
     with pytest.raises(ValueError, match="range source defect") as caught:
-        resource.edit(before.ref.revision, (CfgEdit(("range", "step"), 1.0),))
+        resource.edit((CfgEdit(("range", "step"), 1.0),))
     assert caught.value is defect
     assert resource.observe() == before
 
@@ -933,17 +895,16 @@ def test_replacing_failed_expression_does_not_evaluate_old_input(
     captured_resource,
 ) -> None:
     resource, sources = captured_resource
-    changed = resource.edit(
-        resource.observe().ref.revision,
+    resource.edit(
         (CfgEdit(("a",), EvalValue("general.ext.offset")),),
     )
     sources.fail_evaluation = True
-    unavailable = resource.refresh(changed.ref.revision)
+    unavailable = resource.refresh()
     assert unavailable.status is CfgStatus.UNAVAILABLE
     sources.evaluation_reads.clear()
-    recovered = resource.edit(unavailable.ref.revision, (CfgEdit(("a",), 7.0),))
+    recovered = resource.edit((CfgEdit(("a",), 7.0),))
     assert recovered.status is CfgStatus.VALID
-    assert resource.accept(recovered.ref.revision).values["a"] == 7.0
+    assert resource.accept().values["a"] == 7.0
     assert sources.evaluation_reads == []
 
 
@@ -951,28 +912,26 @@ def test_replaced_intermediate_expression_is_not_evaluated(captured_resource) ->
     resource, sources = captured_resource
     sources.fail_evaluation = True
     changed = resource.edit(
-        resource.observe().ref.revision,
         (
             CfgEdit(("a",), EvalValue("general.ext.offset")),
             CfgEdit(("a",), 7.0),
         ),
     )
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values["a"] == 7.0
+    assert resource.accept().values["a"] == 7.0
     assert sources.evaluation_reads == []
 
 
 def test_retained_expression_uses_new_source_basis(captured_resource) -> None:
     resource, sources = captured_resource
-    changed = resource.edit(
-        resource.observe().ref.revision,
+    resource.edit(
         (CfgEdit(("a",), EvalValue("general.ext.offset * 2")),),
     )
-    assert resource.accept(changed.ref.revision).values["a"] == 2.0
+    assert resource.accept().values["a"] == 2.0
     sources.names["offset"] = 6.0
     sources.revision += 1
-    newer = resource.edit(changed.ref.revision, (CfgEdit(("literal.dot",), 7.0),))
-    assert resource.accept(newer.ref.revision).values["a"] == 12.0
+    newer = resource.edit((CfgEdit(("literal.dot",), 7.0),))
+    assert resource.accept().values["a"] == 12.0
     assert newer.source_basis[0].revision == sources.revision
 
 
@@ -983,9 +942,7 @@ def test_unexpected_edit_evaluation_fault_is_not_invalid_input(
     before = resource.observe()
     sources.fail_evaluation = True
     with pytest.raises(RuntimeError, match="resolver defect"):
-        resource.edit(
-            before.ref.revision, (CfgEdit(("a",), EvalValue("general.ext.offset")),)
-        )
+        resource.edit((CfgEdit(("a",), EvalValue("general.ext.offset")),))
     assert resource.observe() == before
 
 
@@ -1022,7 +979,7 @@ def test_unavailable_projection_drops_linked_cache_and_derived_range_result() ->
     before = resource.observe()
     assert before.status is CfgStatus.VALID
     sources.fail = True
-    changed = resource.refresh(before.ref.revision)
+    changed = resource.refresh()
     ref = changed.tree.children["ref"]
     assert ref.children == {}
     assert isinstance(ref.value, ReferenceValue)
@@ -1036,7 +993,7 @@ def test_unavailable_projection_drops_linked_cache_and_derived_range_result() ->
     assert sweep.start.resolved is None
     assert sweep.step == DirectValue(None)
     sources.fail = False
-    recovered = resource.refresh(changed.ref.revision)
+    recovered = resource.refresh()
     assert recovered.status is CfgStatus.VALID
     assert recovered.tree.children["ref"].children["x"].value == DirectValue(7.0)
 
@@ -1055,20 +1012,7 @@ def test_edit_rejects_malformed_batch_without_reading_sources(edits) -> None:
     before = resource.observe()
     reads = sources.reads
     with pytest.raises(CfgInputError) as caught:
-        resource.edit(before.ref.revision, edits)
-    assert caught.value.reason is CfgInputReason.MALFORMED_INPUT
-    assert resource.observe() == before
-    assert sources.reads == reads
-
-
-@pytest.mark.parametrize("revision", [True, -1, 0.0, "0"])
-def test_invalid_revision_never_reads_sources_or_publishes(revision) -> None:
-    sources = Sources()
-    resource = make_resource(sources)
-    before = resource.observe()
-    reads = sources.reads
-    with pytest.raises(CfgInputError) as caught:
-        resource.edit(revision, ())
+        resource.edit(edits)
     assert caught.value.reason is CfgInputReason.MALFORMED_INPUT
     assert resource.observe() == before
     assert sources.reads == reads
@@ -1113,9 +1057,7 @@ def test_unexpected_capture_validator_fault_preserves_publication(
     )
     before = resource.observe()
     with pytest.raises(RuntimeError) as caught:
-        resource.edit(
-            before.ref.revision, (CfgEdit(("a",), EvalValue("@{device.value}")),)
-        )
+        resource.edit((CfgEdit(("a",), EvalValue("@{device.value}")),))
     assert caught.value is defect
     assert resource.observe() == before
 
@@ -1124,8 +1066,8 @@ def test_group_refresh_publishes_individual_fault_before_any_notification() -> N
     sources = Sources(values={"frequency": 2.0, "other": 3.0})
     first = make_resource(sources)
     second = make_resource(sources)
-    first.edit(first.observe().ref.revision, (CfgEdit(("a",), EvalValue("frequency")),))
-    second.edit(second.observe().ref.revision, (CfgEdit(("a",), EvalValue("other")),))
+    first.edit((CfgEdit(("a",), EvalValue("frequency")),))
+    second.edit((CfgEdit(("a",), EvalValue("other")),))
     before_inputs = second.snapshot_inputs()
     seen: list[tuple[CfgObservation, CfgObservation]] = []
 
@@ -1164,7 +1106,7 @@ def test_group_refresh_publishes_individual_fault_before_any_notification() -> N
         assert successful.source_basis == failed.source_basis == stable.source_basis
     assert second.snapshot_inputs() == before_inputs
     with pytest.raises(CfgPreconditionError) as blocked:
-        second.accept(second.observe().ref.revision)
+        second.accept()
     assert blocked.value.reason is CfgPreconditionReason.NOT_VALID
 
 
@@ -1189,7 +1131,6 @@ def test_range_incomplete_input_publishes_invalid_then_can_be_completed(
         else {"start": 0.0, "stop": incomplete, "expts": 3}
     )
     changed = resource.edit(
-        resource.observe().ref.revision,
         (
             CfgEdit(("range",), payload)
             if whole
@@ -1203,10 +1144,10 @@ def test_range_incomplete_input_publishes_invalid_then_can_be_completed(
     assert isinstance(pending, DirectValue) and pending.value is None
     assert pending.raw == "-"
     with pytest.raises(CfgPreconditionError):
-        resource.accept(changed.ref.revision)
-    completed = resource.edit(changed.ref.revision, (CfgEdit(("range", edge), 2.0),))
+        resource.accept()
+    completed = resource.edit((CfgEdit(("range", edge), 2.0),))
     assert completed.status is CfgStatus.VALID
-    assert resource.accept(completed.ref.revision).values["range"] == {
+    assert resource.accept().values["range"] == {
         "start": 0.0,
         "stop": 2.0,
         "expts": 3,
@@ -1231,11 +1172,10 @@ def test_whole_range_uses_new_geometry_before_step(centered: bool, order) -> Non
         resolution=Sources().read,
     )
     changed = resource.edit(
-        resource.observe().ref.revision,
         (CfgEdit(("range",), dict(pairs[index] for index in order)),),
     )
     assert changed.status is CfgStatus.VALID
-    accepted = resource.accept(changed.ref.revision)
+    accepted = resource.accept()
     assert accepted.values["range"] == {
         "start": 6.0,
         "stop": 14.0,
@@ -1258,7 +1198,5 @@ def test_whole_range_rejection_is_atomic(payload) -> None:
     resource = CfgResource(lambda: schema, resolution=sources.read)
     before = resource.observe()
     with pytest.raises(CfgInputError):
-        resource.edit(
-            before.ref.revision, (CfgEdit(("a",), 9.0), CfgEdit(("range",), payload))
-        )
+        resource.edit((CfgEdit(("a",), 9.0), CfgEdit(("range",), payload)))
     assert resource.observe() == before

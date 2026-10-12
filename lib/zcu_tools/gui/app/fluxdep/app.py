@@ -90,5 +90,19 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         )
         return GuiAssembly(controller=ctrl, window=window, control_adapter=adapter)
 
+    def before_show(self, assembly: GuiAssembly) -> None:
+        """Retire app-local authority views before normal Qt exit stops remote."""
+        from qtpy.QtWidgets import QApplication
+
+        from .ui.main_window import MainWindow
+
+        window = assembly.window
+        if not isinstance(window, MainWindow):
+            raise TypeError("fluxdep assembly requires its MainWindow")
+        application = QApplication.instance()
+        if not isinstance(application, QApplication):
+            raise RuntimeError("fluxdep app requires a QApplication before assembly")
+        window.watch_application_shutdown(application)
+
 
 __all__ = ["FluxDepGuiBehavior"]

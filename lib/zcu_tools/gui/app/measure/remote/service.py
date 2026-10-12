@@ -10,8 +10,6 @@ layers measure-gui's own dispatch policy on top by overriding the base seams:
   - ``_new_client_ctx`` → a :class:`_ClientCtx` that also tracks CfgEditor
     sessions; ``_on_client_close_extra`` reclaims them on drop;
   - ``_route_extra`` → the editor.subscribe/unsubscribe state-owning methods;
-  - shared resource observations → injected method policies and Controller
-    versions; ``_resource_key`` supplies writeback pane aliases;
   - ``_after_success`` → CfgEditor session lifecycle tracking;
   - ``_extra_start`` / ``_extra_stop`` → the per-editor change stream and the
     out-of-band diagnostic channel (``notify_diagnostic``), both pushed via
@@ -35,6 +33,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, cast
+
+from qtpy.QtWidgets import QApplication
 
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
@@ -71,7 +71,6 @@ if TYPE_CHECKING:
 
 from .dispatch import METHOD_REGISTRY
 from .events import EVENT_SERIALIZERS, wire_event_name
-from .method_entries import METHOD_ENTRIES
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -118,6 +117,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
 
+    def _local_modal_open(self) -> bool:
+        return QApplication.activeModalWidget() is not None
+
     ctrl: Controller
     tab_control: TabControlPort
     cfg_lookup: Callable[[str], CfgEditing]
@@ -144,12 +146,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
             gui_version=GUI_VERSION,
             server_name="RemoteControlServer",
             method_registry=METHOD_REGISTRY,
+            control_identity=controller.control_identity,
             event_serializers=EVENT_SERIALIZERS,
             wire_event_name=wire_event_name,
-            resource_versions=controller.resources_versions,
-            observation_policies={
-                entry.method: entry.agent for entry in METHOD_ENTRIES
-            },
         )
         self.render_view = render_view
         self.tab_control = controller.tab_control
@@ -197,7 +196,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         self, ctx: SubscriptionCtx, *, on_owner_thread: bool
     ) -> None:
         # No further owner request may use this ctx after the link closes.
-        # The per-connection seen map is released with the ctx, not copied elsewhere.
         # Reclaim this connection's CfgEditor sessions. On a drop (IO thread) the
         # LiveModel teardown must be marshalled onto the State owner thread; during
         # stop() the endpoint already calls us there, so reclaim directly.
@@ -236,22 +234,8 @@ class RemoteControlAdapter(RemoteControlServiceBase):
         )
 
     # ------------------------------------------------------------------
-    # Dispatch policy seams: version guard + editor lifecycle
+    # Editor lifecycle
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _resource_key(template: str, values: Mapping[str, object]) -> str:
-        if "{writeback_resource}" in template:
-            pane = values.get("subtab_id")
-            if pane not in ("analysis", "post_analysis"):
-                raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback pane")
-            values = dict(
-                values,
-                writeback_resource=(
-                    "analyze" if pane == "analysis" else "post_analyze"
-                ),
-            )
-        return template.format_map(values)
 
     def _after_success(
         self,

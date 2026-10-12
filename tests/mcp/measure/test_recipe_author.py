@@ -52,13 +52,12 @@ def test_author_reads_owner_reference_mode_and_child_readonly(tmp_path, mode):
         )
 
 
-def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
+def test_author_edits_preserve_defaults(tmp_path):
     gui = LookbackGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set("rounds", None)
         assert tab.use_library("modules.readout", None) is None
-        assert gui.publication["cfg_ref"]["revision"] == "2"
         tab.set("rounds", 7)
         # This short reference is a wire-edit literal, not native admission.
         assert tab.use_library("modules.readout", "readout") is None
@@ -69,7 +68,6 @@ def test_author_edits_preserve_defaults_and_use_each_returned_cfg_ref(tmp_path):
         gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"]
         == "readout"
     )
-    assert gui.publication["cfg_ref"]["revision"] == "5"
 
 
 @pytest.mark.parametrize(
@@ -113,14 +111,12 @@ def test_author_reuse_resets_the_observed_cfg_before_editing(tmp_path):
             for method, params in client.transport.sent
             if method in {"tab.get_cfg", "tab.reset_cfg", "tab.edit_cfg", "tab.new"}
         ]
-    assert [method for method, _ in cfg_calls] == [
-        "tab.get_cfg",
-        "tab.reset_cfg",
-        "tab.edit_cfg",
-    ]
-    assert cfg_calls[1][1]["expected"] == {"cfg_id": "cfg", "revision": "2"}
-    assert cfg_calls[2][1]["expected"] == {"cfg_id": "cfg", "revision": "3"}
-    assert gui.publication["cfg_ref"]["revision"] == "4"
+    assert [method for method, _ in cfg_calls] == ["tab.reset_cfg", "tab.edit_cfg"]
+    assert cfg_calls[0][1] == {"tab_id": "t"}
+    assert cfg_calls[1][1] == {
+        "tab_id": "t",
+        "edits": [{"path": ["rounds"], "value": 9}],
+    }
     assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 9
 
 
@@ -131,7 +127,6 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
         tab = RecipeSession(client.context).open_tab("lookback")
         with pytest.raises(ValueError, match="field"):
             tab.set(field, 5)
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 @pytest.mark.parametrize(
@@ -170,7 +165,9 @@ def test_author_required_library_returns_parameter_gap_or_none(
         assert tab.use_library("modules.readout", name, required="readout_ref") == (
             expected
         )
-    assert gui.publication["cfg_ref"]["revision"] == ("2" if name is None else "3")
+    assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == (
+        0 if name is None else 1
+    )
 
 
 def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
@@ -202,7 +199,6 @@ def test_author_sweep_rejects_invalid_counts_before_edit(tmp_path, expts):
         RecipeSession(client.context).open_tab("lookback").set_sweep(
             "sweep.freq", expts=expts
         )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_author_sweep_only_edits_supplied_fields(tmp_path):
@@ -213,7 +209,6 @@ def test_author_sweep_only_edits_supplied_fields(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set_sweep("sweep.freq")
-        assert gui.publication["cfg_ref"]["revision"] == "2"
         tab.set_sweep("sweep.freq", start=6000.0, expts=2)
     inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
     assert inputs["start"]["resolved"] == 6000.0
@@ -284,7 +279,6 @@ def test_author_disconnected_binding_does_not_reconnect_or_replay_an_edit(tmp_pa
             tab.set("rounds", 5)
         assert error.value.reason == "connection_lost"
         assert len(client.transport.sent) == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 @pytest.mark.parametrize("items", [None, []])

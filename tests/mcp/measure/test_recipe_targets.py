@@ -112,13 +112,10 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
             params["aliases"] == {"custom": "Q1", "resonator": "R2"}
             for _, params in gui.alias_requests
         )
-        run = next(
+        next(
             params for method, params in gui.alias_requests if method == "tab.run_start"
         )
-        preview = [
-            params for method, params in gui.alias_requests if method == "tab.get_cfg"
-        ][-1]
-        assert run["expected"] == preview["expected"] == gui.publication["cfg_ref"]
+        [params for method, params in gui.alias_requests if method == "tab.get_cfg"][-1]
         assert all(
             "aliases" not in params
             for method, params in client.transport.sent

@@ -46,7 +46,9 @@ class InteractiveMplWidget(QWidget):
         self.figure = Figure(figsize=(8, 5))
         self.canvas = FigureCanvasQTAgg(self.figure)
 
+        self._editable = True
         controls = QWidget()
+        self._controls = controls
         self.controls_layout = QVBoxLayout(controls)
         controls.setFixedWidth(220)
 
@@ -68,6 +70,16 @@ class InteractiveMplWidget(QWidget):
         self.canvas.mpl_connect("button_press_event", self._dispatch_press)
         self.canvas.mpl_connect("motion_notify_event", self._dispatch_move)
         self.canvas.mpl_connect("button_release_event", self._dispatch_release)
+
+    def set_editable(self, *, editable: bool) -> None:
+        """Gate controls and domain gestures, leaving canvas viewing available."""
+        self._editable = editable
+        self._controls.setEnabled(editable)
+        if not editable:
+            self.cancel_pointer_preview()
+
+    def cancel_pointer_preview(self) -> None:
+        """Discard presentation-only input when authority changes mid-gesture."""
 
     def add_finish_button(self, label: str = "Finish") -> QPushButton:
         """Append the finish/apply button (call after adding subclass controls).
@@ -100,14 +112,15 @@ class InteractiveMplWidget(QWidget):
 
     def _dispatch_press(self, event: Event) -> None:
         mouse = cast(MouseEvent, event)
-        if mouse.inaxes is not None:
+        if self._editable and mouse.inaxes is not None:
             self.on_press(mouse)
 
     def _dispatch_move(self, event: Event) -> None:
         mouse = cast(MouseEvent, event)
-        if mouse.inaxes is not None:
+        if self._editable and mouse.inaxes is not None:
             self.on_move(mouse)
 
     def _dispatch_release(self, event: Event) -> None:
         mouse = cast(MouseEvent, event)
-        self.on_release(mouse)
+        if self._editable:
+            self.on_release(mouse)

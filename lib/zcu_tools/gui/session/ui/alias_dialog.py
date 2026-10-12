@@ -39,7 +39,9 @@ class AliasDialog(QDialog):
     """
 
     def __init__(
-        self, control: ContextControlPort, parent: QWidget | None = None
+        self,
+        control: ContextControlPort,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._control = control

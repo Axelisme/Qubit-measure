@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QEvent, Qt  # type: ignore[attr-defined]
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QApplication,

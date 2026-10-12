@@ -48,6 +48,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 default_integer("from_level", 0, "Nonnegative transition from level"),
                 default_integer("to_level", 1, "Nonnegative transition to level"),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -91,6 +92,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "unknown/invalid concrete names return invalid_predictor_qubit; malformed "
             "direct inputs return invalid_predictor_params. Never reads dialog/cache.",
             _SOURCES,
+            readonly=True,
         ),
     ),
 )

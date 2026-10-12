@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
@@ -32,6 +33,7 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
     DataFigurePreviewGallery,
 )
+from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
@@ -120,19 +122,31 @@ def _failing_renderer_for(target_fig: object):
     return _render
 
 
-def make_ctrl():
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
-    ctrl.get_cfg_editor_draft.return_value = MagicMock()
-    ctrl.active_operation_count.return_value = 0
+@pytest.fixture
+def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
+    """Retain every Local authority until this case retires its owned views."""
+    owned_authorities: list[ControlIdentity] = []
 
-    return ctrl
+    def create_ctrl() -> MagicMock:
+        ctrl = MagicMock()
+        ctrl.control_identity = ControlIdentity()
+        owned_authorities.append(ctrl.control_identity)
+        configure_cfg_lookup(ctrl)
+        ctrl.get_left_panel_width.return_value = 500
+        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.get_adapter_guide.return_value = {}
+        ctrl.progress_control.attach_progress.return_value = lambda: None
+        ctrl.progress_control.progress_bars.return_value = []
+        ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
+        ctrl.get_cfg_editor_draft.return_value = MagicMock()
+        ctrl.active_operation_count.return_value = 0
+
+        return ctrl
+
+    try:
+        yield create_ctrl
+    finally:
+        owned_authorities.clear()
 
 
 def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=False):
@@ -184,7 +198,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch):
+def exp_tab_widget(qapp, monkeypatch, make_ctrl):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
     def mock_attach(fig, container):
@@ -222,7 +236,6 @@ def exp_tab_widget(qapp, monkeypatch):
 
 
 def test_gallery_capability_driven_cards(qapp):
-    # Run only
     caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
     g_none = DataFigurePreviewGallery(caps_none, renderer=_fake_renderer)
     assert g_none.has_card("run")
@@ -353,7 +366,7 @@ def test_gallery_never_retains_figure(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget):
+def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     # NONE
     caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
@@ -396,7 +409,7 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget):
     tab_both.detach()
 
 
-def test_exp_data_routing_a4(qapp, exp_tab_widget):
+def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
@@ -432,7 +445,9 @@ def test_exp_data_routing_a4(qapp, exp_tab_widget):
     tab.detach()
 
 
-def test_exp_data_activation_refreshes_and_lifecycle_sync(qapp, exp_tab_widget):
+def test_exp_data_activation_refreshes_and_lifecycle_sync(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     # Use fake renderer so we can assert raster not empty after show
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
@@ -499,7 +514,7 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(qapp, exp_tab_widget):
     tab.detach()
 
 
-def test_exp_data_invisible_defers_render(qapp, exp_tab_widget):
+def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     call_log: list[str] = []
 
@@ -534,7 +549,7 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget):
 
 
 def test_exp_production_reachability_data_gallery_is_active_right_widget(
-    qapp, exp_tab_widget
+    qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
@@ -566,7 +581,7 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
 
 
 def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
-    qapp, exp_tab_widget
+    qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
@@ -691,7 +706,7 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
 
 
 def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
-    qapp, exp_tab_widget
+    qapp, exp_tab_widget, make_ctrl
 ):
     """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
     ctrl = make_ctrl()
@@ -855,7 +870,9 @@ def test_gallery_wide_single_full_width(qapp):
     g_w.hide()
 
 
-def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget):
+def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
+    qapp, exp_tab_widget, make_ctrl
+):
     """Geometry via shipped ExpTabWidget Data path for each capability combination (A1).
 
     Verifies automatic viewport-driven reflow (gallery viewport, not test-driven

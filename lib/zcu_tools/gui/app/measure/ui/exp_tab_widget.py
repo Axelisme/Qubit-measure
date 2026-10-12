@@ -292,6 +292,7 @@ class ExpTabWidget(QWidget):
         self._has_analysis = capabilities.analysis is not AnalysisMode.NONE
         self._has_post = bool(capabilities.post_analysis)
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
+        self._writable = True
         self._progress_control = ctrl.progress_control
         self._cfg = ctrl.cfg_resources.lookup(tab_id)
         # The action boundary is retained for Reset; button slots close over it.
@@ -1016,7 +1017,7 @@ class ExpTabWidget(QWidget):
         if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
-        self._cfg.reset(self.cfg_form.current_ref().revision)
+        self._cfg.reset()
         self._actions.refresh_interaction(self.tab_id)
 
     def _is_data_visible(self) -> bool:
@@ -1081,6 +1082,19 @@ class ExpTabWidget(QWidget):
         # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)
 
+    def set_writable(self, *, writable: bool) -> None:
+        """Receive Local write availability; domain and Stop gates remain separate."""
+        self._writable = writable
+        if self._has_analysis:
+            # Removed widgets remain QObject children until DeferredDelete; only
+            # stack membership owns mounted presentations.
+            for index in range(self._analysis_stack.count()):
+                frontend = self._analysis_stack.widget(index)
+                if isinstance(frontend, InteractiveFrontend):
+                    frontend.set_read_only(read_only=not writable)
+        if self._actions is not None:
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
+
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
         if snapshot.capabilities is None:
@@ -1094,6 +1108,7 @@ class ExpTabWidget(QWidget):
             )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
+        writable = self._writable
         local_busy = state.is_running or state.is_analyzing
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
@@ -1113,7 +1128,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.setObjectName("primaryButton")
             cfg_valid = self.cfg_form.is_valid()
             can_run = (
-                not local_busy
+                writable
+                and not local_busy
                 and not state.global_run_active
                 and state.has_active_context
                 and (not capabilities.requires_soc or state.has_soc)
@@ -1142,7 +1158,7 @@ class ExpTabWidget(QWidget):
             self.run_btn.style().polish(self.run_btn)  # type: ignore[attr-defined]
             self.run_btn.update()
 
-        idle = not local_busy
+        idle = writable and not local_busy
         self.cfg_form.set_editing_enabled(idle)
         self.reset_btn.setEnabled(idle)
 
@@ -1178,7 +1194,7 @@ class ExpTabWidget(QWidget):
                 f"render snapshot for tab {self.tab_id!r} has no save pane"
             )
         self._save_center.set_comment_text(snapshot.save.comment)
-        self._save_center.update_interaction(snapshot)
+        self._save_center.update_interaction(snapshot, writable=writable)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id

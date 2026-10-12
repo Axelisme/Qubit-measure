@@ -298,7 +298,6 @@ def test_start_run_sets_is_running(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert cf.state.is_tab_running(tab_id)
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))  # cleanup
@@ -311,7 +310,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
+    cfg.edit((CfgEdit(("reps",), 42),))
 
     # Observe the payload at the worker-to-adapter boundary.
     captured: dict[str, dict[str, object]] = {}
@@ -332,7 +331,6 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
@@ -344,7 +342,6 @@ def test_start_run_emits_run_started(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     cf.bus.emit.assert_any_call(RunStartedPayload(tab_id=tab_id))
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -354,7 +351,6 @@ def test_run_finished_updates_tab_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.get_tab(tab_id).run.result is not None
@@ -364,7 +360,6 @@ def test_run_finished_emits_run_finished(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
@@ -376,7 +371,6 @@ def test_run_finished_calls_refresh_tab(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     cf.bus.emit.assert_any_call(
@@ -418,7 +412,7 @@ def test_result_commit_survives_analysis_preparation_failure(cf, monkeypatch, so
 
         if source == "cancelled":
             monkeypatch.setattr(adapter, "run", partial_run)
-        cf.ctrl.start_run(tab_id, cf.ctrl.cfg_resources.lookup(tab_id).observe().ref)
+        cf.ctrl.start_run(tab_id)
         if source == "cancelled":
             try:
                 assert _wait_for(entered.is_set)
@@ -473,7 +467,6 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
 
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     # The non-analysis adapter's analyze-params builder is never touched, so the
@@ -498,7 +491,6 @@ def test_run_failed_shows_status_message(cf):
 
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.view.show_error_dialog.called
@@ -514,7 +506,6 @@ def test_run_failed_clears_run_lock(cf):
 
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
     assert cf.state.is_run_active() is False
@@ -534,7 +525,6 @@ def test_start_run_while_running_raises(cf):
     cf.state.get_tab(tab_id).adapter = slow
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
 
     try:
@@ -543,7 +533,6 @@ def test_start_run_while_running_raises(cf):
         with pytest.raises(OperationConflictError, match="run is active"):
             cf.ctrl.start_run(
                 other_tab_id,
-                cf.ctrl.cfg_resources.lookup(other_tab_id).observe().ref,
             )
     finally:
         ev.set()
@@ -564,7 +553,6 @@ def test_start_run_while_device_setup_active_raises(cf):
     with pytest.raises(OperationConflictError, match="device_setup is active"):
         cf.ctrl.start_run(
             tab_id,
-            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
         )
 
     cf.ctrl._operation_gate.release(1)
@@ -584,7 +572,6 @@ def test_unselected_context_rejects_real_run(cf):
     with pytest.raises(RuntimeError, match="active file-backed context"):
         cf.ctrl.start_run(
             tab_id,
-            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
         )
 
 
@@ -648,7 +635,6 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
         cf.ctrl.start_run(
             tab_id,
-            cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
         )
 
     cf.ctrl._operation_gate.release(1)
@@ -690,7 +676,6 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
     tab_id = cf.ctrl.new_tab("fake")
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
@@ -708,11 +693,9 @@ def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     published = []
     cfg.watch(published.append)
-    before = cfg.observe().ref
+    cfg.observe()
     cf.bus.emit.reset_mock()
-    after = cfg.edit(before.revision, (CfgEdit(("reps",), 42),))
-    assert published[-1].ref == after.ref
-    assert after.ref.revision == before.revision + 1
+    cfg.edit((CfgEdit(("reps",), 42),))
     assert cf.bus.emit.call_args_list == []
 
 
@@ -739,12 +722,10 @@ def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
 
     tab_id = cf.ctrl.new_tab("fake")
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 123),))
-    before = cfg.observe().ref
-    returned = cfg.reset(before.revision)
+    cfg.edit((CfgEdit(("reps",), 123),))
+    cfg.observe()
+    cfg.reset()
     defaults = _default_fake_schema(cf.state.session_env)
-    assert returned.ref.cfg_id == before.cfg_id
-    assert returned.ref.revision == before.revision + 1
     assert (
         cf.state.get_tab(tab_id).cfg.snapshot_inputs().value.fields["reps"]
         == defaults.value.fields["reps"]
@@ -760,7 +741,6 @@ def test_reset_tab_cfg_while_running_raises(cf):
     cf.state.get_tab(tab_id).adapter = slow
     cf.ctrl.start_run(
         tab_id,
-        cf.ctrl.cfg_resources.lookup(tab_id).observe().ref,
     )
     assert cf.state.is_tab_running(tab_id)
 
@@ -768,7 +748,7 @@ def test_reset_tab_cfg_while_running_raises(cf):
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     with pytest.raises(CfgPreconditionError, match="blocked"):
-        cfg.reset(cfg.observe().ref.revision)
+        cfg.reset()
 
     # cleanup
     ev.set()
@@ -821,7 +801,7 @@ def test_persist_then_restore_app_state(tmp_path):
     from zcu_tools.gui.cfg.resource import CfgEdit
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("reps",), 42),))
+    cfg.edit((CfgEdit(("reps",), 42),))
     cf.ctrl.setup_control.new_entry(EntryRequest("chip"))
     cf.ctrl.setup_control.remember_connection(
         ConnectionPreferences(ip="10.0.0.2", port=7000)
@@ -888,9 +868,4 @@ def test_restore_invalid_tab_is_rejected_and_reported(cf):
 # ---------------------------------------------------------------------------
 # Connection / predictor — handled by ConnectionService.
 # (Direct controller setters are removed in Phase 62.2.)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Notify façade (Stage 4b) — pure-Python, no Qt fixture needed
 # ---------------------------------------------------------------------------

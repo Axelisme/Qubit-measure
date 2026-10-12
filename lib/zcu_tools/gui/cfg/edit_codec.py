@@ -8,29 +8,16 @@ Plain strings never request text parsing or expression evaluation.
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Mapping, Sequence
 
 from .model import DirectValue, EvalValue
 from .resource import (
     CfgEdit,
-    CfgId,
     CfgInput,
     CfgInputError,
     CfgInputReason,
     CfgPath,
-    CfgRef,
-    CfgRevision,
 )
-
-
-def decode_revision(value: object) -> CfgRevision:
-    if not isinstance(value, str) or re.fullmatch(r"0|[1-9][0-9]*", value) is None:
-        raise CfgInputError(
-            CfgInputReason.MALFORMED_INPUT,
-            "revision must be a canonical decimal string",
-        )
-    return CfgRevision(int(value))
 
 
 def decode_path(value: object) -> CfgPath:
@@ -42,18 +29,6 @@ def decode_path(value: object) -> CfgPath:
             "path must be an array of nonempty string segments",
         )
     return tuple(value)
-
-
-def decode_ref(value: object) -> CfgRef:
-    if not isinstance(value, dict) or set(value) != {"cfg_id", "revision"}:
-        raise CfgInputError(
-            CfgInputReason.MALFORMED_INPUT, "expected must contain cfg_id and revision"
-        )
-    return CfgRef(CfgId(value["cfg_id"]), decode_revision(value["revision"]))
-
-
-def encode_ref(ref: CfgRef) -> dict[str, str]:
-    return {"cfg_id": str(ref.cfg_id), "revision": str(ref.revision)}
 
 
 def decode_edits(value: object) -> tuple[CfgEdit, ...]:

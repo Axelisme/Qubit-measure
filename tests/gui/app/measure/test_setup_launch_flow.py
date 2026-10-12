@@ -48,15 +48,16 @@ def _button(dialog: SetupDialog, text: str) -> QPushButton:
 
 
 def _reopen_setup(app: LaunchedMeasureApp, qapp: QApplication) -> SetupDialog:
-    """Close the open Setup and open it again from the toolbar."""
-    (current,) = visible_setup_dialogs(app.window)
-    current.reject()
+    """Close any open Setup and open a fresh instance from the toolbar."""
+    previous = visible_setup_dialogs(app.window)
+    for current in previous:
+        current.reject()
     qapp.processEvents()
     assert visible_setup_dialogs(app.window) == []
     click_toolbar_setup(app.window)
     qapp.processEvents()
     (reopened,) = visible_setup_dialogs(app.window)
-    assert reopened is not current
+    assert reopened not in previous
     return reopened
 
 
@@ -111,10 +112,24 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
 ) -> None:
     with launched_measure_app(qapp, tmp_path) as app:
         control = app.controller.context_control
+        (startup,) = visible_setup_dialogs(app.window)
+        startup.reject()
+        qapp.processEvents()
+        # Identity is fixed per socket; acquire owner only after closing Local Setup.
+        app.invoke("connect", {"port": app.remote.port, "mode": "owner"})
+
+        def check_setup_entry(name: str) -> None:
+            app.invoke("rpc_call", {"method": "control.release"})
+            dialog = _reopen_setup(app, qapp)
+            assert name in _field_texts(dialog)
+            dialog.reject()
+            qapp.processEvents()
+            app.invoke("rpc_call", {"method": "control.acquire"})
+
         entry = app.invoke(
             "rpc_call", {"method": "entry.new", "params": {"name": "chip-a"}}
         )
-        assert {"chip-a"} <= _field_texts(_reopen_setup(app, qapp))
+        check_setup_entry("chip-a")
 
         point = app.invoke(
             "rpc_call", {"method": "point.new", "params": {"label": "q1"}}
@@ -125,7 +140,7 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         # Selecting the same point keeps the selected resource identity.
         app.invoke("rpc_call", {"method": "point.use", "params": {"label": "q1"}})
         assert control.read_context().target == target
-        assert {"chip-a"} <= _field_texts(_reopen_setup(app, qapp))
+        check_setup_entry("chip-a")
 
         # A missing entry leaves the entry, selected point and Setup unchanged.
         binding = control.get_source_binding()
@@ -139,7 +154,12 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         )
         assert control.read_context().target == target
         assert control.get_source_binding() == binding
-        assert "chip-b" not in _field_texts(_reopen_setup(app, qapp))
+        app.invoke("rpc_call", {"method": "control.release"})
+        failed_setup = _reopen_setup(app, qapp)
+        assert "chip-b" not in _field_texts(failed_setup)
+        failed_setup.reject()
+        qapp.processEvents()
+        app.invoke("rpc_call", {"method": "control.acquire"})
 
         # A new entry publishes metadata without selecting a point; Setup shows its name.
         changed = app.invoke(
@@ -151,4 +171,4 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         with pytest.raises(FailedPreconditionError) as caught:
             control.read_context()
         assert caught.value.reason_code == "no_context"
-        assert {"chip-b"} <= _field_texts(_reopen_setup(app, qapp))
+        check_setup_entry("chip-b")

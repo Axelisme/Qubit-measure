@@ -17,7 +17,6 @@ from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.services.guard import GuardError
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -81,7 +80,7 @@ def test_run_start_unselected_context_symmetry(qapp):
 
     # UI path
     with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.start_run(tab_id, ctrl.cfg_resources.lookup(tab_id).observe().ref)
+        ctrl.start_run(tab_id)
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
@@ -90,7 +89,6 @@ def test_run_start_unselected_context_symmetry(qapp):
             "tab.run_start",
             {
                 "tab_id": tab_id,
-                "expected": encode_ref(ctrl.cfg_resources.lookup(tab_id).observe().ref),
             },
         )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED

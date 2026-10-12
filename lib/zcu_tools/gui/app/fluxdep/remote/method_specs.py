@@ -6,15 +6,14 @@ that the lightweight ``mcp_server`` bridge can import it (to generate MCP tool
 schemas) without pulling in the Qt-bound service layer. ``dispatch`` binds a
 synchronous handler to each spec here to form its runtime registry.
 
-Read methods establish only their declared resource observations. Mutating
-methods use the existing Controller owners; shared dispatch enforces their
-per-connection guards before invoking the handler.
+Read methods are explicitly readonly. Mutating methods use the existing
+Controller owners; shared dispatch checks control authority before invoking
+the handler.
 """
 
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
-from zcu_tools.gui.remote.observation import ResourceObservationPolicy
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 # ---------------------------------------------------------------------------
@@ -28,10 +27,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the current project info (chip_name, qub_name, result_dir, "
         "database_path).",
+        readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
-        "Apply project identity and paths after reading project.info. Empty or "
+        "Apply project identity and paths. Empty or "
         "omitted paths use the native project defaults; database_path is the raw "
         "data root, not the fit search database file.",
         params=(
@@ -46,18 +46,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
         "Completion includes zero points; point_count reports available data.",
+        readonly=True,
     ),
     "spectrum.snapshot": MethodSpec(
         5.0,
         "Read the complete editable spectrum projection for a literal name. "
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
         params=(ParamSpec("name", JsonType.STRING),),
+        readonly=True,
     ),
     "spectrum.load": MethodSpec(
         30.0,
-        "Load native raw data after reading project.info, spectrum.list and "
-        "every current spectrum snapshot. The basename replaces an existing "
-        "entry. New spectra still need a full snapshot before editing.",
+        "Load native raw data. The basename replaces an existing entry.",
         params=(
             ParamSpec("filepath", JsonType.STRING),
             ParamSpec("spec_type", JsonType.STRING, enum=("OneTone", "TwoTone")),
@@ -69,32 +69,30 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "spectrum.load_processed": MethodSpec(
         30.0,
-        "Restore processed spectra after reading project.info, spectrum.list "
-        "and every current spectrum snapshot. Includes empty completed spectra; "
+        "Restore processed spectra, including empty completed spectra; "
         "publication is incremental, not rolled back on failure.",
         params=(ParamSpec("filepath", JsonType.STRING),),
     ),
     "spectrum.remove": MethodSpec(
         5.0,
-        "Remove a literal spectrum after reading its snapshot and spectrum.list.",
+        "Remove a literal spectrum.",
         params=(ParamSpec("name", JsonType.STRING),),
     ),
     "spectrum.set_active": MethodSpec(
         5.0,
-        "Select a spectrum for display after reading spectrum.list. Null or "
+        "Select a spectrum for display. Null or "
         "omitted name clears display selection without changing source versions.",
         params=(ParamSpec("name", JsonType.STRING, required=False),),
     ),
     "spectrum.reset_alignment": MethodSpec(
         5.0,
-        "Reopen alignment after reading the spectrum snapshot. Preserve "
+        "Reopen alignment. Preserve "
         "native points, completion and the last calibration.",
         params=(ParamSpec("name", JsonType.STRING),),
     ),
     "spectrum.reset_points": MethodSpec(
         5.0,
-        "Clear committed points and completion on an aligned spectrum after "
-        "reading its snapshot. Preserve alignment.",
+        "Clear committed points and completion on an aligned spectrum. Preserve alignment.",
         params=(ParamSpec("name", JsonType.STRING),),
     ),
     # Cross-spectrum selection
@@ -102,22 +100,24 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the complete published joint-cloud selection mask and native "
         "normalized min_distance. Null mask means all points, not a live Session.",
+        readonly=True,
     ),
     "selection.pointcloud": MethodSpec(
         5.0,
         "Derive the joint (flux, freq) point cloud assembled from every "
         "spectrum's selected points. Returns {fluxs:[...], freqs:[...]}.",
+        readonly=True,
     ),
-    # Live interactive state is not a full published-resource observation.
     "interactive.read": MethodSpec(
         30.0,
         "Inspect the live context without opening input or changing display. "
-        "Returns state and native PNG, or null when inactive; no guard is refreshed.",
+        "Returns state and native PNG, or null when inactive.",
+        readonly=True,
     ),
     "spectrum.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse a picker for an already active literal spectrum after "
-        "reading its snapshot. kind is line, onetone or twotone. Returns the "
+        "Open/reuse a picker for an already active literal spectrum. "
+        "kind is line, onetone or twotone. Returns the "
         "owner identity, commands, state and native PNG.",
         params=(
             ParamSpec("name", JsonType.STRING),
@@ -126,7 +126,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "spectrum.interactive.command": MethodSpec(
         30.0,
-        "Command the current picker identity after reading its spectrum. "
+        "Command the current picker identity. "
         "Use plugin commands or parameterless undo, finish, cancel. params "
         "defaults to an empty object. Terminal receipt retains the old identity.",
         params=(
@@ -138,15 +138,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "selection.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse the joint-cloud selection after reading collection, "
-        "all spectrum snapshots (including zero-point spectra), and selection. "
+        "Open/reuse the joint-cloud selection. "
         "Returns identity, commands, input state and native PNG.",
     ),
     "selection.interactive.command": MethodSpec(
         30.0,
-        "Command the current joint identity after reading all sources and "
-        "selection. Use plugin commands or parameterless undo, apply, cancel. "
-        "Apply publishes without closing; input reads/PNG do not refresh guards.",
+        "Command the current joint identity. "
+        "Use plugin commands or parameterless undo, apply, cancel. "
+        "Apply publishes without closing.",
         params=(
             ParamSpec("context_id", JsonType.INTEGER),
             ParamSpec("command", JsonType.STRING),
@@ -158,10 +157,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
         "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        readonly=True,
     ),
     "fit.set_params": MethodSpec(
         5.0,
-        "Replace all fit inputs after reading fit.result; clear the old result "
+        "Replace all fit inputs; clear the old result "
         "without starting a search. database_path is the search database file. "
         "EJb, ECb and ELb are finite [lower, upper] bounds in GHz. transitions "
         "maps category names to integer pairs; reserved r_f/sample_f are finite "
@@ -178,16 +178,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "fit.search": MethodSpec(
         5.0,
-        "Start the app's single-flight database search after reading project, "
-        "fit, selection, collection and every spectrum snapshot. Returns the "
+        "Start the app's single-flight database search. Returns the "
         "app token; after completion explicitly reread fit.result.",
     ),
     "operation.status": MethodSpec(
         5.0,
         "Read a retained search token's pending or terminal activity. Null or "
         "omitted token reads the latest GUI/agent activity, or null before "
-        "any search. Unknown tokens are rejected; no observations are updated.",
+        "any search. Unknown tokens are rejected.",
         params=(ParamSpec("token", JsonType.INTEGER, required=False),),
+        readonly=True,
     ),
     "operation.cancel": MethodSpec(
         5.0,
@@ -199,18 +199,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         35.0,
         "Wait off-owner for a known search token, returning completed or timeout "
         "with native outcome and cancellation reasons. timeout is finite "
-        "seconds from 0 to 30 (default 10). Timeout does not cancel; this read "
-        "does not refresh fit or other observations.",
+        "seconds from 0 to 30 (default 10). Timeout does not cancel.",
         params=(
             ParamSpec("token", JsonType.INTEGER),
             ParamSpec("timeout", JsonType.NUMBER, required=False, default=10.0),
         ),
         off_main_thread=True,
+        readonly=True,
     ),
     "export.spectrums": MethodSpec(
         30.0,
-        "Export the native spectrum collection after reading project.info, "
-        "spectrum.list and every current spectrum snapshot. Optional filepath "
+        "Export the native spectrum collection. Optional filepath "
         "defaults to the project result directory. Existing files are rejected "
         "unless overwrite is true; I/O failure may leave partial output.",
         params=(
@@ -220,82 +219,19 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "fit.export_params": MethodSpec(
         30.0,
-        "Export the current fit result after reading project.info, fit.result, "
-        "spectrum.list and every current spectrum snapshot. Optional savepath "
+        "Export the current fit result. Optional savepath "
         "defaults to params.json in the project result directory. Merge with "
         "independent sections and use the first aligned spectrum's calibration.",
         params=(ParamSpec("savepath", JsonType.STRING, required=False),),
     ),
-    # Resource version table (optimistic-concurrency guard baseline). Full
-    # snapshot is bookkeeping, not a full editable read. Only GUI shared
-    # dispatch owns per-connection seen; MCP must not infer observations here.
-    "resources.versions": MethodSpec(5.0, "Snapshot of all resource versions"),
+    # Domain resource versions remain available as read-only bookkeeping.
+    "resources.versions": MethodSpec(
+        5.0, "Snapshot of all resource versions", readonly=True
+    ),
     # State readiness (fan-out at MCP into one fluxdep_state_check reply).
     "state.check": MethodSpec(
         5.0,
         "Read readiness flags at once: {has_project, spectrum_count, has_active}.",
+        readonly=True,
     ),
-}
-
-# App resource semantics only; shared RemoteControlServiceBase owns seen maps,
-# guard comparison, full-read observations and successful self-write tracking.
-OBSERVATION_POLICIES: dict[str, ResourceObservationPolicy] = {
-    "project.info": ResourceObservationPolicy(reveals=("project",)),
-    "project.setup": ResourceObservationPolicy(
-        guard_deps=("project",), refresh_after_write=True
-    ),
-    "spectrum.list": ResourceObservationPolicy(reveals=("spectrums:__set__",)),
-    "spectrum.snapshot": ResourceObservationPolicy(reveals=("spectrum:{name}",)),
-    "spectrum.load": ResourceObservationPolicy(
-        guard_deps=("project", "spectrums:__set__", "spectrum:*"),
-        refresh_after_write=True,
-    ),
-    "spectrum.load_processed": ResourceObservationPolicy(
-        guard_deps=("project", "spectrums:__set__", "spectrum:*"),
-        refresh_after_write=True,
-    ),
-    "spectrum.remove": ResourceObservationPolicy(
-        guard_deps=("spectrums:__set__", "spectrum:{name}"), refresh_after_write=True
-    ),
-    "spectrum.set_active": ResourceObservationPolicy(guard_deps=("spectrums:__set__",)),
-    "spectrum.reset_alignment": ResourceObservationPolicy(
-        guard_deps=("spectrum:{name}",), refresh_after_write=True
-    ),
-    "spectrum.reset_points": ResourceObservationPolicy(
-        guard_deps=("spectrum:{name}",), refresh_after_write=True
-    ),
-    "selection.snapshot": ResourceObservationPolicy(reveals=("selection",)),
-    "selection.pointcloud": ResourceObservationPolicy(),
-    "interactive.read": ResourceObservationPolicy(),
-    "spectrum.interactive.open": ResourceObservationPolicy(
-        guard_deps=("spectrum:{name}",)
-    ),
-    "spectrum.interactive.command": ResourceObservationPolicy(
-        guard_deps=("spectrum:{name}",), refresh_after_write=True
-    ),
-    "selection.interactive.open": ResourceObservationPolicy(
-        guard_deps=("spectrums:__set__", "spectrum:*", "selection")
-    ),
-    "selection.interactive.command": ResourceObservationPolicy(
-        guard_deps=("spectrums:__set__", "spectrum:*", "selection"),
-        refresh_after_write=True,
-    ),
-    "fit.result": ResourceObservationPolicy(reveals=("fit",)),
-    "fit.set_params": ResourceObservationPolicy(
-        guard_deps=("fit",), refresh_after_write=True
-    ),
-    "fit.search": ResourceObservationPolicy(
-        guard_deps=("project", "fit", "selection", "spectrums:__set__", "spectrum:*")
-    ),
-    "operation.status": ResourceObservationPolicy(),
-    "operation.cancel": ResourceObservationPolicy(),
-    "operation.await": ResourceObservationPolicy(),
-    "export.spectrums": ResourceObservationPolicy(
-        guard_deps=("project", "spectrums:__set__", "spectrum:*")
-    ),
-    "fit.export_params": ResourceObservationPolicy(
-        guard_deps=("project", "fit", "spectrums:__set__", "spectrum:*")
-    ),
-    "resources.versions": ResourceObservationPolicy(),
-    "state.check": ResourceObservationPolicy(),
 }

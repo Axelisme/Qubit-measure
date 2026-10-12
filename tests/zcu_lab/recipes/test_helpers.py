@@ -152,7 +152,7 @@ def test_author_rejects_nonfinite_or_boolean_frequency_before_editing(
                 calibration="$resonator.freq",
                 required="frequency_mhz",
             )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize("center", [None, 6500.0])
@@ -206,7 +206,7 @@ def test_author_frequency_sweep_reports_all_missing_inputs_before_edit(tmp_path)
                 "span_mhz", "No finite positive $resonator.kappa linewidth"
             ),
         )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 @pytest.mark.parametrize(
@@ -224,7 +224,7 @@ def test_author_flux_sweep_rejects_invalid_explicit_endpoints(tmp_path, start, s
             start=start,
             stop=stop,
         )
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 def test_author_flux_sweep_requires_calibrations_only_for_omitted_endpoints(tmp_path):
@@ -308,7 +308,7 @@ def test_author_flux_device_rejects_mismatched_or_unconfirmed_units_before_edit(
                 RecipeSession(client.context).open_tab("lookback"), "coil", unit=unit
             )
         assert error.value.reason == "invalid_device"
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
@@ -322,7 +322,7 @@ def test_author_fake_flux_requires_explicit_native_opt_in(tmp_path):
         use_flux_device(
             RecipeSession(client.context).open_tab("lookback"), "coil", unit="native"
         )
-    assert gui.publication["cfg_ref"]["revision"] == "4"
+    assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 2
 
 
 @pytest.mark.parametrize(
@@ -336,7 +336,7 @@ def test_author_flux_device_rejects_blank_assertions_before_edit(tmp_path, name,
         with pytest.raises(ValueError, match="must be non-empty"):
             use_flux_device(tab, name, unit=unit)
         assert len(client.transport.sent) == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 def test_author_run_captures_asserted_flux_unit_without_conversion(tmp_path):
@@ -392,7 +392,7 @@ def test_author_flux_device_uses_declared_native_coordinate(tmp_path, type_name)
     assert children["dev"]["children"]["flux_dev"]["input"]["resolved"] == "coil"
     assert children["flux_unit"]["input"]["resolved"] == "native"
     assert children["sweep"] == before_sweep
-    assert gui.publication["cfg_ref"]["revision"] == "4"
+    assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 2
 
 
 def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
@@ -410,7 +410,7 @@ def test_author_flux_device_rejects_unknown_coordinate_before_edit(tmp_path):
         assert error.value.reason == "invalid_device"
         assert not [call for call in client.transport.sent if call[0] == "tab.edit_cfg"]
     assert gui.publication == before
-    assert gui.publication["cfg_ref"]["revision"] == "2"
+    assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
 def frequency_sweep(

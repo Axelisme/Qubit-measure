@@ -109,7 +109,7 @@ def test_rpc_tool_backed_operation_keeps_handle_usable_for_cancel(
     ]
 
 
-def test_rpc_stale_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
+def test_rpc_admission_error_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     client.context.session.ensure_connected()
     client.transport.sent.clear()
@@ -117,17 +117,16 @@ def test_rpc_stale_requires_explicit_retry_by_caller(tmp_path: Path) -> None:
         "ok": False,
         "error": {
             "code": "precondition_failed",
-            "reason": "stale_version",
-            "message": "read the current result first",
-            "data": {"stale": ["tab:tab-1:result"]},
+            "reason": "not_holder",
+            "message": "caller does not hold control",
         },
     }
     params = {"tab_id": "tab-1", "data_path": "saved.h5"}
     with pytest.raises(GuiRpcError) as failure:
         client.call("rpc_call", {"method": "tab.load_data", "params": params})
-    assert failure.value.reason == "stale_version"
+    assert failure.value.reason == "not_holder"
     assert failure.value.code == "precondition_failed"
-    assert "run result" in str(failure.value)
+    assert "caller does not hold control" in str(failure.value)
     assert client.transport.sent == [("tab.load_data", params)]
 
 

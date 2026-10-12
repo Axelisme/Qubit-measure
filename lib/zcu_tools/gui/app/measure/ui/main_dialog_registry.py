@@ -35,7 +35,11 @@ def _visible_dialog_names(
 
 
 class MainDialogRegistry:
-    """Owns the named non-modal dialogs exposed through ``MainWindow``."""
+    """Retain the named dialogs exposed through ``MainWindow``.
+
+    Keep each dialog's modal presentation. Inspect and Device receive a static
+    read-only mode from the main window when opened for Remote viewing.
+    """
 
     def __init__(
         self, ctrl: Controller, parent: QWidget, *, dialog_refs: DialogRefStore
@@ -45,6 +49,10 @@ class MainDialogRegistry:
         self._dialog_refs = dialog_refs
         self._dialog_names: dict[DialogName, None] = {}
 
+    def _reclaim_for_stop(self) -> None:
+        if self._ctrl.control_identity.status().holder != "gui":
+            self._ctrl.control_identity.reclaim_local()
+
     def _dialog(self, name: DialogName) -> QDialog | None:
         return self._dialog_refs.get(name)
 
@@ -52,7 +60,7 @@ class MainDialogRegistry:
         self._dialog_refs.discard(name)
         self._dialog_names.pop(name, None)
 
-    def _build_dialog(self, name: DialogName) -> QDialog:
+    def _build_dialog(self, name: DialogName, *, writable: bool) -> QDialog:
         """Construct a fresh QDialog for ``name``.
 
         Per-name imports stay lazy to avoid loading unused dialog modules during
@@ -61,15 +69,21 @@ class MainDialogRegistry:
         if name is DialogName.SETUP:
             from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
-            return SetupDialog(self._ctrl.setup_control, parent=self._parent)
+            return SetupDialog(
+                self._ctrl.setup_control,
+                parent=self._parent,
+            )
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
-            return DeviceDialog(
+            dialog = DeviceDialog(
                 self._ctrl.device_control,
                 parameter_provider=self._ctrl.context_control.read_context,
                 parent=self._parent,
+                before_stop=self._reclaim_for_stop,
             )
+            dialog.set_read_only(not writable)
+            return dialog
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
@@ -85,33 +99,41 @@ class MainDialogRegistry:
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
 
-            return InspectDialog(
+            dialog = InspectDialog(
                 self._ctrl, bus=self._ctrl.get_bus(), parent=self._parent
             )
+            dialog.set_read_only(read_only=not writable)
+            return dialog
         if name is DialogName.ALIASES:
             from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 
-            return AliasDialog(self._ctrl.context_control, parent=self._parent)
+            return AliasDialog(
+                self._ctrl.context_control,
+                parent=self._parent,
+            )
         if name is DialogName.ARB_WAVEFORM:
             from .arb_waveform_dialog import ArbWaveformDialog
 
-            return ArbWaveformDialog(self._ctrl.arb_waveforms, parent=self._parent)
+            return ArbWaveformDialog(
+                self._ctrl.arb_waveforms,
+                parent=self._parent,
+            )
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
-    def open(self, name: DialogName) -> None:
-        """Open a named dialog non-modally, or raise an existing instance."""
+    def open(self, name: DialogName, *, writable: bool = True) -> None:
+        """Open with the existing modal policy, or raise a retained instance."""
         existing = self._dialog(name)
         if existing is not None:
             try:
                 existing.raise_()
                 existing.activateWindow()
                 if not existing.isVisible():
-                    existing.show()
+                    existing.open()
                 return
             except RuntimeError:
                 self._forget(name)
 
-        dialog = self._build_dialog(name)
+        dialog = self._build_dialog(name, writable=writable)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(

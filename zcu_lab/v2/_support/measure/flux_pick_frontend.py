@@ -69,6 +69,8 @@ class FluxPickFrontend(InteractiveFrontend):
         self._committed = state
         self._preview_active = False
         self._retired = False
+        self._read_only = False
+        self._alignment_busy = False
 
         controls = QWidget(self)
         buttons = QVBoxLayout(controls)
@@ -101,6 +103,16 @@ class FluxPickFrontend(InteractiveFrontend):
         self._unsubscribe_alignment = plugin.subscribe_alignment(self._on_alignment)
         self._canvas.draw_idle()
 
+    def set_read_only(self, *, read_only: bool) -> None:
+        self._read_only = read_only
+        if read_only:
+            self.cancel_preview()
+        for widget in (self._conjugate, self._swap, self._done, self._cancel):
+            widget.setEnabled(not read_only and not self._retired)
+        self._align.setEnabled(
+            not read_only and not self._retired and not self._alignment_busy
+        )
+
     @property
     def figure(self) -> Figure:
         return self._figure
@@ -131,7 +143,7 @@ class FluxPickFrontend(InteractiveFrontend):
             self._show_committed(self._session.snapshot())
 
     def _on_press(self, event: MouseEvent) -> None:
-        if self._retired or event.button != MouseButton.LEFT:
+        if self._read_only or self._retired or event.button != MouseButton.LEFT:
             return
         role = self._picker.selected_role
         if role is None:
@@ -162,7 +174,11 @@ class FluxPickFrontend(InteractiveFrontend):
         self._repaint()
 
     def _on_move(self, event: MouseEvent) -> None:
-        if self._retired or not self._picker.is_main_axes(event.inaxes):
+        if (
+            self._read_only
+            or self._retired
+            or not self._picker.is_main_axes(event.inaxes)
+        ):
             return
         x = event.xdata
         role = self._picker.selected_role
@@ -176,22 +192,23 @@ class FluxPickFrontend(InteractiveFrontend):
             self._repaint()
 
     def _set_conjugate(self, enabled: bool) -> None:  # noqa: FBT001 - Qt toggled(bool)
-        if not self._retired:
+        if not self._read_only and not self._retired:
             self._plugin.actions.conjugate.execute(self._session, enabled)
 
     def _swap_lines(self) -> None:
-        if not self._retired:
+        if not self._read_only and not self._retired:
             self._plugin.actions.swap.execute(self._session, None)
 
     def _on_alignment(self, busy: bool, error: str | None) -> None:  # noqa: FBT001 - status subscription
         if self._retired:
             return
-        self._align.setEnabled(not busy)
+        self._alignment_busy = busy
+        self._align.setEnabled(not self._read_only and not busy)
         if error is not None:
             self._info.setText(error)
 
     def _auto_align(self) -> None:
-        if self._retired:
+        if self._read_only or self._retired:
             return
         try:
             self._plugin.start_alignment(self._session)
@@ -201,7 +218,7 @@ class FluxPickFrontend(InteractiveFrontend):
             self._info.setText(str(exc))
 
     def _finish(self) -> None:
-        if self._retired:
+        if self._read_only or self._retired:
             return
         self.cancel_preview()
         try:
@@ -213,7 +230,7 @@ class FluxPickFrontend(InteractiveFrontend):
             self.teardown()
 
     def _cancel_analysis(self) -> None:
-        if not self._retired:
+        if not self._read_only and not self._retired:
             self.cancel_preview()
             self._request_cancel()
             self.teardown()

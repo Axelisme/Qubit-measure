@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
-from zcu_tools.gui.cfg.resource import CfgRef
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -24,7 +24,6 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     GatePresence,
 )
-from zcu_tools.gui.session.notify_handles import NotifyHandles, NotifyResult
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
@@ -217,14 +216,6 @@ class RenderView(Protocol):
     def close_dialog(self, name: DialogName) -> None: ...
     def list_open_dialogs(self) -> list[DialogName]: ...
     def request_shutdown(self) -> None: ...
-    def open_notify_prompt(self, token: int, message: str, timeout: float) -> None:
-        """Open a non-modal NotifyUserDialog for the given token / message.
-
-        Called from the main thread (notify.open handler). The dialog mints no
-        token — it receives one so reply/dismiss/timeout route back correctly.
-        timeout is the display timeout in seconds (QTimer in the dialog).
-        """
-        ...
 
 
 class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
@@ -278,6 +269,7 @@ class Controller(SessionControllerMixin):
         Invalid syntax, duplicates or forward links raise
         InvalidInputError(alias_invalid). No device or cache is used to bind rows.
         """
+        self.control_identity = ControlIdentity()
         self._state = state
         # Base directory the default per-qubit result/database paths are anchored
         # under. The entry script injects the repo root (Path(__file__).parent...)
@@ -369,9 +361,6 @@ class Controller(SessionControllerMixin):
         self._settings_svc = services.settings
         self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
-        # Notify prompt registry (Stage 4b): independent of OperationHandles;
-        # tokens minted on the main thread, consumed off-main (ADR-0066).
-        self._notify_handles: NotifyHandles = NotifyHandles()
         # App-level PersistenceCaretaker, injected by runtime behavior via
         # attach_caretaker (None in bare-Controller tests that don't exercise
         # persistence).
@@ -706,13 +695,13 @@ class Controller(SessionControllerMixin):
         return self._state.version.snapshot()
 
     def start_run(
-        self, tab_id: str, expected: CfgRef, *, aliases: Mapping[str, str] | None = None
+        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> int:
         """Start observed cfg inputs with an optional single-Run alias override.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """
-        return self._run_analyze_control.start_run(tab_id, expected, aliases=aliases)
+        return self._run_analyze_control.start_run(tab_id, aliases=aliases)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)
@@ -1092,47 +1081,6 @@ class Controller(SessionControllerMixin):
 
     def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
         return self._operation_control.await_operation(operation_id, timeout)
-
-    # ------------------------------------------------------------------
-    # Notify-user prompt (Stage 4b, ADR-0066 two-RPC design)
-    #
-    # Producer side (main thread): open_notify_prompt / reply_notify /
-    #   dismiss_notify / timeout_notify
-    # Consumer side (off-main IO worker): await_notify
-    # ------------------------------------------------------------------
-
-    def open_notify_prompt(self, message: str, timeout: float) -> int:
-        """Mint a notify token and open a non-modal prompt dialog. Main thread.
-
-        Returns the token the caller must pass to await_notify and to the
-        dialog so its reply/dismiss/timeout callbacks route correctly.
-        """
-        token = self._notify_handles.open()
-        host = self._render_host
-        if host is not None and hasattr(host, "open_notify_prompt"):
-            host.open_notify_prompt(token, message, timeout)  # type: ignore[union-attr]
-        return token
-
-    def reply_notify(self, token: int, text: str) -> None:
-        """Deliver a user reply to the notify channel. Main thread (dialog callback)."""
-        self._notify_handles.reply(token, text)
-
-    def dismiss_notify(self, token: int) -> None:
-        """Deliver a dismiss signal to the notify channel. Main thread (dialog callback)."""
-        self._notify_handles.dismiss(token)
-
-    def timeout_notify(self, token: int) -> None:
-        """Deliver a timeout signal to the notify channel. Main thread (QTimer callback)."""
-        self._notify_handles.timeout(token)
-
-    def await_notify(self, token: int, timeout: float) -> NotifyResult:
-        """Block until the notify prompt settles. Off-main IO thread only.
-
-        timeout is the backstop: longer than the dialog's QTimer so the dialog
-        fires first. Returns NotifyResult with reason in {'reply', 'dismiss',
-        'timeout'} — never raises on timeout/dismiss (ADR-0066).
-        """
-        return self._notify_handles.await_result(token, timeout)
 
     # ------------------------------------------------------------------
     # Project root and settings

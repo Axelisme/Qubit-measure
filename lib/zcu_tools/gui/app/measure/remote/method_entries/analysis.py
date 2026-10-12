@@ -33,20 +33,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:h_tab_get_analyze_result",
         MethodSpec(
             5.0,
-            "Read the current scalar summary without refreshing observations. Optional "
+            "Read the current scalar summary. Optional "
             "operation_id requires that operation's result and also returns complete "
-            "operation_state, establishing the same observations as tab.snapshot.",
+            "operation_state.",
             (required_string("tab_id"), optional_integer("operation_id")),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
-            reveals=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            reveals_when_nonempty=("operation_id",),
             operation_key="analyze:{tab_id}",
         ),
     ),
@@ -58,6 +51,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read primary analyze params as {analyze_params, definitions}. Values "
             "are null before a result exists; definitions come from the live adapter.",
             (required_string("tab_id"),),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -88,7 +82,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             exposure="tool",
             tool_names=("tab_analyze",),
             operation_key="analyze:{tab_id}",
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -123,20 +116,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
             5.0,
-            "Read the current post-analysis scalar summary without refreshing observations. "
+            "Read the current post-analysis scalar summary. "
             "Optional operation_id requires that operation's result and also returns complete "
-            "operation_state, establishing the same observations as tab.snapshot.",
+            "operation_state.",
             (required_string("tab_id"), optional_integer("operation_id")),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(
-            reveals=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            reveals_when_nonempty=("operation_id",),
             operation_key="post_analyze:{tab_id}",
         ),
     ),
@@ -148,6 +134,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Read post-analysis params as {post_analyze_params, definitions}. Values "
             "are null before post analysis; definitions come from the live adapter.",
             (required_string("tab_id"),),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -177,7 +164,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             exposure="tool",
             tool_names=("tab_analyze",),
             operation_key="post_analyze:{tab_id}",
-            refresh_after_write=True,
         ),
     ),
 )

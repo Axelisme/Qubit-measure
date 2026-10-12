@@ -45,21 +45,26 @@ class ExportSpectrumsDialog(QDialog):
             )
         )
 
-        path_row = QHBoxLayout()
+        self._content = QWidget()
+        path_row = QHBoxLayout(self._content)
+        path_row.setContentsMargins(0, 0, 0, 0)
         path_row.addWidget(QLabel("Path:"))
         self._path_edit = QLineEdit(default_path)
         path_row.addWidget(self._path_edit, stretch=1)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._on_browse)
         path_row.addWidget(browse)
-        root.addLayout(path_row)
+        root.addWidget(self._content)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self._write_buttons.accepted.connect(self.accept)
+        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        cancel.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self._write_buttons)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
 
     def _on_browse(self) -> None:
         filepath, _ = QFileDialog.getSaveFileName(
@@ -67,6 +72,7 @@ class ExportSpectrumsDialog(QDialog):
             "Export spectrums.hdf5",
             self._path_edit.text(),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if filepath:
             self._path_edit.setText(filepath)

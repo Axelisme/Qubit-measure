@@ -281,6 +281,9 @@ class DeviceDialog(QDialog):
     expression-bearing Apply. None permits pure calculations but not parameter
     paths. Direct-only Apply does not call it. Provider or expression failures
     display an error and prevent setup; valid Apply delegates setup to device.
+    before_stop, when supplied, permits Stop in inspection mode and runs before
+    the cancellation request. The application uses it to reclaim authority;
+    this shared dialog does not own the holder or decide control transitions.
     """
 
     def __init__(
@@ -288,8 +291,11 @@ class DeviceDialog(QDialog):
         device: DeviceControlPort,
         parameter_provider: Callable[[], ParameterContext | None],
         parent: QWidget | None = None,
+        *,
+        before_stop: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._before_stop = before_stop
         self._dev = device
         self._parameter_provider = parameter_provider
         self._read_only = False
@@ -444,11 +450,11 @@ class DeviceDialog(QDialog):
 
     # --- live-value poller (dialog-scoped + selection-scoped) ----------------
 
-    def showEvent(self, a0: Any) -> None:  # noqa: N802 (Qt override)
+    def showEvent(self, a0: Any) -> None:
         super().showEvent(a0)
         self._update_poll_timer()
 
-    def hideEvent(self, a0: Any) -> None:  # noqa: N802 (Qt override)
+    def hideEvent(self, a0: Any) -> None:
         super().hideEvent(a0)
         self._update_poll_timer()
 
@@ -666,7 +672,9 @@ class DeviceDialog(QDialog):
         # --- Apply button ---
         if is_setting_up:
             # The selected device is mid-setup: show its red Stop button.
-            self._apply_btn.setEnabled(not self._read_only)
+            self._apply_btn.setEnabled(
+                not self._read_only or self._before_stop is not None
+            )
             self._apply_btn.setText("Stop")
             self._apply_btn.setStyleSheet("color: red;")
             self._apply_btn.setToolTip("Cancel the in-progress setup.")
@@ -748,8 +756,6 @@ class DeviceDialog(QDialog):
         self._on_selection_changed(self._list.currentRow())
 
     def _on_apply_or_stop_clicked(self) -> None:
-        if self._read_only:
-            return
         item = self._list.currentItem()
         if item is None:
             return
@@ -760,9 +766,15 @@ class DeviceDialog(QDialog):
         # device's concurrent setup never makes this button a Stop.
         snapshot = self._dev.get_device_snapshot(name)
         if snapshot is not None and snapshot.status is DeviceStatus.SETTING_UP:
+            if self._read_only and self._before_stop is None:
+                return
+            if self._before_stop is not None:
+                self._before_stop()
             self._dev.cancel_device_operation(name)
             return
 
+        if self._read_only:
+            return
         if self._dev.is_memory_device(name):
             self._add_status.setText("")
             self._dev.start_reconnect_device(name)

@@ -39,7 +39,6 @@ class FieldGui(LookbackGui):
                 and len(edits) == 1
                 and edits[0]["path"] == ["range"]
             ):
-                assert params["expected"] == self.publication["cfg_ref"]
                 for key, value in edits[0]["value"].items():
                     state = scalar(value)["input"]
                     if isinstance(value, dict):
@@ -49,9 +48,6 @@ class FieldGui(LookbackGui):
                             resolved=self.md[value["__expr"]],
                         )
                     self.publication["tree"]["children"]["range"]["inputs"][key] = state
-                self.publication["cfg_ref"]["revision"] = str(
-                    int(self.publication["cfg_ref"]["revision"]) + 1
-                )
                 return self.publication
         return super().__call__(method, params)
 
@@ -86,7 +82,7 @@ def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
                 "unit": "native",
             },
         }
-        assert gui.publication["cfg_ref"]["revision"] == "2"
+
         assert not any(method == "tab.edit_cfg" for method, _ in client.transport.sent)
 
 
@@ -103,10 +99,9 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
         with pytest.raises(ValueError, match="Unknown cfg field|source must be"):
             tab.retain_source(field, source)
         assert client.transport.sent == before
-        assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
-def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
+def test_set_fields_writes_one_batch_and_keeps_none_default(
     tmp_path: Path,
 ) -> None:
     gui = FieldGui()
@@ -137,7 +132,6 @@ def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
                 "tab.edit_cfg",
                 {
                     "tab_id": "t",
-                    "expected": {"cfg_id": "cfg", "revision": "2"},
                     "edits": [
                         {
                             "path": ["modules", "readout", "pulse_cfg", "freq"],
@@ -151,7 +145,7 @@ def test_set_fields_writes_one_batch_revision_and_keeps_none_default(
                 },
             )
         ]
-        assert gui.publication["cfg_ref"]["revision"] == "3"
+
         assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 3
         pulse = gui.publication["tree"]["children"]["modules"]["children"]["readout"][
             "children"
@@ -187,7 +181,6 @@ def test_batch_preflight_rejects_all_before_first_edit(
                 ]
             )
         assert len(client.transport.sent) == before
-        assert gui.publication["cfg_ref"]["revision"] == "2"
 
 
 def test_empty_batch_and_default_only_batch_do_not_edit(tmp_path: Path) -> None:
@@ -216,7 +209,7 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
             for method, params in client.transport.sent
             if method == "tab.edit_cfg"
         ]
-        assert [params["expected"]["revision"] for params in edits] == ["2", "3"]
+        assert len(edits) == 2
         assert edits[1]["edits"] == [
             {
                 "path": ["range"],

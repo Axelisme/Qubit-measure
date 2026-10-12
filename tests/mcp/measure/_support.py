@@ -1,6 +1,6 @@
 """Recording wire adapter for public measure MCP contracts."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,6 +56,16 @@ class WireTransport:
         if method in self.replies:
             response = self.replies[method]
             reply = response(params) if callable(response) else response
+        elif method in {"control.connect", "control.status"}:
+            reply = {
+                "ok": True,
+                "result": {
+                    "holder": "rpc:agent",
+                    "locked": False,
+                    "online": True,
+                    "me": True,
+                },
+            }
         elif method == "resources.versions":
             reply = {"ok": True, "result": {"versions": {}}}
         elif method == "wire.version":
@@ -93,6 +103,24 @@ def full_execution_reply(client: MeasureClient, reply: ToolReply) -> ToolReply:
     if "elapsed_s" in reply.data:
         data["elapsed_s"] = reply.data["elapsed_s"]
     return ToolReply(data, reply.images, reply.is_error)
+
+
+def business_effects_after_initial_control(
+    recorded: Sequence[tuple[str, Mapping[str, object]]],
+) -> list[tuple[str, Mapping[str, object]]]:
+    """Project a caller's existing observation after one default initialization.
+
+    Callers retain their own metadata exclusions. Only a first exact agent/owner
+    control.connect is removed; absent initialization preserves the entire flow.
+    Wrong initialization fails, and later control calls remain visible so an
+    unexpected reconnect or retry cannot disappear from sequence assertions.
+    This never clears or changes the recording transport's sent requests.
+    """
+    effects = list(recorded)
+    if effects and effects[0][0] == "control.connect":
+        assert effects[0] == ("control.connect", {"label": "agent", "mode": "owner"})
+        return effects[1:]
+    return effects
 
 
 def make_client(

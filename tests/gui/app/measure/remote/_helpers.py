@@ -415,6 +415,9 @@ def open_client(port: int) -> socket.socket:
     sock = socket.create_connection(("127.0.0.1", port), timeout=1.0)
     # The OS may recycle a closed socket's fileno from an earlier test.
     reset_inbox(sock)
+    reply = call(sock, "control.connect", rid="control-initialize")
+    if not reply["ok"] and reply["error"]["code"] != "unauthorized":
+        raise AssertionError(reply)
     return sock
 
 

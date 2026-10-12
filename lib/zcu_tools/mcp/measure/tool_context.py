@@ -48,7 +48,7 @@ class MeasureToolContext:
         operation_handle: int | None = None,
     ) -> dict[str, Any]:
         """Send a known GUI method using its live timeout unless overridden."""
-        if timeout_seconds is None and method in {"operation.await", "notify.await"}:
+        if timeout_seconds is None and method == "operation.await":
             raise ValueError(f"{method!r} requires explicit timeout_seconds")
         return self.gui.send_gui_rpc(
             method, params, timeout_seconds, operation_handle=operation_handle

@@ -262,27 +262,23 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
         3.0
     )
     with pytest.raises(CfgPreconditionError):
-        resource.accept(initial.ref.revision)
+        resource.accept()
 
     environment = _environment(calibration=calibration, calibration_present=True)
-    refreshed = resource.refresh(initial.ref.revision)
-    assert refreshed.ref.cfg_id == initial.ref.cfg_id
-    assert refreshed.ref.revision > initial.ref.revision
+    refreshed = resource.refresh()
     assert read_value_path(resource.snapshot_inputs().value, "value") == EvalValue(
         expression
     )
     if calibration is not None:
         assert refreshed.status is CfgStatus.VALID
-        accepted = resource.accept(refreshed.ref.revision)
+        accepted = resource.accept()
         assert accepted.values["value"] == (12.0 if scaled else 6.0)
         assert accepted.values["neighbor"] == 3.0
     else:
         assert refreshed.status is CfgStatus.INVALID
         with pytest.raises(CfgPreconditionError):
-            resource.accept(refreshed.ref.revision)
-        reset = resource.reset(refreshed.ref.revision)
-        assert reset.ref.cfg_id == initial.ref.cfg_id
-        assert reset.ref.revision > refreshed.ref.revision
+            resource.accept()
+        reset = resource.reset()
         assert reset.status is CfgStatus.INVALID
         assert read_value_path(resource.snapshot_inputs().value, "value") == EvalValue(
             expression
@@ -297,7 +293,7 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
             for diagnostic in reset.diagnostics
         )
         with pytest.raises(CfgPreconditionError):
-            resource.accept(reset.ref.revision)
+            resource.accept()
 
 
 def test_unbound_pulse_default_preserves_empty_link_and_refreshes_calibration() -> None:
@@ -334,15 +330,13 @@ def test_unbound_pulse_default_preserves_empty_link_and_refreshes_calibration() 
         for diagnostic in initial.diagnostics
     )
     with pytest.raises(CfgPreconditionError):
-        resource.accept(initial.ref.revision)
-    edited = resource.edit(initial.ref.revision, (CfgEdit(("neighbor",), 4.0),))
+        resource.accept()
+    edited = resource.edit((CfgEdit(("neighbor",), 4.0),))
     assert edited.status is CfgStatus.INVALID
     environment = _environment()
-    refreshed = resource.refresh(edited.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert refreshed.ref.cfg_id == initial.ref.cfg_id
-    assert refreshed.ref.revision > initial.ref.revision
-    raw = resource.accept(refreshed.ref.revision).values
+    raw = resource.accept().values
     assert raw["neighbor"] == 4.0
     modules = raw["modules"]
     assert isinstance(modules, dict)
@@ -433,12 +427,12 @@ def test_unbound_readout_default_takes_catalog_shape_after_binding(pulse: bool) 
         for diagnostic in initial.diagnostics
     )
     with pytest.raises(CfgPreconditionError):
-        resource.accept(initial.ref.revision)
+        resource.accept()
 
     environment = _readout_environment(readout, bound=True)
-    refreshed = resource.refresh(initial.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    raw = resource.accept(refreshed.ref.revision).values["modules"]
+    raw = resource.accept().values["modules"]
     assert isinstance(raw, dict)
     selected = raw["readout"]
     assert isinstance(selected, dict)
@@ -478,16 +472,14 @@ def test_unbound_optional_module_is_invalid_until_explicitly_disabled() -> None:
         read_value_path(resource.snapshot_inputs().value, "modules.drive"),
         ReferenceValue,
     )
-    disabled = resource.edit(
-        initial.ref.revision, (CfgEdit(("modules", "drive", "__ref"), None),)
-    )
+    disabled = resource.edit((CfgEdit(("modules", "drive", "__ref"), None),))
     assert disabled.status is CfgStatus.VALID
     assert read_value_path(resource.snapshot_inputs().value, "modules.drive") is None
     environment = _environment()
-    refreshed = resource.refresh(disabled.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
     assert read_value_path(resource.snapshot_inputs().value, "modules.drive") is None
-    assert resource.accept(refreshed.ref.revision).values == {"modules": {}}
+    assert resource.accept().values == {"modules": {}}
 
 
 @pytest.mark.parametrize("slot", [None, "Q1.pulses.missing"], ids=["unset", "dangling"])
@@ -517,17 +509,17 @@ def test_unbound_module_keeps_missing_link_until_reset_uses_bound_fallback(
     initial = resource.observe()
     assert initial.status is CfgStatus.INVALID
     environment = _environment(slot=slot)
-    refreshed = resource.refresh(initial.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.INVALID
     value = read_value_path(resource.snapshot_inputs().value, "modules.drive")
     assert isinstance(value, ReferenceValue)
     assert value.chosen_key == "qubit.module.x180"
     assert value.value == CfgSectionValue()
     with pytest.raises(CfgPreconditionError):
-        resource.accept(refreshed.ref.revision)
-    reset = resource.reset(refreshed.ref.revision)
+        resource.accept()
+    reset = resource.reset()
     assert reset.status is CfgStatus.VALID
-    modules = resource.accept(reset.ref.revision).values["modules"]
+    modules = resource.accept().values["modules"]
     assert isinstance(modules, dict)
     drive = modules["drive"]
     assert isinstance(drive, dict)

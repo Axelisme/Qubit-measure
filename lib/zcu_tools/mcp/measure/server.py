@@ -69,7 +69,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v114: integration revision above the base's device_setup release.
 # v115: read-only predictor inputs and readiness without an installed predictor.
 # v116: explicit working-point selection and saved writeback destinations.
-MCP_VERSION = 116
+# v117: holder/ref-free cfg integrated above the working-point and UI releases.
+MCP_VERSION = 117
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -110,8 +111,8 @@ missing parameters, failures and interactive handoffs return earlier. Configure
 the client deadline above 300 seconds with room for transport and reply overhead.
 The stdio server is synchronous: another request on that connection is not
 guaranteed service during the first wait. A client timeout is not cancellation.
-Never automatically rerun a recipe or mutation after timeout, disconnect, busy
-or stale_version. Inspect current state and confirmed files before deciding.
+Never automatically rerun a recipe or mutation after timeout, disconnect or busy.
+Inspect current state and confirmed files before deciding.
 
 Use global status for GUI operations, non-terminal executions and terminal count.
 Keep known execution IDs for later queries; global status does not embed history.
@@ -131,7 +132,7 @@ Twotone requires center_mhz/span_mhz/points; flux surveys require flux_range and
 flux_points as well as explicit flux_device/flux_unit. Resonator frequency defaults
 use current frequency/linewidth to write numeric endpoints, without live formulas.
 Use status(execution, detail="full") for captured analysis/writeback detail without
-new RPCs or guard observations. Artifacts preserve producer sections, names, every member
+new RPCs or authority changes. Artifacts preserve producer sections, names, every member
 and all output paths, formats, statuses and errors. Synchronous tab.save_data and
 tab.save_artifacts return the complete current report, not a Save handle. No Save
 await or snapshot reread is needed. Reserved destinations are not saved files.
@@ -142,7 +143,7 @@ Failed outcomes are data. A wait timeout stops waiting,
 not the operation or its continuation. Operation handles belong to one GUI
 connection generation; execution IDs belong to this MCP server session and
 are not durable recovery tokens. After GUI reconnect, discover current handles
-through status and refresh observations; do not reuse an old op.
+through status; do not reuse an old op.
 
 For a registered recipe, finish_early stops acquisition and continues with
 usable partial results, raw saving and analysis. cancel takes precedence and
@@ -153,15 +154,12 @@ receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
-Read tab.snapshot(tab_id), context.snapshot and soc.info(include_cfg=true)
-explicitly for their guarded resources, and device.snapshot for devices.
-Summaries, partial getters, status and bare versions do not replace these reads.
-Cfg editing and Run require the observed cfg_ref from tab.get_cfg. A new tab
-receipt certifies existence only. apply_writeback(tab, items) selects current
+Cfg editing applies to current inputs; Run accepts only Valid cfg and fixes
+its execution values at admission. apply_writeback(tab, items) selects current
 Primary/Post candidates by stable target_name. Omit items for all; an empty array
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
-any write, using current IDs rather than proposal IDs. It does not answer recipes
-or refresh guards. apply_writeback stops on the first error and reports confirmed
+any write, using current IDs rather than proposal IDs. It does not answer recipes.
+apply_writeback stops on the first error and reports confirmed
 progress without retry or rollback. Inspect proposals and the destination first.
 
 When a recipe is awaiting_answer, answer(recipe=<execution ID>,
@@ -170,8 +168,8 @@ Only the recipe's explicit tab.accept writes. writeback.receipts lists actual
 confirmed writes and failed prefixes. Only one nonterminal recipe is admitted.
 
 tab_interact without payload reads committed state and available commands.
-Send payload={command,args} for one action. This method has no seen guard;
-later owner-loop commits win. Reads preserve focus; commands follow Analysis.
+Send payload={command,args} for one action. Later owner-loop commits win.
+Reads preserve focus; commands follow Analysis.
 done joins the original completion. For a recipe-owned analysis it waits for
 that recipe's next result or question; standalone analysis retains its execution.
 preview_active is a local interactive preview, not committed state. Current tool

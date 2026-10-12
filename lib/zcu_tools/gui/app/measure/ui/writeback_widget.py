@@ -796,6 +796,7 @@ class WritebackWidget(QWidget):
         dialog.open()
 
     def _add_cfg_close_action(self, dialog: QDialog, layout: QVBoxLayout) -> None:
+        """Append a Close action to the modal editor."""
         button_row = QHBoxLayout()
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)

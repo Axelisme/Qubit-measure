@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from zcu_tools.gui.cfg.edit_codec import encode_ref
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
     CfgPreconditionError,
@@ -28,15 +27,20 @@ from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui.app.measure._load_support import historical_metadata
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.recipes import RECIPES
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
+from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs
 from ._helpers import mcp_client as _mcp_client
 from ._remote_core_support import (
     RemoteCoreFixture as _Fixture,
 )
+from ._remote_core_support import open_client as _open_client
+from ._remote_core_support import recv_response as _recv_response
+from ._remote_core_support import send as _send
 
 
 @pytest.fixture()
@@ -143,9 +147,6 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )
@@ -196,9 +197,6 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
                 "method": "tab.run_start",
                 "params": {
                     "tab_id": tab_id,
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                 },
             },
         )["handle"]
@@ -335,9 +333,6 @@ def test_mcp_run_analyze_writeback_save_close_on_one_connection(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -415,9 +410,6 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -454,9 +446,6 @@ def test_tab_run_rejects_missing_active_context_without_starting(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
@@ -503,9 +492,6 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             {
                 "method": "tab.run_start",
                 "params": {
-                    "expected": encode_ref(
-                        fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                    ),
                     "tab_id": tab_id,
                 },
             },
@@ -517,18 +503,15 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 {
                     "method": "tab.run_start",
                     "params": {
-                        "expected": encode_ref(
-                            fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-                        ),
                         "tab_id": tab_id,
                     },
                 },
             )
         editor = fx.ctrl.cfg_resources.lookup(tab_id)
-        accepted_ref = editor.observe().ref
+        editor.observe()
         for command in (
-            lambda: editor.edit(accepted_ref.revision, (CfgEdit(("gain",), 0.2),)),
-            lambda: editor.reset(accepted_ref.revision),
+            lambda: editor.edit((CfgEdit(("gain",), 0.2),)),
+            lambda: editor.reset(),
         ):
             with pytest.raises(CfgPreconditionError) as blocked:
                 command()
@@ -537,11 +520,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             fx.ctrl.close_tab(tab_id)
         other = fx.ctrl.new_tab("fake")
         other_editor = fx.ctrl.cfg_resources.lookup(other)
-        other_editor.edit(
-            other_editor.observe().ref.revision, (CfgEdit(("gain",), 0.3),)
-        )
+        other_editor.edit((CfgEdit(("gain",), 0.3),))
         _edit_context_as_gui(fx, "run_source", 17)
-        assert editor.observe().ref != accepted_ref
         if terminal == "cancelled":
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
@@ -617,5 +597,103 @@ def test_oversized_context_read_returns_error_without_advancing_guard(
         with pytest.raises(RuntimeError) as missing_file:
             call("rpc_call", args)
         assert getattr(missing_file.value, "reason", None) == "unsupported_load"
+    finally:
+        bridge.disconnect()
+
+
+def test_current_cfg_runs_from_another_holder_connection(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    source = _open_client(fx.service.port)
+    runner = _open_client(fx.service.port)
+    try:
+        assert _raw_call(source, "tab.get_cfg", {"tab_id": tab_id})["ok"]
+        args = {"tab_id": tab_id}
+        for method, params in (
+            ("tab.snapshot", {"tab_id": tab_id}),
+            ("soc.info", {"include_cfg": True}),
+        ):
+            assert _raw_call(runner, method, params)["ok"]
+        devices = _raw_call(runner, "device.list")["result"]["devices"]
+        for device in devices:
+            assert _raw_call(runner, "device.snapshot", {"name": device["name"]})["ok"]
+        # Read cfg on one holder connection and run current inputs on the other.
+        started = _raw_call(runner, "tab.run_start", args)
+        assert started["ok"]
+        result = _raw_call(
+            runner,
+            "operation.await",
+            {"operation_id": started["result"]["operation_id"], "timeout": 3.0},
+        )
+        assert result["result"]["status"] == "finished"
+    finally:
+        source.close()
+        runner.close()
+
+
+def test_socket_snapshot_exposes_result_replacement(fx) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = _open_client(fx.service.port)
+    try:
+
+        def rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
+            _send(sock, {"id": method, "method": method, "params": params})
+            return _recv_response(sock)
+
+        assert rpc("context.snapshot", {})["ok"] is True
+        initial = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert initial["result_state"] == {
+            "revision": 0,
+            "available": False,
+            "source_path": None,
+            "source_operation_id": None,
+        }
+        assert initial["analysis_state"]["available"] is False
+        assert initial["post_analysis_state"]["available"] is False
+        # A non-serializable result stays in State; the operational projection
+        # identifies replacements without requiring its payload on the wire.
+        fx.state.update_tab_loaded_result(
+            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+        )
+        observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert observed["result_state"] == {
+            "revision": 1,
+            "available": True,
+            "source_path": "loaded.h5",
+            "source_operation_id": None,
+        }
+        fx.state.update_tab_loaded_result(
+            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+        )
+        replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
+        assert replacement["result_state"]["revision"] == 2
+        assert replacement["result_state"]["source_path"] == "loaded.h5"
+    finally:
+        sock.close()
+
+
+def test_frozen_run_does_not_require_large_context_export(fx, tmp_path: Path) -> None:
+    _prepare_guarded_context(fx)
+    tab_id = fx.ctrl.new_tab("fake")
+    bridge, call = _mcp_client(fx.service.port, tmp_path)
+    try:
+        call("connect", {"port": fx.service.port})
+        _edit_context_as_gui(fx, "large", "x" * (MAX_LINE_BYTES // 2))
+        _edit_context_as_gui(fx, "other_large", "x" * (MAX_LINE_BYTES // 2))
+        with pytest.raises(RuntimeError) as oversized:
+            call("rpc_call", {"method": "context.snapshot"})
+        assert getattr(oversized.value, "reason", None) == "response_encoding_failed"
+        call("rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab_id}})
+        call("rpc_call", {"method": "soc.info", "params": {"include_cfg": True}})
+        _edit_context_as_gui(fx, "unrelated", 17)
+        started = call(
+            "rpc_call",
+            {
+                "method": "tab.run_start",
+                "params": {"tab_id": tab_id},
+            },
+        )
+        _await_completed_run(call, started["handle"])
     finally:
         bridge.disconnect()

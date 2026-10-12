@@ -34,8 +34,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgEditing,
     CfgObservation,
     CfgPath,
-    CfgRef,
-    CfgRevision,
     CfgStatus,
 )
 from zcu_tools.gui.expected_error import ExpectedError
@@ -104,7 +102,7 @@ class ResourceCfgFormWidget(QWidget):
     """Render one caller-owned CfgEditing handle without a writable draft copy.
 
     Every input change (each keystroke or selection) is submitted at once
-    against the owner's latest revision, so the displayed values are always
+    against the owner's current inputs, so the displayed values are always
     the published ones and the last input wins. A rejected input shows its
     error below the tree and the controls return to the published values. Detach discards only view state and never revokes the
     caller-owned handle.
@@ -183,12 +181,6 @@ class ResourceCfgFormWidget(QWidget):
     def set_editing_enabled(self, enabled: bool) -> None:  # noqa: FBT001 - form API
         self._editing_enabled = enabled
         self._tree.setEnabled(enabled and not self._rebuild_pending)
-
-    def current_ref(self) -> CfgRef:
-        """Return the displayed publication's ref without refreshing the owner."""
-        if self._observation is None:
-            raise RuntimeError("Config form is not attached")
-        return self._observation.ref
 
     def is_valid(self) -> bool:
         observation = self._observation
@@ -361,14 +353,14 @@ class ResourceCfgFormWidget(QWidget):
         self._submit(
             path,
             generation,
-            lambda editor, revision: editor.edit(revision, (CfgEdit(path, value),)),
+            lambda editor: editor.edit((CfgEdit(path, value),)),
         )
 
     def _convert_reference(self, path: CfgPath, generation: int) -> None:
         self._submit(
             path,
             generation,
-            lambda editor, revision: editor.convert_reference_to_inline(revision, path),
+            lambda editor: editor.convert_reference_to_inline(path),
         )
 
     def _select_reference(
@@ -378,26 +370,22 @@ class ResourceCfgFormWidget(QWidget):
             self._submit(
                 path,
                 generation,
-                lambda editor, revision: editor.select_custom_reference(
-                    revision, path, selected.label
-                ),
+                lambda editor: editor.select_custom_reference(path, selected.label),
             )
         else:
             self._submit(
                 path,
                 generation,
-                lambda editor, revision: editor.edit(
-                    revision, (CfgEdit((*path, "__ref"), selected),)
-                ),
+                lambda editor: editor.edit((CfgEdit((*path, "__ref"), selected),)),
             )
 
     def _submit(
         self,
         path: CfgPath,
         generation: int,
-        apply: Callable[[CfgEditing, CfgRevision], object],
+        apply: Callable[[CfgEditing], object],
     ) -> None:
-        """Apply one committed input to the owner's latest revision."""
+        """Apply one committed input to the owner's current inputs."""
         editor = self._editor
         if (
             generation != self._generation
@@ -407,8 +395,7 @@ class ResourceCfgFormWidget(QWidget):
         ):
             return
         try:
-            # The latest revision, not the shown one: the last committed input wins.
-            apply(editor, editor.observe().ref.revision)
+            apply(editor)
         except ExpectedError as exc:
             self._error.setText(f"{'.'.join(path)}: {exc}")
             self._error.show()

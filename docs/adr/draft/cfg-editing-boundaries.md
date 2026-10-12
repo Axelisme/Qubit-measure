@@ -22,10 +22,10 @@ Measure tab 由 `TabCfgResources` 持有 headless resource，Qt detach 不撤銷
 
 ## Observation、Run 與 Apply
 
-Measure tab 已使用同 revision 的完整 publication、atomic batch 及 caller 明示 ref 的固定 Run acceptance。它採同步 Valid／Invalid／Unavailable，不使用下段早期目標中的 Pending 狀態。獨立 `CfgDraft` 提供 snapshot／valid；library／writeback 的 `CfgEditorSession.set_fields` 仍逐筆修改 live draft，失敗保留成功前綴。Autofluxdep `NodeCfgSchema.lower` 與獨立 draft 的 lowering 可在使用時讀取 md／ml。Writeback 雖然先準備 selected entries 並只送一次 `ContextWritePort`，單次呼叫本身不能證明所有選中 md／ml writes 的失敗原子性。
+Measure tab 使用完整 publication、atomic batch 與當前 Valid cfg 的固定 Run acceptance，不收 cfg ref 或 expected revision。控制身份限制命令入口，見 [ADR-0070](../0070-control-identity.md)。Watch 推送最新 observation，tab close revoke 舊 handle；view detach 不撤銷 resource。它採同步 Valid／Invalid／Unavailable，不使用 Pending 狀態。獨立 `CfgDraft` 提供 snapshot／valid；library／writeback 的 `CfgEditorSession.set_fields` 仍逐筆修改 live draft，失敗保留成功前綴。Autofluxdep `NodeCfgSchema.lower` 與獨立 draft 的 lowering 可在使用時讀取 md／ml。Writeback 雖然先準備 selected entries 並只送一次 `ContextWritePort`，單次呼叫本身不能證明所有選中 md／ml writes 的失敗原子性。
 
-目標是 owner 發布同一 revision 的完整編輯輸入、解析結果與有效性；變更或 refresh pending 時不得沿用舊版本。Run／Apply 依 caller 指定的有效 revision 接受輸入，對 stale、pending、invalid 或不符版本明確拒絕，不隱含 refresh，也不靠 lower 時重讀 live source 換值。合法但未完成的編輯可發布 invalid observation，不能當成 run snapshot。接受後的 run snapshot 固定；Autofluxdep 每點仍可套用 workflow 宣告的合法 patches，硬體 guard 不因 cfg 固定而省略。編輯發布、selected Apply、memento 與 Run 有各自的提交目的；不以 memento 的可還原狀態假裝可執行。
+目標是 owner 一次發布完整編輯輸入、解析結果與有效性；來源不可用時不得沿用舊 Valid 結果。Run／Apply 檢查當前有效性及 app 條件，不要求 caller 指定 cfg 版本，不隱含 refresh，也不靠 lower 時重讀 live source 換值。合法但未完成的編輯可發布 Invalid observation，不能當成 run snapshot。Measure Run owner 可用固定的一次性 resolution 準備當前 inputs 的 Valid 候選，不改 publication。接受後深層隔離的 run values 與 source provenance 固定；Autofluxdep 每點仍可套用 workflow 宣告的合法 patches，硬體 guard 不因 cfg 固定而省略。編輯發布、selected Apply、memento 與 Run 有各自的提交目的；不以 memento 的可還原狀態假裝可執行。
 
 同一 cfg 的 edit batch 依序在未發布候選上解析 path，全部可接受才發布一次最終 observation 與 net diff；任何不能套用的操作不發布成功前綴。這不要求每次合法編輯都完成成品驗證。同一 context 的 selected library／writeback Apply 先準備全部選中項目與 guards，任何失敗不修改 live md／ml；成功由既有 write owner 在明確邊界提交。提交後的 observer／durability failure 要與未提交失敗區分；不宣稱跨檔 crash transaction、跨 context 原子性或硬體 transaction。
 
-**轉正條件：** 同版本 observation 與 caller revision guard 可觀察；Run／Apply 不偷換來源；batch failure 無 live prefix 且成功只發布最終結果；selected Apply 的準備／提交失敗與後續通知失敗可區分。版本／wire schema、no-op policy、碰撞、成功後草稿處置及同步機制需另定有界契約，不能由本 draft 猜測。
+**轉正條件：** 完整 observation、watch 與 revoke 可觀察；Run／Apply 不偷換來源，非 Valid 不接受，Run 接受後不受後續編輯影響；batch failure 無 live prefix 且成功只發布最終結果；selected Apply 的準備／提交失敗與後續通知失敗可區分。Wire schema、no-op policy、碰撞、成功後草稿處置及同步機制需另定有界契約，不能由本 draft 猜測。Source basis 仍記錄來源版本，不作 cfg 修改或執行的權限依據。

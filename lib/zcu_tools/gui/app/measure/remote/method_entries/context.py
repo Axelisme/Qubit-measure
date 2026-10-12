@@ -21,17 +21,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Apply nonempty ordered library edits through the shared draft model. "
             "Commit each successful edit, stop at the first failure without rollback. "
             "save_as creates a new entry after the first successful edit; source stays unchanged. "
-            "Returns valid/applied/errors. Read context.snapshot explicitly first.",
+            "Returns valid/applied/errors.",
             (
                 required_string("kind"),
                 required_string("name"),
                 required_json("edits"),
                 optional_string("save_as"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=("context",),
-            refresh_after_write=True,
         ),
     ),
     method_entry(
@@ -40,6 +36,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "List context labels",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -48,6 +45,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Active context label",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -67,16 +65,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "path selects a complete subtree, takes priority over summaries, and returns "
             "{target, aliases, path, value}. Dotted paths start with target/point/library/aliases; "
             "list indices must be canonical nonnegative decimals. Invalid paths name the first bad segment. "
-            "Only omitting both parameters establishes context observation before guarded writes; "
-            "explicit summaries=false or path='' remains partial and does not refresh the guard. "
             "Unsupported values fail the entire read in every mode.",
             (
                 ParamSpec("summaries", JsonType.BOOLEAN, required=False, default=False),
                 optional_string("path"),
             ),
-        ),
-        agent=AgentMethodPolicy(
-            reveals=("context",), reveals_without=("summaries", "path")
+            readonly=True,
         ),
     ),
     method_entry(
@@ -88,6 +82,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{values: [{key, type, owner, description}]}. These are escape-hatch "
             "resolve-once sources for rare defaults and agent reads; prefer typed "
             "RPCs when a stable API exists.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -106,6 +101,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "type", "Optional expected type: int, float, str, or bool"
                 ),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -120,7 +116,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "MODIFIED refs retain their inline Custom value.",
             (required_string("name", "Concrete module key, e.g. Q1.pulses.pi"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_del_waveform",
@@ -137,7 +132,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_module",
@@ -158,7 +152,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_rename_waveform",
@@ -178,7 +171,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "context.ml_list_roles",
@@ -189,6 +181,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "{roles: [{role_id, label, item_kind, default_name}]}. Each role seeds a "
             "blank module/waveform with md-linked defaults (e.g. 'res_probe', "
             "'bath_reset'); 'default_name' is the suggested entry name.",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -207,6 +200,5 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("name", "new ml entry name"),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

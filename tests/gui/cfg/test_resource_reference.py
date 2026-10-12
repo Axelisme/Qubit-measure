@@ -29,7 +29,7 @@ def test_ref_children_are_readonly(reference_resource) -> None:
     resource, _ = reference_resource
     before = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
-        resource.edit(before.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+        resource.edit((CfgEdit(("ref", "x"), 7.0),))
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == before
     node = before.tree.children["ref"]
@@ -39,17 +39,15 @@ def test_ref_children_are_readonly(reference_resource) -> None:
 
 def test_convert_reference_to_inline_copies_published_value(reference_resource) -> None:
     resource, catalog = reference_resource
-    accepted = resource.accept(resource.observe().ref.revision)
+    accepted = resource.accept()
     catalog.entries["first"] = entry(99.0)
-    converted = resource.convert_reference_to_inline(
-        resource.observe().ref.revision, ("ref",)
-    )
+    converted = resource.convert_reference_to_inline(("ref",))
     assert converted.tree.children["ref"].mode == "inline"
     assert not converted.tree.children["ref"].children["x"].readonly
-    assert resource.accept(converted.ref.revision).values == {"ref": {"x": 1.0}}
-    edited = resource.edit(converted.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
-    refreshed = resource.refresh(edited.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert resource.accept().values == {"ref": {"x": 1.0}}
+    resource.edit((CfgEdit(("ref", "x"), 7.0),))
+    resource.refresh()
+    assert resource.accept().values == {"ref": {"x": 7.0}}
     assert accepted.values == {"ref": {"x": 1.0}}
 
 
@@ -67,10 +65,10 @@ def test_conversion_rejects_invalid_publication_without_cached_copy(
             "Shape",
             CfgSectionValue({"x": DirectValue(None, raw="1e", error="unfinished")}),
         )
-    before = resource.refresh(resource.observe().ref.revision)
+    before = resource.refresh()
     assert before.status is not CfgStatus.VALID
     with pytest.raises(CfgInputError) as rejected:
-        resource.convert_reference_to_inline(before.ref.revision, ("ref",))
+        resource.convert_reference_to_inline(("ref",))
     assert rejected.value.reason is CfgInputReason.INVALID_VALUE
     assert resource.observe() == before
 
@@ -87,16 +85,16 @@ def test_conversion_freezes_nested_waveform_and_expression() -> None:
             }
         ),
     )
-    before = resource.refresh(resource.observe().ref.revision)
-    converted = resource.convert_reference_to_inline(before.ref.revision, ("ref",))
+    resource.refresh()
+    converted = resource.convert_reference_to_inline(("ref",))
     nested = converted.tree.children["ref"].children["raise_waveform"]
     assert nested.mode == "inline"
     assert nested.children["length"].value == DirectValue(0.0)
     del catalog.entries["rise"]
     del catalog.entries["parent"]
-    refreshed = resource.refresh(converted.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "flat_top",
         "length": 1.0,
         "raise_waveform": {"style": "gauss", "length": 0.0, "sigma": 0.1},
@@ -114,10 +112,10 @@ def test_one_off_acceptance_resolves_linked_reference_without_rebinding(
     temporary = Catalog({"first": entry(8.0)}).snapshot()
     catalog.lookups.clear()
 
-    accepted = resource.accept(before.ref.revision, resolution=temporary)
+    accepted = resource.accept(resolution=temporary)
 
     assert accepted.values["ref"] == {"x": 8.0}
-    assert resource.accept(before.ref.revision).values["ref"] == {"x": 1.0}
+    assert resource.accept().values["ref"] == {"x": 1.0}
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert seen == [before]
@@ -134,7 +132,6 @@ def test_ref_and_children_payload_is_rejected_atomically(
     before = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
         resource.edit(
-            before.ref.revision,
             (CfgEdit(("ref", "__ref"), "second"), CfgEdit(("ref",), payload)),
         )
     assert rejected.value.reason is CfgInputReason.INVALID_VALUE
@@ -150,21 +147,17 @@ def test_failed_reference_write_leaves_no_relinked_prefix(
     resource, _ = reference_resource
     before = resource.observe()
     with pytest.raises(CfgInputError):
-        resource.edit(before.ref.revision, (CfgEdit(("ref",), payload),))
+        resource.edit((CfgEdit(("ref",), payload),))
     assert resource.observe() == before
 
 
 def test_disabled_reference_can_be_relinked(reference_resource) -> None:
     resource, _ = reference_resource
-    disabled = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref", "__ref"), None),)
-    )
+    disabled = resource.edit((CfgEdit(("ref", "__ref"), None),))
     assert disabled.tree.children["ref"].value is None
-    assert resource.accept(disabled.ref.revision).values == {}
-    enabled = resource.edit(
-        disabled.ref.revision, (CfgEdit(("ref", "__ref"), "second"),)
-    )
-    assert resource.accept(enabled.ref.revision).values["ref"] == {"x": 2.0}
+    assert resource.accept().values == {}
+    resource.edit((CfgEdit(("ref", "__ref"), "second"),))
+    assert resource.accept().values["ref"] == {"x": 2.0}
 
 
 def test_complete_inline_replacement_recovers_without_resolving_failed_old_key(
@@ -172,12 +165,12 @@ def test_complete_inline_replacement_recovers_without_resolving_failed_old_key(
 ) -> None:
     resource, catalog = reference_resource
     catalog.failed_keys = frozenset({"first"})
-    unavailable = resource.refresh(resource.observe().ref.revision)
+    unavailable = resource.refresh()
     assert unavailable.status is CfgStatus.UNAVAILABLE
     catalog.lookups.clear()
-    changed = resource.edit(unavailable.ref.revision, (CfgEdit(("ref",), {"x": 7.0}),))
+    changed = resource.edit((CfgEdit(("ref",), {"x": 7.0}),))
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values == {"ref": {"x": 7.0}}
+    assert resource.accept().values == {"ref": {"x": 7.0}}
     assert "first" not in catalog.lookups
 
 
@@ -186,21 +179,20 @@ def test_ref_partial_edit_cannot_recover_by_using_failed_key_cache(
 ) -> None:
     resource, catalog = reference_resource
     catalog.failed_keys = frozenset({"first"})
-    unavailable = resource.refresh(resource.observe().ref.revision)
+    unavailable = resource.refresh()
     with pytest.raises(CfgInputError) as rejected:
-        resource.edit(unavailable.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+        resource.edit((CfgEdit(("ref", "x"), 7.0),))
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == unavailable
 
 
 def test_linked_refresh_uses_new_catalog_value(reference_resource) -> None:
     resource, catalog = reference_resource
-    before = resource.observe()
+    resource.observe()
     catalog.entries["first"] = entry(10.0)
-    changed = resource.refresh(before.ref.revision)
+    changed = resource.refresh()
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values["ref"] == {"x": 10.0}
-    assert resource.accept(changed.ref.revision).ref == changed.ref
+    assert resource.accept().values["ref"] == {"x": 10.0}
 
 
 @pytest.mark.parametrize(
@@ -213,43 +205,37 @@ def test_ref_content_write_rejects_leaf_and_empty_aggregate(
     resource, _ = reference_resource
     before = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
-        resource.edit(before.ref.revision, (edit,))
+        resource.edit((edit,))
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == before
 
 
 def test_complete_same_value_payload_selects_inline(reference_resource) -> None:
     resource, catalog = reference_resource
-    changed = resource.edit(
-        resource.observe().ref.revision, (CfgEdit(("ref",), {"x": 1.0}),)
-    )
+    changed = resource.edit((CfgEdit(("ref",), {"x": 1.0}),))
     assert changed.tree.children["ref"].mode == "inline"
     catalog.entries["first"] = entry(20.0)
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values["ref"] == {"x": 1.0}
+    resource.refresh()
+    assert resource.accept().values["ref"] == {"x": 1.0}
     assert "first" not in catalog.lookups
 
 
 def test_inline_conversion_no_longer_resolves_original_key(reference_resource) -> None:
     resource, catalog = reference_resource
-    converted = resource.convert_reference_to_inline(
-        resource.observe().ref.revision, ("ref",)
-    )
-    changed = resource.edit(converted.ref.revision, (CfgEdit(("ref", "x"), 7.0),))
+    resource.convert_reference_to_inline(("ref",))
+    resource.edit((CfgEdit(("ref", "x"), 7.0),))
     del catalog.entries["first"]
     catalog.lookups.clear()
-    refreshed = resource.refresh(changed.ref.revision)
+    refreshed = resource.refresh()
     assert refreshed.status is CfgStatus.VALID
-    assert resource.accept(refreshed.ref.revision).values["ref"] == {"x": 7.0}
+    assert resource.accept().values["ref"] == {"x": 7.0}
     assert "first" not in catalog.lookups
     catalog.entries["first"] = entry(20.0)
-    restored = resource.refresh(refreshed.ref.revision)
-    assert resource.accept(restored.ref.revision).values["ref"] == {"x": 7.0}
-    relinked = resource.edit(
-        restored.ref.revision, (CfgEdit(("ref", "__ref"), "first"),)
-    )
-    assert resource.accept(relinked.ref.revision).values["ref"] == {"x": 20.0}
+    resource.refresh()
+    assert resource.accept().values["ref"] == {"x": 7.0}
+    resource.edit((CfgEdit(("ref", "__ref"), "first"),))
+    assert resource.accept().values["ref"] == {"x": 20.0}
 
 
 @pytest.mark.parametrize("written", [1.0, 7.0])
@@ -284,7 +270,7 @@ def test_nested_ref_ancestor_rejects_child_edit(
     )
     before = resource.observe()
     with pytest.raises(CfgInputError) as rejected:
-        resource.edit(before.ref.revision, (CfgEdit(("parent", "left", "x"), written),))
+        resource.edit((CfgEdit(("parent", "left", "x"), written),))
     assert rejected.value.reason is CfgInputReason.READONLY
     assert resource.observe() == before
 
@@ -321,15 +307,11 @@ def test_later_edit_uses_shape_selected_by_earlier_inline_replacement() -> None:
         resolution=catalog.snapshot,
     )
     changed = resource.edit(
-        resource.observe().ref.revision,
         (CfgEdit(("ref",), {"type": "second", "y": 2.0}), CfgEdit(("ref", "y"), 8.0)),
     )
-    assert resource.accept(changed.ref.revision).values == {
-        "ref": {"type": "second", "y": 8.0}
-    }
+    assert resource.accept().values == {"ref": {"type": "second", "y": 8.0}}
     with pytest.raises(CfgInputError):
         resource.edit(
-            changed.ref.revision,
             (CfgEdit(("ref",), {"__ref": "second", "type": "first", "x": 9.0}),),
         )
     assert resource.observe() == changed

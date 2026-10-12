@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QMetaObject, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -21,6 +22,7 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.types import SessionEnv
 
@@ -74,7 +76,6 @@ def test_dialog_filters_and_disables_unpersisted_selection(
 def test_dialog_cancel_and_file_selection(
     qapp: QApplication,
     rows: tuple[SavedRunInfo, ...],
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     dialog = RunLoadDialog(rows, initial_point="", start_directory=str(tmp_path))
@@ -83,12 +84,28 @@ def test_dialog_cancel_and_file_selection(
     cancel.click()
     assert dialog.selected_path() is None
     dialog.deleteLater()
-    path = str(tmp_path / "native.h5")
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: (path, ""))
+    native = tmp_path / "native.h5"
+    native.touch()
+    path = str(native)
+    seen: list[bool] = []
+
+    def choose() -> None:
+        chooser = QApplication.activeModalWidget()
+        if not isinstance(chooser, QFileDialog):
+            seen.append(False)
+            if isinstance(chooser, QDialog):
+                chooser.reject()
+            return
+        seen.append(True)
+        chooser.selectFile(path)
+        QMetaObject.invokeMethod(chooser, "accept", Qt.ConnectionType.DirectConnection)
+
     selected = RunLoadDialog((), initial_point="", start_directory=str(tmp_path))
     file_button = selected.findChild(QPushButton, "load_file")
     assert file_button is not None
+    QTimer.singleShot(0, choose)
     file_button.click()
+    assert seen == [True]
     assert selected.selected_path() == path
     selected.deleteLater()
     qapp.processEvents()
@@ -102,7 +119,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     tmp_path: Path,
     action: str,
 ) -> None:
-    ctrl = MagicMock()
+    ctrl = MagicMock(control_identity=ControlIdentity())
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_bus.return_value = BaseEventBus()

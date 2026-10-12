@@ -63,7 +63,7 @@ def test_existing_tab_tracks_unselected_and_active_source(
         tabs = window.findChild(QTabWidget)
         assert tabs is not None
         title = tabs.tabText(0)
-        cfg_id = ctrl.cfg_resources.lookup(tab_id).observe().ref.cfg_id
+        cfg = ctrl.cfg_resources.lookup(tab_id)
         interaction = ctrl.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
         assert not interaction.has_context
@@ -86,7 +86,7 @@ def test_existing_tab_tracks_unselected_and_active_source(
         ctrl.setup_control.use_point(PointUseRequest("first"))
         assert window.get_view_snapshot()["point_label"] == "first"
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
-        assert ctrl.cfg_resources.lookup(tab_id).observe().ref.cfg_id == cfg_id
+        assert ctrl.cfg_resources.lookup(tab_id) is cfg
         assert tabs.tabText(0) == title
     finally:
         assert background.quiesce()

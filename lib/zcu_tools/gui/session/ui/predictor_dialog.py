@@ -391,7 +391,11 @@ class PredictorDialog(QDialog):
         action_row = QHBoxLayout()
         self._remove_btn = QPushButton("Remove")
         self._remove_btn.clicked.connect(self._on_remove_selected)
-        action_row.addWidget(self._remove_btn)
+        remove_region = QWidget()
+        remove_layout = QHBoxLayout(remove_region)
+        remove_layout.setContentsMargins(0, 0, 0, 0)
+        remove_layout.addWidget(self._remove_btn)
+        action_row.addWidget(remove_region)
         action_row.addStretch()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self._on_close_requested)
@@ -1611,7 +1615,11 @@ class PredictorDialog(QDialog):
             self._set_status("Live mode keeps model params read-only.", error=False)
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
+            self,
+            "Select params.json",
+            "",
+            "JSON files (*.json);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not path:
             return

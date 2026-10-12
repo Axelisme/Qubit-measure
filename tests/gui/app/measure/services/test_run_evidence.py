@@ -267,7 +267,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
         adapter_name="twotone/t1",
         adapter=adapter,
         request=RunRequest(soc=None, soccfg=None, cfg_context=None),
-        accepted_cfg=tab.cfg.accept(tab.cfg.observe().ref.revision),
+        accepted_cfg=tab.cfg.accept(),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
     )

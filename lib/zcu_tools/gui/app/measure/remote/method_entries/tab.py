@@ -8,7 +8,6 @@ from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 from ._params import (
     optional_string,
     required_json,
-    required_object,
     required_string,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
@@ -24,11 +23,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "named alias overrides belong to a single Run. Returns {tab_id}.",
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
-        agent=AgentMethodPolicy(
-            refresh_after_write=True,
-            created_resource="tab:{tab_id}",
-            created_identity="tab_id",
-        ),
     ),
     method_entry(
         "tab.open_file",
@@ -36,18 +30,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Create a tab, load a result file without a SoC, and focus it. "
-            "Read context.snapshot explicitly first. A load failure closes the new "
+            "A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
             "tab_id, cfg_backfill and analysis_error. Failed analysis preparation "
-            "retains the loaded result and the new tab. not_applied retains the result. "
-            "Read tab.snapshot and tab.get_cfg before subsequent guarded writes.",
+            "retains the loaded result and the new tab. not_applied retains the result.",
             (required_string("adapter_name"), required_string("data_path")),
-        ),
-        agent=AgentMethodPolicy(
-            guard_deps=("context",),
-            refresh_after_write=True,
-            created_resource="tab:{tab_id}",
-            created_identity="tab_id",
         ),
     ),
     method_entry(
@@ -65,7 +52,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
         agent=AgentMethodPolicy(
-            exposure="tool", tool_names=("tab_close",), refresh_after_write=True
+            exposure="tool",
+            tool_names=("tab_close",),
         ),
     ),
     method_entry(
@@ -88,6 +76,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "the tab the USER is focused on (a collaboration cue, NOT your operation "
             "target); running_tab_id is the tab currently running (or null when "
             "nothing is running).",
+            readonly=True,
         ),
     ),
     method_entry(
@@ -99,18 +88,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "analysis revisions/availability, and all effective save paths. "
             "Result arrays are not required for this observation. Read writeback "
             "preview separately for proposal contents. The all-tabs summary is "
-            "only an index and does not refresh a per-tab guard baseline.",
+            "only an index.",
             (optional_string("tab_id", "Tab to inspect; omit for all tabs"),),
-        ),
-        agent=AgentMethodPolicy(
-            reveals=(
-                "tab:{tab_id}",
-                "tab:{tab_id}:result",
-                "tab:{tab_id}:analyze",
-                "tab:{tab_id}:post_analyze",
-                "tab:{tab_id}:save",
-            ),
-            reveals_when_nonempty=("tab_id",),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -123,8 +103,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
             "canonical library root or null for missing/custom. Invalid paths, "
-            "unknown roles and source failures propagate. Does not observe "
-            "or refresh the live context guard.",
+            "unknown roles and source failures propagate.",
             (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),
@@ -136,20 +115,18 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     description="Temporary alias-name to component-name overrides; None and {} mean no override",
                 ),
             ),
+            readonly=True,
         ),
-        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.get_cfg",
         "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Return a complete cached resource publication: cfg_ref, status, tree, "
+            "Return a complete cached resource publication: status, tree, "
             "source_basis and diagnostics. Ordinary reads do not query sources. "
-            "Nonempty aliases requires expected cfg_ref and resolves current inputs "
-            "against named overrides without publication. None and {} read cached cfg. Stale "
-            "refs reject; the returned ref never refreshes to a newer revision. "
-            "Use cfg_ref as expected for tab.edit_cfg or tab.reset_cfg. Paths are arrays of field "
+            "Nonempty aliases resolves current inputs against named overrides "
+            "without publication. None and {} read cached cfg. Paths are arrays of field "
             "segments; writes use the closed __expr/__text/__complex/__ref codec. "
             "Library editor observations use their own independent interface.",
             (
@@ -160,51 +137,38 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     required=False,
                     description="Temporary alias-name to component-name overrides; None and {} mean no override",
                 ),
-                ParamSpec("expected", JsonType.OBJECT, required=False),
             ),
+            readonly=True,
         ),
-        agent=AgentMethodPolicy(),
     ),
     method_entry(
         "tab.reset_cfg",
         "tab:h_tab_reset_cfg",
         MethodSpec(
             5.0,
-            "Reset cfg to current adapter defaults at expected cfg_ref. Returns the "
-            "complete new publication, which may be Invalid. Every successful command "
-            "adds a revision, even if inputs are unchanged. Busy, stale and notification-"
-            "reentrant resets are rejected. Does not clear results or save artifacts.",
-            (
-                required_string("tab_id"),
-                required_object(
-                    "expected", "cfg_ref from the complete resource observation"
-                ),
-            ),
+            "Reset cfg to current adapter defaults. Returns the complete new "
+            "publication, which may be Invalid. Busy and notification-reentrant "
+            "resets are rejected. Does not clear results or save artifacts.",
+            (required_string("tab_id"),),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
     method_entry(
         "tab.edit_cfg",
         "tab:h_tab_edit_cfg",
         MethodSpec(
             5.0,
-            "Atomically apply an ordered edit batch at expected cfg_ref. Paths are "
+            "Atomically apply an ordered edit batch to current inputs. Paths are "
             "arrays of field-name segments. Scalars use __expr/__text/__complex; "
             "reference inputs use __ref and complete children; range inputs are "
             "complete objects. All edits publish together or none do. Valid "
-            "incomplete input may publish Invalid. Every successful command adds "
-            "a revision, including equal values. Busy, stale and notification-"
-            "reentrant edits are rejected. Returns the complete new observation.",
+            "incomplete input may publish Invalid. Busy and notification-reentrant "
+            "edits are rejected. Returns the complete new observation.",
             (
                 required_string("tab_id"),
-                required_object(
-                    "expected", "cfg_ref from the complete resource observation"
-                ),
                 required_json(
                     "edits", "Ordered list of {path: [segments], value} inputs"
                 ),
             ),
         ),
-        agent=AgentMethodPolicy(refresh_after_write=True),
     ),
 )

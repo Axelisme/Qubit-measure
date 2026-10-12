@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -60,13 +61,17 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     TwoTonePickContext,
 )
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +85,7 @@ class MainWindow(QMainWindow):
         *,
         interactive_runner: BackgroundRunner | None = None,
         search_runner: BackgroundRunner | None = None,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
         """Mount views and retain app-owned interactive/search Qt runners.
 
@@ -91,6 +97,12 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self._ctrl = ctrl
+        self._dialogs = dialog_presenter or QtDialogPresenter()
+        self._writable = ctrl.control_identity.status().holder == "gui"
+        self._close_prompt_open = False
+        self._close_confirmed = False
+        self._control_disposed = False
+        self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
         self._search_runner = search_runner
         if search_runner is not None:
@@ -107,8 +119,57 @@ class MainWindow(QMainWindow):
         self._subscribe_events()
         self._refresh_list()
         self._rebuild_editor()
+        self._dispose_control = ctrl.control_identity.watch(self._refresh_control)
+
+    def _refresh_control(self, status: ControlStatus) -> None:
+        self._indicator.set_status(status)
+        self.set_writable(writable=status.holder == "gui")
+
+    def set_writable(self, *, writable: bool) -> None:
+        """Push Local write availability, preserving canvas and non-writing tabs."""
+        self._writable = writable
+        for control in self._write_controls:
+            control.setEnabled(writable)
+        if isinstance(
+            self._current_editor, (InteractiveMplWidget, ResultPreviewWidget)
+        ):
+            self._current_editor.set_editable(editable=writable)
+        if self._analyze_panel is not None:
+            self._analyze_panel.set_writable(writable=writable)
 
     # --- construction ----------------------------------------------------
+
+    def watch_application_shutdown(self, application: QApplication) -> None:
+        """Bind app-local watch retirement before the runtime's adapter stop.
+
+        Call once on the owner thread. Final view disposal removes this app
+        connection, so QApplication cannot retain an already retired window.
+        """
+        if self._shutdown_application is not None or self._control_disposed:
+            raise RuntimeError("window shutdown projection is already bound or retired")
+        self._shutdown_application = application
+        application.aboutToQuit.connect(self.dispose_control_watches)
+
+    def dispose_control_watches(self) -> None:
+        """Retire only owned authority projections, on the owner thread.
+
+        This is idempotent. It does not cancel or drain domain work. Refused
+        closes keep watches; accepted closes retire before view teardown.
+        """
+        if self._control_disposed:
+            return
+        self._control_disposed = True
+        self._dispose_control()
+        if self._shutdown_application is not None:
+            self._shutdown_application.aboutToQuit.disconnect(
+                self.dispose_control_watches
+            )
+            self._shutdown_application = None
+
+    def deleteLater(self) -> None:
+        """Retire watches before direct Qt deletion, without domain shutdown."""
+        self.dispose_control_watches()
+        super().deleteLater()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -116,6 +177,8 @@ class MainWindow(QMainWindow):
 
         # Left panel: collection management above the list, global actions below.
         left = QVBoxLayout()
+        self._indicator = ControlIndicator(self._ctrl.control_identity, self)
+        left.addWidget(self._indicator)
 
         # Above the list: add a raw spectrum / remove this one.
         # Project (chip / qubit names) — drives the default export layout.
@@ -182,6 +245,15 @@ class MainWindow(QMainWindow):
         splitter.setSizes([280, 820])
         root.addWidget(splitter)
         self.setCentralWidget(central)
+        self._write_controls = (
+            self._project_btn,
+            self._add_btn,
+            self._remove_btn,
+            self._list,
+            self._reload_btn,
+            self._export_btn,
+            self._analyze_btn,
+        )
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
@@ -338,6 +410,8 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is not None:
             self._analyze_panel.detach()
         self._current_editor = widget
+        if isinstance(widget, (InteractiveMplWidget, ResultPreviewWidget)):
+            widget.set_editable(editable=self._writable)
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
@@ -408,6 +482,8 @@ class MainWindow(QMainWindow):
         stage-driven ``_current_editor`` but leaves this panel alive, so its
         tabs / form / database path / figures are preserved across switches.
         """
+        if not self._writable:
+            return
         if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
@@ -419,11 +495,14 @@ class MainWindow(QMainWindow):
         self._clear_editor()
         if self._analyze_panel is None:
             self._analyze_panel = AnalyzePanelWidget(self._ctrl)
+            self._analyze_panel.set_writable(writable=self._writable)
             self._editor_stack.addWidget(self._analyze_panel)
         self._analyze_panel.show_tab(tab or self._analyze_panel.current_tab)
         self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:
+        if not self._writable:
+            return
         from .load_dialog import LoadSpectrumDialog
         from .paths import raw_spectrum_dir
 
@@ -460,6 +539,8 @@ class MainWindow(QMainWindow):
 
     def _on_reload_clicked(self) -> None:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
+        if not self._writable:
+            return
         from qtpy.QtWidgets import QFileDialog
 
         from .paths import processed_spectrum_dir
@@ -469,6 +550,7 @@ class MainWindow(QMainWindow):
             "Load spectrums.hdf5",
             processed_spectrum_dir(self._ctrl.state.project),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not filepath:
             return
@@ -482,6 +564,8 @@ class MainWindow(QMainWindow):
             self._ctrl.set_active_spectrum(names[0])
 
     def _on_remove_clicked(self) -> None:
+        if not self._writable:
+            return
         name = self._ctrl.state.active_spectrum
         if name is None:
             return
@@ -499,6 +583,8 @@ class MainWindow(QMainWindow):
 
     def _on_project_clicked(self) -> None:
         """Edit the project chip/qubit names (and optional roots)."""
+        if not self._writable:
+            return
         from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
         dialog = ProjectDialog(
@@ -523,6 +609,8 @@ class MainWindow(QMainWindow):
         dialog.open()
 
     def _on_export_clicked(self) -> None:
+        if not self._writable:
+            return
         from .export_dialog import ExportSpectrumsDialog
 
         # The default path comes from the project's result dir (set via Project…);
@@ -570,13 +658,41 @@ class MainWindow(QMainWindow):
 
     # --- close path --------------------------------------------------------
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Refuse close until search startup and worker/delivery have settled.
+    def _on_close_decision(self, *, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if confirmed:
+            # One accepted intent survives drain refusals and holder changes.
+            self._close_confirmed = True
+            self.close()
 
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Confirm Remote close asynchronously, then wait for search to settle.
+
+        Pending or declined decisions leave owners alive and admission open.
+        Acceptance is remembered across drain refusals and holder changes.
         begin_close permanently blocks admission and requests cancellation.
         Keep subscriptions, figures and Qt owners alive on drain refusal.
         A later close attempt can finish once the runner and search owner drain.
         """
+        if self._close_prompt_open:
+            if a0 is not None:
+                a0.ignore()
+            return
+        status = self._ctrl.control_identity.status()
+        if status.holder != "gui" and not self._close_confirmed:
+            if a0 is not None:
+                a0.ignore()
+            self._close_prompt_open = True
+            self._dialogs.confirm_async(
+                self,
+                "Close remote-controlled window?",
+                f"{status.holder.removeprefix('rpc:')} controls this window. Close and cancel pending work?",
+                on_decision=lambda confirmed: self._on_close_decision(
+                    confirmed=confirmed
+                ),
+                default=False,
+            )
+            return
         self._ctrl.search.begin_close()
         search_drained = self._search_runner is None or self._search_runner.quiesce()
         # Startup notifications can reenter close before any worker is submitted.
@@ -584,6 +700,7 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 a0.ignore()
             return
+        self.dispose_control_watches()
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:
             self._interactive_runner.quiesce()

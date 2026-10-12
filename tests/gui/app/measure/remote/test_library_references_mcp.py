@@ -77,8 +77,8 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
 
     tab_id = "references"
     cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)
-    converted = cfg.convert_reference_to_inline(cfg.observe().ref.revision, ("inline",))
-    cfg.edit(converted.ref.revision, (CfgEdit(("inline", field), 0.75),))
+    cfg.convert_reference_to_inline(("inline",))
+    cfg.edit((CfgEdit(("inline", field), 0.75),))
     fx.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)

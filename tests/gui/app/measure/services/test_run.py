@@ -80,16 +80,16 @@ def test_run_started_and_terminal_events_keep_operation_origin(
     origin: EventOrigin, expected_kind: str
 ) -> None:
     state, tab_id, adapter = make_state()
-    svc, _gate, bg, _handles = make_run_service(state, mock_emit=False)
+    svc, _gate, bg, _handles = make_run_service(state)
     observed: list[tuple[object, EventMeta]] = []
-    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+    bg.bus.subscribe_with_meta(
         RunStartedPayload, lambda payload, meta: observed.append((payload, meta))
     )
-    svc._bus.subscribe_with_meta(  # type: ignore[attr-defined]
+    bg.bus.subscribe_with_meta(
         RunFinishedPayload, lambda payload, meta: observed.append((payload, meta))
     )
 
-    with svc._bus.origin(origin):  # type: ignore[attr-defined]
+    with bg.bus.origin(origin):
         token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     assert bg.last_on_done is not None
     bg.last_on_done(object())
@@ -199,8 +199,7 @@ def test_start_run_acquires_lease_and_submits_to_bg():
     assert gate.has_active(OperationKind.RUN)
     assert state.is_tab_running(tab_id)
     assert not any(
-        isinstance(call.args[0], TabInteractionChangedPayload)
-        for call in svc._bus.emit.call_args_list  # type: ignore[attr-defined]
+        isinstance(payload, TabInteractionChangedPayload) for payload in bg.events
     )
 
 
@@ -227,7 +226,7 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    cfg.refresh(cfg.observe().ref.revision)
+    cfg.refresh()
     bg.run_work()
 
     context = adapter.run.call_args.kwargs["context"]
@@ -268,7 +267,6 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     cfg = make_cfg(schema, state=state)
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
-    accepted_ref = cfg.observe().ref
     inputs = make_inputs(state, tab_id, adapter)
     accepted_basis = inputs.accepted_cfg.source_basis
     service, _gate, background, _handles = make_run_service(state)
@@ -278,16 +276,14 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    after = cfg.refresh(cfg.observe().ref.revision)
+    after = cfg.refresh()
     background.run_work()
 
     result = state.get_tab(tab_id).run.result
     assert isinstance(result, RunRecord)
     assert result.cfg is not None
     assert result.cfg.gain == 0.25
-    assert inputs.accepted_cfg.ref == accepted_ref
     assert inputs.accepted_cfg.source_basis == accepted_basis
-    assert after.ref != accepted_ref
     assert after.source_basis != accepted_basis
 
 
@@ -307,15 +303,15 @@ def test_start_run_rejects_when_tab_busy():
 
 def test_start_run_releases_lease_when_submit_raises():
     state, tab_id, adapter = make_state()
-    svc, gate, _bg, _ = make_run_service(state, fail_submit=True)
+    svc, gate, bg, _ = make_run_service(state, fail_submit=True)
 
     with pytest.raises(RuntimeError, match="worker boom"):
         svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
 
     assert not gate.has_active(OperationKind.RUN)
     assert not state.is_tab_running(tab_id)
-    svc._bus.emit.assert_called_with(  # type: ignore[attr-defined]
-        TabInteractionChangedPayload(tab_id, TabInteractionFact.RUN_START_REJECTED)
+    assert bg.events[-1] == TabInteractionChangedPayload(
+        tab_id, TabInteractionFact.RUN_START_REJECTED
     )
 
 
@@ -328,12 +324,11 @@ def test_run_finished_emits_outcome_finished():
     assert bg.last_on_done is not None
     bg.last_on_done(object())
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.tab_id == tab_id
     assert payload.outcome == "finished"
     assert not any(
-        isinstance(call.args[0], TabInteractionChangedPayload)
-        for call in svc._bus.emit.call_args_list  # type: ignore[attr-defined]
+        isinstance(payload, TabInteractionChangedPayload) for payload in bg.events
     )
 
 
@@ -372,7 +367,7 @@ def test_run_failed_emits_outcome_failed_with_message():
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "failed"
     assert payload.error_message == "boom"
 
@@ -403,7 +398,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     bg.run_work()
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "failed"
     assert payload.error_message == "RuntimeError: builder boom"
     outcome = handles.poll(token)
@@ -501,7 +496,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
     assert not state.is_tab_running(tab_id)
@@ -517,7 +512,7 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("interrupted"))
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
@@ -532,7 +527,7 @@ def test_bg_done_without_cancel_reports_finished():
     assert bg.last_on_done is not None
     bg.last_on_done(result)
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "finished"
     assert state.get_tab(tab_id).run.result is result
 
@@ -547,7 +542,7 @@ def test_bg_done_after_cancel_reports_cancelled_with_partial():
     assert bg.last_on_done is not None
     bg.last_on_done(partial)
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
 
@@ -567,7 +562,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     svc.cancel_run()
     bg.run_work()
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is partial
     outcome = handles.poll(token)
@@ -583,7 +578,7 @@ def test_bg_error_without_cancel_reports_failed():
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("boom"))
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "failed"
     assert payload.error_message == "boom"
 
@@ -597,6 +592,6 @@ def test_bg_error_after_cancel_reports_cancelled_without_result():
     assert bg.last_on_error is not None
     bg.last_on_error(RuntimeError("interrupted"))
 
-    payload = last_run_finished_payload(svc._bus.emit)  # type: ignore[attr-defined]
+    payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "cancelled"
     assert state.get_tab(tab_id).run.result is None

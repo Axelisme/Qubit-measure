@@ -2,7 +2,7 @@
 
 import pytest
 
-from ._support import make_client
+from ._support import business_effects_after_initial_control, make_client
 
 
 @pytest.fixture
@@ -110,11 +110,13 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
         "skipped": [],
         "not_started": [],
     }
-    domain_calls = [
-        entry
-        for entry in apply_writeback_client.transport.sent
-        if entry[0] not in ("wire.version", "rpc.catalog", "resources.versions")
-    ]
+    domain_calls = business_effects_after_initial_control(
+        [
+            entry
+            for entry in apply_writeback_client.transport.sent
+            if entry[0] not in ("wire.version", "rpc.catalog", "resources.versions")
+        ]
+    )
     assert domain_calls == [
         ("tab.get_analyze_result", {"tab_id": "t"}),
         ("tab.get_post_analyze_result", {"tab_id": "t"}),
@@ -204,7 +206,7 @@ def test_apply_writeback_skips_absent_or_empty_drafts(apply_writeback_client, pr
     )
 
 
-@pytest.mark.parametrize("reason", ["no_read", "stale_version"])
+@pytest.mark.parametrize("reason", ["result_superseded", "not_holder"])
 @pytest.mark.parametrize(
     "method,stage,expected_calls",
     [
@@ -242,9 +244,6 @@ def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
     assert result["error"]["reason"] == reason
     assert result["error"]["message"] == (
         "GUI Error (precondition_failed): guard denied"
-        if reason == "no_read"
-        else "GUI Error (PRECONDITION_FAILED): a resource changed since your last read; "
-        "review then retry"
     )
     assert result["failed_stage_may_have_partial_writes"] is (
         method == "tab.writeback_write"
@@ -266,11 +265,14 @@ def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
         "tab.writeback_write",
         "tab.writeback_write",
     ]
-    assert [
-        method
-        for method, _ in apply_writeback_client.transport.sent
-        if method not in ("wire.version", "rpc.catalog", "resources.versions")
-    ] == expected_sequence[:expected_calls]
+    effects = business_effects_after_initial_control(
+        [
+            entry
+            for entry in apply_writeback_client.transport.sent
+            if entry[0] not in ("wire.version", "rpc.catalog", "resources.versions")
+        ]
+    )
+    assert [method for method, _ in effects] == expected_sequence[:expected_calls]
 
 
 def test_apply_writeback_reports_partial_write_after_skipped_primary(

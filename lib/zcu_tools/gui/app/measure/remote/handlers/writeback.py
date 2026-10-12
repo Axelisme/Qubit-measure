@@ -312,8 +312,8 @@ def h_tab_writeback_apply(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     pane = "analysis" if subtab_id == "analysis" else "post_analysis"
     item_ids = None
-    if "ids" in params:
-        ids = params["ids"]
+    ids = params.get("ids")
+    if ids is not None:
         if not isinstance(ids, list) or any(
             not isinstance(item, str) or not item for item in ids
         ):

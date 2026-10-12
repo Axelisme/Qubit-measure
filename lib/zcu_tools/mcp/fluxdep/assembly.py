@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.images import validated_png
-from zcu_tools.mcp.core.lifecycle import build_lifecycle_tools
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import (
@@ -20,6 +20,7 @@ from zcu_tools.mcp.core.stdio_server import (
     generate_tools,
     run_stdio_loop,
 )
+from zcu_tools.mcp.fluxdep.lifecycle import build_control_lifecycle_tools
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,10 @@ def build_fluxdep_server(
         return call_gui(bridge, GuiRpcCall(method, params, timeout_seconds)).data
 
     generated = generate_tools(
-        config, METHOD_SPECS, frozenset({"resources.versions"}), send_gui_rpc
+        config,
+        METHOD_SPECS | CONTROL_METHOD_SPECS,
+        frozenset({"resources.versions", "control.connect"}),
+        send_gui_rpc,
     )
     for method in (
         "interactive.read",
@@ -97,7 +101,7 @@ def build_fluxdep_server(
         generated[name]["handler"] = lambda arguments, forwarder=forwarder: (
             project_interactive_reply(ToolReply(forwarder(arguments)))
         )
-    lifecycle, names = build_lifecycle_tools(config, bridge, repo_root, "fluxdep-gui")
+    lifecycle, names = build_control_lifecycle_tools(config, bridge, repo_root)
     tools = assemble_tools(generated, lifecycle, names)
 
     def cleanup() -> None:

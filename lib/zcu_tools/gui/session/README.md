@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，module slot 的明確錯誤分類
+**Last updated:** 2026-10-12
 
 # gui/session/ — 量測 session core
 
@@ -45,7 +45,6 @@ session/
 ├── operation_handles.py— OperationHandles（async Handle/Cancel facet，零 kind）+ per-op OperationChannel（單一有序事件 FIFO Settled/Stop，取代舊 FeedbackInbox + poll-loop，ADR-0066）+ captured EventOrigin operation record；`create(cancel_hook=, origin=)`要求caller顯式capture，`event_origin(token)`在live/retained-done record上投影string operation id；`has_cancel_hook`/channel.`can_cancel` 提供一般取消能力查詢；cancel hook例外只log，Stop事件仍入列且cancel_all繼續處理其它operation
 ├── operation_runner.py — OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
 ├── scopes.py           — progress_ambient（session 層：pbar ContextVar，無 Qt；ADR-0066，取代舊 executor `_entered`/OffMainScopes 的 pbar 欄位）。Figure 使用 operation-owned Plots，不透過 ambient scope
-├── notify_handles.py   — NotifyChannel/NotifyHandles（agent→user prompt 的跨線程 channel，事件集 Reply/Dismiss/Timeout，獨立於 operation 的 Settled/Stop；鏡像 OperationChannel 四不變式，ADR-0066）
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
 ├── predictor_control.py — Read-only explicit-parameter queries and concrete-qubit prefill for dialog and remote callers
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
@@ -120,6 +119,8 @@ user's selection remains unchanged. No persisted marker or competing busy cache 
 introduced.
 
 ## 關鍵設計
+
+- **Add input lifetime**：ComponentTree 的 read-only mode 停用 Add。Local Add dialog 不接 control authority；modal 期間 remote adapter 拒絕 Local 接管。Finished 退休輸入，晚到 submit 不會重新寫入。
 
 - **expected failure逐一opt in**：session service只讓caller可修正的concrete exceptions加入
   `ExpectedError` taxonomy；`OperationConflictError`、context validation、predictor readiness與

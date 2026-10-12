@@ -103,17 +103,15 @@ def attach_header(
 ) -> tuple[ReferenceInputWidget, Callable[[], None]]:
     editing: CfgEditing = resource
     observation = editing.observe()
-    revision = observation.ref.revision
     node = observation.tree.children["ref"]
     assert isinstance(node.spec, ReferenceSpec)
     assert isinstance(node.value, (ReferenceValue, type(None)))
 
     def submit(choice: ReferenceSelection) -> None:
-        nonlocal revision
         if isinstance(choice, CustomReferenceSelection):
-            editing.select_custom_reference(revision, ("ref",), choice.label)
+            editing.select_custom_reference(("ref",), choice.label)
         else:
-            editing.edit(revision, (CfgEdit(("ref", "__ref"), choice),))
+            editing.edit((CfgEdit(("ref", "__ref"), choice),))
 
     widget = ReferenceInputWidget(
         node.spec,
@@ -123,13 +121,9 @@ def attach_header(
         submit=submit,
     )
 
-    widget.set_convert_action(
-        lambda: editing.convert_reference_to_inline(revision, ("ref",))
-    )
+    widget.set_convert_action(lambda: editing.convert_reference_to_inline(("ref",)))
 
     def display(published: CfgObservation) -> None:
-        nonlocal revision
-        revision = published.ref.revision
         ref = published.tree.children["ref"]
         assert isinstance(ref.value, (ReferenceValue, type(None)))
         widget.display(
@@ -152,9 +146,8 @@ def test_qt_custom_waveform_selection_inherits_length_without_extra_submit(
     combo.setCurrentIndex(combo.findText("DRAG"))
 
     changed = resource.observe()
-    assert changed.ref.revision == 1
     assert changed.status is CfgStatus.VALID
-    assert resource.accept(changed.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "drag",
         "length": 0.8,
         "sigma": 0.2,
@@ -188,23 +181,22 @@ def test_qt_convert_to_inline_uses_owner_publication(widgets) -> None:
     button.click()
     converted = resource.observe()
     assert converted.tree.children["ref"].mode == "inline"
-    assert resource.accept(converted.ref.revision).values["ref"] == {
+    assert resource.accept().values["ref"] == {
         "style": "gauss",
         "length": 1.0,
         "sigma": 0.2,
     }
-    edited = resource.edit(converted.ref.revision, (CfgEdit(("ref", "length"), 3.0),))
+    resource.edit((CfgEdit(("ref", "length"), 3.0),))
     combo = widget.findChild(QComboBox)
     assert combo is not None
     combo.setCurrentIndex(combo.findText("Lib: saved"))
 
     relinked = resource.observe()
-    assert relinked.ref.revision == edited.ref.revision + 1
     selected = relinked.tree.children["ref"].value
     assert isinstance(selected, ReferenceValue)
     assert selected.chosen_key == "saved"
     assert relinked.tree.children["ref"].mode == "ref"
-    values = resource.accept(relinked.ref.revision).values["ref"]
+    values = resource.accept().values["ref"]
     assert isinstance(values, dict) and values["length"] == 1.0
     unsubscribe()
 
@@ -255,12 +247,10 @@ def test_qt_optional_none_then_custom_starts_complete_choice(widgets) -> None:
     combo.setCurrentIndex(combo.findData(NONE_KEY))
     disabled = resource.observe()
     assert disabled.tree.children["ref"].value is None
-    assert disabled.ref.revision == 1
 
     combo.setCurrentIndex(combo.findText("Cosine"))
 
     selected = resource.observe()
-    assert selected.ref.revision == 2
     contents = selected.tree.children["ref"].value
     assert isinstance(contents, ReferenceValue)
     assert contents.chosen_key == "<Custom:Cosine>"
@@ -291,10 +281,9 @@ def test_missing_library_hint_follows_publication_without_resubmit(widgets) -> N
     assert combo is not None and hint is not None
 
     del catalog.entries["saved"]
-    missing = resource.refresh(resource.observe().ref.revision)
+    missing = resource.refresh()
 
     assert missing.status is CfgStatus.INVALID
-    assert resource.observe().ref.revision == 1
     assert combo.currentText() == "Missing: saved"
     assert hint.isVisibleTo(widget)
     assert "saved" in hint.text()

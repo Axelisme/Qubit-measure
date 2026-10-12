@@ -49,10 +49,10 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.resource import (
     AcceptedConfig,
     CfgEdit,
-    CfgRef,
     CfgResolution,
     CfgResource,
 )
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -69,16 +69,39 @@ from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
-def _mock_ctrl() -> MagicMock:
+@pytest.fixture
+def control_factory(qapp: QApplication) -> Iterator[Callable[[], ControlIdentity]]:
+    """Keep fake application authority alive until its Qt view tree is deleted."""
+    baseline = set(qapp.topLevelWidgets())
+    authorities: list[ControlIdentity] = []
+
+    def create() -> ControlIdentity:
+        authority = ControlIdentity()
+        authorities.append(authority)
+        return authority
+
+    yield create
+    for widget in qapp.topLevelWidgets():
+        if widget not in baseline:
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+    authorities.clear()
+
+
+def _mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     ctrl = MagicMock()
+    ctrl.control_identity = control_factory()
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"
     return ctrl
 
 
-def test_main_window_role_failure_is_presented_without_registering_tab(qapp):
-    ctrl = _apply_window_defaults(_mock_ctrl())
+def test_main_window_role_failure_is_presented_without_registering_tab(
+    control_factory, qapp
+):
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.new_tab.side_effect = RoleResolutionError(
         "qubit", "R1", "qubit/*", "wrong kind"
@@ -270,30 +293,32 @@ def _snapshot(
     return replace(snapshot, artifacts=tuple(sections))
 
 
-def test_left_panel_toggle_is_attached_to_tab_bar(qapp):
+def test_left_panel_toggle_is_attached_to_tab_bar(control_factory, qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.show()
     QApplication.processEvents()
 
-    corner = tab._left_tabs.cornerWidget(Qt.TopLeftCorner)  # type: ignore[attr-defined]
+    left_tabs = tab.findChild(QTabWidget)
+    assert left_tabs is not None
+    corner = left_tabs.cornerWidget(Qt.Corner.TopLeftCorner)
     assert corner is None
     assert tab._left_edge_handle.isVisible() is True
 
 
-def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
+def test_left_panel_toggle_uses_collapsed_boundary_handle(control_factory, qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.resize(1000, 700)
@@ -320,13 +345,13 @@ def test_left_panel_toggle_uses_collapsed_boundary_handle(qapp):
     assert tab._splitter.sizes()[0] >= expanded_left
 
 
-def test_left_panel_handle_tracks_splitter_boundary(qapp):
+def test_left_panel_handle_tracks_splitter_boundary(control_factory, qapp):
     from qtpy.QtWidgets import QApplication
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.resize(1000, 700)
@@ -348,12 +373,12 @@ def test_left_panel_handle_tracks_splitter_boundary(qapp):
     assert abs(moved_x - (left_boundary - tab._left_edge_handle.width() // 2)) <= 2
 
 
-def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
+def test_exp_tab_disables_local_buttons_while_analyzing(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(
             analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
         ),
@@ -393,12 +418,12 @@ def test_exp_tab_disables_local_buttons_while_analyzing(qapp):
     assert all(not button.isEnabled() for button in saves)
 
 
-def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
+def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.update_interaction_state(
@@ -425,12 +450,12 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(qapp):
     assert all(button.isEnabled() for button in saves)
 
 
-def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
+def test_exp_tab_run_tooltip_shows_no_soc_reason(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.update_interaction_state(
@@ -452,12 +477,12 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(qapp):
     assert tab.run_btn.toolTip() == "No SoC connection"
 
 
-def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
+def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.cfg_form.first_invalid_reason = MagicMock(
@@ -483,7 +508,9 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(qapp):
     assert tab.run_btn.toolTip() == "Config invalid: modules.readout: invalid"
 
 
-def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(qapp):
+def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
+    control_factory, qapp
+):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     snap = _snapshot(
@@ -500,7 +527,7 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(qa
         has_figure=True,
     )
     assert snap.capabilities is not None
-    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap.capabilities)
+    tab = ExpTabWidget("tab-1", _mock_ctrl(control_factory), snap.capabilities)
     tab.update_writeback_items(
         [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
@@ -524,7 +551,9 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(qa
     assert all(not button.isEnabled() for button in saves)
 
 
-def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
+def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
+    control_factory, qapp
+):
     """flux_dep / power_dep adapters (analysis=NONE) hide only the
     analysis widgets, never the Save section. Regression: the whole second tab
     used to be hidden, so the user could not save a 2D-sweep run at all."""
@@ -532,7 +561,7 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False),
     )
     tab.update_interaction_state(
@@ -564,14 +593,14 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(qapp):
     assert all(button.isEnabled() for button in saves)
 
 
-def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
+def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(control_factory, qapp):
     """An analysis adapter keeps the analysis widgets visible and the second tab
     labelled 'Analysis' — the counterpart to the non-analysis case."""
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     tab.update_interaction_state(
@@ -587,7 +616,7 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(qapp):
     assert len(saves) == 2
 
 
-def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
+def test_exp_tab_load_button_requires_context_but_not_soc(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     snap1 = _snapshot(
@@ -601,7 +630,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
         supports_load_data=True,
     )
     assert snap1.capabilities is not None
-    tab = ExpTabWidget("tab-1", _mock_ctrl(), snap1.capabilities)
+    tab = ExpTabWidget("tab-1", _mock_ctrl(control_factory), snap1.capabilities)
     tab.update_interaction_state(snap1)
     load = next(
         button
@@ -628,14 +657,14 @@ def test_exp_tab_load_button_requires_context_but_not_soc(qapp):
 
 @pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
 def test_main_window_load_data_dialog_calls_controller(
-    qapp, monkeypatch, tmp_path, analysis_error
+    control_factory, qapp, monkeypatch, tmp_path, analysis_error
 ):
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
@@ -694,10 +723,12 @@ def test_main_window_load_data_dialog_calls_controller(
     dialogs.assert_no_unexpected_messages()
 
 
-def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp):
+def test_main_window_successful_writeback_relies_on_event_owned_projection(
+    control_factory, qapp
+):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.apply_writeback_for_pane.return_value = {
@@ -716,11 +747,11 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(qapp)
     window.show_status_message.assert_called_once_with("Writeback applied: param-1")
 
 
-def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
+def test_main_window_toolbar_does_not_show_arb_waveforms(control_factory, qapp):
     from qtpy.QtWidgets import QPushButton
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
 
     window = MainWindow(ctrl)
@@ -731,11 +762,11 @@ def test_main_window_toolbar_does_not_show_arb_waveforms(qapp):
     assert "Arb Waveforms…" not in texts
 
 
-def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
+def test_main_window_named_dialog_facade_delegates_to_registry(control_factory, qapp):
     from zcu_tools.gui.app.measure.remote.dialogs import DialogName
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
     registry = MagicMock()
@@ -750,16 +781,16 @@ def test_main_window_named_dialog_facade_delegates_to_registry(qapp):
     assert window.take_dialog_screenshot(DialogName.SETUP) == b"png"
 
     registry.close.assert_called_once_with(DialogName.PREDICTOR)
-    registry.open.assert_called_once_with(DialogName.PREDICTOR)
+    registry.open.assert_called_once_with(DialogName.PREDICTOR, writable=True)
     registry.visible_names.assert_called_once_with()
     registry.take_screenshot.assert_called_once_with(DialogName.SETUP)
 
 
-def test_show_error_dialog_retains_until_close(qapp):
+def test_show_error_dialog_retains_until_close(control_factory, qapp):
     from qtpy.QtWidgets import QMessageBox
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
 
@@ -781,34 +812,13 @@ def test_show_error_dialog_retains_until_close(qapp):
     assert len(window._dialog_refs) == 0
 
 
-def test_open_notify_prompt_retains_until_close(qapp):
-    from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.app.measure.ui.notify_dialog import NotifyUserDialog
-
-    ctrl = _apply_window_defaults(MagicMock())
-    ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
-
-    window.open_notify_prompt(17, "Need input", timeout=60.0)
-    qapp.processEvents()
-
-    dialogs = window.findChildren(NotifyUserDialog)
-    assert len(dialogs) == 1
-    assert dialogs[0]._token == 17
-    assert len(window._dialog_refs) == 1
-    assert window.list_open_dialogs() == []
-
-    dialogs[0].reject()
-    qapp.processEvents()
-
-    assert len(window._dialog_refs) == 0
-
-
-def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
+def test_main_window_load_data_dialog_cancel_is_noop(
+    control_factory, qapp, monkeypatch
+):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.save_control.list_saved_runs.return_value = ()
@@ -827,13 +837,15 @@ def test_main_window_load_data_dialog_cancel_is_noop(qapp, monkeypatch):
     ctrl.load_tab_result.assert_not_called()
 
 
-def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch):
+def test_main_window_load_data_dialog_shows_user_facing_error(
+    control_factory, qapp, monkeypatch
+):
     from qtpy.QtWidgets import QFileDialog
     from zcu_tools.gui.app.measure.services.load import LoadDataError
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.save_control.list_saved_runs.return_value = ()
@@ -866,10 +878,10 @@ def test_main_window_load_data_dialog_shows_user_facing_error(qapp, monkeypatch)
     assert "bad axes" in message
 
 
-def test_main_window_run_lock_keeps_new_tab_available(qapp):
+def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
@@ -892,11 +904,13 @@ def test_main_window_run_lock_keeps_new_tab_available(qapp):
     tab_two.update_interaction_state.assert_called_once()
 
 
-def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
+def test_main_window_tabs_are_movable_and_close_uses_moved_widget(
+    control_factory, qapp
+):
     from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(_editor_wiring_ctrl())
+    ctrl = _apply_window_defaults(_editor_wiring_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.side_effect = lambda tab_id: tab_id in {"tab-a", "tab-b"}
     window = MainWindow(ctrl)
@@ -930,10 +944,10 @@ def test_main_window_tabs_are_movable_and_close_uses_moved_widget(qapp):
     ctrl.close_tab.assert_called_once_with("tab-a")
 
 
-def test_main_window_soc_changed_refreshes_run_lock(qapp):
+def test_main_window_soc_changed_refreshes_run_lock(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -949,14 +963,14 @@ def test_main_window_soc_changed_refreshes_run_lock(qapp):
     tab.update_interaction_state.assert_called()
 
 
-def test_main_window_content_event_queries_single_tab_snapshot(qapp):
+def test_main_window_content_event_queries_single_tab_snapshot(control_factory, qapp):
     from zcu_tools.gui.app.measure.events.tab import (
         TabContentChangedPayload,
         TabContentFact,
     )
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
@@ -968,7 +982,9 @@ def test_main_window_content_event_queries_single_tab_snapshot(qapp):
     ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
 
 
-def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
+def test_main_window_interaction_event_refreshes_finished_analysis_figure(
+    control_factory, qapp
+):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
@@ -976,7 +992,7 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
     )
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1006,6 +1022,7 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(qapp):
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_start(
+    control_factory,
     qapp,
 ):
     from matplotlib.figure import Figure
@@ -1015,7 +1032,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     )
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1042,6 +1059,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
 
 
 def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
+    control_factory,
     qapp,
 ):
     from matplotlib.figure import Figure
@@ -1051,7 +1069,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     )
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1076,7 +1094,9 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     tab.show_analysis_figures.assert_not_called()
 
 
-def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
+def test_main_window_interaction_event_shows_post_figure_after_primary(
+    control_factory, qapp
+):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
@@ -1084,7 +1104,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
     )
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1126,7 +1146,9 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(qapp):
         "post_analyze_start_rejected",
     ],
 )
-def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, fact):
+def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
+    control_factory, qapp, fact
+):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
@@ -1134,7 +1156,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
     )
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget, MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1174,7 +1196,9 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(qapp, 
     assert tab.get_current_figure_for_pane("post_analysis") is post
 
 
-def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
+def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
+    control_factory, qapp
+):
     from dataclasses import dataclass
 
     from matplotlib.figure import Figure
@@ -1188,7 +1212,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(qapp):
     class _Params:
         threshold: float = 0.5
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.has_tab.return_value = True
@@ -1225,12 +1249,12 @@ def _emit_run_finished(bus, tab_id: str, outcome: str) -> None:
     bus.emit(RunFinishedPayload(tab_id=tab_id, outcome=outcome))
 
 
-def test_finished_run_preserves_selected_subtab(qapp):
+def test_finished_run_preserves_selected_subtab(control_factory, qapp):
     """RUN_FINISHED refreshes state without choosing a result pane."""
     from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -1249,12 +1273,12 @@ def test_finished_run_preserves_selected_subtab(qapp):
     tab.focus_result_panel.assert_not_called()
 
 
-def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
+def test_stopped_run_does_not_auto_switch_to_analysis_tab(control_factory, qapp):
     """A stopped (cancelled) run may leave a partial result, but the user
     interrupted on purpose — must not yank them to the Analysis tab."""
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -1268,12 +1292,12 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(qapp):
     tab._left_tabs.setCurrentIndex.assert_not_called()
 
 
-def test_non_analysis_adapter_run_preserves_selected_subtab(qapp):
+def test_non_analysis_adapter_run_preserves_selected_subtab(control_factory, qapp):
     """Non-analysis adapters also retain the user's selected pane after Run."""
     from qtpy.QtWidgets import QTabWidget, QWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -1294,13 +1318,15 @@ def test_non_analysis_adapter_run_preserves_selected_subtab(qapp):
     tab.focus_result_panel.assert_not_called()
 
 
-def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
+def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
+    control_factory, qapp
+):
     """A finished run on a non-analysis adapter has no analyze params; the
     content refresh must skip the analyze form rather than hit the Fast-Fail
     guard that demands initialized params (regression: it used to raise)."""
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = _apply_window_defaults(MagicMock())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.get_running_tab_id.return_value = None
@@ -1317,11 +1343,11 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(qapp):
     tab.populate_analyze_params.assert_not_called()
 
 
-def _editor_wiring_ctrl() -> MagicMock:
+def _editor_wiring_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     """A view facade over a real, caller-owned cfg resource."""
     from tests.gui.app.measure._cfg_fakes import make_cfg
 
-    ctrl = _mock_ctrl()
+    ctrl = _mock_ctrl(control_factory)
     cfg = make_cfg(_pulse_schema())
     ctrl.cfg_resources.lookup.side_effect = lambda _tab: cfg
     ctrl.active_operation_count.return_value = 0
@@ -1339,35 +1365,33 @@ def _pulse_schema():
     return CfgSchema(spec=spec, value=make_default_value(spec))
 
 
-def test_exp_tab_attach_projects_existing_resource(qapp):
+def test_exp_tab_attach_projects_existing_resource(control_factory, qapp):
     from qtpy.QtWidgets import QLineEdit, QWidget
     from zcu_tools.gui.cfg.resource import CfgEdit
 
-    ctrl = _editor_wiring_ctrl()
+    ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    before = cfg.observe().ref
+    cfg.observe()
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
-    assert cfg.observe().ref == before
-    cfg.edit(before.revision, (CfgEdit(("gain",), 0.45),))
+    cfg.edit((CfgEdit(("gain",), 0.45),))
     widget = tab.cfg_form.findChild(QWidget, "cfgInput:gain")
     assert widget is not None
     entry = widget.findChild(QLineEdit)
     assert entry is not None and float(entry.text()) == 0.45
 
 
-def test_exp_tab_detach_preserves_resource_for_later_views(qapp):
+def test_exp_tab_detach_preserves_resource_for_later_views(control_factory, qapp):
     from zcu_tools.gui.cfg.resource import CfgEdit
 
-    ctrl = _editor_wiring_ctrl()
+    ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
-    after = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
+    after = cfg.edit((CfgEdit(("gain",), 0.45),))
     other = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     other.attach(_snapshot("tab-1"), _RecordingTabActions())
-    assert cfg.observe().ref == after.ref
     assert other.cfg_form.is_valid() == (after.status.value == "Valid")
 
 
@@ -1463,12 +1487,12 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
     assert cfg.observe().status.value == "Valid"
 
 
-def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
+def test_exp_tab_buttons_dispatch_public_tab_actions(control_factory, qapp):
     import dataclasses
 
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
-    ctrl = _editor_wiring_ctrl()
+    ctrl = _editor_wiring_ctrl(control_factory)
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1538,15 +1562,15 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(qapp):
     ]
 
 
-def test_exp_tab_reset_publishes_defaults_on_same_resource(qapp):
+def test_exp_tab_reset_publishes_defaults_on_same_resource(control_factory, qapp):
     from zcu_tools.gui.cfg.resource import CfgEdit
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    ctrl = _editor_wiring_ctrl()
+    ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
     defaults = cfg.snapshot_inputs()
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.45),))
-    before = cfg.observe().ref
+    cfg.edit((CfgEdit(("gain",), 0.45),))
+    cfg.observe()
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1556,16 +1580,15 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(qapp):
     actions = _RecordingTabActions()
     tab.attach(_snapshot("tab-1"), actions)
     tab.reset_btn.click()
-    after = cfg.observe().ref
-    assert after.cfg_id == before.cfg_id
-    assert after.revision == before.revision + 1
+    cfg.observe()
+
     assert cfg.snapshot_inputs() == defaults
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
-def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
+def test_exp_tab_reset_confirm_no_does_not_reset(control_factory, qapp):
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
-    ctrl = _editor_wiring_ctrl()
+    ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
     before = cfg.observe()
     tab = ExpTabWidget(
@@ -1582,13 +1605,13 @@ def test_exp_tab_reset_confirm_no_does_not_reset(qapp):
     assert actions.calls == []
 
 
-def test_exp_tab_reset_btn_idle_only_enable(qapp):
+def test_exp_tab_reset_btn_idle_only_enable(control_factory, qapp):
     """reset_btn must be enabled when idle and disabled while the tab is busy."""
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
 
@@ -1606,6 +1629,7 @@ def test_exp_tab_reset_btn_idle_only_enable(qapp):
 
 
 def test_main_window_confirms_and_begins_shutdown_when_operations_active(
+    control_factory,
     qapp,
 ):
     """User close with work in progress: confirm, then begin_shutdown (which
@@ -1617,7 +1641,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
@@ -1632,12 +1656,12 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
     _shutdown_callback(ctrl)
 
 
-def test_main_window_declining_confirmation_keeps_window_open(qapp):
+def test_main_window_declining_confirmation_keeps_window_open(control_factory, qapp):
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
@@ -1651,7 +1675,7 @@ def test_main_window_declining_confirmation_keeps_window_open(qapp):
     ctrl.begin_shutdown.assert_not_called()
 
 
-def test_main_window_persists_session_on_close_when_idle(qapp):
+def test_main_window_persists_session_on_close_when_idle(control_factory, qapp):
     """Idle close: no confirmation; closeEvent ignores the event and *defers*
     begin_shutdown to the next event-loop turn (so it never re-enters
     self.close() within the closeEvent stack — the single-click bug). After the
@@ -1660,7 +1684,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
@@ -1683,7 +1707,7 @@ def test_main_window_persists_session_on_close_when_idle(qapp):
     ctrl.persist_all.assert_called_once_with()
 
 
-def test_main_window_close_removes_event_bus_subscriptions(qapp):
+def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp):
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtGui import QCloseEvent
     from zcu_tools.gui.app.measure.events.run import (
@@ -1702,7 +1726,7 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
         SocChangedPayload,
     )
 
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     bus = EventBus()
     ctrl.get_bus.return_value = bus
@@ -1730,12 +1754,12 @@ def test_main_window_close_removes_event_bus_subscriptions(qapp):
         assert bus._subs.get(payload_type, []) == []
 
 
-def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
+def test_new_tab_menu_supports_nested_paths(control_factory, qapp, monkeypatch):
     from qtpy.QtWidgets import QMenu
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     del qapp
-    ctrl = MagicMock()
+    ctrl = _mock_ctrl(control_factory)
     configure_cfg_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_adapter_names.return_value = [
@@ -1768,14 +1792,14 @@ def test_new_tab_menu_supports_nested_paths(qapp, monkeypatch):
     ctrl.new_tab.assert_called_once_with("twotone/rabi/length")
 
 
-def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
+def test_show_analysis_figure_draws_canvas(control_factory, qapp, monkeypatch):
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     del qapp
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
     canvas = MagicMock()
@@ -1790,7 +1814,7 @@ def test_show_analysis_figure_draws_canvas(qapp, monkeypatch):
     canvas.draw.assert_called_once_with()
 
 
-def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
+def test_show_analysis_figure_keeps_two_figures_coexisting(control_factory, qapp):
     """Analysis and Post figures live in independent containers; each pane's history
     is distinct and showing one does not evict the other."""
     from matplotlib.figure import Figure
@@ -1800,7 +1824,7 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
     del qapp
     tab = ExpTabWidget(
         "tab-1",
-        _mock_ctrl(),
+        _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     tab.show()
@@ -1831,10 +1855,11 @@ def test_show_analysis_figure_keeps_two_figures_coexisting(qapp):
 
 
 def _setup_window_with_tabs(
+    control_factory: Callable[[], ControlIdentity],
     dialog_presenter: RecordingDialogPresenter | None = None,
     active_operations: int = 0,
 ) -> tuple[MainWindow, MagicMock]:
-    ctrl = _apply_window_defaults(_editor_wiring_ctrl())
+    ctrl = _apply_window_defaults(_editor_wiring_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = active_operations
     ctrl.has_tab.side_effect = lambda tid: True
@@ -1918,10 +1943,10 @@ class _DeferredClosePresenter(RecordingDialogPresenter):
         self.destructive_decisions.append(on_decision)
 
 
-def test_tab_close_without_result_closes_immediately(qapp):
+def test_tab_close_without_result_closes_immediately(control_factory, qapp):
     """Scenario 1: Tab with NO_RESULT closes without prompting."""
     dialogs = RecordingDialogPresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs)
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     _add_tab(window, "tab-1", has_run=False)
 
     window._tabs.tabCloseRequested.emit(0)
@@ -1930,10 +1955,10 @@ def test_tab_close_without_result_closes_immediately(qapp):
     ctrl.close_tab.assert_called_once_with("tab-1")
 
 
-def test_tab_close_with_saved_data_closes_immediately(qapp):
+def test_tab_close_with_saved_data_closes_immediately(control_factory, qapp):
     """Scenario 1: Tab with SAVED data closes without prompting."""
     dialogs = RecordingDialogPresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs)
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
     assert tab.has_unsaved_data() is False
 
@@ -1946,10 +1971,12 @@ def test_tab_close_with_saved_data_closes_immediately(qapp):
 @pytest.mark.parametrize(
     "data_status", [SaveStatus.NOT_SAVED, SaveStatus.UNSAVED_CHANGES]
 )
-def test_tab_close_with_unsaved_data_declined_keeps_tab(qapp, data_status):
+def test_tab_close_with_unsaved_data_declined_keeps_tab(
+    control_factory, qapp, data_status
+):
     """Cancelling tab-close leaves either unsaved data state untouched."""
     dialogs = RecordingDialogPresenter(destructive_answers=[False])
-    window, ctrl = _setup_window_with_tabs(dialogs)
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     tab = _add_tab(window, "tab-1", has_run=True, saved=False)
     tab.update_interaction_state(_snapshot("tab-1", data_status=data_status))
     assert tab.has_unsaved_data() is True
@@ -1965,10 +1992,10 @@ def test_tab_close_with_unsaved_data_declined_keeps_tab(qapp, data_status):
     assert window.has_tab_widget("tab-1") is True
 
 
-def test_tab_close_with_unsaved_data_confirmed_closes_tab(qapp):
+def test_tab_close_with_unsaved_data_confirmed_closes_tab(control_factory, qapp):
     """Scenario 2: Confirming tab-close closes the unsaved tab."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs)
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     tab = _add_tab(window, "tab-1", has_run=True, saved=False)
     assert tab.has_unsaved_data() is True
 
@@ -1982,10 +2009,10 @@ def test_tab_close_with_unsaved_data_confirmed_closes_tab(qapp):
     ctrl.close_tab.assert_called_once_with("tab-1")
 
 
-def test_moved_tab_with_unsaved_data_closes_by_captured_identity(qapp):
+def test_moved_tab_with_unsaved_data_closes_by_captured_identity(control_factory, qapp):
     """Scenario 3: A tab moved before close request closes by captured widget identity."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs)
+    window, ctrl = _setup_window_with_tabs(control_factory, dialogs)
     tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
     _add_tab(window, "tab-b", has_run=False)
     assert tab_a.has_unsaved_data() is True
@@ -2005,9 +2032,11 @@ def test_moved_tab_with_unsaved_data_closes_by_captured_identity(qapp):
     ctrl.close_tab.assert_called_once_with("tab-a")
 
 
-def test_tab_moved_while_confirmation_pending_closes_captured_widget(qapp):
+def test_tab_moved_while_confirmation_pending_closes_captured_widget(
+    control_factory, qapp
+):
     """Scenario 3: Tab moved while confirmation prompt is open closes captured identity."""
-    window, ctrl = _setup_window_with_tabs()
+    window, ctrl = _setup_window_with_tabs(control_factory)
     tab_a = _add_tab(window, "tab-a", has_run=True, saved=False)
     _add_tab(window, "tab-b", has_run=False)
 
@@ -2053,9 +2082,11 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(qapp):
     ctrl.close_tab.assert_called_once_with("tab-a")
 
 
-def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
+def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
+    control_factory, qapp
+):
     """Scenario 2/3: Duplicate tab close requests for same tab are suppressed while prompt is open."""
-    window, ctrl = _setup_window_with_tabs()
+    window, ctrl = _setup_window_with_tabs(control_factory)
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     decision_cb: list[Callable[[bool], None]] = []
@@ -2097,10 +2128,14 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
     ctrl.close_tab.assert_called_once_with("tab-1")
 
 
-def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(qapp):
+def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(
+    control_factory, qapp
+):
     """Scenario 6: App close with neither unsaved data nor active operations closes cleanly."""
     dialogs = RecordingDialogPresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=0
+    )
     _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2110,9 +2145,11 @@ def test_app_close_idle_with_no_unsaved_tabs_shuts_down_without_prompt(qapp):
     _shutdown_callback(ctrl)
 
 
-def test_closing_window_leaves_plot_host_available_until_app_quits(qapp):
+def test_closing_window_leaves_plot_host_available_until_app_quits(
+    control_factory, qapp
+):
     window, _ctrl = _setup_window_with_tabs(
-        RecordingDialogPresenter(), active_operations=0
+        control_factory, RecordingDialogPresenter(), active_operations=0
     )
     window.close()
     QCoreApplication.processEvents()
@@ -2137,10 +2174,14 @@ def test_closing_window_leaves_plot_host_available_until_app_quits(qapp):
         qapp.processEvents()
 
 
-def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(qapp):
+def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(
+    control_factory, qapp
+):
     """Scenario 4: App close with unsaved data warns; cancelling leaves app open."""
     dialogs = RecordingDialogPresenter(destructive_answers=[False])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=0
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     window.close()
@@ -2154,10 +2195,14 @@ def test_app_close_with_unsaved_tabs_prompts_and_declining_cancels(qapp):
     ctrl.begin_shutdown.assert_not_called()
 
 
-def test_app_close_with_unsaved_tabs_prompts_and_confirming_shuts_down(qapp):
+def test_app_close_with_unsaved_tabs_prompts_and_confirming_shuts_down(
+    control_factory, qapp
+):
     """Scenario 4: App close with unsaved data warns; confirming begins shutdown."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=0
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
     _add_tab(window, "tab-2", has_run=False)
 
@@ -2172,10 +2217,12 @@ def test_app_close_with_unsaved_tabs_prompts_and_confirming_shuts_down(qapp):
     _shutdown_callback(ctrl)
 
 
-def test_app_close_with_both_unsaved_tabs_and_active_operations(qapp):
+def test_app_close_with_both_unsaved_tabs_and_active_operations(control_factory, qapp):
     """Scenario 5: Both risks present; prompt communicates both, confirm shuts down."""
     dialogs = RecordingDialogPresenter(destructive_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=3)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=3
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     window.close()
@@ -2191,10 +2238,14 @@ def test_app_close_with_both_unsaved_tabs_and_active_operations(qapp):
     _shutdown_callback(ctrl)
 
 
-def test_app_close_with_both_unsaved_tabs_and_active_operations_declined(qapp):
+def test_app_close_with_both_unsaved_tabs_and_active_operations_declined(
+    control_factory, qapp
+):
     """Scenario 5: Both risks present; decline preserves app state."""
     dialogs = RecordingDialogPresenter(destructive_answers=[False])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=2)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=2
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     window.close()
@@ -2208,10 +2259,14 @@ def test_app_close_with_both_unsaved_tabs_and_active_operations_declined(qapp):
     ctrl.begin_shutdown.assert_not_called()
 
 
-def test_app_close_with_active_operations_only_uses_confirm_async(qapp):
+def test_app_close_with_active_operations_only_uses_confirm_async(
+    control_factory, qapp
+):
     """Active-operation-only prompt uses non-blocking confirm_async."""
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=2)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=2
+    )
     _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2225,9 +2280,11 @@ def test_app_close_with_active_operations_only_uses_confirm_async(qapp):
     _shutdown_callback(ctrl)
 
 
-def test_app_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
+def test_app_close_suppresses_duplicate_prompt_while_decision_pending(
+    control_factory, qapp
+):
     """Scenario 4: Duplicate app close requests while prompt is open are suppressed."""
-    window, ctrl = _setup_window_with_tabs(active_operations=0)
+    window, ctrl = _setup_window_with_tabs(control_factory, active_operations=0)
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     decision_cb: list[Callable[[bool], None]] = []
@@ -2269,10 +2326,14 @@ def test_app_close_suppresses_duplicate_prompt_while_decision_pending(qapp):
     _shutdown_callback(ctrl)
 
 
-def test_app_close_reprompts_if_unsaved_data_appears_before_decision(qapp):
+def test_app_close_reprompts_if_unsaved_data_appears_before_decision(
+    control_factory, qapp
+):
     """A newly completed result upgrades an active-only prompt before shutdown."""
     dialogs = _DeferredClosePresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2293,10 +2354,14 @@ def test_app_close_reprompts_if_unsaved_data_appears_before_decision(qapp):
     ctrl.begin_shutdown.assert_not_called()
 
 
-def test_app_close_suppresses_reentry_while_shutdown_is_coordinating(qapp):
+def test_app_close_suppresses_reentry_while_shutdown_is_coordinating(
+    control_factory, qapp
+):
     """Accepted close owns the lifecycle until the coordinator callback runs."""
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2310,10 +2375,12 @@ def test_app_close_suppresses_reentry_while_shutdown_is_coordinating(qapp):
     ctrl.begin_shutdown.assert_called_once()
 
 
-def test_app_close_suppresses_duplicate_idle_shutdown_requests(qapp):
+def test_app_close_suppresses_duplicate_idle_shutdown_requests(control_factory, qapp):
     """Repeated idle close events schedule only one shutdown coordinator run."""
     dialogs = RecordingDialogPresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=0
+    )
     _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2327,12 +2394,14 @@ def test_app_close_suppresses_duplicate_idle_shutdown_requests(qapp):
     ctrl.begin_shutdown.assert_called_once()
 
 
-def test_app_close_rechecks_unsaved_data_after_operations_settle(qapp):
+def test_app_close_rechecks_unsaved_data_after_operations_settle(control_factory, qapp):
     """A result completed during shutdown gets a final data-loss decision."""
     dialogs = RecordingDialogPresenter(
         confirm_answers=[True], destructive_answers=[False]
     )
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2359,10 +2428,12 @@ def test_app_close_rechecks_unsaved_data_after_operations_settle(qapp):
     ]
 
 
-def test_app_close_waits_for_pending_tab_close_decision(qapp):
+def test_app_close_waits_for_pending_tab_close_decision(control_factory, qapp):
     """Tab and app close confirmations never overlap."""
     dialogs = _DeferredClosePresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=0)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=0
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     window._tabs.tabCloseRequested.emit(0)
@@ -2374,10 +2445,14 @@ def test_app_close_waits_for_pending_tab_close_decision(qapp):
     dialogs.destructive_decisions.pop()(False)
 
 
-def test_repeated_programmatic_shutdown_waits_for_pre_prompt_coordination(qapp):
+def test_repeated_programmatic_shutdown_waits_for_pre_prompt_coordination(
+    control_factory, qapp
+):
     """Repeated RPC takeover cannot bypass the captured shutdown coordinator."""
     dialogs = _DeferredClosePresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2398,10 +2473,14 @@ def test_repeated_programmatic_shutdown_waits_for_pre_prompt_coordination(qapp):
     ctrl.persist_all.assert_called_once_with()
 
 
-def test_programmatic_shutdown_supersedes_user_shutdown_coordination(qapp):
+def test_programmatic_shutdown_supersedes_user_shutdown_coordination(
+    control_factory, qapp
+):
     """RPC intent forces close when user-started coordination later settles."""
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2418,10 +2497,12 @@ def test_programmatic_shutdown_supersedes_user_shutdown_coordination(qapp):
     ctrl.persist_all.assert_called_once_with()
 
 
-def test_programmatic_shutdown_supersedes_final_unsaved_prompt(qapp):
+def test_programmatic_shutdown_supersedes_final_unsaved_prompt(control_factory, qapp):
     """RPC intent tears down without waiting for a post-settlement dialog."""
     dialogs = _DeferredClosePresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     tab = _add_tab(window, "tab-1", has_run=True, saved=True)
 
     window.close()
@@ -2446,10 +2527,12 @@ def test_programmatic_shutdown_supersedes_final_unsaved_prompt(qapp):
     ctrl.persist_all.assert_called_once_with()
 
 
-def test_programmatic_request_shutdown_bypasses_unsaved_guard(qapp):
+def test_programmatic_request_shutdown_bypasses_unsaved_guard(control_factory, qapp):
     """Programmatic request_shutdown() remains non-interactive even with unsaved data."""
     dialogs = RecordingDialogPresenter()
-    window, ctrl = _setup_window_with_tabs(dialogs, active_operations=1)
+    window, ctrl = _setup_window_with_tabs(
+        control_factory, dialogs, active_operations=1
+    )
     _add_tab(window, "tab-1", has_run=True, saved=False)
 
     window.request_shutdown()
@@ -2466,14 +2549,14 @@ class RunFormFixture:
     owner: CfgResource
     tab: ExpTabWidget
     line: QLineEdit
-    runs: list[tuple[CfgRef, AcceptedConfig]]
+    runs: list[AcceptedConfig]
 
 
 @pytest.fixture
 def run_form(
-    qapp: QApplication, request: pytest.FixtureRequest
+    control_factory, qapp: QApplication, request: pytest.FixtureRequest
 ) -> Iterator[RunFormFixture]:
-    ctrl = _apply_window_defaults(_mock_ctrl())
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
     ctrl.bus = EventBus()
     snapshot = _snapshot(
         "pending-tab",
@@ -2516,10 +2599,10 @@ def run_form(
         )
     owner = CfgResource(lambda: schema, resolution=resolution)
     ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
-    runs: list[tuple[CfgRef, AcceptedConfig]] = []
+    runs: list[AcceptedConfig] = []
 
-    def start(tab_id: str, ref: CfgRef) -> None:
-        runs.append((ref, owner.accept(ref.revision)))
+    def start(tab_id: str) -> None:
+        runs.append(owner.accept())
 
     ctrl.start_run.side_effect = start
     window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
@@ -2556,15 +2639,12 @@ def test_run_uses_the_input_published_while_typing(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
-    base = fx.owner.observe().ref
+    fx.owner.observe()
     edit_run_input(fx, "3.5")
-    assert fx.owner.observe().ref.revision == base.revision + 3
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
-    assert accepted.values == {"value": 3.5}
+    assert fx.runs[0].values == {"value": 3.5}
 
 
 @pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
@@ -2587,9 +2667,7 @@ def test_run_uses_the_last_sampling_operation(
                 )
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == fx.owner.observe().ref == fx.tab.cfg_form.current_ref()
-    assert accepted.values == {
+    assert fx.runs[0].values == {
         "value": 2.0,
         "range": {"start": 0.0, "stop": 2.0, "expts": 7, "step": 1 / 3},
     }
@@ -2613,15 +2691,11 @@ def test_run_uses_the_external_update_shown_in_the_form(
 ) -> None:
     fx = run_form
     edit_run_input(fx, "3.51")
-    current = fx.owner.edit(
-        fx.owner.observe().ref.revision, (CfgEdit(("value",), DirectValue(8.0)),)
-    )
+    fx.owner.edit((CfgEdit(("value",), DirectValue(8.0)),))
     assert fx.line.text() == "8.0"
     fx.window.run_or_stop_tab("pending-tab")
     assert len(fx.runs) == 1
-    ref, accepted = fx.runs[0]
-    assert ref == current.ref
-    assert accepted.values == {"value": 8.0}
+    assert fx.runs[0].values == {"value": 8.0}
 
 
 def test_run_can_submit_a_repair_to_invalid_published_config(
@@ -2629,7 +2703,6 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
 ) -> None:
     fx = run_form
     fx.owner.edit(
-        fx.owner.observe().ref.revision,
         (CfgEdit(("value",), DirectValue(None, raw="-")),),
     )
     assert not fx.tab.run_btn.isEnabled()
@@ -2637,7 +2710,7 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
-    assert fx.runs[0][1].values == {"value": 4.5}
+    assert fx.runs[0].values == {"value": 4.5}
 
 
 @pytest.mark.parametrize("block", ["busy", "context", "soc", "global-run"])
@@ -2665,14 +2738,13 @@ def test_valid_input_does_not_bypass_other_run_gates(
 def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
     fx = run_form
     edit_run_input(fx, "3.5")
-    base = fx.owner.observe().ref
+    fx.owner.observe()
     fx.ctrl.get_tab_snapshot.return_value = _snapshot(
         "pending-tab",
         supports_analysis=False,
         is_running=True,
     )
     fx.window.run_or_stop_tab("pending-tab")
-    assert fx.owner.observe().ref == base
     assert fx.runs == []
     fx.ctrl.cancel_run.assert_called_once_with()
 
@@ -2700,7 +2772,7 @@ def test_reset_replaces_published_input_with_defaults(
             line,
             QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
         )
-    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 3.5}
+    assert fx.owner.accept().values == {"value": 3.5}
     tab.reset_btn.click()
     assert line.text() == "2.0"
-    assert fx.owner.accept(tab.cfg_form.current_ref().revision).values == {"value": 2.0}
+    assert fx.owner.accept().values == {"value": 2.0}

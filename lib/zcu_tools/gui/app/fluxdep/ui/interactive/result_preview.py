@@ -40,9 +40,11 @@ class ResultPreviewWidget(QWidget):
         self._canvas = FigureCanvasQTAgg(self._figure)
         layout = QVBoxLayout(self)
 
+        self._edit_controls = QWidget()
+        layout.addWidget(self._edit_controls)
         # Re-do buttons sit above the figure (with the result, on the right side).
         if on_repick_lines is not None or on_reselect_points is not None:
-            row = QHBoxLayout()
+            row = QHBoxLayout(self._edit_controls)
             if on_repick_lines is not None:
                 repick = QPushButton("Re-pick lines")
                 repick.clicked.connect(on_repick_lines)
@@ -52,10 +54,13 @@ class ResultPreviewWidget(QWidget):
                 reselect.clicked.connect(on_reselect_points)
                 row.addWidget(reselect)
             row.addStretch(1)
-            layout.addLayout(row)
 
         layout.addWidget(self._canvas)
         self._render(entry)
+
+    def set_editable(self, *, editable: bool) -> None:
+        """Gate redo actions without disabling the read-only result canvas."""
+        self._edit_controls.setEnabled(editable)
 
     def _render(self, entry: SpectrumEntry) -> None:
         ax = self._figure.add_subplot(1, 1, 1)

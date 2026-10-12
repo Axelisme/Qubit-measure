@@ -266,30 +266,21 @@ def test_parameter_read_roleless_tab_can_read_current_concrete_paths(
     ) == {"values": {"Q2.rate": 20.0}, "modules": {"QL.pulses.pi": "QL.pulses.pi"}}
 
 
-def test_target_cfg_preview_keeps_publication_and_rejects_stale_ref(
+def test_target_cfg_preview_keeps_publication(
     application: TargetApplication,
 ) -> None:
     tab_id = application.controller.tab_control.new_tab("targeted")
     cfg = application.state.get_tab(tab_id).cfg
-    observed = cfg.edit(cfg.observe().ref.revision, (CfgEdit(("rate",), 17.0),))
-    expected = {
-        "cfg_id": str(observed.ref.cfg_id),
-        "revision": str(observed.ref.revision),
-    }
+    observed = cfg.edit((CfgEdit(("rate",), 17.0),))
     preview = h_tab_get_cfg(
         application.remote,
-        {"tab_id": tab_id, "aliases": {"driver": "Q2"}, "expected": expected},
+        {
+            "tab_id": tab_id,
+            "aliases": {"driver": "Q2"},
+        },
     )
     assert preview["status"] == "Valid"
-    assert preview["cfg_ref"] == expected
     assert cfg.observe() == observed
-    cfg.edit(observed.ref.revision, (CfgEdit(("rate",), 18.0),))
-    with pytest.raises(RemoteError) as caught:
-        h_tab_get_cfg(
-            application.remote,
-            {"tab_id": tab_id, "aliases": {"driver": "Q2"}, "expected": expected},
-        )
-    assert caught.value.reason == "stale_revision"
 
 
 @pytest.mark.parametrize("target", ["", " ", 2, False])
@@ -307,15 +298,6 @@ def test_target_source_reads_reject_malformed_target(
                 {"tab_id": tab_id, "aliases": {"driver": target}, **query},
             )
         assert caught.value.reason == "invalid_aliases"
-
-
-def test_target_preview_requires_expected_ref(application: TargetApplication) -> None:
-    tab_id = application.controller.tab_control.new_tab("targeted")
-    with pytest.raises(RemoteError) as caught:
-        h_tab_get_cfg(
-            application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}}
-        )
-    assert caught.value.code is ErrorCode.INVALID_PARAMS
 
 
 @pytest.mark.parametrize("field", ["paths", "module_refs"])

@@ -109,9 +109,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         return original_analyze(self, request, plots=plots)
 
     try:
-        run_id = fx.ctrl.start_run(
-            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-        )  # GUI path, not an MCP start.
+        run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
         run_result = call(
             sock, "operation.await", {"operation_id": run_id, "timeout": 2}
         )
@@ -141,9 +139,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
 
 
 def _completed_run(fx, sock, tab_id):
-    operation_id = fx.ctrl.start_run(
-        tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-    )
+    operation_id = fx.ctrl.start_run(tab_id)
     terminal = call(
         sock, "operation.await", {"operation_id": operation_id, "timeout": 2}
     )["result"]
@@ -308,9 +304,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
     try:
         _completed_run(fx, sock, tab_id)
         monkeypatch.setattr(FakeAdapter, "run", held_run)
-        run_id = fx.ctrl.start_run(
-            tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-        )
+        run_id = fx.ctrl.start_run(tab_id)
         assert entered.wait(1)
         running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert running["result_state"]["available"] is False
@@ -442,9 +436,7 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
     tab_id = fx.ctrl.new_tab("fake")
-    operation_id = fx.ctrl.start_run(
-        tab_id, fx.ctrl.cfg_resources.lookup(tab_id).observe().ref
-    )
+    operation_id = fx.ctrl.start_run(tab_id)
     bar = ProgressBarModel(
         label="late progress", total=2, start_time=time.monotonic() - 3600
     )
@@ -887,10 +879,8 @@ def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):
     """The resource enforces the same busy gate for every frontend."""
     tab_id = "tab-run"
     _add_fake_tab(fx, tab_id)
-    from zcu_tools.gui.cfg.edit_codec import encode_ref
 
-    cfg = fx.ctrl.cfg_resources.lookup(tab_id)
-    expected = encode_ref(cfg.observe().ref)
+    fx.ctrl.cfg_resources.lookup(tab_id)
     sock = open_client(fx.service.port)
     try:
         fx.state.set_tab_running(tab_id, running=True)
@@ -899,7 +889,6 @@ def test_tab_cfg_edit_blocked_while_owning_tab_runs(fx):
             "tab.edit_cfg",
             {
                 "tab_id": tab_id,
-                "expected": expected,
                 "edits": [{"path": ["reps"], "value": 10}],
             },
         )

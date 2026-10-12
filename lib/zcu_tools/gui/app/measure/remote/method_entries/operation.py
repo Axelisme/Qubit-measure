@@ -14,7 +14,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "operation.active",
         "operation:h_operation_active",
-        MethodSpec(5.0, "List all live operations from GUI domain owners."),
+        MethodSpec(
+            5.0, "List all live operations from GUI domain owners.", readonly=True
+        ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
@@ -32,6 +34,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 default_number("timeout", 120.0, "Seconds to wait"),
             ),
             off_main_thread=True,
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="tool", tool_names=("wait",)),
     ),
@@ -60,6 +63,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "unknown/evicted ids; it is not derived from individual bars. "
             "Agents read progress through wait.",
             (required_integer("operation_id", "Known GUI-local operation id"),),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

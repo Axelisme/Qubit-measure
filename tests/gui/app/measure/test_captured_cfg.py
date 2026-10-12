@@ -137,20 +137,19 @@ def test_tab_refresh_preserves_distinct_captures_and_publishes_before_notificati
         expression_schema,
         resolution=lambda: bindings.snapshot((), captured_values={}, parameters=second),
     )
-    initial = one.observe().ref
     observed = []
 
     def subscriber(publication) -> None:
-        if publication.ref != initial:
-            observed.append((one.observe(), two.observe()))
+        observed.append((one.observe(), two.observe()))
 
     dispose = one.watch(subscriber)
+    observed.clear()
     host.current = second
     publications = owner.refresh_all()
     dispose()
     assert observed == [publications]
-    assert one.accept(publications[0].ref.revision).values == {"value": 10.0}
-    assert two.accept(publications[1].ref.revision).values == {"value": 20.0}
+    assert one.accept().values == {"value": 10.0}
+    assert two.accept().values == {"value": 20.0}
 
 
 def test_role_capture_failure_does_not_register_a_tab() -> None:

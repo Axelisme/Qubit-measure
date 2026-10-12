@@ -80,14 +80,14 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     other_key = f"tab:{other_tab}:cfg"
     before = ctrl.resources_versions()
 
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), 0.25),))
+    cfg.edit((CfgEdit(("gain",), 0.25),))
 
     saved = ctrl.get_tab_snapshot(tab_id).cfg_schema
     assert saved.value.fields["gain"] == DirectValue(0.25)
     assert ctrl.resources_versions()[key] == before[key] + 1
     assert ctrl.resources_versions()[other_key] == before[other_key]
 
-    cfg.edit(cfg.observe().ref.revision, (CfgEdit(("gain",), DirectValue(raw="1e")),))
+    cfg.edit((CfgEdit(("gain",), DirectValue(raw="1e")),))
 
     invalid = ctrl.get_tab_snapshot(tab_id).cfg_schema.value.fields["gain"]
     assert isinstance(invalid, DirectValue)

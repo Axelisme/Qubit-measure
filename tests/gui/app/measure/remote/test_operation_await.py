@@ -12,17 +12,12 @@ a wire result (ADR-0066):
 
 from __future__ import annotations
 
-from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
-from zcu_tools.gui.app.measure.remote.method_entries._registry import (
-    build_dispatch_registry,
-)
 from zcu_tools.gui.app.measure.services.operation_control import OperationControlFacet
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -53,20 +48,6 @@ def _ctrl(result: AwaitResult | None) -> MagicMock:
 
 def test_off_main_thread_flag_set():
     assert METHOD_REGISTRY["operation.await"].off_main_thread is True
-
-
-@pytest.mark.parametrize("method", ["tab.snapshot", "tab.load_data"])
-def test_remote_registry_rejects_off_main_reveal_or_guard(method: str) -> None:
-    entry = next(item for item in METHOD_ENTRIES if item.method == method)
-    # Suppress the old write-receipt restriction so this tests the guard/reveal
-    # declaration rather than a separate reason to reject off-main writes.
-    candidate = replace(
-        entry,
-        spec=replace(entry.spec, off_main_thread=True),
-        agent=replace(entry.agent, refresh_after_write=False),
-    )
-    with pytest.raises(ValueError, match="owner thread"):
-        build_dispatch_registry((candidate,))
 
 
 # ---------------------------------------------------------------------------

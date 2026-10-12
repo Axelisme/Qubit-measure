@@ -160,6 +160,7 @@ class Connections:
         client = Client(self.port, self.scheduler)
         self.clients.append(client)
         client.result("resources.versions")
+        client.result("control.connect", label="editor-lifecycle", mode="owner")
         return client
 
     def wait(self, predicate: Callable[[], bool]) -> None:

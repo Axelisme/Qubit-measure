@@ -16,7 +16,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "adapter.list",
         "view:h_adapter_list",
-        MethodSpec(5.0, "List available adapters. Returns {adapters: [name]}."),
+        MethodSpec(
+            5.0, "List available adapters. Returns {adapters: [name]}.", readonly=True
+        ),
     ),
     method_entry(
         "adapter.guide",
@@ -30,6 +32,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "write back, and recommended analysis settings. How you actually use it "
             "is your call. Empty fields mean the adapter has no guide written yet.",
             (required_string("adapter_name", "Adapter to introspect"),),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -61,6 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "out_path", "Write PNG here instead of returning base64"
                 ),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -69,6 +73,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Capture view state summary",
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
@@ -86,6 +91,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "out_path", "Write PNG here instead of returning base64"
                 ),
             ),
+            readonly=True,
         ),
     ),
     method_entry(
@@ -114,6 +120,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "out_path", "Write PNG here instead of returning base64"
                 ),
             ),
+            readonly=True,
         ),
     ),
 )

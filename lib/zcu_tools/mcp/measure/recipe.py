@@ -877,8 +877,9 @@ class RecipeSession:
         current sources with this same temporary mapping, not a
         tab birth capture or context.snapshot. Source/alias failures propagate
         without fallback. Busy, mismatched adapters
-        and invalid locators fail without creating a fallback. Capture the cfg
-        ref for edits and Run; each source query uses current globals. GUI/connection
+        and invalid locators fail without creating a fallback. Use the returned
+        cfg publication for recipe edits and Run preparation; each source query
+        uses current globals. GUI/connection
         errors propagate; empty/non-string names raise ValueError before any GUI request. Identifier errors propagate from the GUI context owner.
         """
         if not adapter or not adapter.strip():
@@ -914,10 +915,7 @@ class RecipeSession:
             interaction = _cfg_object(snapshot["interaction"])
             if interaction["is_running"] or interaction["is_analyzing"]:
                 raise GuiRpcError("Tab is busy", reason="tab_busy")
-            observed_cfg = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
-            publication = self._tools.send_gui_rpc(
-                "tab.reset_cfg", {"tab_id": tab, "expected": observed_cfg["cfg_ref"]}
-            )
+            publication = self._tools.send_gui_rpc("tab.reset_cfg", {"tab_id": tab})
         return RecipeTab(
             _TabBinding(
                 self._tools,
@@ -961,7 +959,6 @@ class RecipeTab:
                         if self._binding.aliases
                         else {}
                     ),
-                    "expected": self._binding.publication["cfg_ref"],
                 },
             )
             self._binding.publication = _cfg_object(reply)
@@ -1070,7 +1067,6 @@ class RecipeTab:
                 "tab.edit_cfg",
                 {
                     "tab_id": self._binding.tab,
-                    "expected": self._binding.publication["cfg_ref"],
                     "edits": edits,
                 },
             )
@@ -1298,8 +1294,10 @@ class RecipeTab:
         self._binding.origins[field] = captured_sources
 
     def run(self) -> RunOperation:
-        """Immediately send Run with captured cfg ref and return its yield handle.
+        """Immediately send Run for this tab and return its yield handle.
 
+        The recipe cfg publication must be Valid. Nonempty aliases preview the
+        current inputs before this check; Invalid cfg fails before Run is sent.
         Capture actual conditions and result provenance. A pending between-yield
         cancel suppresses this one start and is consumed once. GUI rejection fails
         immediately; completion failures are thrown by the driver at the yield.
@@ -1314,7 +1312,7 @@ class RecipeTab:
         self._preview_aliases()
         if self._binding.publication["status"] != "Valid":
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
-        actual = capture_actual(self._binding.publication, self._actual_fields())
+        actual = capture_actual(self._actual_fields())
         binding = _RunBinding(
             self._binding, RecipeRunSnapshot(self._binding.tab, actual)
         )
@@ -1335,7 +1333,7 @@ class RecipeTab:
                 raise _StepCancelled
             binding.publish(replace(binding.capture, start_status="unknown"))
 
-        payload: dict[str, object] = {"tab_id": tab, "expected": actual["cfg_ref"]}
+        payload: dict[str, object] = {"tab_id": tab}
         if self._binding.aliases:
             payload["aliases"] = self._binding.aliases
         try:

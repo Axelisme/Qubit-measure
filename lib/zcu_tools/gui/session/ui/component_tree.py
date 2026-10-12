@@ -105,16 +105,20 @@ class ComponentTreeWidget(QWidget):
     """
 
     def __init__(
-        self, control: ContextControlPort, parent: QWidget | None = None
+        self,
+        control: ContextControlPort,
+        parent: QWidget | None = None,
     ) -> None:
         """Bind the owner-thread control and render its current document.
 
         Without an entry or parameter context the tree is empty, the owner's
         message shows as a hint and "Add component…" is disabled. Field edits
         go through the source owner; setup mode edits only the entry template.
+        set_read_only disables writes while retaining tree browsing.
         """
         super().__init__(parent)
         self._control = control
+        self._read_only = False
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
         self._expanded: dict[_RowKey, bool] = {}
         layout = QVBoxLayout(self)
@@ -143,6 +147,15 @@ class ComponentTreeWidget(QWidget):
         layout.addWidget(self._hint)
         self.refresh()
 
+    def set_read_only(self, *, read_only: bool) -> None:
+        """Block Value editing and Add while preserving tree/destination browsing.
+
+        Re-render the cached document to close an active Value editor. Late
+        delegate submissions cannot write while read_only is True.
+        """
+        self._read_only = read_only
+        self.refresh()
+
     def refresh(self) -> None:
         """Render the cached selected document; never implicitly refresh files.
 
@@ -162,7 +175,7 @@ class ComponentTreeWidget(QWidget):
             self._show_hint(str(exc))
             return
         self._show_hint("")
-        self._add_btn.setEnabled(True)
+        self._add_btn.setEnabled(not self._read_only)
         items: dict[_RowKey, QTreeWidgetItem] = {}
         default_expanded: dict[_RowKey, bool] = {}
         entry_info = self._control.get_entry_info()
@@ -376,7 +389,8 @@ class ComponentTreeWidget(QWidget):
                 )
 
     def _add_target(self, item: QTreeWidgetItem, target: _EditTarget) -> None:
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        if not self._read_only:
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         self._edit_targets[_row_key(item)] = target
 
     def _mark_unset(self, item: QTreeWidgetItem) -> None:
@@ -405,7 +419,7 @@ class ComponentTreeWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _on_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
-        if _row_key(item) in self._edit_targets:
+        if not self._read_only and _row_key(item) in self._edit_targets:
             self._tree.editItem(item, _VALUE)
 
     def _edit_current(self) -> None:
@@ -426,6 +440,8 @@ class ComponentTreeWidget(QWidget):
         return self._edit_targets[_row_key(item)]
 
     def _submit_edit(self, target: _EditTarget, raw: str) -> None:
+        if self._read_only:
+            return
         if raw == target.initial:
             return  # Unchanged text, including an unset row left empty, writes nothing.
         try:

@@ -1,16 +1,13 @@
-"""Shared GUI-side dispatch, resource observations and event subscriptions.
+"""Shared GUI-side dispatch, control authority and event subscriptions.
 
 RemoteControlServiceBase routes parsed NDJSON requests to app-provided handlers.
-OwnerScheduler serializes State work; bounded waits may run off-main. Apps inject
-method registries, wire metadata, event serializers and optional resource-version
-policies. Guard, handler and successful observation share one owner turn. The
-dispatch handshake prevents timed-out requests from establishing observations,
-and unsuccessful reply delivery rolls back only those observations.
+OwnerScheduler serializes State work; bounded readonly waits may run off-main.
+Apps inject method registries, wire metadata, event serializers and their optional
+control identity owner. Authority checks and commands share one owner turn.
 
 NdjsonRpcEndpoint owns socket lifecycle, framing, authentication, per-client
-queues and push delivery. Apps own resource keys, version producers, method
-dependencies and domain effects. Measure additionally owns editor lifetime,
-diagnostics and writeback pane aliases through the existing narrow hooks.
+queues and push delivery. Apps own domain effects. Measure additionally owns
+editor lifetime and diagnostics through the existing narrow hooks.
 Qt-free and app-free. See ADR-0068 for transport and policy ownership.
 """
 
@@ -24,8 +21,10 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from zcu_tools.gui.control_identity import ControlIdentity, ControlIdentityError
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin, EventSubscriptions
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
     RemoteError,
@@ -33,7 +32,6 @@ from zcu_tools.gui.remote.errors import (
 )
 from zcu_tools.gui.remote.framing import encode_line
 from zcu_tools.gui.remote.method_spec import BoundMethod
-from zcu_tools.gui.remote.observation import ResourceObservationPolicy
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.remote.rpc_endpoint import (
     ClientLink,
@@ -55,7 +53,15 @@ def _store_expected_error(
 ) -> None:
     """Store generic expected projection, containing projection bugs as controller errors."""
     try:
-        holder["remote_error"] = remote_error_from_expected(exc)
+        error = remote_error_from_expected(exc)
+        if isinstance(exc, ControlIdentityError):
+            data: dict[str, object] = {
+                "holder": exc.status.holder,
+                "locked": exc.status.locked,
+                "online": exc.status.online,
+            }
+            error.data = data
+        holder["remote_error"] = error
     except Exception as projection_exc:  # projection safety boundary
         logger.exception(
             "%s expected-error projection raised: %s", origin, projection_exc
@@ -67,17 +73,15 @@ class SubscriptionCtx:
     """Per-connection semantic state attached to ``link.app_ctx``.
 
     ``client_id`` is a stable opaque connection identity; ``subscribed`` contains
-    wire event names. ``seen`` maps observed resource keys to their versions and
-    is accessed only on the State owner thread. Subclasses add app-owned resources,
+    wire event names. Subclasses add app-owned resources,
     such as editor session ids, by declaring additional ``__slots__``.
     """
 
-    __slots__ = ("client_id", "subscribed", "seen")
+    __slots__ = ("client_id", "subscribed")
 
     def __init__(self) -> None:
         self.client_id = uuid4().hex
         self.subscribed: set[str] = set()
-        self.seen: dict[str, int] = {}
 
 
 def _ctx(link: ClientLink) -> SubscriptionCtx:
@@ -109,32 +113,27 @@ class RemoteControlServiceBase:
         method_registry: Mapping[str, BoundMethod],
         event_serializers: Mapping[Any, Serializer],
         wire_event_name: Callable[[Any], str],
-        resource_versions: Callable[[], Mapping[str, int]] | None = None,
-        observation_policies: Mapping[str, ResourceObservationPolicy] | None = None,
+        control_identity: ControlIdentity | None = None,
     ) -> None:
-        """Bind app dispatch and optional owner-thread observation policies.
+        """Bind app dispatch and optional owner-thread control authority.
 
         controller exposes the app bus and commands used by method_registry.
         opts configures the socket; owner_scheduler serializes State work.
         wire_version, gui_version and server_name identify the endpoint.
         event_serializers and wire_event_name project subscribed domain events.
-        resource_versions returns a complete current key-to-version snapshot on
-        the owner thread; observation_policies declares every registry method.
-        Omit both for an app without resource observations. Supplying only one,
-        mismatched method keys, or an off-main observation raises ValueError.
+        control_identity is the application's optional write-authority owner;
+        omit it for observe-only apps. When supplied, unmarked methods require
+        the calling socket's holder identity, and off-main methods must declare
+        readonly=True. Control initialization and transitions share owner turns.
         Construction opens no socket; start() begins serving requests.
         """
-        if (resource_versions is None) != (observation_policies is None):
-            raise ValueError("resource versions and observation policies are paired")
-        if observation_policies is not None:
-            if observation_policies.keys() != method_registry.keys():
-                raise ValueError("observation policies must match registered methods")
-            for method, policy in observation_policies.items():
-                policy.validate_owner_thread(
-                    off_main_thread=method_registry[method].off_main_thread
-                )
-        self._resource_versions = resource_versions
-        self._observation_policies = dict(observation_policies or {})
+        if control_identity is not None:
+            for method, entry in method_registry.items():
+                if entry.off_main_thread and not entry.readonly:
+                    raise ValueError(
+                        f"off-owner control method must be readonly: {method}"
+                    )
+        self.control_identity = control_identity
         self.ctrl = controller
         self._opts = opts
         self._wire_version = wire_version
@@ -175,119 +174,6 @@ class RemoteControlServiceBase:
         """Handle extra state-owning methods (e.g. editor.*). Return True if handled."""
         del link, req
         return False
-
-    @staticmethod
-    def _resource_key(template: str, values: Mapping[str, object]) -> str:
-        """Expand a declared resource key; apps may supply domain-specific aliases."""
-        return template.format_map(values)
-
-    def _guard(
-        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
-    ) -> None:
-        """Reject missing or stale declared resources before the owner handler."""
-        if self._resource_versions is None:
-            return
-        deps = self._observation_policies[method].guard_deps
-        if not deps:
-            return
-        current = self._resource_versions()
-        required: set[str] = set()
-        for template in deps:
-            if template.endswith("*"):
-                prefix = self._resource_key(template[:-1], params)
-                required.update(key for key in current if key.startswith(prefix))
-                required.update(key for key in ctx.seen if key.startswith(prefix))
-            else:
-                required.add(self._resource_key(template, params))
-        stale = sorted(
-            key
-            for key in required
-            if key not in ctx.seen or ctx.seen[key] != current.get(key, 0)
-        )
-        if stale:
-            raise RemoteError(
-                ErrorCode.PRECONDITION_FAILED,
-                "a resource you depend on was changed in the GUI since you last "
-                "saw it; review then retry",
-                reason="stale_version",
-                data={"stale": stale},
-            )
-
-    def _before_handler(
-        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
-    ) -> dict[str, int] | None:
-        """Capture write before-versions on the owner thread, when declared."""
-        del ctx, params
-        if (
-            self._resource_versions is not None
-            and self._observation_policies[method].refresh_after_write
-        ):
-            return dict(self._resource_versions())
-        return None
-
-    @staticmethod
-    def _self_write_updates(
-        seen: Mapping[str, int], before: Mapping[str, int], current: Mapping[str, int]
-    ) -> dict[str, int]:
-        updates: dict[str, int] = {}
-        for key in before.keys() | current.keys():
-            old, new = before.get(key, 0), current.get(key, 0)
-            if old != new and key in seen and seen[key] == old:
-                updates[key] = new
-        return updates
-
-    def _owner_success(
-        self,
-        ctx: SubscriptionCtx,
-        method: str,
-        params: Mapping[str, object],
-        result: Mapping[str, object],
-        before: dict[str, int] | None,
-    ) -> Callable[[], None] | None:
-        """Record successful reads/writes and return an observation-only rollback."""
-        if self._resource_versions is None:
-            return None
-        policy = self._observation_policies[method]
-        current = self._resource_versions()
-        updates = (
-            self._self_write_updates(ctx.seen, before, current)
-            if before is not None
-            else {}
-        )
-        if (
-            before is not None
-            and policy.created_resource is not None
-            and policy.created_identity is not None
-        ):
-            identity = result.get(policy.created_identity)
-            if isinstance(identity, str) and identity:
-                key = self._resource_key(policy.created_resource, result)
-                if before.get(key, 0) == 0 and current.get(key, 0) == 1:
-                    updates[key] = 1
-        if (
-            policy.reveals
-            and all(name not in params for name in policy.reveals_without)
-            and all(params.get(name) for name in policy.reveals_when_nonempty)
-        ):
-            for template in policy.reveals:
-                key = self._resource_key(template, params)
-                updates[key] = current.get(key, 0)
-        if not updates:
-            return None
-        previous = {key: ctx.seen.get(key) for key in updates}
-        ctx.seen.update(updates)
-
-        def _rollback() -> None:
-            for key, version in updates.items():
-                if ctx.seen.get(key) != version:
-                    continue
-                old = previous[key]
-                if old is None:
-                    ctx.seen.pop(key, None)
-                else:
-                    ctx.seen[key] = old
-
-        return _rollback
 
     def _after_success(
         self,
@@ -386,7 +272,14 @@ class RemoteControlServiceBase:
         self._owner_scheduler.post(self._on_client_count_changed)
 
     def on_client_close(self, link: ClientLink, *, on_owner_thread: bool) -> None:
-        self._on_client_close_extra(_ctx(link), on_owner_thread=on_owner_thread)
+        ctx = _ctx(link)
+        self._on_client_close_extra(ctx, on_owner_thread=on_owner_thread)
+        control = self.control_identity
+        if control is not None:
+            if on_owner_thread:
+                control.disconnect(ctx.client_id)
+            else:
+                self._owner_scheduler.post(lambda: control.disconnect(ctx.client_id))
         # Notify the owner on both IO-thread drops and owner-thread stops.
         if on_owner_thread:
             self._on_client_count_changed()
@@ -424,6 +317,13 @@ class RemoteControlServiceBase:
         if self._route_extra(link, req):
             return
         spec = self._method_registry.get(req.method)
+        if self.control_identity is not None and req.method in CONTROL_METHOD_SPECS:
+            spec = BoundMethod(
+                handler=lambda _adapter, params: self._control_command(
+                    _ctx(link), req.method, params
+                ),
+                spec=CONTROL_METHOD_SPECS[req.method],
+            )
         if spec is None:
             self._endpoint.reply_error(
                 link,
@@ -439,9 +339,48 @@ class RemoteControlServiceBase:
             handler_params = validate_params(spec.params, req.params)
         else:
             handler_params = req.params
-        self._dispatch_on_owner(
-            link, req.id, req.method, spec, handler_params, request_params=req.params
-        )
+        self._dispatch_on_owner(link, req.id, req.method, spec, handler_params)
+
+    def _check_control(self, ctx: SubscriptionCtx, method: str) -> None:
+        if (
+            self.control_identity is None
+            or method in CONTROL_METHOD_SPECS
+            or method == "rpc.catalog"
+        ):
+            return
+        if not self._method_registry[method].readonly:
+            self.control_identity.require_holder(ctx.client_id)
+
+    def _local_modal_open(self) -> bool:
+        """Qt adapters query modal presentation on the owner turn; headless has none."""
+        return False
+
+    def _control_command(
+        self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
+    ) -> dict[str, object]:
+        control = self.control_identity
+        assert control is not None
+        if method == "control.connect":
+            label, mode = params["label"], params["mode"]
+            if not isinstance(label, str) or mode not in ("owner", "readonly"):
+                raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid control identity")
+            if mode == "owner":
+                control.connect(
+                    ctx.client_id, label, "owner", local_busy=self._local_modal_open()
+                )
+            else:
+                control.connect(ctx.client_id, label, "readonly")
+        elif method == "control.acquire":
+            control.acquire(ctx.client_id, local_busy=self._local_modal_open())
+        elif method == "control.release":
+            control.release(ctx.client_id)
+        status = control.status()
+        return {
+            "holder": status.holder,
+            "locked": status.locked,
+            "online": status.online,
+            "me": control.is_holder(ctx.client_id),
+        }
 
     # ------------------------------------------------------------------
     # events.* state-owning handlers
@@ -496,9 +435,7 @@ class RemoteControlServiceBase:
     # Dispatch onto the State owner thread (marshal + off-main + policy seams)
     # ------------------------------------------------------------------
 
-    def _dispatch_on_owner(
-        self, link: ClientLink, rid, method, spec, params, *, request_params
-    ) -> None:
+    def _dispatch_on_owner(self, link: ClientLink, rid, method, spec, params) -> None:
         holder: dict[str, object] = {}
         bus = self._get_bus()
         ctx = _ctx(link)
@@ -506,22 +443,16 @@ class RemoteControlServiceBase:
 
         if spec.off_main_thread:
             # Blocking handlers wait on this IO worker, never on the State owner.
-            # Registry validation rejects guard/reveal declarations for these.
+            # Registry validation requires readonly methods for controlled apps.
             self._run_off_main(spec, params, bus, request_origin, holder)
         else:
             done = threading.Event()
-            handshake = threading.Lock()
-            completed = False
-            abandoned = False
 
             def _run() -> None:
-                nonlocal completed
-                # Guard, handler and successful observation share one owner turn.
-                before: dict[str, int] | None = None
+                # Check current authority at execution, not at request arrival.
                 with bus.origin(request_origin):
                     try:
-                        self._guard(ctx, method, params)
-                        before = self._before_handler(ctx, method, params)
+                        self._check_control(ctx, method)
                         result = spec.handler(self, params)
                         if not isinstance(result, dict):
                             raise TypeError(
@@ -536,36 +467,17 @@ class RemoteControlServiceBase:
                         logger.exception("handler raised: %s", exc)
                         holder["controller_error"] = exc
                     finally:
-                        # Observation and completion are one handshake decision:
-                        # timeout cannot abandon a request after it records seen.
-                        with handshake:
-                            observed = holder.get("result")
-                            if isinstance(observed, dict) and not abandoned:
-                                try:
-                                    holder["rollback"] = self._owner_success(
-                                        ctx, method, request_params, observed, before
-                                    )
-                                except Exception as exc:  # dispatch boundary
-                                    logger.exception(
-                                        "owner observation raised: %s", exc
-                                    )
-                                    holder["controller_error"] = exc
-                            completed = True
                         done.set()
 
             self._owner_scheduler.post(_run)
             if not done.wait(timeout=spec.timeout_seconds):
-                with handshake:
-                    timed_out = not completed
-                    abandoned = timed_out
-                if timed_out:
-                    self._endpoint.reply_error(
-                        link,
-                        rid=rid,
-                        code=ErrorCode.TIMEOUT,
-                        message=f"handler did not complete within {spec.timeout_seconds}s",
-                    )
-                    return
+                self._endpoint.reply_error(
+                    link,
+                    rid=rid,
+                    code=ErrorCode.TIMEOUT,
+                    message=f"handler did not complete within {spec.timeout_seconds}s",
+                )
+                return
         self._reply_dispatch(link, rid, (method, params), ctx, holder)
 
     def _run_off_main(self, spec, params, bus, request_origin, holder) -> None:
@@ -603,18 +515,7 @@ class RemoteControlServiceBase:
         result = holder["result"]
         assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
         self._after_success(ctx, method, params, result)
-        delivered = False
-        try:
-            delivered = self._endpoint.reply_ok(link, rid=rid, result=result)
-        finally:
-            rollback = holder.get("rollback")
-            if not delivered and callable(rollback):
-                # The link's IO worker routes requests sequentially. Queue undo
-                # before it can marshal the next request onto the owner thread.
-                def _undo() -> None:
-                    rollback()
-
-                self._owner_scheduler.post(_undo)
+        self._endpoint.reply_ok(link, rid=rid, result=result)
 
     # ------------------------------------------------------------------
     # EventBus integration (subscribe on owner thread; push via broadcast)
@@ -653,7 +554,7 @@ class RemoteControlServiceBase:
         def _on_event(payload: Any, meta: EventMeta) -> None:
             # Runs on the State owner thread. The endpoint first selects recipients,
             # then calls this factory on this same thread and revalidates before
-            # enqueue. Resource versions still belong to mutation sites.
+            # enqueue.
             def _make_line() -> bytes | None:
                 try:
                     wire_payload = serializer(payload)

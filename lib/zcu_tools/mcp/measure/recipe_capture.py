@@ -38,26 +38,21 @@ class ActualField(TypedDict):
 class RecipeActual(TypedDict):
     """Run-before-start capture; later queries do not replace it with live data.
 
-    cfg_ref is the opaque GUI identity/revision observation used to start Run.
     fields maps declared summary cfg fields to value/source/unit facts.
-    Both members are detached from caller state; no cfg inputs are retained.
+    Facts are detached from caller state; no cfg inputs are retained.
     """
 
-    cfg_ref: object
     fields: dict[str, ActualField]
 
 
-def capture_actual(
-    publication: Mapping[str, object], fields: Mapping[str, ActualField]
-) -> RecipeActual:
-    """Detach cfg_ref and declared summary facts from an observed publication.
+def capture_actual(fields: Mapping[str, ActualField]) -> RecipeActual:
+    """Detach declared summary facts for this Run.
 
-    publication must contain cfg_ref from tab.get_cfg/edit_cfg. fields contains
-    resolved value/source/unit facts, not cfg inputs or values to edit. Missing
-    cfg_ref raises KeyError. Preserve source labels and units verbatim; do not
-    read GUI state, retain publication, resolve expressions or convert.
+    Only the declared facts in fields enter the capture.
+    fields contains resolved value/source/unit facts, not cfg inputs or edits.
+    Preserve source labels and units verbatim; do not read GUI state, retain
+    publication, resolve expressions or convert.
     """
     return RecipeActual(
-        cfg_ref=deepcopy(publication["cfg_ref"]),
         fields=deepcopy(dict(fields)),
     )

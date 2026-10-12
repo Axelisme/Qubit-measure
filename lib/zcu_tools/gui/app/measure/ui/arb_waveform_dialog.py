@@ -197,9 +197,16 @@ class _PreviewCanvas(QWidget):
 
 
 class ArbWaveformDialog(QDialog):
-    """Qubit-scoped arbitrary waveform asset manager."""
+    """Qubit-scoped arbitrary waveform asset manager.
 
-    def __init__(self, assets: ArbWaveformPort, parent: QWidget | None = None) -> None:
+    Rename, overwrite and deletion require explicit modal confirmation.
+    """
+
+    def __init__(
+        self,
+        assets: ArbWaveformPort,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._assets = assets
         self._current_data_key: str | None = None

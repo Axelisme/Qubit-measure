@@ -90,7 +90,10 @@ class MethodSpec:
     ``timeout_seconds`` is the main-thread handler budget. ``params`` is the
     parameter contract used both for runtime validation (dispatch/service) and
     MCP ``inputSchema`` generation (mcp_server). ``tool_name`` overrides the
-    derived ``<prefix>_<method>`` MCP tool name when non-empty.
+    derived ``<prefix>_<method>`` MCP tool name when non-empty. ``readonly``
+    explicitly exempts queries from application holder checks; it defaults to
+    False, including mixed read/command methods. Control management and catalog
+    are always callable, with their own command-specific admission rules.
 
     ``off_main_thread`` marks a blocking handler that must NOT be marshalled
     onto the State owner thread — it runs on the IO worker thread instead. Required
@@ -107,6 +110,8 @@ class MethodSpec:
     params: tuple[ParamSpec, ...] = ()
     tool_name: str = ""
     off_main_thread: bool = False
+    # Only explicitly read-only methods bypass application control authority.
+    readonly: bool = False
     mcp: McpMethodPolicy = field(default_factory=McpMethodPolicy.generated)
 
 
@@ -116,6 +121,10 @@ class BoundMethod:
 
     handler: Handler
     spec: MethodSpec
+
+    @property
+    def readonly(self) -> bool:
+        return self.spec.readonly
 
     @property
     def timeout_seconds(self) -> float:

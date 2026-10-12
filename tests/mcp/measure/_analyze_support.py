@@ -15,7 +15,12 @@ from zcu_tools.mcp.measure.recipe import RecipeDefinition
 
 from zcu_lab.recipes import RECIPES
 
-from ._support import MeasureClient, RpcResponder, make_client
+from ._support import (
+    MeasureClient,
+    RpcResponder,
+    business_effects_after_initial_control,
+    make_client,
+)
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -126,11 +131,14 @@ def assert_figure(reply: dict[str, Any], *, present: bool) -> None:
 
 
 def sent_methods(client: MeasureClient) -> list[str]:
-    return [
-        name
-        for name, _ in client.transport.sent
-        if name not in ("wire.version", "rpc.catalog")
-    ]
+    effects = business_effects_after_initial_control(
+        [
+            (name, params)
+            for name, params in client.transport.sent
+            if name not in ("wire.version", "rpc.catalog")
+        ]
+    )
+    return [name for name, _ in effects]
 
 
 def analysis_start_reply(

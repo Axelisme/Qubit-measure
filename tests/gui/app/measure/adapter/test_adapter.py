@@ -537,11 +537,6 @@ def test_make_default_value_module_ref():
 # ---------------------------------------------------------------------------
 
 
-def test_parameter_writeback_requires_proposed_value():
-    with pytest.raises(TypeError):
-        ParameterWriteback(target_name="k", description="d")  # type: ignore[call-arg]
-
-
 def test_parameter_writeback_valid():
     item = ParameterWriteback(target_name="freq", description="d", proposed_value=1)
     assert item.target_name == "freq"

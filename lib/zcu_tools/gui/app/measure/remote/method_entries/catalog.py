@@ -10,7 +10,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
         "rpc.catalog",
         "catalog:h_rpc_catalog",
-        MethodSpec(5.0, "Read the live agent-facing method catalog."),
+        MethodSpec(5.0, "Read the live agent-facing method catalog.", readonly=True),
         agent=AgentMethodPolicy(exposure="internal"),
     ),
 )

@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -85,7 +86,11 @@ class ProjectDialog(QDialog):
             project.database_path and project.database_path != derived_db
         )
 
-        form = QFormLayout(self)
+        root = QVBoxLayout(self)
+        self._content = QWidget()
+        form = QFormLayout(self._content)
+        form.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._content)
 
         scope_row = QHBoxLayout()
         self._scope_combo = QComboBox()
@@ -119,15 +124,21 @@ class ProjectDialog(QDialog):
             self._db_label, self._dir_row(self._database_edit, self._browse_database)
         )
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
-
+        self._build_buttons(root)
         self._refresh_result_scopes(silent=True)
         self._on_names_changed("")
+
+    def _build_buttons(self, root: QVBoxLayout) -> None:
+        # Separate containers let authority gate OK without disabling Cancel.
+        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self._write_buttons.accepted.connect(self.accept)
+        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        cancel.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self._write_buttons)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
 
     def _dir_row(self, edit: QLineEdit, on_browse: Callable[[], None]) -> QWidget:
         row = QHBoxLayout()
@@ -265,7 +276,10 @@ class ProjectDialog(QDialog):
 
     def _browse_result(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, "Select result dir", self._result_edit.text()
+            self,
+            "Select result dir",
+            self._result_edit.text(),
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if path:
             self._result_overridden = True
@@ -273,7 +287,10 @@ class ProjectDialog(QDialog):
 
     def _browse_database(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, f"Select {self._db_label.lower()}", self._database_edit.text()
+            self,
+            f"Select {self._db_label.lower()}",
+            self._database_edit.text(),
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if path:
             self._database_overridden = True

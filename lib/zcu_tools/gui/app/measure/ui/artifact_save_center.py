@@ -374,7 +374,9 @@ class ArtifactSaveCenter(QWidget):
                 output_row.error.setText(error_text)
                 output_row.error.setVisible(bool(error_text))
 
-    def update_interaction(self, snapshot: TabSnapshot) -> None:
+    def update_interaction(
+        self, snapshot: TabSnapshot, *, writable: bool = True
+    ) -> None:
         """Refresh evidence and enable commands only for idle, ready tabs.
 
         A complete live snapshot is required. Saved artifacts remain saveable.
@@ -384,7 +386,7 @@ class ArtifactSaveCenter(QWidget):
             raise RuntimeError("Save center needs a live tab snapshot")
         self.update_from_snapshot(snapshot)
         state = snapshot.interaction
-        idle = not (state.is_running or state.is_analyzing)
+        idle = writable and not (state.is_running or state.is_analyzing)
         for row in self._rows.values():
             row.save.setEnabled(idle and state.has_active_context)
         self._comment_edit.setEnabled(idle)

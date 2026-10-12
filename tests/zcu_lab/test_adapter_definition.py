@@ -146,18 +146,16 @@ def test_registered_flux_form_edits_unit_without_device_observations(name: str) 
         ),
     )
     try:
-        observed = resource.observe()
-        accepted = resource.accept(observed.ref.revision)
+        resource.observe()
+        accepted = resource.accept()
         assert accepted.values.get("flux_unit") == "A"
         dev = accepted.values.get("dev")
         for unit in ("V", "native"):
-            observed = resource.edit(
-                observed.ref.revision, (CfgEdit(("flux_unit",), unit),)
-            )
-            accepted = resource.accept(observed.ref.revision)
+            resource.edit((CfgEdit(("flux_unit",), unit),))
+            accepted = resource.accept()
             assert accepted.values["flux_unit"] == unit
             assert accepted.values.get("dev") == dev
-        invalid = resource.edit(observed.ref.revision, (CfgEdit(("flux_unit",), "mA"),))
+        invalid = resource.edit((CfgEdit(("flux_unit",), "mA"),))
         assert invalid.status is CfgStatus.INVALID
     finally:
         resource.revoke()
@@ -377,7 +375,7 @@ def _assert_calibration_moves_sweep_centers(
 
 def _refresh_or_reset_direct_defaults(resource: CfgResource) -> CfgObservation:
     inputs = resource.snapshot_inputs()
-    refreshed = resource.refresh(resource.observe().ref.revision)
+    refreshed = resource.refresh()
     assert resource.snapshot_inputs() == inputs
     devices = inputs.value.fields.get("dev")
     if isinstance(devices, CfgSectionValue) and any(
@@ -385,7 +383,7 @@ def _refresh_or_reset_direct_defaults(resource: CfgResource) -> CfgObservation:
         for value in devices.fields.values()
     ):
         assert refreshed.status is CfgStatus.INVALID
-        return resource.reset(refreshed.ref.revision)
+        return resource.reset()
     return refreshed
 
 
@@ -429,7 +427,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         )
         calibrated = _refresh_or_reset_direct_defaults(resource)
         assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
-        accepted = resource.accept(calibrated.ref.revision)
+        accepted = resource.accept()
         point = parameters.document()
         point.components["Q1"] = point.components["Q1"].model_copy(
             update={"freq": 4400.0}
@@ -447,9 +445,9 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             roles=None,
         ).bind_aliases(rows, {})
         environment = replace(environment, parameters=updated_parameters)
-        updated = resource.refresh(calibrated.ref.revision)
+        updated = resource.refresh()
         assert updated.status is CfgStatus.VALID, updated.diagnostics
-        updated_values = resource.accept(updated.ref.revision).values
+        updated_values = resource.accept().values
         assert updated_values != accepted.values
         _assert_calibration_moves_sweep_centers(calibrated.tree, updated.tree)
         environment = replace(
@@ -464,13 +462,13 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                 {},
             ),
         )
-        unbound = resource.refresh(updated.ref.revision)
+        unbound = resource.refresh()
         assert unbound.status is CfgStatus.INVALID
         assert any("qubit" in item.message for item in unbound.diagnostics)
         environment = replace(environment, parameters=updated_parameters)
-        rebound = resource.refresh(unbound.ref.revision)
+        rebound = resource.refresh()
         assert rebound.status is CfgStatus.VALID
-        assert resource.accept(rebound.ref.revision).values == updated_values
+        assert resource.accept().values == updated_values
         for component, fields in {
             "Q1": {"freq": None},
             "R1": {"freq": None},
@@ -488,7 +486,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
                 roles=None,
             ).bind_aliases(rows, {}),
         )
-        uncalibrated = resource.refresh(rebound.ref.revision)
+        uncalibrated = resource.refresh()
         assert uncalibrated.status is CfgStatus.INVALID
         assert any(
             "$qubit" in item.message

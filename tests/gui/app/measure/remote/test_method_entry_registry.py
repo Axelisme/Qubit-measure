@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.remote.handlers.notify import h_notify_await
+from zcu_tools.gui.app.measure.remote.handlers.operation import h_operation_await
 from zcu_tools.gui.app.measure.remote.method_entries import METHOD_ENTRIES
 from zcu_tools.gui.app.measure.remote.method_entries._registry import (
     RemoteMethodEntry,
@@ -20,8 +20,8 @@ def _entry(method: str, handler_ref: str) -> RemoteMethodEntry:
 
 def test_build_method_specs_rejects_duplicate_methods() -> None:
     entries = (
-        _entry("dup.method", "notify:h_notify_open"),
-        _entry("dup.method", "notify:h_notify_await"),
+        _entry("dup.method", "operation:h_operation_active"),
+        _entry("dup.method", "operation:h_operation_await"),
     )
 
     with pytest.raises(
@@ -33,10 +33,10 @@ def test_build_method_specs_rejects_duplicate_methods() -> None:
 @pytest.mark.parametrize(
     ("handler_ref", "message"),
     [
-        ("notify", "<handler_module>:<function_name>"),
+        ("operation", "<handler_module>:<function_name>"),
         ("missing_module:h_missing", "cannot import remote handler module"),
-        ("notify:h_missing", "does not name an attribute"),
-        ("notify:logger", "is not callable"),
+        ("operation:h_missing", "does not name an attribute"),
+        ("operation:logger", "is not callable"),
     ],
 )
 def test_build_dispatch_registry_rejects_bad_handler_refs(
@@ -60,4 +60,4 @@ def test_handler_refs_follow_wire_method_name_convention() -> None:
 
 
 def test_dispatch_registry_resolves_real_handler_identity() -> None:
-    assert METHOD_REGISTRY["notify.await"].handler is h_notify_await
+    assert METHOD_REGISTRY["operation.await"].handler is h_operation_await

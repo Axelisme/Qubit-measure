@@ -77,7 +77,6 @@ def test_open_file_loads_without_soc_with_result_and_cfg_backfill(
 ):
     fx, sock = app
     previous = fx.ctrl.new_tab("file")
-    assert call(sock, "context.snapshot")["ok"] is True
     reply = call(sock, "tab.open_file", {"adapter_name": "file", "data_path": path})
     assert reply["ok"] is True
     outcome = reply["result"]

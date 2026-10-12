@@ -158,7 +158,7 @@ def test_resource_form_shows_device_name_preview_and_unbound_diagnostic(qapp) ->
         line.setText("$flux_dev")
         assert form.is_valid()
         current = base.bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
-        resource.refresh(resource.observe().ref.revision)
+        resource.refresh()
         assert any(label.text() == '= "yoko2"' for label in form.findChildren(QLabel))
     finally:
         form.detach()

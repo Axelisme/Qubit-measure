@@ -80,6 +80,10 @@ class LoadDataDialog(QDialog):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
+        self._content = QWidget()
+        content = QVBoxLayout(self._content)
+        content.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._content)
 
         # File row.
         file_row = QHBoxLayout()
@@ -91,7 +95,7 @@ class LoadDataDialog(QDialog):
         file_row.addWidget(QLabel("File:"))
         file_row.addWidget(self._file_edit, stretch=1)
         file_row.addWidget(browse)
-        root.addLayout(file_row)
+        content.addLayout(file_row)
 
         # Option row — the shared transpose toggle plus the subclass's extras. The
         # button is created here (wired to the shared state) but placed by the
@@ -101,7 +105,7 @@ class LoadDataDialog(QDialog):
         self._transpose_btn.toggled.connect(self._on_transpose_toggled)
         opt_row = QHBoxLayout()
         self._build_options(opt_row)
-        root.addLayout(opt_row)
+        content.addLayout(opt_row)
 
         # Preview canvas.
         self._figure = Figure(figsize=(5, 3))
@@ -111,15 +115,18 @@ class LoadDataDialog(QDialog):
         self._render_preview()
 
         # OK / Cancel.
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        self._ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self._ok_button = self._write_buttons.button(QDialogButtonBox.StandardButton.Ok)
         if self._ok_button is not None:
             self._ok_button.setEnabled(False)  # no file chosen yet
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self._write_buttons.accepted.connect(self.accept)
+        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        cancel.rejected.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self._write_buttons)
+        buttons.addWidget(cancel)
+        root.addLayout(buttons)
 
     def _build_options(self, opt_row: QHBoxLayout) -> None:
         """Populate the option row. Subclasses add ``self._transpose_btn`` (and any
@@ -134,6 +141,7 @@ class LoadDataDialog(QDialog):
             self._browse_caption,
             self._start_dir,
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not filepath:
             return

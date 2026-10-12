@@ -27,7 +27,6 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
     CfgResource,
-    CfgRevision,
     SourceRevision,
 )
 from zcu_tools.gui.session.types import SessionEnv
@@ -99,8 +98,8 @@ def test_measure_snapshot_detaches_metadata_options_and_captures() -> None:
     parameters = parameter_capture(offset=2.0)
     captures = {"device.flux.value": 0.2}
     basis = (
-        SourceRevision("context", CfgRevision(3)),
-        SourceRevision("device:flux", CfgRevision(4)),
+        SourceRevision("context", 3),
+        SourceRevision("device:flux", 4),
     )
     frozen = bindings.snapshot(basis, captured_values=captures, parameters=parameters)
     parameters = parameter_capture(offset=9.0)
@@ -128,8 +127,8 @@ def test_source_snapshot_tracks_context_and_device_set_aba_without_live_reads() 
         state, captured_values=captures, parameters=host.read_context()
     )
     assert first.source_basis == (
-        SourceRevision("context", CfgRevision(0)),
-        SourceRevision(DEVICE_SET_VERSION_KEY, CfgRevision(0)),
+        SourceRevision("context", 0),
+        SourceRevision(DEVICE_SET_VERSION_KEY, 0),
     )
 
     state.version.bump("context")
@@ -146,9 +145,9 @@ def test_source_snapshot_tracks_context_and_device_set_aba_without_live_reads() 
         state, captured_values=captures, parameters=host.read_context()
     )
     assert second.source_basis == (
-        SourceRevision("context", CfgRevision(1)),
-        SourceRevision(DEVICE_SET_VERSION_KEY, CfgRevision(1)),
-        SourceRevision("device:flux", CfgRevision(1)),
+        SourceRevision("context", 1),
+        SourceRevision(DEVICE_SET_VERSION_KEY, 1),
+        SourceRevision("device:flux", 1),
     )
     captures["device.flux.value"] = 0.7
     assert second.read_capture("device.flux.value") == 0.2
@@ -219,15 +218,14 @@ def test_measure_resource_preserves_capture_and_refreshes_dynamic_metadata() -> 
             (), captured_values=captures, parameters=parameters
         ),
     )
-    changed = resource.edit(
-        resource.observe().ref.revision,
+    resource.edit(
         (CfgEdit(("value",), EvalValue("@{device.flux.value} + general.ext.offset")),),
     )
-    assert resource.accept(changed.ref.revision).values["value"] == pytest.approx(2.2)
+    assert resource.accept().values["value"] == pytest.approx(2.2)
     captures["device.flux.value"] = 0.7
     parameters = parameter_capture(offset=5.0)
-    refreshed = resource.refresh(changed.ref.revision)
-    assert resource.accept(refreshed.ref.revision).values["value"] == pytest.approx(5.2)
+    resource.refresh()
+    assert resource.accept().values["value"] == pytest.approx(5.2)
     host.read_value_source.assert_not_called()
 
 

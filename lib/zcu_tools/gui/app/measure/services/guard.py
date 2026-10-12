@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     require_soc_handles,
 )
-from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgResolution, CfgRevision
+from zcu_tools.gui.cfg.resource import AcceptedConfig, CfgResolution
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
 from zcu_tools.resources.entry import PointStorageBinding
@@ -77,9 +77,9 @@ class GuardService:
 
     View and remote controls call these checks on the owner thread before the
     corresponding service command. Successful checks return None, except
-    capture_run_inputs which accepts the exact cfg revision and returns data.
+    capture_run_inputs which accepts current Valid cfg and returns fixed data.
     Checks reject unknown tabs or unmet domain conditions with GuardError and
-    its stable reason_code; cfg revision/validity failures keep their cfg errors.
+    its stable reason_code; cfg validity failures keep their cfg errors.
     Checks do not emit events, acquire leases or start operations.
 
     Analyze does not reject analysis capability NONE; post-analyze has no check
@@ -132,20 +132,19 @@ class GuardService:
         self,
         tab_id: str,
         *,
-        expected_revision: CfgRevision,
         aliases: Mapping[str, str] | None = None,
     ) -> RunInputs:
-        """Check tab_id and capture the exact cfg revision and observed inputs.
+        """Check tab_id and capture the current cfg and observed inputs.
 
         Requires ACTIVE context and the adapter's Run preconditions, including
         SoC when declared. Unknown tab, readiness and adapter validation failures
-        raise GuardError; stale or invalid publications keep their cfg errors.
+        raise GuardError; invalid publications keep their cfg errors.
         Cached device settings do not participate in admission.
         Captures current global parameters once for cfg context and all resolved
         alias names. Nonempty aliases maps names to concrete components for
         this Run, never changing global rows or tab cfg publication. None and {}
         use cached acceptance. Temporary acceptance uses that same capture,
-        can resolve Invalid inputs, and retains revision guards.
+        can resolve Invalid inputs without changing the publication.
         Current saved-point storage supplies entry/point/description. No Run,
         lease, file or ledger write starts; source and alias errors propagate.
         """
@@ -156,7 +155,6 @@ class GuardService:
         parameters = self._captured_parameters(aliases)
         # Temporary alias resolution does not publish or change global aliases.
         accepted = tab.cfg.accept(
-            expected_revision,
             resolution=self._cfg_resolution(parameters) if aliases else None,
         )
         raw_cfg = accepted.values

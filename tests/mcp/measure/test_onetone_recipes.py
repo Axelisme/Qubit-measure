@@ -258,7 +258,7 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
     tmp_path, md, arguments, start, stop, center_source, span_source
 ):
     gui = OnetoneGui(md)
-    before = deepcopy(gui.publication)
+    deepcopy(gui.publication)
     with recipe_client(tmp_path, gui) as client:
         question = client.call("onetone_spectrum", arguments)
         reply = full_execution_reply(client, skip_writeback(client, question))
@@ -320,7 +320,6 @@ def test_spectrum_saves_one_run_with_gui_derived_frequency_and_averages(
         assert data["analysis"]["status"] == "finished"
         assert data["writeback"]["items"][0]["proposed"] == 0.24
         assert reply.images
-        assert before["cfg_ref"] != gui.publication["cfg_ref"]
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
         assert methods.count("tab.save_data") == 1

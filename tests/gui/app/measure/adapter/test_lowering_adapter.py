@@ -65,28 +65,24 @@ def test_device_name_resource_refresh_preview_and_accept_share_fixed_sources(
     try:
         observed = resource.observe()
         assert observed.status is CfgStatus.VALID
-        assert resource.accept(observed.ref.revision).values == {"flux_dev": "yoko1"}
+        assert resource.accept().values == {"flux_dev": "yoko1"}
         current = base.bind_aliases((AliasRow("flux_dev", "yoko2"),), {})
-        preview = resource.preview(observed.ref.revision, resolution=resolution())
+        preview = resource.preview(resolution=resolution())
         assert preview.tree.children["flux_dev"].value == EvalValue(
             "$flux_dev", resolved="yoko2"
         )
         assert resource.observe() == observed
-        assert resource.accept(
-            observed.ref.revision, resolution=resolution()
-        ).values == {"flux_dev": "yoko2"}
-        changed = resource.edit(
-            observed.ref.revision, (CfgEdit(("flux_dev",), EvalValue("$flux_dev")),)
-        )
+        assert resource.accept(resolution=resolution()).values == {"flux_dev": "yoko2"}
+        changed = resource.edit((CfgEdit(("flux_dev",), EvalValue("$flux_dev")),))
         assert changed.status is CfgStatus.VALID
         current = base.bind_aliases((AliasRow("flux_dev", "yoko3"),), {})
-        refreshed = resource.refresh(changed.ref.revision)
-        assert resource.accept(refreshed.ref.revision).values == {"flux_dev": "yoko3"}
+        resource.refresh()
+        assert resource.accept().values == {"flux_dev": "yoko3"}
         assert resource.snapshot_inputs().value.fields["flux_dev"] == EvalValue(
             "$flux_dev"
         )
         current = base.bind_aliases((AliasRow("flux_dev", ""),), {})
-        invalid = resource.refresh(refreshed.ref.revision)
+        invalid = resource.refresh()
         assert invalid.status is CfgStatus.INVALID
         assert any(
             "flux_dev" in diagnostic.message for diagnostic in invalid.diagnostics

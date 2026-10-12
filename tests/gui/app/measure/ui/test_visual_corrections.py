@@ -6,6 +6,7 @@ Observable Qt behavior tests — no prose or stylesheet-source assertions.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,6 +30,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
+from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
 
@@ -36,18 +38,30 @@ from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_cap
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
-def make_ctrl():
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    exp_ctx = MagicMock()
-    exp_ctx.parameters = parameter_capture(r_f=6000.0)
-    ctrl.get_session_env.return_value = exp_ctx
-    return ctrl
+@pytest.fixture
+def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
+    """Retain every Local authority until this case retires its owned views."""
+    owned_authorities: list[ControlIdentity] = []
+
+    def create_ctrl() -> MagicMock:
+        ctrl = MagicMock()
+        ctrl.control_identity = ControlIdentity()
+        owned_authorities.append(ctrl.control_identity)
+        configure_cfg_lookup(ctrl)
+        ctrl.get_left_panel_width.return_value = 500
+        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.get_adapter_guide.return_value = {}
+        ctrl.progress_control.attach_progress.return_value = lambda: None
+        ctrl.progress_control.progress_bars.return_value = []
+        exp_ctx = MagicMock()
+        exp_ctx.parameters = parameter_capture(r_f=6000.0)
+        ctrl.get_session_env.return_value = exp_ctx
+        return ctrl
+
+    try:
+        yield create_ctrl
+    finally:
+        owned_authorities.clear()
 
 
 def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
@@ -112,7 +126,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch):
+def exp_tab_widget(qapp, monkeypatch, make_ctrl):
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
     orig_attach = mod.attach_existing_figure_to_container
@@ -127,8 +141,22 @@ def exp_tab_widget(qapp, monkeypatch):
         return w
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    yield mod.ExpTabWidget
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+    owned_tabs: list[mod.ExpTabWidget] = []
+
+    def create_tab(
+        tab_id: str, ctrl: MagicMock, capabilities: AdapterCapabilities
+    ) -> mod.ExpTabWidget:
+        tab = mod.ExpTabWidget(tab_id, ctrl, capabilities)
+        owned_tabs.append(tab)
+        return tab
+
+    try:
+        yield create_tab
+    finally:
+        for tab in owned_tabs:
+            tab.deleteLater()
+        owned_tabs.clear()
+        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
 def test_A2_sole_tree_has_no_structure_selector(qapp):
@@ -161,7 +189,7 @@ def test_A2_sole_tree_has_no_structure_selector(qapp):
     draft.close()
 
 
-def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
+def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget, make_ctrl):
     """A4: Run cfg tree viewport follows panel height, scrolls only when content exceeds viewport."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
@@ -212,7 +240,9 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget):
     tab.detach()
 
 
-def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widget):
+def test_A5_Run_action_row_status_free_and_20_80_proportions(
+    qapp, exp_tab_widget, make_ctrl
+):
     """A5: Run action row has no status text; Reset 20% / Run 80% with retained treatments."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
@@ -300,7 +330,9 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
     tab.detach()
 
 
-def test_A6_Analyze_full_width_below_params_before_writeback(qapp, exp_tab_widget):
+def test_A6_Analyze_full_width_below_params_before_writeback(
+    qapp, exp_tab_widget, make_ctrl
+):
     """A6: Analyze immediately below params and before Writeback, 100% width, availability preserved."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
