@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QLabel, QPushButton
+from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
@@ -183,7 +183,13 @@ def test_post_form_enabled_with_primary_analyze_result(qapp):
     assert tab._post_gate_label.isHidden() is True
 
 
-def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatch):
+def _no_parameters_hint(tab) -> QLabel:
+    hint = tab.post_analyze_form.findChild(QLabel, "analysisNoParameters")
+    assert hint is not None
+    return hint
+
+
+def test_initial_attach_shows_no_parameters_hint_for_zero_field_post(qapp, monkeypatch):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
@@ -202,11 +208,12 @@ def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatc
         MagicMock(),
     )
 
-    assert tab._post_analyze_section.isHidden() is True
+    assert tab._post_analyze_section.isHidden() is False
+    assert _no_parameters_hint(tab).isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is True
 
 
-def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
+def test_empty_post_params_show_hint_across_gate_states(qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
     tab = ExpTabWidget(
@@ -224,7 +231,8 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
         ),
         actions,
     )
-    assert tab._post_analyze_section.isHidden() is True
+    assert tab._post_analyze_section.isHidden() is False
+    assert _no_parameters_hint(tab).isHidden() is False
     assert tab.post_analyze_btn.isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is False
     assert tab._post_gate_label.isHidden() is False
@@ -247,7 +255,8 @@ def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp):
             post_analysis_figure=Figure(),
         )
     )
-    assert tab._post_analyze_section.isHidden() is True
+    assert tab._post_analyze_section.isHidden() is False
+    assert _no_parameters_hint(tab).isHidden() is False
     assert tab.post_analyze_btn.isEnabled() is True
     assert tab._post_gate_label.isHidden() is True
     buttons = [
@@ -483,8 +492,8 @@ def test_post_artifact_save_requires_post_result(qapp):
     assert len(buttons) == 3
     assert all(button.isEnabled() for button in buttons)
     labels = [label.text() for label in tab.findChildren(QLabel)]
-    assert "post_analysis · json" in labels
-    assert labels.count("fit · png") == 2
+    assert "Post-analysis results" in labels
+    assert sum(text.endswith(".png") for text in labels) == 2
     for button in buttons:
         button.click()
     assert [call.args for call in actions.save_artifact.call_args_list] == [
@@ -518,7 +527,7 @@ def test_post_artifact_save_disabled_without_active_context(qapp):
     assert len(buttons) == 3
     assert all(not button.isEnabled() for button in buttons)
     labels = [label.text() for label in tab.findChildren(QLabel)]
-    assert "post_analysis · json" in labels
+    assert "Post-analysis results" in labels
     for button in buttons:
         button.click()
     actions.save_artifact.assert_not_called()
@@ -538,3 +547,43 @@ def test_post_tab_uses_separate_qt_tab_index(qapp):
     assert tab._left_tabs.tabText(tab._post_tab_index) == "Post-Analysis"
     # Analysis stays at index 1 (the auto-switch + label logic depends on it).
     assert tab._left_tabs.tabText(1) == "Analysis"
+
+
+def test_post_analyze_button_matches_analyze_button(qapp):
+    from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
+
+    tab = ExpTabWidget(
+        "tab-1",
+        _mock_ctrl(),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    tab.attach(
+        _snapshot("tab-1", has_analyze_result=True, post_params=_PostParams()),
+        MagicMock(),
+    )
+    tab.resize(1000, 700)
+    tab.show()
+    try:
+        tabs = next(
+            t
+            for t in tab.findChildren(QTabWidget)
+            if any(t.tabText(i) == "Post-Analysis" for i in range(t.count()))
+        )
+        sizes = {}
+        for title, button in (
+            ("Analysis", tab.analyze_btn),
+            ("Post-Analysis", tab.post_analyze_btn),
+        ):
+            tabs.setCurrentIndex(
+                next(i for i in range(tabs.count()) if tabs.tabText(i) == title)
+            )
+            qapp.processEvents()
+            parent = button.parentWidget()
+            assert parent is not None
+            sizes[title] = (button.height(), parent.width() - button.width())
+        # Same height, and both span their column with the same side margins.
+        assert sizes["Post-Analysis"] == sizes["Analysis"]
+    finally:
+        tab.close()
+        tab.deleteLater()
+        qapp.processEvents()

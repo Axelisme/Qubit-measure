@@ -4,6 +4,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.resources.entry import PointStorageBinding
 
     from .ports import WritebackLifecyclePort
     from .tab_cfg import TabCfgResources
@@ -195,7 +197,11 @@ class TabService:
                 source_operation_id=tab.post_analysis.source_operation_id,
                 result_params=tab.post_analysis.result_params,
             ),
-            save=SavePaneSnapshot(comment=tab.save.comment),
+            save=SavePaneSnapshot(
+                comment=tab.save.comment,
+                display_bases=_display_bases(tab.run.storage),
+                saves_to_entry=tab.adapter.experiment_tag is not None,
+            ),
             artifacts=self._state.get_artifact_snapshots(tab_id),
         )
 
@@ -352,3 +358,12 @@ class TabService:
 
     def get_tab_post_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).post_analysis.result
+
+
+def _display_bases(storage: PointStorageBinding | None) -> tuple[Path, ...]:
+    """Parents of the Run's result/database roots, or () without storage."""
+    if storage is None:
+        return ()
+    # Entry directories are <root>/<entry name>; one level above the root keeps
+    # the root and entry names visible in the displayed path.
+    return (storage.database_path.parent.parent, storage.result_path.parent.parent)

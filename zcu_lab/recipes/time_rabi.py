@@ -94,25 +94,25 @@ def time_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs
 
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
-    try:
-        set_frequency(
+    if (
+        parameter := set_frequency(
             tab,
             "modules.qub_pulse.freq",
             frequency_mhz,
             calibration="$qubit.freq",
             required="frequency_mhz",
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
-    try:
-        set_frequency(
+    ) is not None:
+        missing.append(parameter)
+    if (
+        parameter := set_frequency(
             tab,
             "modules.readout",
             calibration="$resonator.freq",
             required="readout_ref",
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    ) is not None:
+        missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 

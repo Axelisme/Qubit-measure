@@ -11,6 +11,8 @@ from typing import BinaryIO
 import check_ratchet as ratchet
 import pytest
 
+pytestmark = pytest.mark.requires_subprocess
+
 
 @dataclass
 class CommandReceipts:
@@ -87,6 +89,139 @@ def command_receipts(
 
     monkeypatch.setattr(ratchet.subprocess, "run", respond)
     return receipts
+
+
+def git_command(root: Path, *args: str) -> str:
+    """Run external Git to construct a real base/candidate comparison."""
+    return subprocess.run(
+        ("git", *args), cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def radon_repository(tmp_path: Path) -> Path:
+    root = tmp_path / "radon-repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.ruff]\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".agent_state/\n", encoding="utf-8")
+    git_command(root, "init")
+    git_command(root, "config", "user.email", "ratchet@example.test")
+    git_command(root, "config", "user.name", "Ratchet test")
+    return root
+
+
+def complexity_source(name: str, complexity: int) -> str:
+    """Build a function with CC 1 plus one independent decision per assert."""
+    return (
+        f"def {name}(value):\n"
+        + "".join(f"    assert value != {index}\n" for index in range(complexity - 1))
+        + "    return value\n"
+    )
+
+
+def save_radon_base(root: Path, path: str, source: str) -> None:
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    git_command(root, "add", ".")
+    git_command(root, "commit", "-m", "Base source")
+    git_command(root, "tag", "base")
+
+
+@pytest.mark.parametrize(
+    ("before_cc", "after_cc", "expected"),
+    [
+        (None, 21, True),
+        (20, 21, True),
+        (21, 40, False),
+        (40, 21, False),
+        (21, 20, False),
+    ],
+)
+def test_radon_reports_only_new_threshold_crossings(
+    radon_repository: Path, before_cc: int | None, after_cc: int, expected: bool
+) -> None:
+    path = "lib/module.py"
+    save_radon_base(
+        radon_repository,
+        path,
+        complexity_source("work", before_cc) if before_cc else "",
+    )
+    (radon_repository / path).write_text(
+        complexity_source("work", after_cc), encoding="utf-8"
+    )
+
+    report = ratchet.run(radon_repository, "base", ["radon"])
+
+    assert report["status"] == ("FAIL" if expected else "PASS")
+    assert report["detectors"]["radon"]["regressions"] == (
+        [{"path": path, "rule": "cyclomatic-complexity", "before": 0, "after": 1}]
+        if expected
+        else []
+    )
+
+
+def test_radon_drops_a_function_at_twenty_from_the_violation_count(
+    radon_repository: Path,
+) -> None:
+    path = "lib/module.py"
+    save_radon_base(radon_repository, path, complexity_source("existing", 21))
+    (radon_repository / path).write_text(
+        complexity_source("existing", 20)
+        + complexity_source("added_one", 21)
+        + complexity_source("added_two", 21),
+        encoding="utf-8",
+    )
+
+    report = ratchet.run(radon_repository, "base", ["radon"])
+
+    assert report["status"] == "FAIL"
+    assert report["detectors"]["radon"]["regressions"] == [
+        {"path": path, "rule": "cyclomatic-complexity", "before": 1, "after": 2}
+    ]
+
+
+def test_radon_preserves_counts_when_git_recognizes_a_rename(
+    radon_repository: Path,
+) -> None:
+    save_radon_base(radon_repository, "lib/old.py", complexity_source("work", 21))
+    git_command(radon_repository, "mv", "lib/old.py", "lib/new.py")
+
+    report = ratchet.run(radon_repository, "base", ["radon"])
+
+    assert report["status"] == "PASS"
+    assert report["detectors"]["radon"]["regressions"] == []
+
+
+@pytest.mark.parametrize(
+    ("path", "counted"),
+    [
+        ("lib/zcu_tools/gui/module.py", True),
+        ("zcu_lab/module.py", True),
+        ("zcu_lab/v2/module.py", True),
+        ("zcu_lab/recipes/module.py", True),
+        ("zcu_lab/workflows/module.py", True),
+        ("tools/module.py", False),
+        ("tests/module.py", False),
+        ("scripts/module.py", False),
+    ],
+)
+def test_radon_counts_framework_and_all_user_package_sources(
+    radon_repository: Path, path: str, counted: bool
+) -> None:
+    save_radon_base(radon_repository, path, "")
+    (radon_repository / path).write_text(
+        complexity_source("work", 21), encoding="utf-8"
+    )
+
+    report = ratchet.run(radon_repository, "base", ["radon"])
+
+    assert report["status"] == ("FAIL" if counted else "PASS")
+    assert report["detectors"]["radon"]["regressions"] == (
+        [{"path": path, "rule": "cyclomatic-complexity", "before": 0, "after": 1}]
+        if counted
+        else []
+    )
 
 
 def test_a_count_that_rises_is_a_regression() -> None:

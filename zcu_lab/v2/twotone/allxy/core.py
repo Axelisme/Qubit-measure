@@ -79,6 +79,11 @@ ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 def predict_state_with_error(
     gates: tuple[str, str], power_err: float, detune_err: float
 ) -> float:
+    """Predict Bloch-z after a supported AllXY pair with power/detune errors.
+
+    Errors are dimensionless expansion parameters. Unsupported gate pairs raise
+    ValueError. The returned value uses the polynomial AllXY approximation.
+    """
     ep = power_err
     ed = detune_err
 
@@ -86,28 +91,30 @@ def predict_state_with_error(
     # page 154
 
     if gates == ("I", "I"):
-        return 1
-    if gates in [("X180", "X180"), ("Y180", "Y180")]:
-        return 1 - 8 * ep**2 - (np.pi**2 / 32) * ed**4
-    if gates in [("X180", "Y180"), ("Y180", "X180")]:
-        return 1 - 4 * ep**2 - ed**2
-    if gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
-        return -ep + (1 - np.pi / 2) * ed**2
-    if gates == ("X90", "Y90"):
-        return ep**2 - 2 * ed
-    if gates == ("Y90", "X90"):
-        return ep**2 + 2 * ed
-    if gates in [("X90", "Y180"), ("X180", "Y90")]:
-        return ep - ed
-    if gates in [("Y90", "X180"), ("Y180", "X90")]:
-        return ep + ed
-    if gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
-        return 3 * ep + (3 * np.pi / 8) * ed**2
-    if gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
-        return -1 + 2 * ep**2 + 0.5 * ed**2
-    if gates in [("X90", "X90"), ("Y90", "Y90")]:
-        return -1 + 2 * ep**2 + 2 * ed**2
-    raise ValueError(f"Invalid gate pair: {gates}")
+        state = 1
+    elif gates in [("X180", "X180"), ("Y180", "Y180")]:
+        state = 1 - 8 * ep**2 - (np.pi**2 / 32) * ed**4
+    elif gates in [("X180", "Y180"), ("Y180", "X180")]:
+        state = 1 - 4 * ep**2 - ed**2
+    elif gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
+        state = -ep + (1 - np.pi / 2) * ed**2
+    elif gates == ("X90", "Y90"):
+        state = ep**2 - 2 * ed
+    elif gates == ("Y90", "X90"):
+        state = ep**2 + 2 * ed
+    elif gates in [("X90", "Y180"), ("X180", "Y90")]:
+        state = ep - ed
+    elif gates in [("Y90", "X180"), ("Y180", "X90")]:
+        state = ep + ed
+    elif gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
+        state = 3 * ep + (3 * np.pi / 8) * ed**2
+    elif gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
+        state = -1 + 2 * ep**2 + 0.5 * ed**2
+    elif gates in [("X90", "X90"), ("Y90", "Y90")]:
+        state = -1 + 2 * ep**2 + 2 * ed**2
+    else:
+        raise ValueError(f"Invalid gate pair: {gates}")
+    return state
 
 
 def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

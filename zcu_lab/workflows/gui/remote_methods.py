@@ -1,4 +1,4 @@
-"""Qt-free declarations for RPC submission and control of a T1 run."""
+"""Qt-free declarations for RPC submission and control of a native workflow run."""
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
@@ -23,7 +23,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
                 JsonType.STRING,
                 required=False,
                 default=None,
-                description="Native workflow name; omitted/null selects T1_fluxdep, not GUI draft selection.",
+                description=(
+                    "Native workflow name: coherence_fluxdep, mist_fluxdep or overnight; "
+                    "omitted/null selects coherence_fluxdep, not GUI draft selection."
+                ),
             ),
             ParamSpec(
                 "plan",

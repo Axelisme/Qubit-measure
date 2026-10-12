@@ -433,21 +433,7 @@ def fit_singleshot(
     fixedparams: Sequence[float | None] | None = None,
 ) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
     """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
-    if (
-        xs.ndim != 1
-        or xs.size < 3
-        or g_pdfs.shape != xs.shape
-        or e_pdfs.shape != xs.shape
-        or not np.isfinite([xs, g_pdfs, e_pdfs]).all()
-        or np.any(np.diff(xs) <= 0)
-        or np.any(g_pdfs < 0)
-        or np.any(e_pdfs < 0)
-        or g_pdfs.sum() <= 0
-        or e_pdfs.sum() <= 0
-    ):
-        raise ValueError(
-            "GE fit requires finite nonnegative histograms on an increasing axis"
-        )
+    _require_ge_histograms(xs, g_pdfs, e_pdfs)
     if fixedparams is not None:
         if len(fixedparams) != 7:
             raise ValueError(
@@ -574,3 +560,24 @@ def fit_singleshot_p0(
         sigma=sigmas,
     )
     return (float(fitted[0]), float(fitted[1]), float(fitted[2])), covariance
+
+
+def _require_ge_histograms(
+    xs: NDArray[np.float64], g_pdfs: NDArray[np.float64], e_pdfs: NDArray[np.float64]
+) -> None:
+    """Require aligned nonnegative histograms with positive mass on increasing x."""
+    if (
+        xs.ndim != 1
+        or xs.size < 3
+        or g_pdfs.shape != xs.shape
+        or e_pdfs.shape != xs.shape
+        or not np.isfinite([xs, g_pdfs, e_pdfs]).all()
+        or np.any(np.diff(xs) <= 0)
+        or np.any(g_pdfs < 0)
+        or np.any(e_pdfs < 0)
+        or g_pdfs.sum() <= 0
+        or e_pdfs.sum() <= 0
+    ):
+        raise ValueError(
+            "GE fit requires finite nonnegative histograms on an increasing axis"
+        )

@@ -49,6 +49,75 @@ from zcu_lab.v2._support.singleshot.util import (
 )
 
 
+def _fit_transition_rates(
+    Ts: NDArray[np.float64], populations: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Fit each complete sweep row and close progress even when fitting fails.
+
+    Return rates in ge, eg, eo, oe, go, og order and their covariance blocks.
+    """
+    # Rate order: ge, eg, eo, oe, go, og.
+    N = populations.shape[0]
+    rates = np.zeros((N, 6), dtype=np.float64)
+    rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
+    pbar = make_pbar(total=N, desc="Fitting transition rates")
+    try:
+        for i, pop in enumerate(populations):
+            fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
+            rates[i] = fit_result.rates.as_array()
+            rate_Covs[i] = fit_result.covariance[:6, :6]
+            pbar.update()
+    finally:
+        pbar.close()
+
+    return rates, rate_Covs
+
+
+def _plot_transition_rates(
+    xs: NDArray[np.float64],
+    rates: NDArray[np.float64],
+    rate_Covs: NDArray[np.float64],
+    axes: tuple[Axes, Axes, Axes],
+    xlabel: str,
+) -> None:
+    """Plot three-state transition rates, showing covariance errors at every fifth point."""
+    ax_Tg, ax_Te, ax_To = axes
+    # Rate order: ge, eg, eo, oe, go, og.
+    R_go = rates[:, 4]
+    R_ge = rates[:, 0]
+    R_eo = rates[:, 2]
+    R_eg = rates[:, 1]
+    Rerr_go = np.sqrt(rate_Covs[:, 4, 4])
+    Rerr_ge = np.sqrt(rate_Covs[:, 0, 0])
+    Rerr_eo = np.sqrt(rate_Covs[:, 2, 2])
+    Rerr_eg = np.sqrt(rate_Covs[:, 1, 1])
+    for i in range(rates.shape[0]):
+        if i % 5 == 0:
+            continue
+        Rerr_go[i] = np.nan
+        Rerr_ge[i] = np.nan
+        Rerr_eo[i] = np.nan
+        Rerr_eg[i] = np.nan
+
+    ax_Tg.errorbar(xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue")
+    ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label=r"$\Gamma_{01}$", color="blue")
+
+    ax_Te.errorbar(xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange")
+    ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label=r"$\Gamma_{10}$", color="red")
+
+    ax_To.errorbar(xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange")
+    ax_To.errorbar(xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue")
+
+    max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
+    for ax in (ax_Tg, ax_Te, ax_To):
+        ax.legend()
+        ax.grid(True)
+        ax.set_xlabel(xlabel)
+        ax.set_yscale("log")
+        ax.set_ylim(1e-3, 2 * max_rate)
+        ax.set_xlim(xs[0], xs[-1])
+
+
 def _default_initial_states() -> NDArray[np.int64]:
     return np.array([0, 1], dtype=np.int64)
 
@@ -406,19 +475,7 @@ class T1WithToneSweepExp(
 
         populations = correct_populations(populations, confusion_matrix)
 
-        # Rate order: ge, eg, eo, oe, go, og.
-        N = populations.shape[0]
-        rates = np.zeros((N, 6), dtype=np.float64)
-        rate_Covs = np.zeros((N, 6, 6), dtype=np.float64)
-        pbar = make_pbar(total=N, desc="Fitting transition rates")
-        try:
-            for i, pop in enumerate(populations):
-                fit_result = fit_dual_transition_rates(Ts, pop[0], pop[1])
-                rates[i] = fit_result.rates.as_array()
-                rate_Covs[i] = fit_result.covariance[:6, :6]
-                pbar.update()
-        finally:
-            pbar.close()
+        rates, rate_Covs = _fit_transition_rates(Ts, populations)
 
         if ac_coeff is not None:
             xs = ac_coeff * xs**2
@@ -458,48 +515,7 @@ class T1WithToneSweepExp(
         _plot_population(ax_ee, populations[:, 1, :, 1], "Excited")
         _plot_population(ax_eo, populations[:, 1, :, 2], "Other")
 
-        # Rate order: ge, eg, eo, oe, go, og.
-        R_go = rates[:, 4]
-        R_ge = rates[:, 0]
-        R_eo = rates[:, 2]
-        R_eg = rates[:, 1]
-        Rerr_go = np.sqrt(rate_Covs[:, 4, 4])
-        Rerr_ge = np.sqrt(rate_Covs[:, 0, 0])
-        Rerr_eo = np.sqrt(rate_Covs[:, 2, 2])
-        Rerr_eg = np.sqrt(rate_Covs[:, 1, 1])
-        for i in range(rates.shape[0]):
-            if i % 5 == 0:
-                continue
-            Rerr_go[i] = np.nan
-            Rerr_ge[i] = np.nan
-            Rerr_eo[i] = np.nan
-            Rerr_eg[i] = np.nan
-
-        ax_Tg.errorbar(
-            xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue"
-        )
-        ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label=r"$\Gamma_{01}$", color="blue")
-
-        ax_Te.errorbar(
-            xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange"
-        )
-        ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label=r"$\Gamma_{10}$", color="red")
-
-        ax_To.errorbar(
-            xs, R_eo, yerr=Rerr_eo, label=r"$\Gamma_{1L}$", color="darkorange"
-        )
-        ax_To.errorbar(
-            xs, R_go, yerr=Rerr_go, label=r"$\Gamma_{0L}$", color="dodgerblue"
-        )
-
-        max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
-        for ax in (ax_Tg, ax_Te, ax_To):
-            ax.legend()
-            ax.grid(True)
-            ax.set_xlabel(xlabel)
-            ax.set_yscale("log")
-            ax.set_ylim(1e-3, 2 * max_rate)
-            ax.set_xlim(xs[0], xs[-1])
+        _plot_transition_rates(xs, rates, rate_Covs, (ax_Tg, ax_Te, ax_To), xlabel)
 
         ax_gg.set_ylabel("Time (μs)")
         ax_eg.set_ylabel("Time (μs)")

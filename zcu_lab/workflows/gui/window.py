@@ -99,7 +99,8 @@ class T1WorkflowWindow(QWidget):
 
         state belongs to services; owner marshals plot commands. parent=None is
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
-        catalog=None builds T1/overnight, T1 first. loader=None is unmonitored.
+        catalog=None builds Coherence/MIST/overnight, Coherence first.
+        loader=None is unmonitored.
         Reload keeps session/Controller and the retained run binding. Prepare
         captures context/global qubit alias; source errors propagate without I/O.
         Caller retains this Window/parent through shutdown. Close requests Stop,
