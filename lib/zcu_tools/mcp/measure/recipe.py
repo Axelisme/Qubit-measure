@@ -1312,7 +1312,7 @@ class RecipeTab:
         self._preview_aliases()
         if self._binding.publication["status"] != "Valid":
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
-        actual = capture_actual(self._binding.publication, self._actual_fields())
+        actual = capture_actual(self._actual_fields())
         binding = _RunBinding(
             self._binding, RecipeRunSnapshot(self._binding.tab, actual)
         )

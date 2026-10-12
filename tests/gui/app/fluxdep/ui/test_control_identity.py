@@ -318,7 +318,9 @@ def pending_window(qapp, cross_controller, tmp_path):
         None,
         None,
     )
-    dialogs = RecordingDialogPresenter(confirm_answers=[False, False], defer_confirm=True)
+    dialogs = RecordingDialogPresenter(
+        confirm_answers=[False, False], defer_confirm=True
+    )
     view = MainWindow(ctrl, dialog_presenter=dialogs)
     view.show()
     button(view, "Analyze…").click()

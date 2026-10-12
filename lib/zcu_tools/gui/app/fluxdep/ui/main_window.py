@@ -61,6 +61,7 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     TwoTonePickContext,
 )
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
@@ -98,6 +99,8 @@ class MainWindow(QMainWindow):
         self._ctrl = ctrl
         self._dialogs = dialog_presenter or QtDialogPresenter()
         self._writable = ctrl.control_identity.status().holder == "gui"
+        self._close_prompt_open = False
+        self._close_confirmed = False
         self._control_disposed = False
         self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
@@ -128,8 +131,7 @@ class MainWindow(QMainWindow):
         for control in self._write_controls:
             control.setEnabled(writable)
         if isinstance(
-            self._current_editor,
-            (LinePickerWidget, OneToneWidget, FindPointsWidget, ResultPreviewWidget),
+            self._current_editor, (InteractiveMplWidget, ResultPreviewWidget)
         ):
             self._current_editor.set_editable(editable=writable)
         if self._analyze_panel is not None:
@@ -408,10 +410,7 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is not None:
             self._analyze_panel.detach()
         self._current_editor = widget
-        if isinstance(
-            widget,
-            (LinePickerWidget, OneToneWidget, FindPointsWidget, ResultPreviewWidget),
-        ):
+        if isinstance(widget, (InteractiveMplWidget, ResultPreviewWidget)):
             widget.set_editable(editable=self._writable)
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
@@ -659,22 +658,40 @@ class MainWindow(QMainWindow):
 
     # --- close path --------------------------------------------------------
 
-    def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Refuse close until search startup and worker/delivery have settled.
+    def _on_close_decision(self, *, confirmed: bool) -> None:
+        self._close_prompt_open = False
+        if confirmed:
+            # One accepted intent survives drain refusals and holder changes.
+            self._close_confirmed = True
+            self.close()
 
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Confirm Remote close asynchronously, then wait for search to settle.
+
+        Pending or declined decisions leave owners alive and admission open.
+        Acceptance is remembered across drain refusals and holder changes.
         begin_close permanently blocks admission and requests cancellation.
         Keep subscriptions, figures and Qt owners alive on drain refusal.
         A later close attempt can finish once the runner and search owner drain.
         """
-        status = self._ctrl.control_identity.status()
-        if status.holder != "gui" and not self._dialogs.confirm(
-            self,
-            "Close remote-controlled window?",
-            f"{status.holder.removeprefix('rpc:')} controls this window. Close and cancel pending work?",
-            default=False,
-        ):
+        if self._close_prompt_open:
             if a0 is not None:
                 a0.ignore()
+            return
+        status = self._ctrl.control_identity.status()
+        if status.holder != "gui" and not self._close_confirmed:
+            if a0 is not None:
+                a0.ignore()
+            self._close_prompt_open = True
+            self._dialogs.confirm_async(
+                self,
+                "Close remote-controlled window?",
+                f"{status.holder.removeprefix('rpc:')} controls this window. Close and cancel pending work?",
+                on_decision=lambda confirmed: self._on_close_decision(
+                    confirmed=confirmed
+                ),
+                default=False,
+            )
             return
         self._ctrl.search.begin_close()
         search_drained = self._search_runner is None or self._search_runner.quiesce()
