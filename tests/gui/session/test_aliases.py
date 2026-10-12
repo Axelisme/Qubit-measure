@@ -97,8 +97,9 @@ def test_unbound_alias_never_falls_back_to_a_same_named_component(
     with pytest.raises(RoleResolutionError) as caught:
         table.resolve("resonator", point)
     assert caught.value.role == "resonator"
-    with pytest.raises(RoleResolutionError, match="Unknown alias"):
+    with pytest.raises(RoleResolutionError) as unknown:
         table.resolve("missing", point)
+    assert unknown.value.reason == "Unknown alias"
 
 
 @pytest.mark.parametrize("partner", [None, 7, "missing"])
@@ -122,8 +123,10 @@ def test_missing_link_field_and_wrong_kind_report_the_requested_alias(
     table = AliasTable(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.absent"))
     )
-    with pytest.raises(RoleResolutionError, match="resonator.*Unreadable link"):
+    with pytest.raises(RoleResolutionError) as unreadable:
         table.resolve("resonator", point)
+    assert unreadable.value.role == "resonator"
+    assert "Unreadable link" in unreadable.value.reason
     with pytest.raises(RoleResolutionError) as caught:
         table.resolve("qubit", point, kind="resonator")
     assert caught.value.role == "qubit"

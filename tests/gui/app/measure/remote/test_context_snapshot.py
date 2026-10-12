@@ -350,7 +350,7 @@ def test_snapshot_alias_rows_isolate_unbound_and_invalid_links(
         assert row["alias"] == alias and row["value"] == value
         assert row["resolved"] is None
         assert alias in str(row["error"])
-    assert "Alias is not bound" in str(rows[2]["error"])
+    assert "$unbound" in str(rows[2]["error"]) and "Aliases" in str(rows[2]["error"])
     assert "must name a component or device" in str(rows[4]["error"])
 
 

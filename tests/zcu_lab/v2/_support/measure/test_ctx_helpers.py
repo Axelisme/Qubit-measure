@@ -373,8 +373,6 @@ def test_unknown_role_does_not_become_uncalibrated_fallback(
         assert edge.resolved is None
         with pytest.raises(ExpressionError) as raised:
             evaluate_scalar_expr(edge.expr, direct)
-        assert str(raised.value) == (
-            "Invalid parameter path '$resonator.freq': Role 'resonator' requires "
-            "kind None; focus=None: Alias is not bound"
-        )
+        assert "$resonator.freq" in str(raised.value)
+        assert "not bound" in str(raised.value)
         assert isinstance(raised.value.__cause__, RoleResolutionError)

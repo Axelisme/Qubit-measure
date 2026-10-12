@@ -20,6 +20,7 @@ from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval, safe_po
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.parameters import ModuleSlotError
+from zcu_tools.resources.entry import RoleResolutionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext
@@ -175,6 +176,9 @@ def _read_alias_name(alias: str, parameters: ParameterContext | None) -> str:
         raise ExpressionError(f"Alias {alias!r} requires a context")
     try:
         name = parameters.value(alias)
+    except RoleResolutionError as exc:
+        # The alias owner's message already names $alias and its remedy.
+        raise ExpressionError(str(exc)) from exc
     except (ValueError, InvalidInputError) as exc:
         raise ExpressionError(f"Invalid alias {alias!r}: {exc}") from exc
     if not isinstance(name, str):
