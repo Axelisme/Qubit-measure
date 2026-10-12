@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
     from .arb_waveform import ArbWaveformPort
+    from .services import AppServices
     from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
@@ -315,6 +316,33 @@ class Controller(SessionControllerMixin):
             params_for=params_for,
             alias_preset=alias_preset,
         )
+        self._bind_services(services)
+        # App-level PersistenceCaretaker, injected by runtime behavior via
+        # attach_caretaker (None in bare-Controller tests that don't exercise
+        # persistence).
+        self._caretaker: (
+            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
+        ) = None
+        # Lazily built on first begin_shutdown so the Controller stays importable
+        # without a Qt event loop (tests construct a bare Controller). The driver
+        # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
+        self._shutdown_driver: QtShutdownDriver | None = None
+        bus.subscribe(RunFinishedPayload, self._on_run_finished)
+        bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
+        bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
+        bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
+        bus.subscribe(SaveArtifactsFinishedPayload, self._on_save_artifacts_finished)
+        bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
+        bus.subscribe(
+            DeviceOperationFinishedPayload, self._on_device_operation_finished
+        )
+        # FLUX-AWARE-MOCK: the mock flux source provisioning (SOC_CHANGED hook +
+        # fake_flux register/reconnect/ramp) is owned by the shared session-layer
+        # MockFluxProvisioner (built in build_session_services), so this controller
+        # carries no provisioning code of its own.
+
+    def _bind_services(self, services: AppServices) -> None:
+        """Retain the bundle and name the service instances used by the facade."""
         self._services = services
         self._operation_gate = services.operation_gate
         self._operation_control = services.operation_control
@@ -348,29 +376,6 @@ class Controller(SessionControllerMixin):
         self._settings_svc = services.settings
         self._cfg_editor_svc = services.cfg_editor
         self._arb_waveform_svc = services.arb_waveform
-        # App-level PersistenceCaretaker, injected by runtime behavior via
-        # attach_caretaker (None in bare-Controller tests that don't exercise
-        # persistence).
-        self._caretaker: (
-            SingleFileCaretaker[AppPersistedState, RestoreReport] | None
-        ) = None
-        # Lazily built on first begin_shutdown so the Controller stays importable
-        # without a Qt event loop (tests construct a bare Controller). The driver
-        # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
-        self._shutdown_driver: QtShutdownDriver | None = None
-        bus.subscribe(RunFinishedPayload, self._on_run_finished)
-        bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
-        bus.subscribe(AnalyzeFailedPayload, self._on_analyze_failed)
-        bus.subscribe(SaveDataFinishedPayload, self._on_save_data_finished)
-        bus.subscribe(SaveArtifactsFinishedPayload, self._on_save_artifacts_finished)
-        bus.subscribe(DeviceSetupFinishedPayload, self._on_device_setup_finished)
-        bus.subscribe(
-            DeviceOperationFinishedPayload, self._on_device_operation_finished
-        )
-        # FLUX-AWARE-MOCK: the mock flux source provisioning (SOC_CHANGED hook +
-        # fake_flux register/reconnect/ramp) is owned by the shared session-layer
-        # MockFluxProvisioner (built in build_session_services), so this controller
-        # carries no provisioning code of its own.
 
     def add_view(self, view: ViewProtocol) -> None:
         """Attach a full Qt View. It is a diagnostic sink (fan-out target) and

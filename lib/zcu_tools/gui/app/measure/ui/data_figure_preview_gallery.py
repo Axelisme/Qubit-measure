@@ -111,13 +111,36 @@ class _PreviewCard(QWidget):
         self._stack = QStackedWidget()
         self._stack.setObjectName(f"previewStack_{source_key}")
 
-        # Image page
+        self._image_page = self._build_image_page()
+        self._empty_page, self._empty_label = self._build_message_page(
+            "Empty",
+            _EMPTY_TEXT,
+            "color:#6c757d; border:1px dashed #adb5bd; background:#f8f9fa; "
+            "padding:12px 8px; border-radius:6px; font-size:11px;",
+        )
+        self._error_page, self._error_label = self._build_message_page(
+            "Error",
+            f"{display_name} — {_UNAVAILABLE_TEXT}",
+            "color:#842029; border:1px solid #f5c2c7; background:#f8d7da; "
+            "padding:12px 8px; border-radius:6px; font-size:11px;",
+        )
+
+        outer.addWidget(self._stack, stretch=1)
+
+        # Presentation cache — original pixmap, never a Figure (S3).
+        self._orig_pixmap: QPixmap | None = None
+
+        # Initial state: empty (supported but no figure yet)
+        self.show_empty()
+
+    def _build_image_page(self) -> QWidget:
+        """Add the aspect-fit raster viewport as the first stack page."""
         image_page = QWidget()
-        image_page.setObjectName(f"previewImagePage_{source_key}")
+        image_page.setObjectName(f"previewImagePage_{self._source_key}")
         img_layout = QVBoxLayout(image_page)
         img_layout.setContentsMargins(0, 0, 0, 0)
         self._image_label = QLabel()
-        self._image_label.setObjectName(f"previewImage_{source_key}")
+        self._image_label.setObjectName(f"previewImage_{self._source_key}")
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setScaledContents(False)
         self._image_label.setSizePolicy(
@@ -127,54 +150,26 @@ class _PreviewCard(QWidget):
         self._image_label.setMinimumWidth(120)
         img_layout.addWidget(self._image_label)
         self._stack.addWidget(image_page)
-        self._image_page = image_page
-        # Watch image viewport resize so aspect-fit stays within bounds (S3).
         self._image_label.installEventFilter(self)
+        return image_page
 
-        # Empty page — supported but no figure
-        empty_page = QWidget()
-        empty_page.setObjectName(f"previewEmptyPage_{source_key}")
-        empty_layout = QVBoxLayout(empty_page)
-        empty_layout.setContentsMargins(8, 12, 8, 12)
-        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # The card header already names the source, so the placeholder does not.
-        self._empty_label = QLabel(_EMPTY_TEXT)
-        self._empty_label.setObjectName(f"previewEmpty_{source_key}")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setWordWrap(True)
-        self._empty_label.setStyleSheet(
-            "color:#6c757d; border:1px dashed #adb5bd; background:#f8f9fa; "
-            "padding:12px 8px; border-radius:6px; font-size:11px;"
-        )
-        empty_layout.addWidget(self._empty_label)
-        self._stack.addWidget(empty_page)
-        self._empty_page = empty_page
-
-        # Error page — render failure
-        error_page = QWidget()
-        error_page.setObjectName(f"previewErrorPage_{source_key}")
-        error_layout = QVBoxLayout(error_page)
-        error_layout.setContentsMargins(8, 12, 8, 12)
-        error_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._error_label = QLabel(f"{display_name} — {_UNAVAILABLE_TEXT}")
-        self._error_label.setObjectName(f"previewError_{source_key}")
-        self._error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._error_label.setWordWrap(True)
-        self._error_label.setStyleSheet(
-            "color:#842029; border:1px solid #f5c2c7; background:#f8d7da; "
-            "padding:12px 8px; border-radius:6px; font-size:11px;"
-        )
-        error_layout.addWidget(self._error_label)
-        self._stack.addWidget(error_page)
-        self._error_page = error_page
-
-        outer.addWidget(self._stack, stretch=1)
-
-        # Presentation cache — original pixmap, never a Figure (S3).
-        self._orig_pixmap: QPixmap | None = None
-
-        # Initial state: empty (supported but no figure yet)
-        self.show_empty()
+    def _build_message_page(
+        self, name: str, text: str, stylesheet: str
+    ) -> tuple[QWidget, QLabel]:
+        """Add a centered, wrapping empty/error page and return its text label."""
+        page = QWidget()
+        page.setObjectName(f"preview{name}Page_{self._source_key}")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 12, 8, 12)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label = QLabel(text)
+        label.setObjectName(f"preview{name}_{self._source_key}")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        label.setStyleSheet(stylesheet)
+        layout.addWidget(label)
+        self._stack.addWidget(page)
+        return page, label
 
     def show_empty(self) -> None:
         self._orig_pixmap = None
@@ -349,41 +344,7 @@ class DataFigurePreviewGallery(QWidget):
         hint.setObjectName("previewGalleryHint")
         outer.addWidget(hint)
 
-        self._scroll = QScrollArea()
-        self._scroll.setObjectName("previewGalleryScroll")
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._inner = QWidget()
-        self._inner.setObjectName("previewGalleryInner")
-        # Use grid for viewport-driven mosaic (narrow single column vs wide mosaic).
-        self._inner_layout = QGridLayout(self._inner)
-        self._inner_layout.setContentsMargins(0, 0, 0, 0)
-        self._inner_layout.setSpacing(LAYOUT_SPACING)
-        self._inner_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        # Track ordered cards for layout.
-        self._ordered_cards: list[_PreviewCard] = []
-
-        # Cards — Run always, Analysis/Post per capability
-        self._cards: dict[str, _PreviewCard] = {}
-
-        run_card = _PreviewCard("run", "Run")
-        self._cards["run"] = run_card
-        self._ordered_cards.append(run_card)
-
-        if self._has_analysis:
-            ana_card = _PreviewCard("analysis", "Analysis")
-            self._cards["analysis"] = ana_card
-            self._ordered_cards.append(ana_card)
-
-        if self._has_post:
-            post_card = _PreviewCard("post", "Post-Analysis")
-            # Normalize key: use "post_analysis" externally but "post" internally.
-            self._cards["post_analysis"] = post_card
-            # Also expose alias "post" for convenience
-            self._cards["post"] = post_card
-            self._ordered_cards.append(post_card)
-
-        self._scroll.setWidget(self._inner)
+        self._build_viewport()
         outer.addWidget(self._scroll, stretch=1)
         # Viewport-driven reflow must track scroll viewport size, not only
         # gallery widget size; QScrollArea viewport may resize after gallery
@@ -403,6 +364,48 @@ class DataFigurePreviewGallery(QWidget):
             # Avoid double-setting for alias
             if card.current_state() != "empty":
                 card.show_empty()
+
+    def _build_viewport(self) -> None:
+        """Build the scrollable card grid without installing resize reactions yet."""
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("previewGalleryScroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._inner = QWidget()
+        self._inner.setObjectName("previewGalleryInner")
+        # Use grid for viewport-driven mosaic (narrow single column vs wide mosaic).
+        self._inner_layout = QGridLayout(self._inner)
+        self._inner_layout.setContentsMargins(0, 0, 0, 0)
+        self._inner_layout.setSpacing(LAYOUT_SPACING)
+        self._inner_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Track ordered cards for layout.
+        self._ordered_cards: list[_PreviewCard] = []
+
+        self._build_cards()
+
+        self._scroll.setWidget(self._inner)
+
+    def _build_cards(self) -> None:
+        """Create capability-selected cards in display order, retaining the post alias."""
+        # Cards — Run always, Analysis/Post per capability
+        self._cards: dict[str, _PreviewCard] = {}
+
+        run_card = _PreviewCard("run", "Run")
+        self._cards["run"] = run_card
+        self._ordered_cards.append(run_card)
+
+        if self._has_analysis:
+            ana_card = _PreviewCard("analysis", "Analysis")
+            self._cards["analysis"] = ana_card
+            self._ordered_cards.append(ana_card)
+
+        if self._has_post:
+            post_card = _PreviewCard("post", "Post-Analysis")
+            # Normalize key: use "post_analysis" externally but "post" internally.
+            self._cards["post_analysis"] = post_card
+            # Also expose alias "post" for convenience
+            self._cards["post"] = post_card
+            self._ordered_cards.append(post_card)
 
     # -- viewport-driven responsive helpers -------------------------
 

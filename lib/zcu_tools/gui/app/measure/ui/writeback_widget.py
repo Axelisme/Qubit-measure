@@ -52,9 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_matrix_value(value: Any) -> bool:
-    if not isinstance(value, (list, tuple)):
-        return False
-    if len(value) == 0:
+    if not isinstance(value, (list, tuple)) or len(value) == 0:
         return False
     if not all(isinstance(row, (list, tuple)) for row in value):
         return False
