@@ -8,7 +8,7 @@ from qtpy.QtWidgets import QLineEdit, QWidget
 from zcu_tools.gui.cfg import CfgSchema, DirectValue, ScalarSpec
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
@@ -18,10 +18,10 @@ pytestmark = pytest.mark.uses_wall_clock
 @pytest.fixture
 def live_cfg_form(qapp):
     fx = Fixture()
-    cfg = FakeAdapter().make_default_cfg(fx.state.session_env)
+    cfg = SampleAdapter().make_default_cfg(fx.state.session_env)
     gain_spec = cfg.spec.fields["gain"]
     assert isinstance(gain_spec, ScalarSpec)
-    # An optional numeric text field uses QLineEdit; the other FakeAdapter
+    # An optional numeric text field uses QLineEdit; the other SampleAdapter
     # inputs remain the same, so the generic run guard owns invalidity.
     cfg = CfgSchema(
         spec=replace(
@@ -31,7 +31,7 @@ def live_cfg_form(qapp):
         value=cfg.value,
     )
     tab_id = "tab-live"
-    resource = fx.prepare_tab(tab_id, FakeAdapter(), cfg)
+    resource = fx.prepare_tab(tab_id, SampleAdapter(), cfg)
     form = ResourceCfgFormWidget()
     form.attach(resource)
     gain_widget = form.findChild(QWidget, "cfgInput:gain")

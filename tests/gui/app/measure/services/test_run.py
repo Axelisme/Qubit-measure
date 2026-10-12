@@ -55,8 +55,7 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.program.v2 import ProgramV2Cfg
 
 from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
-from zcu_lab.v2.fake.stub.core import FakeResult, FakeRunResult
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleResult, SampleRun
 
 from ._run_support import (
     ConstructorFailingProgram,
@@ -243,18 +242,18 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
-    class RecordingSnapshotAdapter(FakeAdapter):
+    class RecordingSnapshotAdapter(SampleAdapter):
         def run(
             self,
             req: RunRequest,
             raw_cfg: Mapping[str, ExperimentCfgValue],
             *,
             context: RunContext,
-        ) -> FakeRunResult:
+        ) -> SampleRun:
             # Controlled execution produces an artifact with the real domain cfg builder.
             return RunRecord(
                 cfg=self.build_exp_cfg(dict(raw_cfg), req),
-                result=FakeResult(np.empty(0)),
+                result=SampleResult(np.empty(0)),
             )
 
     state, tab_id, _adapter = make_state(readiness=ContextReadiness.ACTIVE)

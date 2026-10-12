@@ -55,8 +55,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from zcu_lab.definitions import ALIAS_PRESET, register_all
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, register_all
 
 
 def _context_root() -> Path:
@@ -171,7 +170,7 @@ class Fixture:
         self.registry = Registry()
         register_all(self.registry)
         if not self.registry.has("fake"):
-            self.registry.register("fake", FakeAdapter)
+            self.registry.register("fake", SampleAdapter)
         self.view = None if headless else make_view()
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root

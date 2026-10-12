@@ -73,10 +73,10 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
             {name: ReferenceValue(path, value) for name in ("linked", "inline")}
         ),
     )
-    from zcu_lab.v2.fake.stub.gui import FakeAdapter
+    from tests.gui.app.measure._synthetic import SampleAdapter
 
     tab_id = "references"
-    cfg = fx.prepare_tab(tab_id, FakeAdapter(), schema)
+    cfg = fx.prepare_tab(tab_id, SampleAdapter(), schema)
     cfg.convert_reference_to_inline(("inline",))
     cfg.edit((CfgEdit(("inline", field), 0.75),))
     fx.start()
