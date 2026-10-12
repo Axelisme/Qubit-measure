@@ -165,11 +165,18 @@ class MissingParameter:
     """One missing tool parameter and the instruction for supplying it.
 
     parameter is the public keyword name; reason explains the absent required source
-    or input. Both strings must be non-empty.
+    or input. Both strings must be non-empty. Construction raises ValueError with
+    "missing parameters must contain non-empty names and reasons" if either is empty.
     """
 
     parameter: str
     reason: str
+
+    def __post_init__(self) -> None:
+        if not self.parameter or not self.reason:
+            raise ValueError(
+                "missing parameters must contain non-empty names and reasons"
+            )
 
 
 class RecipeNeedsParameters(Exception):
