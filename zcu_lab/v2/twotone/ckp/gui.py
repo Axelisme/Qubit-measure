@@ -83,6 +83,9 @@ class CKPAnalyzeResult(AnalyzeResultBase):
 
 
 class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
+    experiment_tag: ClassVar[str | None] = (
+        CKP_Exp.AXES_SPEC.tag if CKP_Exp.AXES_SPEC is not None else None
+    )
     exp_cls = CKP_Exp
     ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 

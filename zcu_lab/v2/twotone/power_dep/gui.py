@@ -31,6 +31,9 @@ PowerDepRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
+    experiment_tag: ClassVar[str | None] = (
+        PowerExp.AXES_SPEC.tag if PowerExp.AXES_SPEC is not None else None
+    )
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

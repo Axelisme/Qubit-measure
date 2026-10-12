@@ -86,6 +86,10 @@ class FakeFreqAdapter(
 ):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    experiment_tag: ClassVar[str | None] = (
+        FakeFreqExp.AXES_SPEC.tag if FakeFreqExp.AXES_SPEC is not None else None
+    )
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=True
     )

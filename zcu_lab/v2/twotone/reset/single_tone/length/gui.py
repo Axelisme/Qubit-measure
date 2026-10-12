@@ -52,6 +52,9 @@ class SingleToneLengthAdapter(
         NoAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        LengthExp.AXES_SPEC.tag if LengthExp.AXES_SPEC is not None else None
+    )
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 

@@ -57,6 +57,9 @@ FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        FreqFluxExp.AXES_SPEC.tag if FreqFluxExp.AXES_SPEC is not None else None
+    )
     exp_cls = FreqFluxExp
     ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

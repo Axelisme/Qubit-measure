@@ -52,6 +52,10 @@ class IRBAnalyzeResult(AnalyzeResultBase):
 class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult, NoAnalyzeParams]):
     """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
+    experiment_tag: ClassVar[str | None] = (
+        IRB_Exp.AXES_SPEC.tag if IRB_Exp.AXES_SPEC is not None else None
+    )
+
     exp_cls = IRB_Exp
     ExpCfg_cls: ClassVar[type[IRBCfg]] = IRBCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

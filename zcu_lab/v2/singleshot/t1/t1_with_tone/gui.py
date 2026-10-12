@@ -65,6 +65,9 @@ class SsT1ToneAdapter(
         NoAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        T1WithToneExp.AXES_SPEC.tag if T1WithToneExp.AXES_SPEC is not None else None
+    )
     exp_cls = T1WithToneExp
     ExpCfg_cls: ClassVar[Any] = T1WithToneCfg
 

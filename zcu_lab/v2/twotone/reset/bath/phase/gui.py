@@ -52,6 +52,9 @@ class BathPhaseAdapter(
         NoAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        PhaseExp.AXES_SPEC.tag if PhaseExp.AXES_SPEC is not None else None
+    )
     exp_cls = PhaseExp
     ExpCfg_cls: ClassVar[Any] = PhaseCfg
 

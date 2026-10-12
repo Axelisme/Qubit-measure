@@ -128,6 +128,9 @@ class T2RamseyAdapter(
         T2RamseyAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        T2RamseyExp.AXES_SPEC.tag if T2RamseyExp.AXES_SPEC is not None else None
+    )
     exp_cls = T2RamseyExp
     ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
 

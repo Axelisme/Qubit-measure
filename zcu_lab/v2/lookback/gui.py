@@ -106,6 +106,9 @@ class LookbackAdapter(
         LookbackAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        LookbackExp.AXES_SPEC.tag if LookbackExp.AXES_SPEC is not None else None
+    )
     exp_cls = LookbackExp
     ExpCfg_cls: ClassVar[Any] = LookbackCfg
 

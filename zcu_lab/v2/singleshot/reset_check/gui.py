@@ -50,6 +50,9 @@ class SsResetCheckAdapter(
         ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult, NoAnalyzeParams
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        ResetCheckExp.AXES_SPEC.tag if ResetCheckExp.AXES_SPEC is not None else None
+    )
     exp_cls = ResetCheckExp
     ExpCfg_cls: ClassVar[Any] = ResetCheckCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

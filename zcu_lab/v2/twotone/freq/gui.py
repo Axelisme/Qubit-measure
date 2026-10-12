@@ -100,6 +100,9 @@ class FreqAnalyzeResult(AnalyzeResultBase):
 class FreqAdapter(
     BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        FreqExp.AXES_SPEC.tag if FreqExp.AXES_SPEC is not None else None
+    )
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 

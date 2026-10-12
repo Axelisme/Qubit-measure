@@ -80,6 +80,9 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
 
 
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
+    experiment_tag: ClassVar[str | None] = (
+        PowerDepExp.AXES_SPEC.tag if PowerDepExp.AXES_SPEC is not None else None
+    )
     exp_cls = PowerDepExp
     ExpCfg_cls = PowerDepCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

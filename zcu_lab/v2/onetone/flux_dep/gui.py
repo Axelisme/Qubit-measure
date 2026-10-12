@@ -101,6 +101,9 @@ def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
 class OneToneFluxDepAdapter(
     BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        FluxDepExp.AXES_SPEC.tag if FluxDepExp.AXES_SPEC is not None else None
+    )
     exp_cls = FluxDepExp
     ExpCfg_cls = FluxDepCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

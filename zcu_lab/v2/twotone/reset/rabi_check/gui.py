@@ -67,6 +67,10 @@ class RabiCheckAdapter(
     diagnostics do not determine reset fidelity or a unique reset channel.
     """
 
+    experiment_tag: ClassVar[str | None] = (
+        RabiCheckExp.AXES_SPEC.tag if RabiCheckExp.AXES_SPEC is not None else None
+    )
+
     exp_cls = RabiCheckExp
     ExpCfg_cls: ClassVar[Any] = RabiCheckCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

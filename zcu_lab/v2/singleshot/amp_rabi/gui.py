@@ -63,6 +63,9 @@ class SsAmpRabiAdapter(
         AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
     ]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        AmpRabiExp.AXES_SPEC.tag if AmpRabiExp.AXES_SPEC is not None else None
+    )
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

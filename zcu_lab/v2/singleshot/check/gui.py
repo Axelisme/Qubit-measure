@@ -45,6 +45,9 @@ class CheckAnalyzeResult(AnalyzeResultBase):
 class CheckAdapter(
     BaseAdapter[CheckCfg, CheckRunResult, CheckAnalyzeResult, NoAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = (
+        CheckExp.AXES_SPEC.tag if CheckExp.AXES_SPEC is not None else None
+    )
     exp_cls = CheckExp
     ExpCfg_cls: ClassVar[Any] = CheckCfg
 
