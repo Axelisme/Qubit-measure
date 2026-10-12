@@ -1,6 +1,6 @@
 # `workflows.gui` Workflow form attachments
 
-**Last updated:** 2026-10-12，Coherence forms 與三個 catalog 名稱
+**Last updated:** 2026-10-12，direct device defaults 與 conversion controls 退役
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與 Qt attachment，不實作通用 editor 或 Engine。
 Native science 不依賴 GUI。Window、Controller、operation、session 與 fixed-source presentation 分工不因合併而改變。
@@ -26,7 +26,8 @@ Null 或 invalid referenced value 產生欄位錯誤，不 fallback。Expression
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
 三個附件共用通用 WorkflowFormPanel、WorkflowPlanPanel 與既有 tuning view，不建立第二個 Window 或 Controller。
-Coherence 沒有臨時 export/sample callback；現有 conversion adapter 不會收到 CoherencePoint。
+附件只負責 Start/forms/native run，沒有 export/sample binding。
+Saved run conversion 由 coherence_export 與 mist_export 獨立工具負責，GUI/RPC/MCP 不提供匯出入口。
 
 ## 固定來源與 modules
 
@@ -40,7 +41,9 @@ Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，保留具
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 
-Flux_dev 目前保留 captured $flux_dev expression default。Missing/unbound alias 在該欄位指名 Invalid；普通字串是 literal。
+Coherence 的新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal device name。
+既有 direct draft 不隨 alias 修改，使用者仍可切 eval。合法 saved input 與 MIST defaults 不改。
+Missing capture/unbound alias 保留 $flux_dev expression error input，公開欄位顯示 Invalid 並指名 flux_dev，不阻斷 panel 或補造 device。
 Fake caller 明填 native；YOKO 明填 A 或 V。表單不推測單位、不轉換值、不預驗 device membership。
 Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不重解析既有 run。
 
@@ -84,6 +87,6 @@ Reload 只允許 idle/terminal；pending/running/paused 在 preflight 前拒絕�
 Compatible input 保留；removed/renamed selection 改選新 catalog 第一個附件，並顯示原名與新名。
 Import/panel replacement 失敗保留舊 panels/RAM，但阻擋 Start 直到 retry；fixed source 改動要求 restart，沒有舊 callable fallback。
 
-App/window/figures/layout/sample_action/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 是 fixed source。
+App/window/figures/layout/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 是 fixed source。
 其餘 zcu_lab.workflows 是 bounded reload scope；framework、components 與 native experiment sources 固定。
 Window 的同 run、capture、取消與保存邊界見 ADR-0062、ADR-0063、ADR-0067、ADR-0068。

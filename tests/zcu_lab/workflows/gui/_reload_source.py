@@ -74,14 +74,11 @@ def step(env, plan, tun, state):
     {wait_step}
     return Done()
 
-def prepare(*, plan, data_root, records):
-    raise ValueError("export-v{version}:" + str(plan.points))
-
 def build():
     return WorkflowCatalog((WorkflowAttachment(
         step=step, plan_model=Plan, knobs_model=Knobs,
         plan_to_cfg=Plan.to_cfg, knobs_to_cfg=Knobs.to_cfg,
-        seed=calibrated_seed, prepare_export=prepare,
+        seed=calibrated_seed,
     ),))
 {failure}
 """
@@ -153,7 +150,6 @@ class InjectedCatalog:
         window: T1WorkflowWindow,
     ) -> None:
         """Select a real declared scenario via public current-catalog reload."""
-        from zcu_lab.workflows.export import prepare_t1_fluxdep_export
         from zcu_lab.workflows.gui.attachment import WorkflowAttachment
         from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
         from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
@@ -168,7 +164,6 @@ class InjectedCatalog:
                     plan_to_cfg=CoherencePlanForm.to_cfg,
                     knobs_to_cfg=CoherenceTunablesForm.to_cfg,
                     seed=calibrated_seed,
-                    prepare_export=prepare_t1_fluxdep_export,
                 ),
             )
         )

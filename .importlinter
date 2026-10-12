@@ -302,11 +302,21 @@ name = Workflow export science does not import frontend owners
 type = forbidden
 source_modules =
     zcu_lab.workflows.export
+    zcu_lab.workflows.export_inputs
+    zcu_lab.workflows.coherence_export
+    zcu_lab.workflows.mist_export
     zcu_lab.workflows.samples
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp
     zcu_tools.notebook
+    zcu_lab.workflows.gui
+    zcu_lab.workflows.mcp
+    qtpy
+    PyQt5
+    PyQt6
+    PySide2
+    PySide6
 
 # D75: experiment cores remain independent of all GUI attachments and helpers.
 [importlinter:contract:user-core-no-gui]

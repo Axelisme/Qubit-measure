@@ -24,7 +24,7 @@ class WorkflowCatalog:
     attachment is the default for Start without name (shipped coherence_fluxdep).
     Names must be unique and at least one attachment must exist. The app selector
     and optional Start name consume this same pairing; Registry has no lookup.
-    New Starts use current callables; Controller's existing export binding stays
+    New Starts use current callables; Controller's existing run binding stays
     fixed across catalog replacement. No live resources are owned here.
     """
 
@@ -75,7 +75,6 @@ def build_catalog() -> WorkflowCatalog:
     Coherence has no temporary export bridge; independent tools own conversion.
     """
     from ..coherence import coherence_fluxdep
-    from ..export import prepare_mist_fluxdep_export
     from ..mist import mist_fluxdep
     from ..overnight import overnight
     from .calibration_modules import calibration_seed
@@ -95,8 +94,6 @@ def build_catalog() -> WorkflowCatalog:
         plan_to_cfg=CoherencePlanForm.to_cfg,
         knobs_to_cfg=CoherenceTunablesForm.to_cfg,
         seed=calibrated_seed,
-        prepare_export=None,
-        samples_reason="Coherence conversion is provided by independent run tools",
     )
     mist = WorkflowAttachment(
         step=mist_fluxdep,
@@ -107,8 +104,6 @@ def build_catalog() -> WorkflowCatalog:
         seed=lambda plan, form: calibration_seed(
             plan.qub_pulse, plan.readout, form.pi_length_us
         ),
-        prepare_export=prepare_mist_fluxdep_export,
-        samples_reason="MIST has no lifetime sample science fields",
     )
     monitoring = WorkflowAttachment(
         step=overnight,
@@ -117,7 +112,5 @@ def build_catalog() -> WorkflowCatalog:
         plan_to_cfg=OvernightPlanForm.to_cfg,
         knobs_to_cfg=OvernightTunablesForm.to_cfg,
         seed=lambda _plan, _form: None,
-        prepare_export=None,
-        samples_reason="Overnight monitors fixed-flux rounds, not a flux scan",
     )
     return WorkflowCatalog((coherence, mist, monitoring))

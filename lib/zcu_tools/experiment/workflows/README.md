@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-12，iteration 目錄與 workflow 自行保存
+**Last updated:** 2026-10-12，iteration 保存與獨立 workflow conversion 分工
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -36,9 +36,9 @@ Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init�
 
 `WorkflowEnv.plots` 直接提供注入的 `Plots`，跨步驟與 retry 保留同一個繪圖 lifetime。`live` 接 `LiveUpdate` 回呼，收到 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含 partial NaN。回呼同步執行，不修改或保留借用的資料；workflow 用 typed handles 投影實數，或以 draw 任意繪圖、save 保存。Run 只綁定一個 buffer，保留回呼錯誤來源，不驗證繪圖策略。宿主在 producer 停止後 finish／release，Pause 不結束 Plots。回呼簽名目前是顧問代裁，待使用者審查。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
 
-獨立 GUI app 已接線。Window 使用同一份 SessionServices 的 runner／progress，app 重用 zcu_lab 的單一 ALIAS_PRESET。這些組裝屬於宿主，不改變核心的 device、run 或保存契約。裸 device alias 求值與 T1 flux_dev expression default 仍待 b4 29。S4 source reload 與 U7 input 保存／還原未做。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不能把已接線或 bounded 測試視為 04 全票完成。
+獨立 GUI app 已接線。Window 使用同一份 SessionServices 的 runner／progress，app 重用 zcu_lab 的單一 ALIAS_PRESET。這些組裝屬於宿主，不改變核心的 device、run 或保存契約。具體 forms、source reload 與 input 保存由 zcu_lab.workflows.gui 擁有。
 
-`exporting` 提供 Qt-free 的 PreparedFluxdepExport、FluxdepExportSnapshot、FluxdepExportOutput 與 FluxdepExportReport，集中科學 payload、固定 host capture 與獨立輸出結果的型別契約。SampleRun、SampleRow 與 SampleField 讓 science 將固定 run artifacts 投影成已驗證的具名 JSON 欄位。Framework 不編目實驗量、解讀 device snapshot 或換算單位。它不觸發保存、不擴 Engine lifecycle。Terminal admission、SaveLayout、ledger 與 GUI/MCP 接線屬於 gui.app.workflows host，science adapter 屬於 zcu_lab。Record.json 仍不是匯出的 commit authority。
+各 workflow 的獨立工具在 zcu_lab 讀 manifest、iteration record.json 與 point 具名 native reference。框架不提供 reader、export-only carrier 或通用 dispatcher，不解讀具體實驗、device snapshot 或單位。GUI/Controller 不保留 export binding。工具的輸入驗證、科學 payload 與 writers 分工見 zcu_lab.workflows。缺 record 不代表無量測，不能從 leftover native 檔創造提交點。
 
 ## 驗證 owner
 

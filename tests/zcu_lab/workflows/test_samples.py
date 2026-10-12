@@ -1,102 +1,103 @@
-"""Science artifact and append host contracts, without live source fallback."""
+"""Coherence sample preparation and append contracts, without live fallback."""
 
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import load_run_data, save_run_data
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
-from tests.zcu_lab.workflows._point_files import point_files
-from zcu_lab.workflows import export
-from zcu_lab.workflows.calibration import CalibratedPi2
-from zcu_lab.workflows.t1 import T1Point
-from zcu_lab.workflows.t2 import T2Plan, T2Point
+from zcu_lab.workflows.calibration import FrequencyResult, RabiResult, ReadoutResult
+from zcu_lab.workflows.coherence import CoherencePlan, CoherencePoint
+from zcu_lab.workflows.coherence_measurements import LifetimeKind, LifetimeResult
+from zcu_lab.workflows.export_inputs import SavedPoint
+from zcu_lab.workflows.samples import SampleExportError, append_samples, prepare_samples
 
 from ._sample_inputs import sample_engine
 from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 
 
+def sample_points(
+    inputs: Inputs, root: Path, kind: LifetimeKind, *, all_accepted: bool = False
+) -> tuple[CoherencePlan, tuple[SavedPoint[CoherencePoint], ...]]:
+    """Generate reachable current points and named native acquisition snapshots."""
+    seed = seed_from_inputs(inputs)
+    plan = CoherencePlan.model_validate(make_plan(inputs).model_dump()).model_copy(
+        update={
+            "fluxes": (1.0, 1.1, 1.2),
+            "measure_t1": kind == "t1",
+            "measure_t2ramsey": kind == "t2ramsey",
+            "measure_t2echo": kind == "t2echo",
+        }
+    )
+
+    def record(i: int) -> CoherencePoint:
+        accepted = i < 2 or all_accepted
+        return CoherencePoint(
+            i,
+            plan.fluxes[i],
+            FrequencyResult(
+                "accepted" if accepted else "rejected",
+                None if accepted else "rejected",
+                seed.f01_mhz if accepted else None,
+                ("frequency.h5",),
+            ),
+            RabiResult(
+                "accepted" if accepted else "skipped",
+                None if accepted else "dependency",
+                seed.f01_mhz if accepted else None,
+                0.4 if accepted else None,
+                0.2 if accepted else None,
+                "rabi.h5" if accepted else None,
+            ),
+            ReadoutResult("skipped", "cadence", None, None, None),
+            (
+                LifetimeResult(
+                    kind,
+                    "accepted" if accepted else "skipped",
+                    None if accepted else "dependency",
+                    20.0 + i if accepted else None,
+                    0.5 if accepted else None,
+                    "decay.h5" if accepted else None,
+                ),
+            ),
+        )
+
+    engine, paths, _devices = sample_engine(plan, root, record, seed=seed, kind=kind)
+    points = tuple(
+        SavedPoint(
+            TypeAdapter(CoherencePoint).validate_python(r.encoded_record.value),
+            paths.data_root / r.iteration_dir / "record.json",
+        )
+        for r in engine.records("sample-run")
+    )
+    return plan, points
+
+
 @pytest.mark.parametrize("kind", ["t1", "t2echo", "t2ramsey"])
 def test_samples_use_committed_scalars_and_last_native_snapshot(
-    inputs: Inputs, tmp_path: Path, kind: str
+    inputs: Inputs, tmp_path: Path, kind: LifetimeKind
 ) -> None:
-    from zcu_tools.experiment.workflows.exporting import SampleRun
-
-    seed = seed_from_inputs(inputs)
-    base = make_plan(inputs).model_copy(update={"fluxes": (1.0, 1.1, 1.2)})
-    if kind == "t1":
-        engine, paths, _devices = sample_engine(
-            base,
-            tmp_path,
-            lambda i: T1Point(
-                i,
-                base.fluxes[i],
-                seed,
-                20 + i if i < 2 else None,
-                0.5 if i < 2 else None,
-                None if i < 2 else "rejected",
-                None,
-                "decay.h5",
-            ),
-            seed=seed,
-        )
-        rows = export.export_t1_samples(
-            SampleRun("sample-run", base, paths.data_root, engine.records("sample-run"))
-        )
-    else:
-        plan = T2Plan.model_validate(base.model_dump())
-        cal = CalibratedPi2(
-            seed.f01_mhz,
-            seed.pi_length_us,
-            seed.readout_freq_mhz,
-            seed.readout_gain,
-            0.2,
-        )
-        engine, paths, _devices = sample_engine(
-            plan,
-            tmp_path,
-            lambda i: T2Point(
-                i,
-                plan.fluxes[i],
-                cal,
-                20 + i if i < 2 else None,
-                0.5 if i < 2 else None,
-                None if i < 2 else "rejected",
-                None,
-                "decay.h5",
-            ),
-            seed=seed,
-        )
-        if kind == "t2echo":
-            rows = export.export_t2echo_samples(
-                SampleRun(
-                    "sample-run", plan, paths.data_root, engine.records("sample-run")
-                )
-            )
-        else:
-            rows = export.export_t2ramsey_samples(
-                SampleRun(
-                    "sample-run", plan, paths.data_root, engine.records("sample-run")
-                )
-            )
+    plan, points = sample_points(inputs, tmp_path, kind)
+    rows = prepare_samples("sample-run", plan, points)
+    field = {"t1": "t1", "t2echo": "t2e", "t2ramsey": "t2r"}[kind]
     assert [row.key for row in rows] == ["sample-run/0", "sample-run/1"]
-    assert [{field.name: field.value for field in row.fields} for row in rows] == [
+    assert [{f.name: f.value for f in row.fields} for row in rows] == [
         {
             "dev_value": 40.0,
             "dev_unit": "native",
-            "freq_mhz": seed.f01_mhz,
-            f"{kind}_us": 20.0,
-            f"{kind}_err_us": 0.5,
+            "freq_mhz": seed_from_inputs(inputs).f01_mhz,
+            f"{field}_us": 20.0,
+            f"{field}_err_us": 0.5,
         },
         {
             "dev_value": 41.0,
             "dev_unit": "native",
-            "freq_mhz": seed.f01_mhz,
-            f"{kind}_us": 21.0,
-            f"{kind}_err_us": 0.5,
+            "freq_mhz": seed_from_inputs(inputs).f01_mhz,
+            f"{field}_us": 21.0,
+            f"{field}_err_us": 0.5,
         },
     ]
 
@@ -104,20 +105,8 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
 def test_prevalidation_rejects_missing_snapshot_before_any_append(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    from zcu_tools.experiment.workflows.exporting import SampleRun
-    from zcu_tools.gui.app.workflows.samples import append_samples
-
-    plan = make_plan(inputs).model_copy(update={"fluxes": (1.0, 1.1, 1.2)})
-    seed = seed_from_inputs(inputs)
-    engine, paths, _devices = sample_engine(
-        plan,
-        tmp_path,
-        lambda i: T1Point(i, plan.fluxes[i], seed, 20.0, 1.0, None, None, "decay.h5"),
-        seed=seed,
-    )
-    records = engine.records("sample-run")
-    last = records[-1]
-    path = paths.data_root / last.iteration_dir / point_files(last)[-1]
+    plan, points = sample_points(inputs, tmp_path, "t1", all_accepted=True)
+    path = points[-1].directory / "decay.h5"
     native = load_run_data(path)
     save_run_data(
         path,
@@ -130,9 +119,7 @@ def test_prevalidation_rejects_missing_snapshot_before_any_append(
     with pytest.raises(ValueError, match="snapshot"):
         append_samples(
             "sample-run",
-            rows=export.export_t1_samples(
-                SampleRun("sample-run", plan, paths.data_root, records)
-            ),
+            rows=prepare_samples("sample-run", plan, points),
             table=table,
             point="captured",
         )
@@ -165,29 +152,8 @@ class InterruptedTable(JsonlSampleTable):
 def test_partial_io_count_cause_and_retry_latest(
     inputs: Inputs, tmp_path: Path
 ) -> None:
-    from zcu_tools.experiment.workflows.exporting import SampleRun
-    from zcu_tools.gui.app.workflows.samples import SampleExportError, append_samples
-
-    plan = make_plan(inputs).model_copy(update={"fluxes": (1.0, 1.1, 1.2)})
-    seed = seed_from_inputs(inputs)
-    engine, paths, _devices = sample_engine(
-        plan,
-        tmp_path,
-        lambda i: T1Point(
-            i,
-            plan.fluxes[i],
-            seed,
-            20.0 if i < 2 else None,
-            1.0 if i < 2 else None,
-            None if i < 2 else "rejected",
-            None,
-            "decay.h5",
-        ),
-        seed=seed,
-    )
-    rows = export.export_t1_samples(
-        SampleRun("sample-run", plan, paths.data_root, engine.records("sample-run"))
-    )
+    plan, points = sample_points(inputs, tmp_path, "t1")
+    rows = prepare_samples("sample-run", plan, points)
     table = InterruptedTable(tmp_path / "history.jsonl")
     with pytest.raises(SampleExportError) as failure:
         append_samples("sample-run", rows=rows, table=table, point="captured")

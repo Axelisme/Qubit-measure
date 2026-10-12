@@ -157,7 +157,7 @@ def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
     assert failure.value.reason_code == "no_context"
 
 
-def test_current_start_and_tuning_use_new_catalog_but_old_export_stays_fixed(
+def test_current_start_and_tuning_use_new_catalog(
     source: ReloadSource,
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
@@ -179,8 +179,6 @@ def test_current_start_and_tuning_use_new_catalog_but_old_export_stays_fixed(
     source.write(2)
     window.reload_source()
     window.plan_panel.state.write({("points",): 33}, window.plan_panel.env)
-    with pytest.raises(ValueError, match="export-v1:21"):
-        window.export_fluxdep("old")
     assert isinstance(window.start("new"), int)
     harness.complete_segment()
     status = window.controller.status()
@@ -189,8 +187,6 @@ def test_current_start_and_tuning_use_new_catalog_but_old_export_stays_fixed(
         and status.workflow == "reload-v2"
         and status.lifecycle == "done"
     )
-    with pytest.raises(ValueError, match="export-v2:33"):
-        window.export_fluxdep("new")
     assert window.tuning_panel is not None
     assert type(window.tuning_panel.panel) is type(window.tunables_panel)
     inspected = window.inspect_form("tunables", run_id="new")

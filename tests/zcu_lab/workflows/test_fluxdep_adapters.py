@@ -5,6 +5,7 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     DataVariable,
     ExperimentPayload,
@@ -13,13 +14,17 @@ from zcu_tools.datafile import (
     save_run_data,
     write_labber,
 )
-from zcu_tools.experiment.workflows import PreparedFluxdepExport
 
 from tests._native_support import native_metadata
-from zcu_lab.workflows import export as science
+from zcu_lab.workflows.coherence import CoherencePoint
+from zcu_lab.workflows.coherence_export import prepare_export as prepare_coherence
+from zcu_lab.workflows.export import PreparedFluxdepExport
+from zcu_lab.workflows.export_inputs import read_manifest, read_points
+from zcu_lab.workflows.mist import MISTPoint
+from zcu_lab.workflows.mist_export import prepare_export as prepare_mist
 
-from ._export_inputs import RUN_ID
-from ._fluxdep_export_inputs import synthetic_mist_run, synthetic_t2_run
+from ._export_inputs import RUN_ID, synthetic_run
+from ._fluxdep_export_inputs import synthetic_mist_run
 from ._sim_inputs import Inputs
 
 
@@ -54,21 +59,24 @@ def read_exports(
 def test_t2_adapters_keep_unequal_delay_rows_rejection_and_missing_points(
     inputs: Inputs, tmp_path: Path, kind: Literal["echo", "ramsey"]
 ) -> None:
-    engine, plan, paths = synthetic_t2_run(inputs, tmp_path, kind)
+    engine, plan, _identity, paths = synthetic_run(
+        inputs, tmp_path, kind="t2echo" if kind == "echo" else "t2ramsey"
+    )
     assert engine.execute(RUN_ID).lifecycle == "done"
-    if kind == "echo":
-        prepared = science.prepare_t2echo_fluxdep_export(
-            plan=plan, data_root=paths.data_root, records=engine.records(RUN_ID)
-        )
-    else:
-        prepared = science.prepare_t2ramsey_fluxdep_export(
-            plan=plan, data_root=paths.data_root, records=engine.records(RUN_ID)
-        )
+    points, _missing = read_points(
+        read_manifest(paths.metadata_root, "coherence_fluxdep"),
+        TypeAdapter(CoherencePoint),
+    )
+    prepared = prepare_coherence(plan, points)
     assert prepared.cfg.values == plan.model_dump(mode="json")
     for payload in read_exports(prepared, tmp_path):
-        assert tuple(payload.variables) == ("signal", "time", f"t2{kind}")
-        signal = payload.variables[DataVariable("signal")]
-        time = payload.variables[DataVariable("time")]
+        assert tuple(payload.variables) == (
+            f"t2{kind}_signal",
+            f"t2{kind}_time",
+            f"t2{kind}",
+        )
+        signal = payload.variables[DataVariable(f"t2{kind}_signal")]
+        time = payload.variables[DataVariable(f"t2{kind}_time")]
         lifetime = payload.variables[DataVariable(f"t2{kind}")]
         np.testing.assert_array_equal(
             signal.z,
@@ -83,12 +91,12 @@ def test_t2_adapters_keep_unequal_delay_rows_rejection_and_missing_points(
             time.z, [[0, 1e-6, 2e-6], [0, 3e-6, np.nan], [np.nan] * 3, [np.nan] * 3]
         )
         np.testing.assert_array_equal(lifetime.z, [20e-6, np.nan, np.nan, np.nan])
-        assert (signal.data.name, signal.data.unit) == ("Signal", "a.u.")
-        assert (time.data.name, time.data.unit) == ("Time", "s")
-        assert (lifetime.data.name, lifetime.data.unit) == (f"T2{kind}", "s")
+        assert (signal.data.name, signal.data.unit) == (f"t2{kind} Signal", "a.u.")
+        assert (time.data.name, time.data.unit) == (f"t2{kind} Time", "s")
+        assert (lifetime.data.name, lifetime.data.unit) == (f"t2{kind}", "s")
         for channel in (signal, time):
             assert [(a.name, a.unit) for a in channel.axes] == [
-                ("Time Index", ""),
+                (f"t2{kind} Time Index", ""),
                 ("Flux", "native"),
             ]
             np.testing.assert_array_equal(channel.axes[0].values, [0, 1, 2])
@@ -102,9 +110,10 @@ def test_mist_adapter_keeps_actual_gain_axis_and_success_only(
 ) -> None:
     engine, plan, paths = synthetic_mist_run(inputs, tmp_path)
     assert engine.execute(RUN_ID).lifecycle == "done"
-    prepared = science.prepare_mist_fluxdep_export(
-        plan=plan, data_root=paths.data_root, records=engine.records(RUN_ID)
+    points, _missing = read_points(
+        read_manifest(paths.metadata_root, "mist_fluxdep"), TypeAdapter(MISTPoint)
     )
+    prepared = prepare_mist(plan, points)
     assert prepared.cfg.values == plan.model_dump(mode="json")
     for payload in read_exports(prepared, tmp_path):
         assert tuple(payload.variables) == ("signal", "success")
@@ -136,7 +145,8 @@ def test_mist_adapter_refuses_a_point_with_a_different_gain_grid(
 ) -> None:
     engine, plan, paths = synthetic_mist_run(inputs, tmp_path, mismatch=True)
     assert engine.execute(RUN_ID).lifecycle == "done"
+    points, _missing = read_points(
+        read_manifest(paths.metadata_root, "mist_fluxdep"), TypeAdapter(MISTPoint)
+    )
     with pytest.raises(ValueError, match="gain grid"):
-        science.prepare_mist_fluxdep_export(
-            plan=plan, data_root=paths.data_root, records=engine.records(RUN_ID)
-        )
+        prepare_mist(plan, points)

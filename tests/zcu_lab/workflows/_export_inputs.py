@@ -40,9 +40,12 @@ from tests.experiment.workflows._engine_fakes import (
 )
 from zcu_lab.workflows.calibration import (
     Calibrated,
-    CalibrationFailed,
+    FrequencyResult,
+    RabiResult,
+    ReadoutResult,
 )
-from zcu_lab.workflows.t1 import T1Plan, T1Point, T1Tunables
+from zcu_lab.workflows.coherence import CoherencePlan, CoherencePoint, CoherenceTunables
+from zcu_lab.workflows.coherence_measurements import LifetimeKind, LifetimeResult
 
 from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 
@@ -104,8 +107,16 @@ def synthetic_run(
     terminal: Literal["done", "stopped", "failed", "aborted"] = "done",
     *,
     run_id: str = RUN_ID,
-) -> tuple[Engine[Calibrated], T1Plan, RunIdentity, RunPaths]:
-    plan = make_plan(inputs).model_copy(update={"fluxes": (1.0, 1.1, 1.2, 1.3)})
+    kind: LifetimeKind = "t1",
+) -> tuple[Engine[Calibrated], CoherencePlan, RunIdentity, RunPaths]:
+    plan = CoherencePlan.model_validate(make_plan(inputs).model_dump()).model_copy(
+        update={
+            "fluxes": (1.0, 1.1, 1.2, 1.3),
+            "measure_t1": kind == "t1",
+            "measure_t2ramsey": kind == "t2ramsey",
+            "measure_t2echo": kind == "t2echo",
+        }
+    )
     metadata = native_metadata()
     identity = RunIdentity(
         run_id, metadata.provenance, str(plan.snapshot.entry_id), plan.snapshot.point
@@ -122,13 +133,18 @@ def synthetic_run(
         )
     )
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("T1_fluxdep", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "coherence_fluxdep", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
-    ) -> Step[int, T1Point]:
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
+    ) -> Step[int, CoherencePoint]:
         if state == 3 and terminal == "done":
             return Done()
         if state == 3 and terminal == "failed":
@@ -137,15 +153,13 @@ def synthetic_run(
             return Aborted("synthetic abort")
         if state == 2:
             return Next(
-                T1Point(
+                CoherencePoint(
                     state,
                     plan.fluxes[state],
-                    CalibrationFailed("frequency", "missing calibration"),
-                    None,
-                    None,
-                    "missing calibration",
-                    None,
-                    None,
+                    FrequencyResult("failed", "missing calibration", None, ()),
+                    RabiResult("skipped", "dependency", None, None, None, None),
+                    ReadoutResult("skipped", "dependency", None, None, None),
+                    (LifetimeResult(kind, "skipped", "dependency", None, None, None),),
                 ),
                 state + 1,
             )
@@ -154,25 +168,34 @@ def synthetic_run(
         )
         assert isinstance(calibration, Completed)
         save_trace(calibration, env.iteration_dir / "calibration.h5")
-        final = yield from env.run(acquire, TraceCfg(state, "twotone/ge/t1"))
+        final = yield from env.run(acquire, TraceCfg(state, "twotone/ge/" + kind))
         assert isinstance(final, Completed)
         save_trace(final, env.iteration_dir / "decay.h5")
         if state == 3:
             clock.on_wait = lambda _signal: engine.stop(run_id)
             yield from env.wait_until(clock.now() + timedelta(seconds=1))
         return Next(
-            T1Point(
+            CoherencePoint(
                 state,
                 plan.fluxes[state],
-                env.context,
-                20.0 if state == 0 else None,
-                1.0 if state == 0 else None,
-                None if state == 0 else "T1 fit rejected",
-                None,
-                "decay.h5",
+                FrequencyResult("accepted", None, 5000.0, ()),
+                RabiResult("accepted", None, 5000.0, 0.4, 0.2, None),
+                ReadoutResult("skipped", "cadence", None, None, None),
+                (
+                    LifetimeResult(
+                        kind,
+                        "accepted" if state == 0 else "rejected",
+                        None if state == 0 else "fit rejected",
+                        20.0 if state == 0 else None,
+                        1.0 if state == 0 else None,
+                        "decay.h5",
+                    ),
+                ),
             ),
             state + 1,
         )
 
-    engine.start(step, plan=plan, tunables=T1Tunables(), paths=paths, identity=identity)
+    engine.start(
+        step, plan=plan, tunables=CoherenceTunables(), paths=paths, identity=identity
+    )
     return engine, plan, identity, paths

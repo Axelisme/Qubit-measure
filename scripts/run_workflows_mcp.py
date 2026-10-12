@@ -25,7 +25,7 @@ if __name__ == "__main__":
         app_name="workflows",
         app_slug="workflows",
         default_port=8768,
-        mcp_version=4,
+        mcp_version=2,
         wire_version=WIRE_VERSION,
         pid_file=repo_root / "logs/workflows/gui.pid",
         log_file=repo_root / "logs/workflows/gui.log",

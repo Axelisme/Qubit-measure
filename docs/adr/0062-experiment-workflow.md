@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-12，獨立校準結果與 Coherence 提交
+**Last updated:** 2026-10-12，獨立 workflow 轉換與 frontend run 分工
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -30,15 +30,21 @@ Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 devi
 
 Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper，不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
 
-共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。T1 flux_dev 的表單 default 是顯式 $flux_dev expression，與數值欄位使用同一份固定 alias capture。Focused GUI／MCP 表單 seam、固定 RunSnapshot 與 native 再次 Save 已通過，後續 alias 修改與 Save 不重新解析該 snapshot。這些證據不涵蓋 scenario 14 或完整 integration。S4 source reload 與 U7 input 保存還原尚未實作。Base 09 終驗與使用者 CP-B 驗收仍須分別完成，不授權硬體操作。
+共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。Coherence 的新 flux_dev default 在固定 capture 解析 $flux_dev 並保存 direct literal device name。缺 capture 或 unbound alias 保留 expression error input，由公開 form 指名 Invalid，不補造 device 或阻斷 panel；其他解析錯誤照常拋出。既有 direct draft 不隨 alias 修改，使用者仍能切 eval，合法 saved input 與 MIST defaults 不改。Source reload 與 input 保存由具體 GUI app 擁有，不授權硬體操作。
 
 各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 device effect 仍由 driver 設定值與驗證 limits。
 
-## Terminal fluxdep 匯出
+## 獨立 workflow 轉換工具
 
-Engine.records 提供 committed evidence，record.json 不作提交判定。匯出是明確 host 命令，不新增 engine finalize hook 或 Done 自動保存。純資料型別在 experiment.workflows.exporting，科學 payload 在 zcu_lab.workflows.export。Host 的 export_fluxdep_run 接收一次呼叫的 frozen FluxdepExportRequest，使用注入的科學 callback、SaveLayout 與 scoped ledger。Controller 用同一 run binding 固定 Start plan、identity、provenance 與 entry paths，terminal delivery 只補 host UTC finished_at。GUI 動作、RPC 與 MCP 呼同一命令，不讀當前 draft 或硬體。
+轉換 saved run 不需要 live GUI run。各 workflow 提供自己的小工具，GUI／RPC／MCP 不再提供匯出入口。Coherence 工具支援 merged、Labber、samples；MIST 工具支援 merged、Labber 並拒絕 samples。Overnight 沒有本次要求的輸出，不新增空工具。每個工具提供可 import 的函式與 humble main(argv)，不建立通用 export_run dispatcher。
 
-Native 原子覆寫 workflow data_root/merged.h5。Labber 使用相同 payload 與明填 independent layout，在 SaveLayout 選出的新日期樹路徑保存。Datafile 擁有既有異質 layout 與完整寫入的 finalization。Signal/Time 2D 與 T1 Flux-only 1D 保持原 rank，不 union 或 broadcast。Native/Labber 的 allocation/writer failure 分別回報，未分配 Labber path 為 None。Saved ledger 事件只含 known-path attempts，附檔保留完整報告；ledger 失敗不抹掉已成功路徑。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護，不讓 framework 反向 import 使用者 adapter。格式與批次保存分工沿 [[0063]]。
+工具在 zcu_lab 讀固定 manifest 與每輪 record.json，只消費結構完整的 committed point，再讀 point 的具名 native reference。缺摘要列出每輪路徑，malformed／identity mismatch／缺檔指名 source。工具不讀 journal、不從檔名掃描或 leftover 檔建立提交點。這不是 crash resume，也不新增 framework reader 或保存保證。Shared typed envelope/native writer helpers 集中 Coherence 與 MIST 兩個使用者的輸入與失敗隔離，不做 registry 或 live Engine adapter。
+
+Run 外目的地由呼叫者明填 --result／--database。所選 flags 的必要參數與共同資料在任何寫入前先驗，merged-only 不要求外部目的地。Native 覆寫 manifest data_root/merged.h5；Labber 使用同一 payload 與既有 independent layout，在 SaveLayout 的新日期樹路徑保存。各 allocation/writer failure 分別回報，未配置 Labber path 為 None，已配置的失敗保留 path。Native run_id 不合法就回報原 writer error，不重造身分、不抹掉其他成功輸出，也不寫 ledger或自動重試。
+
+Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay，不 union、rounding 或插值。Rejected fit 保留 raw 與 NaN lifetime，disabled 不產 channel。MIST 保留 actual gain inner-first Signal 與 Flux-only Success，actual gain mismatch 拒絕。Samples 每點最多一行，有 accepted frequency 或任一 lifetime 就寫，只含接受值的 MHz/us 欄位。座標來自該點最後 Completed acquisition 的固定 native snapshot，按 frequency→Rabi→readout→T1→Ramsey→Echo，包含 calibration 與 rejected fit。全部 rows 先驗，owner 的 prefix/count/cause 與 latest-wins 不改。
+
+科學型別留在 zcu_lab，framework export-only carriers 與 frontend binding/helpers 退役。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護。該 contract 包含兩個工具、shared input/native helpers 與 samples producer。Datafile 擁有檔案格式，sample table 擁有追加與 latest-wins，工具不重做 HDF5 編碼。保存分工沿 [[0063]]。
 
 ## Iteration 目錄與保存責任
 

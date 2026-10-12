@@ -84,8 +84,6 @@ def test_selected_overnight_gui_and_mcp_commit_same_native_pairs(
     assert len(records) == 2 and all(
         len(point_files(record)) == 2 for record in records
     )
-    with pytest.raises(ValueError, match="fluxdep export binding"):
-        window.export_fluxdep("overnight-host")
 
 
 def test_explicit_unknown_mcp_start_keeps_selection_and_drafts(

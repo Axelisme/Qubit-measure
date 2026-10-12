@@ -16,6 +16,7 @@ from zcu_tools.gui.form import (
     RangeInput,
     field_error,
 )
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.coherence import CoherencePlan
 
@@ -30,8 +31,8 @@ from .calibration_modules import (
 class CoherencePlanForm(FormModel):
     """Start-time setpoints and two shared module reference/inline selections.
 
-    flux_dev is the resolved host device name; its input defaults to $flux_dev
-    in the fixed alias capture. Required flux_unit declares A, V or native.
+    flux_dev is the resolved host device name; new input defaults to a literal
+    resolved from $flux_dev in the fixed alias capture. Required flux_unit declares A, V or native.
     fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     shared pulse drive; readout selects a pulse-backed readout because native
@@ -73,11 +74,11 @@ class CoherencePlanForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Prefill the device alias expression and captured x180 pi estimate.
+        """Prefill the captured device name and x180 pi estimate.
 
-        Keep $flux_dev as an expression for shared preview/Start evaluation.
-        Missing captures or bindings produce an alias-naming field error, not
-        a device fallback. Device membership is checked only when used.
+        Resolve $flux_dev only for new defaults and keep the name literal.
+        Missing captures or unbound aliases retain the expression error input
+        for public preview/Start to report Invalid, without a device fallback. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
         the fixed alias capture and retain its concrete path as an expression
         if readable and non-null. No capture, absent/null values or
@@ -86,7 +87,16 @@ class CoherencePlanForm(FormModel):
         values produce ordinary field validation errors, not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
-        return calibration_defaults(super().defaults(env, previous), env, previous)
+        data = calibration_defaults(super().defaults(env, previous), env, previous)
+        if env.parameters is None or "flux_dev" in previous:
+            return data
+        try:
+            data["flux_dev"] = env.parameters.resolve_path("$flux_dev")
+        except RoleResolutionError as error:
+            if error.reason not in {"Alias is not bound", "Unknown alias"}:
+                raise
+            # Keep the existing expression error input; the editor names the alias.
+        return data
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:

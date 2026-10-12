@@ -1,6 +1,6 @@
 # `zcu_lab.workflows` 使用者 workflow
 
-**Last updated:** 2026-10-12，Coherence 與獨立校準 stage
+**Last updated:** 2026-10-12，獨立 run conversion 與部分校準結果
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。
 Engine 擁有迭代、輸入副本、取消、revision 與提交。宿主建立 catalog，再注入框架；import 不啟動量測。
@@ -68,7 +68,28 @@ Workflow 在 env.run 返回 Completed 後呼既有 exact-path native writer，fi
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
 Writer 沿各 experiment 的 cfg、persistence declaration、AcquisitionEvidence、RunSnapshot 與 device snapshot，不改 native 格式。
 Framework 只保存 manifest、journal 與 best-effort record.json。
-Coherence 沒有臨時 export bridge；既有 conversion adapter 的輸入仍由其各自的純資料 carrier 定義。
+Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 reader 或通用 dispatcher。
+
+## 獨立 run 轉換
+
+`coherence_export.export_run` 支援 merged、Labber 與 samples，`mist_export.export_run` 只支援 merged、Labber。
+兩個模組提供同 process 的 `main(argv)`，也能以 `python -m zcu_lab.workflows.coherence_export` 或 `mist_export` 執行。
+傳入 run 的 metadata 目錄並明選 `--merged`、`--labber` 或 Coherence 的 `--samples`。
+Samples 需要明填 `--result <entry result>`，Labber 需要 `--database <Database>`。Merged-only 不需外部目的地。
+工具在任何寫入前驗所選 flags 及共同輸入。Merged 覆寫 manifest data_root 的 merged.h5，Labber 每次在日期樹取新檔。
+各 writer 回報自己的 path/status/error。未配置的 Labber path 為 None，已配置的失敗保留 path，不自動重試或寫 ledger。
+
+工具讀固定 manifest 與每輪 record.json，再使用 committed point 的具名 native reference。
+缺摘要列出每輪路徑，壞資料指名 source，不讀 journal、掃 native 候選或重抓目前 GUI。
+Coherence 各已量 lifetime 分別輸出 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay。
+Disabled 項目沒有 channel，rejected fit 保留 raw 與 NaN lifetime，不 union、插值或重 fit。
+MIST 保留 actual gain inner-first 的 Signal 及 Flux-only Success，grid 不同就拒絕。
+
+Coherence samples 每點最多一行，有 accepted frequency 或任一 lifetime 才寫。
+僅寫接受值，欄位沿 freq_mhz 與 t1/t2r/t2e_us、對應 err_us，未接受欄位省略。
+座標來自 frequency→Rabi→readout→T1→Ramsey→Echo 的最後 Completed native snapshot，包括拒絕的 fit。
+歷史 point/component 取固定 plan，key 為 run_id/index。全部 rows 先驗再追加，I/O failure 保留 prefix/count/cause。
+Latest-wins 由 sample table owner 決定。GUI、RPC、MCP 沒有 conversion controls。
 
 `devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，yield from 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。

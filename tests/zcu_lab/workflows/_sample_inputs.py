@@ -62,26 +62,37 @@ def acquire(run: Run[CaptureCfg]) -> Capture:
     return Capture(dict(run.device_snapshot))
 
 
-def save_capture(source: Completed[CaptureCfg, Capture], path: Path) -> None:
+def save_capture(
+    source: Completed[CaptureCfg, Capture],
+    path: Path,
+    *,
+    tag: str,
+    axis: tuple[str, str] = ("Time", "s"),
+) -> None:
     save_run_data(
         path,
         ExperimentPayload(
             variables={
                 DataVariable("data"): LabberPayload(
                     ("Signal", "a.u.", np.array([1 + 0j])),
-                    [("Time", "s", np.array([0.0]))],
+                    [(axis[0], axis[1], np.array([0.0]))],
                 )
             },
             metadata=LabberMetadata(),
             representation="single",
         ),
-        replace(native_metadata(), device_snapshot=source.result.snapshot),
+        replace(native_metadata(tag), device_snapshot=source.result.snapshot),
         cfg=CfgSnapshot(values={}, cfg_type="Capture", schema_version="1.0"),
     )
 
 
 def sample_engine[R](
-    plan: BaseModel, root: Path, record: Callable[[int], R], *, seed: Calibrated
+    plan: BaseModel,
+    root: Path,
+    record: Callable[[int], R],
+    *,
+    seed: Calibrated,
+    kind: str = "t1",
 ) -> tuple[Engine[Calibrated], RunPaths, RecordingDevices]:
     """Commit two successful points and one rejected point with two env.run each."""
     devices = RecordingDevices()
@@ -116,13 +127,26 @@ def sample_engine[R](
         )
         calibration = yield from env.run(acquire, CaptureCfg(state))
         assert isinstance(calibration, Completed)
-        save_capture(calibration, env.iteration_dir / "calibration.h5")
+        save_capture(
+            calibration,
+            env.iteration_dir / "frequency.h5",
+            tag="twotone/freq",
+            axis=("Frequency", "MHz"),
+        )
+        rabi = yield from env.run(acquire, CaptureCfg(state))
+        assert isinstance(rabi, Completed)
+        save_capture(
+            rabi,
+            env.iteration_dir / "rabi.h5",
+            tag="twotone/ge/rabi_length",
+            axis=("Length", "s"),
+        )
         devices.drivers["flux"].setup(
             FakeDeviceInfo(address="none", value=40 + state), progress=False
         )
         final = yield from env.run(acquire, CaptureCfg(state))
         assert isinstance(final, Completed)
-        save_capture(final, env.iteration_dir / "decay.h5")
+        save_capture(final, env.iteration_dir / "decay.h5", tag="twotone/ge/" + kind)
         return Next(record(state), state + 1)
 
     engine.start(

@@ -3,7 +3,6 @@
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox
 from zcu_tools.cfg_model import PulseSpec
-from zcu_tools.datafile import load_run_data
 from zcu_tools.gui.form import FormErrors
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs
@@ -89,13 +88,3 @@ def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(
     assert status.workflow == name and status.committed_seq == 2
     engine = controller.engine
     assert engine is not None and len(engine.records(run_id)) == 2
-    canonical = engine.records(run_id)
-    report = window.export_fluxdep(run_id)
-    assert all(output.status == "saved" for output in report.outputs), report
-    native_path = report.outputs[0].path
-    assert native_path is not None
-    merged = load_run_data(native_path)
-    assert merged.metadata.experiment == name
-    assert merged.metadata.snapshot.point == "source"
-    assert engine.records(run_id) == canonical
-    assert tuple(merged.payload.variables) == ("signal", "success")

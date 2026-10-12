@@ -20,7 +20,6 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.workflows import (
     Actor,
     EnginePorts,
-    FluxdepExportReport,
     InvalidRunState,
     RunIdentity,
     RunPaths,
@@ -30,7 +29,6 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
-from zcu_tools.gui.app.workflows.samples import SampleExportReport
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -53,13 +51,11 @@ from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import (
-    Origin,
     RoleResolutionError,
     new_run_id,
 )
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
-from . import sample_action
 from ._form_io import inspect_form_input, prepare_start_form
 from .catalog import WorkflowCatalog, build_catalog
 from .figures import WorkflowFigureViews
@@ -104,7 +100,7 @@ class T1WorkflowWindow(QWidget):
         state belongs to services; owner marshals plot commands. parent=None is
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
         catalog=None builds T1/overnight, T1 first. loader=None is unmonitored.
-        Reload keeps session/Controller and terminal export bindings. Prepare
+        Reload keeps session/Controller and the retained run binding. Prepare
         captures context/global qubit alias; source errors propagate without I/O.
         Caller retains this Window/parent through shutdown. Close requests Stop,
         waits for delivery, then calls on_close on owner; None skips caller cleanup.
@@ -143,16 +139,12 @@ class T1WorkflowWindow(QWidget):
             (self._controls.pause, self._pause_clicked),
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
-            (self._controls.export, self._export_clicked),
             (self._controls.setup, self.open_setup),
             (self._controls.aliases, self._aliases_clicked),
             (self._controls.prepare, self._use_source_clicked),
             (self._controls.reload, self._reload_clicked),
         ):
             button.clicked.connect(slot)
-        self._controls.samples.clicked.connect(
-            lambda: sample_action.invoke_samples(self, self._controls.message)
-        )
         self._controls.reload.setEnabled(self._loader is not None)
         self._plot_host = QtPlotHost(
             FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
@@ -257,7 +249,7 @@ class T1WorkflowWindow(QWidget):
 
         Use on the GUI owner before Start or after terminal delivery. Unknown
         names raise InvalidInputError; pending/running/paused ownership rejects before
-        changes. Existing terminal run/export binding stays with Controller.
+        changes. Existing run binding stays with Controller.
         Selection reuses fixed form captures, without device/source reads. Local
         unparsed text is not saved. No run/operation/lease is created or replaced.
         """
@@ -310,7 +302,7 @@ class T1WorkflowWindow(QWidget):
         loader=None rejects unmonitored embedding. Success replaces only form
         panels/catalog, retains a still-declared selection or chooses the new
         default, and reports changed names/dropped paths in the message label.
-        services/session/controller/hardware and old run export
+        services/session/controller/hardware and the old run binding
         binding remain unchanged. Local unparsed text is not a saved draft.
         Failure retains parsed drafts and old panels but makes Start unavailable
         until successful retry. CatalogReloadError.restart_required forbids retry
@@ -527,7 +519,6 @@ class T1WorkflowWindow(QWidget):
             session.soc, session.soccfg, plots, prepared.context
         )
         identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
-        export_bindings = prepared.bind_exports(storage, identity, roots)
         # Install presentation before synchronous admission listeners can reenter.
         self._close_tuning_panel()
         self._figure_views.install_native(plots)
@@ -538,7 +529,6 @@ class T1WorkflowWindow(QWidget):
                 RunPaths(metadata_root=roots.result, data_root=roots.database),
                 identity,
                 env,
-                export_bindings,
             )
         except Exception:
             self._figure_views.start_failed()
@@ -552,8 +542,6 @@ class T1WorkflowWindow(QWidget):
         self.tunables_panel.setEnabled(False)
         self._controls.selector.setEnabled(False)
         self._controls.start.setEnabled(False)
-        self._controls.export.setEnabled(False)
-        self._controls.samples.setEnabled(False)
         self._controls.message.setText("Startup pending")
         self._forms_for_run = True
         self._poll.start()
@@ -717,51 +705,6 @@ class T1WorkflowWindow(QWidget):
                     )
             raise
 
-    def export_fluxdep(
-        self, run_id: str, *, origin: Origin = "gui"
-    ) -> FluxdepExportReport:
-        """Explicitly export the targeted terminal run and display all attempts.
-
-        Call on this Window's Qt owner. This is the GUI action and RPC's common
-        public entry, using the Controller's fixed Start plan/storage/provenance.
-        It never reads current drafts or devices. Target/pending/unsupported and
-        nonterminal errors propagate before writes. The returned report contains
-        native then Labber path/status/error and a separate ledger_error; a null
-        Labber path means allocation failed. Writer/ledger failures are displayed
-        without changing the run outcome, canonical records or prior successes.
-        """
-        report = self.controller.export_fluxdep(run_id, origin=origin)
-        lines = [
-            f"{out.format}: {out.status}, {out.path if out.path is not None else 'unallocated'}"
-            + (f", {out.error}" if out.error else "")
-            for out in report.outputs
-        ]
-        if report.ledger_error is not None:
-            lines.append(f"Ledger: {report.ledger_error}")
-        self._controls.message.setText("\n".join(lines))
-        return report
-
-    def export_samples(self, run_id: str) -> SampleExportReport:
-        """Append this terminal run's captured samples on the Qt owner and show count.
-
-        Uses Controller target/pending/terminal/unsupported admission. Science
-        validates all rows first; SampleExportError retains prefix count/cause.
-        Errors propagate; no current sources, hardware, ledger or lifecycle change.
-        """
-        report = self.controller.export_samples(run_id)
-        sample_action.show_samples_report(self._controls.message, report)
-        return report
-
-    def _export_clicked(self) -> None:
-        run_id = self.controller.run_id
-        if run_id is None:
-            return
-        try:
-            self.export_fluxdep(run_id)
-        except Exception as error:
-            self._controls.message.setText(str(error))
-            logger.exception("Workflow export action failed")
-
     def pause(self, run_id: str) -> RunStatus:
         """Request Pause of the explicit native target, retaining plan and plots.
 
@@ -795,23 +738,8 @@ class T1WorkflowWindow(QWidget):
     def _refresh_run(self) -> None:
         controller = self.controller
         status = controller.status()
-        sample_binding = controller.sample_binding
-        reason = (
-            self._forms.attachment.samples_unsupported_reason
-            if sample_binding is None
-            else sample_binding.unsupported_reason
-        )
-        sample_action.set_samples_action(
-            self._controls.samples,
-            eligible=controller.samples_export_ready,
-            reason=reason,
-        )
         if status is None:
-            self._controls.export.setEnabled(False)
             return
-        self._controls.export.setEnabled(
-            status.lifecycle in {"done", "stopped", "failed", "aborted"}
-        )
         self._controls.message.setText(status.lifecycle)
         engine = controller.engine
         if status.workflow == "overnight" and engine is not None:

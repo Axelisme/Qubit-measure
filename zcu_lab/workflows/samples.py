@@ -1,122 +1,196 @@
-"""Pure successful flux-point samples from committed scalar/native artifacts."""
+"""Coherence accepted scalars and actual last-Completed device coordinates."""
 
+from dataclasses import dataclass
 from math import isfinite
+from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from zcu_tools.datafile import load_run_data
-from zcu_tools.experiment.workflows import CommittedRecord
-from zcu_tools.experiment.workflows.exporting import SampleField, SampleRow, SampleRun
+from zcu_tools.resources.sample_table import JsonlSampleTable
 
-from .calibration import CalibrationFailed
-from .t1 import T1Plan, T1Point
-from .t2 import T2Plan, T2Point
+from zcu_lab.v2.twotone.freq.core import FreqExp
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
+from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
+
+from .coherence import CoherencePlan, CoherencePoint
+from .export import load_lifetime_trace, load_trace
+from .export_inputs import SavedPoint, native_path
 
 
-def export_t1_samples(run: SampleRun[T1Plan]) -> tuple[SampleRow, ...]:
-    """Prepare T1 rows from a fixed accepted run, without writing or fitting.
+class SampleField(BaseModel):
+    """Producer-defined finite JSON field, never owner metadata."""
 
-    run supplies the detached native plan, exact data_root and committed records.
-    Each accepted point contributes freq_mhz, t1_us/t1_err_us and dev_value/unit
-    from the point-named native decay acquisition's flux_dev snapshot, not the plan or live
-    device. Failed points are skipped. Keys are <run_id>/<zero-based index>.
-    Invalid indices/scalars, degraded summaries, missing snapshot/device/native
-    acquisition or escaped paths raise ValueError before returning any batch.
-    Native reader I/O/schema failures propagate. No source, catalog or hardware
-    is consulted and native units are preserved without conversion.
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", strict=True, allow_inf_nan=False
+    )
+    name: str = Field(min_length=1)
+    value: JsonValue
+
+    def model_post_init(self, _context: object) -> None:
+        if self.name in {"run_id", "point", "at", "source"}:
+            raise ValueError("Sample field cannot replace owner metadata")
+
+
+@dataclass(frozen=True)
+class SampleRow:
+    """One sample: workflow run/index key and uniquely named validated fields."""
+
+    key: str
+    fields: tuple[SampleField, ...]
+
+    def __post_init__(self) -> None:
+        if not self.key or len({f.name for f in self.fields}) != len(self.fields):
+            raise ValueError("Sample key must be nonempty and field names unique")
+
+
+class SampleExportError(RuntimeError):
+    """I/O failure retains written_count prefix and original cause/__cause__."""
+
+    def __init__(self, written_count: int, cause: OSError) -> None:
+        self.written_count = written_count
+        self.cause = cause
+        super().__init__(f"Sample export failed after {written_count} rows: {cause}")
+
+
+@dataclass(frozen=True)
+class SampleExportReport:
+    """Successful append receipt: workflow identity, this-call count and owner path."""
+
+    run_id: str
+    written_count: int
+    path: Path
+
+
+def append_samples(
+    run_id: str,
+    *,
+    rows: tuple[SampleRow, ...],
+    table: JsonlSampleTable,
+    point: str | None,
+) -> SampleExportReport:
+    """Append an entirely prepared batch, retaining prefix/count/cause on OSError.
+
+    table is the explicitly bound result/component owner. point is the historical
+    plan point. Retry appends every row; owner reads latest complete row per key.
+    All rows must already be validated. No ledger/accept event or rollback occurs.
     """
-    points = tuple(_decode(record, TypeAdapter(T1Point)) for record in run.records)
-    return _rows(run, points, "t1")
-
-
-def export_t2echo_samples(run: SampleRun[T2Plan]) -> tuple[SampleRow, ...]:
-    """Prepare Echo freq_mhz/t2echo_us/t2echo_err_us rows from fixed artifacts.
-
-    Uses export_t1_samples' artifact/failure semantics: one accepted flux point
-    per key, named native decay flux_dev snapshot, no fit/conversion/write/live capture.
-    Malformed evidence raises before any batch is returned; native I/O propagates.
-    """
-    points = tuple(_decode(record, TypeAdapter(T2Point)) for record in run.records)
-    return _rows(run, points, "t2echo")
-
-
-def export_t2ramsey_samples(run: SampleRun[T2Plan]) -> tuple[SampleRow, ...]:
-    """Prepare Ramsey freq_mhz/t2ramsey_us/t2ramsey_err_us from fixed artifacts.
-
-    Uses export_t1_samples' artifact/failure semantics: one accepted flux point
-    per key, named native decay flux_dev snapshot, no fit/conversion/write/live capture.
-    Malformed evidence raises before any batch is returned; native I/O propagates.
-    """
-    points = tuple(_decode(record, TypeAdapter(T2Point)) for record in run.records)
-    return _rows(run, points, "t2ramsey")
-
-
-def _decode[R: T1Point | T2Point](
-    record: CommittedRecord, adapter: TypeAdapter[R]
-) -> R:
-    if record.encoded_record.mode != "json":
-        raise ValueError("Samples require structured committed point summaries")
-    return adapter.validate_python(record.encoded_record.value)
-
-
-def _rows(
-    run: SampleRun[T1Plan] | SampleRun[T2Plan],
-    points: tuple[T1Point | T2Point, ...],
-    quantity: str,
-) -> tuple[SampleRow, ...]:
-    root = run.data_root.resolve()
-    seen: set[int] = set()
-    rows: list[SampleRow] = []
-    for record, point in zip(run.records, points, strict=True):
-        if (
-            point.index < 0
-            or point.index >= len(run.plan.fluxes)
-            or point.index in seen
-        ):
-            raise ValueError("Sample indices must be unique and inside the fixed plan")
-        seen.add(point.index)
-        if (
-            isinstance(point.calibration, CalibrationFailed)
-            or point.reason is not None
-            or point.lifetime_us is None
-        ):
-            continue
-        if point.error_us is None or not isfinite(point.error_us) or point.error_us < 0:
-            raise ValueError("Accepted sample error must be finite and nonnegative")
-        if not isfinite(point.lifetime_us) or point.lifetime_us <= 0:
-            raise ValueError("Accepted sample lifetime must be finite and positive")
-        frequency = point.calibration.f01_mhz
-        if not isfinite(frequency) or frequency <= 0:
-            raise ValueError("Accepted sample frequency must be finite and positive")
-        if point.decay_file is None:
-            raise ValueError("Accepted sample requires a native acquisition snapshot")
-        path = (root / record.iteration_dir / point.decay_file).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError("Sample acquisition path escapes data_root")
-        snapshot = load_run_data(path).metadata.device_snapshot
-        if snapshot is None or run.plan.flux_dev not in snapshot:
-            raise ValueError(f"Native snapshot lacks flux device {run.plan.flux_dev}")
-        device = snapshot[run.plan.flux_dev]
-        value, unit = device.get("value"), device.get("value_unit")
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not isfinite(value)
-        ):
-            raise ValueError(
-                "Native snapshot device value must be a finite real number"
+    if not run_id:
+        raise ValueError("Sample export requires a run_id")
+    written = 0
+    for row in rows:
+        try:
+            table.append(
+                run_id=row.key,
+                point=point,
+                source=f"workflow:{run_id}",
+                at=None,
+                **{field.name: field.value for field in row.fields},
             )
-        if not isinstance(unit, str) or not unit:
-            raise ValueError("Native snapshot device value_unit must be nonempty")
-        rows.append(
-            SampleRow(
-                f"{run.run_id}/{point.index}",
-                (
-                    SampleField(name="dev_value", value=value),
-                    SampleField(name="dev_unit", value=unit),
-                    SampleField(name="freq_mhz", value=frequency),
-                    SampleField(name=f"{quantity}_us", value=point.lifetime_us),
-                    SampleField(name=f"{quantity}_err_us", value=point.error_us),
-                ),
-            )
+        except OSError as cause:
+            raise SampleExportError(written, cause) from cause
+        written += 1
+    return SampleExportReport(run_id, written, table.path)
+
+
+def _positive(value: float | None, name: str) -> float:
+    if value is None or not isfinite(value) or value <= 0:
+        raise ValueError(f"Accepted {name} must be finite and positive")
+    return value
+
+
+def _last_completed(saved: SavedPoint[CoherencePoint]) -> str:
+    point = saved.point
+    references: list[str] = []
+    # Validate every explicit reference, not just the snapshot chosen for the row.
+    for file in point.frequency.files:
+        load_trace(saved.directory, file, FreqExp().persistence_spec())
+        references.append(file)
+    if point.rabi.file is not None:
+        load_trace(saved.directory, point.rabi.file, LenRabiExp().persistence_spec())
+        references.append(point.rabi.file)
+    if point.readout.file is not None:
+        load_trace(
+            saved.directory, point.readout.file, FreqGainExp().persistence_spec()
         )
+        references.append(point.readout.file)
+    for item in point.measurements:
+        if item.file is not None:
+            load_lifetime_trace(saved.directory, item.file, item.kind)
+            references.append(item.file)
+    if not references:
+        raise ValueError(
+            f"{saved.record_path}: Accepted sample requires a Completed acquisition"
+        )
+    return references[-1]
+
+
+def _coordinate(
+    saved: SavedPoint[CoherencePoint], device: str
+) -> tuple[SampleField, SampleField]:
+    path = native_path(saved.directory, _last_completed(saved))
+    snapshot = load_run_data(path).metadata.device_snapshot
+    if snapshot is None or device not in snapshot:
+        raise ValueError(f"{path}: Native snapshot lacks flux device {device}")
+    value, unit = snapshot[device].get("value"), snapshot[device].get("value_unit")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(value)
+    ):
+        raise ValueError(f"{path}: Device value must be finite real")
+    if not isinstance(unit, str) or not unit:
+        raise ValueError(f"{path}: Device value_unit must be nonempty")
+    return SampleField(name="dev_value", value=value), SampleField(
+        name="dev_unit", value=unit
+    )
+
+
+def prepare_samples(
+    run_id: str, plan: CoherencePlan, points: tuple[SavedPoint[CoherencePoint], ...]
+) -> tuple[SampleRow, ...]:
+    """Prepare at most one row per point: accepted frequency OR any lifetime.
+
+    Only accepted values appear in MHz/us fields (t1, t2r, t2e). Calibration
+    success is not a row gate. Coordinates preserve last Completed native device
+    value/unit in frequency→Rabi→readout→T1→Ramsey→Echo order, including rejected
+    fits. No plan/live/alias substitution or fitting occurs. Validate the whole
+    batch before returning; malformed scalars/references/snapshots raise with
+    their record/native source and nothing is appended.
+    """
+    rows: list[SampleRow] = []
+    for saved in points:
+        point = saved.point
+        fields: list[SampleField] = []
+        try:
+            if point.frequency.status == "accepted":
+                fields.append(
+                    SampleField(
+                        name="freq_mhz",
+                        value=_positive(point.frequency.frequency_mhz, "frequency"),
+                    )
+                )
+            for item in point.measurements:
+                if item.status != "accepted":
+                    continue
+                quantity = {"t1": "t1", "t2ramsey": "t2r", "t2echo": "t2e"}[item.kind]
+                value = _positive(item.lifetime_us, quantity)
+                if (
+                    item.error_us is None
+                    or not isfinite(item.error_us)
+                    or item.error_us < 0
+                ):
+                    raise ValueError(
+                        f"Accepted {quantity} error must be finite/nonnegative"
+                    )
+                fields.extend(
+                    (
+                        SampleField(name=quantity + "_us", value=value),
+                        SampleField(name=quantity + "_err_us", value=item.error_us),
+                    )
+                )
+            if fields:
+                fields.extend(_coordinate(saved, plan.flux_dev))
+                rows.append(SampleRow(f"{run_id}/{point.index}", tuple(fields)))
+        except ValueError as error:
+            raise ValueError(f"{saved.record_path}: {error}") from error
     return tuple(rows)

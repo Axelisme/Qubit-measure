@@ -223,6 +223,43 @@ def test_submit_failure_leaves_no_accepted_run_or_paths(
     assert not (entry.database_path / "workflows").exists()
 
 
+def test_start_button_identity_is_accepted_by_native_conversion(
+    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+) -> None:
+    """Ordinary Start generates an identity usable by the native writer/reader."""
+    from zcu_tools.datafile import load_run_data
+
+    from zcu_lab.workflows.coherence_export import export_run
+
+    window, harness, entry = attachment
+    window.plan_panel.state.write(
+        {("fluxes", "kind"): "list", ("fluxes", "values"): [1.0]}, FormEnv()
+    )
+    window.tunables_panel.state.reset(
+        FormInput(
+            CoherenceTunablesForm,
+            {
+                "cal": {"span_mhz": 2.0, "rabi_start_factor": 0.125},
+                "t1": {"rounds": 2},
+            },
+        )
+    )
+    start = window.findChild(QPushButton, "workflow.run.start")
+    assert start is not None
+    start.click()
+    harness.complete_segment()
+    run_id = window.controller.run_id
+    assert run_id is not None
+    report = export_run(entry.result_path / "workflows" / run_id)
+    assert report.outputs[0].status == "saved", report
+    native = load_run_data(entry.database_path / "workflows" / run_id / "merged.h5")
+    assert (
+        native.metadata.run_id == run_id and native.metadata.snapshot.point == "source"
+    )
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == "done"
+
+
 def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:
