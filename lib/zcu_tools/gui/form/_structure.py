@@ -395,15 +395,10 @@ def _compatible_sequence(annotation: object, value: JsonValue) -> bool:
     return all(_compatible(FieldInfo.from_annotation(args[0]), item) for item in value)
 
 
-def _restore_field(
-    info: FieldInfo,
-    current: JsonValue,
-    saved: JsonValue,
-    env: FormEnv,
-    path: FormPath,
-    dropped: list[FormPath],
-) -> JsonValue:
-    tag = discriminator(info)
+def _restore_child_model(
+    info: FieldInfo, current: JsonValue, saved: JsonValue, tag: str | None
+) -> type[BaseModel] | None:
+    """Select a saved branch without coercion; omitted tags keep the current branch."""
     child = selected(info, saved)
     if child is None and tag is None and isinstance(saved, dict):
         # Raw shape, not evaluation/Pydantic coercion, identifies an untagged
@@ -417,33 +412,56 @@ def _restore_field(
             child = matches[0]
     if isinstance(saved, dict) and tag is not None and tag not in saved:
         child = selected(info, current)
+    return child
+
+
+def _restore_branch_seed(
+    child: type[BaseModel],
+    current: JsonValue,
+    saved: dict[str, JsonValue],
+    tag: str | None,
+    env: FormEnv,
+    path: FormPath,
+) -> dict[str, JsonValue]:
+    """Inherit current fields, using branch defaults only when the tag changes."""
+    prior = current if isinstance(current, dict) else {}
+    if tag is None or tag not in saved or saved[tag] == prior.get(tag):
+        return (
+            copy_object(prior) if isinstance(current, dict) else static_defaults(child)
+        )
+    try:
+        seed = _branch_defaults(child, env, prior)
+    except PydanticCustomError as exc:
+        from ._sources import prefix_error
+
+        raise prefix_error(exc, path) from exc
+    seed.update(
+        {
+            name: prior[name]
+            for name in child.model_fields
+            if name != tag and name in prior
+        }
+    )
+    seed[tag] = saved[tag]
+    return seed
+
+
+def _restore_field(
+    info: FieldInfo,
+    current: JsonValue,
+    saved: JsonValue,
+    env: FormEnv,
+    path: FormPath,
+    dropped: list[FormPath],
+) -> JsonValue:
+    tag = discriminator(info)
+    child = _restore_child_model(info, current, saved, tag)
     if child is not None and isinstance(saved, dict):
         # Structural selectors cannot accept Expr or complex envelopes.
         if tag is not None and isinstance(saved.get(tag), dict):
             dropped.append((*path, tag))
             saved = {name: value for name, value in saved.items() if name != tag}
-        prior = current if isinstance(current, dict) else {}
-        if tag is not None and tag in saved and saved[tag] != prior.get(tag):
-            try:
-                seed = _branch_defaults(child, env, prior)
-            except PydanticCustomError as exc:
-                from ._sources import prefix_error
-
-                raise prefix_error(exc, path) from exc
-            seed.update(
-                {
-                    name: prior[name]
-                    for name in child.model_fields
-                    if name != tag and name in prior
-                }
-            )
-            seed[tag] = saved[tag]
-        else:
-            seed = (
-                copy_object(prior)
-                if isinstance(current, dict)
-                else static_defaults(child)
-            )
+        seed = _restore_branch_seed(child, current, saved, tag, env, path)
         return _restore_model(child, seed, saved, env, path, dropped)
     if isinstance(saved, dict) and model_types(info.annotation):
         dropped.append(path)
