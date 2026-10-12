@@ -76,7 +76,11 @@ Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive
 root `tests/conftest.py` 在子目錄的 conftest 和測試匯入前導向暫存 cache，
 各 xdist worker 使用自己的 cache。guard 比對使用者真實 GUI cache 的存在性、metadata 與內容。
 測試不得寫入真實 cache；偵測到變動時，guard 讓 session 失敗並指出污染的 node 與 phase。
-啟動與 session finish 的污染以生命週期 phase 標示。
+啟動與 session finish 的污染以生命週期 phase 標示，比對止於 session finish。
+
+最外層 cache 隔離持續到 process 結束，不在 session finish 或 unconfigure 還原真實 cache。
+因此 pytest cleanup 仍寫入暫存目錄。巢狀 `pytest.main()` 結束時還原已隔離的外層
+`XDG_CACHE_HOME`，不切回使用者 cache。
 
 非 Linux 在 pytest 啟動時以 `UsageError` 拒絕執行，訊息說明只支援 Linux 的 `XDG_CACHE_HOME`。
 不降級成未隔離的測試。Windows 實測不在目前支援範圍。
