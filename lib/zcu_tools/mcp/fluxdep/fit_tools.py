@@ -19,6 +19,16 @@ class DatabaseArguments(TypedDict):
     path: str
 
 
+class FitResultArguments(TypedDict):
+    """image requests J5 evidence when the native result is fresh and has quality.
+
+    Omission defaults to True. GUI supplies fit availability and freshness; this
+    query never changes inputs, starts search or infers dependencies.
+    """
+
+    image: NotRequired[bool]
+
+
 class FitArguments(TypedDict):
     """Optional overrides of current GUI inputs; omitted keys retain GUI values.
 
@@ -76,6 +86,24 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         rendered = call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
         return with_png(summary, rendered)
 
+    def fit_result(arguments: FitResultArguments) -> ToolReply:
+        recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
+        summary = search_summary(recorded)
+        stale = recorded.data["stale"]
+        summary.data.update(
+            {
+                "stale": stale,
+                "stale_reasons": recorded.data["stale_reasons"],
+            }
+        )
+        if stale:
+            summary.data["note"] = "rerun fluxdep_fit to refresh"
+        if not stale and arguments.get("image", True):
+            return with_png(
+                summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
+            )
+        return summary
+
     # Reuse native declarations, changing only the agent patch/clear interface.
     properties: dict[str, object] = {
         spec.name: schema_property(spec)
@@ -108,6 +136,14 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
                 "mirrors need sample_f, and mirror blue/red need both."
             ),
             "inputSchema": {"type": "object", "properties": properties},
+        },
+        bridge.config.tool_prefix + "fit_result": {
+            "handler": fit_result,
+            "description": "Read the recorded fit and native freshness. Fresh quality-bearing results attach J5 evidence by default; stale results never attach an image. image=false suppresses evidence without changing the fit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"image": {"type": "boolean", "default": True}},
+            },
         },
         bridge.config.tool_prefix + "database_info": {
             "handler": database_info,

@@ -177,21 +177,33 @@ def test_finish_and_image_override_return_native_evidence(
     assert client.transport.requests[-1]["params"] == {"name": "one"}
 
 
-def test_align_finish_projects_native_invalidated_without_deriving_targets(client: Client):
+def test_align_finish_projects_native_invalidated_without_deriving_targets(
+    client: Client,
+):
     finished = native(closed=True)
     finished["invalidated"] = ["native points", "native mask", "fit"]
     buffer = BytesIO()
     with Image.new("RGB", (12, 8), "red") as image:
         image.save(buffer, format="PNG")
     png = buffer.getvalue()
-    client.transport.replies.extend([
-        GuiResponse(result=native()), GuiResponse(result=finished),
-        GuiResponse(result={"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}),
-    ])
+    client.transport.replies.extend(
+        [
+            GuiResponse(result=native()),
+            GuiResponse(result=finished),
+            GuiResponse(
+                result={
+                    "png_b64": base64.b64encode(png).decode("ascii"),
+                    "bytes": len(png),
+                }
+            ),
+        ]
+    )
     reply = invoke(client, command="finish")
     assert reply.data.get("invalidated") == ["native points", "native mask", "fit"]
     assert [request["method"] for request in client.transport.requests] == [
-        "spectrum.interactive.open", "spectrum.interactive.command", "spectrum.render",
+        "spectrum.interactive.open",
+        "spectrum.interactive.command",
+        "spectrum.render",
     ]
 
 

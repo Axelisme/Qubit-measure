@@ -97,6 +97,8 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
         }
         if changes:
             summary["changes"] = changes
+        if "invalidated" in native:
+            summary["invalidated"] = native["invalidated"]
         if "discarded" in opened:
             summary["discarded"] = opened["discarded"]
         if command == "auto_align":

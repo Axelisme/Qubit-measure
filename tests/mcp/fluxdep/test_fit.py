@@ -171,10 +171,15 @@ def queue_finished(
 
 @pytest.mark.parametrize("stale,image", [(False, True), (False, False), (True, True)])
 def test_fit_result_projects_freshness_and_only_renders_fresh_requested_evidence(
-    client: Client, recorded_fit: dict[str, object], stale: bool, image: bool,
+    client: Client,
+    recorded_fit: dict[str, object],
+    stale: bool,
+    image: bool,
 ) -> None:
     recorded_fit["stale"] = stale
-    recorded_fit["stale_reasons"] = ["one re-aligned", "filter changed"] if stale else []
+    recorded_fit["stale_reasons"] = (
+        ["one re-aligned", "filter changed"] if stale else []
+    )
     client.transport.replies.append(GuiResponse(result=recorded_fit))
     png = b""
     if not stale and image:
@@ -182,9 +187,14 @@ def test_fit_result_projects_freshness_and_only_renders_fresh_requested_evidence
         with Image.new("RGB", (12, 8), "red") as evidence:
             evidence.save(buffer, format="PNG")
         png = buffer.getvalue()
-        client.transport.replies.append(GuiResponse(result={
-            "png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png),
-        }))
+        client.transport.replies.append(
+            GuiResponse(
+                result={
+                    "png_b64": base64.b64encode(png).decode("ascii"),
+                    "bytes": len(png),
+                }
+            )
+        )
     tool = client.server.tools.get("fluxdep_fit_result")
     if tool is None:
         pytest.fail("missing composed fit_result decision tool")
