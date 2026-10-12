@@ -86,20 +86,17 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
     ]:
         if state.index == 2:
             return Done()
+        captured = calibration.CalibrationInputs(plan.qub_pulse, plan.readout, tun)
         frequency = yield from frequency_stage(
             env,
-            qub_pulse=plan.qub_pulse,
-            readout=plan.readout,
-            tun=tun,
+            inputs=captured,
             flux=float(state.index),
             carry=state.carry,
             save=partial(save_frequency, snapshot=plan.snapshot),
         )
         rabi = yield from rabi_stage(
             env,
-            qub_pulse=plan.qub_pulse,
-            readout=plan.readout,
-            tun=tun,
+            inputs=captured,
             frequency=frequency,
             carry=state.carry,
             t1_estimate_us=50.0,
@@ -107,10 +104,7 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
         )
         readout = yield from readout_stage(
             env,
-            qub_pulse=plan.qub_pulse,
-            readout=plan.readout,
-            tun=tun,
-            frequency=frequency,
+            inputs=captured,
             rabi=rabi,
             point_index=state.index,
             carry=state.carry,
