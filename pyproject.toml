@@ -210,7 +210,9 @@ testpaths = ["tests"]
 # lanes stay isolated. pytest clears this directory at session start.
 # Installing the quality group must not randomize ordinary collection or runs.
 # Diagnostics opt in explicitly with `pytest -p randomly --randomly-seed=<seed>`.
-addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly"
+# Ticket checks omit slow tests. Before land review, CLI -m "" includes all tests;
+# -m slow selects only the slow subset, not the full suite.
+addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly -m 'not slow'"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",
@@ -218,7 +220,7 @@ filterwarnings = [
 ]
 markers = [
   "requires_loopback: integration tests that bind or connect a real loopback socket",
-  "slow: slow tests (e.g. qutip cross-validation)",
+  "slow: expensive validation reserved for pre-land review (see tests/README.md)",
   # Capability markers. A module declares what it uses; tools/check_test_capabilities.py
   # checks the declaration. These name a capability, not permission to be slow, so
   # mismarking makes a test wrong rather than exempt.
