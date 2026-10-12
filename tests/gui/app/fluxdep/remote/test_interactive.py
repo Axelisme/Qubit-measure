@@ -183,7 +183,7 @@ def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteH
         assert image.size == (640, 480)
     assert _context(one_route.request(link, "interactive.read", name="one"))["can_undo"] is True
     denied = one_route.request(link, "spectrum.interactive.command", name="other", context_id=first["context_id"], command="undo")
-    _error(denied, "FAILED_PRECONDITION", "interactive_context_changed")
+    _error(denied, "precondition_failed", "interactive_context_changed")
     assert _picker_command(one_route, link, first, "finish")["ok"]
     assert _context(one_route.request(link, "interactive.read", name="other"))["context_id"] == second["context_id"]
     listed = one_route.request(link, "spectrum.list")
@@ -202,7 +202,7 @@ def test_observer_display_selection_is_readonly_and_preserves_drafts(one_route: 
     assert one_route.ctrl.state.version.snapshot() == versions
     assert _context(one_route.request(observer, "interactive.read", name="one"))["context_id"] == draft["context_id"]
     denied = _picker_command(one_route, observer, draft, "undo")
-    _error(denied, "FAILED_PRECONDITION", "readonly_connection")
+    _error(denied, "precondition_failed", "not_holder")
 
 
 def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
