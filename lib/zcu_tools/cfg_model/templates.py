@@ -52,7 +52,7 @@ class TemplateDef:
     ``seeds`` maps dotted paths relative to that Spec's root to literal scalars
     or Expr bodies or Slot nodes. Strings, Expr bodies and Slot paths can contain
     component placeholders; expansion preserves their distinct types. Slot's
-    Form-only options are retained without expansion or source resolution.
+    consumer-specific options are retained without expansion or source resolution.
     ``default_name`` suggests a library entry name; empty means no suggestion,
     including blanks.
 
