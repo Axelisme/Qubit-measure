@@ -117,7 +117,9 @@ def test_search_attributes_points_and_summarizes_all_transitions(tmp_path, noisy
     np.testing.assert_array_equal(result.predicted_freqs, predicted)
     np.testing.assert_array_equal(result.transition_indices, indices)
     np.testing.assert_array_equal(result.residuals, residuals)
-    np.testing.assert_array_equal(result.outlier_mask, [False] * 9 + ([True] if noisy else []))
+    np.testing.assert_array_equal(
+        result.outlier_mask, [False] * 9 + ([True] if noisy else [])
+    )
     quality = result.quality
     assert quality.mean == pytest.approx(1.0875 if noisy else 0.0)
     assert quality.outlier_threshold == pytest.approx(3.2625 if noisy else 0.0)
@@ -135,7 +137,16 @@ def test_search_attributes_points_and_summarizes_all_transitions(tmp_path, noisy
         "mirror2 0-1",
     ]
     assert [summary.points for summary in quality.per_transition] == [
-        1, 1, 0, 1, 1, 1, 1, 1, 1, 2 if noisy else 1
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2 if noisy else 1,
     ]
     assert [summary.mean for summary in quality.per_transition] == [
         0.125 if noisy else 0.0,

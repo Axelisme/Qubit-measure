@@ -8,6 +8,8 @@ flux-dependent spectroscopy, including energy calculations and transition models
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -28,6 +30,37 @@ def count_max_evals(transitions: TransitionDict) -> int:
     return max_lvl
 
 
+def _transition_groups(
+    transitions: TransitionDict, levels: int
+) -> Iterator[tuple[str, float, float]]:
+    """Keep diagnostic labels in the same order as the numeric compilation."""
+    r_f = float(transitions.get("r_f", 0.0))
+    sample_f = float(transitions.get("sample_f", 0.0))
+    yield "transitions", 1.0, 0.0
+    yield "blue side", 1.0, r_f
+    yield "red side", -1.0, r_f
+    yield "mirror", -1.0, sample_f
+    yield "mirror blue", -1.0, sample_f - r_f
+    yield "mirror red", 1.0, sample_f - r_f
+    for n in range(2, levels):
+        yield f"transitions{n}", 1.0 / n, 0.0
+        yield f"mirror{n}", -1.0 / n, sample_f
+
+
+def transition_labels(transitions: TransitionDict, levels: int) -> tuple[str, ...]:
+    """Return ``category i-j`` labels in compile_transitions column order.
+
+    levels is the database energy-level count. Pair order and duplicate pairs
+    are preserved within each category; empty categories produce no labels.
+    Numeric frequency validation belongs to compile_transitions.
+    """
+    return tuple(
+        f"{category} {i}-{j}"
+        for category, _, _ in _transition_groups(transitions, levels)
+        for i, j in transitions.get(category, [])
+    )
+
+
 def compile_transitions(
     transitions: TransitionDict, M: int
 ) -> tuple[NDArray[np.int32], NDArray[np.float64], NDArray[np.float64]]:
@@ -43,13 +76,6 @@ def compile_transitions(
     """
     validate_transition_frequencies(transitions)
 
-    r_f = 0.0
-    if "r_f" in transitions:
-        r_f = float(transitions["r_f"])
-    sample_f = 0.0
-    if "sample_f" in transitions:
-        sample_f = float(transitions["sample_f"])
-
     pairs: list[tuple[int, int]] = []
     coeffs: list[float] = []
     offsets: list[float] = []
@@ -60,16 +86,8 @@ def compile_transitions(
             coeffs.append(c)
             offsets.append(off)
 
-    _add(transitions.get("transitions", []), 1.0, 0.0)
-    _add(transitions.get("blue side", []), 1.0, r_f)
-    _add(transitions.get("red side", []), -1.0, r_f)
-    _add(transitions.get("mirror", []), -1.0, sample_f)
-    _add(transitions.get("mirror blue", []), -1.0, sample_f - r_f)
-    _add(transitions.get("mirror red", []), 1.0, sample_f - r_f)
-
-    for n in range(2, M):
-        _add(transitions.get(f"transitions{n}", []), 1.0 / n, 0.0)
-        _add(transitions.get(f"mirror{n}", []), -1.0 / n, sample_f)
+    for category, coefficient, offset in _transition_groups(transitions, M):
+        _add(transitions.get(category, []), coefficient, offset)
 
     if not pairs:
         return (
