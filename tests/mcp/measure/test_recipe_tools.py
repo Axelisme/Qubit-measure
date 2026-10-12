@@ -413,12 +413,12 @@ def test_tool_assembly_refuses_inconsistent_or_colliding_injection(tmp_path):
         ({"unknown": 1}, "Additional properties"),
     ],
 )
-def test_production_lookback_rejects_invalid_inputs_before_gui_access(
+def test_injected_pipeline_rejects_invalid_inputs_before_gui_access(
     tmp_path, arguments, match
 ):
     client = make_client(tmp_path, WritebackGui())
     with closing(client.context.session):
-        rejected = client.call("lookback", arguments)
+        rejected = client.call("pipeline", arguments)
         assert rejected.is_error and rejected.data["status"] == "failed"
         assert match in rejected.data["error"]["message"]
         full = client.call(
@@ -429,12 +429,12 @@ def test_production_lookback_rejects_invalid_inputs_before_gui_access(
         assert client.transport.sent == []
 
 
-def test_production_lookback_preserves_sources_and_only_writes_after_answer(tmp_path):
+def test_injected_pipeline_preserves_sources_and_only_writes_after_answer(tmp_path):
     gui = WritebackGui()
     client = make_client(tmp_path, gui)
     with closing(client.context.session):
         question = client.call(
-            "lookback",
+            "pipeline",
             {
                 "frequency_mhz": 5100,
                 "readout_length_us": 4,
@@ -541,7 +541,7 @@ def test_question_and_answer_share_json_stdio_projection(tmp_path, monkeypatch):
     client = make_client(tmp_path, gui)
     with closing(client.context.session):
         question = stdio_data(
-            call_stdio(monkeypatch, client, "lookback", {"frequency_mhz": 5100})
+            call_stdio(monkeypatch, client, "pipeline", {"frequency_mhz": 5100})
         )
         assert question["status"] == "awaiting_answer"
         assert question["question_items"] == ["frequency"]
@@ -562,3 +562,24 @@ def test_question_and_answer_share_json_stdio_projection(tmp_path, monkeypatch):
         assert result["writeback"]["receipts"][0]["completed"][0]["written"][0][
             "after"
         ] == {"value": 2.0}
+
+
+@pytest.mark.parametrize("post", [False, True], ids=["primary", "primary-post"])
+def test_question_cancel_retains_images_without_rpc_or_writeback(tmp_path, post):
+    gui = WritebackGui()
+    client = make_client(tmp_path, gui, recipes=(SAMPLE,))
+    with closing(client.context.session):
+        question = client.call("sample", {"post": post, "write": True})
+        assert question.data["status"] == "awaiting_answer"
+        before = list(client.transport.sent)
+        key = question.data["execution"]
+        client.call("cancel", {"execution": key})
+        terminal = client.call("wait", {"execution": key, "timeout": 2})
+        assert terminal.data["status"] == "cancelled"
+        assert [image.data for image in terminal.images] == [
+            image.data for image in question.images
+        ]
+        assert len(terminal.images) == (2 if post else 1)
+        assert terminal.data["writeback"]["receipts"] == ()
+        assert gui.writes == []
+        assert client.transport.sent == before

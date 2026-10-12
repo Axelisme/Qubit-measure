@@ -17,17 +17,18 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_tools.gui.cfg import (
     EvalValue,
     ScalarSpec,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
 
@@ -89,7 +90,9 @@ class SsT1Adapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()

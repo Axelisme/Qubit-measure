@@ -8,8 +8,6 @@ import pytest
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
 
-from zcu_lab.recipes.helpers import set_frequency
-
 from ._recipe_execution_support import definition
 from ._recipe_parameter_support import TargetGui
 from ._support import make_client
@@ -27,9 +25,9 @@ def targeted(
         aliases=None if target is None else {"qubit": target},
         reuse=reuse_tab_id,
     )
-    set_frequency(
-        tab, "modules.readout", calibration="$resonator.freq", required="readout_ref"
-    )
+    tab.read_value("$resonator.freq")
+    for path in ("modules.readout.pulse_cfg.freq", "modules.readout.ro_cfg.ro_freq"):
+        tab.set(path, {"__expr": "$resonator.freq"}, source="$resonator.freq")
     yield tab.run()
 
 
@@ -87,12 +85,7 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
         tab = session.open_tab("lookback", aliases=aliases, reuse=reuse)
         aliases["resonator"] = "missing"
         tab.use_library("modules.readout", None, required="readout_ref")
-        set_frequency(
-            tab,
-            "modules.readout",
-            calibration="$resonator.freq",
-            required="readout_ref",
-        )
+        tab.read_value("$resonator.freq")
         yield tab.run()
 
     registered = definition(

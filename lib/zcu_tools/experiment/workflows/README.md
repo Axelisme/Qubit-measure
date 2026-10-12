@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-12，iteration 保存與獨立 workflow conversion 分工
+**Last updated:** 2026-10-13，泛型宿主與 workflow 自有繪圖
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -28,7 +28,7 @@ Package 內的保存 seam 只負責 typed journal、manifest、iteration 路徑�
 
 每個已結束 invocation 在 `iter/<至少六位 call_seq>/record.json` 保存輸入與結果摘要。格式為 `zcu-workflow-iteration`，版本為 1，包含 identity、workflow、完整 plan、本次 capture 的完整普通 tunables、started 與 result。Started 保存 call_seq、commit_seq、revision、kind。Result 沿用 journal 的 StepCommitted／Finished／Discarded／Failed 欄位。具體檔名屬於 encoded point record，框架不解讀。摘要不保存 state，也不複製 native 檔案的 cfg 或量測結果；EncodedRecord 沿用 json／repr／null 規則。
 
-Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加 replace 原子保存摘要。執行中的 invocation 沒有 record.json，不先建 pending 檔。摘要序列化或 I/O 失敗只記 log，不改變提交、state publication、後續 step 或 run 終態。Journal 仍是 commit 唯一權威；record.json 不是 checkpoint，不支援 crash resume。核心不提供 committed journal reader。Overnight 的 live 趨勢只取 Engine.records，不保存或重開趨勢圖。Workflow 實作者自行處理 iter 內的圖形保存，不新增框架存圖 interface。責任分工見 ADR-0062。
+Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加 replace 原子保存摘要。執行中的 invocation 沒有 record.json，不先建 pending 檔。摘要序列化或 I/O 失敗只記 log，不改變提交、state publication、後續 step 或 run 終態。Journal 仍是 commit 唯一權威；record.json 不是 checkpoint，不支援 crash resume。核心不提供 committed journal reader。Workflow 透過 `env.plots` 自行決定繪圖資料與更新時機。框架不輪詢 records，也不保證圖只呈現 journal 已提交的紀錄。Workflow 實作者自行處理 iter 內的圖形保存，不新增框架存圖 interface。責任分工見 ADR-0062。
 
 RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
 
@@ -36,9 +36,11 @@ Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init�
 
 `WorkflowEnv.plots` 直接提供注入的 `Plots`，跨步驟與 retry 保留同一個繪圖 lifetime。`live` 接 `LiveUpdate` 回呼，收到 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含 partial NaN。回呼同步執行，不修改或保留借用的資料；workflow 用 typed handles 投影實數，或以 draw 任意繪圖、save 保存。Run 只綁定一個 buffer，保留回呼錯誤來源，不驗證繪圖策略。宿主在 producer 停止後 finish／release，Pause 不結束 Plots。回呼簽名目前是顧問代裁，待使用者審查。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
 
-獨立 GUI app 已接線。Window 使用同一份 SessionServices 的 runner／progress，app 重用 zcu_lab 的單一 ALIAS_PRESET。這些組裝屬於宿主，不改變核心的 device、run 或保存契約。具體 forms、source reload 與 input 保存由 zcu_lab.workflows.gui 擁有。
+獨立 GUI app 已接線。`zcu_tools.gui.app.workflows` 擁有泛型 Window、App 組裝、forms 協調、source reload 與 input 保存。Window 使用同一份 SessionServices 的 runner／progress，組合根注入註冊清單、source loader 與 alias preset。核心與宿主不依賴具體 workflow 或 `Calibrated`，不反向 import `zcu_lab`。各 workflow 保留自己的 forms 與科學流程。這些組裝不改變核心的 device、run 或保存契約。
 
-各 workflow 的獨立工具在 zcu_lab 讀 manifest、iteration record.json 與 point 具名 native reference。框架不提供 reader、export-only carrier 或通用 dispatcher，不解讀具體實驗、device snapshot 或單位。GUI/Controller 不保留 export binding。工具的輸入驗證、科學 payload 與 writers 分工見 zcu_lab.workflows。缺 record 不代表無量測，不能從 leftover native 檔創造提交點。
+`saved_run` 提供 typed manifest／iteration reader，由 caller 傳入 workflow 名稱與 point TypeAdapter。它只消費 structured committed summaries，指名缺失與 malformed source，不讀 journal 或從 leftover native 檔創造提交點。`export` 以 caller 的 native declaration 讀具名 trace，並對已準備好的 grouped payload 分別寫 merged native 與 Labber。Writer failure 保留各自 path／error，不操作 ledger 或修復 run identity。
+
+各 workflow 的獨立工具留在 zcu_lab，擁有科學 payload、channel、單位與樣本政策。框架不提供通用 dispatcher，不解讀具體實驗或 device snapshot。GUI/Controller 不保留 export binding。缺 record 不代表無量測。
 
 ## 驗證 owner
 

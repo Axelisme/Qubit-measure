@@ -184,8 +184,10 @@ The runtime seam deliberately stops above remote method/domain/session policy:
 launchers (`measure`, `fluxdep`, `dispersive`, `workflows`) use this runtime
 directly. Measurement-session apps keep their domain composition in app behavior
 classes and launcher-provided factories. The workflows launcher composes
-`zcu_lab.workflows.gui.app.WorkflowsGuiBehavior`: one fresh EMPTY session, one
-T1 Window/Controller, and an optional RPC adapter over those same owners. It opens
+`zcu_tools.gui.app.workflows.app.WorkflowsGuiBehavior`: one fresh EMPTY session,
+one generic Window/Controller, and an optional RPC adapter over those same owners.
+The launcher injects the lab's ordered workflow registrations, alias preset and
+bounded source loader. The loader rereads the lab registry on reload. It opens
 shared Setup non-modally. Assembly normally restores saved parsed plan/knobs
 input before display; `--clean` skips reading the previous input file. Successful
 close still saves current input. Launch does not restore native runs or connect

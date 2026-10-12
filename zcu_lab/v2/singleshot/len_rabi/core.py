@@ -3,12 +3,18 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from numbers import Real
 from typing import ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
+from zcu_tools.analysis.fitting.singleshot_rabi import (
+    RabiJointFitResult,
+    fit_rabi_joint,
+)
+from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -17,6 +23,7 @@ from zcu_tools.experiment import (
     Axis,
     PersistableExperiment,
     ZSpec,
+    config,
 )
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -24,20 +31,17 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.plotting.singleshot_rabi import plot_rabi_joint
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
+    PulseReadoutCfg,
     ReadoutCfg,
     ResetCfg,
     SweepCfg,
 )
 
-from zcu_lab.v2._support.singleshot.rabi_analysis import (
-    classify_rabi_iq,
-    plot_rabi_joint,
-)
-from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult, fit_rabi_joint
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
 
@@ -213,7 +217,20 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
             initial_state=options.initial_state,
         )
         readout = source.cfg.modules.readout if source.cfg is not None else None
+        if readout is None:
+            ro_length = None
+        elif isinstance(readout, PulseReadoutCfg):
+            ro_length = readout.ro_cfg.ro_length
+        else:
+            ro_length = readout.ro_length
+        ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
         plot_rabi_joint(
-            result.lengths, result.signals, fit, readout, sweep="length", plots=plots
+            result.lengths,
+            result.signals,
+            fit,
+            ro_length_us,
+            sweep="length",
+            plots=plots,
+            figsize=config.figsize,
         )
         return fit

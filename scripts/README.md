@@ -1,8 +1,8 @@
 # Scripts
 
-**Last updated:** 2026-10-12，Coherence native workflow simulator
+**Last updated:** 2026-10-13，使用者入口與 agent 組合根分開
 
-這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
+這裡只放使用者自己執行的入口。Agent MCP 組合根在 [mcp_servers/](../mcp_servers/README.md)，repo 品質檢查在 [tools/](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
 `uv run --directory <worktree> --no-sync -- python scripts/<name>.py`。
 板端入口使用獨立的 PYNQ Python 3.8 環境，不假設工作站依賴可用。
@@ -10,8 +10,7 @@
 
 ## GUI 與板端 server
 
-- `run_measure_mcp.py`：把 `zcu_lab.recipes.RECIPES` 注入 measure MCP stdio server。入口不自行連接儀器；`connect` 與後續工具呼叫仍須遵守當次授權。MCP 的 session、worker 與寫回交接見 [measure MCP README](../lib/zcu_tools/mcp/measure/README.md)。
-
+- `run_workflows_gui.py`：工作站 workflows GUI，將 `zcu_lab.workflows.registry`、alias preset 與 source loader 注入 lib 宿主。模擬驗證在這個 GUI 的模擬模式完成，不另用 agent 專用模擬腳本。控制、保存與 reload 分工見 [workflows 宿主](../lib/zcu_tools/gui/app/workflows/README.md)。
 - `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。讀取可恢復的 session 與實驗設定；正常關閉會寫回 GUI state，預設在 repo `logs/gui/measure/` 建立 session log。預設啟動 loopback remote-control socket；允許外部連線的選項會改變網路曝露範圍。`--clean` 不恢復先前 session，但不阻止關閉時寫回。量測 GUI 可透過 QICK 連接硬體；啟動器本身只組合 GUI 與 runtime。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑；傳入的 project 與 repo root 交給 GUI runtime。預設各開 remote-control TCP socket（預設 port 8766、8767，未指定時占用會回退到臨時 port）；GUI 的分析或存檔由各自 app 負責，啟動器不直接改寫原始資料。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
 - 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔；repo root 仍由入口檔的 parent 定位。
@@ -22,11 +21,6 @@
 - `download_result.py`：工作站有 Google Drive client 依賴與 credentials 的環境。輸入 entry 名稱與 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，從 Drive 遞迴下載到 repo `results/<name>/`。本地不存在會建目錄，遠端較新會覆寫本地檔案並設定 mtime。OAuth token 讀取或更新目前工作目錄的 `token.json`，可能啟動認證流程。此腳本會存取網路及使用者資料。
 - `upload_result.py`：同上，但需要 Drive 寫入權限。從 repo `results/<name>/` 建立或更新 Drive 對應 entry 的檔案與目錄。明確選用 `--prune-remote` 時，還會刪除遠端缺少本地對應的檔案。OAuth token 存於目前工作目錄的 `token.json`。此腳本會存取網路與修改使用者的 Drive 資料。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
-
-## 離線 workflow
-
-- `run_workflow_sim.py`：以現行 native cfg／SimParams JSON 跑單次 acquisition，不保存，也不代替完整 workflow。
-- `run_coherence_fluxdep_sim.py`：以現行 CoherencePlan／CoherenceTunables／Calibrated／SimParams JSON 跑選定 lifetime 的完整 fluxdep。入口只建立一個 FakeDevice，其 native 值逐 acquisition 驅動模擬板。使用者明確指定隔離的 Result／Database entry paths；entry owner 計算 workflow roots，Engine 保存 journal；workflow 保存各 stage／enabled lifetime 的 native acquisitions 與摘要 PNG。已存在的 run roots 拒絕覆寫，不連接硬體。
 
 ## 模擬資料庫產生
 

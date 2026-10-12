@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     AxesSpec,
@@ -19,6 +20,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.plotting.singleshot import plot_with_classified
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     ProgramV2Cfg,
@@ -30,11 +32,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
 )
 
-from zcu_lab.v2._support.singleshot.util import (
-    classify_result,
-    plot_with_classified,
-    raw_shots_to_signal,
-)
+from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)

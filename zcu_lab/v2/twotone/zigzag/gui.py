@@ -17,12 +17,13 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-
-from zcu_lab.v2._support.measure import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    scaled_path_seed,
 )
+from zcu_tools.gui.app.measure.seeds import scaled_path_seed
+
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.zigzag import (
     EXPECTS_ML,
     add_gate_modules,
@@ -73,9 +74,11 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
-        builder = add_gate_modules(MeasureCfgBuilder()).relax_delay(
-            scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5)
-        )
+        builder = add_gate_modules(
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
+        ).relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
         return (
             add_repeat_fields(builder, n_times=10)
             .bool(

@@ -18,7 +18,7 @@ Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed map
 | --- | --- | --- |
 | `zcu_tools.gui.form` | Input、FormState、FormEnv、FormErrors、Display、求值、驗證、input schema、保存與相容還原 | Qt、Engine revision、提交 policy、檔案位置、儀器與來源 publication |
 | `zcu_tools.gui.widgets.form` | 按型別與 Display 產生 editor，修改 FormState，顯示值與錯誤 | 領域 defaults、to_cfg、Engine 控制與提交時機 |
-| `zcu_lab.workflows.gui` | 具體表單、defaults、choices、跨欄位 validators、明寫的 to_cfg | 通用 parser、schema walker、Engine lifecycle |
+| `zcu_lab.workflows.{coherence_fluxdep,mist_fluxdep,overnight}.form` 與 `common` 表單 helpers | 具體表單、defaults、choices、跨欄位 validators、明寫的 to_cfg | 通用 parser、schema walker、Engine lifecycle |
 | `zcu_tools.experiment.workflows` | 普通 tunables 值的 revision、step capture、journal 與原子發布 | Expression、表單、Qt、library lookup |
 | Workflow host | 捕捉 FormEnv，Start、Apply、Discard、revision 衝突、輸入保存與 RPC 入口 | 重做表單、Engine 或 storage owner 的工作 |
 

@@ -265,7 +265,7 @@ def role_ref(
     malformed module and materialization failures propagate. No legacy names
     or live session library are consulted.
     """
-    from zcu_lab.v2._support.measure.seeds import custom, module_seed
+    from zcu_tools.gui.app.measure.seeds import custom, module_seed
 
     lib = role.lib
     if lib is None or lib.module_type is None:

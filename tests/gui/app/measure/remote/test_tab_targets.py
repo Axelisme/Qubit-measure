@@ -40,20 +40,20 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry import component_registry
 
+from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.resources.entry.fakes import (
     Driver,
     register_fakes,
     registry_state,
     restore_registry,
 )
-from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 
 class LibraryDriver(Driver):
     module: dict[str, str]
 
 
-class TargetAdapter(T1Adapter):
+class TargetAdapter(SampleAdapter):
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         return CfgSchema(
             CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),

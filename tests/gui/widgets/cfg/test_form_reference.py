@@ -358,8 +358,9 @@ def test_missing_module_reference_is_invalid_and_shows_hint(qapp, ctrl):
     from qtpy.QtWidgets import QLabel
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
+    from tests.gui._component_fakes import Qubit as QubitSchema
+    from tests.gui._component_fakes import Resonator as ResonatorSchema
     from tests.gui.app.measure._cfg_fakes import parameter_capture
-    from zcu_lab.components import QubitSchema, ResonatorSchema
 
     pulse_spec = CfgSectionSpec(
         label="Pulse",

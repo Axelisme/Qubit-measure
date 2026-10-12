@@ -34,7 +34,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry import RoleResolutionError
 
 from tests.gui.app.measure._cfg_fakes import PublishedHost, parameter_capture
-from zcu_lab.components import QubitSchema, ResonatorSchema
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 
 
 def _bindings(

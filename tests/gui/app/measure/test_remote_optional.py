@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.cfg import DirectValue
 
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
 
     def registry_factory() -> tuple[Registry, TemplateCatalog, ExperimentCatalogLoader]:
         registry = Registry()
-        registry.register("fake", FakeAdapter)
+        registry.register("fake", SampleAdapter)
         return registry, TemplateCatalog(), UnusedLoader()
 
     previous_hook = sys.excepthook

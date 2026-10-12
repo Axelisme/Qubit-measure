@@ -20,17 +20,18 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import Seed, custom, scaled_path_seed
 from zcu_tools.gui.cfg import (
     EvalValue,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import Seed, custom, scaled_path_seed
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
     FreqGainAnalyzeOptions,
     FreqGainCfg,
@@ -124,7 +125,9 @@ class BathFreqGainAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset("reset", optional=True)
             .pulse("init_pulse", role_id="pi_pulse", optional=True)
             .reset(

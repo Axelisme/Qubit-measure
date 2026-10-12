@@ -46,8 +46,8 @@ from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 @pytest.fixture(autouse=True)
@@ -706,7 +706,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
 
 
 def _catalog():
-    from zcu_lab.templates import register_all_templates
+    from tests.gui.app.measure._templates import register_all_templates
 
     cat = TemplateCatalog()
     register_all_templates(cat)

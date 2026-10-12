@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import socket
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -12,27 +11,27 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.flux_pick_plugin import (
+    make_flux_pick_plugin,
+    render_flux_pick,
+)
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
 
-from tests.zcu_lab.v2.onetone.flux_dep.flux_dep_support import (
-    make_cfg as make_onetone_cfg,
+from tests.gui.app.measure._flux_adapter import (
+    SpectrumCfg,
+    SpectrumCore,
+    SpectrumResult,
 )
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
-from zcu_lab.v2._support.measure.flux_pick_plugin import (
-    make_flux_pick_plugin,
-    render_flux_pick,
-)
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp, FluxDepResult
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
 from ._helpers import Fixture, recv_response, send
 
@@ -51,14 +50,14 @@ class InteractiveFixture(Fixture):
         self.widgets: list[FluxPickFrontend] = []
 
 
-def load_native_onetone(
-    fx: InteractiveFixture, tab_id: str, path: Path, result: FluxDepResult
+def load_native_spectrum(
+    fx: InteractiveFixture, tab_id: str, path: Path, result: SpectrumResult
 ) -> None:
     """Write and publicly load history captured from the current session source."""
     parameters = fx.ctrl.context_control.read_context()
     assert parameters is not None
     storage = parameters.capture_storage()
-    cfg = make_onetone_cfg()
+    cfg = SpectrumCfg()
     cfg.sweep.freq = SweepCfg(
         start=float(result.freqs[0]),
         stop=float(result.freqs[-1]),
@@ -71,7 +70,7 @@ def load_native_onetone(
         step=float((result.values[-1] - result.values[0]) / (len(result.values) - 1)),
         expts=len(result.values),
     )
-    spec = FluxDepExp().persistence_spec()
+    spec = SpectrumCore().persistence_spec()
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",
         experiment=spec.tag,
@@ -117,17 +116,13 @@ def start_mounted(
     )
     # Synthetic run input is fixture setup; starting analysis, mounting, RPC,
     # result publication and writeback must all use their production seams.
-    run_result = (
-        RunRecord(cfg=None, result=FluxDepResult(devs, freqs, signals))
-        if adapter == "onetone/flux_dep"
-        else RunRecord(cfg=None, result=FreqFluxResult(devs, freqs, signals))
-    )
+    run_result = RunRecord(cfg=None, result=SpectrumResult(devs, freqs, signals))
     if native_source is None:
         parameters = fx.ctrl.context_control.read_context()
         fx.state.update_tab_result(tab_id, run_result, parameters=parameters)
     else:
-        assert isinstance(run_result.result, FluxDepResult)
-        load_native_onetone(fx, tab_id, native_source, run_result.result)
+        assert isinstance(run_result.result, SpectrumResult)
+        load_native_spectrum(fx, tab_id, native_source, run_result.result)
     tab_widget = next(
         tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
     )
@@ -149,11 +144,7 @@ def start_interactive(fx, *, background=None):
     plots = Plots(NonPresentingHost())
     analyze_params = FluxPickParams()
     plugin = make_flux_pick_plugin(
-        AnalyzeRequest(
-            run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
-            analyze_params=analyze_params,
-            parameters=None,
-        ),
+        FluxPickInputs(np.asarray(signals, dtype=np.complex128), devs, freqs),
         force_magnitude=True,
         plots=plots,
         result_builder=render_flux_pick,
