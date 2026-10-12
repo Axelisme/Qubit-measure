@@ -1,8 +1,8 @@
 """Owner-turn interactive wire projection and commands over native app contexts.
 
 Retain the requested context through synchronous GUI callbacks. Each reply uses
-one committed snapshot for numbers and PNG; native analysis/plotting owns the
-projection policy. No input read establishes a published-resource observation.
+one committed snapshot for numbers; dedicated readonly rendering uses its
+current committed snapshot. Native analysis/plotting owns projection policy. No input read establishes a published-resource observation.
 """
 
 from __future__ import annotations
@@ -79,11 +79,11 @@ def _execute(
     owner: FluxDepInteractiveOwner,
     plugin: PluginDefinition[_S, _R],
     session: Session[_S],
-    kind: str,
+    active: ActiveInteractiveContext,
     command: str | None,
     params: Mapping[str, object],
-    name: str | None,
 ) -> None:
+    kind, name = active.kind, active.spectrum_name
     if command is None:
         return
     if command == "undo":
@@ -121,10 +121,9 @@ def _reply(
             owner,
             context.plugin,
             context.session,
-            "line",
+            active,
             command,
             values,
-            active.spectrum_name,
         )
         state = context.session.snapshot()
         closed = _closed(owner, active) if command is not None else False
@@ -159,10 +158,9 @@ def _reply(
             owner,
             context.plugin,
             context.session,
-            "onetone",
+            active,
             command,
             values,
-            active.spectrum_name,
         )
         state_one = context.session.snapshot()
         closed = _closed(owner, active) if command is not None else False
@@ -197,10 +195,9 @@ def _reply(
             owner,
             context.plugin,
             context.session,
-            "twotone",
+            active,
             command,
             values,
-            active.spectrum_name,
         )
         state_two = context.session.snapshot()
         previous_two = before_two if command is not None else None
@@ -241,10 +238,9 @@ def _reply(
             owner,
             context.plugin,
             context.session,
-            "selection",
+            active,
             command,
             values,
-            active.spectrum_name,
         )
         state_selection = context.session.snapshot()
         previous_selection = before_selection if command is not None else None
@@ -285,15 +281,22 @@ def _reply(
 def h_interactive_read(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> InteractiveReply:
-    """Inspect adapter's live input on the owner loop; params is unused.
+    """Read a named draft on the owner loop without opening input or switching view.
 
-    Return committed state/commands/PNG without opening input or switching view.
-    Inactive returns null context/effect. Native projection/render errors propagate.
+    params contains validated name, or selection for Filter. Optional context_id
+    refuses cancelled, removed or replaced input with interactive_context_changed.
+    Name-only reads return null context/effect when absent. Native failures propagate.
     """
     name = params["name"]
     assert isinstance(name, str)
     owner = adapter.ctrl.interactive
     active = owner.inspect(name)
+    context_id = params.get("context_id")
+    if context_id is not None and (active is None or active.context_id != context_id):
+        raise FailedPreconditionError(
+            "interactive identity or target changed",
+            reason_code="interactive_context_changed",
+        )
     return (
         _reply(owner, active)
         if active is not None
@@ -307,10 +310,11 @@ def h_spectrum_interactive_open(
     """Open/reuse adapter's picker on the owner loop.
 
     params is ParamSpec-validated name (nonempty literal) and kind
-    (line/onetone/twotone). Return identity/state/commands/PNG with null effect.
-    Native owner rejects unknown/inactive/unaligned/wrong-type sources. A
+    (line/onetone/twotone). Return identity/state with null effect; discarded reports
+    a replaced unfinished align/sample draft.
+    Native owner rejects unknown/unaligned/wrong-type sources. A
     synchronous reaction retiring this input raises interactive_context_changed.
-    Native projection/render errors propagate without rollback.
+    Native projection errors propagate without rollback.
     """
     name, kind = params["name"], params["kind"]
     assert isinstance(name, str)  # Shared ParamSpec validated name and kind.
@@ -339,9 +343,9 @@ def h_selection_interactive_open(
 ) -> InteractiveReply:
     """Open/reuse adapter's joint-cloud input on the owner loop; params unused.
 
-    Return identity/state/commands/PNG with null effect. Native owner rejects
+    Return identity/state with null effect. Native owner rejects
     unavailable cloud/disposed input. Synchronous retirement raises
-    interactive_context_changed. Projection/render errors propagate; no rollback.
+    interactive_context_changed. Projection errors propagate; no rollback.
     Shared route, not this handler, enforces all-source observations.
     """
     del params
@@ -356,9 +360,10 @@ def h_selection_interactive_open(
     return _reply(owner, active)
 
 
-def _command(
-    adapter: RemoteControlAdapter, params: Mapping[str, object], *, selection: bool
-) -> InteractiveReply:
+def _command_envelope(
+    params: Mapping[str, object],
+) -> tuple[int, str, dict[str, object]]:
+    """Validate the native envelope; plugin remains domain parameter authority."""
     context_id, command, values = (
         params["context_id"],
         params["command"],
@@ -378,6 +383,13 @@ def _command(
             "params keys must be strings", reason_code="invalid_interactive_command"
         )
     command_params: dict[str, object] = {key: value for key, value in values.items()}
+    return context_id, command, command_params
+
+
+def _command(
+    adapter: RemoteControlAdapter, params: Mapping[str, object], *, selection: bool
+) -> InteractiveReply:
+    context_id, command, command_params = _command_envelope(params)
     owner = adapter.ctrl.interactive
     target = "selection" if selection else params["name"]
     assert isinstance(target, str)
@@ -415,9 +427,9 @@ def h_spectrum_interactive_command(
     params has validated name, positive context_id, command and params object
     (default empty). Require current identity/target before mutation. Plugin
     validates domain commands; undo/finish/cancel reject nonempty params.
-    Return retained identity's state/PNG and effect, even after GUI replacement.
+    Return retained identity's state and effect, even after GUI replacement.
     ExpectedError categories/reasons and native failures propagate unchanged;
-    publication/render failure does not imply rollback or reopened input.
+    publication failure does not imply rollback or reopened input.
     """
     return _command(adapter, params, selection=False)
 
@@ -430,9 +442,9 @@ def h_selection_interactive_command(
     params has validated positive context_id, command and params object
     (default empty). Require current joint identity before mutation. Plugin
     validates domain commands; undo/apply/cancel reject nonempty params.
-    Return retained identity's state/PNG/effect. Apply publishes without closing
+    Return retained identity's state/effect. Apply publishes without closing
     valid input/Undo. ExpectedError and native failures propagate unchanged;
-    publication/render failure does not imply rollback.
+    publication failure does not imply rollback.
     """
     return _command(adapter, params, selection=True)
 

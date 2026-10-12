@@ -9,7 +9,6 @@ from typing_extensions import TypedDict as ExtTypedDict
 from zcu_tools.gui.app.fluxdep.state import SpecType
 from zcu_tools.gui.interactive.flux_pick import FluxPickInfo
 from zcu_tools.gui.project import ProjectInfoPayload
-from zcu_tools.gui.remote.param_spec import InputSchema
 
 
 class PngImage(TypedDict):
@@ -17,13 +16,6 @@ class PngImage(TypedDict):
 
     png_b64: str
     bytes: int
-
-
-class CommandDeclaration(TypedDict):
-    """Available command: name is plugin/reserved ID; schema is its JSON input."""
-
-    name: str
-    schema: InputSchema
 
 
 class EmptyPluginInfo(TypedDict):
@@ -81,12 +73,12 @@ class SelectionStateReply(TypedDict):
 
 
 class ContextReplyBase(TypedDict):
-    """One owner-lifetime identity's committed state and native image.
+    """One owner-lifetime identity's committed state.
 
     context_id is positive, not an edit revision. closed means this identity
     retired, even if a successor exists. plugin is its native plugin ID.
-    commands lists current declarations (empty when closed). can_undo follows
-    Session history and is false when closed. figure depicts this exact capture.
+    can_undo follows Session history and is false when closed. PNG is returned
+    only by the dedicated readonly render method.
     """
 
     context_id: int
@@ -189,6 +181,7 @@ class InteractiveReply(TypedDict):
 
     context belongs to the requested identity, never a synchronous successor.
     effect is null for reads/opens and populated only after a successful command.
+    discarded is align/sample only when open replaces an unfinished draft.
     """
 
     discarded: NotRequired[Literal["align", "sample"]]

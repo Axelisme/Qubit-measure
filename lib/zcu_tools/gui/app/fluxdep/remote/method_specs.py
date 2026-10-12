@@ -117,7 +117,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         30.0,
         "Inspect the live context without opening input or changing display. "
         "Returns committed state, or null when inactive. name=selection reads Filter.",
-        params=(ParamSpec("name", JsonType.STRING),),
+        params=(
+            ParamSpec("name", JsonType.STRING),
+            ParamSpec("context_id", JsonType.INTEGER, required=False),
+        ),
         readonly=True,
     ),
     "interactive.render": MethodSpec(

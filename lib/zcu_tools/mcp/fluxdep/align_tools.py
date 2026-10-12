@@ -5,7 +5,7 @@ from typing import NotRequired, TypedDict
 
 from zcu_tools.mcp.core.bridge import McpBridge
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
+from zcu_tools.mcp.core.rpc import GuiInvocationError, GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import ToolTable
 
 from .projection import with_png
@@ -41,7 +41,7 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
             "context_id": opened["context"]["context_id"],
         }
         params = dict(arguments.get("params", {}))
-        if command == "move_line" and "conjugate" in params:
+        if command == "move_line":
             call_gui(
                 bridge,
                 GuiRpcCall(
@@ -49,7 +49,7 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
                     {
                         **envelope,
                         "command": "set_conjugate",
-                        "params": {"enabled": params.pop("conjugate")},
+                        "params": {"enabled": params.pop("conjugate", False)},
                     },
                     31.0,
                 ),
@@ -65,9 +65,19 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
         if command == "auto_align":
             while native["context"]["info"]["alignment_busy"]:
                 sleep(1.0)
-                native = call_gui(
-                    bridge, GuiRpcCall("interactive.read", target, 31.0)
-                ).data
+                try:
+                    native = call_gui(
+                        bridge, GuiRpcCall("interactive.read", envelope, 31.0)
+                    ).data
+                except GuiInvocationError as error:
+                    if error.reason != "interactive_context_changed":
+                        raise
+                    raise GuiInvocationError(
+                        f"auto_align interrupted: context for {name} was cancelled or replaced",
+                        code=error.code,
+                        reason=error.reason,
+                        data=error.data,
+                    ) from error
         context = native["context"]
         after = context["state"]
         summary: dict[str, object] = {

@@ -36,6 +36,7 @@ from zcu_tools.analysis.fluxdep.twotone import (
 )
 from zcu_tools.gui.app.fluxdep.cross_selection import CrossSelectionPlugin
 from zcu_tools.gui.app.fluxdep.event_bus import (
+    ActiveSpectrumChangedPayload,
     EventBus,
     InteractiveChangedPayload,
     InteractiveKind,
@@ -73,7 +74,7 @@ class _NormalizedBackground:
 class LinePickContext:
     """Live context owned by FluxDepInteractiveOwner, not by its widgets.
 
-    spectrum_name identifies the active spectrum whose captured arrays are used.
+    spectrum_name identifies the literal spectrum whose captured arrays are used.
     plugin supplies shared device-axis commands and the accepted alignment result.
     session is the sole committed state; old contexts retain readable snapshots
     after cancellation but reject writes.
@@ -92,7 +93,7 @@ class LinePickContext:
 class OneTonePickContext:
     """Live one-tone context with captured calibration references.
 
-    spectrum_name identifies the active aligned OneTone spectrum.
+    spectrum_name identifies the aligned OneTone spectrum.
     plugin supplies threshold actions/commands and native point results.
     session owns complete committed threshold/indices and single-level undo.
     flux_half and flux_int are captured, finite native device reference lines,
@@ -110,7 +111,7 @@ class OneTonePickContext:
 class TwoTonePickContext:
     """Live TwoTone selection owned by the app rather than presentation.
 
-    spectrum_name identifies the active aligned TwoTone spectrum. plugin owns
+    spectrum_name identifies the aligned TwoTone spectrum. plugin owns
     captured numerical inputs/actions; session holds committed mask/settings/
     tools and single-level undo. flux_half/flux_int are captured native device
     reference lines, not an editable or second calibration.
@@ -152,12 +153,11 @@ class _BeginCheckpoint:
     """Owner admission captured before the first invalidating context query.
 
     next_context_id is the existing identity allocation frontier, not a Session
-    edit revision. active_spectrum is the displayed name or None. source_versions
-    records collection, selection and spectrum resource keys with their versions.
+    edit revision. source_versions records collection, selection and spectrum
+    resource keys with their versions. Display selection is not an input guard.
     """
 
     next_context_id: int
-    active_spectrum: str | None
     source_versions: tuple[tuple[str, int], ...]
 
 
@@ -217,11 +217,13 @@ class FluxDepInteractivePorts:
 
 
 class FluxDepInteractiveOwner:
-    """Serialize one active picker and invalidate it on spectrum facts.
+    """Own one picker per spectrum and one global Filter on the owner loop.
 
-    Public access requires the supplied owner thread. Views may detach without
-    ending a context. Switch, reload, removal and external spectrum changes close
-    old input; dispose also releases bus subscriptions.
+    Views and active display may change without retiring drafts. Replacing a
+    spectrum's picker kind closes only that spectrum's old input. Source
+    publications retire affected pickers and the captured Filter cloud. Each
+    line plugin has its own single-flight worker; late closed-input delivery
+    cannot publish. dispose retires every draft and releases subscriptions.
     """
 
     def __init__(
@@ -258,6 +260,9 @@ class FluxDepInteractiveOwner:
         self._disposed = False
         self._publishing_selection = False
         self._subscriptions: tuple[Callable[[], None], ...] = (
+            bus.subscribe(
+                ActiveSpectrumChangedPayload, self._on_active_changed
+            ).unsubscribe,
             bus.subscribe(SpectrumAddedPayload, self._on_spectrum_changed).unsubscribe,
             bus.subscribe(
                 SelectionChangedPayload, self._on_selection_changed
@@ -302,6 +307,11 @@ class FluxDepInteractiveOwner:
         elif context.spectrum_name not in self._state.spectrums:
             self.cancel(context.spectrum_name)
             return None
+        elif isinstance(context, TwoTonePickContext):
+            entry = self._state.spectrums[context.spectrum_name]
+            if entry.spec_type != "TwoTone" or not entry.aligned:
+                self.cancel(context.spectrum_name)
+                return None
         try:
             context.session.ensure_input_open()
         except FailedPreconditionError:
@@ -318,7 +328,6 @@ class FluxDepInteractiveOwner:
         )
         return _BeginCheckpoint(
             self._next_context_id,
-            self._state.active_spectrum,
             tuple((key, self._state.version.get(key)) for key in source_keys),
         )
 
@@ -327,7 +336,6 @@ class FluxDepInteractiveOwner:
         if (
             self._disposed
             or self._next_context_id != checkpoint.next_context_id
-            or self._state.active_spectrum != checkpoint.active_spectrum
             or any(
                 self._state.version.get(key) != version
                 for key, version in checkpoint.source_versions
@@ -370,7 +378,7 @@ class FluxDepInteractiveOwner:
         self._updated(active)
 
     def _updated(self, active: ActiveInteractiveContext) -> None:
-        if self._contexts.get(active.spectrum_name) == active:
+        if self._contexts.get(active.spectrum_name) is active:
             self._emit_interactive(active, "updated")
 
     def _emit_interactive(
@@ -386,6 +394,10 @@ class FluxDepInteractiveOwner:
                 phase=phase,
             )
         )
+
+    def _on_active_changed(self, _event: ActiveSpectrumChangedPayload) -> None:
+        # Only the displayed picker changes; all draft identities remain live.
+        self._view_selection = False
 
     def _on_spectrum_changed(
         self,
@@ -405,12 +417,12 @@ class FluxDepInteractiveOwner:
                 self.cancel("selection")
 
     def begin_line_pick(self, name: str) -> LinePickContext:
-        """Reuse valid active context or open captured-input device-axis picking.
+        """Reuse a named context or open captured-input device-axis picking.
 
         InvalidInputError rejects unknown names. FailedPreconditionError rejects
-        inactive names or a disposed owner. Seed inherits meaningful alignment;
+        a disposed owner. Seed inherits meaningful alignment;
         OneTone fixes magnitude_only to True. Reentrant retirement that changes
-        context, spectrum/selection publications or active name, or disposes the
+        context or spectrum/selection publications, or disposes the
         owner raises FailedPreconditionError and keeps the callback's result.
         RuntimeError rejects off-owner use.
         """
@@ -464,6 +476,7 @@ class FluxDepInteractiveOwner:
     def finish_line_pick(self, name: str | None = None) -> FluxPickAnalysis:
         """Validate, close and publish alignment; return accepted numeric result.
 
+        name addresses a literal spectrum; omission reads the displayed draft.
         Missing context or invalid separation raises FailedPreconditionError;
         validation failure keeps input editable. Clear context before publication.
         Publication errors propagate and do not reopen terminal input.
@@ -487,12 +500,12 @@ class FluxDepInteractiveOwner:
         return result
 
     def begin_onetone_pick(self, name: str) -> OneTonePickContext:
-        """Reuse a valid context or open picking for an active aligned OneTone.
+        """Reuse a named context or open picking for an aligned OneTone.
 
-        Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
+        Unknown name raises InvalidInputError. Unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Switching picker kind
         closes old input before replacement. Reentrant retirement that changes
-        context, spectrum/selection publications or active name, or disposes the
+        context or spectrum/selection publications, or disposes the
         owner raises FailedPreconditionError and keeps the callback's result.
         Off-owner use raises RuntimeError.
         """
@@ -542,6 +555,7 @@ class FluxDepInteractiveOwner:
     def finish_onetone_pick(self, name: str | None = None) -> OneTonePickResult:
         """Validate committed indices, close input and publish native point arrays.
 
+        name addresses a literal spectrum; omission reads the displayed draft.
         Missing context raises FailedPreconditionError; invalid state retains
         editable input. Clear ownership before Controller's publication.
         Publication failure propagates without reopening terminal input.
@@ -559,12 +573,12 @@ class FluxDepInteractiveOwner:
         return result
 
     def begin_twotone_pick(self, name: str) -> TwoTonePickContext:
-        """Reuse valid active aligned TwoTone context or open a captured seed.
+        """Reuse a named aligned TwoTone context or open a captured seed.
 
-        Unknown name raises InvalidInputError. Inactive/unaligned/wrong-type or
+        Unknown name raises InvalidInputError. Unaligned/wrong-type or
         disposed owner raises FailedPreconditionError. Kind switch closes old
         input. Reentrant retirement that changes context, spectrum/selection
-        publications or active name, or disposes the owner raises
+        publications, or disposes the owner raises
         FailedPreconditionError and keeps the callback's result. Off-owner use
         raises RuntimeError. Invalid raw data raises ValueError.
         """
@@ -614,6 +628,7 @@ class FluxDepInteractiveOwner:
     def finish_twotone_pick(self, name: str | None = None) -> TwoTonePickResult:
         """Compute latest committed points, close input and publish through PointsService.
 
+        name addresses a literal spectrum; omission reads the displayed draft.
         Missing context raises FailedPreconditionError. Validation failure keeps
         context editable. Clear context before publication; publication failure
         remains terminal. Never use a widget's pending or cached preview.
@@ -635,10 +650,10 @@ class FluxDepInteractiveOwner:
 
         Capture every source version, including zero-point entries, and bounds
         from the usable spectra's raw axes and points. Only published distance is
-        inherited. Cancel the previous picker on successful replacement.
+        inherited. Spectrum drafts remain live when Filter opens.
         FailedPreconditionError rejects disposed owner or no usable cloud;
         invalid numeric input raises ValueError. Reentrant retirement that changes
-        context, spectrum/selection publications or active name, or disposes the
+        context or spectrum/selection publications, or disposes the
         owner raises FailedPreconditionError and keeps the callback's result.
         Off-owner use raises RuntimeError.
         """
@@ -792,6 +807,8 @@ class FluxDepInteractiveOwner:
         active = self._contexts.pop(self._target_key(name), None)
         if active is None:
             return
+        if isinstance(active.context, CrossSelectionContext):
+            self._view_selection = False
         active.context.session.close_input()
         for unsubscribe in self._context_subscriptions.pop(active.context_id, ()):
             unsubscribe()

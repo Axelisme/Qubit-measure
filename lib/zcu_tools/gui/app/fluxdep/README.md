@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，per-spectrum Filter masks 與 Filter 效能
+**Last updated:** 2026-10-13，named contexts、readonly display 與 alignment decisions
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -71,16 +71,11 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   state/bus/project_root 儲存 + `state`/`bus` property + `get_project_root` + `_emit`
   helper；per-command façade body 仍各 app（領域動詞 + app payload），main 不繼承。
   **無 measure 概念**（run/analyze/writeback/context/device/tab）。
-- **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 持有 active spectrum 的
-  單一 live 定線／OneTone／TwoTone／跨譜篩選 context。GUI controls 與 commands 共用 `gui.interactive` 的 Actions／Session；
-  LinePicker 只持有 disposable preview，OneTone threshold 與 indices 一起 commit／undo。
-  TwoTone Session 保存 mask、detector 與 tools；工具設定保留單層 Undo，完整 stroke 一次 commit。
-  Background projection 只提供 derived view；Finish 重新計算 committed snapshot，不等待 preview。
-  Finish 經 Controller 的 AlignmentService／PointsService 發布；後者擁有排序與 flux calibration。
-  Picker kind switch、active switch、reload、remove 或 external spectrum change 關閉舊輸入。
-  跨譜 context capture 全部來源版本，包含零點譜；任何來源變更或外部 selection publication 都關閉舊輸入。
-  Apply 同步計算最新 snapshot、經 Controller 發布一次 selection，保留 input 與 Undo，不是 picking Finish。
-  Widget detach 不終止 session，window close 才 dispose owner 並 quiesce 背景 runner。
+- **`interactive.py`** — Qt-free `FluxDepInteractiveOwner` 每張譜保存一份 live 定線／OneTone／TwoTone context 與 Undo，跨譜 Filter 全域一份。GUI controls 與 RPC commands 共用 `gui.interactive` 的 Actions／Session。
+  Active 只決定顯示。切換不退休草稿；同譜換 picker kind 才丟掉該譜草稿，open receipt 回 `discarded`。
+  Source reload、remove 與 external publication 退休對應 context，Filter 仍驗證全部來源版本。
+  每份 line plugin 有獨立 single-flight auto alignment；共用 background runner 可並行提交不同譜。
+  Finish 經 Controller services 發布。Window close dispose 全部 contexts 並 quiesce runner；view detach 不終止 Session。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
 - **`ui/`** — `MainWindow`（左 spectrum 列表 + 右階段驅動編輯區）、互動 widget
@@ -210,12 +205,14 @@ Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 acti
 Await 在 IO thread 等待，不碰 State；timeout 不取消，cancel receipt 不代表 cancelled outcome。
 Unknown／evicted token 明示拒絕，結果由 fit.result 讀取。
 
-Interactive open 由 app 檢查來源與 active target。Read 只 inspect，不開輸入或切畫面。
-Command 帶 owner-lifetime context_id，核對身份與 target 後呼叫同一 plugin Actions、
-Session Undo 與 app publication。回覆使用同一 committed snapshot 投影數值與 Agg PNG。
+Interactive open 以譜名定址，不要求 active。Read 與 command 按 name 取得同一份草稿。
+Read 的 optional context_id 與 command identity 保留 owner-lifetime guard。
+數值回覆不帶 commands 或 figure；readonly `interactive.render(name)` 單獨產生 Agg PNG。
+Command 核對 identity 與 target 後呼叫同一 plugin Actions、Session Undo 與 app publication。
 TwoTone mask-cell count 與 detected-point count 分開；selection 保留 input mask 與
 downsample 後 kept count。Finish／cancel receipt 保留退休 identity，即使 GUI 已開下一份
 context。Apply 不關閉有效 joint input；publication／rendering 失敗不宣稱 rollback。
+顯示切換不開 Session。Local holder 的人類點譜可另開目前階段 picker，observer RPC 只顯示草稿或已發布資料。
 PNG 不使用 Qt canvas，也不保存為產物。
 
 MCP entrypoint 使用共用 bridge，手寫工具組裝基礎 RPC 並摘要資料，control tools 轉送同一
@@ -228,8 +225,8 @@ RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 Local、Local 鎖定及 Remote label／在線狀態。點燈呼叫 `toggle_local`，收回成 Local
 鎖定或切換 Local 鎖定；轉移本身不取消 search 或 interactive Session。
 
-MainWindow 的 `set_writable` 停用 collection／project／IO 命令、spectrum 選取與
-redo controls，並推送給 Analyze panel 和目前 picker。新 view 套用當下狀態，
+MainWindow 的 `set_writable` 停用 collection／project／IO 命令與
+redo controls，spectrum 清單仍能切換顯示。主視窗推送狀態給 Analyze panel 和目前 picker。新 view 套用當下狀態，
 子元件不訂閱 authority。Picker 停用 controls 與 domain pointer gestures，
 canvas 保持可用，接管時丟棄未提交的 Local pointer preview。
 Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt remote adapter

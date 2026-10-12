@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-12, composed connection and spectrum summaries
+**Last updated:** 2026-10-13, named alignment decisions and guarded polling
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge.
@@ -33,6 +33,18 @@ rounds numerical spectrum summaries to three decimals and preserves GUI
 alignment provenance. Load and snapshot attach the native evidence PNG as image
 content, not base64 text or an image file. PNG integrity uses the same core
 producer as Measure. MCP retains no spectrum, draft, provenance or fit state.
+
+`align_tools.py` implements J2 as `fluxdep_align(name, command, params?, image?)`.
+It opens/reuses the named line draft, sends commands and summarizes half/integer
+lines, period and changed fields as before/after pairs. Every move_line first
+sets conjugate, defaulting to false, so the command does not inherit a hidden GUI
+mode. auto_align polls interactive.read once per second with the starting
+context_id until the GUI is not busy. A retired draft becomes an interrupted tool
+error; MCP does not compare identities or keep a registry. finish accepts manual
+or load-inherited lines without auto_align and attaches spectrum.render evidence.
+image=true requests interactive.render for unfinished drafts. GUI open receipts
+supply discarded stage facts; downstream invalidation belongs to app publication,
+not MCP inference.
 
 The stdio entry supplies connection settings and instructions. Server exit only
 disconnects; it does not kill or shut down the GUI. Tools preserve scalar JSON
