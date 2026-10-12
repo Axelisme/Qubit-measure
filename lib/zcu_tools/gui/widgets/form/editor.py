@@ -251,14 +251,21 @@ class FormEditor[F: FormModel](QWidget):
     def _add_rows(
         self, fields: tuple[FieldView, ...], parent: QWidget, layout: QVBoxLayout
     ) -> None:
+        level: list[FieldRow] = []
         for field in fields:
             row = FieldRow(field, parent, self._write, self._unparsed)
             self._rows[field.path] = row
+            level.append(row)
             layout.addWidget(row.widget)
             if row.group is not None:
                 child_layout = row.group.layout()
                 if isinstance(child_layout, QVBoxLayout):
                     self._add_rows(field.children, row.group, child_layout)
+        # One label column per model level: the widest label sets the width,
+        # so every control of this level starts at the same left edge.
+        width = max((row.label.sizeHint().width() for row in level), default=0)
+        for row in level:
+            row.label.setFixedWidth(width)
 
     def _write(self, path: FormWritePath, value: JsonValue) -> None:
         state = self._require_state()

@@ -100,8 +100,10 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
 class FieldRow:
     """Keep one schema row stable while publication values change.
 
-    field is the displayed FieldView; widget/layout own its Qt row. input is
-    its optional scalar control; mode selects direct/Expr; enabled toggles
+    field is the displayed FieldView; widget/layout own its Qt row. label is
+    the left-aligned name label at the start of the header; its parent sets
+    one width for a model level's labels so their controls share a left edge.
+    input is its optional scalar control; mode selects direct/Expr; enabled toggles
     nullable models; group hosts model children. value/error are public-named
     presentation labels, hidden while empty: value shows only an
     Expression-mode resolved value, error shows below the header. On choice
@@ -138,7 +140,8 @@ class FieldRow:
         self.group: QGroupBox | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
-        header.addWidget(_tight_label(field.label, self.widget))
+        self.label = _tight_label(field.label, self.widget)
+        header.addWidget(self.label)
         if field.kind == "model":
             self._build_group(header)
         else:
