@@ -15,7 +15,14 @@ from pytest_cache_guard import GuiCacheGuard
 def run_session(
     tmp_path: Path, source: str, plugin: GuiCacheGuard
 ) -> int | pytest.ExitCode:
-    """Run an isolated in-process pytest session without this suite's conftest."""
+    """Run source as a test module below tmp_path, using an already-created guard.
+
+    Exclude this suite's conftest and register plugin with public pytest.main;
+    pytest handles its lifecycle. Restore sys.path, the bare conftest entry,
+    PYTEST_CURRENT_TEST and generated UUID module entries even on errors.
+    Return pytest's exit status; startup/cleanup exceptions may propagate.
+    Process-owned plugins remain the caller's responsibility to close.
+    """
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\naddopts = --import-mode=importlib\n")
     # pytest's importlib mode keeps collected modules in sys.modules. A unique
@@ -27,6 +34,9 @@ def run_session(
     test_file.write_text(source)
     previous_path = sys.path[:]
     previous_current_test = os.environ.get("PYTEST_CURRENT_TEST")
+    previous_conftest = (
+        {"conftest": sys.modules["conftest"]} if "conftest" in sys.modules else {}
+    )
     try:
         return pytest.main(
             [
@@ -43,6 +53,8 @@ def run_session(
         )
     finally:
         sys.path[:] = previous_path
+        sys.modules.pop("conftest", None)
+        sys.modules.update(previous_conftest)
         if previous_current_test is None:
             os.environ.pop("PYTEST_CURRENT_TEST", None)
         else:
@@ -302,7 +314,9 @@ def test_synthetic_conftest_restores_module_registry(
             sys.modules["conftest"] = outer_conftest
 
 
-def test_process_owner_keeps_cache_isolated_after_pytest_returns(tmp_path: Path) -> None:
+def test_process_owner_keeps_cache_isolated_after_pytest_returns(
+    tmp_path: Path,
+) -> None:
     previous_environment = dict(os.environ)
     real_cache = tmp_path / "synthetic-user-cache" / "gui"
     cleanup_cache = tmp_path / "cleanup-cache.txt"

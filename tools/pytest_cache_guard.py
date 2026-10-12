@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import os
 import stat
@@ -10,6 +11,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import ClassVar
 
 import pytest
 from platformdirs import user_cache_dir
@@ -35,10 +37,15 @@ def _snapshot(root: Path) -> dict[str, _CacheEntry]:
         os.lstat(root)
     except FileNotFoundError:
         return {}
-    paths = [root, *sorted(root.rglob("*"))]
+    pending = [root]
     entries: dict[str, _CacheEntry] = {}
-    for path in paths:
+    while pending:
+        path = pending.pop()
         info = os.lstat(path)
+        if stat.S_ISDIR(info.st_mode):
+            # Unlike glob, scandir propagates traversal errors to the caller.
+            with os.scandir(path) as children:
+                pending.extend(Path(child.path) for child in children)
         if stat.S_ISLNK(info.st_mode):
             content = str(path.readlink())
         elif stat.S_ISREG(info.st_mode):
@@ -63,12 +70,15 @@ class GuiCacheGuard:
     platformdirs GUI cache (or the protected path inherited from an xdist
     controller via ZCU_TOOLS_PYTEST_REAL_GUI_CACHE). ``cache_root`` is the
     temporary XDG cache root; omitted means an owned temporary directory inside
-    this checkout. Construct before importing test modules, register with
-    pytest, and let unconfigure restore both environment variables. Each worker
-    gets its own temporary cache, but all protect the original user directory.
-    ``process_lifetime=True`` retains isolation through pytest cleanup until
-    process exit or explicit ``close()``; False restores on unconfigure for
-    nested sessions. Caller-provided cache roots are never deleted.
+    this checkout. Construct before importing test modules and register with
+    pytest. Each worker gets its own temporary cache, but all protect the
+    original user directory. ``process_lifetime=True`` retains isolation
+    through pytest cleanup until process exit (via atexit) or explicit
+    ``close()``; False restores both environment variables on unconfigure for
+    nested sessions. Caller-provided cache roots are never deleted. Owners
+    must be closed in nested-to-outer order; only owned temporary roots are
+    removed. Root conftests use ``process_isolation_active()`` to distinguish
+    nested sessions from separate xdist processes.
 
     Changes in existence, metadata or file contents fail collection/test
     reports with the responsible node and phase. Changes outside those reports
@@ -78,6 +88,8 @@ class GuiCacheGuard:
     deletes user cache data. Filesystem read errors propagate rather than
     silently disabling protection.
     """
+
+    _process_owner: ClassVar[GuiCacheGuard | None] = None
 
     def __init__(
         self,
@@ -110,6 +122,24 @@ class GuiCacheGuard:
             cache_root = Path(self._temporary_cache.name)
         os.environ["XDG_CACHE_HOME"] = str(cache_root.resolve())
         os.environ[_REAL_CACHE_ENV] = str(self._real_cache.resolve())
+        self._process_lifetime = process_lifetime
+        self._owner_pid = os.getpid()
+        self._previous_process_owner = GuiCacheGuard._process_owner
+        if process_lifetime:
+            GuiCacheGuard._process_owner = self
+            atexit.register(self.close)
+
+    @staticmethod
+    def process_isolation_active() -> bool:
+        """Return whether the current PID has a still-held process cache owner.
+
+        Inherited environment variables or an owner from a different PID
+        (after fork) do not establish same-process ownership. No state changes.
+        """
+        owner = GuiCacheGuard._process_owner
+        return (
+            owner is not None and not owner._closed and owner._owner_pid == os.getpid()
+        )
 
     def _check(self, owner: str) -> str | None:
         current = _snapshot(self._real_cache)
@@ -131,6 +161,17 @@ class GuiCacheGuard:
     def pytest_configure(self) -> None:
         """Reject writes made while initial conftests were imported."""
         message = self._check("startup (initial conftest imports)")
+        if message is not None:
+            raise pytest.UsageError(message)
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_sessionstart(self) -> Generator[None, None, None]:
+        """Reject sessionstart-hook pollution as startup, before collection.
+
+        Raise pytest.UsageError on pollution; filesystem errors propagate.
+        """
+        yield
+        message = self._check("startup (sessionstart hooks)")
         if message is not None:
             raise pytest.UsageError(message)
 
@@ -175,15 +216,20 @@ class GuiCacheGuard:
 
         Idempotent; never release an outer guard or alter protected user data.
         Process owners may call this explicitly instead of waiting for exit.
-        Filesystem cleanup errors propagate.
+        Close nested owners first; otherwise raise RuntimeError. Filesystem
+        cleanup errors propagate without releasing isolation. No cache checks
+        run here: pollution reporting ends at sessionfinish.
         """
-        self.pytest_unconfigure()
-
-    def pytest_unconfigure(self) -> None:
-        """Restore the environment and remove owned temporary cache files."""
         if self._closed:
             return
+        if self._process_lifetime and GuiCacheGuard._process_owner is not self:
+            raise RuntimeError("Close nested process cache owners before outer owners")
+        if self._temporary_cache is not None:
+            self._temporary_cache.cleanup()
         self._closed = True
+        if self._process_lifetime:
+            atexit.unregister(self.close)
+            GuiCacheGuard._process_owner = self._previous_process_owner
         if self._previous_cache_home is None:
             os.environ.pop("XDG_CACHE_HOME", None)
         else:
@@ -192,5 +238,12 @@ class GuiCacheGuard:
             os.environ.pop(_REAL_CACHE_ENV, None)
         else:
             os.environ[_REAL_CACHE_ENV] = self._previous_real_cache
-        if self._temporary_cache is not None:
-            self._temporary_cache.cleanup()
+
+    def pytest_unconfigure(self) -> None:
+        """Release session ownership; keep process ownership through cleanup.
+
+        Session owners restore their outer environment and delete owned roots
+        via close(). Process owners stay isolated until close() or atexit.
+        """
+        if not self._process_lifetime:
+            self.close()
