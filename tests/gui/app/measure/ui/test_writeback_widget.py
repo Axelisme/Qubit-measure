@@ -162,6 +162,28 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     assert len(edit_buttons) == 2
 
 
+@pytest.mark.parametrize(
+    "value",
+    [None, [], [[], []], [1, 2], [[1], [2, 3]], [[{}]], [[[1]]]],
+)
+def test_non_matrix_proposals_do_not_render_matrix_table(qapp, value):
+    item = ParameterWriteback(
+        target_name="proposal", description="d", proposed_value=value
+    )
+    item.session_id = "param-1"
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    try:
+        widget.populate([item], _parameter_values([item]))
+        assert widget.findChildren(QTableWidget) == []
+        checks = widget.findChildren(QCheckBox)
+        assert len(checks) == 1
+        assert checks[0].isChecked()
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
+
+
 def test_writeback_widget_non_scalar_item_is_read_only(qapp):
     """A non-scalar md item (e.g. a confusion matrix) renders selectable but
     with no Edit button — it is a derived value applied verbatim."""

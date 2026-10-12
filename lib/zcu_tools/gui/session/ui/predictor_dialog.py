@@ -192,45 +192,41 @@ class PredictorDialog(QDialog):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
+        left_layout.addWidget(self._build_model_group())
+
+        left_layout.addWidget(self._build_transition_group(), stretch=1)
+
+        left_layout.addWidget(self._build_calibration_group())
+
+        # ── status label ──────────────────────────────────────────────────
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("predictor_status")
+        left_layout.addWidget(self._status_label)
+
+        left_layout.addLayout(self._build_transition_actions())
+
+        self._build_curve_tabs()
+
+        root_layout.addWidget(left_widget, stretch=0)
+        root_layout.addWidget(self._tab_widget, stretch=1)
+
+        self._initialize_trial(params)
+
+        self._unsubscribe_device_changed: Callable[[], None] | None = (
+            device.on_device_changed(self._on_device_changed)
+            if device is not None
+            else None
+        )
+        self.finished.connect(self._cleanup_subscriptions)
+        self.destroyed.connect(self._cleanup_subscriptions)
+
+    def _build_model_group(self) -> QGroupBox:
         # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
         # File loading only prefills independent trial parameters.
         model_group = QGroupBox("Model params")
         model_form = QFormLayout(model_group)
 
-        self._model_combo = QComboBox()
-        self._model_combo.addItem("Fluxonium", "fluxonium")
-        self._model_combo.addItem("SQUID transmon", "transmon")
-        model_form.addRow("Model:", self._model_combo)
-
-        self._component_combo = QComboBox()
-        self._component_combo.setMinimumContentsLength(12)
-        component_row = QHBoxLayout()
-        component_row.addWidget(self._component_combo, stretch=1)
-        self._component_refresh_btn = QPushButton("↻")
-        self._component_refresh_btn.setToolTip(
-            "Refresh component choices without loading parameters"
-        )
-        self._component_refresh_btn.clicked.connect(self._refresh_components)
-        component_row.addWidget(self._component_refresh_btn)
-        self._component_load_btn = QPushButton("Load component")
-        self._component_load_btn.clicked.connect(self._on_load_component_clicked)
-        component_row.addWidget(self._component_load_btn)
-        # Same as the params.json row: a holder widget's margins squeeze the row.
-        model_form.addRow("Component:", component_row)
-
-        self._params_path_edit = QLineEdit()
-        self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
-        params_path_row = QHBoxLayout()
-        params_path_row.addWidget(self._params_path_edit, stretch=1)
-        self._load_btn = QPushButton("Load")
-        self._load_btn.clicked.connect(self._on_load_path_clicked)
-        params_path_row.addWidget(self._load_btn)
-        self._browse_btn = QPushButton("Browse")
-        self._browse_btn.clicked.connect(self._on_browse_file)
-        params_path_row.addWidget(self._browse_btn)
-        # Add the row layout directly: a holder widget's default layout margins
-        # squeezed the edit and buttons to a few pixels inside the form row.
-        model_form.addRow("params.json:", params_path_row)
+        self._add_model_sources(model_form)
 
         # Energies in GHz; flux anchors and bias in device-value units. Wide
         # ranges + many decimals allow exploration. The params classes own physics
@@ -271,12 +267,75 @@ class PredictorDialog(QDialog):
             ),
         )
 
-        left_layout.addWidget(model_group)
+        return model_group
 
+    def _add_model_sources(self, model_form: QFormLayout) -> None:
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("Fluxonium", "fluxonium")
+        self._model_combo.addItem("SQUID transmon", "transmon")
+        model_form.addRow("Model:", self._model_combo)
+
+        self._component_combo = QComboBox()
+        self._component_combo.setMinimumContentsLength(12)
+        component_row = QHBoxLayout()
+        component_row.addWidget(self._component_combo, stretch=1)
+        self._component_refresh_btn = QPushButton("↻")
+        self._component_refresh_btn.setToolTip(
+            "Refresh component choices without loading parameters"
+        )
+        self._component_refresh_btn.clicked.connect(self._refresh_components)
+        component_row.addWidget(self._component_refresh_btn)
+        self._component_load_btn = QPushButton("Load component")
+        self._component_load_btn.clicked.connect(self._on_load_component_clicked)
+        component_row.addWidget(self._component_load_btn)
+        # Same as the params.json row: a holder widget's margins squeeze the row.
+        model_form.addRow("Component:", component_row)
+
+        self._params_path_edit = QLineEdit()
+        self._params_path_edit.setPlaceholderText("params.json containing fluxdep_fit")
+        params_path_row = QHBoxLayout()
+        params_path_row.addWidget(self._params_path_edit, stretch=1)
+        self._load_btn = QPushButton("Load")
+        self._load_btn.clicked.connect(self._on_load_path_clicked)
+        params_path_row.addWidget(self._load_btn)
+        self._browse_btn = QPushButton("Browse")
+        self._browse_btn.clicked.connect(self._on_browse_file)
+        params_path_row.addWidget(self._browse_btn)
+        # Add the row layout directly: a holder widget's default layout margins
+        # squeezed the edit and buttons to a few pixels inside the form row.
+        model_form.addRow("params.json:", params_path_row)
+
+    def _build_transition_group(self) -> QGroupBox:
         # ── Tracked transitions group (predict controls + table + remove) ──
         transitions_group = QGroupBox("Tracked transitions")
         transitions_layout = QVBoxLayout(transitions_group)
 
+        transitions_layout.addLayout(self._build_value_controls())
+
+        transitions_layout.addLayout(self._build_transition_controls())
+
+        # 4-column table: Transition | f (MHz) | |n| | |phi|
+        # Multi-row selection enabled; individual delete buttons are gone.
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
+        header = self._table.horizontalHeader()
+        if header is not None:
+            # Value columns follow their text so frequencies are never cut to
+            # "134...."; |phi| takes the remaining width.
+            for column in range(3):
+                header.setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.ResizeToContents
+                )
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        transitions_layout.addWidget(self._table)
+
+        return transitions_group
+
+    def _build_value_controls(self) -> QHBoxLayout:
         # Controls above the table.  Keep device value/device selector and
         # transition-add controls on separate rows so long device names do not
         # force the whole left column wider than the plot area needs.
@@ -318,8 +377,9 @@ class PredictorDialog(QDialog):
             self._device_read_btn = device_read_btn
 
         self._value_controls_row.addStretch()
-        transitions_layout.addLayout(self._value_controls_row)
+        return self._value_controls_row
 
+    def _build_transition_controls(self) -> QHBoxLayout:
         self._transition_controls_row = QHBoxLayout()
         self._transition_controls_row.addWidget(QLabel("Transition:"))
         self._transition_controls_row.addWidget(QLabel("from"))
@@ -337,29 +397,9 @@ class PredictorDialog(QDialog):
         self._transition_controls_row.addWidget(self._add_btn)
 
         self._transition_controls_row.addStretch()
-        transitions_layout.addLayout(self._transition_controls_row)
+        return self._transition_controls_row
 
-        # 4-column table: Transition | f (MHz) | |n| | |phi|
-        # Multi-row selection enabled; individual delete buttons are gone.
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
-        header = self._table.horizontalHeader()
-        if header is not None:
-            # Value columns follow their text so frequencies are never cut to
-            # "134...."; |phi| takes the remaining width.
-            for column in range(3):
-                header.setSectionResizeMode(
-                    column, QHeaderView.ResizeMode.ResizeToContents
-                )
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.itemSelectionChanged.connect(self._on_selection_changed)
-        transitions_layout.addWidget(self._table)
-
-        left_layout.addWidget(transitions_group, stretch=1)
-
+    def _build_calibration_group(self) -> QGroupBox:
         # ── Calibration: measured frequency -> predictor flux_bias ────────
         calibration_group = QGroupBox("Calibration")
         calibration_form = QFormLayout(calibration_group)
@@ -378,13 +418,9 @@ class PredictorDialog(QDialog):
         self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
         self._calibration_freq_field.raw_changed.connect(self._sync_calibration_button)
         calibration_form.addRow("Selected transition:", self._calibrate_btn)
-        left_layout.addWidget(calibration_group)
+        return calibration_group
 
-        # ── status label ──────────────────────────────────────────────────
-        self._status_label = QLabel("")
-        self._status_label.setObjectName("predictor_status")
-        left_layout.addWidget(self._status_label)
-
+    def _build_transition_actions(self) -> QHBoxLayout:
         # ── Remove + Close on one horizontal row (saves vertical space) ────
         # Remove removes ALL currently selected transition rows; Close closes
         # the dialog. A spacer pushes Close to the right edge.
@@ -400,8 +436,9 @@ class PredictorDialog(QDialog):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
-        left_layout.addLayout(action_row)
+        return action_row
 
+    def _build_curve_tabs(self) -> None:
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
         # follow/lock callbacks, so a click-follow on any tab drives the others.
@@ -441,9 +478,8 @@ class PredictorDialog(QDialog):
         self._tab_widget.addTab(self._mat_n_tab, "|n|")
         self._tab_widget.addTab(self._mat_phi_tab, "|phi|")
 
-        root_layout.addWidget(left_widget, stretch=0)
-        root_layout.addWidget(self._tab_widget, stretch=1)
-
+    def _initialize_trial(self, params: ModelParams | None) -> None:
+        """Populate the completed view, then bind parameter edits before applying the trial."""
         # ── Debounce timer for per-row column updates ─────────────────────
         # Used both by the spinbox and by the marker follow-loop so cursor motion
         # updates the spinbox/table/markers at the debounce cadence, not per pixel.
@@ -477,14 +513,6 @@ class PredictorDialog(QDialog):
         self._sync_live_mode_controls()
         self._params_path_edit.textChanged.connect(self._emit_state_changed)
         self._tab_widget.currentChanged.connect(self._emit_state_changed)
-
-        self._unsubscribe_device_changed: Callable[[], None] | None = (
-            device.on_device_changed(self._on_device_changed)
-            if device is not None
-            else None
-        )
-        self.finished.connect(self._cleanup_subscriptions)
-        self.destroyed.connect(self._cleanup_subscriptions)
 
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
