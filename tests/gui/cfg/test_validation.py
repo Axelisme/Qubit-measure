@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.gui.cfg import (
+    CenteredSweepSpec,
+    CenteredSweepValue,
     CfgNodeSpec,
     CfgNodeValue,
     CfgSchema,
@@ -15,6 +17,8 @@ from zcu_tools.gui.cfg import (
     ReferenceSpec,
     ReferenceValue,
     ScalarSpec,
+    SweepSpec,
+    SweepValue,
     lower_finished_cfg,
     validate_finished_cfg,
 )
@@ -259,6 +263,95 @@ def test_static_validation_uses_exact_literal_type_and_choice_errors(
         validate_finished_cfg(schema, resolve_reference=None)
 
     assert str(exc_info.value) == message
+
+
+@pytest.mark.parametrize(
+    ("spec", "value", "message"),
+    [
+        (
+            SweepSpec("Range"),
+            DirectValue(1.0),
+            "Config field 'value' must be a SweepValue, got DirectValue",
+        ),
+        (
+            CenteredSweepSpec("Range"),
+            DirectValue(1.0),
+            "Config field 'value' must be a CenteredSweepValue, got DirectValue",
+        ),
+        (
+            CfgSectionSpec(fields={}),
+            DirectValue(1.0),
+            "Config field 'value' must be a CfgSectionValue, got DirectValue",
+        ),
+        (
+            ScalarSpec("Value", float),
+            None,
+            "Config field 'value' is None but is not a disabled optional ref",
+        ),
+    ],
+)
+def test_static_validation_rejects_wrong_carriers(
+    spec: CfgNodeSpec, value: CfgNodeValue | None, message: str
+) -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_finished_cfg(
+            _schema({"value": spec}, {"value": value}), resolve_reference=None
+        )
+    assert str(exc_info.value) == message
+
+
+def test_dynamic_nested_ranges_validate_in_field_order_before_lowering() -> None:
+    calls: list[str] = []
+    values = {"start": 1.0, "stop": 2.0, "center": 10.0}
+
+    def resolve(expr: str, /) -> float:
+        calls.append(expr)
+        return values[expr]
+
+    schema = _schema(
+        {
+            "nested": CfgSectionSpec(
+                fields={
+                    "linear": SweepSpec("Linear"),
+                    "centered": CenteredSweepSpec("Centered", locked_center=10.0),
+                }
+            )
+        },
+        {
+            "nested": CfgSectionValue(
+                fields={
+                    "linear": SweepValue(EvalValue("start"), EvalValue("stop"), 5),
+                    "centered": CenteredSweepValue(
+                        center=EvalValue("center"), span=4.0, expts=5
+                    ),
+                }
+            )
+        },
+    )
+    assert lower_finished_cfg(
+        schema, resolve_expression=resolve, resolve_reference=None
+    ) == {
+        "nested": {
+            "linear": {"start": 1.0, "stop": 2.0, "expts": 5, "step": 0.25},
+            "centered": {"start": 8.0, "stop": 12.0, "expts": 5, "step": 1.0},
+        }
+    }
+    # Dynamic validation visits authored edges first; lowering resolves them again.
+    assert calls == ["start", "stop", "center", "center", "start", "stop", "center"]
+
+
+def test_dynamic_locked_center_rejects_resolved_mismatch() -> None:
+    schema = _schema(
+        {"range": CenteredSweepSpec("Range", locked_center=10.0)},
+        {"range": CenteredSweepValue(center=EvalValue("center"), span=4.0, expts=5)},
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        lower_finished_cfg(
+            schema, resolve_expression=lambda _: 11.0, resolve_reference=None
+        )
+    assert str(exc_info.value) == (
+        "Config field 'range.center' (Sweep center) is locked to 10.0, got 11.0"
+    )
 
 
 def test_static_error_precedes_expression_error() -> None:
