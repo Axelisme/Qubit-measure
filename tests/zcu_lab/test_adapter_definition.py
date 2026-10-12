@@ -20,7 +20,14 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindings,
 )
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.cfg import CfgSectionSpec, EvalValue, LiteralSpec, SweepValue
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    LiteralSpec,
+    SweepValue,
+)
 from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
 from zcu_tools.gui.cfg.binding.ports import ResolvedReference
 from zcu_tools.gui.cfg.resource import (
