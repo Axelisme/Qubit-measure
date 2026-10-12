@@ -279,6 +279,7 @@ def test_transition_rejection_does_not_publish(
         ({}, None),
         ({"transitions": [], "mirror": []}, None),
         ({"transitons": []}, "invalid_params"),
+        ({"2": []}, "invalid_params"),
         ({"transitions2": []}, "controller_error"),
         ({"transitions": [[0, 1]]}, "controller_error"),
     ],
