@@ -357,7 +357,7 @@ class AnalyzePanelWidget(QWidget):
         # Seed the database path: the prior fit's path, else a bundled default so
         # the user usually doesn't have to browse at all.
         self._db_edit.setText(
-            fit.database_path
+            fit.search_db
             or default_database_file(
                 self._ctrl.state.project, self._ctrl.get_project_root()
             )
@@ -500,7 +500,7 @@ class AnalyzePanelWidget(QWidget):
         r_f = _parse_freq(self._r_f)
         sample_f = _parse_freq(self._sample_f)
         self._ctrl.set_fit_params(
-            database_path=self._db_edit.text().strip(),
+            search_db=self._db_edit.text().strip(),
             EJb=(self._ej_lo.value(), self._ej_hi.value()),
             ECb=(self._ec_lo.value(), self._ec_hi.value()),
             ELb=(self._el_lo.value(), self._el_hi.value()),

@@ -264,14 +264,14 @@ class FitResultReply(TypedDict):
     """Complete editable fit snapshot and current result availability.
 
     has_result marks a stored successful result. params is its EJ/EC/EL or None.
-    database_path is the search database file, not the project's raw root.
+    search_db is the search database file, not the project's raw root.
     EJb/ECb/ELb are [lower, upper] GHz bounds. transitions contains native choices.
     r_f/sample_f are separate optional GHz inputs, None when unset.
     """
 
     has_result: bool
     params: FitParametersReply | None
-    database_path: str
+    search_db: str
     EJb: list[float]
     ECb: list[float]
     ELb: list[float]

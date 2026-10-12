@@ -273,7 +273,7 @@ def _h_fit_result(
     return {
         "has_result": fit.has_result,
         "params": params_payload,
-        "database_path": fit.database_path,
+        "search_db": fit.search_db,
         "EJb": list(fit.EJb),
         "ECb": list(fit.ECb),
         "ELb": list(fit.ELb),
@@ -360,8 +360,8 @@ def _h_fit_database_info(
 def _h_fit_set_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> FitUpdatedReply:
-    database_path = params["database_path"]
-    assert isinstance(database_path, str)  # ParamSpec validated the nonempty path.
+    search_db = params["search_db"]
+    assert isinstance(search_db, str)  # ParamSpec validated the nonempty path.
     # Parse the complete request before publishing. Domain interpretation of
     # bounds/categories and separate frequency precedence stays in the kernel.
     EJb = _fit_bounds(params["EJb"], "EJb")
@@ -375,7 +375,7 @@ def _h_fit_set_params(
         else None
     )
     adapter.ctrl.set_fit_params(
-        database_path, EJb, ECb, ELb, transitions, r_f, sample_f
+        search_db, EJb, ECb, ELb, transitions, r_f, sample_f
     )
     return {"fit": _h_fit_result(adapter, {})}
 
