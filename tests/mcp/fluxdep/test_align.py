@@ -83,6 +83,14 @@ def test_move_line_composes_conjugate_and_reports_only_changed_lines(client: Cli
     assert not result.images
 
 
+@pytest.mark.parametrize("params", [{"role": "half", "position": 2.0}, {"role": "half", "position": 2.0, "conjugate": False}])
+def test_move_line_resets_conjugate_when_omitted_or_false(client: Client, params: dict[str, object]):
+    client.transport.replies.extend(GuiResponse(result=result) for result in [native(), native(), native(2.0)])
+    invoke(client, command="move_line", params=params)
+    assert client.transport.requests[1]["params"] == {"name": "one", "context_id": 12, "command": "set_conjugate", "params": {"enabled": False}}
+    assert client.transport.requests[2]["params"] == {"name": "one", "context_id": 12, "command": "move_line", "params": {"role": "half", "position": 2.0}}
+
+
 @pytest.mark.parametrize("error", [None, "alignment failed"])
 def test_auto_align_polls_named_context_to_terminal(client: Client, error: str | None):
     client.transport.replies.extend(
@@ -148,12 +156,22 @@ def test_finish_and_image_override_return_native_evidence(
 
 
 def test_auto_align_reports_guarded_context_interruption(client: Client):
-    client.transport.replies.extend([
-        GuiResponse(result=native()),
-        GuiResponse(result=native(busy=True)),
-        GuiResponse(error=GuiError(code="precondition_failed", message="interactive identity or target changed", reason="interactive_context_changed")),
-    ])
-    with pytest.raises(GuiInvocationError, match="auto_align interrupted.*cancelled or replaced") as refusal:
+    client.transport.replies.extend(
+        [
+            GuiResponse(result=native()),
+            GuiResponse(result=native(busy=True)),
+            GuiResponse(
+                error=GuiError(
+                    code="precondition_failed",
+                    message="interactive identity or target changed",
+                    reason="interactive_context_changed",
+                )
+            ),
+        ]
+    )
+    with pytest.raises(
+        GuiInvocationError, match="auto_align interrupted.*cancelled or replaced"
+    ) as refusal:
         invoke(client, command="auto_align")
     assert refusal.value.code == "precondition_failed"
     assert refusal.value.reason == "interactive_context_changed"
