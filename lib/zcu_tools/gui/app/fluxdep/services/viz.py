@@ -60,14 +60,10 @@ def derive_auto_limits(
         ys_lo, ys_hi = min(ys_lo, lo), max(ys_hi, hi)
 
     for entry in spectrums.values():
-        spect = entry.raw
-        signals = spect["signals"]
-        flux_mask = np.any(~np.isnan(signals), axis=1)
-        freq_mask = np.any(~np.isnan(signals), axis=0)
-        if not flux_mask.any() or not freq_mask.any():
+        usable = _usable_background(entry)
+        if usable is None:
             continue
-        fluxs = np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask]
-        freqs = np.asarray(spect["freqs"], dtype=np.float64)[freq_mask]
+        fluxs, freqs, _signals = usable
         _acc_x(float(fluxs.min()), float(fluxs.max()))
         _acc_y(float(freqs.min()), float(freqs.max()))
 
@@ -100,18 +96,47 @@ def _constant_freqs(
     return lines
 
 
+def _axis_resolution(axis: NDArray[np.float64]) -> float:
+    """Points per unit along one axis, (points - 1) / range; 0 without a range."""
+    span = float(np.max(axis) - np.min(axis)) if axis.size else 0.0
+    return (axis.size - 1) / span if span > 0 else 0.0
+
+
+def _usable_background(
+    entry: SpectrumEntry,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]] | None:
+    """Return (fluxs, freqs, signals) without all-NaN rows, or None if empty."""
+    spect = entry.raw
+    signals = spect["signals"]
+    flux_mask = np.any(~np.isnan(signals), axis=1)
+    freq_mask = np.any(~np.isnan(signals), axis=0)
+    if not flux_mask.any() or not freq_mask.any():
+        return None
+    return (
+        np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask],
+        np.asarray(spect["freqs"], dtype=np.float64)[freq_mask],
+        signals[flux_mask, :][:, freq_mask],
+    )
+
+
 def _plot_background(ax, spectrums: dict[str, SpectrumEntry]) -> None:
-    """Draw each spectrum's normalised amplitude as a gray_r heatmap."""
+    """Draw each spectrum's normalised amplitude as a gray_r heatmap.
+
+    Spectra paint from low to high resolution, so a fine scan stays visible
+    where it overlaps a coarse one. Resolution is the geometric mean of both
+    axes' (points - 1) / range after dropping all-NaN rows; an axis with a
+    single point or no range counts as 0. Equal resolutions keep insertion
+    order. All backgrounds stay below the simulation lines and points.
+    """
+    backgrounds = []
     for entry in spectrums.values():
-        spect = entry.raw
-        signals = spect["signals"]
-        flux_mask = np.any(~np.isnan(signals), axis=1)
-        freq_mask = np.any(~np.isnan(signals), axis=0)
-        if not flux_mask.any() or not freq_mask.any():
-            continue
-        signals = signals[flux_mask, :][:, freq_mask]
-        fluxs = np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask]
-        freqs = np.asarray(spect["freqs"], dtype=np.float64)[freq_mask]
+        usable = _usable_background(entry)
+        if usable is not None:
+            backgrounds.append((entry, *usable))
+    backgrounds.sort(
+        key=lambda item: np.sqrt(_axis_resolution(item[1]) * _axis_resolution(item[2]))
+    )
+    for entry, fluxs, freqs, signals in backgrounds:
         real = cast2real_and_norm(signals, use_phase=entry.spec_type != "OneTone")
         ax.pcolormesh(
             fluxs,

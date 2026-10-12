@@ -158,7 +158,12 @@ def _background_order(spectrums: dict[str, SpectrumEntry]) -> list[int]:
     )
     meshes = [c for c in fig.axes[0].collections if isinstance(c, QuadMesh)]
     assert len({mesh.get_zorder() for mesh in meshes}) == 1
-    return [mesh.get_array().size for mesh in meshes]
+    sizes = []
+    for mesh in meshes:
+        cells = mesh.get_array()
+        assert cells is not None
+        sizes.append(cells.size)
+    return sizes
 
 
 def test_background_spectra_paint_from_low_to_high_resolution():
