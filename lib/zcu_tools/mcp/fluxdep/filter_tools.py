@@ -59,9 +59,17 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
             summary["invalidated"] = native["invalidated"]
         reply = ToolReply(summary)
         if command == "finish":
-            return with_png(reply, call_gui(bridge, GuiRpcCall("selection.render", {}, 31.0)))
+            return with_png(
+                reply, call_gui(bridge, GuiRpcCall("selection.render", {}, 31.0))
+            )
         if arguments.get("image", False):
-            return with_png(reply, call_gui(bridge, GuiRpcCall("interactive.render", {"name": "selection"}, 31.0)))
+            return with_png(
+                reply,
+                call_gui(
+                    bridge,
+                    GuiRpcCall("interactive.render", {"name": "selection"}, 31.0),
+                ),
+            )
         return reply
 
     return {
@@ -71,14 +79,29 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "enum": ["stroke", "set_min_distance", "undo", "finish"]},
+                    "command": {
+                        "type": "string",
+                        "enum": ["stroke", "set_min_distance", "undo", "finish"],
+                    },
                     "params": {
                         "type": "object",
                         "properties": {
-                            "vertices": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+                            "vertices": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                },
+                            },
                             "width": {"type": "number", "minimum": 0, "maximum": 0.1},
                             "mode": {"type": "string", "enum": ["select", "erase"]},
-                            "min_distance": {"type": "number", "minimum": 0, "maximum": 0.1},
+                            "min_distance": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 0.1,
+                            },
                         },
                     },
                     "image": {"type": "boolean", "default": False},

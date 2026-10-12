@@ -164,8 +164,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "selection.interactive.command": MethodSpec(
         30.0,
         "Command the current joint identity. "
-        "Use plugin commands or parameterless undo, apply, cancel. "
-        "Apply publishes without closing.",
+        "Use plugin commands or parameterless undo, finish, apply, cancel. "
+        "Finish publishes and closes; Apply publishes without closing.",
         params=(
             ParamSpec("context_id", JsonType.INTEGER),
             ParamSpec("command", JsonType.STRING),

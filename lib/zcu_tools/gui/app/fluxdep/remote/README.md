@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，named interactive state, fit rendering and database metadata
+**Last updated:** 2026-10-13，Filter publication and sampled checkpoints
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -18,7 +18,10 @@ Interactive context IDs bind commands to the owning session and named target.
 interactive.read(name) is inert; its optional context_id rejects cancelled,
 removed or replaced drafts. Numeric replies contain no figure or command schema.
 interactive.render(name), or name=selection for Filter, returns the current PNG
-without opening input or switching display. Replacing an unfinished same-spectrum
+without opening input or switching display. Filter finish publishes and closes
+its global context. selection.render() always draws the published joint cloud
+and per-spectrum masks, even while a draft exists. It does not open a Session.
+Replacing an unfinished same-spectrum
 stage reports discarded=align/sample. Retirement and terminal receipts remain app-owned. Search outcomes, publication failures and
 partial output do not imply rollback. Timeout does not cancel accepted work.
 
@@ -31,6 +34,10 @@ or I/O failure leaves the current fit untouched.
 ranges without loading energy values. `fit.render()` uses the same native Show
 overlay as Qt, returns PNG without saving an artifact, and requires a fit result.
 Both queries are readonly.
+
+Export/Restore saves sampled checkpoints, including empty completed spectra,
+without Filter masks. Restore rejects the entire request before publication when
+any name already exists and lists every conflict.
 
 GUI editing gates, modal Cancel/Close, pure viewing and shutdown remain frontend
 responsibilities. Fluxdep has no hardware Stop exception; the user reclaims from

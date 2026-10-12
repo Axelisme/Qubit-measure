@@ -25,6 +25,19 @@ class SpectrumLoadArguments(TypedDict):
     transpose_axes: NotRequired[bool]
 
 
+class CheckpointExportArguments(TypedDict):
+    """Optional native checkpoint destination and explicit replacement choice."""
+
+    filepath: NotRequired[str]
+    overwrite: NotRequired[bool]
+
+
+class CheckpointRestoreArguments(TypedDict):
+    """Required path of a sampled checkpoint to restore without Filter masks."""
+
+    filepath: str
+
+
 def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
     """Build list/load/snapshot/remove with bounded summaries and J1 evidence.
 
@@ -49,21 +62,37 @@ def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
     def remove(arguments: SpectrumNameArguments) -> ToolReply:
         return call_gui(bridge, GuiRpcCall("spectrum.remove", dict(arguments), 6.0))
 
-    def export_spectrums(arguments: dict[str, object]) -> ToolReply:
-        receipt = call_gui(bridge, GuiRpcCall("export.spectrums", arguments, 31.0))
-        rows = spectrum_summaries(call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0)))
-        return ToolReply({
-            "filepath": receipt.data["filepath"],
-            "spectrums": [
-                {"name": row["name"], "stage": row["stage"], "point_count": row["point_count"]}
-                for row in rows
-            ],
-            "note": "filter mask not saved",
-        })
+    def export_spectrums(arguments: CheckpointExportArguments) -> ToolReply:
+        receipt = call_gui(
+            bridge, GuiRpcCall("export.spectrums", dict(arguments), 31.0)
+        )
+        rows = spectrum_summaries(
+            call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0))
+        )
+        return ToolReply(
+            {
+                "filepath": receipt.data["filepath"],
+                "spectrums": [
+                    {
+                        "name": row["name"],
+                        "stage": row["stage"],
+                        "point_count": row["point_count"],
+                    }
+                    for row in rows
+                ],
+                "note": "filter mask not saved",
+            }
+        )
 
-    def restore(arguments: dict[str, object]) -> ToolReply:
-        call_gui(bridge, GuiRpcCall("spectrum.load_processed", arguments, 31.0))
-        return ToolReply({"spectrums": spectrum_summaries(call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0)))})
+    def restore(arguments: CheckpointRestoreArguments) -> ToolReply:
+        call_gui(bridge, GuiRpcCall("spectrum.load_processed", dict(arguments), 31.0))
+        return ToolReply(
+            {
+                "spectrums": spectrum_summaries(
+                    call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0))
+                )
+            }
+        )
 
     def list_spectrums(_arguments: dict[str, object]) -> ToolReply:
         spectrums = spectrum_summaries(
@@ -122,7 +151,10 @@ def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
             "description": "Save a sampled checkpoint with native alignment and all sampled points, including empty completed spectra. Filter masks are not saved. Defaults to create-only; overwrite=true explicitly replaces. Return the resolved GUI path and bounded published spectrum summaries.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"filepath": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}},
+                "properties": {
+                    "filepath": {"type": "string"},
+                    "overwrite": {"type": "boolean", "default": False},
+                },
             },
         },
         prefix + "spectrum_load_processed": {
