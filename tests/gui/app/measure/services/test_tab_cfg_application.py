@@ -377,9 +377,7 @@ def test_missing_module_slot_keeps_tab_invalid_and_blocks_run(
         for diagnostic in observed.diagnostics
     )
     with pytest.raises(CfgPreconditionError) as caught:
-        services.guard.capture_run_inputs(
-            tab_id, expected_revision=observed.ref.revision
-        )
+        services.guard.capture_run_inputs(tab_id)
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     assert state.get_tab(tab_id).cfg.observe() == observed
 
