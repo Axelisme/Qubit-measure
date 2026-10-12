@@ -62,6 +62,7 @@ class AnalyzeFormWidget(QWidget):
         self._empty_hint.setObjectName("analysisNoParameters")
         self._empty_hint.setStyleSheet("color: gray;")
         self._empty_hint.setWordWrap(True)
+        self._empty_hint.setVisible(False)
         layout.addWidget(self._empty_hint)
 
     def populate(self, params_instance: object) -> None:
@@ -124,7 +125,8 @@ class AnalyzeFormWidget(QWidget):
         self._widgets.clear()
         self._bindings = ()
         self._params_cls = None
-        self._empty_hint.setVisible(True)
+        # Without a parameter contract the form makes no claim about parameters.
+        self._empty_hint.setVisible(False)
 
     def read_params(self) -> object:
         """Read widgets and return a typed dataclass instance."""
