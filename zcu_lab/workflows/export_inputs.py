@@ -225,7 +225,7 @@ def read_points[P](
             raise ValueError(f"{source}: {error}") from error
     if missing and not points:
         raise ValueError(
-            "No committed iteration records available; missing record.json:\n"
+            "No iteration records available; missing record.json:\n"
             + "\n".join(str(path) for path in missing)
         )
     return tuple(points), tuple(missing)
