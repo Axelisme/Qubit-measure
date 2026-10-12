@@ -194,8 +194,7 @@ def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteH
 def test_observer_display_selection_is_readonly_and_preserves_drafts(one_route: RouteHarness):
     owner_link = one_route.client()
     draft = _open_picker(one_route, owner_link, "one", "line")
-    observer = one_route.client()
-    one_route.request(observer, "control.connect", mode="readonly", label="observer")
+    observer = one_route.client(mode="readonly", label="observer")
     versions = one_route.ctrl.state.version.snapshot()
     displayed = one_route.request(observer, "spectrum.set_active", name=None)
     assert displayed["ok"], displayed

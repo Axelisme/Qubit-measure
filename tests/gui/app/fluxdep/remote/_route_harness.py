@@ -107,12 +107,12 @@ class RouteHarness:
         )
         return cls(ctrl, service)
 
-    def client(self) -> ClientLink:
+    def client(self, *, label: str = "agent", mode: str = "owner") -> ClientLink:
         """Open an owner connection with the default control label and real app context."""
         link = ClientLink(f"client-{len(self.links)}", token_required=False)
         self.service.on_client_open(link)
         self.links.append(link)
-        reply = self.request(link, "control.connect")
+        reply = self.request(link, "control.connect", label=label, mode=mode)
         assert reply["ok"], reply
         return link
 
