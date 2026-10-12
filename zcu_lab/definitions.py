@@ -1,7 +1,9 @@
 """Explicit user-owned measure catalog; importing it performs no registration."""
 
+from collections.abc import Mapping
 from typing import Any
 
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
@@ -129,19 +131,28 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 def register_all(
     registry: Registry,
     *,
-    templates: TemplateCatalog | None = None,
+    templates: Mapping[str, TemplateDef] | None = None,
+    template_catalog: TemplateCatalog | None = None,
     components: ComponentRegistry | None = None,
 ) -> None:
     """Register adapters into the caller-owned registry.
 
-    Pass a caller-owned TemplateCatalog as ``templates`` only at startup to
-    register module/waveform templates. Pass the shared ComponentRegistry as
-    components at startup to register component models and roles. Omit both on
-    reload to preserve identities. Duplicate entries raise registration errors.
+    Pass persistent definitions as ``templates`` and their caller-owned
+    TemplateCatalog receiver as ``template_catalog`` at startup. When definitions
+    are omitted, the catalog uses the existing role templates until migration.
+    Pass the shared ComponentRegistry as components at startup to register
+    component models and roles. Omit startup arguments on reload to preserve
+    identities. Definitions without a receiver raise ValueError; duplicate
+    entries raise registration errors.
     """
+    if templates is not None and template_catalog is None:
+        raise ValueError("Injected templates require a template_catalog receiver")
     if components is not None:
         register_components(components)
-    if templates is not None:
-        register_all_templates(templates)
+    if template_catalog is not None:
+        if templates is None:
+            register_all_templates(template_catalog)
+        else:
+            template_catalog.register_definitions(templates)
     for name, cls in ADAPTERS.items():
         registry.register(name, cls)

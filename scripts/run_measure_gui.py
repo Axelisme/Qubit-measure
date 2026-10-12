@@ -74,7 +74,9 @@ def _build_measure_catalogs():
 
     registry = Registry()
     template_catalog = TemplateCatalog()
-    register_all(registry, templates=template_catalog, components=component_registry)
+    register_all(
+        registry, template_catalog=template_catalog, components=component_registry
+    )
     loader = SourceExperimentCatalogLoader(
         sources=(
             SourcePackage("zcu_tools", PROJECT_ROOT / "lib" / "zcu_tools"),

@@ -15,14 +15,27 @@ modify path (inspect modify / ``editor.new(from_name=...)``).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, TypeAlias, TypedDict
 
+from zcu_tools.cfg_model import Expr, TemplateDef, TemplateSeed
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, UnknownProgramShapeError
-from zcu_tools.gui.cfg import CfgSectionSpec, LiteralSpec, ReferenceValue
+from zcu_tools.gui.cfg import (
+    CfgSectionSpec,
+    CfgSectionValue,
+    DirectValue,
+    EvalValue,
+    LiteralSpec,
+    ReferenceSpec,
+    ReferenceValue,
+    make_custom_reference_key,
+    make_default_value,
+    select_ref_value_spec,
+)
 
 from .adapter import SessionEnv
+from .specs import MAIN_PROGRAM_SPEC_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +104,22 @@ class TemplateCatalog:
         )
         if entry.template_id in self._entries:
             raise ValueError(f"Template {entry.template_id!r} is already registered")
-        _validate_entry_shape(entry)
+        _validate_entry_shape(entry.template_id, entry.item_kind, entry.shape())
         self._entries[entry.template_id] = entry
+
+    def register_definitions(self, templates: Mapping[str, TemplateDef]) -> None:
+        """Append injected persistent definitions in their mapping order.
+
+        ModuleSpec and WaveformSpec members select the matching canonical
+        program shape. Each create builds fresh structural defaults, then
+        applies seeds; empty seeds therefore preserve library blank behavior.
+        Expr seeds become EvalValue, while ordinary strings stay literal.
+        Nested reference discriminator seeds select an allowed inline shape.
+        Invalid seed paths/shapes raise ValueError or TypeError; duplicate IDs
+        raise ValueError. Call only at startup, not on catalog reload.
+        """
+        for template_id, definition in templates.items():
+            self.register(_entry_from_definition(template_id, definition))
 
     def entries_for(self, item_kind: TemplateItemKind) -> list[TemplateEntry]:
         """Return module or waveform entries in registration order, without factories."""
@@ -123,21 +150,20 @@ class TemplateCatalog:
         ]
 
 
-def _validate_entry_shape(entry: TemplateEntry) -> None:
-    spec = entry.shape()
+def _validate_entry_shape(
+    template_id: str, item_kind: TemplateItemKind, spec: object
+) -> None:
     if not isinstance(spec, CfgSectionSpec):
         raise TypeError(
-            f"Template {entry.template_id!r} shape factory must return CfgSectionSpec, "
+            f"Template {template_id!r} shape factory must return CfgSectionSpec, "
             f"got {type(spec).__name__}"
         )
-    key = "type" if entry.item_kind == "module" else "style"
-    other_kind: TemplateItemKind = (
-        "waveform" if entry.item_kind == "module" else "module"
-    )
-    other_key = "style" if entry.item_kind == "module" else "type"
+    key = "type" if item_kind == "module" else "style"
+    other_kind: TemplateItemKind = "waveform" if item_kind == "module" else "module"
+    other_key = "style" if item_kind == "module" else "type"
     if key in spec.fields and other_key in spec.fields:
         raise ValueError(
-            f"Template {entry.template_id!r} shape must declare exactly one root discriminator"
+            f"Template {template_id!r} shape must declare exactly one root discriminator"
         )
     literal = spec.fields.get(key)
     if not isinstance(literal, LiteralSpec) or not isinstance(literal.value, str):
@@ -146,24 +172,108 @@ def _validate_entry_shape(entry: TemplateEntry) -> None:
             other_literal.value, str
         ):
             raise TypeError(
-                f"Template {entry.template_id!r} declares kind {entry.item_kind!r} but "
+                f"Template {template_id!r} declares kind {item_kind!r} but "
                 f"shape root kind is {other_kind!r}"
             )
         raise ValueError(
-            f"Template {entry.template_id!r} shape has no string literal discriminator {key!r}"
+            f"Template {template_id!r} shape has no string literal discriminator {key!r}"
         )
     discriminator = literal.value
     try:
-        PROGRAM_SHAPES.get(entry.item_kind, discriminator)
+        PROGRAM_SHAPES.get(item_kind, discriminator)
     except UnknownProgramShapeError:
         try:
             PROGRAM_SHAPES.get(other_kind, discriminator)
         except UnknownProgramShapeError as exc:
             raise ValueError(
-                f"Template {entry.template_id!r} has unknown {entry.item_kind} shape "
+                f"Template {template_id!r} has unknown {item_kind} shape "
                 f"{discriminator!r}"
             ) from exc
         raise TypeError(
-            f"Template {entry.template_id!r} declares kind {entry.item_kind!r} but "
+            f"Template {template_id!r} declares kind {item_kind!r} but "
             f"shape root kind is {other_kind!r}"
         ) from None
+
+
+def _entry_from_definition(template_id: str, definition: TemplateDef) -> TemplateEntry:
+    # Persistent union members have exactly one of these root discriminators.
+    kind: TemplateItemKind = (
+        "module" if "type" in definition.module.model_fields else "waveform"
+    )
+    key = "type" if kind == "module" else "style"
+    discriminator = definition.module.model_fields[key].default
+    if not isinstance(discriminator, str):
+        raise TypeError(f"Template {template_id!r} requires a string discriminator")
+    program_shape = PROGRAM_SHAPES.get(kind, discriminator)
+    seeds = definition.expanded_seeds()
+
+    def shape() -> CfgSectionSpec:
+        return program_shape.make_spec(MAIN_PROGRAM_SPEC_POLICY)
+
+    def make_value(_ctx: SessionEnv) -> ReferenceValue:
+        spec = shape()
+        value = _seeded_section(spec, seeds)
+        return ReferenceValue(make_custom_reference_key(spec.label), value)
+
+    # Fail on malformed seeds at injection, without reading any session source.
+    _seeded_section(shape(), seeds)
+    return TemplateEntry(
+        template_id, definition.label, kind, shape, make_value, definition.default_name
+    )
+
+
+def _seeded_section(
+    spec: CfgSectionSpec, seeds: Mapping[str, TemplateSeed]
+) -> CfgSectionValue:
+    value = make_default_value(spec)
+    unknown = {path.split(".")[0] for path in seeds} - spec.fields.keys()
+    if unknown:
+        raise ValueError(f"Unknown template seed fields: {sorted(unknown)}")
+    for key, node_spec in spec.fields.items():
+        child_seeds = {
+            path[len(key) + 1 :]: seed
+            for path, seed in seeds.items()
+            if path.startswith(f"{key}.")
+        }
+        if isinstance(node_spec, ReferenceSpec) and child_seeds:
+            current = value.fields[key]
+            selected = _seed_reference_shape(node_spec, current, child_seeds)
+            value.fields[key] = ReferenceValue(
+                make_custom_reference_key(selected.label),
+                _seeded_section(selected, child_seeds),
+            )
+        elif isinstance(node_spec, CfgSectionSpec) and child_seeds:
+            value.fields[key] = _seeded_section(node_spec, child_seeds)
+        elif child_seeds:
+            raise TypeError(f"Template seed field {key!r} has no children")
+        if key in seeds:
+            seed = seeds[key]
+            if isinstance(node_spec, (ReferenceSpec, CfgSectionSpec)):
+                raise TypeError(f"Template seed field {key!r} requires child paths")
+            if isinstance(node_spec, LiteralSpec) and seed != node_spec.value:
+                raise ValueError(f"Template seed cannot change literal {key!r}")
+            value.with_field(
+                key,
+                EvalValue(seed.text) if isinstance(seed, Expr) else DirectValue(seed),
+            )
+    return value
+
+
+def _seed_reference_shape(
+    spec: ReferenceSpec,
+    current: object,
+    seeds: Mapping[str, TemplateSeed],
+) -> CfgSectionSpec:
+    discriminator_key = spec.discriminator
+    if discriminator_key is None:
+        raise ValueError("Template reference shape requires a discriminator")
+    discriminator = seeds.get(discriminator_key)
+    if discriminator is not None:
+        for allowed in spec.allowed:
+            literal = allowed.fields.get(discriminator_key)
+            if isinstance(literal, LiteralSpec) and literal.value == discriminator:
+                return allowed
+        raise ValueError(f"Unknown template seed shape {discriminator!r}")
+    if isinstance(current, ReferenceValue):
+        return select_ref_value_spec(spec, current)
+    return spec.allowed[0]
