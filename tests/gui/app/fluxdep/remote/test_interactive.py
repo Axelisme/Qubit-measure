@@ -147,7 +147,8 @@ def _joint_command(
 
 @pytest.mark.parametrize("kind", ["line", "onetone"])
 def test_finish_reports_transitive_publication_invalidated(
-    one_route: RouteHarness, kind: str,
+    one_route: RouteHarness,
+    kind: str,
 ) -> None:
     link = one_route.client()
     context = _open_picker(one_route, link, "one", kind)
@@ -159,7 +160,9 @@ def test_finish_reports_transitive_publication_invalidated(
     assert finished["result"].get("invalidated") == expected
 
 
-def test_twotone_finish_reports_filter_and_fit_invalidated(two_route: RouteHarness) -> None:
+def test_twotone_finish_reports_filter_and_fit_invalidated(
+    two_route: RouteHarness,
+) -> None:
     link = two_route.client()
     context = _open_picker(two_route, link, "two", "twotone")
     finished = _picker_command(two_route, link, context, "finish")
@@ -184,14 +187,18 @@ def test_finish_invalidated_is_the_original_publication_despite_reentrant_change
             one_route.ctrl.set_alignment("neighbor", 0.0, 1.0)
             one_route.ctrl.interactive.begin_line_pick("one")
 
-    subscription = one_route.ctrl.bus.subscribe(SpectrumChangedPayload, publish_neighbor_and_reopen)
+    subscription = one_route.ctrl.bus.subscribe(
+        SpectrumChangedPayload, publish_neighbor_and_reopen
+    )
     try:
         finished = _picker_command(one_route, link, context, "finish")
     finally:
         subscription.unsubscribe()
     assert finished["ok"] and "result" in finished
     assert finished["result"].get("invalidated") == [
-        "points of one", "filter mask of one", "fit",
+        "points of one",
+        "filter mask of one",
+        "fit",
     ]
     successor = one_route.ctrl.interactive.inspect("one")
     assert successor is not None

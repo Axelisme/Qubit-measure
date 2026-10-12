@@ -192,6 +192,8 @@ class InteractiveReply(TypedDict):
     discarded is align/sample only when open replaces an unfinished draft.
     """
 
+    # Terminal finish only: downstream labels from that exact app publication.
+    invalidated: NotRequired[list[str]]
     discarded: NotRequired[Literal["align", "sample"]]
     context: InteractiveContextReply | None
     effect: InteractiveEffect | None

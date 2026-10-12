@@ -57,7 +57,9 @@ def _joint_command(
     )
 
 
-def test_filter_finish_invalidated_is_native_fit_dependency(joint_route: RouteHarness) -> None:
+def test_filter_finish_invalidated_is_native_fit_dependency(
+    joint_route: RouteHarness,
+) -> None:
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
     finished = _joint_command(joint_route, link, context, "finish")

@@ -172,16 +172,19 @@ class Controller(BaseController[FluxDepState, EventBus]):
         flux_half: float,
         flux_int: float,
         inherited_from: str | None = None,
-    ) -> None:
-        """Publish native half/integer lines, clearing source for direct edits.
+    ) -> list[str]:
+        """Publish native half/integer lines and return downstream invalidated labels.
 
         The picker passes inherited_from only when finishing an untouched
         inherited draft. Other callers omit it for manually determined alignment.
         The owner service maps raw/point flux axes and publishes provenance under
         the same version bump. Invalid separation/mapped values fail before writes.
         """
+        before = self.state.pipeline_snapshot()
         self._alignment.set_alignment(name, flux_half, flux_int, inherited_from)
+        invalidated = self.state.invalidated(before)
         self._emit(SpectrumChangedPayload(name=name))
+        return invalidated
 
     def reset_alignment(self, name: str) -> None:
         """Reopen alignment, keeping points/completion; emit one change on success.
@@ -204,9 +207,18 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_points(
         self, name: str, dev_values: NDArray[np.float64], freqs: NDArray[np.float64]
-    ) -> None:
+    ) -> list[str]:
+        """Publish native device/GHz points and return this publication's invalidated labels.
+
+        PointsService sorts/maps arrays. Validation failures publish nothing.
+        Capture downstream facts before emitting; reentrant subscribers cannot
+        change this receipt. State and events remain committed if an emit fails.
+        """
+        before = self.state.pipeline_snapshot()
         self._points.set_points(name, dev_values, freqs)
+        invalidated = self.state.invalidated(before)
         self._emit(SpectrumChangedPayload(name=name))
+        return invalidated
 
     # --- cross-spectrum selection ---------------------------------------
 
@@ -215,9 +227,18 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_selection(
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
-    ) -> None:
+    ) -> list[str]:
+        """Publish a joint bool mask and return this publication's invalidated labels.
+
+        min_distance is the normalized downsample threshold. Shape errors fail
+        before publication. Capture facts before emitting, independent of
+        synchronous subscriber writes. No rollback is claimed on emit failure.
+        """
+        before = self.state.pipeline_snapshot()
         self._selection.set_selection(selected, min_distance)
+        invalidated = self.state.invalidated(before)
         self._emit(SelectionChangedPayload())
+        return invalidated
 
     # --- export ----------------------------------------------------------
 

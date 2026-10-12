@@ -82,7 +82,7 @@ def _execute(
     active: ActiveInteractiveContext,
     command: str | None,
     params: Mapping[str, object],
-) -> None:
+) -> list[str] | None:
     kind, name = active.kind, active.spectrum_name
     if command is None:
         return
@@ -94,13 +94,12 @@ def _execute(
         owner.apply_cross_selection()
     elif command == "finish":
         if kind == "line":
-            owner.finish_line_pick(name)
-        elif kind == "onetone":
-            owner.finish_onetone_pick(name)
-        elif kind == "selection":
-            owner.finish_cross_selection()
-        else:
-            owner.finish_twotone_pick(name)
+            return owner.finish_line_pick(name).invalidated
+        if kind == "onetone":
+            return owner.finish_onetone_pick(name).invalidated
+        if kind == "selection":
+            return owner.finish_cross_selection().invalidated
+        return owner.finish_twotone_pick(name).invalidated
     else:
         plugin.execute_command(session, command, params)
 
@@ -119,7 +118,7 @@ def _reply(
     # reference, not owner.inspect()'s successor, supplies the after snapshot.
     if isinstance(context, LinePickContext):
         before = context.session.snapshot()
-        _execute(
+        invalidated = _execute(
             owner,
             context.plugin,
             context.session,
@@ -156,7 +155,7 @@ def _reply(
         }
     elif isinstance(context, OneTonePickContext):
         before_one = context.session.snapshot()
-        _execute(
+        invalidated = _execute(
             owner,
             context.plugin,
             context.session,
@@ -193,7 +192,7 @@ def _reply(
         }
     elif isinstance(context, TwoTonePickContext):
         before_two = context.session.snapshot()
-        _execute(
+        invalidated = _execute(
             owner,
             context.plugin,
             context.session,
@@ -236,7 +235,7 @@ def _reply(
         }
     else:
         before_selection = context.session.snapshot()
-        _execute(
+        invalidated = _execute(
             owner,
             context.plugin,
             context.session,
@@ -284,12 +283,15 @@ def _reply(
             "points_added": int(view_selection.added_points.shape[0]),
             "points_removed": int(view_selection.removed_points.shape[0]),
         }
-    return {
+    reply: InteractiveReply = {
         "context": wire,
         "effect": {"command": command, "closed": closed, "changes": changes}
         if command is not None
         else None,
     }
+    if invalidated is not None:
+        reply["invalidated"] = invalidated
+    return reply
 
 
 def h_interactive_read(

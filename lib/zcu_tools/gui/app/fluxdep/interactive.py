@@ -200,6 +200,21 @@ class ActiveInteractiveContext:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationReceipt[T]:
+    """One successful app publication, independent of subsequent owner changes.
+
+    result is the accepted kernel numeric result for this command; its arrays
+    remain detached from State. invalidated lists downstream labels captured by
+    Controller before emitting the publication fact. Four terminal picker kinds
+    share this atomic correspondence. Failures raise instead of returning a
+    receipt; line/sample failures after retirement do not reopen input.
+    """
+
+    result: T
+    invalidated: list[str]
+
+
+@dataclass(frozen=True, slots=True)
 class FluxDepInteractivePorts:
     """Runtime collaborators for app-owned picking and joint-cloud selection.
 
@@ -214,10 +229,10 @@ class FluxDepInteractivePorts:
     """
 
     background: BackgroundSubmitter | None
-    publish_alignment: Callable[[str, float, float, str | None], None]
-    publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], None]
+    publish_alignment: Callable[[str, float, float, str | None], list[str]]
+    publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], list[str]]
     derive_pointcloud: Callable[[], tuple[NDArray[np.float64], NDArray[np.float64]]]
-    publish_selection: Callable[[NDArray[np.bool_], float], None]
+    publish_selection: Callable[[NDArray[np.bool_], float], list[str]]
 
 
 class FluxDepInteractiveOwner:
@@ -477,7 +492,9 @@ class FluxDepInteractiveOwner:
             else None
         )
 
-    def finish_line_pick(self, name: str | None = None) -> FluxPickAnalysis:
+    def finish_line_pick(
+        self, name: str | None = None
+    ) -> PublicationReceipt[FluxPickAnalysis]:
         """Validate, close and publish alignment; return accepted numeric result.
 
         name addresses a literal spectrum; omission reads the displayed draft.
@@ -495,13 +512,13 @@ class FluxDepInteractiveOwner:
             result = context.plugin.finish(context.session)
         finally:
             self.cancel(context.spectrum_name)
-        self._publish_alignment(
+        invalidated = self._publish_alignment(
             context.spectrum_name,
             result.flux_half,
             result.flux_int,
             None if context.alignment_changed else context.inherited_from,
         )
-        return result
+        return PublicationReceipt(result, invalidated)
 
     def begin_sample_pick(self, name: str) -> OneTonePickContext | TwoTonePickContext:
         """Open/reuse sampling for the named spectrum, using its published type.
@@ -570,7 +587,9 @@ class FluxDepInteractiveOwner:
             else None
         )
 
-    def finish_onetone_pick(self, name: str | None = None) -> OneTonePickResult:
+    def finish_onetone_pick(
+        self, name: str | None = None
+    ) -> PublicationReceipt[OneTonePickResult]:
         """Validate committed indices, close input and publish native point arrays.
 
         name addresses a literal spectrum; omission reads the displayed draft.
@@ -587,8 +606,10 @@ class FluxDepInteractiveOwner:
             result = context.plugin.finish(context.session)
         finally:
             self.cancel(context.spectrum_name)
-        self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
-        return result
+        invalidated = self._publish_points(
+            context.spectrum_name, result.dev_values, result.freqs
+        )
+        return PublicationReceipt(result, invalidated)
 
     def begin_twotone_pick(self, name: str) -> TwoTonePickContext:
         """Reuse a named aligned TwoTone context or open a captured seed.
@@ -643,7 +664,9 @@ class FluxDepInteractiveOwner:
             else None
         )
 
-    def finish_twotone_pick(self, name: str | None = None) -> TwoTonePickResult:
+    def finish_twotone_pick(
+        self, name: str | None = None
+    ) -> PublicationReceipt[TwoTonePickResult]:
         """Compute latest committed points, close input and publish through PointsService.
 
         name addresses a literal spectrum; omission reads the displayed draft.
@@ -660,8 +683,10 @@ class FluxDepInteractiveOwner:
             result = context.plugin.finish(context.session)
         finally:
             self.cancel(context.spectrum_name)
-        self._publish_points(context.spectrum_name, result.dev_values, result.freqs)
-        return result
+        invalidated = self._publish_points(
+            context.spectrum_name, result.dev_values, result.freqs
+        )
+        return PublicationReceipt(result, invalidated)
 
     def begin_cross_selection(self) -> CrossSelectionContext:
         """Reuse valid open cross context or capture an all-selected cloud seed.
@@ -792,6 +817,14 @@ class FluxDepInteractiveOwner:
         return context
 
     def apply_cross_selection(self) -> CrossSelectionResult:
+        """Publish once without closing input; return detached native Filter numbers.
+
+        Missing/invalid input raises FailedPreconditionError. Publication errors
+        leave input editable without rollback. Same owner-only rules as finish.
+        """
+        return self._publish_cross_selection().result
+
+    def _publish_cross_selection(self) -> PublicationReceipt[CrossSelectionResult]:
         """Synchronously publish the latest complete kept mask once, nonterminally.
 
         Validate current context and analyze its snapshot, never pending preview.
@@ -815,15 +848,17 @@ class FluxDepInteractiveOwner:
         self._publishing_selection = True
         try:
             # Publication and the detached caller result own independent masks.
-            self._publish_selection(result.selected.copy(), result.min_distance)
+            invalidated = self._publish_selection(
+                result.selected.copy(), result.min_distance
+            )
         finally:
             # A publisher may commit and then fail; preserve its actual version, not a rollback.
             context.selection_version = self._state.version.get(SELECTION_VERSION_KEY)
             self._publishing_selection = False
         self._updated(active)
-        return result
+        return PublicationReceipt(result, invalidated)
 
-    def finish_cross_selection(self) -> CrossSelectionResult:
+    def finish_cross_selection(self) -> PublicationReceipt[CrossSelectionResult]:
         """Publish the latest kept mask and retire Filter after successful publication.
 
         Require a valid global context. Publication failures propagate without
@@ -831,7 +866,7 @@ class FluxDepInteractiveOwner:
         """
         self._require_owner()
         context = self.current_cross_selection()
-        result = self.apply_cross_selection()
+        result = self._publish_cross_selection()
         # Publication facts may retire this identity and open a successor.
         if self.current_cross_selection() is context:
             self.cancel("selection")
