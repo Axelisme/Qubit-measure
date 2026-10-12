@@ -43,7 +43,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 與每次 env.run 前的 connected device capture。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 、每次 env.run 前的 connected device capture 與 workflow 自行保存 iteration 檔案。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、NotebookAdapter 與 GUI adapter 分工、RunContext／CfgEnv、具名原生圖與多圖保存、instance DeviceManager 與模擬環境 coordinator。
 
 

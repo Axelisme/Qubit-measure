@@ -33,7 +33,6 @@ from ._engine_fakes import (
     RecordingDevices,
     State,
     Tunables,
-    save_integer,
 )
 
 
@@ -160,7 +159,7 @@ def test_engine_live_failure_is_not_recoverable_acquisition_failure(
         env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
     ) -> Step[State, int]:
         del plan, tun
-        result = yield from env.run(acquire, Cfg(), save=save_integer, live=live)
+        result = yield from env.run(acquire, Cfg(), live=live)
         if isinstance(result, Completed):
             observed.append(result)
         return Next(1, state)
@@ -200,12 +199,11 @@ def test_engine_reuses_injected_plots_across_steps_and_saves_live_figure(
         del plan, tun
         seen.append(env.plots)
         if state.index:
-            env.plots.save("trace", env.iter_dir / "trace.png")
+            env.plots.save("trace", env.iteration_dir / "trace.png")
             return Done()
         result = yield from env.run(
             acquire,
             Cfg(),
-            save=save_integer,
             live=lambda axes, samples: viewer.update(axes[0], samples.real),
         )
         assert isinstance(result, Completed)

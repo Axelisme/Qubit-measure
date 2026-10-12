@@ -26,28 +26,34 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._coherence_input import t1_input
+from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest
 
 
 def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_capture(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
     observed: list[tuple[float, int]] = []
     replies: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("tuning-running", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "tuning-running", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, float]:
         yield from ()
         del env, plan
@@ -58,23 +64,30 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
             replies.append(rpc("workflow.tunables", {"run_id": "running", "batch": []}))
             panel = window.tuning_panel
             assert panel is not None
-            panel.panel.state.write({("guess_us",): {"expr": "10 * 3"}}, FormEnv())
-            control = panel.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+            panel.panel.state.write({("t1", "guess_us"): {"expr": "10 * 3"}}, FormEnv())
+            control = panel.panel.editor.findChild(
+                QLineEdit, "form.input.t1.sweep_factor"
+            )
             assert isinstance(control, QLineEdit)
             control.setText("-")
             replies.append(
                 rpc(
                     "workflow.tunables",
-                    {"run_id": "running", "batch": [{"path": ["reps"], "value": 200}]},
+                    {
+                        "run_id": "running",
+                        "batch": [{"path": ["t1", "reps"], "value": 200}],
+                    },
                 )
             )
             assert panel.panel.editor.local_parse_errors() is None
-            assert panel.host.accepted_input.data["guess_us"] == {"expr": "10 * 3"}
+            assert t1_input(panel.host.accepted_input.data)["guess_us"] == {
+                "expr": "10 * 3"
+            }
             assert panel.panel.state.input.data == panel.panel.state.base.data
-        observed.append((tun.guess_us, tun.reps))
-        return Next(tun.guess_us, state + 1)
+        observed.append((tun.t1.guess_us, tun.t1.reps))
+        return Next(tun.t1.guess_us, state + 1)
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("running"), int)
     harness.complete_segment()
     assert harness.background.error is None
@@ -123,7 +136,7 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
     prior = engine.records("tuning")
     assert len(prior) == 1 and prior[0].revision == 0
     panel.panel.state.write(
-        {("guess_us",): {"expr": "general.ext.guess_us * 2"}}, FormEnv()
+        {("t1", "guess_us"): {"expr": "general.ext.guess_us * 2"}}, FormEnv()
     )
     # External Apply resolves the accepted capture, not later live parameters.
     context = harness.services.context
@@ -138,7 +151,7 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
         assert isinstance(result, dict) and isinstance(result["status"], dict)
         assert result["status"]["revision"] == 1
     assert engine.records("tuning") == prior
-    assert panel.host.accepted_input.data["guess_us"] == {
+    assert t1_input(panel.host.accepted_input.data)["guess_us"] == {
         "expr": "general.ext.guess_us * 2"
     }
     assert panel.panel.state.base.data == panel.panel.state.input.data
@@ -188,8 +201,8 @@ def test_rpc_tunables_invalid_input_retains_draft_without_publishing(
         {
             "run_id": "tuning",
             "batch": [
-                {"path": ["reps"], "value": 200},
-                {"path": ["guess_us"], "value": value},
+                {"path": ["t1", "reps"], "value": 200},
+                {"path": ["t1", "guess_us"], "value": value},
             ],
         },
     )
@@ -198,9 +211,9 @@ def test_rpc_tunables_invalid_input_retains_draft_without_publishing(
     assert (error["code"], error["reason"]) == ("invalid_params", "form_errors")
     data = error["data"]
     assert isinstance(data, dict) and isinstance(data["messages"], list)
-    assert any(m["path"] == ["guess_us"] for m in data["messages"])
-    assert panel.panel.state.input.data["guess_us"] == value
-    assert panel.panel.state.input.data["reps"] == 200
+    assert any(m["path"] == ["t1", "guess_us"] for m in data["messages"])
+    assert t1_input(panel.panel.state.input.data)["guess_us"] == value
+    assert t1_input(panel.panel.state.input.data)["reps"] == 200
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
     assert controller.engine.tunables("tuning") == before
     panel.discard()
@@ -212,8 +225,11 @@ def test_rpc_tunables_invalid_input_retains_draft_without_publishing(
     [
         {},
         [{"path": [], "value": 200}],
-        [{"path": ["reps"], "value": 200, "extra": 1}],
-        [{"path": ["reps"], "value": 200}, {"path": ["reps"], "value": 300}],
+        [{"path": ["t1", "reps"], "value": 200, "extra": 1}],
+        [
+            {"path": ["t1", "reps"], "value": 200},
+            {"path": ["t1", "reps"], "value": 300},
+        ],
         [{"path": ["calibration", 0], "value": 200}],
         [{"path": ["unknown"], "value": 200}],
         [
@@ -289,7 +305,7 @@ def test_rpc_tunables_absent_and_pending_target_cannot_edit_start_draft(
     for actual in (None, "pending"):
         reply = rpc(
             "workflow.tunables",
-            {"run_id": "old", "batch": [{"path": ["guess_us"], "value": 80.0}]},
+            {"run_id": "old", "batch": [{"path": ["t1", "guess_us"], "value": 80.0}]},
         )
         error = reply["error"]
         assert reply["ok"] is False and isinstance(error, dict)
@@ -332,7 +348,7 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
     assert token is not None
     lease = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
     assert lease and harness.handles.known_outcome(token) is None
-    panel.panel.state.write({("guess_us",): 35.0}, FormEnv())
+    panel.panel.state.write({("t1", "guess_us"): 35.0}, FormEnv())
     before = (
         panel.panel.state.input.data,
         panel.panel.state.base.data,
@@ -342,10 +358,10 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
         controller.operation_id,
     )
     with pytest.raises(RunMismatch):
-        window.apply_tunables("old", {("reps",): 200}, actor=Actor("agent", "rpc"))
+        window.apply_tunables("old", {("t1", "reps"): 200}, actor=Actor("agent", "rpc"))
     reply = rpc(
         "workflow.tunables",
-        {"run_id": "old", "batch": [{"path": ["reps"], "value": 200}]},
+        {"run_id": "old", "batch": [{"path": ["t1", "reps"], "value": 200}]},
     )
     error = reply["error"]
     assert reply["ok"] is False and isinstance(error, dict)
@@ -381,7 +397,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     )
     before = controller.engine.tunables("tuning")
     accepted = panel.host.accepted_input.data
-    control = panel.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+    control = panel.panel.editor.findChild(QLineEdit, "form.input.t1.sweep_factor")
     assert isinstance(control, QLineEdit)
     control.setText("-")
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
@@ -394,7 +410,10 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     try:
         reply = rpc(
             "workflow.tunables",
-            {"run_id": "tuning", "batch": [{"path": ["guess_us"], "value": 45.0}]},
+            {
+                "run_id": "tuning",
+                "batch": [{"path": ["t1", "guess_us"], "value": 45.0}],
+            },
         )
         error = reply["error"]
         assert reply["ok"] is False and isinstance(error, dict)
@@ -415,7 +434,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
             journal.write_bytes(original_journal)
     assert controller.engine.tunables("tuning") == before
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
-    assert panel.panel.state.input.data["guess_us"] == 45.0
+    assert t1_input(panel.panel.state.input.data)["guess_us"] == 45.0
     assert panel.panel.editor.local_parse_errors() is not None
     assert control.text() == "-" and not harness.gate.snapshot()
     assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
@@ -446,8 +465,8 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert token is not None
     native = controller.engine.tunables("tuning")
     accepted = panel.host.accepted_input.data
-    panel.panel.state.write({("guess_us",): 45.0}, panel.host.env)
-    control = panel.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+    panel.panel.state.write({("t1", "guess_us"): 45.0}, panel.host.env)
+    control = panel.panel.editor.findChild(QLineEdit, "form.input.t1.sweep_factor")
     button = panel.findChild(QPushButton, "workflow.tuning.apply")
     message = panel.findChild(QLabel, "workflow.tuning.message")
     assert isinstance(control, QLineEdit) and isinstance(button, QPushButton)
@@ -480,8 +499,8 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     )
     assert controller.engine.tunables("tuning") == native
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
-    assert panel.panel.state.input.data["guess_us"] == 45.0
-    assert panel.panel.state.input.data["sweep_factor"] == 8.0
+    assert t1_input(panel.panel.state.input.data)["guess_us"] == 45.0
+    assert t1_input(panel.panel.state.input.data)["sweep_factor"] == 8.0
     assert control.text() == before_click_text
     assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
@@ -524,7 +543,7 @@ def test_window_tunables_journal_failure_reraises_the_original_cause(
     try:
         with pytest.raises(IsADirectoryError) as caught:
             window.apply_tunables(
-                "tuning", {("guess_us",): 45.0}, actor=Actor("agent", "rpc")
+                "tuning", {("t1", "guess_us"): 45.0}, actor=Actor("agent", "rpc")
             )
     finally:
         journal.rmdir()

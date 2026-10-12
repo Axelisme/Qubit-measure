@@ -415,7 +415,12 @@ class FormState[F: FormModel]:
         Start with host-provided current default input. Keep valid Expr/complex
         tags, missing-vs-null and whole sequence/typed-mapping leaves. Drop removed paths
         and type-incompatible leaves, but keep range/cross-field-invalid values
-        so result can report them. This is not legacy format support. Branch
+        so result can report them. Untagged model unions select a branch only
+        when saved field names and raw value types match exactly one member;
+        valid expression envelopes count as compatible for expression-capable
+        fields without evaluation. Zero or multiple matches discard that subtree,
+        never select the first branch. Tagged selection/defaults stay unchanged.
+        This is not legacy format support. Branch
         writes use the same discriminator-first order as write. A saved object
         without a discriminator overlays the current selected branch, retaining
         its tag and unsaved defaults; an empty object makes no change. If neither
