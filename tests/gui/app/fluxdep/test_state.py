@@ -102,6 +102,29 @@ def test_put_spectrum_replace_does_not_bump_set():
     assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 1  # set unchanged
 
 
+@pytest.mark.parametrize("name", ["a", "new"])
+def test_put_spectrum_rejects_filter_mask_without_mutation(name: str):
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_active("a")
+    st.set_selection(np.empty(0, dtype=np.bool_), 0.2)
+    stored_entry = st.get_spectrum("a")
+    before_versions = st.version.snapshot()
+    incoming = _make_entry(name)
+    incoming.filter_mask = np.empty(0, dtype=np.bool_)
+    incoming_mask = incoming.filter_mask
+
+    with pytest.raises(ValueError, match="cannot carry a Filter mask"):
+        st.put_spectrum(incoming)
+
+    assert incoming.filter_mask is incoming_mask
+    assert list(st.spectrums) == ["a"]
+    assert st.get_spectrum("a") is stored_entry
+    assert st.active_spectrum == "a"
+    assert st.selection.min_distance == 0.2
+    assert st.version.snapshot() == before_versions
+
+
 def test_remove_spectrum_drops_key_bumps_set():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
