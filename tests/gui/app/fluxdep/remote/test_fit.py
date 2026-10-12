@@ -198,7 +198,7 @@ def test_transition_rejection_does_not_publish(
 ) -> None:
     client = route_harness.client()
     initial = route_harness.ctrl.state.fit
-    reply = route_harness.request(client, "fit.set_params", **_inputs(search_db, transitions=transitions))
+    reply = route_harness.request(client, "fit.set_params", database_path=search_db, **_inputs(search_db, transitions=transitions))
     assert not reply["ok"]
     assert "error" in reply
     assert reply["error"]["code"] == "invalid_params"
@@ -218,6 +218,7 @@ def test_database_is_read_only_when_validation_needs_levels(
     initial = route_harness.ctrl.state.fit
     reply = route_harness.request(
         route_harness.client(), "fit.set_params",
+        database_path=str(tmp_path / "missing.h5"),
         **_inputs(str(tmp_path / "missing.h5"), transitions=transitions),
     )
     if code is None:
