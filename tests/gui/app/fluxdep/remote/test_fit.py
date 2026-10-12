@@ -10,6 +10,9 @@ import h5py
 import numpy as np
 import pytest
 from PIL import Image
+from zcu_tools.analysis.fluxdep.models import PointsData
+from zcu_tools.analysis.spectrum import SpectrumData
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, SpectrumEntry
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
@@ -40,6 +43,91 @@ def _png_data(figure: object) -> bytes:
     data = base64.b64decode(encoded, validate=True)
     assert figure["bytes"] == len(data)
     return data
+
+
+def _source(name: str) -> SpectrumEntry:
+    axis = np.array([0.0, 0.5, 1.0])
+    return SpectrumEntry(
+        name=name,
+        spec_type="OneTone",
+        raw=SpectrumData(
+            dev_values=axis.copy(), fluxs=axis.copy(), freqs=axis.copy(),
+            signals=np.ones((3, 3), dtype=np.complex128),
+        ),
+        points=PointsData(
+            dev_values=np.empty(0), fluxs=np.empty(0), freqs=np.empty(0),
+        ),
+        aligned=True,
+        points_completed=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "change, reason",
+    [
+        ("align", "empty re-aligned"),
+        ("points", "points of empty changed"),
+        ("filter", "filter changed"),
+        ("add", "spectrum collection changed"),
+        ("remove", "spectrum collection changed"),
+        ("replace", "empty re-aligned"),
+    ],
+)
+def test_upstream_publication_retains_fit_marks_stale_and_refuses_export(
+    route_harness: RouteHarness, tmp_path: Path, change: str, reason: str,
+) -> None:
+    state = route_harness.ctrl.state
+    state.put_spectrum(_source("empty"))
+    state.set_fit_result((3.0, 0.8, 0.5))
+    match change:
+        case "align":
+            state.set_alignment("empty", AlignmentPublication(0.1, 0.6, 1.0),
+                                np.array([0.1, 0.6, 1.1]), np.empty(0))
+        case "points":
+            state.set_points("empty", PointsData(dev_values=np.empty(0),
+                             fluxs=np.empty(0), freqs=np.empty(0)))
+        case "filter":
+            state.set_selection(np.empty(0, dtype=np.bool_))
+        case "add":
+            state.put_spectrum(_source("new"))
+        case "remove":
+            state.remove_spectrum("empty")
+        case "replace":
+            state.put_spectrum(_source("empty"))
+    client = route_harness.client()
+    reply = route_harness.request(client, "fit.result")
+    assert reply["ok"] and "result" in reply
+    assert reply["result"].get("stale") is True
+    assert reason in reply["result"].get("stale_reasons", [])
+    assert reply["result"]["params"] == {"EJ": 3.0, "EC": 0.8, "EL": 0.5}
+    path = tmp_path / "stale.json"
+    export = route_harness.request(client, "fit.export_params", savepath=str(path))
+    assert not export["ok"] and "error" in export
+    assert export["error"]["reason"] == "fit_stale"
+    assert reason in export["error"]["message"]
+    assert not path.exists()
+
+
+def test_active_is_display_only_and_replacement_clears_stale_result(
+    route_harness: RouteHarness,
+) -> None:
+    state = route_harness.ctrl.state
+    state.put_spectrum(_source("empty"))
+    state.set_fit_result((3.0, 0.8, 0.5))
+    state.set_active("empty")
+    client = route_harness.client()
+    reply = route_harness.request(client, "fit.result")
+    assert reply["ok"] and "result" in reply
+    assert reply["result"].get("stale", "missing") is False
+    assert reply["result"].get("stale_reasons") == []
+    state.set_selection(np.empty(0, dtype=np.bool_))
+    state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
+    cleared = route_harness.request(client, "fit.result")
+    assert cleared["ok"] and "result" in cleared
+    assert cleared["result"]["params"] is None
+    assert cleared["result"].get("stale", "missing") is False
+    assert cleared["result"].get("stale_reasons") == []
+    assert cleared["result"].get("quality", "missing") is None
 
 
 def test_fit_result_projects_recorded_quality_without_rounding_or_merging(
