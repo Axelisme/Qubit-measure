@@ -719,6 +719,60 @@ def test_literal_picker_name_does_not_guard_same_prefix_neighbor(
     assert not one_route.ctrl.state.spectrums[name].points_completed
 
 
+@pytest.mark.parametrize("name", ["one", "two"])
+def test_sample_intent_opens_actual_picker_kind(
+    route_harness: RouteHarness,
+    onetone_controller: Controller,
+    twotone_controller: Controller,
+    name: str,
+):
+    _copy_sources(route_harness, onetone_controller)
+    _copy_sources(route_harness, twotone_controller)
+    link = route_harness.client()
+    opened = route_harness.request(
+        link, "spectrum.interactive.open", name=name, kind="sample"
+    )
+    context = _context(opened)
+    assert context["kind"] == ("onetone" if name == "one" else "twotone")
+    assert context["spectrum_name"] == name
+    if name == "two":
+        assert _state(context)["masked_count"] == 0
+    reopened = _context(
+        route_harness.request(
+            link, "spectrum.interactive.open", name=name, kind="sample"
+        )
+    )
+    assert reopened["context_id"] == context["context_id"]
+
+
+@pytest.mark.parametrize("condition", ["unaligned", "absent"])
+def test_sample_intent_uses_native_prerequisites(
+    one_route: RouteHarness, condition: str
+):
+    name = "one"
+    if condition == "unaligned":
+        one_route.ctrl.reset_alignment(name)
+    else:
+        name = "absent"
+    link = one_route.client()
+    versions = one_route.ctrl.state.version.snapshot()
+    active = one_route.ctrl.state.active_spectrum
+    reply = one_route.request(
+        link, "spectrum.interactive.open", name=name, kind="sample"
+    )
+    _error(
+        reply,
+        "invalid_params" if condition == "absent" else "precondition_failed",
+        None,
+    )
+    assert (
+        "unknown spectrum" if condition == "absent" else "requires an aligned spectrum"
+    ) in reply["error"]["message"]
+    assert one_route.ctrl.state.active_spectrum == active
+    assert one_route.ctrl.state.version.snapshot() == versions
+    assert one_route.ctrl.interactive.inspect() is None
+
+
 @pytest.mark.parametrize("condition", ["unaligned", "wrong_type", "absent"])
 def test_open_uses_native_prerequisites_without_changing_active(
     one_route: RouteHarness, condition: str
