@@ -21,9 +21,9 @@ def project_overnight_trend(
 ) -> tuple[OvernightPoint, ...]:
     """Decode committed overnight summaries in input commit order.
 
-    records must come from Engine.records or read_committed_records for an
-    overnight run. Returns detached scalar evidence in aware UTC actual-start
-    time and microseconds, retaining None uncertainties, values and diagnoses.
+    records must come from Engine.records for an overnight run. Returns detached
+    scalar evidence in aware UTC actual-start time and microseconds, retaining
+    None uncertainties, values and diagnoses.
     Empty commits return (). Repr-degraded or invalid summaries raise ValueError;
     no native trace, GUI draft, fit, threshold or missing-value substitute is used.
     """

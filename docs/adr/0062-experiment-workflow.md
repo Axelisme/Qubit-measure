@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-12，committed 趨勢圖唯讀重開
+**Last updated:** 2026-10-12，overnight live 趨勢與保存責任
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -40,11 +40,13 @@ Engine.records 提供 committed evidence，record.json 不作提交判定。匯�
 
 Native 原子覆寫 workflow data_root/merged.h5。Labber 使用相同 payload 與明填 independent layout，在 SaveLayout 選出的新日期樹路徑保存。Datafile 擁有既有異質 layout 與完整寫入的 finalization。Signal/Time 2D 與 T1 Flux-only 1D 保持原 rank，不 union 或 broadcast。Native/Labber 的 allocation/writer failure 分別回報，未分配 Labber path 為 None。Saved ledger 事件只含 known-path attempts，附檔保留完整報告；ledger 失敗不抹掉已成功路徑。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護，不讓 framework 反向 import 使用者 adapter。格式與批次保存分工沿 [[0063]]。
 
-## Committed 趨勢圖讀回
+## Overnight live 趨勢與保存責任
 
-Live 趨勢圖用 Engine.records；離線重開用 artifact owner 的 read_committed_records。Journal 的完整提交行是共同 authority。Best-effort record.json 可能缺失，native files 也可能屬於未提交步驟，所以兩者都不能創造完成點。Reader 沿既有 owner event 型別驗證 envelope、schema、run identity、sequence 與相對路徑，未完成末行不算 commit，完整壞行拒絕讀取。它不建 Engine、不恢復 state、不提供 resume。
+Live 趨勢圖只用 Engine.records 的 committed evidence。具體 scalar 投影與繪圖在 zcu_lab.workflows.trend，不在框架重 fit。GUI presentation owner 在 zcu_lab.workflows.gui.figures，與 Window 固定。它只持有 native Plots 和繪圖 cursor，沒有 Engine、run target 或 operation。Window 沿既有約 50ms poll 更新 live 圖，最後提交刷新後才 finish。Pause 保留 Plots，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
 
-具體 scalar 投影與繪圖在 zcu_lab.workflows.trend，不在框架重 fit。GUI presentation owner 在 zcu_lab.workflows.gui.figures，與 Window 固定。它只持有 native/offline Plots 和繪圖 cursor，沒有 Engine、run target 或 operation。Window 先做 target／Qt owner／idle admission，最後提交刷新後才 finish。離線圖不冒充 native RPC target，候選成功後才替換；Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
+使用者在 2026-10-12 裁定：「趨勢圖也不用，後來用戶自己從數據重畫最自由，但可以workflow實作者存每個iter希望存的圖」與「讓workflow實作者自己在內部存，框架保持簡單」。本裁定取消趨勢圖保存與重開能力，保留現有 live 顯示。框架不提供 committed journal reader，不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure 或 Engine 提交通知。使用者可自行從 record.json 或 native 資料重畫；workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。
+
+Journal writer、Engine 提交與 iteration 保存契約不變。現有具名圖 RPC、PNG renderer 與 Plots 工具也不變。依賴方向由 C18 與 trend-science-no-frontends contract 保護，科學投影不依賴 frontend admission。
 
 ## 取捨與 owner
 

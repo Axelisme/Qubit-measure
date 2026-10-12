@@ -1,6 +1,6 @@
 # workflows/gui — Workflow form attachments
 
-**Last updated:** 2026-10-12, captured terminal samples export
+**Last updated:** 2026-10-12, live-only overnight trend presentation
 
 這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
 
@@ -20,11 +20,11 @@ RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledg
 
 `T1WorkflowWindow.export_samples(run_id)`、GUI Export samples 與 RPC `workflow.export_samples` 使用同一 retained Controller binding。MCP `workflows_workflow_export_samples` 只轉送一次。T1、T2echo 與 T2ramsey 支持成功 flux 點；MIST 與 overnight 停用動作並以 tooltip 說明原因，RPC/MCP 回 unsupported。後續 selection、entry point 或 source reload 不替換既有 run 的 table、component、point 或 science callback。Native 已 terminal 但 host 尚未 delivery 時，samples 動作仍停用。RPC 的部分 I/O 失敗提供 written_count、cause 與 cause_type；MCP 沿原 call_gui 文字錯誤保留原因與行數。`sample_action` 只呈現 eligibility、receipt 與 click failure，signal wiring 留在 Window。它與 layout／figures 一樣是 fixed source，修改需 restart。
 
-`T1WorkflowWindow.open_overnight_trend(metadata_root)` 只在 Qt owner 與 idle admission 通過後讀取指定 metadata directory 的 journal。它不讀 GUI draft、裝置或 native files，不建立 run、operation 或 RPC target。按鈕 objectName 是 `workflow.trend.open`，圖名是 `overnight_trend`。Live poll 與 terminal delivery 使用 Engine.records，重開使用 artifact owner 的 committed reader；兩者共用同一 scalar 投影與繪圖函式，最後提交也在 finish 前更新。
+Overnight 只提供 live 趨勢圖，圖名是 `overnight_trend`。Live poll 與 terminal delivery 使用 Engine.records，最後提交在 finish 前更新。缺值與 reason 沿 scalar 投影保留，不重 fit。Canvas 保持至少 640×480。GUI 不提供從 run 目錄重開或自動保存趨勢圖的動作，也不新增存圖 interface。使用者可自行從 record.json 或 native 資料重畫，保存責任見 ADR-0062。
 
 `gui.layout.build_workflow_layout` 一次建立既有控制項與原 vertical layout，回傳具名 `WorkflowControls`。Carrier 只保留 Window 消費的 Qt controls，不存 domain state，也不接 callback。全部 signal wiring 與 admission policy 留在 Window。Layout 與 Window 都是 fixed source，修改需 restart。
 
-`gui.figures` 的 app-private presentation owner 持有 native Plots、單一 offline Plots 與 committed cursor。Native RPC 不讀 offline 圖。失敗候選清理後保留先前離線 view；成功後才替換。Pause 保留 native 圖，terminal 才 finish，成功 Start 與 close 釋放 offline presentation。這個 owner 與 Window 都是 fixed source，修改需 restart；繪圖時解析目前可 reload 的 science 函式，不把舊 callable 當永久權威。
+`gui.figures` 的 app-private presentation owner 只持有 native Plots 與 committed cursor。Pause 保留 native 圖，terminal refresh 後才 finish；replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figure。這個 owner 與 Window 都是 fixed source，修改需 restart；繪圖時解析目前可 reload 的 science 函式，不把舊 callable 當永久權威。
 
 Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
 

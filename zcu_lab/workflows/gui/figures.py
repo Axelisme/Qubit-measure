@@ -2,60 +2,46 @@
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-
 from qtpy.QtWidgets import QWidget
 from zcu_tools.experiment.workflows import CommittedRecord
-from zcu_tools.experiment.workflows.artifacts import read_committed_records
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting.figure_export import render_figure_png
-from zcu_tools.plotting.figures import NamedFigures
-from zcu_tools.plotting.plots import PlotHost, Plots
-
-logger = logging.getLogger(__name__)
+from zcu_tools.plotting.plots import Plots
 
 
 class WorkflowFigureViews:
-    """Own native and independent offline presentations on one explicit host.
+    """Own the attached native presentation and its committed drawing cursor.
 
     App-local implementation, not a package-exported run owner.
     native is the attached run's actual Plots or None before install/after release.
-    _offline is one finished read-only view, never an RPC/native target. _cursor
-    is the last attempted native commit count, reset with each new native Plots.
+    _cursor is the last attempted native commit count, reset with new Plots.
     No Engine, Controller, run identity, operation, session or admission is held.
-    Window admits owner/idle/target access before calling; Pause does nothing,
-    terminal refresh precedes finish_native, and successful Start/close release
-    the offline view. Callers retain returned Figures independently of release.
-    This owner is fixed with Window. Science drawing is resolved at each call,
-    so bounded science reload does not freeze an old projection callable.
+    Window admits owner/target access before calling; Pause does nothing,
+    terminal refresh precedes finish_native, and close releases presentation.
+    Callers retain Figures independently of release. This owner is fixed with
+    Window. Science drawing is resolved at each call, so bounded science reload
+    does not freeze an old projection callable.
     """
 
-    def __init__(self, host: PlotHost) -> None:
-        """Borrow the existing explicit PlotHost on its initialized Qt owner.
+    def __init__(self) -> None:
+        """Create empty presentation state without acquiring any resources.
 
         Caller keeps this owner through producer drain and releases on close.
         No controls, callbacks or native operation authority are acquired.
         """
-        self._host = host
         self.native: Plots | None = None
-        self._offline: Plots | None = None
         self._cursor: int | None = None
 
     def install_native(self, plots: Plots) -> None:
         """Install new active Plots before native admission listeners reenter.
 
         Window has admitted replacement. Release the previous native presentation
-        and reset its cursor; offline stays until Start actually succeeds.
+        and reset its cursor.
         """
         if self.native is not None:
             self.native.release()
         self.native = plots
         self._cursor = None
-
-    def start_succeeded(self) -> None:
-        """Release the finished offline view only after Start submission succeeds."""
-        self._release_offline()
 
     def start_failed(self) -> None:
         """Finish/release the unsuccessful native candidate after submit fails."""
@@ -104,7 +90,7 @@ class WorkflowFigureViews:
         """Render admitted native name at 640 x 480 on Qt owner, without retry.
 
         Unknown names raise KeyError. Released native Plots raise no_plots,
-        matching native_names. Offline views never supply native RPC products.
+        matching native_names.
         """
         return render_figure_png(self._require_native()[name])
 
@@ -115,44 +101,8 @@ class WorkflowFigureViews:
             )
         return self.native
 
-    def open(self, metadata_root: Path) -> NamedFigures:
-        """Publish a finished independent trend only after candidate success.
-
-        Window must admit Qt owner/idle access before I/O. metadata_root contains
-        journal.jsonl. Missing/invalid source and draw errors propagate; failed
-        candidates finish without presentation and release, retaining the original
-        error if cleanup fails. Draw has no rollback guarantee. Native presentation
-        and target stay unchanged. Returned named Figures survive view release.
-        """
-        from ..trend import draw_overnight_trend
-
-        records = read_committed_records(metadata_root)
-        candidate = Plots(self._host)
-        try:
-            draw_overnight_trend(candidate, records)
-            self._size_trend_canvas(candidate)
-            figures = candidate.finish()
-        except Exception:
-            try:
-                candidate.finish(present=False)
-                candidate.release()
-            except Exception:
-                logger.exception("Failed to release an unsuccessful trend view")
-            raise
-        previous = self._offline
-        self._offline = candidate
-        if previous is not None:
-            previous.release()
-        return figures
-
-    def _release_offline(self) -> None:
-        if self._offline is not None:
-            self._offline.release()
-            self._offline = None
-
     def release(self) -> None:
-        """Release presentations only after Window close admission/producer drain."""
-        self._release_offline()
+        """Release native presentation after Window close admission/producer drain."""
         if self.native is not None:
             self.native.release()
             self.native = None

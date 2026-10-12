@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from pathlib import Path
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -12,7 +11,7 @@ from pydantic import JsonValue
 from qick import QickConfig
 from qtpy.QtCore import QSignalBlocker, QTimer
 from qtpy.QtGui import QCloseEvent
-from qtpy.QtWidgets import QFileDialog, QWidget
+from qtpy.QtWidgets import QWidget
 from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
@@ -51,7 +50,6 @@ from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
-from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import (
@@ -146,7 +144,6 @@ class T1WorkflowWindow(QWidget):
             (self._controls.resume, self._resume_clicked),
             (self._controls.stop, self._stop_clicked),
             (self._controls.export, self._export_clicked),
-            (self._controls.open_trend, self._open_trend_clicked),
             (self._controls.setup, self.open_setup),
             (self._controls.aliases, self._aliases_clicked),
             (self._controls.prepare, self._use_source_clicked),
@@ -161,7 +158,7 @@ class T1WorkflowWindow(QWidget):
             FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
             owner,
         )
-        self._figure_views = WorkflowFigureViews(self._plot_host)
+        self._figure_views = WorkflowFigureViews()
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._sync_source_status)
         self._sync_source_status()
@@ -546,8 +543,6 @@ class T1WorkflowWindow(QWidget):
         except Exception:
             self._figure_views.start_failed()
             raise
-        self._figure_views.start_succeeded()
-        self._controls.open_trend.setEnabled(False)
         self.plan_panel.state.reset(submitted_plan)
         self.tunables_panel.state.reset(accepted_input)
         for editor in (self.plan_panel.editor, self.tunables_panel.editor):
@@ -677,32 +672,6 @@ class T1WorkflowWindow(QWidget):
         if controller.engine is None:
             raise RuntimeError("Figures require an accepted run")
         return self._figure_views.native_png(name)
-
-    def open_overnight_trend(self, metadata_root: Path) -> NamedFigures:
-        """Open metadata_root/journal.jsonl as a read-only overnight named Figure mapping.
-
-        Qt owner and idle admission precede I/O; pending/active/paused runs reject.
-        Source/draw errors propagate without replacing the previous offline view;
-        draw is not transactional. Native Engine/RPC targets remain unchanged.
-        The offline view has no run/operation/RPC binding. Its presentation is
-        finished, then released at replacement/Start/close; returned Figures survive.
-        """
-        if get_ident() != self._thread:
-            raise RuntimeError("Trend opening requires the Window owner thread")
-        self._ensure_idle()
-        return self._figure_views.open(metadata_root)
-
-    def _open_trend_clicked(self) -> None:
-        directory = QFileDialog.getExistingDirectory(
-            self, "Select workflow metadata directory"
-        )
-        if not directory:
-            return
-        try:
-            self.open_overnight_trend(Path(directory))
-        except Exception as error:
-            logger.exception("Overnight trend opening failed")
-            self._controls.message.setText(str(error))
 
     def apply_tunables(
         self,
@@ -836,14 +805,6 @@ class T1WorkflowWindow(QWidget):
             self._controls.samples,
             eligible=controller.samples_export_ready,
             reason=reason,
-        )
-        self._controls.open_trend.setEnabled(
-            not controller.has_pending_segment
-            and controller.operation_id is None
-            and (
-                status is None
-                or status.lifecycle in {"done", "stopped", "failed", "aborted"}
-            )
         )
         if status is None:
             self._controls.export.setEnabled(False)

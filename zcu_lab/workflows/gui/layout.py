@@ -19,7 +19,6 @@ class WorkflowControls:
     selector chooses the workflow; message displays run/input/view diagnostics.
     start/pause/resume/stop are the existing native run action buttons.
     export opens explicit merged/Labber export; samples appends scientific rows;
-    open_trend selects an offline view.
     setup opens shared Setup; aliases opens alias editing; prepare captures forms;
     reload attempts bounded source replacement. Their original order is retained.
     source_status displays current qubit availability, not admission authority.
@@ -37,7 +36,6 @@ class WorkflowControls:
     stop: QPushButton
     export: QPushButton
     samples: QPushButton
-    open_trend: QPushButton
     setup: QPushButton
     aliases: QPushButton
     prepare: QPushButton
@@ -82,8 +80,6 @@ def build_workflow_layout(
     plot_stack = QStackedWidget(parent)
     plot_placeholder = QLabel("Workflow plots", plot_stack)
     plot_stack.addWidget(plot_placeholder)
-    open_trend = QPushButton("Open overnight trend…", parent)
-    open_trend.setObjectName("workflow.trend.open")
     layout = QVBoxLayout(parent)
     setup = QPushButton("Setup", parent)
     setup.setObjectName("workflow.source.setup")
@@ -110,7 +106,6 @@ def build_workflow_layout(
         stop,
         export,
         samples,
-        open_trend,
         message,
         plot_stack,
     ):
@@ -124,7 +119,6 @@ def build_workflow_layout(
         stop,
         export,
         samples,
-        open_trend,
         setup,
         aliases,
         prepare,
