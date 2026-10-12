@@ -116,6 +116,8 @@ def test_native_cfg_backfill_is_detached_inline_and_direct_range() -> None:
     )
     assert hasattr(form, "cfg_input"), "Form must own native cfg backfill"
     backfill = form.cfg_input(native)
+    if not isinstance(backfill, FormInput):
+        pytest.fail(str(backfill.errors.messages))
     data = backfill.data
     assert data["sweep"] == {"kind": "linrange", "start": 10.0, "stop": 14.0, "n": 3}
     assert data["amplitude"] == {"__complex__": [2.0, 3.0]}
