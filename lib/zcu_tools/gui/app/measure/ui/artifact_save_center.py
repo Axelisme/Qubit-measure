@@ -55,13 +55,16 @@ def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
     return str(path)
 
 
-def _output_status_text(status: str, error: str | None) -> str:
-    """ "✓" when saved, "✗ <error>" when failed, "" before any save attempt."""
-    if status == "saved":
-        return "✓"
-    if status == "failed":
-        return f"✗ {error}" if error else "✗"
-    return ""
+def _output_status_text(status: str) -> str:
+    """Return the row-end mark: a check when saved, empty otherwise."""
+    return "✓" if status == "saved" else ""
+
+
+def _output_error_text(status: str, error: str | None) -> str:
+    """Return the full-width failure line, or empty when the output did not fail."""
+    if status != "failed":
+        return ""
+    return f"✗ {error}" if error else "✗"
 
 
 def _hint_label(text: str) -> QLabel:
@@ -135,6 +138,7 @@ class ArtifactSaveCenter(QWidget):
         self._path_edits: dict[tuple[ArtifactKey, int], _ElidedPathEdit] = {}
         self._file_names: dict[tuple[ArtifactKey, int], QLabel] = {}
         self._output_status: dict[tuple[ArtifactKey, int], QLabel] = {}
+        self._output_errors: dict[tuple[ArtifactKey, int], QLabel] = {}
         self._save_handler: Callable[[ArtifactRef], None] | None = None
 
         outer = QVBoxLayout(self)
@@ -201,13 +205,15 @@ class ArtifactSaveCenter(QWidget):
 
     def _build_output(self, identity: tuple[ArtifactKey, int]) -> QWidget:
         container = QWidget(self)
-        row = QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        row = QHBoxLayout()
         name = QLabel()
         row.addWidget(name)
         self._file_names[identity] = name
         edit = _ElidedPathEdit()
-        row.addWidget(edit, stretch=2)
+        row.addWidget(edit, stretch=1)
         self._path_edits[identity] = edit
         open_folder = QPushButton("Open folder")
         open_folder.clicked.connect(
@@ -215,11 +221,17 @@ class ArtifactSaveCenter(QWidget):
         )
         row.addWidget(open_folder)
         status = QLabel()
-        status.setTextFormat(Qt.TextFormat.PlainText)
-        status.setWordWrap(True)
-        status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
-        row.addWidget(status, stretch=1)
+        row.addWidget(status)
         self._output_status[identity] = status
+        layout.addLayout(row)
+        # A failure message needs the full width to wrap readably.
+        error = QLabel()
+        error.setTextFormat(Qt.TextFormat.PlainText)
+        error.setWordWrap(True)
+        error.setStyleSheet("color: #b00020;")
+        error.hide()
+        layout.addWidget(error)
+        self._output_errors[identity] = error
         return container
 
     def _save_artifact(self, ref: ArtifactRef) -> None:
@@ -301,6 +313,7 @@ class ArtifactSaveCenter(QWidget):
                 self._path_edits.pop(identity)
                 self._file_names.pop(identity)
                 self._output_status.pop(identity)
+                self._output_errors.pop(identity)
         bases = snapshot.save.display_bases
         self._no_persistence_hint.setVisible(not snapshot.save.saves_to_entry)
         per_section = {
@@ -349,8 +362,11 @@ class ArtifactSaveCenter(QWidget):
                     _display_path(output.path, bases), str(output.path)
                 )
                 self._output_status[identity].setText(
-                    _output_status_text(output.status, output.error)
+                    _output_status_text(output.status)
                 )
+                error_text = _output_error_text(output.status, output.error)
+                self._output_errors[identity].setText(error_text)
+                self._output_errors[identity].setVisible(bool(error_text))
 
     def update_interaction(self, snapshot: TabSnapshot) -> None:
         """Refresh evidence and enable commands only for idle, ready tabs.
