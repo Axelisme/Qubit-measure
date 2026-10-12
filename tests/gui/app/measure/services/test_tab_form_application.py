@@ -1,10 +1,10 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
 from collections.abc import Mapping
-from time import monotonic, sleep
 from typing import ClassVar
 
 import pytest
+from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import Expr
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.cfg.resource import CfgPreconditionError
 
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -73,12 +74,26 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
         )
         assert resource.result() == TraceCfg(amount=6.0)
         assert resource.preview().values[("amount",)] == 6.0
-        application.ctrl.start_run(tab_id)
-        deadline = monotonic() + 3
-        while application.state.is_run_active() and monotonic() < deadline:
-            qapp.processEvents()
-            sleep(0.001)
-        qapp.processEvents()
+        finished: list[RunFinishedPayload] = []
+        loop, timer = QEventLoop(), QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def terminal(payload: RunFinishedPayload) -> None:
+            if payload.tab_id == tab_id:
+                finished.append(payload)
+                loop.quit()
+
+        subscription = application.bus.subscribe(RunFinishedPayload, terminal)
+        try:
+            application.ctrl.start_run(tab_id)
+            timer.start(3000)
+            if not finished:
+                loop.exec()
+        finally:
+            timer.stop()
+            subscription.unsubscribe()
+        assert finished, "Run must reach a terminal notification before timeout"
         assert not application.state.is_run_active()
         assert application.state.get_tab(tab_id).run.result == TraceCfg(amount=6.0)
         resource.reset()
