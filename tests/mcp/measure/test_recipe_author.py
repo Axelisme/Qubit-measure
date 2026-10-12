@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
-    RecipeNeedsParameters,
+    MissingParameter,
     RecipeSession,
     SweepSources,
     WritebackError,
@@ -14,6 +14,21 @@ from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._recipe_field_support import SweepGui as _SweepGui
 from ._recipe_support import LookbackGui, recipe_client
+
+
+@pytest.mark.parametrize(
+    "parameter,reason",
+    [
+        pytest.param("", "Provide a readout reference", id="empty-parameter"),
+        pytest.param("readout_ref", "", id="empty-reason"),
+    ],
+)
+def test_missing_parameter_rejects_empty_name_or_reason(parameter, reason):
+    with pytest.raises(
+        ValueError,
+        match="^missing parameters must contain non-empty names and reasons$",
+    ):
+        MissingParameter(parameter, reason)
 
 
 @pytest.mark.parametrize("mode", ["inline", "ref"])
@@ -42,10 +57,10 @@ def test_author_edits_preserve_defaults(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         tab.set("rounds", None)
-        tab.use_library("modules.readout", None)
+        assert tab.use_library("modules.readout", None) is None
         tab.set("rounds", 7)
         # This short reference is a wire-edit literal, not native admission.
-        tab.use_library("modules.readout", "readout")
+        assert tab.use_library("modules.readout", "readout") is None
         tab.disable_library("modules.reset")
 
     assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 7
@@ -114,13 +129,45 @@ def test_author_rejects_unknown_fields_without_editing(tmp_path, field):
             tab.set(field, 5)
 
 
-def test_author_missing_required_library_is_a_named_parameter_gap(tmp_path):
+@pytest.mark.parametrize(
+    "name,current_reference,expected",
+    [
+        pytest.param(
+            None,
+            None,
+            MissingParameter(
+                "readout_ref", "Provide a valid modules.readout library reference"
+            ),
+            id="absent-reference",
+        ),
+        pytest.param(
+            None,
+            "unknown",
+            MissingParameter(
+                "readout_ref", "Provide a valid modules.readout library reference"
+            ),
+            id="unavailable-reference",
+        ),
+        pytest.param(None, "Q1.readout.seed", None, id="retained-library"),
+        pytest.param("Q1.readout.seed", None, None, id="explicit-library"),
+    ],
+)
+def test_author_required_library_returns_parameter_gap_or_none(
+    tmp_path, name, current_reference, expected
+):
     gui = LookbackGui()
+    gui.library["Q1.readout.seed"] = {}
+    gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"] = (
+        current_reference
+    )
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(RecipeNeedsParameters) as error:
-            tab.use_library("modules.readout", None, required="readout_ref")
-        assert [item.parameter for item in error.value.missing] == ["readout_ref"]
+        assert tab.use_library("modules.readout", name, required="readout_ref") == (
+            expected
+        )
+    assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == (
+        0 if name is None else 1
+    )
 
 
 def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):

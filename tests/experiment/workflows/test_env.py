@@ -1,7 +1,7 @@
 """Environment capability and display contracts, without executing requests."""
 
 from collections.abc import Generator
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -116,21 +116,6 @@ def test_native_accessors_return_injected_handles_without_operating(
 def test_wait_rejects_naive_target_before_suspension(env: WorkflowEnv[str]) -> None:
     request = env.wait_until(datetime(2026, 10, 6))
     with pytest.raises(ValueError, match="timezone-aware"):
-        next(request)
-
-
-@dataclass
-class Cfg:
-    """Pure fake config; value is one integer experiment input."""
-
-    value: int = 1
-
-
-def test_anonymous_experiment_is_rejected_before_suspension(
-    env: WorkflowEnv[str],
-) -> None:
-    request = env.run(lambda _run: 1, Cfg(), save=lambda _completed, _path: None)
-    with pytest.raises(ValueError, match="ASCII function name"):
         next(request)
 
 

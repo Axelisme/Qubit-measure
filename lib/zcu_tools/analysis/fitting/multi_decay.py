@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
@@ -435,48 +436,16 @@ def fit_with_vadality(
 
     fig, (ax, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12))
 
-    plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
-    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)
-    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)
-
-    r_num = Rs.shape[0]
-    for i in range(r_num):
-        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)
-        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)
-        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)
-
-    ax.legend()
-    ax.grid(True)
+    _plot_population_scan(ax, times, populations, fit_pps)
 
     names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
-    for i in range(Rs.shape[1]):
-        ax2.errorbar(
-            times[time_idxs],
-            Rs[:, i],
-            yerr=R_errs[:, i],
-            label=names[i],
-            fmt=".-",
-            markersize=4,
-            capsize=3,
-        )
-    ax2.set_ylim(0.0, 2 * np.max(Rs[-10:]))
-    ax2.legend()
-    ax2.grid(True)
+    _plot_rate_scan(ax2, times[time_idxs], Rs, R_errs, names)
 
-    ax3.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 0", markersize=4)
-    ax3.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 1", markersize=4)
-    ax3.plot(times[time_idxs], fit_lambdas[:, 2], "o-", label="Lambda 2", markersize=4)
-    ax3.legend()
-    ax3.grid(True)
+    _plot_modes(ax3, times[time_idxs], fit_lambdas, "Lambda")
 
-    ax4.plot(times[time_idxs], fit_amplitudes[:, 0], "o-", label="Amp 0", markersize=4)
-    ax4.plot(times[time_idxs], fit_amplitudes[:, 1], "o-", label="Amp 1", markersize=4)
-    ax4.plot(times[time_idxs], fit_amplitudes[:, 2], "o-", label="Amp 2", markersize=4)
-    ax4.legend()
-    ax4.grid(True)
+    _plot_modes(ax4, times[time_idxs], fit_amplitudes, "Amp")
 
-    plt.show(fig)
+    plt.show()
     plt.close(fig)
 
     rate, rate_err, *_, (_, pCov) = fit_transition_rates(times, populations)
@@ -510,7 +479,7 @@ def fit_with_vadality(
     ax5.set_xticklabels(names)
     ax5.set_yticklabels(names)
 
-    plt.show(fig)
+    plt.show()
     plt.close(fig)
 
 
@@ -555,73 +524,25 @@ def fit_dual_with_vadality(
     fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 8))
 
     # ax1
-    plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)
-    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)
-    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)
-
-    r_num = Rs.shape[0]
-    for i in range(r_num):
-        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)
-        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)
-        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)
-
-    ax1.legend()
-    ax1.grid(True)
+    _plot_population_scan(ax1, times, populations1, fit_pps1)
 
     # ax2
-    plot_kwargs = dict(ls="-", marker=".", markersize=3)
-    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)
-    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)
-    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)
-
-    r_num = Rs.shape[0]
-    for i in range(r_num):
-        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)
-        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)
-        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)
-
-    ax2.legend()
-    ax2.grid(True)
+    _plot_population_scan(ax2, times, populations2, fit_pps2)
 
     # ax3
     names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
-    for i in range(Rs.shape[1]):
-        ax3.errorbar(
-            times[time_idxs],
-            Rs[:, i],
-            yerr=R_errs[:, i],
-            label=names[i],
-            fmt=".-",
-            markersize=4,
-            capsize=3,
-        )
-    ax3.set_ylim(0.0, 2 * np.max(Rs[-10:]))
-    ax3.legend()
-    ax3.grid(True)
+    _plot_rate_scan(ax3, times[time_idxs], Rs, R_errs, names)
 
     # ax4
-    ax4.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 0", markersize=4)
-    ax4.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 1", markersize=4)
-    ax4.plot(times[time_idxs], fit_lambdas[:, 2], "o-", label="Lambda 2", markersize=4)
-    ax4.legend()
-    ax4.grid(True)
+    _plot_modes(ax4, times[time_idxs], fit_lambdas, "Lambda")
 
     # ax5
-    ax5.plot(times[time_idxs], fit_amps1[:, 0], "o-", label="Amp 0", markersize=4)
-    ax5.plot(times[time_idxs], fit_amps1[:, 1], "o-", label="Amp 1", markersize=4)
-    ax5.plot(times[time_idxs], fit_amps1[:, 2], "o-", label="Amp 2", markersize=4)
-    ax5.legend()
-    ax5.grid(True)
+    _plot_modes(ax5, times[time_idxs], fit_amps1, "Amp")
 
     # ax6
-    ax6.plot(times[time_idxs], fit_amps2[:, 0], "o-", label="Amp 0", markersize=4)
-    ax6.plot(times[time_idxs], fit_amps2[:, 1], "o-", label="Amp 1", markersize=4)
-    ax6.plot(times[time_idxs], fit_amps2[:, 2], "o-", label="Amp 2", markersize=4)
-    ax6.legend()
-    ax6.grid(True)
+    _plot_modes(ax6, times[time_idxs], fit_amps2, "Amp")
 
-    plt.show(fig)
+    plt.show()
     plt.close(fig)
 
     final_result = fit_dual_transition_rates(times, populations1, populations2)
@@ -641,12 +562,86 @@ def fit_dual_with_vadality(
         for j in range(rpCov.shape[1]):
             rpCov[i, j] = pCov[i, j] / (np.sqrt(pCov[i, i] * pCov[j, j]) + 1e-12)
 
-    max_val = np.max(np.abs(rpCov))
-    ax1.imshow(rpCov, vmin=-max_val, vmax=max_val, cmap="viridis")
-    for i in range(rpCov.shape[0]):
-        for j in range(rpCov.shape[1]):
-            val = rpCov[i, j]
-            ax1.text(
+    _plot_signed_rate_matrix(ax1, rpCov, names)
+
+    _plot_signed_rate_matrix(ax2, pCov, names)
+
+    plt.show()
+
+
+def _plot_population_scan(
+    ax: Axes,
+    times: NDArray[np.float64],
+    populations: NDArray[np.float64],
+    fitted: NDArray[np.float64],
+) -> None:
+    """Overlay each prefix fit on the measured g/e/other population traces."""
+    for index, (color, label) in enumerate(
+        (("blue", "Ground"), ("red", "Excited"), ("green", "Other"))
+    ):
+        ax.plot(
+            times,
+            populations[:, index],
+            color=color,
+            label=label,
+            ls="-",
+            marker=".",
+            markersize=3,
+        )
+
+    r_num = fitted.shape[0]
+    for i in range(r_num):
+        ax.plot(times, fitted[i, :, 0], color="blue", alpha=i / r_num)
+        ax.plot(times, fitted[i, :, 1], color="red", alpha=i / r_num)
+        ax.plot(times, fitted[i, :, 2], color="green", alpha=i / r_num)
+
+    ax.legend()
+    ax.grid(True)
+
+
+def _plot_rate_scan(
+    ax: Axes,
+    times: NDArray[np.float64],
+    rates: NDArray[np.float64],
+    errors: NDArray[np.float64],
+    names: list[str],
+) -> None:
+    """Plot rate estimates and uncertainty as the fitted prefix grows."""
+    for i in range(rates.shape[1]):
+        ax.errorbar(
+            times,
+            rates[:, i],
+            yerr=errors[:, i],
+            label=names[i],
+            fmt=".-",
+            markersize=4,
+            capsize=3,
+        )
+    ax.set_ylim(0.0, 2 * np.max(rates[-10:]))
+    ax.legend()
+    ax.grid(True)
+
+
+def _plot_modes(
+    ax: Axes, times: NDArray[np.float64], values: NDArray[np.float64], prefix: str
+) -> None:
+    """Plot the three eigenvalues or mode amplitudes for a prefix fit scan."""
+    for index in range(3):
+        ax.plot(times, values[:, index], "o-", label=f"{prefix} {index}", markersize=4)
+    ax.legend()
+    ax.grid(True)
+
+
+def _plot_signed_rate_matrix(
+    ax: Axes, matrix: NDArray[np.float64], names: list[str]
+) -> None:
+    """Display the signed covariance or correlation with rate labels and values."""
+    max_val = np.max(np.abs(matrix))
+    ax.imshow(matrix, vmin=-max_val, vmax=max_val, cmap="viridis")
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            val = matrix[i, j]
+            ax.text(
                 j,
                 i,
                 f"{val:.1g}",
@@ -655,28 +650,7 @@ def fit_dual_with_vadality(
                 color="white" if val < 0 else "black",
             )
 
-    ax1.set_xticks(list(range(rpCov.shape[0])))
-    ax1.set_yticks(list(range(rpCov.shape[0])))
-    ax1.set_xticklabels(names)
-    ax1.set_yticklabels(names)
-
-    max_val = np.max(np.abs(pCov))
-    ax2.imshow(pCov, vmin=-max_val, vmax=max_val, cmap="viridis")
-    for i in range(pCov.shape[0]):
-        for j in range(pCov.shape[1]):
-            val = pCov[i, j]
-            ax2.text(
-                j,
-                i,
-                f"{val:.1g}",
-                ha="center",
-                va="center",
-                color="white" if val < 0 else "black",
-            )
-
-    ax2.set_xticks(list(range(pCov.shape[0])))
-    ax2.set_yticks(list(range(pCov.shape[0])))
-    ax2.set_xticklabels(names)
-    ax2.set_yticklabels(names)
-
-    plt.show(fig)
+    ax.set_xticks(list(range(matrix.shape[0])))
+    ax.set_yticks(list(range(matrix.shape[0])))
+    ax.set_xticklabels(names)
+    ax.set_yticklabels(names)

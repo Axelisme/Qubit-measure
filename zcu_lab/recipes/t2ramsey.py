@@ -89,19 +89,19 @@ def t2ramsey(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
 
     # Report every absent calibration before Run, as the existing tool does.
     missing: list[MissingParameter] = []
-    try:
-        set_frequency(
+    if (
+        parameter := set_frequency(
             tab,
             "modules.readout",
             calibration="$resonator.freq",
             required="readout_ref",
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
-    try:
-        tab.use_library("modules.pi2_pulse", pi2_ref, required="pi2_ref")
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    ) is not None:
+        missing.append(parameter)
+    if (
+        parameter := tab.use_library("modules.pi2_pulse", pi2_ref, required="pi2_ref")
+    ) is not None:
+        missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 

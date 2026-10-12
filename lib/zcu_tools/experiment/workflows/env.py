@@ -89,11 +89,11 @@ class Displays:
 
 
 class WorkflowEnv[C](InitEnv[C]):
-    """One step's detached context, files directory, and effect capabilities.
+    """One step's detached context, invocation root, and effect capabilities.
 
     started_at is the run's aware UTC start, unchanged by Resume. context is
-    host-owned deeply read-only data. iter_dir is this invocation's files/
-    directory, not the run root. displays is the engine's retained display owner.
+    host-owned deeply read-only data. iteration_dir is this invocation's existing
+    absolute root, not the run root. displays is the retained display owner.
     soc/devices are read-only accessors for author-owned availability checks.
     Hardware operations should still use effects to retain journal and cancellation
     behavior; the framework trusts authors and does not enforce that restriction.
@@ -104,20 +104,29 @@ class WorkflowEnv[C](InitEnv[C]):
         self,
         started_at: datetime,
         ports: EnginePorts[C],
-        iter_dir: Path,
+        iteration_dir: Path,
         displays: Displays,
     ) -> None:
-        """Bind host ports and retained displays to one step's files directory.
+        """Bind host ports and retained displays to one step's invocation root.
 
         ports supplies detached context and native handles without copying or
-        connecting them. iter_dir is the current invocation's files/ path.
+        connecting them. iteration_dir is the current invocation's absolute root.
         displays retains bars across steps. started_at obeys InitEnv's UTC
         contract. Missing ports are checked only when their accessor is used.
         """
         super().__init__(started_at, ports.context)
-        self.iter_dir = iter_dir
+        self._iteration_dir = iteration_dir
         self._ports = ports
         self._displays = displays
+
+    @property
+    def iteration_dir(self) -> Path:
+        """Return this invocation's existing absolute root, for author-owned files.
+
+        The property cannot be rebound. The Engine does not track, validate,
+        publish or clean up files written by the workflow.
+        """
+        return self._iteration_dir
 
     @property
     def soc(self) -> object:
@@ -146,16 +155,12 @@ class WorkflowEnv[C](InitEnv[C]):
         experiment: Callable[[Run[Cfg]], Result],
         cfg: Cfg,
         *,
-        save: Callable[[Completed[Cfg, Result], Path], None],
         live: LiveUpdate | None = None,
     ) -> Generator[Effect, None, Completed[Cfg, Result] | Failed]:
-        """Execute and save an experiment; return its typed Completed or Failed.
+        """Execute an experiment without saving; return its typed Completed or Failed.
 
-        experiment must have an ASCII letter/digit/underscore function name;
-        anonymous or unnamed callables raise ValueError at effect entry.
         cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
-        save must write and close the exact temporary path; the engine publishes
-        it before returning Completed.
+        Completed means acquisition succeeded, not that files were saved.
         live optionally receives (axes, samples) synchronously on each update
         of the experiment's unique buffer: finite float64 axis vectors in buffer
         dimension order, and complex128 samples of the buffer shape, including
@@ -163,11 +168,11 @@ class WorkflowEnv[C](InitEnv[C]):
         copy/dispatch real projected values to the host owner. Callback failures
         fail the workflow even when Schedule catches them. The experiment owns
         device operations; the engine does not inspect cfg.dev or apply settings.
-        Outer, live, saver, and deepcopy errors propagate; Schedule failures
-        return Failed without data or a run file.
+        Outer, live, and deepcopy errors propagate; Schedule failures
+        return Failed without data.
         Cancellation discards the step and never returns a cancellation value.
         """
-        request = RunEffect(experiment, cfg, save, live)
+        request = RunEffect(experiment, cfg, live)
         yield request
         if request.outcome is None:
             raise RuntimeError("Engine did not complete the run effect")

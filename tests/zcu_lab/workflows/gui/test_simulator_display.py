@@ -92,13 +92,18 @@ def test_native_dense_updates_coalesce_with_responsive_owner_and_latest_png(
     owner_id = get_ident()
     observations = display_observations
     window.plan_panel.state.write(
-        {("fluxes", "values"): [inputs.flux_value]}, window.plan_panel.env
+        {
+            ("fluxes", "values"): [inputs.flux_value],
+            ("measure_t2ramsey",): False,
+            ("measure_t2echo",): False,
+        },
+        window.plan_panel.env,
     )
     window.tunables_panel.state.write(
         {
             ("cal", "span_mhz"): 2.0,
             ("cal", "rabi_start_factor"): 0.125,
-            ("rounds",): 80,
+            ("t1", "rounds"): 80,
         },
         window.tunables_panel.env,
     )
@@ -123,7 +128,7 @@ def test_native_dense_updates_coalesce_with_responsive_owner_and_latest_png(
         run_id="dense",
     )
     source, _metadata = load_run_with_metadata(
-        roots.database / record.iteration_dir / record.run_files[-1],
+        roots.database / record.iteration_dir / "t1.h5",
         spec=T1Exp().persistence_spec(),
     )
     np.testing.assert_allclose(updates[-1][1], source.result.signals.real)

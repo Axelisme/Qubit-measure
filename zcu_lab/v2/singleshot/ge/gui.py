@@ -142,6 +142,7 @@ class GEPostAnalyzeResult(PostAnalyzeResultBase):
 
 
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
+    experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
     exp_cls = GE_Exp
     ExpCfg_cls: ClassVar[Any] = GE_Cfg
     # FIT primary analysis + a confusion-diagnostic post-analysis layer.

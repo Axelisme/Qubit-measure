@@ -162,3 +162,26 @@ def test_expression_edge_tooltip_shows_full_expression(editor: RangeEditor):
     assert line.toolTip() == "offset"
     line.setText("offset * 2")
     assert line.toolTip() == "offset * 2"
+
+
+def test_sweep_inputs_use_separate_rows_with_stretching_input_column(qapp):
+    from qtpy.QtWidgets import QGridLayout, QWidget
+
+    widget = SweepInputWidget(
+        SweepSpec(), SweepValue(0.0, 2.0, 3), submit=lambda edge, value: None
+    )
+    try:
+        layout = widget.layout()
+        assert isinstance(layout, QGridLayout)
+        positions = []
+        for name in ("start", "stop", "expts", "step"):
+            control = widget.findChild(QWidget, name)
+            assert control is not None
+            index = layout.indexOf(control)
+            assert index >= 0, f"{name} must occupy its own row in the sweep layout"
+            positions.append(layout.getItemPosition(index))
+        assert positions == [(0, 1, 1, 1), (1, 1, 1, 1), (2, 1, 1, 1), (3, 1, 1, 1)]
+        assert layout.columnStretch(1) > layout.columnStretch(0)
+    finally:
+        widget.deleteLater()
+        qapp.processEvents()

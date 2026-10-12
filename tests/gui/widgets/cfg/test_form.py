@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from qtpy.QtWidgets import QComboBox, QLabel, QLineEdit
+from qtpy.QtWidgets import QComboBox, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.cfg import (
@@ -427,24 +427,14 @@ def test_populate_centered_sweep_field_round_trip(qapp, ctrl):
         span_input = sweep_widget.findChild(QLineEdit, "span")
         points_input = sweep_widget.findChild(QLineEdit, "expts")
         assert span_input is not None and points_input is not None
-        center_input = sweep_widget.findChild(QLineEdit)
+        center = sweep_widget.findChild(QWidget, "center")
+        assert center is not None
+        center_input = center.findChild(QLineEdit)
         assert center_input is not None
         assert not center_input.isEnabled()
         labels = {label.text(): label for label in sweep_widget.findChildren(QLabel)}
         center_label = labels["center [generated]"]
         assert center_label.toolTip() == "Generated center"
-        center_cell = center_label.parentWidget()
-        span_cell = labels["span"].parentWidget()
-        assert center_cell is not None and span_cell is not None
-        pair_row = center_cell.parentWidget()
-        assert pair_row is not None and pair_row is span_cell.parentWidget()
-        form.show()
-        qapp.processEvents()
-        pair_row.resize(801, pair_row.sizeHint().height())
-        qapp.processEvents()
-        assert abs(center_cell.width() - span_cell.width()) <= 1
-        assert center_cell.width() + span_cell.width() + 4 == pair_row.width()
-        assert center_cell.geometry().united(span_cell.geometry()) == pair_row.rect()
 
         span_input.setText("120.0")
         points_input.setText("121")

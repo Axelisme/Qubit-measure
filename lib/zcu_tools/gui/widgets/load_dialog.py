@@ -40,7 +40,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 
 from zcu_tools.datafile import load_labber_data
-from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,6 @@ class LoadDataDialog(QDialog):
         self._file_placeholder = file_placeholder
         self._browse_caption = browse_caption
         self._no_preview_text = no_preview_text
-        self._edit_gate: RemoteEditGate | None = None
         self._filepath = ""
         self._transpose = False
         self._start_dir = start_dir
@@ -130,16 +128,6 @@ class LoadDataDialog(QDialog):
         buttons.addWidget(cancel)
         root.addLayout(buttons)
 
-    def bind_edit_gate(self, gate: RemoteEditGate) -> None:
-        """Gate fields and OK through the view's authority owner, leaving Cancel live.
-
-        Bind once before opening. The caller retains/disposes the gate; dialog
-        destruction detaches its containers. File validity remains a child gate.
-        """
-        self._edit_gate = gate
-        gate.bind(self._content)
-        gate.bind(self._write_buttons)
-
     def _build_options(self, opt_row: QHBoxLayout) -> None:
         """Populate the option row. Subclasses add ``self._transpose_btn`` (and any
         extra option widgets) in whatever order/layout the app wants."""
@@ -153,10 +141,9 @@ class LoadDataDialog(QDialog):
             self._browse_caption,
             self._start_dir,
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if not filepath or (
-            self._edit_gate is not None and not self._edit_gate.local_editing
-        ):
+        if not filepath:
             return
         self._filepath = filepath
         self._file_edit.setText(filepath)

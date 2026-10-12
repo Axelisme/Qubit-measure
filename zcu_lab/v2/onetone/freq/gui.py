@@ -138,6 +138,7 @@ class OneToneFreqAdapter(
         OneToneFreqAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 

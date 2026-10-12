@@ -23,10 +23,11 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._coherence_input import t1_input
+from ._reload_source import InjectedCatalog
 from ._window_scenarios import (
     assert_failed_close_diagnostic,
     assert_failed_stop_settled,
@@ -52,10 +53,10 @@ def test_close_pending_start_requests_stop_without_destroying_producer_host(
 
 def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
-    attempts, figures = install_pause_plot_workflow(window, monkeypatch)
+    attempts, figures = install_pause_plot_workflow(window, catalog_source)
     token = window.start("paused")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -97,18 +98,23 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
     window, harness, _entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("register-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "register-window", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         attempts.append("step")
@@ -117,7 +123,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("register-window"), int)
     harness.complete_segment()
     active_controller = window.controller
@@ -160,17 +166,22 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
 
 def test_resume_stop_rejection_unlocks_window_without_a_producer(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("reject-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "reject-window", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         attempts.append("step")
@@ -179,7 +190,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("reject-window"), int)
     harness.complete_segment()
 
@@ -212,17 +223,20 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_paused_window_stop_or_close_ends_run_without_another_worker(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
     window, harness, entry = run_attachment
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("paused-close", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("paused-close", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         env.pbar("work", 2).refresh()
@@ -230,7 +244,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("paused-stop"), int)
     harness.complete_segment()
     assert harness.background.work is None
@@ -264,18 +278,21 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
 
 def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
     native_errors: list[IsADirectoryError] = []
     observed: list[tuple[bool, bool]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("failed-read", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("failed-read", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         env.pbar("retained", 2).refresh()
@@ -283,7 +300,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     token = window.start("failed-read")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -298,7 +315,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     def during_submit() -> None:
         try:
             window.apply_tunables(
-                "failed-read", {("guess_us",): 45.0}, actor=Actor("agent", "rpc")
+                "failed-read", {("t1", "guess_us"): 45.0}, actor=Actor("agent", "rpc")
             )
         except IsADirectoryError as error:
             native_errors.append(error)
@@ -317,7 +334,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     failed = controller.status()
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
-    assert panel.panel.state.input.data["guess_us"] == 45.0
+    assert t1_input(panel.panel.state.input.data)["guess_us"] == 45.0
     assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
     assert controller.operation_id is None and not controller.has_pending_segment
     assert harness.handles.known_outcome(token) == OperationOutcome(
@@ -330,16 +347,21 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
 
 def test_prepare_forms_rejects_pending_and_paused_run(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("prepare-guard", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "prepare-guard", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         window.pause("prepare-guard")
@@ -348,7 +370,7 @@ def test_prepare_forms_rejects_pending_and_paused_run(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     before = window.plan_panel
     assert isinstance(window.start("prepare-guard"), int)
     with pytest.raises(InvalidRunState):
@@ -387,20 +409,22 @@ def test_window_without_run_rejects_explicit_target(
 @pytest.mark.parametrize("phase", ["pending", "paused"])
 def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     phase: str,
 ) -> None:
     window, harness, entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("replacement-target", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "replacement-target", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
         env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state
@@ -411,7 +435,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("run-A"), int)
     window.stop("run-A")
     harness.complete_segment()
@@ -464,7 +488,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
 @pytest.mark.parametrize("phase", ["paused", "active"])
 def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     escaped_qt_errors: list[BaseException],
     settlements: list[int],
     caplog: pytest.LogCaptureFixture,
@@ -472,7 +496,7 @@ def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
 ) -> None:
     window, harness, entry = run_attachment
 
-    install_close_fault_workflow(window, monkeypatch)
+    install_close_fault_workflow(window, catalog_source)
     token = window.start("close-fault")
     assert isinstance(token, int)
     harness.complete_segment()

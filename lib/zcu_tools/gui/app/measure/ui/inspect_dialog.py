@@ -37,11 +37,6 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    watch_control,
-)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -138,21 +133,6 @@ class _MlCreateDialog(QDialog):
         layout.addLayout(btn_row)
         create_btn.clicked.connect(self._on_create)
         cancel_btn.clicked.connect(self.reject)
-        for content in (self._template_combo, self._name_edit, create_btn):
-            bind_control_enabled(content, ctrl.control_identity, retirement_dialog=self)
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def _suggest_name(self, entry: Any) -> str:
         """Convention-based name suggestion for ``entry``, de-duplicated.
@@ -230,38 +210,18 @@ class InspectDialog(InspectDialogBase):
         self._ml_refresh_pending = False
         super().__init__(ctrl.context_control, bus, parent=parent)
         self.finished.connect(self._on_finished)
-        dispose = watch_control(
-            self,
-            ctrl.control_identity,
-            lambda status: self.set_read_only(read_only=status.holder != "gui"),
-        )
-        self.finished.connect(dispose)
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Disable editing while retaining module/parameter inspection."""
         self._read_only = read_only
         self._component_tree.set_read_only(read_only=read_only)
         self._create_btn.setEnabled(not read_only)
+        self._arb_waveform_btn.setEnabled(not read_only)
         self._update_ml_editor_controls()
 
     def _build_md_tab(self) -> QWidget:
         """Use the session component-tree editor for measure parameters."""
-        self._component_tree = ComponentTreeWidget(
-            self._ctrl, control_identity=self._app_ctrl.control_identity
-        )
+        self._component_tree = ComponentTreeWidget(self._ctrl)
         return self._component_tree
 
     def _build_extra_toolbar_buttons(self, toolbar: QHBoxLayout) -> None:
@@ -278,17 +238,6 @@ class InspectDialog(InspectDialogBase):
         splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
         splitter.setChildrenCollapsible(False)
 
-        left_panel = self._build_ml_collection_panel()
-        right_panel = self._build_ml_editor_panel()
-
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([240, 460])
-        layout.addWidget(splitter)
-        return widget
-
-    def _build_ml_collection_panel(self) -> QWidget:
-        """Build the library selection tree and New/Delete actions."""
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -311,10 +260,6 @@ class InspectDialog(InspectDialogBase):
         self._create_btn.clicked.connect(self._on_create_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
-        return left_panel
-
-    def _build_ml_editor_panel(self) -> QWidget:
-        """Build the embedded draft form and Name/Revert/Apply controls."""
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -346,7 +291,11 @@ class InspectDialog(InspectDialogBase):
         self._ml_revert_btn.clicked.connect(self._on_ml_revert_clicked)
         self._ml_apply_btn.clicked.connect(self._on_ml_apply_clicked)
 
-        return right_panel
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([240, 460])
+        layout.addWidget(splitter)
+        return widget
 
     def _populate_ml(self, ml: LibrarySnapshot | None) -> None:
         """Populate the measure tree without dropping an unresolved draft."""
@@ -380,32 +329,6 @@ class InspectDialog(InspectDialogBase):
                 desired = None
                 self._ml_selected_data = None
 
-        restore_item = self._rebuild_ml_tree(ml, desired)
-        self._ml_live_ml = ml
-        self._ml_refresh_pending = False
-
-        if restore_item is None:
-            if desired is not None:
-                self._ml_selected_data = None
-                self._clear_ml_editor()
-            else:
-                self._update_ml_editor_controls()
-            return
-
-        # Keep the restored selection from triggering a prompt while the tree is
-        # rebuilt. Re-run the normal selection path once it is coherent; it either
-        # keeps the current session or opens a fresh one.
-        self._ml_tree_syncing = True
-        try:
-            self._ml_tree.setCurrentItem(restore_item)
-        finally:
-            self._ml_tree_syncing = False
-        self._on_ml_item_changed(restore_item, None)
-
-    def _rebuild_ml_tree(
-        self, ml: LibrarySnapshot | None, desired: tuple[str, str] | None
-    ) -> QTreeWidgetItem | None:
-        """Replace tree rows without selection signals and locate the desired row."""
         self._ml_tree_syncing = True
         self._ml_tree.blockSignals(True)
         self._ml_tree.clear()
@@ -434,7 +357,26 @@ class InspectDialog(InspectDialogBase):
                         restore_item = child
         self._ml_tree.blockSignals(False)
         self._ml_tree_syncing = False
-        return restore_item
+        self._ml_live_ml = ml
+        self._ml_refresh_pending = False
+
+        if restore_item is None:
+            if desired is not None:
+                self._ml_selected_data = None
+                self._clear_ml_editor()
+            else:
+                self._update_ml_editor_controls()
+            return
+
+        # Keep the restored selection from triggering a prompt while the tree is
+        # rebuilt. Re-run the normal selection path once it is coherent; it either
+        # keeps the current session or opens a fresh one.
+        self._ml_tree_syncing = True
+        try:
+            self._ml_tree.setCurrentItem(restore_item)
+        finally:
+            self._ml_tree_syncing = False
+        self._on_ml_item_changed(restore_item, None)
 
     @staticmethod
     def _ml_item_data(item: QTreeWidgetItem | None) -> tuple[str, str] | None:
@@ -616,8 +558,6 @@ class InspectDialog(InspectDialogBase):
         self._apply_ml_draft(select_result=True)
 
     def _apply_ml_draft(self, *, select_result: bool) -> bool:
-        if self._app_ctrl.control_identity.status().holder != "gui":
-            return False
         data = self._ml_selected_data
         editor_id = self._ml_editor_id
         if data is None or editor_id is None:
@@ -711,8 +651,6 @@ class InspectDialog(InspectDialogBase):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        if self._app_ctrl.control_identity.status().holder != "gui":
-            return
         try:
             self._app_ctrl.apply_library_change(
                 capture,
@@ -728,6 +666,8 @@ class InspectDialog(InspectDialogBase):
         self._populate_ml(self._ctrl.read_context().library)
 
     def _on_arb_waveform_clicked(self) -> None:
+        if self._read_only:
+            return
         # InspectDialog is always parented to MainWindow, which provides open_dialog.
         # The local fallback was dead code that could create a registry-invisible
         # dialog; removed for Fast-Fail clarity (ADR-0002).

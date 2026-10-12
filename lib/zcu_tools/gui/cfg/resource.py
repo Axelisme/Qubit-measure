@@ -400,16 +400,23 @@ class CfgResource:
         fixed resolution prepares the current inputs as a temporary candidate,
         including when the publication is Invalid or Unavailable. It never
         changes inputs, subscribers or the source factory. Non-Valid
-        results raise NOT_VALID; revoked and notification guards apply
-        before evaluating the candidate. Unexpected resolver errors propagate.
+        results raise NOT_VALID with the first candidate diagnostic and its path
+        when available; revoked and notification guards apply before evaluating
+        the candidate. Unexpected resolver errors propagate.
         """
         self._check_command(editing=False)
         if resolution is not None:
             candidate, basis = self._prepare(deepcopy(self._inputs), source=resolution)
             try:
                 if not candidate.is_valid():
+                    observation = self._observe_draft(candidate, basis)
+                    diagnostic = next(iter(observation.diagnostics), None)
                     raise CfgPreconditionError(
-                        CfgPreconditionReason.NOT_VALID, "cfg is not valid"
+                        CfgPreconditionReason.NOT_VALID,
+                        f"cfg is not valid: {diagnostic.message}"
+                        if diagnostic is not None
+                        else "cfg is not valid",
+                        path=diagnostic.path if diagnostic is not None else None,
                     )
                 values = lower_resolved_cfg(candidate.snapshot())
                 return AcceptedConfig(basis, values)

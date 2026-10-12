@@ -21,7 +21,7 @@ class _FactoryRegistry(MainDialogRegistry):
         super().__init__(MagicMock(), parent=parent, dialog_refs=self.refs)
         self._factory = factory
 
-    def _build_dialog(self, name: DialogName) -> QDialog:
+    def _build_dialog(self, name: DialogName, *, writable: bool) -> QDialog:
         return self._factory(name)
 
 
