@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -21,7 +22,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._reload_source import InjectedCatalog
 from ._window_scenarios import install_rpc_pause_workflow
@@ -29,7 +29,7 @@ from ._window_support import RpcRequest
 
 
 def test_rpc_pending_status_and_stop(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
     window, harness, entry = run_attachment
@@ -52,7 +52,7 @@ def test_rpc_pending_status_and_stop(
 
 @pytest.mark.parametrize("method", ["workflow.pause", "workflow.resume"])
 def test_rpc_pending_commands_do_not_claim_acceptance(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     method: str,
 ) -> None:
@@ -106,7 +106,7 @@ def test_rpc_without_attached_run_reports_native_target(
 
 
 def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
 ) -> None:
@@ -169,7 +169,7 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
 
 @pytest.mark.parametrize("phase", ["pending", "paused"])
 def test_rpc_old_target_does_not_change_current_run(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
     phase: str,
@@ -240,7 +240,7 @@ def test_rpc_old_target_does_not_change_current_run(
 
 
 def test_rpc_running_stop_retains_lease_until_owner_delivery(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
 ) -> None:

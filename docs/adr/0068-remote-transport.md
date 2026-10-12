@@ -52,9 +52,9 @@ Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數�
 
 ## Workflows 的同一 run
 
-`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，具體 owner 在 `zcu_lab.workflows.gui.app`。App 建立一份 EMPTY session，將同一份 SessionServices 交給 T1WorkflowWindow。Window constructor 為 `(state, services, owner, *, on_close=None, parent=None)`，runner 與 progress 取自 services。`parent=None` 時 Window 為 top-level，指定 QWidget 時嵌入該 Qt parent。GUI 和 RPC 使用同一 Window 與固定 WorkflowController。
+`scripts/run_workflows_gui.py` 經共用 runtime 組裝獨立 app，宿主 owner 在 `zcu_tools.gui.app.workflows.app`。Scripts 將 `zcu_lab.workflows.registry` 的有序註冊清單與 bounded source loader 交給泛型宿主。App 建立一份 EMPTY session，將同一份 SessionServices 交給 WorkflowWindow。Window constructor 為 `(state, services, owner, *, registrations, loader=None, on_close=None, parent=None)`，runner 與 progress 取自 services。`parent=None` 時 Window 為 top-level，指定 QWidget 時嵌入該 Qt parent。GUI 和 RPC 使用同一 Window 與固定 WorkflowController。
 
-App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不由 framework 選裝置。Shared Setup 非 modal 開啟，global alias 表由 shared AliasDialog 修改。Prepare forms 用 `read_context()` 固定當次 alias 表與來源，不宣告角色或檢查 kind。π defaults 在同一 capture 用 `resolve_path('$qubit.module.x180.waveform.length')` 產生具體元件路徑 expression，不可讀時留空。Prepare 整份替換 defaults，不是 reload。啟動不還原 input 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
+Scripts 注入 `zcu_lab.ALIAS_PRESET`，App 將它交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不由 framework 選裝置。Shared Setup 非 modal 開啟，global alias 表由 shared AliasDialog 修改。Prepare forms 用 `read_context()` 固定當次 alias 表與來源，不宣告角色或檢查 kind。π defaults 在同一 capture 用 `resolve_path('$qubit.module.x180.waveform.length')` 產生具體元件路徑 expression，不可讀時留空。Prepare 整份替換 defaults，不是 reload。啟動還原 parsed input，`--clean` 可略過讀取；不還原 native run 或連硬體。共用 framework 不反向依賴 zcu_lab，依賴方向由 C16 約束；共用 mcp.core 只消費 GUI remote 的依賴邊界由 C13 約束。
 
 `scripts/run_workflows_mcp.py` 啟動 stdio MCP attachment。Workflow tools 由同一份 app method declarations 產生，lifecycle tools 明確 launch／connect／disconnect。MCP 不持 Engine、hardware session、operation registry 或另一份 draft。Start 用當次 defaults 加 path/value batch，不讀 GUI draft；tunables edit 則提交同一 Host 的完整當前 input。Form batch preview 只在呼叫內求值，不提交。Engine journal 只記普通值，expression 留在 FormInput，過渡期不檢查 holder 或 GUI draft revision。
 
@@ -68,7 +68,7 @@ Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自
 
 Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
-共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 透過共用 evaluator 解碼所有非 discriminator 的字串 expression。Coherence 新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal。缺 capture 或 unbound alias 保留 expression error input，公開 form 在該欄位指名 Invalid，不阻斷 panel。其他 forms 與合法 saved input 不改，eval 仍可用。flux_unit 必填，不預驗 device membership。RunSnapshot 與 native 保存使用當次 capture，alias 修改或 Save 不重新解析。Source reload 與 input 保存還原由具體 GUI app 擁有。GUI/RPC/MCP 不提供 export commands，saved run 的轉換由各 workflow 獨立工具負責，見 [[0062]]。這些功能不授權硬體或真實資料。
+共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 透過共用 evaluator 解碼所有非 discriminator 的字串 expression。Coherence 新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal。缺 capture 或 unbound alias 保留 expression error input，公開 form 在該欄位指名 Invalid，不阻斷 panel。其他 forms 與合法 saved input 不改，eval 仍可用。flux_unit 必填，不預驗 device membership。RunSnapshot 與 native 保存使用當次 capture，alias 修改或 Save 不重新解析。泛型宿主擁有 source reload admission 與 input 保存還原；組合根注入每次重新 import 註冊清單的 loader builder。GUI/RPC/MCP 不提供 export commands，saved run 的轉換由各 workflow 獨立工具負責，見 [[0062]]。這些功能不授權硬體或真實資料。
 
 ## 事件與錯誤
 

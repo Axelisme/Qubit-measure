@@ -9,6 +9,7 @@ new persistence format. Local unparsed renderer text is not an inactive draft.
 """
 
 from qtpy.QtWidgets import QWidget
+
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputRestoreReport,
@@ -20,7 +21,7 @@ from .attachment import Attachment
 from .catalog import WorkflowCatalog
 
 
-class WorkflowForms:
+class WorkflowForms[C]:
     """Current catalog/attachment, its two Start panels, and inactive RAM drafts.
 
     catalog is the current source pairing; attachment is the selected workflow.
@@ -31,7 +32,9 @@ class WorkflowForms:
     captures and compatible drafts. No operation, run or accepted Host is owned.
     """
 
-    def __init__(self, catalog: WorkflowCatalog, env: FormEnv, parent: QWidget) -> None:
+    def __init__(
+        self, catalog: WorkflowCatalog[C], env: FormEnv, parent: QWidget
+    ) -> None:
         """Build source-free/partial default panels for catalog's first attachment.
 
         Use on QApplication owner; source/editor failures propagate without a
@@ -44,7 +47,7 @@ class WorkflowForms:
 
     def build_panels(
         self,
-        attachment: Attachment,
+        attachment: Attachment[C],
         env: FormEnv,
         parent: QWidget,
         snapshot: WorkflowInputSnapshot | None = None,
@@ -109,7 +112,10 @@ class WorkflowForms:
         self.plan, self.knobs = plan, knobs
 
     def reload(
-        self, catalog: WorkflowCatalog, snapshot: WorkflowInputSnapshot, parent: QWidget
+        self,
+        catalog: WorkflowCatalog[C],
+        snapshot: WorkflowInputSnapshot,
+        parent: QWidget,
     ) -> WorkflowInputRestoreReport:
         """Replace current models with compatible drafts, retaining fixed capture.
 

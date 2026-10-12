@@ -1,13 +1,13 @@
 # `workflows.gui` Workflow form attachments
 
-**Last updated:** 2026-10-12，direct device defaults 與 conversion controls 退役
+**Last updated:** 2026-10-12，表單保留、宿主搬至 lib
 
-這個 package 擁有具體 workflow 的表單、to_cfg 與 Qt attachment，不實作通用 editor 或 Engine。
-Native science 不依賴 GUI。Window、Controller、operation、session 與 fixed-source presentation 分工不因合併而改變。
+這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
+Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../../lib/zcu_tools/gui/app/workflows/README.md)。
 
 ## Catalog 與 Coherence forms
 
-`WorkflowCatalog` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`，Coherence 是預設。
+`zcu_lab.workflows.registry.build_registry` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`，Coherence 是預設。
 每個 `WorkflowAttachment` 保留 native step、plan/knobs model、converter 與 scalar seed 的同一版本配對。
 Builder 在 bounded reload 中 import current declarations；WorkflowRegistry 只驗 declaration，不提供 lookup。
 GUI Start 用選定附件。RPC／MCP workflow.start 的 name 省略時選預設，未知名稱明確拒絕，不猜舊名或提供 alias。
@@ -53,7 +53,7 @@ Window 將 fixed context/storage、typed cached device mapping、software proven
 Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 native env effects acquisition。
 Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 用同 token、新 tunables revision 重做未提交點，不在 Resume 讀硬體。
 Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 evidence。
-Stop/close 等 producer 返回與最後 committed live refresh 後才 finish，replacement Start/close 再 release presentation。
+Stop/close 等 producer 返回與 terminal delivery 後才 finish，replacement Start/close 再 release presentation。
 
 GUI、RPC、MCP 呼同一 Window/Controller，不另存 run 或重做 target 核對。
 Partial Start 的 plan/tunables 都是 path-array/value batch。空 batch 用當次 capture defaults，不用 GUI draft。
@@ -72,7 +72,7 @@ Paused Apply 後 Resume 保留 commits，新 revision 只用於重做未提交�
 
 Records RPC 直接投影 Engine committed records；point 現在含獨立 stage 與 enabled measurements。
 Live/summary 只建立 enabled lifetime 圖。具名圖/PNG 沿 retained Plots 與 owner-thread renderer，status-only 不渲染。
-Overnight live 趨勢從 committed scalar records 投影，缺值維持 gaps，不重 fit，不自動保存或重開 run 圖。
+宿主不輪詢 committed records 來畫 overnight 趨勢。Workflow 使用 `env.plots` 自行決定圖的資料與更新時機，不自動保存或重開 run 圖。
 
 ## Input 保存與 source reload
 
@@ -87,6 +87,6 @@ Reload 只允許 idle/terminal；pending/running/paused 在 preflight 前拒絕�
 Compatible input 保留；removed/renamed selection 改選新 catalog 第一個附件，並顯示原名與新名。
 Import/panel replacement 失敗保留舊 panels/RAM，但阻擋 Start 直到 retry；fixed source 改動要求 restart，沒有舊 callable fallback。
 
-App/window/figures/layout/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 是 fixed source。
-其餘 zcu_lab.workflows 是 bounded reload scope；framework、components 與 native experiment sources 固定。
+整個 zcu_lab.workflows，包括註冊清單與表單，是 bounded reload scope；lib framework、components 與 native experiment sources 固定。
+Scripts 注入的 SourceCatalogLoader 每次重新 import 當前 registry，宿主不保存舊 builder。
 Window 的同 run、capture、取消與保存邊界見 ADR-0062、ADR-0063、ADR-0067、ADR-0068。

@@ -6,22 +6,27 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel
+from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormInput
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
 from tests.gui.app.workflows._start_fakes import StartHarness
-from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
+from zcu_lab import ALIAS_PRESET
+from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab.workflows.registry import build_registry
 
 from ._coherence_input import t1_input
 
 
 @pytest.fixture
-def window(qapp: QApplication) -> Iterator[T1WorkflowWindow]:
+def window(qapp: QApplication) -> Iterator[WorkflowWindow[Calibrated]]:
     harness = StartHarness()
-    view = T1WorkflowWindow(harness.state, harness.services, harness.owner)
+    view = WorkflowWindow(
+        harness.state, harness.services, harness.owner, registrations=build_registry()
+    )
     try:
         yield view
     finally:
@@ -31,7 +36,7 @@ def window(qapp: QApplication) -> Iterator[T1WorkflowWindow]:
 
 
 def test_original_expressions_roundtrip_and_restore_base(
-    window: T1WorkflowWindow, tmp_path: Path
+    window: WorkflowWindow[Calibrated], tmp_path: Path
 ) -> None:
     window.plan_panel.state.write(
         {("pi_length_us",): {"expr": "0.1 + 0.2"}}, window.plan_panel.env
@@ -63,7 +68,7 @@ def test_original_expressions_roundtrip_and_restore_base(
 
 
 def test_incompatible_fields_drop_without_losing_other_input(
-    window: T1WorkflowWindow,
+    window: WorkflowWindow[Calibrated],
 ) -> None:
     defaults = window.capture_persisted_state()
     from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
@@ -92,7 +97,9 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
             }
         )
     )
-    app = WorkflowsGuiBehavior(cache_dir=tmp_path)
+    app = WorkflowsGuiBehavior(
+        registrations=build_registry(), alias_rows=ALIAS_PRESET, cache_dir=tmp_path
+    )
     app.assemble(None)
     try:
         assert app.window.capture_persisted_state().plan["pi_length_us"] == {
@@ -124,7 +131,9 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
     qapp: QApplication, tmp_path: Path, payload: str
 ) -> None:
     (tmp_path / "t1_workflow_state_v1.json").write_text(payload)
-    app = WorkflowsGuiBehavior(cache_dir=tmp_path)
+    app = WorkflowsGuiBehavior(
+        registrations=build_registry(), alias_rows=ALIAS_PRESET, cache_dir=tmp_path
+    )
     app.assemble(None)
     try:
         assert (
@@ -151,7 +160,12 @@ def test_clean_skips_read_but_close_replaces_snapshot(
 ) -> None:
     path = tmp_path / "t1_workflow_state_v1.json"
     path.write_text("deliberately invalid JSON")
-    app = WorkflowsGuiBehavior(clean=True, cache_dir=tmp_path)
+    app = WorkflowsGuiBehavior(
+        registrations=build_registry(),
+        alias_rows=ALIAS_PRESET,
+        clean=True,
+        cache_dir=tmp_path,
+    )
     app.assemble(None)
     try:
         assert path.read_text() == "deliberately invalid JSON"

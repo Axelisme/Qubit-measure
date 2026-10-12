@@ -8,17 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 
 from tests.gui.app.workflows._start_fakes import StartHarness
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.workflows.declaration import WorkflowStep
+    from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 
     from zcu_lab.workflows.calibration import Calibrated
     from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-    from zcu_lab.workflows.gui.catalog import WorkflowCatalog
 
 
 class ReloadSource:
@@ -32,7 +32,7 @@ class ReloadSource:
         self.write(1)
         sys.path.insert(0, str(root))
         self.path = str(root)
-        self.views: list[tuple[T1WorkflowWindow, StartHarness]] = []
+        self.views: list[tuple[WorkflowWindow[Calibrated], StartHarness]] = []
         self.loader = SourceCatalogLoader(
             sources=(SourcePackage("workflow_reload_fixture", self.root),),
             reload_modules=("workflow_reload_fixture.declaration",),
@@ -41,7 +41,7 @@ class ReloadSource:
             catalog_builder=self.build,
         )
 
-    def build(self) -> WorkflowCatalog:
+    def build(self) -> WorkflowCatalog[Calibrated]:
         """Import the app builder at call time, never retain a prior declaration."""
         return importlib.import_module("workflow_reload_fixture.declaration").build()
 
@@ -58,8 +58,9 @@ class ReloadSource:
             f"""from datetime import timedelta
 from zcu_tools.experiment.workflows import Done, workflow
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables, init_coherence
-from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
-from zcu_lab.workflows.gui.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_lab.workflows.registry import calibrated_seed
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 
@@ -84,14 +85,14 @@ def build():
 """
         )
 
-    def open(self, harness: StartHarness) -> T1WorkflowWindow:
+    def open(self, harness: StartHarness) -> WorkflowWindow[Calibrated]:
         """Construct a view with the same real session and an isolated catalog."""
         catalog = self.loader.load(self.loader.prepare())
-        view = T1WorkflowWindow(
+        view = WorkflowWindow(
             harness.state,
             harness.services,
             harness.owner,
-            catalog=catalog,
+            registrations=catalog.attachments,
             loader=self.loader,
         )
         self.views.append((view, harness))
@@ -124,14 +125,16 @@ class InjectedCatalog:
     """
 
     def __init__(self, root: Path) -> None:
-        from zcu_lab.workflows.gui.catalog import build_catalog
+        from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+
+        from zcu_lab.workflows.registry import build_registry
 
         self.root = root / "injected_workflow_source"
         self.root.mkdir()
         (self.root / "__init__.py").write_text("")
         self.path = str(root)
         sys.path.insert(0, self.path)
-        self.catalog = build_catalog()
+        self.catalog = WorkflowCatalog(build_registry())
         self.loader = SourceCatalogLoader(
             sources=(SourcePackage("injected_workflow_source", self.root),),
             reload_modules=("injected_workflow_source",),
@@ -140,20 +143,22 @@ class InjectedCatalog:
             catalog_builder=self.build,
         )
 
-    def build(self) -> WorkflowCatalog:
+    def build(self) -> WorkflowCatalog[Calibrated]:
         """Return the supplied typed pairing; native declarations remain real."""
         return self.catalog
 
     def install[S, R](
         self,
         step: WorkflowStep[CoherencePlan, CoherenceTunables, S, R, Calibrated],
-        window: T1WorkflowWindow,
+        window: WorkflowWindow[Calibrated],
     ) -> None:
         """Select a real declared scenario via public current-catalog reload."""
-        from zcu_lab.workflows.gui.attachment import WorkflowAttachment
-        from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
+        from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+        from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+
         from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
         from zcu_lab.workflows.gui.plan import CoherencePlanForm
+        from zcu_lab.workflows.registry import calibrated_seed
 
         self.catalog = WorkflowCatalog(
             (

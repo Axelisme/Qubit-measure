@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-from qtpy.QtWidgets import QWidget
-from zcu_tools.experiment.workflows import CommittedRecord
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.plotting.plots import Plots
 
 
 class WorkflowFigureViews:
-    """Own the attached native presentation and its committed drawing cursor.
+    """Own the attached native presentation without interpreting workflow data.
 
     App-local implementation, not a package-exported run owner.
     native is the attached run's actual Plots or None before install/after release.
-    _cursor is the last attempted native commit count, reset with new Plots.
     No Engine, Controller, run identity, operation, session or admission is held.
     Window admits owner/target access before calling; Pause does nothing,
-    terminal refresh precedes finish_native, and close releases presentation.
+    terminal delivery precedes finish_native, and close releases presentation.
     Callers retain Figures independently of release. This owner is fixed with
-    Window. Science drawing is resolved at each call, so bounded science reload
-    does not freeze an old projection callable.
+    Window.
     """
 
     def __init__(self) -> None:
@@ -30,18 +26,16 @@ class WorkflowFigureViews:
         No controls, callbacks or native operation authority are acquired.
         """
         self.native: Plots | None = None
-        self._cursor: int | None = None
 
     def install_native(self, plots: Plots) -> None:
         """Install new active Plots before native admission listeners reenter.
 
         Window has admitted replacement. Release the previous native presentation
-        and reset its cursor.
+        before replacing it.
         """
         if self.native is not None:
             self.native.release()
         self.native = plots
-        self._cursor = None
 
     def start_failed(self) -> None:
         """Finish/release the unsuccessful native candidate after submit fails."""
@@ -49,32 +43,9 @@ class WorkflowFigureViews:
             self.native.finish(present=False)
             self.native.release()
             self.native = None
-        self._cursor = None
-
-    def refresh_native(self, records: tuple[CommittedRecord, ...]) -> None:
-        """Draw an admitted overnight run's complete committed tuple once per cursor.
-
-        Native Plots must be active; Window supplies authoritative Engine records
-        from Engine.records with its default zero cursor. No refit occurs. Cursor
-        advances before draw, preventing automatic timer retries after errors or
-        attempts to draw finished Plots. Draw errors propagate for view isolation.
-        """
-        from ..trend import draw_overnight_trend
-
-        if self.native is not None and self._cursor != len(records):
-            self._cursor = len(records)
-            draw_overnight_trend(self.native, records)
-            self._size_trend_canvas(self.native)
-
-    def _size_trend_canvas(self, plots: Plots) -> None:
-        canvas = plots["overnight_trend"].canvas
-        if not isinstance(canvas, QWidget):
-            raise RuntimeError("Presented overnight trend has no Qt canvas")
-        # Keep both axes readable when the forms consume the default layout.
-        canvas.setMinimumSize(640, 480)
 
     def finish_native(self) -> None:
-        """Finish after producer return and final committed refresh, never on Pause."""
+        """Finish after producer return and terminal delivery, never on Pause."""
         if self.native is not None:
             self.native.finish()
 
@@ -106,4 +77,3 @@ class WorkflowFigureViews:
         if self.native is not None:
             self.native.release()
             self.native = None
-        self._cursor = None

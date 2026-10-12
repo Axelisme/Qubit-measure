@@ -14,6 +14,8 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows import figures as figures_module
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -22,8 +24,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui import figures as figures_module
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._reload_source import InjectedCatalog
 from ._window_scenarios import (
@@ -37,7 +37,7 @@ from ._window_support import RpcRequest
     "method", ["workflow.records", "workflow.figures", "workflow.figure"]
 )
 def test_rpc_read_targets_preserve_pending_and_absent(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     method: str,
 ) -> None:
@@ -86,7 +86,7 @@ def test_rpc_records_rejects_noninteger_cursor(rpc: RpcRequest, since: object) -
 
 
 def test_rpc_records_retains_commits_and_revision_after_resume(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
 ) -> None:
@@ -140,7 +140,7 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
 
 
 def test_rpc_records_running_empty_and_committed_native_summary(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
 ) -> None:
@@ -185,7 +185,7 @@ def test_rpc_records_running_empty_and_committed_native_summary(
 
 @pytest.mark.parametrize("ending", ["resume", "stop"])
 def test_rpc_figures_latest_owner_render_and_lifetime(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,
     catalog_source: InjectedCatalog,
@@ -245,7 +245,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
 
 
 def test_rpc_empty_figures_and_stale_run_do_not_render(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,

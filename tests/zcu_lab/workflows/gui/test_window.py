@@ -12,6 +12,7 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.gui.app.workflows.remote import FormWrite
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -27,7 +28,6 @@ from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
 from ._plan_inputs import inline_input
@@ -36,18 +36,18 @@ from ._window_support import RpcRequest, start_plan_batch
 
 
 def test_window_services_run_and_progress_share_session(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     qapp: QApplication,
     catalog_source: InjectedCatalog,
 ) -> None:
     _existing_window, harness, _entry = run_attachment
     closed: list[str] = []
-    window = T1WorkflowWindow(
+    window = WorkflowWindow(
         harness.state,
         harness.services,
         harness.owner,
-        catalog=catalog_source.catalog,
+        registrations=catalog_source.catalog.attachments,
         loader=catalog_source.loader,
         parent=None,
         on_close=lambda: closed.append("closed"),
@@ -88,7 +88,7 @@ def test_window_services_run_and_progress_share_session(
         assert [(bar.label, bar.total, bar.n) for _, bar in bars] == [
             ("session work", 4, 2)
         ]
-        assert harness.services.progress.bars_for_owner("t1-workflow") == bars
+        assert harness.services.progress.bars_for_owner("workflow") == bars
         stop_button = window.findChild(QPushButton, "workflow.run.stop")
         assert stop_button is not None
         stop_button.click()
@@ -111,7 +111,7 @@ def test_window_services_run_and_progress_share_session(
 
 
 def test_invalid_pi_does_not_submit_or_create_workflow_directories(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, harness, entry = attachment
     window.plan_panel.state.write({("pi_length_us",): 0.0}, FormEnv())
@@ -123,7 +123,7 @@ def test_invalid_pi_does_not_submit_or_create_workflow_directories(
 
 
 def test_startup_source_failure_is_not_replaced_by_old_constructor_capture(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, harness, entry = attachment
     harness.services.context.clear_context()
@@ -134,7 +134,7 @@ def test_startup_source_failure_is_not_replaced_by_old_constructor_capture(
 
 
 def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
@@ -165,9 +165,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     def edit_on_progress_notification() -> None:
         window.tunables_panel.state.write({("t1", "guess_us"): 77.0}, FormEnv())
 
-    detach = harness.progress.attach_by_owner(
-        "t1-workflow", edit_on_progress_notification
-    )
+    detach = harness.progress.attach_by_owner("workflow", edit_on_progress_notification)
     try:
         token = window.start("captured")
     finally:
@@ -205,7 +203,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
 
 
 def test_submit_failure_leaves_no_accepted_run_or_paths(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, harness, entry = attachment
     harness.background.fail_submit = True
@@ -218,7 +216,7 @@ def test_submit_failure_leaves_no_accepted_run_or_paths(
 
 
 def test_start_button_identity_is_accepted_by_native_conversion(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     """Ordinary Start generates an identity usable by the native writer/reader."""
     from zcu_tools.datafile import load_run_data
@@ -255,7 +253,7 @@ def test_start_button_identity_is_accepted_by_native_conversion(
 
 
 def test_real_t1_gui_caller_runs_native_offline_acquisitions(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, harness, entry = attachment
     window.plan_panel.state.write(
@@ -292,7 +290,7 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
 
 
 def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
@@ -371,7 +369,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     [("plan", 0.0), ("tunables", 0), ("plan", {"expr": "missing_name"})],
 )
 def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
     form: str,
@@ -435,7 +433,7 @@ def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
     ],
 )
 def test_rpc_start_rejects_bad_batches_without_mutating_drafts(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     batch: object,
 ) -> None:
@@ -459,7 +457,7 @@ def test_rpc_start_rejects_bad_batches_without_mutating_drafts(
 
 
 def test_rpc_start_ignores_unparseable_gui_text_then_resets_accepted_base(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
 ) -> None:
@@ -484,7 +482,7 @@ def test_rpc_start_ignores_unparseable_gui_text_then_resets_accepted_base(
 
 
 def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, _harness, _entry = attachment
     window.tunables_panel.state.write({("t1", "guess_us"): -1.0}, FormEnv())
@@ -501,7 +499,7 @@ def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
 
 @pytest.mark.parametrize("method", ["gui", "rpc"])
 def test_start_submit_failure_preserves_error_and_allows_window_close(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
     method: str,
@@ -534,7 +532,7 @@ def test_start_submit_failure_preserves_error_and_allows_window_close(
 
 
 def test_rpc_start_native_submit_failure_does_not_install_new_panel_bases(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
 ) -> None:
@@ -562,7 +560,7 @@ def test_rpc_start_native_submit_failure_does_not_install_new_panel_bases(
 
 
 def test_rpc_start_source_failure_does_not_fall_back_to_old_gui_capture(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
 ) -> None:
@@ -588,7 +586,7 @@ def test_rpc_start_source_failure_does_not_fall_back_to_old_gui_capture(
 
 
 def test_rpc_start_cannot_replace_pending_native_run(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
 ) -> None:

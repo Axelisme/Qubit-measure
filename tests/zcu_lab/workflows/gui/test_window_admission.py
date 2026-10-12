@@ -14,6 +14,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.resources.entry import (
@@ -23,7 +24,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
 from ._reload_source import InjectedCatalog
@@ -34,7 +34,7 @@ from ._window_scenarios import admission_canceller, install_admission_observer
 @pytest.mark.parametrize("previous_start", [False, True])
 @pytest.mark.parametrize("notification", ["progress", "gate"])
 def test_admission_notification_can_cancel_current_start(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     action: str,
     previous_start: bool,
@@ -62,7 +62,7 @@ def test_admission_notification_can_cancel_current_start(
 
     detach: Callable[[], None]
     if notification == "progress":
-        detach = harness.progress.attach_by_owner("t1-workflow", cancel_on_notification)
+        detach = harness.progress.attach_by_owner("workflow", cancel_on_notification)
     else:
         subscription = harness.bus.subscribe(GateChangedPayload, cancel_on_register)
         detach = subscription.unsubscribe
@@ -96,7 +96,7 @@ def test_admission_notification_can_cancel_current_start(
 
 
 def test_replacement_accepted_progress_uses_current_host_and_form_capture(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
@@ -159,7 +159,7 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
             and panel.host.env is not old.env
         )
 
-    detach = harness.progress.attach_by_owner("t1-workflow", apply_on_accepted_progress)
+    detach = harness.progress.attach_by_owner("workflow", apply_on_accepted_progress)
     try:
         assert isinstance(window.start("next"), int)
         harness.complete_segment()
@@ -178,7 +178,7 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
 
 @pytest.mark.parametrize("previous_start", [False, True])
 def test_gate_registration_reentrant_start_preserves_outer_controller(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     previous_start: bool,
 ) -> None:

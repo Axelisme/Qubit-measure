@@ -28,7 +28,7 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 from .methods import GUI_VERSION, METHOD_SPECS, WIRE_VERSION
 
 if TYPE_CHECKING:
-    from ..window import T1WorkflowWindow
+    from ..window import WorkflowWindow
 
 
 class RunTarget(TypedDict):
@@ -211,7 +211,7 @@ class WorkflowReply(TypedDict):
     status: NativeStatusReply | None
 
 
-class WorkflowRemoteControlAdapter(RemoteControlServiceBase):
+class WorkflowRemoteControlAdapter[C](RemoteControlServiceBase):
     """RPC face of one workflow Window; it never owns a second run or capture.
 
     workflow.start submits partial path/value batches through Window.start;
@@ -248,11 +248,11 @@ class WorkflowRemoteControlAdapter(RemoteControlServiceBase):
     additional observation policies, holder checks or hidden pre-reads.
     """
 
-    ctrl: T1WorkflowWindow
+    ctrl: WorkflowWindow[C]
 
     def __init__(
         self,
-        window: T1WorkflowWindow,
+        window: WorkflowWindow[C],
         opts: ControlOptions,
         *,
         bus: BaseEventBus,
@@ -274,6 +274,7 @@ class WorkflowRemoteControlAdapter(RemoteControlServiceBase):
             owner_scheduler=owner_scheduler,
             wire_version=WIRE_VERSION,
             gui_version=GUI_VERSION,
+            # Preserve the published server identity across the host relocation.
             server_name="T1WorkflowRemoteServer",
             method_registry={
                 "workflow.start": BoundMethod(

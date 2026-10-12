@@ -14,6 +14,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationOutcome
@@ -24,7 +25,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
 from ._reload_source import InjectedCatalog
@@ -37,7 +37,7 @@ from ._window_scenarios import (
 
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
 ) -> None:
     window, harness, entry = run_attachment
     token = window.start("close-pending")
@@ -52,7 +52,7 @@ def test_close_pending_start_requests_stop_without_destroying_producer_host(
 
 
 def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
@@ -97,7 +97,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
 
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
@@ -160,12 +160,12 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     assert attempts == ["step"]
     assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
-    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert harness.progress.bars_for_owner("workflow") == ()
     assert window.close()
 
 
 def test_resume_stop_rejection_unlocks_window_without_a_producer(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
@@ -213,7 +213,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     assert start is not None and start.isEnabled()
     assert pause is not None and not pause.isEnabled()
     assert resume is not None and not resume.isEnabled()
-    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert harness.progress.bars_for_owner("workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
     assert not controller.has_pending_segment
     assert harness.background.work is None and attempts == ["step"]
@@ -222,7 +222,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
 
 @pytest.mark.parametrize("action", ["stop", "close"])
 def test_paused_window_stop_or_close_ends_run_without_another_worker(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     action: str,
 ) -> None:
@@ -248,7 +248,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert isinstance(window.start("paused-stop"), int)
     harness.complete_segment()
     assert harness.background.work is None
-    assert harness.progress.bars_for_owner("t1-workflow")
+    assert harness.progress.bars_for_owner("workflow")
     assert not window.plan_panel.isEnabled() and not window.tunables_panel.isEnabled()
     assert window.tuning_panel is not None and window.tuning_panel.isEnabled()
     start = window.findChild(QPushButton, "workflow.run.start")
@@ -273,11 +273,11 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     assert status is not None and status.lifecycle == "stopped"
     assert harness.background.work is None
     assert not harness.gate.snapshot()
-    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert harness.progress.bars_for_owner("workflow") == ()
 
 
 def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = run_attachment
@@ -341,12 +341,12 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
         "failed", failed.reason
     )
     assert harness.background.work is None and not harness.gate.snapshot()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
     assert window.close()
 
 
 def test_prepare_forms_rejects_pending_and_paused_run(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = run_attachment
@@ -386,7 +386,7 @@ def test_prepare_forms_rejects_pending_and_paused_run(
 
 @pytest.mark.parametrize("command", ["pause", "resume", "stop"])
 def test_window_without_run_rejects_explicit_target(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     command: str,
 ) -> None:
     window, harness, _entry = attachment
@@ -408,7 +408,7 @@ def test_window_without_run_rejects_explicit_target(
 
 @pytest.mark.parametrize("phase", ["pending", "paused"])
 def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     phase: str,
 ) -> None:
@@ -449,7 +449,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     status = controller.status()
     # Lease age advances on each read; compare stable presence fields.
     gate = tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot())
-    bars = harness.progress.bars_for_owner("t1-workflow")
+    bars = harness.progress.bars_for_owner("workflow")
     tuning = window.tuning_panel
     for invoke in (
         lambda: window.pause("run-A"),
@@ -462,7 +462,7 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         assert controller.status() == status
         assert (
             tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()),
-            harness.progress.bars_for_owner("t1-workflow"),
+            harness.progress.bars_for_owner("workflow"),
         ) == (gate, bars)
         assert (
             window.tuning_panel,
@@ -481,13 +481,13 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         stopped = controller.status()
         assert stopped is not None and stopped.lifecycle == "stopped"
     assert controller.run_id == "run-B" and window.plan_panel.isEnabled()
-    assert harness.progress.bars_for_owner("t1-workflow") == ()
+    assert harness.progress.bars_for_owner("workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
 
 
 @pytest.mark.parametrize("phase", ["paused", "active"])
 def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
     escaped_qt_errors: list[BaseException],
     settlements: list[int],

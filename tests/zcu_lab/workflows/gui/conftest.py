@@ -21,7 +21,9 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
 from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -42,11 +44,11 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
+from zcu_lab import ALIAS_PRESET
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab.workflows.registry import build_registry
 
 from ._plan_inputs import inline_input, library_env
 from ._recording_transport import WindowTransport, WireRoute
@@ -82,12 +84,18 @@ def native_registry() -> Iterator[str]:
 @pytest.fixture
 def native_app(
     qapp: QApplication, tmp_path: Path, native_registry: str
-) -> Iterator[tuple[WorkflowsGuiBehavior, WorkflowRemoteControlAdapter]]:
+) -> Iterator[
+    tuple[WorkflowsGuiBehavior[Calibrated], WorkflowRemoteControlAdapter[Calibrated]]
+]:
     """Keep real Qt workers alive through cancellation, delivery and drain."""
     del native_registry
     (tmp_path / "result").mkdir()
     app = WorkflowsGuiBehavior(
-        project_root=str(tmp_path), cache_dir=tmp_path / "cache", clean=True
+        registrations=build_registry(),
+        alias_rows=ALIAS_PRESET,
+        project_root=str(tmp_path),
+        cache_dir=tmp_path / "cache",
+        clean=True,
     )
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
@@ -108,7 +116,9 @@ def native_app(
 
 @pytest.fixture
 def sim_session(
-    native_app: tuple[WorkflowsGuiBehavior, WorkflowRemoteControlAdapter],
+    native_app: tuple[
+        WorkflowsGuiBehavior[Calibrated], WorkflowRemoteControlAdapter[Calibrated]
+    ],
     native_registry: str,
     qapp: QApplication,
     inputs: Inputs,
@@ -181,7 +191,7 @@ def attachment(
     tmp_path: Path,
     inputs: Inputs,
     catalog_source: InjectedCatalog,
-) -> Iterator[tuple[T1WorkflowWindow, StartHarness, ResultEntry]]:
+) -> Iterator[tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry]]:
     before = registry_state()
     kind = "qubit/workflow-window-test"
     component_registry.register(kind, QubitSchema)
@@ -219,11 +229,11 @@ def attachment(
         )
         harness.background.execute()
         harness.background.deliver()
-        window = T1WorkflowWindow(
+        window = WorkflowWindow(
             harness.state,
             harness.services,
             harness.owner,
-            catalog=catalog_source.catalog,
+            registrations=catalog_source.catalog.attachments,
             loader=catalog_source.loader,
         )
         window.plan_panel.state.reset(inline_input(inputs))
@@ -249,9 +259,9 @@ def attachment(
 
 @pytest.fixture
 def run_attachment(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[T1WorkflowWindow, StartHarness, ResultEntry]:
+) -> tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry]:
     """Supply typed cached native form info for Window/Controller ownership.
 
     The substitute does not replace Runner, Controller or native Engine.
@@ -282,7 +292,7 @@ def escaped_qt_errors(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
 
 @pytest.fixture
 def settlements(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[int]:
     """Record real public settlement calls without replacing their behavior."""
@@ -300,7 +310,7 @@ def settlements(
 
 @pytest.fixture
 def wire_route(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
 ) -> Iterator[WireRoute]:
     """Route original requests off-owner and pump the real owner for RPC and MCP."""
@@ -334,7 +344,7 @@ def wire_route(
 
 @pytest.fixture
 def rpc(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     wire_route: WireRoute,
 ) -> RpcRequest:
     """Keep existing RPC cases on their controlled live-device seam."""
@@ -371,7 +381,7 @@ def mcp_tools(mcp_transport: WindowTransport, tmp_path: Path) -> Iterator[ToolTa
 
 @pytest.fixture
 def paused_tuning(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     catalog_source: InjectedCatalog,
 ) -> list[tuple[int, float, int]]:
     """One committed step, followed by an owner-delivered paused step."""

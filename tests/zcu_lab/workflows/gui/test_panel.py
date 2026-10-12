@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLineEdit
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
 from zcu_tools.gui.session.aliases import AliasRow
@@ -14,9 +15,9 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan
 from zcu_lab.workflows.coherence import CoherencePlan
-from zcu_lab.workflows.gui.catalog import build_catalog
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
+from zcu_lab.workflows.registry import build_registry
 
 from ._plan_inputs import inline_input
 
@@ -124,7 +125,11 @@ def test_plan_panel_previews_native_plan_and_blocks_incomplete_text(
 ) -> None:
     env = FormEnv()
     template = make_plan(inputs)
-    panel = build_catalog().select("coherence_fluxdep").plan_panel(env, None)
+    panel = (
+        WorkflowCatalog(build_registry())
+        .select("coherence_fluxdep")
+        .plan_panel(env, None)
+    )
     try:
         panel.state.write({("flux_dev",): inline_input(inputs).data["flux_dev"]}, env)
         missing = panel.preview(template.snapshot)
