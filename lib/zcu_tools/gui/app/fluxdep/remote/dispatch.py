@@ -91,19 +91,13 @@ def _h_project_setup(
 ) -> ProjectSetupReply:
     chip_name = params["chip_name"]
     qub_name = params["qub_name"]
-    result_dir = params["result_dir"]
-    database_path = params["database_path"]
-    # ParamSpec already validated these strings, including optional defaults.
+    # ParamSpec validates identity; the GUI derives paths from its own root.
     assert isinstance(chip_name, str)
     assert isinstance(qub_name, str)
-    assert isinstance(result_dir, str)
-    assert isinstance(database_path, str)
     adapter.ctrl.setup_project(
         ProjectInfo(
             chip_name=chip_name,
             qub_name=qub_name,
-            result_dir=result_dir,
-            database_path=database_path,
             root_dir=adapter.ctrl.get_project_root(),
         )
     )
@@ -152,6 +146,7 @@ def _h_spectrum_snapshot(
     entry = adapter.ctrl.state.spectrums.get(name)
     if entry is None:
         return {"name": name, "exists": False}
+    active = adapter.ctrl.interactive.inspect()
     return {
         "name": entry.name,
         "exists": True,
@@ -159,6 +154,10 @@ def _h_spectrum_snapshot(
         "aligned": entry.aligned,
         "points_completed": entry.points_completed,
         "alignment_seeded": entry.alignment_seeded,
+        "pending": ("align" if active.kind == "line" else "sample")
+        if active is not None and active.spectrum_name == entry.name
+        else None,
+        "alignment": {"inherited_from": entry.inherited_from},
         "flux_half": entry.flux_half,
         "flux_int": entry.flux_int,
         "flux_period": entry.flux_period,

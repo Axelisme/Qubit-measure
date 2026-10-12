@@ -124,6 +124,7 @@ class LoadService:
             # inherited alignment is a meaningful seed for the line-picker; a
             # fresh load (identity default) is not.
             alignment_seeded=inherit_from is not None,
+            inherited_from=inherit_from,
         )
         self._state.put_spectrum(entry)
         logger.debug(

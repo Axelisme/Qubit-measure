@@ -85,7 +85,7 @@ class ProjectInfo:
     GUIs never touch hardware). The chip / qubit names default to the
     ``unknown_*`` placeholders.
 
-    ``result_dir`` and ``database_path`` are always concrete paths, never an empty
+    ``result_dir`` and ``data_root`` are always concrete paths, never an empty
     sentinel: leave a field unset (empty) at construction and ``__post_init__``
     derives it from the chip/qubit names — so however a ``ProjectInfo`` is built,
     both paths come out well-formed and every save site can
@@ -99,7 +99,7 @@ class ProjectInfo:
     qub_name: str = DEFAULT_QUBIT
     # Empty = "derive from chip/qubit in __post_init__"; a value overrides it.
     result_dir: str = ""  # → result/<chip>/<qubit>
-    database_path: str = ""  # raw measurement root → Database/<chip>/<qubit>
+    data_root: str = ""  # raw measurement root → Database/<chip>/<qubit>
     # Base dir the derived defaults are anchored under (the repo root, injected by
     # the entry script). Empty keeps the legacy cwd-relative default. Not a path
     # itself — only seeds the derivation below; the GUI re-derives via the dialog.
@@ -112,8 +112,8 @@ class ProjectInfo:
             self.result_dir = default_result_dir(
                 self.chip_name, self.qub_name, self.root_dir
             )
-        if not self.database_path:
-            self.database_path = default_database_root(
+        if not self.data_root:
+            self.data_root = default_database_root(
                 self.chip_name, self.qub_name, self.root_dir
             )
 
@@ -127,14 +127,14 @@ class ProjectInfoPayload(TypedDict):
     """Applied project identity and native paths shared by analysis apps.
 
     chip_name and qub_name identify the applied chip/qubit, including placeholders.
-    result_dir is the processed-output directory. database_path is the raw-data
+    result_dir is the processed-output directory. data_root is the raw-data
     root, not a fluxdep search database file. Paths retain ProjectInfo spelling.
     """
 
     chip_name: str
     qub_name: str
     result_dir: str
-    database_path: str
+    data_root: str
 
 
 def project_info_payload(project: ProjectInfo) -> ProjectInfoPayload:
@@ -148,7 +148,7 @@ def project_info_payload(project: ProjectInfo) -> ProjectInfoPayload:
         "chip_name": project.chip_name,
         "qub_name": project.qub_name,
         "result_dir": project.result_dir,
-        "database_path": project.database_path,
+        "data_root": project.data_root,
     }
 
 

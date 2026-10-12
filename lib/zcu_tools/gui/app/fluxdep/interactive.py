@@ -70,7 +70,7 @@ class _NormalizedBackground:
     normalized_signals: NDArray[np.float64]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class LinePickContext:
     """Live context owned by FluxDepInteractiveOwner, not by its widgets.
 
@@ -83,6 +83,10 @@ class LinePickContext:
     spectrum_name: str
     plugin: SharedFluxPickPlugin[FluxPickAnalysis]
     session: Session[FluxPickState]
+    # Published source captured at begin; draft edits never mutate this source.
+    inherited_from: str | None = None
+    # Any accepted edit or auto-align start makes this draft independently aligned.
+    alignment_changed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +201,8 @@ class FluxDepInteractivePorts:
     """Runtime collaborators for app-owned picking and joint-cloud selection.
 
     background delivers computation on the owner loop; None rejects auto-align.
-    publish_alignment receives spectrum name and native device half/integer lines.
+    publish_alignment receives spectrum name, native device half/integer lines,
+    and the current inherited source (None for an edited or auto-aligned draft).
     publish_points receives name and native device/GHz arrays; PointsService owns
     sorting/calibration. derive_pointcloud queries the complete calibrated
     flux/GHz cloud in spectrum insertion order. publish_selection receives that
@@ -206,7 +211,7 @@ class FluxDepInteractivePorts:
     """
 
     background: BackgroundSubmitter | None
-    publish_alignment: Callable[[str, float, float], None]
+    publish_alignment: Callable[[str, float, float, str | None], None]
     publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], None]
     derive_pointcloud: Callable[[], tuple[NDArray[np.float64], NDArray[np.float64]]]
     publish_selection: Callable[[NDArray[np.bool_], float], None]
@@ -336,15 +341,29 @@ class FluxDepInteractiveOwner:
         self._context_id = self._next_context_id
         self._next_context_id += 1
         active = ActiveInteractiveContext(self._context_id, context)
-        subscriptions = [context.session.subscribe(lambda: self._updated(active))]
+        subscriptions = [
+            context.session.subscribe(lambda: self._session_updated(active))
+        ]
         if isinstance(context, LinePickContext):
             subscriptions.append(
                 context.plugin.subscribe_alignment(
-                    lambda _busy, _error: self._updated(active)
+                    lambda busy, _error: self._alignment_updated(active, busy=busy)
                 )
             )
         self._context_subscriptions = tuple(subscriptions)
         self._emit_interactive(active, "opened")
+
+    def _session_updated(self, active: ActiveInteractiveContext) -> None:
+        if isinstance(active.context, LinePickContext):
+            active.context.alignment_changed = True
+        self._updated(active)
+
+    def _alignment_updated(
+        self, active: ActiveInteractiveContext, *, busy: bool
+    ) -> None:
+        if isinstance(active.context, LinePickContext) and busy:
+            active.context.alignment_changed = True
+        self._updated(active)
 
     def _updated(self, active: ActiveInteractiveContext) -> None:
         if self._context is active.context and self._context_id == active.context_id:
@@ -432,7 +451,9 @@ class FluxDepInteractiveOwner:
         )
         if self._background is not None:
             plugin.bind_background(self._background)
-        context = LinePickContext(name, plugin, plugin.open(self._owner))
+        context = LinePickContext(
+            name, plugin, plugin.open(self._owner), inherited_from=entry.inherited_from
+        )
         self._install_context(context)
         return context
 
@@ -468,7 +489,10 @@ class FluxDepInteractiveOwner:
         finally:
             self.cancel()
         self._publish_alignment(
-            context.spectrum_name, result.flux_half, result.flux_int
+            context.spectrum_name,
+            result.flux_half,
+            result.flux_int,
+            None if context.alignment_changed else context.inherited_from,
         )
         return result
 

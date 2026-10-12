@@ -161,6 +161,9 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 每張譜各自一份 flux_half/int/period（對齊 analysis.fluxdep.models.SpectrumResult）。新載入的譜可
 `inherit_from` 既有譜的對齊當初值（`alignment_seeded` 標記），LinePicker 才會 seed；
 fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（相位無資訊）。
+`inherited_from` 表示目前已發布對齊的來源。未改繼承線直接 Finish 保留來源；
+手動改線或 Auto Align 後 Finish 才清除。丟棄草稿不改已發布對齊或來源，
+Controller 直接發布手動對齊則清除來源。
 
 ### Interactive context facts 與 GUI 跟隨
 Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，不建立 Session，也不消耗 Undo。
@@ -215,7 +218,7 @@ downsample 後 kept count。Finish／cancel receipt 保留退休 identity，即�
 context。Apply 不關閉有效 joint input；publication／rendering 失敗不宣稱 rollback。
 PNG 不使用 Qt canvas，也不保存為產物。
 
-MCP entrypoint 使用共用 bridge，pipeline tools 從 declarations 生成，control tools 轉送同一
+MCP entrypoint 使用共用 bridge，手寫工具組裝基礎 RPC 並摘要資料，control tools 轉送同一
 authority。MCP 不訂閱業務 event-push，不維護另一套 holder 或 operation registry。
 RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 

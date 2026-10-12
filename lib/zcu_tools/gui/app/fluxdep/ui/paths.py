@@ -1,6 +1,6 @@
 """Sensible default starting directories for the file dialogs.
 
-Derived from the project (chip / qubit / result_dir / database_path) so the user
+Derived from the project (chip / qubit / result_dir / data_root) so the user
 doesn't have to navigate from scratch each time. The *intended* directory is
 computed from the project layout (e.g. ``result/<chip>/<qubit>/data/fluxdep`` for
 processed spectra) even when it doesn't exist yet (before the first export); the
@@ -16,7 +16,7 @@ from zcu_tools.gui.project import ProjectInfo, nearest_existing
 
 # The repo's bundled simulation databases — the home of the precomputed *search*
 # database (fluxonium*.h5), a shared resource unrelated to a chip/qubit, so it is
-# NOT derived from the project (cf. the project's database_path, the *raw
+# NOT derived from the project (cf. the project's data_root, the *raw
 # spectrum* root). A repo-relative fragment: callers join it under the injected
 # repo root (``_sim_db_dir(root)``) so a .bat launcher that cd's into scripts/
 # still finds it under the repo, not under scripts/Database/simulation.
@@ -30,8 +30,8 @@ def _sim_db_dir(root: str = "") -> str:
 
 
 def raw_spectrum_dir(project: ProjectInfo) -> str:
-    """Where raw spectrum hdf5 files live — the project's database_path root."""
-    return nearest_existing(project.database_path)
+    """Where raw spectrum hdf5 files live — the project's data_root root."""
+    return nearest_existing(project.data_root)
 
 
 def processed_spectrum_dir(project: ProjectInfo) -> str:
@@ -45,7 +45,7 @@ def database_dir(project: ProjectInfo, root: str = "") -> str:
 
     The search database (fluxonium*.h5) is a shared resource unrelated to the
     chip/qubit, so it is the repo's bundled ``Database/simulation`` — NOT derived
-    from the project (whose ``database_path`` is the raw spectrum root). ``root``
+    from the project (whose ``data_root`` is the raw spectrum root). ``root``
     (the injected repo root) anchors it there instead of relative to cwd.
     """
     del project  # search db location is project-independent

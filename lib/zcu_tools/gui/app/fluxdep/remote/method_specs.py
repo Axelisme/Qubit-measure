@@ -25,20 +25,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, "
-        "database_path).",
+        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
         readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
-        "Apply project identity and paths. Empty or "
-        "omitted paths use the native project defaults; database_path is the raw "
-        "data root, not the fit search database file.",
+        "Apply chip/qubit identity. The GUI derives result_dir and data_root "
+        "from its project root; paths are outputs, not accepted inputs.",
         params=(
             ParamSpec("chip_name", JsonType.STRING),
             ParamSpec("qub_name", JsonType.STRING),
-            ParamSpec("result_dir", JsonType.STRING, required=False, default=""),
-            ParamSpec("database_path", JsonType.STRING, required=False, default=""),
         ),
     ),
     # Spectrum collection
