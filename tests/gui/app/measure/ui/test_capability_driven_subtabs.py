@@ -53,11 +53,11 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl.active_operation_count.return_value = 0
         return ctrl
 
-
     try:
         yield create_ctrl
     finally:
         owned_authorities.clear()
+
 
 def make_snapshot(
     tab_id: str,
@@ -177,7 +177,9 @@ def exp_tab_widget(qapp, monkeypatch, make_ctrl):
 
 
 @pytest.mark.parametrize("post", [False, True])
-def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post, make_ctrl):
+def test_explicit_pane_selection_and_unavailable_pane(
+    qapp, exp_tab_widget, post, make_ctrl
+):
     from qtpy.QtWidgets import QTabWidget
 
     snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=post)
@@ -198,7 +200,9 @@ def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post
     tab.deleteLater()
 
 
-def test_main_window_follow_selects_subpane_on_already_selected_tab(qapp, exp_tab_widget, make_ctrl):
+def test_main_window_follow_selects_subpane_on_already_selected_tab(
+    qapp, exp_tab_widget, make_ctrl
+):
     from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -232,7 +236,9 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(qapp, exp_ta
         window.deleteLater()
 
 
-def test_no_analysis_capability_constructs_only_run_data_and_guide(qapp, exp_tab_widget, make_ctrl):
+def test_no_analysis_capability_constructs_only_run_data_and_guide(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -279,7 +285,9 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(qapp, exp_tab
     tab_none.detach()
 
 
-def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_widget, make_ctrl):
+def test_fit_capability_constructs_analysis_between_run_and_data(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap_analysis = make_snapshot(
         "tab-2", analysis=AnalysisMode.FIT, post=False, load=True
@@ -313,7 +321,9 @@ def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_w
     tab_analysis.detach()
 
 
-def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_widget, make_ctrl):
+def test_post_capability_constructs_post_analysis_after_analysis(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True, load=True)
     assert snap_both.capabilities is not None
@@ -329,7 +339,9 @@ def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_w
     tab_both.detach()
 
 
-def test_main_window_refresh_projects_post_writeback_into_post_widget(qapp, exp_tab_widget, make_ctrl):
+def test_main_window_refresh_projects_post_writeback_into_post_widget(
+    qapp, exp_tab_widget, make_ctrl
+):
     from zcu_tools.gui.app.measure.adapter import ParameterWriteback
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -367,7 +379,9 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(qapp, exp_
     tab.detach()
 
 
-def test_figure_containers_remain_stable_across_tab_switch_and_busy(qapp, exp_tab_widget, make_ctrl):
+def test_figure_containers_remain_stable_across_tab_switch_and_busy(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True)
     assert snap.capabilities is not None
@@ -419,7 +433,9 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(qapp, exp_ta
     tab.detach()
 
 
-def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure(qapp, exp_tab_widget, make_ctrl):
+def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
@@ -462,7 +478,9 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
         "POST_ANALYZE_START_REJECTED",
     ],
 )
-def test_analysis_terminal_restores_retained_figures_via_coordinator(qapp, exp_tab_widget, monkeypatch, fact_name, make_ctrl):
+def test_analysis_terminal_restores_retained_figures_via_coordinator(
+    qapp, exp_tab_widget, monkeypatch, fact_name, make_ctrl
+):
     """Terminal reactions restore retained primary then post figures."""
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
@@ -511,7 +529,9 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(qapp, exp_t
         # Snapshot on failure returns retained figures (same objects as above)
         # Emitting the domain fact exercises the subscribed coordinator reaction.
         bus.emit(
-            TabInteractionChangedPayload("tab-1", getattr(TabInteractionFact, fact_name))
+            TabInteractionChangedPayload(
+                "tab-1", getattr(TabInteractionFact, fact_name)
+            )
         )
         assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
         assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained
@@ -520,7 +540,9 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(qapp, exp_t
         window.deleteLater()
 
 
-def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(qapp, exp_tab_widget, make_ctrl):
+def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, load=True, has_post_result=True
