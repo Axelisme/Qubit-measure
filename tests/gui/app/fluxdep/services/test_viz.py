@@ -47,6 +47,41 @@ def _energies(t_fluxs):
     return e
 
 
+def test_published_filter_overlays_complete_high_order_kernel_frequencies(monkeypatch):
+    from zcu_tools.analysis.fluxdep.models import energy2transition
+    from zcu_tools.gui.app.fluxdep.controller import Controller
+    from zcu_tools.gui.app.fluxdep.services import viz
+    from zcu_tools.gui.app.fluxdep.state import FluxDepState
+
+    state = FluxDepState()
+    state.put_spectrum(_entry())
+    state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2),
+                         {"transitions": [(0, 16)], "mirror20": [(0, 1)]}, None, 20.0)
+    state.set_fit_result((3.0, 0.8, 0.5))
+    requested_levels: list[int] = []
+
+    def simulate(params, fluxs, *, cutoff, evals_count):
+        requested_levels.append(evals_count)
+        return fluxs, np.tile(np.arange(evals_count, dtype=np.float64), (fluxs.size, 1))
+
+    monkeypatch.setattr(viz, "calculate_energy_vs_flux", simulate)
+    ctrl = Controller(state)
+    try:
+        figure = Figure()
+        ctrl.render_selection(figure)
+        lines = figure.axes[0].lines
+        expected_freqs, expected_labels = energy2transition(
+            np.tile(np.arange(21, dtype=np.float64), (2, 1)),
+            {"transitions": [(0, 16)], "mirror20": [(0, 1)], "sample_f": 20.0},
+        )
+        assert [line.get_label() for line in lines] == expected_labels
+        assert requested_levels == [21]
+        for index, line in enumerate(lines):
+            np.testing.assert_allclose(line.get_ydata(), expected_freqs[0, index])
+    finally:
+        ctrl.interactive.dispose()
+
+
 def test_render_fit_figure_draws_all_layers():
     fig = Figure()
     spectrums = {"s1": _entry()}
