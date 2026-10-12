@@ -62,6 +62,15 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 
 
 @dataclass(frozen=True, slots=True)
+class _NormalizedBackground:
+    """Cached normalization tied to a spectrum version and raw signals object."""
+
+    spectrum_version: int
+    raw_signals: NDArray[np.complex128]
+    normalized_signals: NDArray[np.float64]
+
+
+@dataclass(frozen=True, slots=True)
 class LinePickContext:
     """Live context owned by FluxDepInteractiveOwner, not by its widgets.
 
@@ -236,12 +245,9 @@ class FluxDepInteractiveOwner:
         self._derive_pointcloud = ports.derive_pointcloud
         self._publish_selection = ports.publish_selection
         self._context: InteractiveContext | None = None
-        # name -> (spectrum version, raw signals, normalized background). Leaving
-        # Filter cancels its context, so each return would otherwise redo the
+        # Leaving Filter cancels its context, so each return would otherwise redo the
         # wavelet normalization of every unchanged spectrum.
-        self._normalized_backgrounds: dict[
-            str, tuple[int, NDArray[np.complex128], NDArray[np.float64]]
-        ] = {}
+        self._normalized_backgrounds: dict[str, _NormalizedBackground] = {}
         self._context_id = 0
         self._next_context_id = 1
         self._context_subscriptions: tuple[Callable[[], None], ...] = ()
@@ -723,8 +729,12 @@ class FluxDepInteractiveOwner:
         version = self._state.version.get(spectrum_version_key(entry.name))
         signals = entry.raw["signals"]
         cached = self._normalized_backgrounds.get(entry.name)
-        if cached is not None and cached[0] == version and cached[1] is signals:
-            return cached[2]
+        if (
+            cached is not None
+            and cached.spectrum_version == version
+            and cached.raw_signals is signals
+        ):
+            return cached.normalized_signals
         normalized = cast2real_and_norm(signals, use_phase=entry.spec_type == "TwoTone")
         normalized.flags.writeable = False
         self._normalized_backgrounds = {
@@ -732,7 +742,9 @@ class FluxDepInteractiveOwner:
             for name, item in self._normalized_backgrounds.items()
             if name in self._state.spectrums
         }
-        self._normalized_backgrounds[entry.name] = (version, signals, normalized)
+        self._normalized_backgrounds[entry.name] = _NormalizedBackground(
+            version, signals, normalized
+        )
         return normalized
 
     def current_cross_selection(self) -> CrossSelectionContext | None:

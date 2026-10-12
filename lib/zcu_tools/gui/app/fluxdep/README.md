@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-12，per-spectrum Filter masks 與 Filter 效能
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 

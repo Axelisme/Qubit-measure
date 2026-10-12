@@ -47,10 +47,7 @@ def validate_transition_frequencies(transitions: TransitionDict) -> None:
             "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
         )
     if (
-        any(
-            "mirror" in name and isinstance(pairs, list) and pairs
-            for name, pairs in transitions.items()
-        )
+        any("mirror" in name and pairs for name, pairs in transitions.items())
         and "sample_f" not in transitions
     ):
         raise ValueError("sample_f is required for mirror transitions")

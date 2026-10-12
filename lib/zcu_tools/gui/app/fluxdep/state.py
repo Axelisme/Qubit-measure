@@ -129,7 +129,8 @@ class SpectrumEntry:
     # another spectrum or already aligned), so the line-picker should seed from
     # them rather than its centre/edge defaults.
     alignment_seeded: bool = False
-    # Filter identities follow point indices, not joint-cloud positions.
+    # None means no Filter (all selected). Otherwise, a bool array of length
+    # point_count, indexed by this spectrum's points, not joint-cloud positions.
     filter_mask: NDArray[np.bool_] | None = None
 
     @property
@@ -200,13 +201,18 @@ class FluxDepState:
         Bumps ``spectrum:<name>`` always; bumps ``spectrums:__set__`` only when
         the name is a *new* member (so a whole-set op such as ``export`` detects
         a concurrently-added spectrum; a re-load/replace of an existing name
-        leaves the set cardinality unchanged).
+        leaves the set cardinality unchanged). Discards this spectrum's Filter
+        mask; bumps ``SELECTION_VERSION_KEY`` if the stored entry had a mask.
+        The incoming entry must have no Filter mask. Otherwise raises ValueError
+        before changing state or versions. Stores the caller's entry directly,
+        without changing it.
         """
         self._assert_owner()
+        if entry.filter_mask is not None:
+            raise ValueError("a new spectrum entry cannot carry a Filter mask")
         is_new = entry.name not in self.spectrums
-        if not is_new and self.spectrums[entry.name].filter_mask is not None:
-            self.version.bump(SELECTION_VERSION_KEY)
-        entry.filter_mask = None
+        if not is_new:
+            self._discard_filter_mask(entry.name)
         self.spectrums[entry.name] = entry
         self.version.bump(spectrum_version_key(entry.name))
         if is_new:
@@ -235,11 +241,12 @@ class FluxDepState:
         The removed key reads as 0; reloading the same name continues above its
         previous live version.
         The collection version advances, and an active removed name is cleared.
+        Discards this spectrum's Filter mask; bumps ``SELECTION_VERSION_KEY``
+        if the entry had a mask.
         """
         self._assert_owner()
         self.get_spectrum(name)
-        if self.spectrums[name].filter_mask is not None:
-            self.version.bump(SELECTION_VERSION_KEY)
+        self._discard_filter_mask(name)
         del self.spectrums[name]
         self.version.retire(spectrum_version_key(name))
         self.version.bump(SPECTRUM_SET_VERSION_KEY)
@@ -307,24 +314,26 @@ class FluxDepState:
     def set_points(self, name: str, points: PointsData) -> None:
         """Commit native/mapped points and complete picking, including zero points.
 
-        Owner-thread command. Bump the named spectrum once; unknown name raises
-        KeyError. Availability is point_count, not the completion flag.
+        Owner-thread command. Bumps ``spectrum:<name>`` and discards this
+        spectrum's Filter mask. Bumps ``SELECTION_VERSION_KEY`` if it had a mask.
+        Unknown name raises KeyError. Availability is point_count, not the
+        completion flag.
         """
         self._assert_owner()
-        if self.spectrums[name].filter_mask is not None:
-            self.version.bump(SELECTION_VERSION_KEY)
+        self._discard_filter_mask(name)
         self.spectrums[name] = replace(
             self.spectrums[name],
             points=points,
             points_completed=True,
-            filter_mask=None,
         )
         self.version.bump(spectrum_version_key(name))
 
     def reset_points(self, name: str) -> None:
-        """Clear points and completion on an aligned spectrum; bump once.
+        """Clear points and completion on an aligned spectrum.
 
-        Keep alignment and its seed. Unknown name raises InvalidInputError
+        Keep alignment and its seed. Bumps ``spectrum:<name>`` and discards this
+        spectrum's Filter mask. Bumps ``SELECTION_VERSION_KEY`` if it had a mask.
+        Unknown name raises InvalidInputError
         (unknown_spectrum); unaligned raises FailedPreconditionError
         (spectrum_not_aligned). Both leave data/version unchanged.
         Must run on the owner thread.
@@ -336,11 +345,9 @@ class FluxDepState:
                 "spectrum must be aligned before resetting points",
                 reason_code="spectrum_not_aligned",
             )
-        if entry.filter_mask is not None:
-            self.version.bump(SELECTION_VERSION_KEY)
+        self._discard_filter_mask(name)
         self.spectrums[name] = replace(
-            entry,
-            filter_mask=None,
+            self.spectrums[name],
             points=PointsData(
                 dev_values=np.empty(0, dtype=np.float64),
                 fluxs=np.empty(0, dtype=np.float64),
@@ -360,12 +367,34 @@ class FluxDepState:
         self.spectrums[name] = replace(self.get_spectrum(name), aligned=False)
         self.version.bump(spectrum_version_key(name))
 
+    def _discard_filter_mask(self, name: str) -> None:
+        """Drop a stored spectrum's mask and advance selection only if present."""
+        entry = self.spectrums[name]
+        if entry.filter_mask is not None:
+            self.version.bump(SELECTION_VERSION_KEY)
+            self.spectrums[name] = replace(entry, filter_mask=None)
+
     def set_selection(
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
     ) -> None:
+        """Publish a joint-cloud Filter mask and remember its downsample threshold.
+
+        ``selected`` must be a one-dimensional bool mask with one value per
+        annotated point across all spectra, in insertion order. Split it into
+        detached per-spectrum masks indexed by each spectrum's points.
+        ``min_distance`` is the normalized downsample threshold for the next
+        selector session. Bumps ``SELECTION_VERSION_KEY`` on publication.
+        Raises ValueError for a shape mismatch before changing data or versions.
+        Must run on the owner thread.
+        """
         self._assert_owner()
         mask = np.asarray(selected, dtype=np.bool_)
         point_count = sum(entry.point_count for entry in self.spectrums.values())
+        if mask.ndim == 1 and mask.size != point_count:
+            raise ValueError(
+                f"selection mask length {mask.size} != joint point cloud "
+                f"size {point_count}"
+            )
         if mask.shape != (point_count,):
             raise ValueError("selection mask must match the joint point cloud shape")
         offset = 0
