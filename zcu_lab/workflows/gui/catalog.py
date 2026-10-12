@@ -82,6 +82,11 @@ def build_catalog() -> WorkflowCatalog:
     )
     from ..mist import mist_fluxdep
     from ..overnight import overnight
+    from ..samples import (
+        export_t1_samples,
+        export_t2echo_samples,
+        export_t2ramsey_samples,
+    )
     from ..t1 import t1_fluxdep
     from ..t2 import t2echo_fluxdep, t2ramsey_fluxdep
     from .calibration_modules import calibration_seed
@@ -105,6 +110,7 @@ def build_catalog() -> WorkflowCatalog:
         knobs_to_cfg=T1TunablesForm.to_cfg,
         seed=calibrated_seed,
         prepare_export=prepare_t1_fluxdep_export,
+        prepare_samples=export_t1_samples,
     )
     monitoring = WorkflowAttachment(
         step=overnight,
@@ -114,6 +120,7 @@ def build_catalog() -> WorkflowCatalog:
         knobs_to_cfg=OvernightTunablesForm.to_cfg,
         seed=lambda _plan, _form: None,
         prepare_export=None,
+        samples_reason="Overnight monitors fixed-flux rounds, not a flux scan",
     )
     echo = WorkflowAttachment(
         step=t2echo_fluxdep,
@@ -125,6 +132,7 @@ def build_catalog() -> WorkflowCatalog:
             plan.qub_pulse, plan.readout, form.pi_length_us
         ),
         prepare_export=prepare_t2echo_fluxdep_export,
+        prepare_samples=export_t2echo_samples,
     )
     ramsey = WorkflowAttachment(
         step=t2ramsey_fluxdep,
@@ -136,6 +144,7 @@ def build_catalog() -> WorkflowCatalog:
             plan.qub_pulse, plan.readout, form.pi_length_us
         ),
         prepare_export=prepare_t2ramsey_fluxdep_export,
+        prepare_samples=export_t2ramsey_samples,
     )
     mist = WorkflowAttachment(
         step=mist_fluxdep,
@@ -147,5 +156,6 @@ def build_catalog() -> WorkflowCatalog:
             plan.qub_pulse, plan.readout, form.pi_length_us
         ),
         prepare_export=prepare_mist_fluxdep_export,
+        samples_reason="MIST has calibrated frequency/success, but no sample science fields",
     )
     return WorkflowCatalog((t1, monitoring, echo, ramsey, mist))

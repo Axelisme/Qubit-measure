@@ -18,13 +18,14 @@ class WorkflowControls:
 
     selector chooses the workflow; message displays run/input/view diagnostics.
     start/pause/resume/stop are the existing native run action buttons.
-    export opens explicit merged/Labber export; open_trend selects an offline view.
+    export opens explicit merged/Labber export; samples appends scientific rows;
+    open_trend selects an offline view.
     setup opens shared Setup; aliases opens alias editing; prepare captures forms;
     reload attempts bounded source replacement. Their original order is retained.
     source_status displays current qubit availability, not admission authority.
     plot_stack and plot_placeholder are the existing FigureContainer attachment.
     layout is the original vertical layout used for replacing panels and tuning.
-    Pause/resume/export start disabled; all other buttons start enabled. Window
+    Pause/resume/export/samples start disabled; all other buttons start enabled. Window
     sets reload availability, selector items and all signal/admission policy.
     """
 
@@ -35,6 +36,7 @@ class WorkflowControls:
     resume: QPushButton
     stop: QPushButton
     export: QPushButton
+    samples: QPushButton
     open_trend: QPushButton
     setup: QPushButton
     aliases: QPushButton
@@ -74,6 +76,9 @@ def build_workflow_layout(
     export = QPushButton("Export merged/Labber", parent)
     export.setObjectName("workflow.run.export_fluxdep")
     export.setEnabled(False)
+    samples = QPushButton("Export samples", parent)
+    samples.setObjectName("workflow.run.export_samples")
+    samples.setEnabled(False)
     plot_stack = QStackedWidget(parent)
     plot_placeholder = QLabel("Workflow plots", plot_stack)
     plot_stack.addWidget(plot_placeholder)
@@ -104,6 +109,7 @@ def build_workflow_layout(
         resume,
         stop,
         export,
+        samples,
         open_trend,
         message,
         plot_stack,
@@ -117,6 +123,7 @@ def build_workflow_layout(
         resume,
         stop,
         export,
+        samples,
         open_trend,
         setup,
         aliases,

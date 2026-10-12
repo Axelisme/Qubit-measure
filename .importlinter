@@ -298,10 +298,11 @@ forbidden_modules =
 
 # ADR-0062: fluxdep science policy stays independent of frontend driving adapters.
 [importlinter:contract:workflow-export-science-no-frontends]
-name = Fluxdep payload policy does not import frontend owners
+name = Workflow export science does not import frontend owners
 type = forbidden
 source_modules =
     zcu_lab.workflows.export
+    zcu_lab.workflows.samples
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp

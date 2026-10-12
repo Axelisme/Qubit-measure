@@ -5,9 +5,73 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
 from zcu_tools.datafile import CfgSnapshot, ExperimentPayload, RunSnapshot
 
-from .models import RunIdentity, RunPaths
+from .models import CommittedRecord, RunIdentity, RunPaths
+
+
+@dataclass(frozen=True)
+class SampleRun[P: BaseModel]:
+    """Fixed run artifacts supplied to a pure science samples producer.
+
+    run_id is the accepted workflow identity, not an acquisition ID or token.
+    plan is its detached native Start plan. data_root is the exact native
+    acquisition directory. records is the committed Engine.records tuple in
+    effect order; uncommitted files and current drafts are not evidence.
+    Empty run_id raises ValueError. This envelope performs no I/O or admission.
+    """
+
+    run_id: str
+    plan: P
+    data_root: Path
+    records: tuple[CommittedRecord, ...]
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Sample run_id must not be empty")
+
+
+class SampleField(BaseModel):
+    """One producer-defined named JSON measurement, validated before append.
+
+    name is a nonempty science field, never owner metadata run_id/point/at/source.
+    value is strict finite JSON, including nested values or null when science
+    explicitly permits it. Invalid names/values raise ValueError. The framework
+    neither catalogs quantity names nor derives units or physical coordinates.
+    """
+
+    model_config = ConfigDict(
+        frozen=True, extra="forbid", strict=True, allow_inf_nan=False
+    )
+    name: str = Field(min_length=1)
+    value: JsonValue
+
+    def model_post_init(self, _context: object) -> None:
+        if self.name in {"run_id", "point", "at", "source"}:
+            raise ValueError("Sample field cannot replace owner metadata")
+
+
+@dataclass(frozen=True)
+class SampleRow:
+    """One fully prepared row for the host's append-only sample owner.
+
+    key is the nonempty producer identity (workflow run ID plus point index).
+    fields holds unique named science values, already validated by SampleField.
+    Duplicate names or empty key raise ValueError. The host only converts this
+    tuple to append keyword fields; it does not repair or interpret measurements.
+    """
+
+    key: str
+    fields: tuple[SampleField, ...]
+
+    def __post_init__(self) -> None:
+        if not self.key:
+            raise ValueError("Sample key must not be empty")
+        names = [field.name for field in self.fields]
+        if len(names) != len(set(names)):
+            raise ValueError("Sample field names must be unique")
 
 
 @dataclass(frozen=True)

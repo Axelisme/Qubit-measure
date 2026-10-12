@@ -21,11 +21,17 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
 )
 from zcu_tools.experiment.workflows.declaration import WorkflowStep, workflow_definition
+from zcu_tools.experiment.workflows.exporting import SampleRow, SampleRun
 from zcu_tools.gui.app.workflows.controller import WorkflowController
-from zcu_tools.gui.app.workflows.exporting import FluxdepExportBinding
+from zcu_tools.gui.app.workflows.exporting import (
+    FluxdepExportBinding,
+    WorkflowExportBindings,
+)
+from zcu_tools.gui.app.workflows.samples import SampleExportBinding
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.resources.entry import PointStorageBinding, WorkflowRoots
+from zcu_tools.resources.entry.storage import bind_sample_table
 
 from ..calibration import Calibrated
 
@@ -58,7 +64,9 @@ class PreparedWorkflow:
     optional export binding; no capture/admission policy is duplicated here.
     bind_export fixes this pairing's native plan/science callback with Window's
     captured storage, identity and roots, or returns None if unsupported.
-    Neither callable owns a run, operation, resource lease or live source.
+    bind_samples captures the exact table/component/point and artifact producer
+    or explicit unsupported reason. bind_exports groups these two capabilities
+    for Start identity checking. No callable owns a run, lease or live source.
     """
 
     context: Calibrated | None
@@ -69,13 +77,30 @@ class PreparedWorkflow:
             RunPaths,
             RunIdentity,
             FormEnv,
-            FluxdepExportBinding | None,
+            WorkflowExportBindings,
         ],
         int,
     ]
     bind_export: Callable[
         [PointStorageBinding, RunIdentity, WorkflowRoots], FluxdepExportBinding | None
     ]
+    bind_samples: Callable[
+        [PointStorageBinding, RunIdentity, WorkflowRoots], SampleExportBinding
+    ]
+
+    def bind_exports(
+        self, storage: PointStorageBinding, identity: RunIdentity, roots: WorkflowRoots
+    ) -> WorkflowExportBindings:
+        """Capture both export capabilities from this prepared Start's fixed inputs.
+
+        storage/identity/roots are the host capture, never current source selection.
+        Delegates to the paired bind_export/bind_samples closures without writes;
+        returns their grouped capabilities for Controller.start identity checking.
+        """
+        return WorkflowExportBindings(
+            self.bind_export(storage, identity, roots),
+            self.bind_samples(storage, identity, roots),
+        )
 
 
 class Attachment(Protocol):
@@ -91,6 +116,11 @@ class Attachment(Protocol):
 
     @property
     def name(self) -> str: ...
+    @property
+    def samples_unsupported_reason(self) -> str | None:
+        """Return the current science reason, or None when samples are supported."""
+        ...
+
     @property
     def plan_model(self) -> type[FormModel]: ...
     @property
@@ -135,7 +165,9 @@ class WorkflowAttachment[
     modules and snapshot, returning consuming-field errors. knobs_to_cfg converts
     ordinary validated values. seed returns T1 scalar calibration or None without
     live reads. prepare_export is the matching science callback or None for
-    unsupported workflows. All fields must be a coherent pairing supplied by the
+    unsupported workflows. prepare_samples is a pure artifact callback or None;
+    samples_reason explains unsupported science, ignored when a producer exists.
+    All fields must be a coherent pairing supplied by the
     app builder. Panels use the shared FormModel view, but native types stay paired
     inside prepare's closures. No run, storage owner or resource is retained.
     """
@@ -147,6 +179,13 @@ class WorkflowAttachment[
     knobs_to_cfg: Callable[[FT], T]
     seed: Callable[[P, FP], Calibrated | None]
     prepare_export: WorkflowExportPreparer[P] | None
+    prepare_samples: Callable[[SampleRun[P]], tuple[SampleRow, ...]] | None = None
+    samples_reason: str = "Workflow has no sample science fields"
+
+    @property
+    def samples_unsupported_reason(self) -> str | None:
+        """Return the declared unsupported reason, or None for a samples producer."""
+        return self.samples_reason if self.prepare_samples is None else None
 
     @property
     def name(self) -> str:
@@ -206,7 +245,7 @@ class WorkflowAttachment[
             paths: RunPaths,
             identity: RunIdentity,
             capture: FormEnv,
-            export_binding: FluxdepExportBinding | None,
+            export_bindings: WorkflowExportBindings,
         ) -> int:
             binding = TunablesHost[FormModel, Calibrated](
                 FormState(accepted_input), capture, identity.run_id
@@ -219,7 +258,7 @@ class WorkflowAttachment[
                 identity=identity,
                 ports=ports,
                 binding=binding,
-                export_binding=export_binding,
+                export_bindings=export_bindings,
             )
 
         def bind_export(
@@ -243,4 +282,29 @@ class WorkflowAttachment[
                 storage.ledger,
             )
 
-        return PreparedWorkflow(context, submit, bind_export)
+        def bind_samples(
+            storage: PointStorageBinding, identity: RunIdentity, roots: WorkflowRoots
+        ) -> SampleExportBinding:
+            fixed_plan = type(native_plan).model_validate_json(
+                native_plan.model_dump_json(), by_name=True, by_alias=False
+            )
+            producer = self.prepare_samples
+
+            def prepare_rows(
+                records: tuple[CommittedRecord, ...],
+            ) -> tuple[SampleRow, ...]:
+                if producer is None:
+                    raise ValueError("Unsupported samples producer")
+                return producer(
+                    SampleRun(identity.run_id, fixed_plan, roots.database, records)
+                )
+
+            return SampleExportBinding(
+                identity.run_id,
+                snapshot.point,
+                bind_sample_table(storage.result_path, snapshot.roles["qubit"]),
+                None if producer is None else prepare_rows,
+                self.samples_unsupported_reason,
+            )
+
+        return PreparedWorkflow(context, submit, bind_export, bind_samples)

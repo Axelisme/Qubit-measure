@@ -14,6 +14,7 @@ from zcu_tools.experiment.workflows import (
     RunMismatch,
     RunStatus,
 )
+from zcu_tools.gui.app.workflows.samples import SampleExportError, UnsupportedSamples
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.remote.control_service import (
@@ -34,6 +35,30 @@ class RunTarget(TypedDict):
     """run_id is the non-empty native identity supplied to Start, never a token."""
 
     run_id: str
+
+
+class SampleExportReply(RunTarget):
+    """Successful explicit append: written_count counts this call; path is history.
+
+    run_id is the targeted workflow, not the per-row key. written_count includes
+    zero only for a supported run without successful points; unsupported fails.
+    """
+
+    written_count: int
+    path: str
+
+
+class SampleFailureData(TypedDict):
+    """Partial append diagnosis: successful prefix count and original I/O cause.
+
+    written_count includes zero and excludes the failed row. cause is the
+    original OSError text; cause_type is its concrete Python exception name.
+    Existing rows remain; retry appends a complete batch without rollback.
+    """
+
+    written_count: int
+    cause: str
+    cause_type: str
 
 
 class FluxdepOutputReply(TypedDict):
@@ -329,6 +354,9 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
                     self._resume, METHOD_SPECS["workflow.resume"]
                 ),
                 "workflow.stop": BoundMethod(self._stop, METHOD_SPECS["workflow.stop"]),
+                "workflow.export_samples": BoundMethod(
+                    self._export_samples, METHOD_SPECS["workflow.export_samples"]
+                ),
                 "workflow.export_fluxdep": BoundMethod(
                     self._export_fluxdep, METHOD_SPECS["workflow.export_fluxdep"]
                 ),
@@ -512,6 +540,35 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
             "run_id": controller.run_id,
             "operation_id": operation_id,
             "status": _project_status(controller.status()),
+        }
+
+    def _export_samples(
+        self, _adapter: RemoteControlServiceBase, params: RunTarget
+    ) -> SampleExportReply:
+        try:
+            report = self.ctrl.export_samples(params["run_id"])
+        except (RunMismatch, InvalidRunState) as error:
+            raise _project_control_error(error) from error
+        except UnsupportedSamples as error:
+            raise RemoteError(
+                ErrorCode.PRECONDITION_FAILED, str(error), reason="unsupported"
+            ) from error
+        except SampleExportError as error:
+            detail = SampleFailureData(
+                written_count=error.written_count,
+                cause=str(error.cause),
+                cause_type=type(error.cause).__name__,
+            )
+            raise RemoteError(
+                ErrorCode.CONTROLLER_ERROR,
+                str(error),
+                reason="sample_export_failed",
+                data=dict(detail),
+            ) from error
+        return {
+            "run_id": report.run_id,
+            "written_count": report.written_count,
+            "path": str(report.path),
         }
 
     def _export_fluxdep(

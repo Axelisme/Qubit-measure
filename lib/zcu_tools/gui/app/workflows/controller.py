@@ -36,7 +36,18 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
 from zcu_tools.resources.entry import Origin, SaveLayout
 
-from .exporting import FluxdepExportBinding, FluxdepExportRequest, export_fluxdep_run
+from .exporting import (
+    FluxdepExportBinding,
+    FluxdepExportRequest,
+    WorkflowExportBindings,
+    export_fluxdep_run,
+)
+from .samples import (
+    SampleExportBinding,
+    SampleExportReport,
+    UnsupportedSamples,
+    append_samples,
+)
 from .tunables import TunablesHost
 
 if TYPE_CHECKING:
@@ -59,6 +70,7 @@ class _Run[F: FormModel, C]:
     settle: SettleFn | None = None
     native_error: Exception | None = None
     export_binding: FluxdepExportBinding | None = None
+    sample_binding: SampleExportBinding | None = None
 
 
 class WorkflowController[F: FormModel, C]:
@@ -144,7 +156,7 @@ class WorkflowController[F: FormModel, C]:
         identity: RunIdentity,
         ports: EnginePorts[C],
         binding: TunablesHost[F, C],
-        export_binding: FluxdepExportBinding | None = None,
+        export_bindings: WorkflowExportBindings | None = None,
     ) -> int:
         """Publish prepared binding and submit native startup once via Runner.
 
@@ -160,9 +172,11 @@ class WorkflowController[F: FormModel, C]:
         no native files. Stop before worker startup does not create a native run.
         Startup errors retain partial files and deliver the original error.
         The returned token is a receipt, not native acceptance or completion.
-        export_binding optionally captures this run's fixed fluxdep export inputs;
-        its identity must match Start. None leaves export explicitly unsupported.
-        Terminal delivery only captures its UTC finished_at, never writes exports.
+        export_bindings captures this run's optional fluxdep/samples capabilities;
+        None supplies neither capability, without constructing storage owners.
+        their identities must match Start before publication. Missing capabilities
+        remain unsupported. Terminal delivery only captures fluxdep UTC finished_at,
+        never writes exports. Captured callbacks/owners never follow catalog changes.
         """
         with self._lock:
             if self._run is not None and self._run.phase != "terminal":
@@ -174,12 +188,15 @@ class WorkflowController[F: FormModel, C]:
                 raise RunMismatch(identity.run_id, binding.run_id)
             if binding.engine is not None:
                 raise RuntimeError("Start requires a pending tunables binding")
-            if (
-                export_binding is not None
-                and export_binding.snapshot.identity != identity
-            ):
-                raise ValueError("Export binding identity must match Start identity")
-            run = _Run(binding, export_binding=export_binding)
+            exports = (
+                WorkflowExportBindings() if export_bindings is None else export_bindings
+            )
+            exports.require_identity(identity)
+            run = _Run(
+                binding,
+                export_binding=exports.fluxdep,
+                sample_binding=exports.samples,
+            )
             self._run = run
 
         def opened(token: int) -> None:
@@ -322,6 +339,71 @@ class WorkflowController[F: FormModel, C]:
                 origin=origin,
                 saved_at=saved_at,
             ),
+        )
+
+    @property
+    def sample_binding(self) -> SampleExportBinding | None:
+        """Return this pending/accepted run's fixed samples capability, or None.
+
+        Consumers may display unsupported_reason but must not reconstruct this
+        binding from current forms/catalog. Reading it performs no I/O/admission.
+        """
+        return None if self._run is None else self._run.sample_binding
+
+    def _samples_terminal(self) -> bool:
+        run = self._run
+        if run is None or run.engine is None or run.phase != "terminal":
+            return False
+        status = run.engine.status()
+        if status is None:
+            raise RuntimeError("Accepted samples run lacks native status")
+        return status.lifecycle in {"done", "stopped", "failed", "aborted"}
+
+    @property
+    def samples_export_ready(self) -> bool:
+        """Read samples action eligibility on the host owner, without I/O or mutation.
+
+        True requires accepted native terminal evidence, completed host delivery
+        and a captured science producer. Initial/pending/producing/nonterminal/
+        unsupported bindings return False. This is a view fact, not admission;
+        export_samples still reports distinct target/lifecycle/unsupported errors.
+        """
+        binding = self.sample_binding
+        return (
+            self._samples_terminal()
+            and binding is not None
+            and binding.prepare is not None
+        )
+
+    def export_samples(self, run_id: str) -> SampleExportReport:
+        """Explicitly append samples from the accepted terminal run on its owner.
+
+        Stale targets raise RunMismatch; pending acceptance raises RuntimeError.
+        Pending delivery or nonterminal state raises InvalidRunState. Unsupported
+        science raises UnsupportedSamples with its captured reason. Science first
+        validates all rows, then append_samples writes them. SampleExportError
+        preserves successful prefix count and original OSError; retry appends all
+        rows with owner latest-wins. No ledger, operation or lifecycle changes.
+        """
+        self.require_run_id(run_id)
+        run = self._run
+        if run is None or run.engine is None:
+            raise RuntimeError("Samples export requires an accepted native run")
+        status = run.engine.status()
+        if status is None:
+            raise RuntimeError("Accepted samples run lacks native status")
+        if not self._samples_terminal():
+            raise InvalidRunState("export samples", status.lifecycle)
+        binding = run.sample_binding
+        if binding is None or binding.prepare is None:
+            raise UnsupportedSamples(
+                "Workflow has no sample science fields"
+                if binding is None
+                else binding.unsupported_reason
+            )
+        rows = binding.prepare(run.engine.records(run_id))
+        return append_samples(
+            run_id, rows=rows, table=binding.table, point=binding.point
         )
 
     def require_run_id(self, run_id: str) -> None:

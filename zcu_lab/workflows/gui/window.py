@@ -31,6 +31,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.samples import SampleExportReport
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -60,6 +61,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
+from . import sample_action
 from ._form_io import inspect_form_input, prepare_start_form
 from .catalog import WorkflowCatalog, build_catalog
 from .figures import WorkflowFigureViews
@@ -151,6 +153,9 @@ class T1WorkflowWindow(QWidget):
             (self._controls.reload, self._reload_clicked),
         ):
             button.clicked.connect(slot)
+        self._controls.samples.clicked.connect(
+            lambda: sample_action.invoke_samples(self, self._controls.message)
+        )
         self._controls.reload.setEnabled(self._loader is not None)
         self._plot_host = QtPlotHost(
             FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
@@ -163,6 +168,7 @@ class T1WorkflowWindow(QWidget):
         self._poll = QTimer(self)
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
+        self._refresh_run()
 
     setup_dialog: SetupDialog
 
@@ -271,6 +277,7 @@ class T1WorkflowWindow(QWidget):
             self._controls.selector.clear()
             self._controls.selector.addItems(list(self._forms.catalog.names))
             self._controls.selector.setCurrentText(self.workflow_name)
+        self._refresh_run()
 
     def _selection_changed(self, name: str) -> None:
         try:
@@ -523,7 +530,7 @@ class T1WorkflowWindow(QWidget):
             session.soc, session.soccfg, plots, prepared.context
         )
         identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
-        export_binding = prepared.bind_export(storage, identity, roots)
+        export_bindings = prepared.bind_exports(storage, identity, roots)
         # Install presentation before synchronous admission listeners can reenter.
         self._close_tuning_panel()
         self._figure_views.install_native(plots)
@@ -534,7 +541,7 @@ class T1WorkflowWindow(QWidget):
                 RunPaths(metadata_root=roots.result, data_root=roots.database),
                 identity,
                 env,
-                export_binding,
+                export_bindings,
             )
         except Exception:
             self._figure_views.start_failed()
@@ -551,6 +558,7 @@ class T1WorkflowWindow(QWidget):
         self._controls.selector.setEnabled(False)
         self._controls.start.setEnabled(False)
         self._controls.export.setEnabled(False)
+        self._controls.samples.setEnabled(False)
         self._controls.message.setText("Startup pending")
         self._forms_for_run = True
         self._poll.start()
@@ -764,6 +772,17 @@ class T1WorkflowWindow(QWidget):
         self._controls.message.setText("\n".join(lines))
         return report
 
+    def export_samples(self, run_id: str) -> SampleExportReport:
+        """Append this terminal run's captured samples on the Qt owner and show count.
+
+        Uses Controller target/pending/terminal/unsupported admission. Science
+        validates all rows first; SampleExportError retains prefix count/cause.
+        Errors propagate; no current sources, hardware, ledger or lifecycle change.
+        """
+        report = self.controller.export_samples(run_id)
+        sample_action.show_samples_report(self._controls.message, report)
+        return report
+
     def _export_clicked(self) -> None:
         run_id = self.controller.run_id
         if run_id is None:
@@ -807,6 +826,17 @@ class T1WorkflowWindow(QWidget):
     def _refresh_run(self) -> None:
         controller = self.controller
         status = controller.status()
+        sample_binding = controller.sample_binding
+        reason = (
+            self._forms.attachment.samples_unsupported_reason
+            if sample_binding is None
+            else sample_binding.unsupported_reason
+        )
+        sample_action.set_samples_action(
+            self._controls.samples,
+            eligible=controller.samples_export_ready,
+            reason=reason,
+        )
         self._controls.open_trend.setEnabled(
             not controller.has_pending_segment
             and controller.operation_id is None

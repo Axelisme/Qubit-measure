@@ -13,6 +13,7 @@ from zcu_tools.experiment.workflows import (
     CommittedRecord,
     Engine,
     InvalidRunState,
+    RunIdentity,
     RunMismatch,
 )
 from zcu_tools.experiment.workflows.exporting import (
@@ -31,6 +32,8 @@ from zcu_tools.resources.entry import (
     SaveLayout,
 )
 from zcu_tools.resources.entry.ledger_models import validate_origin
+
+from .samples import SampleExportBinding
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,32 @@ class FluxdepExportBinding:
     result_path: Path
     database_path: Path
     ledger: RecordsLedger
+
+
+@dataclass(frozen=True)
+class WorkflowExportBindings:
+    """One Start's optional export capabilities and their common identity check.
+
+    fluxdep is the captured merged/Labber binding, or None when unsupported.
+    samples is the captured sample owner/producer/reason, or None when no sample
+    capability was supplied. No run state, I/O or source selection is owned here.
+    The Controller unpacks these bindings once; it does not retain this envelope.
+    """
+
+    fluxdep: FluxdepExportBinding | None = None
+    samples: SampleExportBinding | None = None
+
+    def require_identity(self, identity: RunIdentity) -> None:
+        """Reject bindings for a different Start before publication or submission.
+
+        identity is the proposed native Start identity. Fluxdep compares its full
+        captured RunIdentity; samples compares its run_id. Mismatch raises
+        ValueError without mutation, I/O, admission or replacement of an old run.
+        """
+        if self.fluxdep is not None and self.fluxdep.snapshot.identity != identity:
+            raise ValueError("Export binding identity must match Start identity")
+        if self.samples is not None and self.samples.run_id != identity.run_id:
+            raise ValueError("Sample binding identity must match Start identity")
 
 
 @dataclass(frozen=True)

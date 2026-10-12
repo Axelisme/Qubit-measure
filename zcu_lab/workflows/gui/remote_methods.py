@@ -3,8 +3,8 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-WIRE_VERSION = 3
-GUI_VERSION = 3
+WIRE_VERSION = 4
+GUI_VERSION = 4
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -118,6 +118,11 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "workflow.resume": MethodSpec(
         5.0,
         "Submit Resume of run_id; operation_id is a pending segment token.",
+        params=(_RUN_ID,),
+    ),
+    "workflow.export_samples": MethodSpec(
+        30.0,
+        "Explicit terminal samples append; partial I/O failure preserves prefix and reports count/cause. MIST/overnight unsupported.",
         params=(_RUN_ID,),
     ),
     "workflow.export_fluxdep": MethodSpec(

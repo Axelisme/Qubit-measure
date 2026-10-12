@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-12，唯讀 committed journal 投影
+**Last updated:** 2026-10-12，committed journal 與 samples artifact 契約
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -34,7 +34,7 @@ Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init�
 
 獨立 GUI app 已接線。Window 使用同一份 SessionServices 的 runner／progress，app 重用 zcu_lab 的單一 ALIAS_PRESET。這些組裝屬於宿主，不改變核心的 device、run 或保存契約。裸 device alias 求值與 T1 flux_dev expression default 仍待 b4 29。S4 source reload 與 U7 input 保存／還原未做。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成，不能把已接線或 bounded 測試視為 04 全票完成。
 
-`exporting` 提供 Qt-free 的 PreparedFluxdepExport、FluxdepExportSnapshot、FluxdepExportOutput 與 FluxdepExportReport，集中科學 payload、固定 host capture 與獨立輸出結果的型別契約。它不觸發保存、不擴 Engine lifecycle。Terminal admission、SaveLayout、ledger 與 GUI/MCP 接線屬於 gui.app.workflows host，science adapter 屬於 zcu_lab。Record.json 仍不是匯出的 commit authority。
+`exporting` 提供 Qt-free 的 PreparedFluxdepExport、FluxdepExportSnapshot、FluxdepExportOutput 與 FluxdepExportReport，集中科學 payload、固定 host capture 與獨立輸出結果的型別契約。SampleRun、SampleRow 與 SampleField 讓 science 將固定 run artifacts 投影成已驗證的具名 JSON 欄位。Framework 不編目實驗量、解讀 device snapshot 或換算單位。它不觸發保存、不擴 Engine lifecycle。Terminal admission、SaveLayout、ledger 與 GUI/MCP 接線屬於 gui.app.workflows host，science adapter 屬於 zcu_lab。Record.json 仍不是匯出的 commit authority。
 
 ## 驗證 owner
 
