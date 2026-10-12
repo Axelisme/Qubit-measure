@@ -6,6 +6,7 @@ from .dependencies import (
     ModuleResolver,
     WaveformAssetInfo,
 )
+from .field_meta import FieldMeta, get_field_meta
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -59,6 +60,8 @@ __all__ = [
     "TemplateDef",
     "TemplateSeed",
     "expand_path",
+    "FieldMeta",
+    "get_field_meta",
     "CfgValidationContext",
     "ModuleResolver",
     "WaveformAssetInfo",
