@@ -32,7 +32,11 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
+from tests.gui.app.fluxdep.remote._route_harness import (
+    ErrorReply,
+    RouteHarness,
+    RouteReply,
+)
 
 
 def _copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:
@@ -85,10 +89,11 @@ def _changes(reply: RouteReply) -> dict[str, object]:
     return changes
 
 
-def _error(reply: RouteReply, code: str, reason: str | None) -> None:
+def _error(reply: RouteReply, code: str, reason: str | None) -> ErrorReply:
     assert reply["ok"] is False, reply
     assert reply["error"]["code"] == code
     assert reply["error"].get("reason") == reason
+    return reply["error"]
 
 
 def _read_sources(harness: RouteHarness, link: ClientLink) -> None:
@@ -400,6 +405,13 @@ def test_onetone_threshold_counts_undo_and_empty_finish(one_route: RouteHarness)
     assert entry.points_completed and entry.point_count == 0
 
 
+def point_count(context: Mapping[str, object]) -> int:
+    """Return the native point count for numeric sampling assertions."""
+    value = _state(context)["point_count"]
+    assert isinstance(value, int), value
+    return value
+
+
 def test_twotone_first_and_reopened_sampling_start_empty(two_route: RouteHarness):
     link = two_route.client()
     first = _open_picker(two_route, link, "two", "twotone")
@@ -407,7 +419,7 @@ def test_twotone_first_and_reopened_sampling_start_empty(two_route: RouteHarness
     assert _state(first)["point_count"] == 0
     assert first["can_undo"] is False
     selected = _context(_picker_command(two_route, link, first, "perform_on_all"))
-    assert _state(selected)["point_count"] > 0
+    assert point_count(selected) > 0
     assert _picker_command(two_route, link, first, "finish")["ok"]
     assert two_route.ctrl.state.get_spectrum("two").point_count > 0
     reopened = _open_picker(two_route, link, "two", "twotone")
@@ -766,7 +778,7 @@ def test_sample_intent_uses_native_prerequisites(
     versions = one_route.ctrl.state.version.snapshot()
     active = one_route.ctrl.state.active_spectrum
     reply = request_sample(one_route, link, name)
-    _error(
+    error = _error(
         reply,
         "invalid_params" if condition == "absent" else "precondition_failed",
         "unknown_spectrum" if condition == "absent" else None,
@@ -775,7 +787,7 @@ def test_sample_intent_uses_native_prerequisites(
         "no spectrum named 'absent'"
         if condition == "absent"
         else "requires an aligned spectrum"
-    ) in reply["error"]["message"]
+    ) in error["message"]
     assert one_route.ctrl.state.active_spectrum == active
     assert one_route.ctrl.state.version.snapshot() == versions
     assert one_route.ctrl.interactive.inspect() is None
