@@ -1,8 +1,12 @@
-"""Startup-only template composition; retained across experiment reloads."""
+"""Persistent module/waveform creation templates, retained across reloads.
+
+Only Expr seeds evaluate; ordinary strings, numbers and bools remain literal.
+Slot seeds retain library links. The composition root injects TEMPLATES once
+into its measure Registry; definitions projects that catalog into the library
+creation menu. This module does not register anything at import time.
+"""
 
 from __future__ import annotations
-
-from collections.abc import Callable
 
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
@@ -18,25 +22,11 @@ from zcu_tools.cfg_model import (
     PulseReadoutSpec,
     PulseResetSpec,
     PulseSpec,
+    Slot,
     TemplateDef,
     TemplateSeed,
     TwoPulseResetSpec,
 )
-from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, ProgramShape
-from zcu_tools.gui.app.measure.adapter import SessionEnv
-from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
-from zcu_tools.gui.app.measure.template_catalog import (
-    TemplateCatalog,
-    TemplateEntry,
-    TemplateItemKind,
-)
-from zcu_tools.gui.cfg import (
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
-
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 
 _QUBIT_FREQ = Expr("{qubit}.freq")
 _QUBIT_CH = Expr("{qubit}.wiring.L01.ch")
@@ -104,7 +94,6 @@ def ro(
 
 
 # Insertion order preserves library creation menus. Empty seeds preserve blanks.
-# The named bath reset awaits a public seed for its library-aware pi/2 child.
 TEMPLATES: dict[str, TemplateDef] = {
     "res_probe": TemplateDef(
         PulseSpec,
@@ -173,6 +162,22 @@ TEMPLATES: dict[str, TemplateDef] = {
         },
         default_name="reset_120",
     ),
+    "bath_reset": TemplateDef(
+        BathResetSpec,
+        "Bath reset",
+        {
+            **pulse(
+                freq=Expr("{resonator}.freq"),
+                ch=Expr("{resonator}.wiring.ch"),
+                gain=0.1,
+                length=1.0,
+                at="cavity_tone_cfg",
+            ),
+            **pulse(gain=0.2, length=1.0, at="qubit_tone_cfg"),
+            "pi2_cfg": Slot("{qubit}.module.x90"),
+        },
+        default_name="reset_bath",
+    ),
     "qub_waveform": TemplateDef(
         CosineWaveformCfg,
         "Qubit drive waveform",
@@ -201,81 +206,3 @@ TEMPLATES: dict[str, TemplateDef] = {
     "flat_top:blank": TemplateDef(FlatTopWaveformSpec, "Blank: flat_top", {}),
     "arb:blank": TemplateDef(ArbWaveformCfg, "Blank: arb", {}),
 }
-
-
-def _blank_value_factory(shape: ProgramShape) -> Callable[[SessionEnv], ReferenceValue]:
-    def _make(_ctx: SessionEnv) -> ReferenceValue:
-        value = make_default_value(shape.make_spec(MAIN_PROGRAM_SPEC_POLICY))
-        return ReferenceValue(make_custom_reference_key(shape.discriminator), value)
-
-    return _make
-
-
-def _blank_entries() -> list[TemplateEntry]:
-    entries: list[TemplateEntry] = []
-    factory: Callable[[SessionEnv], ReferenceValue]
-    for shape in PROGRAM_SHAPES.modules():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            TemplateEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "module",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    for shape in PROGRAM_SHAPES.waveforms():
-        factory = _blank_value_factory(shape)
-        entries.append(
-            TemplateEntry(
-                f"{shape.discriminator}:blank",
-                f"Blank: {shape.discriminator}",
-                "waveform",
-                lambda shape=shape: shape.make_spec(MAIN_PROGRAM_SPEC_POLICY),
-                factory,
-            )
-        )
-    return entries
-
-
-# Insertion order is dropdown order. Blank factories never adopt library entries.
-_CATALOG_TEMPLATES: list[tuple[str, str, TemplateItemKind, str]] = [
-    ("res_probe", "Resonator probe", "module", "readout_rf"),
-    ("readout", "Pulse readout", "module", "readout_rf"),
-    ("readout_dpm", "Optimized readout (DPM)", "module", "readout_dpm"),
-    ("direct_readout", "Direct readout", "module", "readout_direct"),
-    ("qub_probe", "Qubit probe pulse", "module", "qub_pulse"),
-    ("pi_pulse", "Pi pulse", "module", "pi_amp"),
-    ("pi2_pulse", "Pi/2 pulse", "module", "pi2_amp"),
-    ("none_reset", "No reset", "module", "reset_none"),
-    ("reset", "Pulse reset", "module", "reset_10"),
-    ("two_pulse_reset", "Two-pulse reset", "module", "reset_120"),
-    ("bath_reset", "Bath reset", "module", "reset_bath"),
-    ("qub_waveform", "Qubit drive waveform", "waveform", "qub_flat"),
-    ("res_waveform", "Res-probe waveform", "waveform", "ro_waveform"),
-]
-
-TEMPLATE_ENTRIES: list[TemplateEntry] = [
-    TemplateEntry(
-        template_id,
-        label,
-        kind,
-        ROLE_FACTORIES[template_id].shape,
-        ROLE_FACTORIES[template_id].blank,
-        default_name,
-    )
-    for template_id, label, kind, default_name in _CATALOG_TEMPLATES
-]
-
-ALL_TEMPLATE_ENTRIES: list[TemplateEntry] = [*TEMPLATE_ENTRIES, *_blank_entries()]
-
-
-def register_all_templates(catalog: TemplateCatalog) -> None:
-    """Append named and blank templates in dropdown order to the caller catalog.
-
-    Duplicate IDs or invalid shapes raise the catalog registration error. Call
-    only at startup, not on reload; this function does not clear prior entries.
-    """
-    for entry in ALL_TEMPLATE_ENTRIES:
-        catalog.register(entry)

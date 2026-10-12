@@ -1,16 +1,13 @@
 """Explicit user-owned measure catalog; importing it performs no registration."""
 
-from collections.abc import Mapping
 from typing import Any
 
-from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
-from zcu_lab.templates import register_all_templates
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
@@ -131,28 +128,22 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 def register_all(
     registry: Registry,
     *,
-    templates: Mapping[str, TemplateDef] | None = None,
     template_catalog: TemplateCatalog | None = None,
     components: ComponentRegistry | None = None,
 ) -> None:
     """Register adapters into the caller-owned registry.
 
-    Pass persistent definitions as ``templates`` and their caller-owned
-    TemplateCatalog receiver as ``template_catalog`` at startup. When definitions
-    are omitted, the catalog uses the existing role templates until migration.
-    Pass the shared ComponentRegistry as components at startup to register
-    component models and roles. Omit startup arguments on reload to preserve
-    identities. Definitions without a receiver raise ValueError; duplicate
-    entries raise registration errors.
+    The registry already owns its injected persistent template definitions.
+    Pass their caller-owned TemplateCatalog receiver as ``template_catalog`` at
+    startup to populate the library creation menu from ``registry.templates``.
+    Pass the shared ComponentRegistry as ``components`` at startup to register
+    component models and roles. Omit these startup receivers on reload to
+    preserve identities. Duplicate entries and invalid definitions raise the
+    receiving catalog's registration errors; duplicate adapters raise ValueError.
     """
-    if templates is not None and template_catalog is None:
-        raise ValueError("Injected templates require a template_catalog receiver")
     if components is not None:
         register_components(components)
     if template_catalog is not None:
-        if templates is None:
-            register_all_templates(template_catalog)
-        else:
-            template_catalog.register_definitions(templates)
+        template_catalog.register_definitions(registry.templates)
     for name, cls in ADAPTERS.items():
         registry.register(name, cls)

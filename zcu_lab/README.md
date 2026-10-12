@@ -1,12 +1,12 @@
 # zcu_lab
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13，持久範本目錄注入
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
 `zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
-`definitions.register_all` 接受 caller 的 measure Registry。Startup 可用 `templates` 傳入 TemplateCatalog，並用 `components` 傳入框架共用的 ComponentRegistry。Reload 省略這兩個參數，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
+`templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；`definitions.register_all` 從該 registry 讀範本，以 startup 的 `template_catalog` receiver 填入 library 選單，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略這兩個 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
 `components.py` 擁有具體元件 model、wiring、module 槽與內建角色。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 

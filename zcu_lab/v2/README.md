@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-12，shared actual-detune owner
+**Last updated:** 2026-10-13，持久範本來源
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -26,7 +26,7 @@ zcu_lab/
     └── _support/          # shared domain helpers
 ```
 
-`definitions.register_all` 明列 measure adapters，`templates.register_all_templates` 組合範本。組合根注入 caller-owned catalogs，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
+`definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
 
 ## Reading routes
 
