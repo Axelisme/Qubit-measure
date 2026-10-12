@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -234,9 +235,6 @@ def fitting_ge_and_plot(
             "GE fit returned invalid populations; calibration is unavailable"
         )
 
-    p0_go = max(0.0, 1 - p0_gg - p0_ge)
-    p0_eo = max(0.0, 1 - p0_eg - p0_ee)
-
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
     fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
     # Joint parameters describe the original paired histogram model, not the
@@ -266,20 +264,8 @@ def fitting_ge_and_plot(
             excited_covariance,
         ),
     }
-    gg_fit = p0_gg * gauss_func(xs, sg, s)
-    ge_fit = p0_ge * gauss_func(xs, se, s)
-    eg_fit = p0_eg * gauss_func(xs, sg, s)
-    ee_fit = p0_ee * gauss_func(xs, se, s)
-
-    residual_g = np.clip(g_pdfs - fit_g_pdfs, 0.0, None)
-    residual_e = np.clip(e_pdfs - fit_e_pdfs, 0.0, None)
-
-    Qg_mask = (Ig > sg - 2 * s) & (Ig < sg + 2 * s)
-    Qe_mask = (Ie > se - 2 * s) & (Ie < se + 2 * s)
-    if not Qg_mask.any() or not Qe_mask.any():
-        raise ValueError("GE fit centers have no supporting IQ samples")
-    rotated_g_center = sg + 1j * np.median(Qg[Qg_mask])
-    rotated_e_center = se + 1j * np.median(Qe[Qe_mask])
+    rotated_g_center = _estimate_rotated_center(Ig, Qg, sg, s)
+    rotated_e_center = _estimate_rotated_center(Ie, Qe, se, s)
 
     if (
         not np.isfinite([rotated_g_center, rotated_e_center, s]).all()
@@ -316,22 +302,20 @@ def fitting_ge_and_plot(
     )
     axs[0][0].set_xlim(np.min(bins), np.max(bins))
 
-    axs[0][1].plot(xs, fit_g_pdfs, "k-", label="total")
-    if length_ratio != 0.0:
-        axs[0][1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.5, label="ideal total")
-    axs[0][1].plot(xs, gg_fit, "b-", alpha=0.4, label="ground")
-    axs[0][1].plot(xs, ge_fit, "r--", alpha=0.4, label="excited")
-    axs[0][1].plot(xs, residual_g, "g--", alpha=0.5, label="other")
-    axs[0][1].set_title(f"{p0_gg:.1%} / {p0_ge:.1%} / {p0_go:.1%}", fontsize=14)
-    axs[0][1].legend()
-    axs[1][1].plot(xs, fit_e_pdfs, "k-", label="total")
-    if length_ratio != 0.0:
-        axs[1][1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.5, label="ideal total")
-    axs[1][1].plot(xs, ee_fit, "r-", alpha=0.4, label="excited")
-    axs[1][1].plot(xs, eg_fit, "b--", alpha=0.4, label="ground")
-    axs[1][1].plot(xs, residual_e, "g--", alpha=0.5, label="other")
-    axs[1][1].set_title(f"{p0_eg:.1%} / {p0_ee:.1%} / {p0_eo:.1%}", fontsize=14)
-    axs[1][1].legend()
+    _plot_population_histogram(
+        axs[0][1],
+        xs,
+        ge_params,
+        _PopulationHistogram(g_pdfs, fit_g_pdfs, p0_gg, p0_ge, True),
+        show_ideal=length_ratio != 0.0,
+    )
+    _plot_population_histogram(
+        axs[1][1],
+        xs,
+        ge_params,
+        _PopulationHistogram(e_pdfs, fit_e_pdfs, p0_eg, p0_ee, False),
+        show_ideal=length_ratio != 0.0,
+    )
 
     axs[1][0].plot(xs, fit_g_pdfs, "b-", label="g")
     axs[1][0].plot(xs, fit_e_pdfs, "r-", label="e")
@@ -343,18 +327,7 @@ def fitting_ge_and_plot(
         r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
     )
 
-    for row in axs:
-        for ax in row:
-            ax.axvline(threshold, color="0.2", linestyle="--")
-
-    if logscale:
-        axs[0][1].set_yscale("log")
-        axs[1][0].set_yscale("log")
-        axs[1][1].set_yscale("log")
-        y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
-        axs[0][1].set_ylim(y_min, y_max)
-        axs[1][0].set_ylim(y_min, y_max)
-        axs[1][1].set_ylim(y_min, y_max)
+    _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=logscale)
 
     if align_t1:
         fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
@@ -387,3 +360,78 @@ def fitting_ge_and_plot(
             fit_quality=fit_quality,
         ),
     )
+
+
+def _estimate_rotated_center(
+    values: NDArray[np.float64],
+    quadratures: NDArray[np.float64],
+    center: float,
+    width: float,
+) -> complex:
+    """Estimate the orthogonal median using IQ samples within two fitted widths."""
+    mask = (values > center - 2 * width) & (values < center + 2 * width)
+    if not mask.any():
+        raise ValueError("GE fit centers have no supporting IQ samples")
+    return complex(center + 1j * np.median(quadratures[mask]))
+
+
+@dataclass(frozen=True)
+class _PopulationHistogram:
+    """One prepared-state histogram and its independently refined populations."""
+
+    observed: NDArray[np.float64]
+    fitted: NDArray[np.float64]
+    ground_population: float
+    excited_population: float
+    prepared_ground: bool
+
+
+def _plot_population_histogram(
+    ax: Axes,
+    xs: NDArray[np.float64],
+    ge_params: tuple[float, float, float, float, float, float, float],
+    histogram: _PopulationHistogram,
+    *,
+    show_ideal: bool,
+) -> None:
+    """Plot total, Gaussian components and residual for one prepared state."""
+    sg, se, width, *_ = ge_params
+    pg, pe = histogram.ground_population, histogram.excited_population
+    ground = pg * gauss_func(xs, sg, width)
+    excited = pe * gauss_func(xs, se, width)
+    residual = np.clip(histogram.observed - histogram.fitted, 0.0, None)
+    ax.plot(xs, histogram.fitted, "k-", label="total")
+    if show_ideal:
+        ax.plot(xs, ground + excited, "k--", alpha=0.5, label="ideal total")
+    if histogram.prepared_ground:
+        ax.plot(xs, ground, "b-", alpha=0.4, label="ground")
+        ax.plot(xs, excited, "r--", alpha=0.4, label="excited")
+    else:
+        ax.plot(xs, excited, "r-", alpha=0.4, label="excited")
+        ax.plot(xs, ground, "b--", alpha=0.4, label="ground")
+    ax.plot(xs, residual, "g--", alpha=0.5, label="other")
+    ax.set_title(f"{pg:.1%} / {pe:.1%} / {max(0.0, 1 - pg - pe):.1%}", fontsize=14)
+    ax.legend()
+
+
+def _format_ge_fit_axes(
+    axs: tuple[tuple[Axes, Axes], tuple[Axes, Axes]],
+    threshold: float,
+    g_pdfs: NDArray[np.float64],
+    e_pdfs: NDArray[np.float64],
+    *,
+    logscale: bool,
+) -> None:
+    """Apply the shared threshold and optional histogram logarithmic limits."""
+    for row in axs:
+        for ax in row:
+            ax.axvline(threshold, color="0.2", linestyle="--")
+
+    if logscale:
+        axs[0][1].set_yscale("log")
+        axs[1][0].set_yscale("log")
+        axs[1][1].set_yscale("log")
+        y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
+        axs[0][1].set_ylim(y_min, y_max)
+        axs[1][0].set_ylim(y_min, y_max)
+        axs[1][1].set_ylim(y_min, y_max)
