@@ -28,7 +28,8 @@ class SampleArguments(TypedDict):
 def build_sample_tools(bridge: McpBridge) -> ToolTable:
     """Build the stateless J3 tool over GUI captures and native commands.
 
-    Read published type, open/reuse its named sampling context, then command.
+    Open/reuse the named sampling context, letting GUI choose its native type,
+    then command. finish reads published points and renders native evidence.
     GUI owns prerequisites, context lifetime and positional point differences.
     Invocation errors propagate without retry or rollback. No active selection,
     draft, detector settings or spectrum data is retained between calls.
@@ -37,11 +38,9 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
     def sample(arguments: SampleArguments) -> ToolReply:
         name, command = arguments["name"], arguments["command"]
         target: dict[str, object] = {"name": name}
-        published = call_gui(bridge, GuiRpcCall("spectrum.snapshot", target, 6.0)).data
-        kind = {"OneTone": "onetone", "TwoTone": "twotone"}[published["spec_type"]]
         opened = call_gui(
             bridge,
-            GuiRpcCall("spectrum.interactive.open", {**target, "kind": kind}, 31.0),
+            GuiRpcCall("spectrum.interactive.open", {**target, "kind": "sample"}, 31.0),
         ).data
         before: InteractiveContextReply = opened["context"]
         native = call_gui(
@@ -134,7 +133,7 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
     return {
         bridge.config.tool_prefix + "sample": {
             "handler": sample,
-            "description": "Sample a named aligned spectrum (J3), using its published GUI type. OneTone: set_threshold(threshold in [0,5]), finish. TwoTone: stroke(vertices=device/GHz pairs, width=normalized radius [0,0.1], mode=select|erase), set_settings(threshold in [1,20], sigma in [0,5], smooth_method=wavelet|gaussian; gaussian sigma >=0.001), undo, finish. Settings are dimensionless; set_settings requires at least one value. finish always returns published point ranges and native evidence; image=true requests draft evidence for other commands. Initial and reopened TwoTone sampling start empty. Replies summarize settings before/after, detected points and mask pixels separately. GUI owns prerequisites and parameter validation; accepted edits are not retried or rolled back.",
+            "description": "Sample a named aligned spectrum (J3). GUI selects its native picker from the published spectrum type. OneTone: set_threshold(threshold in [0,5]), finish. TwoTone: stroke(vertices=device/GHz pairs, width=normalized radius [0,0.1], mode=select|erase), set_settings(threshold in [1,20], sigma in [0,5], smooth_method=wavelet|gaussian; gaussian sigma >=0.001), undo, finish. Settings are dimensionless; set_settings requires at least one value. finish always returns published point ranges and native evidence; image=true requests draft evidence for other commands. Initial and reopened TwoTone sampling start empty. Replies summarize settings before/after, detected points and mask pixels separately. GUI owns prerequisites and parameter validation; accepted edits are not retried or rolled back.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
