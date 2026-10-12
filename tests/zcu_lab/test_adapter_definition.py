@@ -407,8 +407,15 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             parameters=parameters.bind_aliases(rows, {}),
         )
         calibrated = resource.refresh(missing.ref.revision)
-        assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
         assert resource.snapshot_inputs() == inputs
+        devices = inputs.fields.get("dev")
+        if isinstance(devices, CfgSectionValue) and any(
+            isinstance(value, DirectValue) and value.error is not None
+            for value in devices.fields.values()
+        ):
+            assert calibrated.status is CfgStatus.INVALID
+            calibrated = resource.reset(calibrated.ref.revision)
+        assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
         accepted = resource.accept(calibrated.ref.revision)
         point = parameters.document()
         point.components["Q1"] = point.components["Q1"].model_copy(
