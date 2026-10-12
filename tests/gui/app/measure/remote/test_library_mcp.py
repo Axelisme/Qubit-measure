@@ -8,7 +8,7 @@ from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from zcu_lab.templates import register_all_templates
+from tests.gui.app.measure._templates import register_all_templates
 
 from ._helpers import Fixture, mcp_client
 

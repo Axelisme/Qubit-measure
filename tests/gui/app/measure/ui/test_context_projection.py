@@ -22,10 +22,10 @@ from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter
 
 
-class ProjectionAdapter(FakeAdapter):
+class ProjectionAdapter(SampleAdapter):
     """Keep the source/view seam real while forbidding execution."""
 
     def run(
