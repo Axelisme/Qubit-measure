@@ -72,6 +72,8 @@ Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 
 
 ## Source catalog reload
 
+使用者在 2026-10-09 裁定：「A」。採用的分工是將 source-loading 抽到 shared GUI loader，各 app 提供 typed catalog builder。Source inventory 與 import 機制可共用，但 Measure Registry 與 workflow catalog 的宣告不同，由 app 決定如何建立與驗證。這樣 workflows 不必複製 loader，Measure 也保留原 recovery／UI。
+
 `gui.catalog_loader.SourceCatalogLoader[CatalogT]` 擁有 bounded source inventory、prepare/load、fixed-source restart，以及共用 SourcePackage、PreparedCatalogReload 和 CatalogReloadError。App 提供 typed catalog builder，負責宣告 validation、active admission、發布和 recovery；shared loader 不依賴 measure Registry 或具體 workflow。Measure 保留原 loader 簽名的 registration adapter與原 recovery/UI。
 
 Workflows 的 app-owned catalog 配對目前 native step、plan／knobs form models、converters 和 seed，並由附件建立 panels。Registry 僅驗宣告與名字，不新增 lookup。Owner-thread reload 在 pending/running/paused 時拒絕，不進入 prepare/import。成功保留 compatible parsed drafts、替換附件，不重建 session/services/controller/hardware。失敗保留 RAM draft 與舊 panels，但 Start 必須等成功 retry。Fixed source 改變要求重啟。Bounded import 可能已有 Python 副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。
