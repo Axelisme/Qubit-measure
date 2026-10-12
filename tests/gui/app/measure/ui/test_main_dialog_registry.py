@@ -10,7 +10,6 @@ import pytest
 from qtpy.QtWidgets import QDialog, QWidget
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.widgets import DialogRefStore
 
 
