@@ -484,6 +484,7 @@ def _lower_section(
             _validate_scalar(node_spec, node_value, full_path)
             if node_spec.optional and node_value.value is None:
                 continue
+        # Sections own omission, nodes own type dispatch; recursion descends into child sections.
         result[key] = _lower_node(
             node_spec,
             node_value,

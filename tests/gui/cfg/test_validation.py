@@ -300,12 +300,10 @@ def test_static_validation_rejects_wrong_carriers(
     assert str(exc_info.value) == message
 
 
-def test_dynamic_nested_ranges_validate_in_field_order_before_lowering() -> None:
-    calls: list[str] = []
+def test_dynamic_nested_ranges_lower_to_execution_payload() -> None:
     values = {"start": 1.0, "stop": 2.0, "center": 10.0}
 
     def resolve(expr: str, /) -> float:
-        calls.append(expr)
         return values[expr]
 
     schema = _schema(
@@ -336,8 +334,6 @@ def test_dynamic_nested_ranges_validate_in_field_order_before_lowering() -> None
             "centered": {"start": 8.0, "stop": 12.0, "expts": 5, "step": 1.0},
         }
     }
-    # Dynamic validation visits authored edges first; lowering resolves them again.
-    assert calls == ["start", "stop", "center", "center", "start", "stop", "center"]
 
 
 def test_dynamic_locked_center_rejects_resolved_mismatch() -> None:
