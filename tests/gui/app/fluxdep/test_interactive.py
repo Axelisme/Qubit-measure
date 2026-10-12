@@ -52,18 +52,24 @@ def controller():
     ctrl.interactive.dispose()
 
 
-def test_spectrum_drafts_survive_display_switch_and_finish_by_name(controller: Controller):
+def test_spectrum_drafts_survive_display_switch_and_finish_by_name(
+    controller: Controller,
+):
     owner = controller.interactive
     other = deepcopy(controller.state.get_spectrum("sample"))
     other.name = "other"
     controller.state.put_spectrum(other)
     first = owner.begin_line_pick("sample")
-    first.plugin.execute_command(first.session, "move_line", {"role": "half", "position": -1.0})
+    first.plugin.execute_command(
+        first.session, "move_line", {"role": "half", "position": -1.0}
+    )
     controller.set_active_spectrum("other")
     assert first.session.can_undo(), "display switching must retain the editable draft"
     first.session.ensure_input_open()
     second = owner.begin_line_pick("other")
-    second.plugin.execute_command(second.session, "move_line", {"role": "integer", "position": 3.0})
+    second.plugin.execute_command(
+        second.session, "move_line", {"role": "integer", "position": 3.0}
+    )
     assert owner.begin_line_pick("sample") is first
     inspected_first = owner.inspect("sample")
     assert inspected_first is not None and inspected_first.context is first
