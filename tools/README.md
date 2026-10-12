@@ -69,6 +69,8 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 
 格式化排在最前面是有原因的：它會改寫程式碼，先量測再格式化的話，讀到結果時那個狀態已經不存在了。
 
+共用 scanner 與 ratchet 的變更檔選集包含 `mcp_servers/`，和使用者入口 `scripts/` 一樣納入檢查。Pyright 使用同名 root 的執行環境，test path checker 將 `tests/mcp_servers/` 對應 repo root 的組合根。
+
 較耗時的兩項**刻意留在外面**；快速 gate 不替代 collection 與行為測試：
 
 ```bash
