@@ -3,10 +3,10 @@
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox
 from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.form import FormErrors
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.workflows.gui.remote import FormWrite
 
 from ._sim_session import SimSession, wait_owner
 

@@ -40,7 +40,7 @@ def test_original_expressions_roundtrip_and_restore_base(
         {("t1", "guess_us"): {"expr": "7 * 3"}}, window.tunables_panel.env
     )
     saved = window.capture_persisted_state()
-    from zcu_lab.workflows.gui.persistence import WorkflowInputCodec
+    from zcu_tools.gui.app.workflows.persistence import WorkflowInputCodec
 
     caretaker = SingleFileCaretaker(
         window, codec=WorkflowInputCodec(), filename="input.json", cache_dir=tmp_path
@@ -66,7 +66,7 @@ def test_incompatible_fields_drop_without_losing_other_input(
     window: T1WorkflowWindow,
 ) -> None:
     defaults = window.capture_persisted_state()
-    from zcu_lab.workflows.gui.persistence import WorkflowInputSnapshot
+    from zcu_tools.gui.app.workflows.persistence import WorkflowInputSnapshot
 
     report = window.restore_persisted_state(
         WorkflowInputSnapshot(

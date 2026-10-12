@@ -1,4 +1,4 @@
-"""App-owned wire projection onto the existing T1 Window controls."""
+"""App-owned wire projection onto the shared workflow Window controls."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
+
 from zcu_tools.experiment.workflows import (
     Actor,
     CommittedRecord,
@@ -24,10 +25,10 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod
 from zcu_tools.gui.session.ports import OwnerScheduler
 
-from .remote_methods import GUI_VERSION, METHOD_SPECS, WIRE_VERSION
+from .methods import GUI_VERSION, METHOD_SPECS, WIRE_VERSION
 
 if TYPE_CHECKING:
-    from .window import T1WorkflowWindow
+    from ..window import T1WorkflowWindow
 
 
 class RunTarget(TypedDict):
@@ -106,8 +107,8 @@ class StartParams(RunTarget):
     """Start identity and two required partial-input batches.
 
     plan/tunables contain FormWrite objects; [] uses current captured defaults.
-    name is an optional native workflow name; omitted/null selects catalog's T1
-    default, independently of the GUI selection. Each path occurs once. Batches
+    name is an optional native workflow name; omitted/null selects catalog's first
+    registration, independently of the GUI selection. Each path occurs once. Batches
     never edit existing draft before success; selection uses the same app owner.
     """
 
@@ -210,8 +211,8 @@ class WorkflowReply(TypedDict):
     status: NativeStatusReply | None
 
 
-class T1RemoteControlAdapter(RemoteControlServiceBase):
-    """RPC face of one T1 Window; it never owns a second run or capture.
+class WorkflowRemoteControlAdapter(RemoteControlServiceBase):
+    """RPC face of one workflow Window; it never owns a second run or capture.
 
     workflow.start submits partial path/value batches through Window.start;
     FormErrors becomes invalid_params/form_errors; data is an object whose native

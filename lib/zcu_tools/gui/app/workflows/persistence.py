@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
 from zcu_tools.gui.form import FormPath
 
 

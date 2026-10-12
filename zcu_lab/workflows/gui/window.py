@@ -27,8 +27,19 @@ from zcu_tools.experiment.workflows import (
     TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
+from zcu_tools.gui.app.workflows._form_io import inspect_form_input, prepare_start_form
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.layout import build_workflow_layout
+from zcu_tools.gui.app.workflows.persistence import (
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
+from zcu_tools.gui.app.workflows.remote import (
+    FormInspectionReply,
+    WorkflowRemoteControlAdapter,
+)
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -56,18 +67,14 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
-from ._form_io import inspect_form_input, prepare_start_form
 from .catalog import WorkflowCatalog, build_catalog
 from .figures import WorkflowFigureViews
 from .forms import WorkflowForms
-from .layout import build_workflow_layout
-from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
-from .remote import FormInspectionReply, T1RemoteControlAdapter
-from .tuning_panel import T1TuningPanel
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
+
     from ..calibration import Calibrated
-    from .panel import WorkflowFormPanel, WorkflowPlanPanel
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +129,7 @@ class T1WorkflowWindow(QWidget):
         self.controller: WorkflowController[FormModel, Calibrated] = WorkflowController(
             services.runner, "t1-workflow", on_finished=self._finished
         )
-        self.tuning_panel: T1TuningPanel[FormModel, Calibrated] | None = None
+        self.tuning_panel: WorkflowTuningPanel[FormModel, Calibrated] | None = None
 
         env = (
             self._capture_env(self._services.device.capture_native_device_info())
@@ -572,7 +579,7 @@ class T1WorkflowWindow(QWidget):
 
     def create_remote_service(
         self, opts: ControlOptions, bus: BaseEventBus
-    ) -> T1RemoteControlAdapter:
+    ) -> WorkflowRemoteControlAdapter:
         """Create an inert RPC adapter of these controls on this Window's owner.
 
         opts configures shared transport; bus must be this Window's session bus.
@@ -581,7 +588,9 @@ class T1WorkflowWindow(QWidget):
         new inputs or touch hardware. Remote Stop requires explicit run_id;
         stopping the transport does not cancel a native run.
         """
-        return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
+        return WorkflowRemoteControlAdapter(
+            self, opts, bus=bus, owner_scheduler=self._owner
+        )
 
     def inspect_form(
         self,
@@ -762,7 +771,7 @@ class T1WorkflowWindow(QWidget):
             and binding is not None
             and binding.engine is not None
         ):
-            self.tuning_panel = T1TuningPanel(
+            self.tuning_panel = WorkflowTuningPanel(
                 controller, self, panel_factory=self._forms.attachment.knobs_panel
             )
             self._controls.layout.addWidget(self.tuning_panel)

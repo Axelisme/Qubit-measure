@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.device import FakeDevice
 from zcu_tools.device.manager import DeviceManager
+from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.remote.control_service import ControlOptions
@@ -53,7 +54,6 @@ from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
-from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
@@ -447,7 +447,7 @@ def test_composition_rpc_reads_same_draft_without_socket(
 ) -> None:
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
-    assert isinstance(adapter, T1RemoteControlAdapter)
+    assert isinstance(adapter, WorkflowRemoteControlAdapter)
     app.window.tunables_panel.state.write({("t1", "guess_us"): 73.0}, FormEnv())
     link = ClientLink("app-contract", token_required=False)
     adapter.on_client_open(link)

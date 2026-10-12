@@ -2,8 +2,9 @@
 
 from collections.abc import Callable
 
+from zcu_tools.gui.app.workflows.remote import FormWrite
+
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.workflows.gui.remote import FormWrite
 
 RpcRequest = Callable[[str, dict[str, object]], dict[str, object]]
 

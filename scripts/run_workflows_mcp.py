@@ -3,10 +3,9 @@
 
 from pathlib import Path
 
+from zcu_tools.gui.app.workflows.remote.methods import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig
-
-from zcu_lab.workflows.gui.remote_methods import WIRE_VERSION
-from zcu_lab.workflows.mcp import run_workflow_mcp
+from zcu_tools.mcp.workflows.server import run_workflow_mcp
 
 if __name__ == "__main__":
     repo_root = Path(__file__).resolve().parents[1]

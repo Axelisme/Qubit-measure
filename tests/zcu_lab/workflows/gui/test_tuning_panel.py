@@ -19,6 +19,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
+from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -32,7 +33,6 @@ from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inp
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
-from zcu_lab.workflows.gui.tuning_panel import T1TuningPanel
 
 from ._coherence_input import t1_input
 
@@ -53,7 +53,7 @@ def tuning(
     inputs: Inputs,
     tmp_path: Path,
 ) -> Iterator[
-    tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]]
+    tuple[WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]]
 ]:
     env = FormEnv()
     accepted = CoherenceTunablesForm.default_input(env)
@@ -116,7 +116,7 @@ def tuning(
     harness.complete_segment()
     engine = controller.engine
     assert engine is not None
-    widget = T1TuningPanel(controller)
+    widget = WorkflowTuningPanel(controller)
     assert widget.host is binding
     assert widget.panel.state is binding.state
     yield widget, engine
@@ -127,7 +127,9 @@ def tuning(
 
 
 def test_gui_apply_and_json_edits_share_native_t1_revision(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
 ) -> None:
     widget, engine = tuning
     widget.panel.state.write({("t1", "guess_us"): {"expr": "10 * 3"}}, FormEnv())
@@ -146,7 +148,9 @@ def test_gui_apply_and_json_edits_share_native_t1_revision(
 
 
 def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
 ) -> None:
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.t1.sweep_factor")
@@ -166,7 +170,9 @@ def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
 
 
 def test_external_edit_submits_pending_parsed_gui_values_in_the_same_batch(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
 ) -> None:
     widget, engine = tuning
     widget.panel.state.write({("t1", "guess_us"): 31.0}, FormEnv())
@@ -183,7 +189,9 @@ def test_external_edit_submits_pending_parsed_gui_values_in_the_same_batch(
 
 
 def test_successful_external_edit_replaces_unparseable_view_text(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
 ) -> None:
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.t1.sweep_factor")
@@ -201,7 +209,9 @@ def test_successful_external_edit_replaces_unparseable_view_text(
 
 
 def test_journal_failure_propagates_without_accepting_input_or_clearing_local_text(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
     tmp_path: Path,
 ) -> None:
     widget, engine = tuning
@@ -234,7 +244,9 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
 
 
 def test_invalid_native_t1_batch_retains_input_without_partial_publication(
-    tuning: tuple[T1TuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]],
+    tuning: tuple[
+        WorkflowTuningPanel[CoherenceTunablesForm, Calibrated], Engine[Calibrated]
+    ],
 ) -> None:
     widget, engine = tuning
     before = engine.tunables("tuning")

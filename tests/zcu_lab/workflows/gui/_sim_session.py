@@ -8,16 +8,16 @@ from pathlib import Path
 from time import monotonic
 
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.workflows.server import build_workflow_tools
 from zcu_tools.resources.entry import ResultEntry
 
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
-from zcu_lab.workflows.mcp import build_workflow_tools
 
 from ._recording_transport import WindowTransport
 
@@ -55,7 +55,7 @@ class SimSession:
 
 
 def connect_tools(
-    adapter: T1RemoteControlAdapter,
+    adapter: WorkflowRemoteControlAdapter,
     qapp: QApplication,
     root: Path,
     io: ThreadPoolExecutor,

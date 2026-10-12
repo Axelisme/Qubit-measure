@@ -491,7 +491,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert outcome.error is not None and str(journal) in outcome.error
     assert str(journal) in message.text() and str(journal) in caplog.text
     assert any(
-        record.name == "zcu_lab.workflows.gui.tuning_panel"
+        record.name == "zcu_tools.gui.app.workflows.tuning_panel"
         and record.exc_info is not None
         and isinstance(record.exc_info[1], IsADirectoryError)
         and record.exc_info[1].filename == str(journal)

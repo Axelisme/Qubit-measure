@@ -1,4 +1,4 @@
-"""Concrete T1 tuning caller for the shared workflow submission policy."""
+"""Accepted-run tuning view using the shared workflow submission policy."""
 
 import logging
 from collections.abc import Callable, Mapping
@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pydantic import JsonValue
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+
 from zcu_tools.experiment.workflows import Actor, TunablesSnapshot
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
@@ -16,7 +17,7 @@ from .panel import WorkflowFormPanel
 logger = logging.getLogger(__name__)
 
 
-class T1TuningPanel[F: FormModel, C](QWidget):
+class WorkflowTuningPanel[F: FormModel, C](QWidget):
     """Edit an already accepted workflow's unique knobs on the GUI thread.
 
     F pairs Controller/Host state with the embedded editor; C preserves native
@@ -122,7 +123,7 @@ class T1TuningPanel[F: FormModel, C](QWidget):
             self._message.setText(str(exc))
             return
         except Exception as exc:
-            logger.exception("T1 workflow Apply failed")
+            logger.exception("Workflow Apply failed")
             self._message.setText(str(exc))
             return
         if isinstance(result, FormErrors):

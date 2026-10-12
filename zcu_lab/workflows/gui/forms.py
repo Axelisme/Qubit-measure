@@ -9,12 +9,15 @@ new persistence format. Local unparsed renderer text is not an inactive draft.
 """
 
 from qtpy.QtWidgets import QWidget
+from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
+from zcu_tools.gui.app.workflows.persistence import (
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
 from zcu_tools.gui.form import FormEnv, FormModel, FormState
 
 from .attachment import Attachment
 from .catalog import WorkflowCatalog
-from .panel import WorkflowFormPanel, WorkflowPlanPanel
-from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
 
 
 class WorkflowForms:

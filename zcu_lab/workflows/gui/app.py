@@ -5,6 +5,11 @@ from typing import ClassVar
 
 import zcu_tools
 from zcu_tools.device.manager import DeviceManager
+from zcu_tools.gui.app.workflows.persistence import (
+    WorkflowInputCodec,
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
 from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import ControlOptions
@@ -25,11 +30,6 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_lab import ALIAS_PRESET
 
 from .catalog import build_catalog
-from .persistence import (
-    WorkflowInputCodec,
-    WorkflowInputRestoreReport,
-    WorkflowInputSnapshot,
-)
 from .window import T1WorkflowWindow
 
 

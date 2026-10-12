@@ -21,6 +21,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -30,6 +31,7 @@ from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.workflows.server import build_workflow_tools
 from zcu_tools.resources.entry import (
     ResultEntry,
     RoleSpec,
@@ -44,9 +46,7 @@ from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.mcp import build_workflow_tools
 
 from ._plan_inputs import inline_input, library_env
 from ._recording_transport import WindowTransport, WireRoute
@@ -82,7 +82,7 @@ def native_registry() -> Iterator[str]:
 @pytest.fixture
 def native_app(
     qapp: QApplication, tmp_path: Path, native_registry: str
-) -> Iterator[tuple[WorkflowsGuiBehavior, T1RemoteControlAdapter]]:
+) -> Iterator[tuple[WorkflowsGuiBehavior, WorkflowRemoteControlAdapter]]:
     """Keep real Qt workers alive through cancellation, delivery and drain."""
     del native_registry
     (tmp_path / "result").mkdir()
@@ -91,7 +91,7 @@ def native_app(
     )
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
-    assert isinstance(adapter, T1RemoteControlAdapter)
+    assert isinstance(adapter, WorkflowRemoteControlAdapter)
     try:
         yield app, adapter
     finally:
@@ -108,7 +108,7 @@ def native_app(
 
 @pytest.fixture
 def sim_session(
-    native_app: tuple[WorkflowsGuiBehavior, T1RemoteControlAdapter],
+    native_app: tuple[WorkflowsGuiBehavior, WorkflowRemoteControlAdapter],
     native_registry: str,
     qapp: QApplication,
     inputs: Inputs,

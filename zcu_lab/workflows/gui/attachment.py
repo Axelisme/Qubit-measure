@@ -18,7 +18,7 @@ from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormSt
 from ..calibration import Calibrated
 
 if TYPE_CHECKING:
-    from .panel import WorkflowFormPanel, WorkflowPlanPanel
+    from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ class WorkflowAttachment[
 
     def plan_panel(self, env: FormEnv, parent: QWidget | None) -> WorkflowPlanPanel:
         """Build this model's partial draft with its paired native preview."""
-        from .panel import WorkflowPlanPanel
+        from zcu_tools.gui.app.workflows.panel import WorkflowPlanPanel
 
         return WorkflowPlanPanel(self.plan_model, self._plan, env, parent)
 
@@ -135,7 +135,7 @@ class WorkflowAttachment[
         self, state: FormState[FormModel], env: FormEnv, parent: QWidget | None
     ) -> WorkflowFormPanel[FormModel]:
         """Render the supplied unique knobs draft in its fixed capture."""
-        from .panel import WorkflowFormPanel
+        from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 
         return WorkflowFormPanel(state, env, parent)
 

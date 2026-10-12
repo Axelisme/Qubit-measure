@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -26,7 +27,6 @@ from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
-from zcu_lab.workflows.gui.remote import FormWrite
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
