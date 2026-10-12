@@ -238,6 +238,17 @@ class InspectDialog(InspectDialogBase):
         splitter = QSplitter(Qt.Orientation.Horizontal)  # type: ignore[attr-defined]
         splitter.setChildrenCollapsible(False)
 
+        left_panel = self._build_ml_collection_panel()
+        right_panel = self._build_ml_editor_panel()
+
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([240, 460])
+        layout.addWidget(splitter)
+        return widget
+
+    def _build_ml_collection_panel(self) -> QWidget:
+        """Build the library selection tree and New/Delete actions."""
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -260,6 +271,10 @@ class InspectDialog(InspectDialogBase):
         self._create_btn.clicked.connect(self._on_create_clicked)
         self._del_ml_btn.clicked.connect(self._on_delete_ml_clicked)
 
+        return left_panel
+
+    def _build_ml_editor_panel(self) -> QWidget:
+        """Build the embedded draft form and Name/Revert/Apply controls."""
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -291,11 +306,7 @@ class InspectDialog(InspectDialogBase):
         self._ml_revert_btn.clicked.connect(self._on_ml_revert_clicked)
         self._ml_apply_btn.clicked.connect(self._on_ml_apply_clicked)
 
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([240, 460])
-        layout.addWidget(splitter)
-        return widget
+        return right_panel
 
     def _populate_ml(self, ml: LibrarySnapshot | None) -> None:
         """Populate the measure tree without dropping an unresolved draft."""
@@ -329,6 +340,32 @@ class InspectDialog(InspectDialogBase):
                 desired = None
                 self._ml_selected_data = None
 
+        restore_item = self._rebuild_ml_tree(ml, desired)
+        self._ml_live_ml = ml
+        self._ml_refresh_pending = False
+
+        if restore_item is None:
+            if desired is not None:
+                self._ml_selected_data = None
+                self._clear_ml_editor()
+            else:
+                self._update_ml_editor_controls()
+            return
+
+        # Keep the restored selection from triggering a prompt while the tree is
+        # rebuilt. Re-run the normal selection path once it is coherent; it either
+        # keeps the current session or opens a fresh one.
+        self._ml_tree_syncing = True
+        try:
+            self._ml_tree.setCurrentItem(restore_item)
+        finally:
+            self._ml_tree_syncing = False
+        self._on_ml_item_changed(restore_item, None)
+
+    def _rebuild_ml_tree(
+        self, ml: LibrarySnapshot | None, desired: tuple[str, str] | None
+    ) -> QTreeWidgetItem | None:
+        """Replace tree rows without selection signals and locate the desired row."""
         self._ml_tree_syncing = True
         self._ml_tree.blockSignals(True)
         self._ml_tree.clear()
@@ -357,26 +394,7 @@ class InspectDialog(InspectDialogBase):
                         restore_item = child
         self._ml_tree.blockSignals(False)
         self._ml_tree_syncing = False
-        self._ml_live_ml = ml
-        self._ml_refresh_pending = False
-
-        if restore_item is None:
-            if desired is not None:
-                self._ml_selected_data = None
-                self._clear_ml_editor()
-            else:
-                self._update_ml_editor_controls()
-            return
-
-        # Keep the restored selection from triggering a prompt while the tree is
-        # rebuilt. Re-run the normal selection path once it is coherent; it either
-        # keeps the current session or opens a fresh one.
-        self._ml_tree_syncing = True
-        try:
-            self._ml_tree.setCurrentItem(restore_item)
-        finally:
-            self._ml_tree_syncing = False
-        self._on_ml_item_changed(restore_item, None)
+        return restore_item
 
     @staticmethod
     def _ml_item_data(item: QTreeWidgetItem | None) -> tuple[str, str] | None:
