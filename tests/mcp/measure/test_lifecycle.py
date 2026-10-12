@@ -493,6 +493,8 @@ def test_token_protected_gui_attach_rejects_bad_credentials_and_reauthenticates_
             time.sleep(0.01)
         assert not client.context.bridge.is_connected
         assert client.call("rpc_list", {"domain": "adapter"})["methods"]
+        # Join the reply producer before reading its final delivery record.
+        gui_b.stop()
         assert gui_b.sent.count("auth") == 1
         assert gui_b.sent.count("rpc.catalog") == 1
         assert rejected_catalog_count == 0
