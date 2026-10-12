@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import partial
 
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,11 +41,10 @@ from zcu_lab.workflows.common.calibration import (
     readout_due,
 )
 from zcu_lab.workflows.common.devices import set_flux
-from zcu_lab.workflows.common.saving import save_frequency, save_rabi, save_readout
 
 
 class CoherencePlan(T1Plan):
-    """Fixed flux/modules/snapshot and lifetime selection, captured at Start.
+    """Choose flux points and lifetimes to map relaxation and dephasing.
 
     Inherited fields retain T1Plan's explicit unit, resolved native routing and
     delay resolution. measure_t1/measure_t2ramsey/measure_t2echo are fixed bools,
@@ -66,7 +64,7 @@ class CoherencePlan(T1Plan):
 
 
 class CoherenceTunables(BaseModel):
-    """Captured shared calibration and independent lifetime generation policies.
+    """Control resonant calibration and the independent lifetime measurements.
 
     cal is shared by the three calibration stages. t1/t2ramsey/t2echo retain
     their own averaging, initial microsecond guesses, timing and fit policies;
@@ -122,7 +120,7 @@ class CoherencePoint:
 
 
 def init_coherence(env: InitEnv[Calibrated], plan: CoherencePlan) -> CoherenceState:
-    """Copy fixed points and initialize independent histories from legal scalar seed.
+    """Seed the flux sweep so each lifetime starts with an independent history.
 
     env.context must contain Calibrated; missing context raises through env.
     No acquisition, source capture, plotting or saving occurs here.
@@ -135,6 +133,7 @@ def _summary(
     kind: LifetimeKind,
     history: LifetimeHistory,
     *,
+    committed_points: int,
     final: bool,
 ) -> None:
     name = f"{kind}/vs_flux"
@@ -147,6 +146,16 @@ def _summary(
         if history:
             fluxes, lifetimes = zip(*history, strict=True)
             axis.scatter(fluxes, lifetimes)
+        elif committed_points == 0:
+            axis.text(
+                0.5,
+                0.5,
+                "尚無已提交點",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+                fontfamily="Noto Sans CJK TC",
+            )
         axis.set(xlabel="flux setpoint", ylabel=f"{kind} (us)")
 
     env.plots.draw(name, draw)
@@ -155,21 +164,11 @@ def _summary(
 
 
 def _append(history: LifetimeHistory, flux: float, result: LifetimeResult) -> None:
+    """Keep only accepted lifetime values in this lifetime's delay-grid history."""
     if result.status == "accepted":
         if result.lifetime_us is None:
             raise ValueError("Accepted lifetime requires microseconds")
         history.append((flux, result.lifetime_us))
-
-
-def _skip(kind: LifetimeKind) -> LifetimeResult:
-    return LifetimeResult(
-        kind,
-        "skipped",
-        "Requires this point's accepted frequency and Rabi",
-        None,
-        None,
-        None,
-    )
 
 
 @workflow(
@@ -184,7 +183,7 @@ def coherence_fluxdep(
     tun: CoherenceTunables,
     state: CoherenceState,
 ) -> Step[CoherenceState, CoherencePoint]:
-    """Run independent calibration then enabled T1/Ramsey/Echo at one flux point.
+    """Measure coherence versus flux to separate relaxation and dephasing losses.
 
     Use through Engine with soc/devices/context/plots. Stages save native after
     Completed and update only their own carry. Current frequency and Rabi are
@@ -195,30 +194,42 @@ def coherence_fluxdep(
     Done follows the last point. Engine owns copied state, cancellation and
     revision capture. Unexpected adapter/writer/fit/plot exceptions propagate.
     """
+    # Require the acquisition ports before drawing or moving the device.
     _ = env.soc
     _ = env.devices
     _ = env.context
+    # Display previously committed lifetimes, or finish after the last point.
     index = len(plan.fluxes) - len(state.remaining)
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
     final = not state.remaining
     if plan.measure_t1:
-        _summary(env, "t1", state.t1_by_flux, final=final)
+        _summary(env, "t1", state.t1_by_flux, committed_points=index, final=final)
     if plan.measure_t2ramsey:
-        _summary(env, "t2ramsey", state.t2ramsey_by_flux, final=final)
+        _summary(
+            env, "t2ramsey", state.t2ramsey_by_flux, committed_points=index, final=final
+        )
     if plan.measure_t2echo:
-        _summary(env, "t2echo", state.t2echo_by_flux, final=final)
+        _summary(
+            env, "t2echo", state.t2echo_by_flux, committed_points=index, final=final
+        )
     if final:
         return Done()
+    # Set the next flux and capture the shared calibration policy.
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    captured = CalibrationInputs(plan.qub_pulse, plan.readout, tun.cal)
+    captured = CalibrationInputs(
+        qub_pulse=plan.qub_pulse,
+        readout=plan.readout,
+        tun=tun.cal,
+        snapshot=plan.snapshot,
+    )
     estimate = state.t1_by_flux[-1][1] if state.t1_by_flux else tun.t1.guess_us
+    # Locate the resonance, then calibrate pulse durations at that frequency.
     frequency = yield from calibrate_frequency(
         env,
         inputs=captured,
         flux=flux,
         carry=state.cal,
-        save=partial(save_frequency, snapshot=plan.snapshot),
     )
     rabi = yield from calibrate_rabi(
         env,
@@ -226,8 +237,9 @@ def coherence_fluxdep(
         frequency=frequency,
         carry=state.cal,
         t1_estimate_us=estimate,
-        save=partial(save_rabi, snapshot=plan.snapshot),
+        point_index=index,
     )
+    # Optimize readout on cadence; retain legal readout after nonacceptance.
     if rabi.status != "accepted" or readout_due(index, tun.cal):
         readout = yield from calibrate_readout(
             env,
@@ -235,62 +247,68 @@ def coherence_fluxdep(
             rabi=rabi,
             carry=state.cal,
             t1_estimate_us=estimate,
-            save=partial(save_readout, snapshot=plan.snapshot),
         )
     else:
         readout = ReadoutResult(
             "skipped", "Readout flux-point cadence", None, None, None
         )
+    # Lifetimes require current frequency and Rabi, never borrowed prior values.
     cal = current_point_calibration(rabi, state.cal)
     measurements: list[LifetimeResult] = []
-    if plan.measure_t1:
-        t1 = (
-            _skip("t1")
-            if cal is None
-            else (
-                yield from measure_t1(
-                    env,
-                    plan,
-                    tun.t1,
-                    cal,
-                    history_guess(tun.t1.guess_us, state.t1_by_flux),
-                )
-            )
+    # Without current calibration, record only the enabled dependency skips.
+    if cal is None:
+        enabled_lifetimes: tuple[tuple[LifetimeKind, bool], ...] = (
+            ("t1", plan.measure_t1),
+            ("t2ramsey", plan.measure_t2ramsey),
+            ("t2echo", plan.measure_t2echo),
         )
-        _append(state.t1_by_flux, flux, t1)
-        measurements.append(t1)
-    if plan.measure_t2ramsey:
-        ramsey = (
-            _skip("t2ramsey")
-            if cal is None
-            else (
-                yield from measure_ramsey(
-                    env,
-                    plan,
-                    tun.t2ramsey,
-                    cal,
-                    history_guess(tun.t2ramsey.guess_us, state.t2ramsey_by_flux),
-                )
+        measurements = [
+            LifetimeResult(
+                kind,
+                "skipped",
+                "Requires this point's accepted frequency and Rabi",
+                None,
+                None,
+                None,
             )
-        )
-        _append(state.t2ramsey_by_flux, flux, ramsey)
-        measurements.append(ramsey)
-    if plan.measure_t2echo:
-        echo = (
-            _skip("t2echo")
-            if cal is None
-            else (
-                yield from measure_echo(
-                    env,
-                    plan,
-                    tun.t2echo,
-                    cal,
-                    history_guess(tun.t2echo.guess_us, state.t2echo_by_flux),
-                )
+            for kind, enabled in enabled_lifetimes
+            if enabled
+        ]
+    else:
+        # Measure relaxation on T1's own history-based delay grid.
+        if plan.measure_t1:
+            t1 = yield from measure_t1(
+                env,
+                plan,
+                tun.t1,
+                cal,
+                history_guess(tun.t1.guess_us, state.t1_by_flux),
             )
-        )
-        _append(state.t2echo_by_flux, flux, echo)
-        measurements.append(echo)
+            _append(state.t1_by_flux, flux, t1)
+            measurements.append(t1)
+        # Measure Ramsey dephasing with its own grid and detuning policy.
+        if plan.measure_t2ramsey:
+            ramsey = yield from measure_ramsey(
+                env,
+                plan,
+                tun.t2ramsey,
+                cal,
+                history_guess(tun.t2ramsey.guess_us, state.t2ramsey_by_flux),
+            )
+            _append(state.t2ramsey_by_flux, flux, ramsey)
+            measurements.append(ramsey)
+        # Measure echo coherence with fitted pi/2 pulses and its own grid.
+        if plan.measure_t2echo:
+            echo = yield from measure_echo(
+                env,
+                plan,
+                tun.t2echo,
+                cal,
+                history_guess(tun.t2echo.guess_us, state.t2echo_by_flux),
+            )
+            _append(state.t2echo_by_flux, flux, echo)
+            measurements.append(echo)
+    # Publish all stage evidence and only the accepted lifetime histories.
     return Next(
         CoherencePoint(index, flux, frequency, rabi, readout, tuple(measurements)),
         state,

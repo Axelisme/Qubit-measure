@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -45,7 +44,6 @@ from zcu_lab.workflows.common.calibration import (
     readout_due,
 )
 from zcu_lab.workflows.common.devices import set_flux
-from zcu_lab.workflows.common.saving import save_frequency, save_rabi, save_readout
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 from zcu_lab.workflows.mist_fluxdep.saving import save_mist
@@ -231,13 +229,17 @@ def mist_fluxdep(
         return Done()
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    captured = CalibrationInputs(plan.qub_pulse, plan.readout, tun.cal)
+    captured = CalibrationInputs(
+        qub_pulse=plan.qub_pulse,
+        readout=plan.readout,
+        tun=tun.cal,
+        snapshot=plan.snapshot,
+    )
     frequency = yield from calibrate_frequency(
         env,
         inputs=captured,
         flux=flux,
         carry=state.cal,
-        save=partial(save_frequency, snapshot=plan.snapshot),
     )
     rabi = yield from calibrate_rabi(
         env,
@@ -245,7 +247,7 @@ def mist_fluxdep(
         frequency=frequency,
         carry=state.cal,
         t1_estimate_us=tun.guess_us,
-        save=partial(save_rabi, snapshot=plan.snapshot),
+        point_index=index,
     )
     if rabi.status != "accepted" or readout_due(index, tun.cal):
         readout = yield from calibrate_readout(
@@ -254,7 +256,6 @@ def mist_fluxdep(
             rabi=rabi,
             carry=state.cal,
             t1_estimate_us=tun.guess_us,
-            save=partial(save_readout, snapshot=plan.snapshot),
         )
     else:
         readout = ReadoutResult(

@@ -30,7 +30,7 @@ class T2RamseyAcquisition(T2RamseyResult):
 
 
 def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
-    """Acquire a uniform native Ramsey fringe with two identical pi/2 pulses.
+    """Measure Ramsey fringes to observe dephasing between two pi/2 pulses.
 
     Supply complete native cfg with scalar detune in MHz and length sweep in
     microseconds, plus Run soc/soccfg/device snapshot. The second pi/2 phase
@@ -46,6 +46,7 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
     provenance = capture_software_provenance(context=None)
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         length_sweep = cfg.sweep.length
@@ -67,6 +68,7 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
             .declare_sweep("length", length_sweep)
             .build_and_acquire()
         )
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,

@@ -22,7 +22,7 @@ def _fluxdep_projection(
 
 
 def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit:
-    """Fit the complete finite zero-detune Echo trace with old fluxdep policy.
+    """Fit Hahn-echo decay to estimate the refocused coherence lifetime.
 
     Supply matching 1-D microsecond times and complex IQ, at least five finite
     samples, with strictly increasing times and explicit zero detune. Normalize
@@ -35,6 +35,7 @@ def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit:
     if result.true_activate_detune != 0.0:
         raise ValueError("Echo fluxdep requires explicit zero detune")
     _validate_fluxdep_trace(result.times, result.signals)
+    # Normalize the complete trace with the flux-sweep polarity policy.
     observed = _fluxdep_projection(result.signals, echo=True)
     lifetime, error, fitted, _ = fit_decay(result.times, observed)
     return DecayFit(
@@ -47,7 +48,7 @@ def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit:
 
 
 def analyze_t2ramsey(result: T2RamseyResult) -> DecayFit:
-    """Fit a complete finite Ramsey fringe using the old fluxdep projection.
+    """Fit Ramsey fringes to estimate the unrefocused dephasing lifetime.
 
     Supply matching 1-D microsecond delays and complex IQ, at least five finite
     samples, with strictly increasing delays. Native rotated IQ is normalized
@@ -57,6 +58,7 @@ def analyze_t2ramsey(result: T2RamseyResult) -> DecayFit:
     does not reject estimates, refit calibration, acquire, plot or write files.
     """
     _validate_fluxdep_trace(result.times, result.signals)
+    # Normalize the complete trace before fitting its decaying fringes.
     observed = _fluxdep_projection(result.signals, echo=False)
     lifetime, error, _detune, _error, fitted, _ = fit_decay_fringe(
         result.times, observed

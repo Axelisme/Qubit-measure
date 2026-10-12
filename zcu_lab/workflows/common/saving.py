@@ -40,7 +40,7 @@ def save_native[Cfg: ExpCfgModel, Result](
     snapshot: RunSnapshot,
     evidence: AcquisitionEvidence,
 ) -> None:
-    """Write a typed native record at the caller's exact destination.
+    """Preserve a measured trace and its evidence as a typed native record.
 
     source contains the complete cfg/result pair; its cfg must match spec's
     cfg_type. destination names the native file, not a directory. spec declares
@@ -72,7 +72,9 @@ def save_frequency(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write native spectroscopy data to the exact, not-yet-existing path.
+    """Preserve spectroscopy data so the resonance fit can be inspected later.
+
+    destination is the exact new native filename; its parent must exist.
 
     source is Engine's complete cfg/result pair. snapshot is the host-captured
     historical entry state. Preserve the Result's acquisition evidence. Parent
@@ -94,7 +96,9 @@ def save_rabi(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write native length-Rabi data to an exact, not-yet-existing path.
+    """Preserve Rabi oscillations so pulse-duration calibration remains traceable.
+
+    destination is the exact new native filename; its parent must exist.
 
     source supplies Engine's complete cfg/result pair; snapshot is historical
     entry state. Preserve acquisition evidence. Parent must exist; schema,
@@ -116,7 +120,9 @@ def save_readout(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write native frequency/gain SNR data to an exact new path.
+    """Preserve the readout SNR landscape so its selected settings remain traceable.
+
+    destination is the exact new native filename; its parent must exist.
 
     source supplies Engine's complete cfg/result pair; snapshot is historical
     entry state. Preserve native axes and acquisition evidence. Parent must
@@ -140,7 +146,9 @@ def save_t1(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write native T1 data to the workflow's exact, not-yet-existing path.
+    """Preserve population decay so the relaxation estimate can be inspected later.
+
+    destination is the exact new native filename; its parent must exist.
 
     source supplies the complete cfg/result pair; snapshot is historical entry
     state. Keep microsecond-to-disk mapping and acquisition evidence from their
@@ -162,7 +170,9 @@ def save_t2echo(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write zero-detune Echo to the workflow's exact, not-yet-existing native path.
+    """Preserve Hahn-echo decay so the refocused coherence fit remains traceable.
+
+    destination is the exact new native filename; its parent must exist.
 
     source owns cfg/result and fixed acquisition/device evidence. snapshot is
     historical entry/point/roles. Preserve native time-to-disk mapping and
