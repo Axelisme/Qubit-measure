@@ -8,8 +8,7 @@ from zcu_tools.experiment.workflows.export import load_trace
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyExp
-
-from .coherence_measurements import LifetimeKind
+from zcu_lab.workflows.coherence_fluxdep.measurements import LifetimeKind
 
 
 def load_lifetime_trace(

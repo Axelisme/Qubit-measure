@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 from zcu_tools.experiment.workflows import CommittedRecord
 from zcu_tools.plotting.plots import Plots
 
-from .overnight import OvernightPoint
+from zcu_lab.workflows.overnight.workflow import OvernightPoint
 
 _point_adapter = TypeAdapter(OvernightPoint)
 

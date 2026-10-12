@@ -1,9 +1,9 @@
-# `workflows.gui` Workflow form attachments
+# Workflow form attachments
 
 **Last updated:** 2026-10-12，表單保留、宿主搬至 lib
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
-Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../../lib/zcu_tools/gui/app/workflows/README.md)。
+Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../lib/zcu_tools/gui/app/workflows/README.md)。
 
 ## Catalog 與 Coherence forms
 
@@ -27,7 +27,7 @@ Null 或 invalid referenced value 產生欄位錯誤，不 fallback。Expression
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
 三個附件共用通用 WorkflowFormPanel、WorkflowPlanPanel 與既有 tuning view，不建立第二個 Window 或 Controller。
 附件只負責 Start/forms/native run，沒有 export/sample binding。
-Saved run conversion 由 coherence_export 與 mist_export 獨立工具負責，GUI/RPC/MCP 不提供匯出入口。
+Saved run conversion 由 coherence_fluxdep.export 與 mist_fluxdep.export 獨立工具負責，GUI/RPC/MCP 不提供匯出入口。
 
 ## 固定來源與 modules
 
@@ -36,7 +36,7 @@ Global qubit alias 必須可讀；EMPTY 可建 app，但來源依 base 契約拒
 Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，保留具體路徑 expression，缺值或不可讀就留 pi_length_us 未填。
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
-`calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
+`common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
 它經 captured core/native factories materialize ref/inline modules與 assets。
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。

@@ -17,7 +17,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from ..overnight import OvernightPlan, OvernightTunables
+from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunables
 
 
 class OvernightPlanForm(FormModel):

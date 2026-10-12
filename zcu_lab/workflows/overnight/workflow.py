@@ -25,10 +25,11 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoModuleCfg,
     T2EchoSweepCfg,
 )
-from zcu_lab.workflows.acquire import run_t1, run_t2echo
-from zcu_lab.workflows.analysis import DecayFit, analyze_t1, analyze_t2echo
-from zcu_lab.workflows.devices import set_flux
-from zcu_lab.workflows.saving import save_t1, save_t2echo
+from zcu_lab.workflows.common.acquire import run_t1, run_t2echo
+from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
+from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.saving import save_t1, save_t2echo
+from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 
 
 class OvernightPlan(BaseModel):

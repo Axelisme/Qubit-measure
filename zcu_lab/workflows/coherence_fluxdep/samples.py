@@ -13,9 +13,8 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 from zcu_lab.v2.twotone.freq.core import FreqExp
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
-
-from .coherence import CoherencePlan, CoherencePoint
-from .export import load_lifetime_trace
+from zcu_lab.workflows.coherence_fluxdep.lifetime_export import load_lifetime_trace
+from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
 
 
 class SampleField(BaseModel):

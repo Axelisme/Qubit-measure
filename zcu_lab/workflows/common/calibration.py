@@ -1,9 +1,4 @@
-"""Independent native calibration stages, with acceptance owned by the workflow.
-
-The Engine owns execution and cancellation. Calibration owns its filenames. Callers supply the
-three exact-path savers explicitly; this module never selects a storage format.
-Selected modules are copied before applying calibration and generation tunables.
-"""
+"""common calibration helpers for lab workflows."""
 
 from __future__ import annotations
 
@@ -16,12 +11,7 @@ from typing import Annotated, Literal
 import numpy as np
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.experiment.workflows import (
-    Completed,
-    Effect,
-    Failed,
-    WorkflowEnv,
-)
+from zcu_tools.experiment.workflows import Completed, Effect, Failed, WorkflowEnv
 from zcu_tools.plotting.plots import LinePlot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
@@ -37,7 +27,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainModuleCfg,
     FreqGainSweepCfg,
 )
-from zcu_lab.workflows.acquire import (
+from zcu_lab.workflows.common.acquire import (
     FrequencyAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
@@ -45,7 +35,7 @@ from zcu_lab.workflows.acquire import (
     run_qubit_freq,
     run_ro_landscape,
 )
-from zcu_lab.workflows.analysis import (
+from zcu_lab.workflows.common.analysis import (
     FrequencyFit,
     RabiFit,
     analyze_len_rabi,
@@ -155,33 +145,6 @@ class CalibratedPi2(Calibrated):
             raise ValueError("pi2_length_us must be positive and finite")
 
 
-@dataclass(frozen=True)
-class CalibrationFailed:
-    """Rejected calibration stage and human-readable reason; no partial values.
-
-    stage is frequency, rabi or readout. reason describes the Schedule failure
-    or acceptance rejection. Exceptions are not converted into this value.
-    """
-
-    stage: Literal["frequency", "rabi", "readout"]
-    reason: str
-
-
-@dataclass(frozen=True)
-class CalibrationFiles:
-    """Native filenames returned only after a complete accepted calibration.
-
-    frequency names completed spectroscopy attempts in widening order, relative
-    to this invocation's root. rabi names its completed Length-Rabi acquisition.
-    readout names the completed landscape, or None when cadence skips that stage.
-    These references do not guarantee later file existence or completeness.
-    """
-
-    frequency: tuple[str, ...]
-    rabi: str
-    readout: str | None
-
-
 @dataclass
 class CalCarry:
     """Step-local calibration state, published only by the Engine's Next commit.
@@ -199,8 +162,14 @@ class CalCarry:
 
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
+
+
 type FrequencySaver = Callable[[Completed[FreqCfg, FrequencyAcquisition], Path], None]
+
+
 type RabiSaver = Callable[[Completed[LenRabiCfg, RabiAcquisition], Path], None]
+
+
 type ReadoutSaver = Callable[[Completed[FreqGainCfg, ReadoutAcquisition], Path], None]
 
 

@@ -28,8 +28,7 @@ from zcu_tools.experiment.workflows.saved_run import (
 )
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepExp
-
-from .mist import MISTPlan, MISTPoint
+from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTPoint
 
 
 @dataclass(frozen=True)

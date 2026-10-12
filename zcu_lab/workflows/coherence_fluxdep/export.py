@@ -28,10 +28,17 @@ from zcu_tools.experiment.workflows.saved_run import (
 )
 from zcu_tools.resources.entry.storage import bind_sample_table
 
-from .coherence import CoherencePlan, CoherencePoint
-from .coherence_measurements import LifetimeKind, LifetimeResult
-from .export import load_lifetime_trace
-from .samples import SampleExportReport, append_samples, prepare_samples
+from zcu_lab.workflows.coherence_fluxdep.lifetime_export import load_lifetime_trace
+from zcu_lab.workflows.coherence_fluxdep.measurements import (
+    LifetimeKind,
+    LifetimeResult,
+)
+from zcu_lab.workflows.coherence_fluxdep.samples import (
+    SampleExportReport,
+    append_samples,
+    prepare_samples,
+)
+from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
 
 
 @dataclass(frozen=True)

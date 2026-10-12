@@ -19,14 +19,15 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyModuleCfg,
     T2RamseySweepCfg,
 )
-
-from .calibration import (
-    CalibratedPi2,
+from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFailed,
     CalibrationFiles,
+)
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan
+from zcu_lab.workflows.common.calibration import (
+    CalibratedPi2,
     apply_readout_calibration,
 )
-from .t1 import T1Plan
 
 
 class T2Plan(BaseModel):

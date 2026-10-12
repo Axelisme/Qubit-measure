@@ -17,12 +17,11 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
-from zcu_lab.workflows.calibration import (
-    Calibrated,
+from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFailed,
     CalibrationFiles,
-    apply_readout_calibration,
 )
+from zcu_lab.workflows.common.calibration import Calibrated, apply_readout_calibration
 
 
 class T1Plan(BaseModel):

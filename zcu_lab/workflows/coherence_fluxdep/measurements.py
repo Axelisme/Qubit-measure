@@ -10,14 +10,27 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.workflows import Effect, Failed, WorkflowEnv
 from zcu_tools.plotting.plots import LinePlot
 
-from .acquire import run_t1, run_t2echo, run_t2ramsey
-from .analysis import DecayFit, analyze_t1, analyze_t2echo_fluxdep, analyze_t2ramsey
-from .calibration import Calibrated, CalibratedPi2, StageStatus
-from .saving import save_t1, save_t2echo, save_t2ramsey
-from .t1 import T1Plan, T1Tunables, t1_cfg
-from .t2 import T2EchoTunables, T2RamseyTunables, t2echo_cfg, t2ramsey_cfg
+from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
+from zcu_lab.workflows.coherence_fluxdep.analysis import (
+    analyze_t2echo_fluxdep,
+    analyze_t2ramsey,
+)
+from zcu_lab.workflows.coherence_fluxdep.saving import save_t2ramsey
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan, T1Tunables, t1_cfg
+from zcu_lab.workflows.coherence_fluxdep.t2 import (
+    T2EchoTunables,
+    T2RamseyTunables,
+    t2echo_cfg,
+    t2ramsey_cfg,
+)
+from zcu_lab.workflows.common.acquire import run_t1, run_t2echo
+from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
+from zcu_lab.workflows.common.calibration import Calibrated, CalibratedPi2, StageStatus
+from zcu_lab.workflows.common.saving import save_t1, save_t2echo
 
 type LifetimeKind = Literal["t1", "t2ramsey", "t2echo"]
+
+
 type LifetimeHistory = list[tuple[float, float]]
 
 

@@ -20,7 +20,7 @@ from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutC
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.resources.entry import RoleResolutionError
 
-from ..calibration import Calibrated
+from zcu_lab.workflows.common.calibration import Calibrated
 
 
 @dataclass(frozen=True)

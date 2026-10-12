@@ -1,11 +1,4 @@
-"""Native exact-path writers for completed workflow acquisitions.
-
-The host captures the entry snapshot. Acquisition callbacks capture times and
-software evidence. These writers combine those facts with each experiment's
-existing persistence declaration; they never select paths or recapture context.
-Device evidence is forwarded unchanged: {} records no devices and None retains
-unrecorded legacy evidence. Saving never reads drivers or refreshes settings.
-"""
+"""common saving helpers for lab workflows."""
 
 from pathlib import Path
 
@@ -17,11 +10,6 @@ from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed
 
-from zcu_lab.v2.mist.power_dep.single_trace.core import (
-    PowerDepCfg,
-    PowerDepExp,
-    PowerDepResult,
-)
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiExp, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
@@ -35,74 +23,16 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoExp,
     T2EchoResult,
 )
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyCfg,
-    T2RamseyExp,
-    T2RamseyResult,
-)
-from zcu_lab.workflows.acquire import (
+from zcu_lab.workflows.common.acquire import (
     FrequencyAcquisition,
-    MISTAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
     T1Acquisition,
     T2EchoAcquisition,
-    T2RamseyAcquisition,
 )
 
 
-def save_mist(
-    source: Completed[PowerDepCfg, MISTAcquisition],
-    destination: Path,
-    *,
-    snapshot: RunSnapshot,
-) -> None:
-    """Write raw MIST gain trace with native mist/gain schema to exact path.
-
-    source owns actual gains/IQ/cfg and acquisition/device evidence; snapshot is
-    the historical Start entry/roles capture. Parent must exist and destination
-    must not. Native schema, collision and I/O errors propagate. This writer
-    does not transform IQ, fit thresholds, choose paths or recapture metadata.
-    """
-    record: RunRecord[PowerDepCfg, PowerDepResult] = RunRecord(
-        source.cfg, source.result
-    )
-    _save(
-        record,
-        destination,
-        spec=PowerDepExp().persistence_spec(),
-        snapshot=snapshot,
-        evidence=source.result.evidence,
-    )
-
-
-def save_t2ramsey(
-    source: Completed[T2RamseyCfg, T2RamseyAcquisition],
-    destination: Path,
-    *,
-    snapshot: RunSnapshot,
-) -> None:
-    """Write Ramsey IQ and fixed evidence to the workflow's exact native path.
-
-    source supplies the completed cfg, rounded microsecond delays, complex IQ
-    and acquisition/device evidence; snapshot supplies historical entry/roles.
-    Use native twotone/ge/t2ramsey declaration and seconds-on-disk coordinates.
-    Parent must exist and destination must not. Native validation, collision
-    and I/O errors propagate; no capture, layout choice or retry occurs.
-    """
-    record: RunRecord[T2RamseyCfg, T2RamseyResult] = RunRecord(
-        source.cfg, source.result
-    )
-    _save(
-        record,
-        destination,
-        spec=T2RamseyExp().persistence_spec(),
-        snapshot=snapshot,
-        evidence=source.result.evidence,
-    )
-
-
-def _save[Cfg: ExpCfgModel, Result](
+def save_native[Cfg: ExpCfgModel, Result](
     source: RunRecord[Cfg, Result],
     destination: Path,
     *,
@@ -110,6 +40,18 @@ def _save[Cfg: ExpCfgModel, Result](
     snapshot: RunSnapshot,
     evidence: AcquisitionEvidence,
 ) -> None:
+    """Write a typed native record at the caller's exact destination.
+
+    source contains the complete cfg/result pair; its cfg must match spec's
+    cfg_type. destination names the native file, not a directory. spec declares
+    the experiment tag, array mapping and SI/discrete units. snapshot supplies
+    the host-captured historical entry/point state. evidence supplies acquisition
+    identity, timestamps, completion, provenance and captured device state.
+    Build RunMetadata from this fixed evidence and snapshot, then call save_run.
+    Existing destinations raise FileExistsError. Invalid cfg/result/spec/metadata
+    raises ValueError or TypeError; I/O errors propagate. No live capture or
+    filename inference occurs.
+    """
     metadata = RunMetadata(
         run_id=evidence.run_id,
         experiment=spec.tag,
@@ -137,7 +79,7 @@ def save_frequency(
     must exist; schema, existing-destination and I/O errors propagate.
     """
     record: RunRecord[FreqCfg, FreqResult] = RunRecord(source.cfg, source.result)
-    _save(
+    save_native(
         record,
         destination,
         spec=FreqExp().persistence_spec(),
@@ -159,7 +101,7 @@ def save_rabi(
     existing-destination and I/O errors propagate, without retry or overwrite.
     """
     record: RunRecord[LenRabiCfg, LenRabiResult] = RunRecord(source.cfg, source.result)
-    _save(
+    save_native(
         record,
         destination,
         spec=LenRabiExp().persistence_spec(),
@@ -183,7 +125,7 @@ def save_readout(
     record: RunRecord[FreqGainCfg, FreqGainResult] = RunRecord(
         source.cfg, source.result
     )
-    _save(
+    save_native(
         record,
         destination,
         spec=FreqGainExp().persistence_spec(),
@@ -205,7 +147,7 @@ def save_t1(
     owners. Parent must exist; schema, collision and I/O errors propagate.
     """
     record: RunRecord[T1Cfg, T1Result] = RunRecord(source.cfg, source.result)
-    _save(
+    save_native(
         record,
         destination,
         spec=T1Exp().persistence_spec(),
@@ -228,7 +170,7 @@ def save_t2echo(
     propagate without recapture, layout selection or retry.
     """
     record: RunRecord[T2EchoCfg, T2EchoResult] = RunRecord(source.cfg, source.result)
-    _save(
+    save_native(
         record,
         destination,
         spec=T2EchoExp().persistence_spec(),

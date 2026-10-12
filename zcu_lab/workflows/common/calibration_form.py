@@ -1,15 +1,13 @@
-"""Shared calibration and T1 lifetime knob forms for Coherence."""
+"""common calibration_form helpers for lab workflows."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Self
 
-from pydantic import Field, JsonValue, model_validator
-from zcu_tools.gui.form import Display, FormEnv, FormModel, field_error
+from pydantic import Field, model_validator
+from zcu_tools.gui.form import Display, FormModel, field_error
 
-from zcu_lab.workflows.calibration import CalibrationTunables
-from zcu_lab.workflows.t1 import T1Tunables
+from zcu_lab.workflows.common.calibration import CalibrationTunables
 
 
 class CalibrationTunablesForm(FormModel):
@@ -101,78 +99,4 @@ class CalibrationTunablesForm(FormModel):
             ro_every=self.ro_every,
             rabi_start_factor=self.rabi_start_factor,
             rabi_stop_factor=self.rabi_stop_factor,
-        )
-
-
-class T1TunablesForm(FormModel):
-    """User-facing T1 lifetime knobs; instances hold ordinary values only.
-
-    Fields control T1 generation/acceptance as
-    described in their Fields. defaults read only captured parameters; these
-    knobs need neither library nor device infos. Submission belongs to the host.
-    """
-
-    reps: Annotated[int, Display(label="T1 averages")] = Field(
-        default=100, ge=1, description="T1 averages"
-    )
-    rounds: Annotated[int, Display(label="T1 rounds")] = Field(
-        default=10, ge=1, description="T1 averaging rounds"
-    )
-    guess_us: Annotated[
-        float,
-        Display(
-            label="Initial lifetime", unit="us", placeholder="general.ext.guess_us"
-        ),
-    ] = Field(default=20.0, gt=0, description="Initial lifetime in us")
-    sweep_factor: float = Field(
-        default=5.0, gt=0, description="Sweep end divided by lifetime guess"
-    )
-    relax_factor: float = Field(
-        default=3.0, gt=0, description="Relax delay divided by lifetime guess"
-    )
-    max_rel_err: float = Field(
-        default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"
-    )
-    max_fit_residual: float = Field(
-        default=0.2, gt=0, le=1, description="Strict normalized residual RMS bound"
-    )
-
-    @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        """Build defaults, retaining a captured guess expression for initial input.
-
-        When previous is empty and parameters contain general.ext.guess_us
-        (even explicit null),
-        retain that path as an expression rather than copying its value. With
-        no capture or an absent leaf, keep the provisional ordinary 20 us.
-        Invalid referenced values remain result errors, not a fallback. Reads
-        use the fixed point only, never materialization, devices or I/O.
-        Unavailable captured sources propagate their source error.
-        """
-        data = super().defaults(env, previous)
-        if (
-            not previous
-            and env.parameters is not None
-            and env.parameters.lookup_point("general.ext.guess_us").present
-        ):
-            data["guess_us"] = {"expr": "general.ext.guess_us"}
-        return data
-
-    def to_cfg(self) -> T1Tunables:
-        """Copy validated ordinary form values to native T1Tunables.
-
-        Expression input stays in FormInput, not in the native values or Engine
-        journal. No owner update or source access occurs. Native validation
-        failures propagate after invalid direct edits.
-        """
-        return T1Tunables(
-            reps=self.reps,
-            rounds=self.rounds,
-            guess_us=self.guess_us,
-            sweep_factor=self.sweep_factor,
-            relax_factor=self.relax_factor,
-            max_rel_err=self.max_rel_err,
-            max_fit_residual=self.max_fit_residual,
         )

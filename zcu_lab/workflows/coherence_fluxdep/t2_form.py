@@ -3,7 +3,7 @@
 from pydantic import Field
 from zcu_tools.gui.form import FormModel
 
-from ..t2 import T2EchoTunables, T2RamseyTunables
+from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables, T2RamseyTunables
 
 
 class T2EchoTunablesForm(FormModel):
