@@ -219,16 +219,20 @@ class FitService:
         logger.debug("compute_search: params=%s", result.params)
         return result
 
-    def record_result(self, result: DatabaseSearchResult) -> None:
-        """Write a computed search result onto State (MAIN THREAD only).
+    def record_result(self, result: DatabaseSearchResult, inputs: SearchInput) -> None:
+        """Publish a computed result with its same captured SearchInput, on owner.
 
         Separated from ``compute_search`` so the heavy search can run on a worker
         thread while this single State write happens on the Qt main thread, per
         the main-thread State invariant. ``search_database`` raises if no
         candidate is feasible, so a ``DatabaseSearchResult`` here always carries a real
-        result.
+        result. inputs is the exact detached capture used to compute result;
+        its original normalized-flux/GHz coordinates and graph versions are
+        recorded without rereading State. Shape mismatches raise ValueError;
+        direct late publication remains marked stale, not refreshed. The search
+        operation owner guards delivery before invoking this method.
         """
-        self._state.set_fit_result(result.params, result=result)
+        self._state.set_search_result(result, inputs.fluxs, inputs.freqs, inputs.stages)
         logger.debug("record_result: params=%s", result.params)
 
     # --- export ----------------------------------------------------------
@@ -241,7 +245,8 @@ class FitService:
         flux_half/int/period; in a multi-spectrum session every spectrum is
         aligned to the same flux coordinate, so the first aligned one is
         representative). Before file I/O, FailedPreconditionError reports
-        no_fit_result or no_aligned_spectrum. Native I/O failures propagate.
+        no_fit_result, fit_stale (with root-change reasons) or no_aligned_spectrum.
+        Stale rejection precedes file I/O. Native I/O failures propagate.
         """
         fit = self._state.fit
         if fit.params is None:

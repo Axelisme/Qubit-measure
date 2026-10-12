@@ -14,10 +14,16 @@ import os
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds, SearchCancelled, SearchQuality, TransitionResidual
 from matplotlib.collections import PathCollection
 from matplotlib.figure import Figure
+from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.fluxdep.search import (
+    DatabaseSearchResult,
+    ParamBounds,
+    SearchCancelled,
+    SearchQuality,
+    TransitionResidual,
+)
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
@@ -241,25 +247,41 @@ def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchron
         ctrl.interactive.dispose()
 
 
-def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attribution(monkeypatch):
+def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attribution(
+    monkeypatch,
+):
     from zcu_tools.gui.app.fluxdep.services import fit, viz
 
     source_fluxs = np.array([-0.2, 1.2, 1.5, 2.2])
     source_freqs = np.array([4.0, 5.0, 6.0, 7.0])
     state = FluxDepState()
     state.put_spectrum(_aligned_entry_with_points("source", source_fluxs, source_freqs))
-    state.set_fit_params("synthetic.h5", *_WIDE, {"transitions": [(0, 1), (0, 2)]}, None, None)
+    state.set_fit_params(
+        "synthetic.h5", *_WIDE, {"transitions": [(0, 1), (0, 2)]}, None, None
+    )
     numerical = DatabaseSearchResult(
-        params=(3.0, 0.8, 0.5), best_distance=0.15, best_scale=1.0, best_index=0,
-        entry_results=np.array([[0.15, 1.0]]), entry_params=np.array([[3.0, 0.8, 0.5]]),
-        fluxs=source_fluxs % 1, freqs=source_freqs.copy(), predicted_freqs=source_freqs.copy(),
+        params=(3.0, 0.8, 0.5),
+        best_distance=0.15,
+        best_scale=1.0,
+        best_index=0,
+        entry_results=np.array([[0.15, 1.0]]),
+        entry_params=np.array([[3.0, 0.8, 0.5]]),
+        fluxs=source_fluxs % 1,
+        freqs=source_freqs.copy(),
+        predicted_freqs=source_freqs.copy(),
         bounds=ParamBounds(EJ=_WIDE[0], EC=_WIDE[1], EL=_WIDE[2]),
         transition_indices=np.array([1, 0, 1, 0], dtype=np.int64),
-        residuals=np.array([0.1, 0.6, 0.2, 0.1]), outlier_mask=np.array([False, True, False, False]),
-        quality=SearchQuality(0.15, 1, 0.45, (
-            TransitionResidual("transitions 0-1", 2, 0.35, 0.6),
-            TransitionResidual("transitions 0-2", 2, 0.15, 0.2),
-        )),
+        residuals=np.array([0.1, 0.6, 0.2, 0.1]),
+        outlier_mask=np.array([False, True, False, False]),
+        quality=SearchQuality(
+            0.15,
+            1,
+            0.45,
+            (
+                TransitionResidual("transitions 0-1", 2, 0.35, 0.6),
+                TransitionResidual("transitions 0-2", 2, 0.15, 0.2),
+            ),
+        ),
     )
     monkeypatch.setattr(fit, "search_database", lambda *args, **kwargs: numerical)
 
@@ -274,9 +296,18 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
         assert state.fit_stale_reasons == []
         figure = Figure()
         ctrl.render_fit(figure)
-        scatters = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
-        np.testing.assert_allclose(np.asarray(scatters[0].get_offsets(), dtype=np.float64), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
-        np.testing.assert_allclose(np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]])
+        scatters = [
+            artist
+            for artist in figure.axes[0].collections
+            if isinstance(artist, PathCollection)
+        ]
+        np.testing.assert_allclose(
+            np.asarray(scatters[0].get_offsets(), dtype=np.float64),
+            [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]],
+        )
+        np.testing.assert_allclose(
+            np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]]
+        )
         recorded = state.fit.result
         if recorded is None:
             pytest.fail("full search publication must retain attribution")
@@ -286,9 +317,18 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
         source_freqs[:] = 10
         assert state.fit_stale_reasons == ["filter changed"]
         ctrl.render_fit(figure)
-        scatters = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
-        np.testing.assert_allclose(np.asarray(scatters[0].get_offsets(), dtype=np.float64), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
-        np.testing.assert_allclose(np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]])
+        scatters = [
+            artist
+            for artist in figure.axes[0].collections
+            if isinstance(artist, PathCollection)
+        ]
+        np.testing.assert_allclose(
+            np.asarray(scatters[0].get_offsets(), dtype=np.float64),
+            [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]],
+        )
+        np.testing.assert_allclose(
+            np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]]
+        )
     finally:
         ctrl.interactive.dispose()
 

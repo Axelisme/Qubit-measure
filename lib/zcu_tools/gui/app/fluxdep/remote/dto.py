@@ -328,7 +328,10 @@ class StateCheckReply(TypedDict):
 
 
 class ResourceVersionsReply(TypedDict):
-    """versions is the raw live resource counter snapshot; missing keys stay absent."""
+    """versions is the public resource counter snapshot; missing keys stay absent.
+
+    Private pipeline stage counters are not part of the remote resource contract.
+    """
 
     versions: dict[str, int]
 

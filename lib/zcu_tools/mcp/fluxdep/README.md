@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, sampling and Filter decisions, sampled checkpoints
+**Last updated:** 2026-10-13, recorded fit observation and native invalidation
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge.
@@ -82,6 +82,13 @@ in order, including duplicate labels and unused lines with null residuals. The
 input point count sums recorded attribution counts. Unrecorded quality cannot be
 represented as zero statistics. Successful fits attach the native Show overlay PNG;
 failed/cancelled outcomes return status/error without an image or parameter result.
+`fluxdep_fit_result(image?)` reads native availability and freshness without a
+search. Recorded quality uses the same summary. Fresh quality-bearing results
+attach Show evidence by default; stale results never attach it. No-result reads
+return status=no_result and params=null. Params-only reads keep native inputs,
+with points/residual/per_transition null, and attach no image. Neither state
+creates zero statistics or reads the current cloud. Stage finish tools project
+native invalidated labels without rebuilding the dependency graph.
 
 The stdio entry supplies connection settings and instructions. Server exit only
 disconnects; it does not kill or shut down the GUI. Tools preserve scalar JSON

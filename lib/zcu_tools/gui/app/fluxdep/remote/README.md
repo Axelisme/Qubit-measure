@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，sampling intent, Filter publication and sampled checkpoints
+**Last updated:** 2026-10-13，fit freshness, recorded quality and publication receipts
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -37,7 +37,13 @@ or I/O failure leaves the current fit untouched.
 `fit.database_info(path)` returns candidate/level counts and inclusive parameter
 ranges without loading energy values. `fit.render()` uses the same native Show
 overlay as Qt, returns PNG without saving an artifact, and requires a fit result.
-Both queries are readonly.
+Both queries are readonly. fit.result projects full-precision recorded kernel
+quality, all compiled transition entries and native stale reasons. Null quality
+means no recorded search diagnostics. Upstream publication retains the fit;
+fit.export_params rejects stale results before I/O with fit_stale and reasons.
+Stage finish receipts include the publication's transitive invalidated labels,
+captured before event delivery. Reentrant successors do not change that receipt.
+Private pipeline counters are absent from resources.versions.
 
 Export/Restore saves sampled checkpoints, including empty completed spectra,
 without Filter masks. Restore rejects the entire request before publication when

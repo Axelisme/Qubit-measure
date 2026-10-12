@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，sampling intent、空初始遮罩、Filter finish 與採點 checkpoint
+**Last updated:** 2026-10-13，search capture、fit freshness 與原生 publication receipts
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -249,7 +249,10 @@ subscriptions 保留原 lifetime。
 ### Database search 的 app ownership
 `FitService.capture_search` 在 State owner capture detached `SearchInput`。
 `compute_search(inputs)` 只算數值，不讀 live State、不繪圖。
-`record_result` 在 owner 寫入 fit，Controller 發布 `FitChanged`。
+`record_result(result, inputs)` 在 owner 寫入同次 `SearchInput` 的原始 normalized-flux／GHz 點雲、點序與版本，Controller 發布 `FitChanged`。Kernel 的 modulo-one flux 不取代背景上的原始座標。
+State 集中定義 alignment → points → Filter → fit 依賴圖。Search delivery、結果過期原因與 publication invalidated 共用此圖。
+Stage counters 留在 GUI 內部；`spectrum:<name>` 仍供 context guards，`fit` 仍記結果 availability，fit-input counter 只記輸入。
+上游發布保留結果並標過期，`set_fit_params` 的完整 replacement 則清掉結果。過期 params 匯出在 I/O 前拒絕。
 
 `Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
 依賴包含 project、fit、selection、spectrum 集合與全部來源，包含零點譜。
@@ -276,7 +279,9 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
 
 ### v2 結果存放 + 視覺化
 - `FitState`（State 上的 singleton，version key `fit`）：db 路徑/EJb/ECb/ELb/transitions/r_f/sample_f
-  + 結果 params(EJ,EC,EL)。`set_fit_params` 改輸入會清掉舊結果（輸入變則舊結果失效）。
+  + 結果 params(EJ,EC,EL)、kernel quality／attribution、原始 search cloud 與捕獲版本。`set_fit_params` 改輸入會清掉舊結果。
+  品質保留完整精度 GHz、編譯順序與重複 labels，無 recorded quality 時為 null。
+  四種 picker finish 回 `PublicationReceipt`，包含 accepted 數值與 Controller 在 emit 前捕獲的 invalidated。同步事件 subscriber 開 successor 或再發布都不能改掉本次 receipt。Filter Apply 維持數值回傳。
 - **AnalyzePanel UI**（`ui/analyze_panel.py`）：selection 後的三步分析集中到**一個「Analyze…」按鈕**
   開的單例面板，內含 **QTabWidget: Filter / Search / Show**（取代舊的 Cross-spectrum filter + Fit
   spectrum 兩按鈕）。
@@ -296,7 +301,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   dataclass**（會更弱型）。
 - `services/viz.py`：matplotlib 重寫 notebook 的 plotly `FreqFluxDependVisualizer`，純函式畫進傳入的
   Figure（background heatmap gray_r + simulation lines + 選中點 + r_f/sample_f const-freq 線 +
-  dev_value secondary axis）。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
+  dev_value secondary axis）。`Controller.render_fit` 畫 recorded search cloud，點依 compiled transition 上色，偏大殘差點空心，標題列 State 的 stale reasons。`Controller.render_selection` 畫 published masks，並疊 stored fit 曲線，不標 residual，也不讀 live draft。兩者共用 kernel 能階需求與 simulation，合法高階 transition 不讀 DB 也不漏線。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
 - params.json 的 flux_half/int/period 取**第一張已對齊譜**（notebook 單譜語意；多譜同對齊到同 flux 座標）。
 - params.json export 透過 `resources.qubit_params.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
 

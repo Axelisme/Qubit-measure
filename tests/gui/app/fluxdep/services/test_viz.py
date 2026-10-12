@@ -84,7 +84,9 @@ def test_published_filter_overlays_complete_high_order_kernel_frequencies(monkey
         assert [line.get_label() for line in lines] == expected_labels
         assert requested_levels == [21]
         for index, line in enumerate(lines):
-            np.testing.assert_allclose(np.asarray(line.get_ydata(), dtype=np.float64), expected_freqs[0, index])
+            np.testing.assert_allclose(
+                np.asarray(line.get_ydata(), dtype=np.float64), expected_freqs[0, index]
+            )
     finally:
         ctrl.interactive.dispose()
 

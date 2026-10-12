@@ -28,6 +28,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2transition
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.analysis.fluxdep.search_models import count_max_evals
 from zcu_tools.gui.app.fluxdep.state import (
     FitState,
@@ -51,13 +52,15 @@ class _Background:
 
 
 def render_selection_result(
-    figure: Figure, spectrums: dict[str, SpectrumEntry]
+    figure: Figure, spectrums: dict[str, SpectrumEntry], *, fit: FitState | None = None
 ) -> None:
     """Draw published sampled points and per-spectrum masks, never live drafts.
 
     figure is caller-owned and cleared. Backgrounds use native normalization;
     excluded points are gray crosses, selected points blue dots in flux/GHz.
-    Empty published collections produce empty axes. No state or file is changed.
+    fit optionally supplies stored EJ/EC/EL and transition choices for J6 model
+    curves, including stale or params-only results. Filter points have no residual
+    markings. Empty collections produce empty axes. No State, draft or file changes.
     """
     figure.clear()
     ax = figure.add_subplot(111)
@@ -76,6 +79,17 @@ def render_selection_result(
         )
         ax.scatter(
             points["fluxs"][kept], points["freqs"][kept], color="blue", s=12, zorder=3
+        )
+    if fit is not None and fit.params is not None:
+        xlim, _ = derive_auto_limits(
+            spectrums, np.empty(0), np.empty(0), fit.r_f, fit.sample_f
+        )
+        t_fluxs, energies = _fit_simulation(fit, xlim, fit.transitions)
+        _plot_simulation_lines(
+            ax,
+            t_fluxs,
+            energies,
+            transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f),
         )
     ax.set_xlabel("Flux")
     ax.set_ylabel("Frequency (GHz)")
@@ -206,11 +220,38 @@ def _plot_simulation_lines(
     t_fluxs: NDArray[np.float64],
     energies: NDArray[np.float64],
     transitions: TransitionDict,
+    reference_transitions: TransitionDict | None = None,
 ) -> None:
-    """Draw the fitted transition frequencies vs flux (one line per transition)."""
+    """Draw model frequencies with colors indexed by the full compiled fit.
+
+    A displayed subset retains attribution colors. Repeated labels occupy
+    distinct occurrence slots; explicitly added display lines receive new slots.
+    """
     freqs, labels = energy2transition(energies, transitions)
-    for i, label in enumerate(labels):
-        ax.plot(t_fluxs, freqs[:, i], label=label, linewidth=1.0, zorder=1)
+    reference_labels = labels
+    if reference_transitions is not None:
+        _, reference_labels = energy2transition(energies, reference_transitions)
+    palette: dict[tuple[str, int], int] = {}
+    occurrences: dict[str, int] = {}
+    for index, label in enumerate(reference_labels):
+        occurrence = occurrences.get(label, 0)
+        palette[(label, occurrence)] = index
+        occurrences[label] = occurrence + 1
+    occurrences.clear()
+    for index, label in enumerate(labels):
+        occurrence = occurrences.get(label, 0)
+        slot = (label, occurrence)
+        if slot not in palette:
+            palette[slot] = len(palette)
+        ax.plot(
+            t_fluxs,
+            freqs[:, index],
+            label=label,
+            color=f"C{palette[slot] % 10}",
+            linewidth=1.0,
+            zorder=1,
+        )
+        occurrences[label] = occurrence + 1
 
 
 def _plot_constant_freqs(ax, r_f: float | None, sample_f: float | None) -> None:
@@ -257,6 +298,31 @@ class FitDisplay:
     ylim: tuple[float, float] | None = None
     show_const_freq: bool = True
     plot_transitions: TransitionDict | None = None
+    # Root-change descriptions from State; empty means the stored fit is fresh.
+    stale_reasons: tuple[str, ...] = ()
+
+
+def _fit_simulation(
+    fit: FitState,
+    xlim: tuple[float, float],
+    transitions: TransitionDict,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Compute the shared J5/J6 model grid with all requested compiled levels."""
+    if fit.params is None:
+        raise ValueError("fit params are required for simulation")
+    flux_lo, flux_hi = xlim
+    if flux_hi <= flux_lo:
+        flux_lo, flux_hi = 0.0, 1.0
+    t_fluxs = np.linspace(flux_lo, flux_hi, 1000)
+    _, energies = calculate_energy_vs_flux(
+        fit.params,
+        t_fluxs,
+        cutoff=40,
+        evals_count=max(
+            15, count_max_evals(fit.transitions), count_max_evals(transitions)
+        ),
+    )
+    return t_fluxs, energies
 
 
 def render_fit_result(
@@ -273,26 +339,32 @@ def render_fit_result(
     spectra supply background/calibration; s_fluxs/s_freqs are paired normalized
     flux/GHz fit points. Limits and display options follow render_fit_figure.
     The simulation spans the displayed flux range. Does not mutate fit or spectra;
-    only replaces figure contents. Native simulation/render failures propagate.
+    only replaces figure contents. Recorded original coordinates and kernel
+    attribution replace the provided live point cloud when quality exists.
+    display.stale_reasons adds an explicit outdated title without discarding data.
+    Native simulation/render failures propagate.
     """
     if fit.params is None:
         raise ValueError("fit params are required for rendering")
+    if fit.result is not None:
+        s_fluxs, s_freqs = fit.result_fluxs, fit.result_freqs
     auto_x, _ = derive_auto_limits(spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f)
-    flux_lo, flux_hi = display.xlim if display.xlim is not None else auto_x
-    if flux_hi <= flux_lo:
-        flux_lo, flux_hi = 0.0, 1.0
-    t_fluxs = np.linspace(flux_lo, flux_hi, 1000)
+
     display_transitions = (
         display.plot_transitions
         if display.plot_transitions is not None
         else fit.transitions
     )
-    _, energies = calculate_energy_vs_flux(
-        fit.params,
-        t_fluxs,
-        cutoff=40,
-        evals_count=max(15, count_max_evals(display_transitions)),
+    t_fluxs, energies = _fit_simulation(
+        fit,
+        display.xlim if display.xlim is not None else auto_x,
+        display_transitions,
     )
+    title = (
+        f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, {fit.params[2]:.2f})"
+    )
+    if display.stale_reasons:
+        title += "\n過期: " + "; ".join(display.stale_reasons)
     aligned = next((entry for entry in spectrums.values() if entry.aligned), None)
     render_fit_figure(
         figure,
@@ -306,7 +378,8 @@ def render_fit_result(
         sample_f=fit.sample_f,
         flux_half=aligned.flux_half if aligned else None,
         flux_period=aligned.flux_period if aligned else None,
-        title=f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, {fit.params[2]:.2f})",
+        title=title,
+        attribution=fit.result,
         xlim=display.xlim,
         ylim=display.ylim,
         show_const_freq=display.show_const_freq,
@@ -332,6 +405,7 @@ def render_fit_figure(
     ylim: tuple[float, float] | None = None,
     show_const_freq: bool = True,
     plot_transitions: TransitionDict | None = None,
+    attribution: DatabaseSearchResult | None = None,
 ) -> None:
     """Render the full fit visualisation onto ``figure`` (cleared first).
 
@@ -346,6 +420,9 @@ def render_fit_figure(
     - ``show_const_freq`` toggles the r_f / sample_f reference lines.
     - ``plot_transitions`` overrides which transition categories are drawn (the
       display subset); ``None`` uses ``transitions`` (the fit set).
+    - attribution is the same-order kernel result for s_fluxs/s_freqs. Its
+      transition_indices supply compiled-slot colors; outlier_mask supplies
+      hollow markers. None draws plain points, never synthetic residual marks.
     """
     figure.clear()
     ax = figure.add_subplot(1, 1, 1)
@@ -360,10 +437,41 @@ def render_fit_figure(
     )
 
     _plot_background(ax, spectrums)
-    _plot_simulation_lines(ax, t_fluxs, energies, sim_transitions)
-    ax.scatter(
-        s_fluxs, s_freqs, color="blue", s=12, alpha=0.5, zorder=2, label="_points"
+    _plot_simulation_lines(
+        ax,
+        t_fluxs,
+        energies,
+        sim_transitions,
+        transitions_with_freqs(transitions, r_f, sample_f),
     )
+    if attribution is None:
+        ax.scatter(
+            s_fluxs, s_freqs, color="blue", s=12, alpha=0.5, zorder=2, label="_points"
+        )
+    else:
+        colors = np.array(
+            [f"C{int(index) % 10}" for index in attribution.transition_indices]
+        )
+        outliers = attribution.outlier_mask
+        ax.scatter(
+            s_fluxs[~outliers],
+            s_freqs[~outliers],
+            c=colors[~outliers],
+            s=16,
+            alpha=0.8,
+            zorder=2,
+            label="_points",
+        )
+        ax.scatter(
+            s_fluxs[outliers],
+            s_freqs[outliers],
+            facecolors="none",
+            edgecolors=[str(color) for color in colors[outliers]],
+            s=30,
+            linewidths=1.2,
+            zorder=3,
+            label="_outliers",
+        )
     if show_const_freq:
         _plot_constant_freqs(ax, r_f, sample_f)
 

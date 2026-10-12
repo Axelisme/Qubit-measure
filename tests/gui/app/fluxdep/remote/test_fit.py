@@ -20,8 +20,8 @@ from zcu_tools.analysis.fluxdep.search import (
 )
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
-from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, SpectrumEntry
 from zcu_tools.gui.app.fluxdep.services.fit import SearchInput
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, SpectrumEntry
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -186,8 +186,11 @@ def test_fit_result_projects_recorded_quality_without_rounding_or_merging(
             quality=quality,
         ),
         SearchInput(
-            search_db="", fluxs=np.array([0.1, 0.2, 0.3]), freqs=np.array([4.0, 4.1, 4.2]),
-            transitions={}, bounds=ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
+            search_db="",
+            fluxs=np.array([0.1, 0.2, 0.3]),
+            freqs=np.array([4.0, 4.1, 4.2]),
+            transitions={},
+            bounds=ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
             stages=ctrl.state.pipeline_snapshot(),
         ),
     )

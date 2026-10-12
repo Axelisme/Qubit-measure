@@ -495,12 +495,14 @@ class FluxDepInteractiveOwner:
     def finish_line_pick(
         self, name: str | None = None
     ) -> PublicationReceipt[FluxPickAnalysis]:
-        """Validate, close and publish alignment; return accepted numeric result.
+        """Validate, close and publish alignment; return its publication receipt.
 
         name addresses a literal spectrum; omission reads the displayed draft.
         Missing context or invalid separation raises FailedPreconditionError;
         validation failure keeps input editable. Clear context before publication.
-        Publication errors propagate and do not reopen terminal input.
+        Return accepted numeric result and Controller's pre-emit invalidated
+        labels in a PublicationReceipt. Publication errors propagate and do not
+        reopen terminal input.
         """
         self._require_owner()
         context = self.current_line_pick(name)
@@ -595,7 +597,8 @@ class FluxDepInteractiveOwner:
         name addresses a literal spectrum; omission reads the displayed draft.
         Missing context raises FailedPreconditionError; invalid state retains
         editable input. Clear ownership before Controller's publication.
-        Publication failure propagates without reopening terminal input.
+        Return the accepted numeric result with pre-emit invalidated labels in
+        a PublicationReceipt. Publication failure does not reopen terminal input.
         """
         self._require_owner()
         context = self.current_onetone_pick(name)
@@ -672,7 +675,9 @@ class FluxDepInteractiveOwner:
         name addresses a literal spectrum; omission reads the displayed draft.
         Missing context raises FailedPreconditionError. Validation failure keeps
         context editable. Clear context before publication; publication failure
-        remains terminal. Never use a widget's pending or cached preview.
+        remains terminal. Return a PublicationReceipt with the accepted numeric
+        result and Controller's pre-emit invalidated labels. Never use a widget's
+        pending or cached preview.
         """
         self._require_owner()
         context = self.current_twotone_pick(name)
@@ -862,7 +867,9 @@ class FluxDepInteractiveOwner:
         """Publish the latest kept mask and retire Filter after successful publication.
 
         Require a valid global context. Publication failures propagate without
-        closing input or claiming rollback. Off-owner use raises RuntimeError.
+        closing input or claiming rollback. Return a PublicationReceipt with
+        detached kept-mask numbers and pre-emit invalidated labels. Off-owner
+        use raises RuntimeError.
         """
         self._require_owner()
         context = self.current_cross_selection()

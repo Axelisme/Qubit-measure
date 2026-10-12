@@ -215,11 +215,16 @@ class FitState:
 
     # Recorded kernel diagnostics/attribution; None for params-only publication.
     result: DatabaseSearchResult | None = None
-    # Captured graph/counters after result publication; empty without a result.
+    # Detached original normalized-flux/GHz search coordinates, in attribution order.
+    # Empty for params-only publication; kernel result.fluxs is modulo-one instead.
+    result_fluxs: NDArray[np.float64] = field(default_factory=lambda: np.empty(0))
+    result_freqs: NDArray[np.float64] = field(default_factory=lambda: np.empty(0))
+    # Captured search graph/counters, never refreshed at numeric publication.
     input_stages: tuple[PipelineStage, ...] = ()
 
     @property
     def has_result(self) -> bool:
+        """Whether params exist, independent of freshness or recorded quality."""
         return self.params is not None
 
 
@@ -507,23 +512,60 @@ class FluxDepState:
             sample_f=sample_f,
         )
         self.version.bump(FIT_VERSION_KEY)
+        self.version.bump("__pipeline:fit-inputs")
 
-    def set_fit_result(
-        self,
-        params: tuple[float, float, float],
-        *,
-        result: DatabaseSearchResult | None = None,
-    ) -> None:
-        """Record EJ/EC/EL GHz and optional kernel diagnostics on current inputs.
+    def set_fit_result(self, params: tuple[float, float, float]) -> None:
+        """Publish params-only EJ/EC/EL GHz on current inputs, without quality.
 
-        result carries recorded attribution and quality, never synthesized values.
-        None publishes params only, so consumers must report absent quality.
-        Owner-thread only; advances the existing fit version once.
+        Owner-thread only. Capture current dependencies for this numeric-only
+        result. Advance result availability, never the fit-input counter.
+        Clears previous search attribution/cloud and quality.
         """
         self._assert_owner()
-        self.fit = replace(self.fit, params=params, result=result)
+        self.fit = replace(
+            self.fit,
+            params=params,
+            result=None,
+            result_fluxs=np.empty(0),
+            result_freqs=np.empty(0),
+            input_stages=self.pipeline_snapshot(),
+        )
         self.version.bump(FIT_VERSION_KEY)
-        self.fit = replace(self.fit, input_stages=self.pipeline_snapshot())
+
+    def set_search_result(
+        self,
+        result: DatabaseSearchResult,
+        fluxs: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+        stages: tuple[PipelineStage, ...],
+    ) -> None:
+        """Publish full kernel result with its original captured inputs, on owner.
+
+        fluxs/freqs are same-order 1-D normalized-flux/GHz coordinates, before
+        kernel modulo-one wrapping. Copy them so later capture-array edits cannot
+        change plotted attribution. stages is the same capture's immutable graph.
+        Never re-read live inputs or reset captured counters. Late direct
+        publications retain their true stale reasons; the operation owner refuses
+        changed dependencies before this call. Shape mismatches raise ValueError
+        without publication. Result publication does not advance input versions.
+        """
+        self._assert_owner()
+        if (
+            fluxs.ndim != 1
+            or freqs.shape != fluxs.shape
+            or result.transition_indices.shape != fluxs.shape
+            or result.outlier_mask.shape != fluxs.shape
+        ):
+            raise ValueError("captured coordinates must match kernel attribution shape")
+        self.fit = replace(
+            self.fit,
+            params=result.params,
+            result=result,
+            result_fluxs=fluxs.copy(),
+            result_freqs=freqs.copy(),
+            input_stages=stages,
+        )
+        self.version.bump(FIT_VERSION_KEY)
 
     def pipeline_snapshot(self) -> tuple[PipelineStage, ...]:
         """Capture the single alignment → points → Filter → fit dependency graph.
@@ -593,8 +635,8 @@ class FluxDepState:
         stages.append(
             PipelineStage(
                 FIT_VERSION_KEY,
-                FIT_VERSION_KEY,
-                self.version.get(FIT_VERSION_KEY),
+                "__pipeline:fit-inputs",
+                self.version.get("__pipeline:fit-inputs"),
                 (SPECTRUM_SET_VERSION_KEY, *masks),
                 "fit",
                 "fit parameters changed",

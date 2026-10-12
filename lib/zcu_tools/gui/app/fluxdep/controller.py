@@ -291,9 +291,11 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """Draw published Filter evidence into caller-owned figure without a Session.
 
         Uses every spectrum\'s published sampled points and Filter mask. No state,
-        draft or display selection is changed; rendering failures propagate.
+        draft or display selection is changed. Stored fit params overlay model
+        curves, including stale/params-only fits, without residual markings;
+        rendering failures propagate.
         """
-        render_selection_result(figure, self.state.spectrums)
+        render_selection_result(figure, self.state.spectrums, fit=self.state.fit)
 
     def render_fit(
         self,
@@ -310,7 +312,10 @@ class Controller(BaseController[FluxDepState, EventBus]):
         Limits are normalized flux and GHz; None derives native auto limits.
         plot_transitions overrides the displayed lines only; None uses fit choices.
         show_const_freq toggles reference lines. Figure contents are replaced.
-        Missing result raises FailedPreconditionError(no_fit_result); simulation
+        Recorded search points keep their original coordinates and attribution;
+        later selection changes cannot shift their colors/outlier markers. The
+        title lists State's stale reasons. Missing result raises
+        FailedPreconditionError(no_fit_result); simulation
         and render errors propagate. GUI and RPC use this same rendering path.
         """
         self.state.assert_owner_thread()
@@ -325,6 +330,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
             ylim=ylim,
             show_const_freq=show_const_freq,
             plot_transitions=plot_transitions,
+            stale_reasons=tuple(self.state.fit_stale_reasons),
         )
         render_fit_result(figure, fit, self.state.spectrums, fluxs, freqs, display)
 
@@ -352,9 +358,17 @@ class Controller(BaseController[FluxDepState, EventBus]):
             inputs, pbar_factory=pbar_factory, cancel_requested=cancel_requested
         )
 
-    def record_search_result(self, result: DatabaseSearchResult) -> None:
-        """Write a computed search result onto State (MAIN THREAD only)."""
-        self._fit.record_result(result)
+    def record_search_result(
+        self, result: DatabaseSearchResult, inputs: SearchInput
+    ) -> None:
+        """Publish result with the exact SearchInput used to compute it, on owner.
+
+        inputs carries detached original normalized-flux/GHz coordinates, point
+        order and captured dependency versions. It is not reconstructed from
+        live State. Late direct publication stays stale; search owner rejects
+        changed inputs before delivery. Shape failures raise without a fact.
+        """
+        self._fit.record_result(result, inputs)
         self._emit(FitChangedPayload(has_result=True))
 
     def search_database(
@@ -373,12 +387,13 @@ class Controller(BaseController[FluxDepState, EventBus]):
         fact. None disables cancellation. Other failures propagate. In-flight
         HDF5/Numba work may delay cancellation observation.
         """
+        inputs = self.capture_search()
         result = self._fit.compute_search(
-            self.capture_search(),
+            inputs,
             pbar_factory=pbar_factory,
             cancel_requested=cancel_requested,
         )
-        self.record_search_result(result)
+        self.record_search_result(result, inputs)
         return result
 
     def export_params(self, savepath: str | None = None) -> str:
