@@ -1,6 +1,24 @@
 import os
 import sys
 
+import pytest
+
+from tools.pytest_cache_guard import GuiCacheGuard
+
+# Configure platformdirs before descendant conftests or test modules can create
+# a caretaker. Do not use pytest's basetemp: it is cleared during the session.
+_GUI_CACHE_GUARD = GuiCacheGuard()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.pluginmanager.register(_GUI_CACHE_GUARD, "gui-cache-guard")
+
+
+def pytest_unconfigure() -> None:
+    # Also restore on startup errors before pytest_configure could register it.
+    _GUI_CACHE_GUARD.pytest_unconfigure()
+
+
 # BLAS thread pinning for xdist workers — must happen BEFORE numpy is imported
 # so that OpenBLAS / MKL / OpenMP size their thread pools from the environment
 # at library load time (setting them post-load has no effect on OpenBLAS).
@@ -15,7 +33,6 @@ if os.environ.get("PYTEST_XDIST_WORKER"):
     os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import numpy as np
-import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LIB_PATH = os.path.join(_REPO_ROOT, "lib")

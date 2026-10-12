@@ -9,7 +9,9 @@ import pytest
 from pytest_cache_guard import GuiCacheGuard
 
 
-def run_session(tmp_path: Path, source: str, plugin: GuiCacheGuard) -> pytest.ExitCode:
+def run_session(
+    tmp_path: Path, source: str, plugin: GuiCacheGuard
+) -> int | pytest.ExitCode:
     """Run an isolated in-process pytest session without this suite's conftest."""
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\naddopts = --import-mode=importlib\n")
@@ -37,7 +39,7 @@ def test_default_caretaker_writes_only_to_session_cache(tmp_path: Path) -> None:
     plugin = GuiCacheGuard(real_cache=real_cache, cache_root=isolated_root)
     result = run_session(
         tmp_path,
-        f'''
+        f"""
 from pathlib import Path
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
@@ -63,7 +65,7 @@ def test_default_save():
     expected = Path({str(isolated_root)!r}) / "zcu_tools/gui/gui_state_v1.json"
     assert expected.read_text().strip() == '"saved"'
     assert caretaker.state_path == expected
-''',
+""",
         plugin,
     )
     assert result == pytest.ExitCode.OK, "default GUI saves must use session cache"
