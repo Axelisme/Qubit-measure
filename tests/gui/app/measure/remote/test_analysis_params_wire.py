@@ -13,10 +13,10 @@ from zcu_tools.gui.app.measure.remote.handlers.analysis import (
 )
 from zcu_tools.gui.remote.errors import RemoteError
 
-from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
+from tests.gui.app.measure._synthetic import ChoiceParams
 
 
-def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:
+def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     control = MagicMock()
     control.has_tab.return_value = True
     control.get_tab_snapshot.return_value = SimpleNamespace(
@@ -35,7 +35,7 @@ def _adapter_with_params(params: OneToneFreqAnalyzeParams) -> MagicMock:
 
 
 def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None:
-    adapter = _adapter_with_params(OneToneFreqAnalyzeParams())
+    adapter = _adapter_with_params(ChoiceParams())
 
     reply = h_tab_get_analyze_params(adapter, {"tab_id": "t"})
     assert reply["analyze_params"] == {
@@ -64,7 +64,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
     assert started["interactive"] is False
     assert started["invalidated_on_success"] == []
     forwarded = adapter.run_analyze_control.analyze.call_args.args[1]
-    assert forwarded == OneToneFreqAnalyzeParams(
+    assert forwarded == ChoiceParams(
         fit_bg_amp_slope=False,
         fit_bg_phase_curvature=True,
         edelay_mode="manual",
@@ -85,7 +85,7 @@ def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None
     ],
 )
 def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> None:
-    original = OneToneFreqAnalyzeParams()
+    original = ChoiceParams()
     adapter = _adapter_with_params(original)
     with pytest.raises(RemoteError) as caught:
         handler(adapter, {"tab_id": "t", "updates": updates})
@@ -110,7 +110,7 @@ def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> N
     assert all(choice in message for choice in ("hm", "auto"))
     adapter.run_analyze_control.analyze.assert_not_called()
     adapter.run_analyze_control.start_post_analyze.assert_not_called()
-    assert original == OneToneFreqAnalyzeParams()
+    assert original == ChoiceParams()
 
 
 @pytest.mark.parametrize(
@@ -118,7 +118,7 @@ def test_analysis_parameter_errors_do_not_start_operation(handler, updates) -> N
     [(h_tab_analyze, "analyze"), (h_tab_post_analyze, "start_post_analyze")],
 )
 def test_analysis_parameters_preserve_omitted_values_and_accept_null(handler, method):
-    original = OneToneFreqAnalyzeParams(model_type="t")
+    original = ChoiceParams(model_type="t")
     adapter = _adapter_with_params(original)
     reply = handler(adapter, {"tab_id": "t", "updates": {"manual_edelay": None}})
     assert reply["operation_id"] == "op-1"
@@ -127,9 +127,7 @@ def test_analysis_parameters_preserve_omitted_values_and_accept_null(handler, me
     kwargs = {"run_operation_id": None}
     if method == "start_post_analyze":
         kwargs["operation_id"] = None
-    operation.assert_called_once_with(
-        "t", OneToneFreqAnalyzeParams(model_type="t"), **kwargs
-    )
+    operation.assert_called_once_with("t", ChoiceParams(model_type="t"), **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -140,7 +138,7 @@ def test_analysis_parameters_preserve_omitted_values_and_accept_null(handler, me
     ],
 )
 def test_start_projects_only_content_replaced_on_success(handler, expected):
-    original = OneToneFreqAnalyzeParams()
+    original = ChoiceParams()
     adapter = _adapter_with_params(original)
     snapshot = adapter.run_analyze_control.get_tab_snapshot.return_value
     snapshot.analysis.has_writeback_draft = True
@@ -156,7 +154,7 @@ def test_start_projects_only_content_replaced_on_success(handler, expected):
 
 
 def test_remote_analyze_params_rejects_removed_key() -> None:
-    adapter = _adapter_with_params(OneToneFreqAnalyzeParams())
+    adapter = _adapter_with_params(ChoiceParams())
     removed_key = "_".join(("fit", "bg", "slope"))
 
     with pytest.raises(RemoteError):

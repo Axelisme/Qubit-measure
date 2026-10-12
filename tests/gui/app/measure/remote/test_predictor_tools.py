@@ -24,7 +24,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import component_registry
 
-import zcu_lab.components as components
+import tests.gui.app.measure._components as components
 from tests.gui._predictor_fakes import FailingPredictorService
 
 from ._helpers import call, mcp_client, open_client

@@ -22,7 +22,7 @@ from zcu_tools.mcp.measure.session import (
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
-from zcu_lab.recipes import RECIPES
+from ._pipeline_recipe import PIPELINE
 
 RpcResponder = Callable[[str, dict[str, Any]], dict[str, Any]]
 
@@ -127,7 +127,7 @@ def make_client(
     tmp_path: Path,
     responder: RpcResponder | None = None,
     *,
-    recipes: Sequence[RecipeDefinition] = RECIPES,
+    recipes: Sequence[RecipeDefinition] = (PIPELINE,),
     resolve_connect_port: ResolveConnectPortFn | None = None,
     port_is_open: PortIsOpenFn | None = None,
 ) -> MeasureClient:

@@ -7,9 +7,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.reference_defaults import resolve_library_reference
 from zcu_tools.gui.cfg import (
-    CfgSectionValue,
     DirectValue,
     EvalValue,
     ReferenceValue,
@@ -151,28 +150,12 @@ def module_seed(
 
         Seed propagates resolver failures; SweepDefault resolves start/stop seeds
         and preserves the declared point count, propagating bound failures."""
-        parameters = ctx.parameters
-        if parameters is None and path.startswith("$"):
-            return ReferenceValue(chosen_key=path, value=CfgSectionValue())
-        if parameters is not None:
-            try:
-                key = parameters.library_key(path)
-            except RoleResolutionError:
-                # Missing aliases remain linked so refresh can supply their source.
-                return ReferenceValue(chosen_key=path, value=CfgSectionValue())
-            except AttributeError:
-                # The path owner defines unset and dangling module slots.
-                key = None
-            if key is not None:
-                try:
-                    parameters.library.module_spec(key)
-                except KeyError:
-                    # A valid direct root can name a not-yet-created entry.
-                    pass
-                else:
-                    _, value = module_cfg_to_value(parameters.library.get_module(key))
-                    return ReferenceValue(chosen_key=path, value=value)
-        return fallback.resolve(ctx) if fallback is not None else None
+        return resolve_library_reference(
+            path,
+            ctx,
+            kind="module",
+            fallback=None if fallback is None else fallback.resolve,
+        )
 
     return Seed(resolve, description=f"module:{path}")
 

@@ -45,11 +45,11 @@ class _LiveFixture(Fixture):
 
     def __init__(self) -> None:
         super().__init__()
-        from zcu_lab.v2.fake.stub.gui import FakeAdapter
+        from tests.gui.app.measure._synthetic import SampleAdapter
 
-        cfg = FakeAdapter().make_default_cfg(self.state.session_env)
+        cfg = SampleAdapter().make_default_cfg(self.state.session_env)
         self._tab_id = "tab-live"
-        self.prepare_tab(self._tab_id, FakeAdapter(), cfg)
+        self.prepare_tab(self._tab_id, SampleAdapter(), cfg)
         # Independent library editor; it never publishes tab cfg.
         self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
             cfg, parameters=self.ctrl.read_context(), gc=False
@@ -579,9 +579,9 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
     )
     from zcu_tools.gui.cfg.model import DirectValue
 
-    from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+    from tests.gui.app.measure._flux_adapter import SpectrumAdapter
 
-    cfg = OneToneFluxDepAdapter().make_default_cfg(
+    cfg = SpectrumAdapter().make_default_cfg(
         SessionEnv(parameters=None, soc=None, soccfg=None)
     )
     devices = cfg.value.fields["dev"]
@@ -608,10 +608,10 @@ def test_tree_device_scalar_has_value_and_dynamic_choices(qapp):
 def _fakefreq_root():
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
+    from tests.gui.app.measure._synthetic import PairAdapter
 
     ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    cfg = FakeFreqAdapter().make_default_cfg(ctx)
+    cfg = PairAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
     return _make_draft(ctrl, cfg.spec, cfg.value)
 
@@ -666,10 +666,10 @@ def test_moduleref_tagged_key_passes_through(qapp):
 def _fluxdep_root(device_names: list[str]):
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+    from tests.gui.app.measure._flux_adapter import SpectrumAdapter
 
     ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    cfg = OneToneFluxDepAdapter().make_default_cfg(ctx)
+    cfg = SpectrumAdapter().make_default_cfg(ctx)
     ctrl = MagicMock()
     ctrl.list_device_names.return_value = list(device_names)
     return _make_draft(ctrl, cfg.spec, cfg.value)

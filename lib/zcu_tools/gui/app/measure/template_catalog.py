@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, TypeAlias, TypedDict
 
-from zcu_tools.cfg_model import Expr, TemplateDef, TemplateSeed
+from zcu_tools.cfg_model import Expr, Slot, TemplateDef, TemplateSeed
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES, UnknownProgramShapeError
 from zcu_tools.gui.cfg import (
     CfgSectionSpec,
@@ -35,6 +35,7 @@ from zcu_tools.gui.cfg import (
 )
 
 from .adapter import SessionEnv
+from .reference_defaults import resolve_library_reference
 from .specs import MAIN_PROGRAM_SPEC_POLICY
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,11 @@ class TemplateCatalog:
         applies seeds; empty seeds therefore preserve library blank behavior.
         Expr seeds become EvalValue, while ordinary strings stay literal.
         Nested reference discriminator seeds select an allowed inline shape.
+        Slot(path) seeds on module references use SMART linked defaults from the
+        create operation's capture: unbound aliases stay linked empty, while
+        bound unset/dangling slots use the nested structural defaults. Waveform
+        Slots and nondefault copy/set/lock/fallback Form options raise TypeError
+        at registration; Slot with inline child seeds raises ValueError.
         Invalid seed paths/shapes raise ValueError or TypeError; duplicate IDs
         raise ValueError. Call only at startup, not on catalog reload.
         """
@@ -210,9 +216,9 @@ def _entry_from_definition(template_id: str, definition: TemplateDef) -> Templat
     def shape() -> CfgSectionSpec:
         return program_shape.make_spec(MAIN_PROGRAM_SPEC_POLICY)
 
-    def make_value(_ctx: SessionEnv) -> ReferenceValue:
+    def make_value(ctx: SessionEnv) -> ReferenceValue:
         spec = shape()
-        value = _seeded_section(spec, seeds)
+        value = _seeded_section(spec, seeds, ctx)
         return ReferenceValue(make_custom_reference_key(spec.label), value)
 
     # Fail on malformed seeds at injection, without reading any session source.
@@ -223,7 +229,9 @@ def _entry_from_definition(template_id: str, definition: TemplateDef) -> Templat
 
 
 def _seeded_section(
-    spec: CfgSectionSpec, seeds: Mapping[str, TemplateSeed]
+    spec: CfgSectionSpec,
+    seeds: Mapping[str, TemplateSeed],
+    env: SessionEnv | None = None,
 ) -> CfgSectionValue:
     value = make_default_value(spec)
     unknown = {path.split(".")[0] for path in seeds} - spec.fields.keys()
@@ -235,19 +243,24 @@ def _seeded_section(
             for path, seed in seeds.items()
             if path.startswith(f"{key}.")
         }
+        seed = seeds.get(key)
+        if isinstance(seed, Slot):
+            if child_seeds:
+                raise ValueError(f"Slot seed {key!r} cannot also have inline children")
+            value.fields[key] = _slot_reference(node_spec, value.fields[key], seed, env)
+            continue
         if isinstance(node_spec, ReferenceSpec) and child_seeds:
             current = value.fields[key]
             selected = _seed_reference_shape(node_spec, current, child_seeds)
             value.fields[key] = ReferenceValue(
                 make_custom_reference_key(selected.label),
-                _seeded_section(selected, child_seeds),
+                _seeded_section(selected, child_seeds, env),
             )
         elif isinstance(node_spec, CfgSectionSpec) and child_seeds:
-            value.fields[key] = _seeded_section(node_spec, child_seeds)
+            value.fields[key] = _seeded_section(node_spec, child_seeds, env)
         elif child_seeds:
             raise TypeError(f"Template seed field {key!r} has no children")
         if key in seeds:
-            seed = seeds[key]
             if isinstance(node_spec, (ReferenceSpec, CfgSectionSpec)):
                 raise TypeError(f"Template seed field {key!r} requires child paths")
             if isinstance(node_spec, LiteralSpec) and seed != node_spec.value:
@@ -257,6 +270,30 @@ def _seeded_section(
                 EvalValue(seed.text) if isinstance(seed, Expr) else DirectValue(seed),
             )
     return value
+
+
+def _slot_reference(
+    spec: object, current: object, slot: Slot, env: SessionEnv | None
+) -> ReferenceValue | None:
+    if not isinstance(spec, ReferenceSpec):
+        raise TypeError("Slot seed requires a reference field")
+    if spec.kind != "module":
+        raise TypeError("Library Slot seeds support only module references")
+    if slot.copy or slot.set or slot.lock or slot.fallback is not None:
+        raise TypeError("Library seeds support only Slot(path), without Form options")
+    if not isinstance(current, ReferenceValue) and current is not None:
+        raise TypeError("Slot field requires a structural reference default")
+    if env is None:
+        # Startup validates syntax/shape without consulting a session source.
+        return current
+    return resolve_library_reference(
+        slot.path,
+        env,
+        kind="module",
+        fallback=(lambda _env: current)
+        if isinstance(current, ReferenceValue)
+        else None,
+    )
 
 
 def _seed_reference_shape(
