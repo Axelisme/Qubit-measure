@@ -9,7 +9,7 @@ from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, spectrum_version_key
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, FluxDepState, spectrum_version_key
 from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 
 
@@ -54,9 +54,7 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
     first = svc.load_spectrum(filepath, spec_type="OneTone")
     st.set_alignment(
         first,
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )
@@ -172,9 +170,7 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
     assert st.spectrums[first].alignment_seeded is False  # fresh load
     st.set_alignment(
         first,
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=st.spectrums[first].raw["dev_values"].copy(),
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )

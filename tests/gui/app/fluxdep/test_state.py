@@ -9,6 +9,7 @@ import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.state import (
+    AlignmentPublication,
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
@@ -246,9 +247,7 @@ def test_set_alignment_marks_aligned_and_bumps():
     new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
     st.set_alignment(
         "a",
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=new_fluxs,
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )
@@ -305,7 +304,7 @@ def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
     version = st.version.get(spectrum_version_key("a"))
     raw_fluxs = entry.raw["fluxs"].copy()
     with pytest.raises(ValueError, match="new_point_fluxs|finite"):
-        st.set_alignment("a", 0.0, 1.0, 2.0, np.array([0.5, 0.75, 1.0]), invalid)
+        st.set_alignment("a", AlignmentPublication(0.0, 1.0, 2.0), np.array([0.5, 0.75, 1.0]), invalid)
     assert st.spectrums["a"] is entry
     np.testing.assert_array_equal(entry.raw["fluxs"], raw_fluxs)
     np.testing.assert_array_equal(entry.points["fluxs"], [0.5, 1.0])
