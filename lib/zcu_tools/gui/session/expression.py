@@ -19,6 +19,7 @@ from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval, safe_po
 
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.session.parameters import ModuleSlotError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext
@@ -116,7 +117,9 @@ def evaluate_scalar_expr(
     Parameter complex tags decode through the shared scalar codec; the captured
     context itself still returns raw YAML. Malformed tags raise ExpressionError
     naming the path and retain the codec error as cause. Strings are not decoded.
-    Invalid grammar, missing/non-numeric paths and arithmetic failures raise.
+    Invalid grammar, missing/non-numeric paths, unset/dangling module slots and
+    arithmetic failures raise ExpressionError. Slot errors retain their path and
+    reason; unexpected source failures propagate unchanged.
     """
     tree = _parse_expression(expr)
     if isinstance(tree.body, ast.Name) and tree.body.id.startswith("$"):
@@ -299,7 +302,7 @@ def _parameter_reader(
                 if concrete_parameters is None:
                     concrete_parameters = parameters.bind_aliases((), {})
                 result = concrete_parameters.lookup(path)
-        except (ValueError, InvalidInputError) as exc:
+        except (ValueError, InvalidInputError, ModuleSlotError) as exc:
             raise ExpressionError(f"Invalid parameter path {path!r}: {exc}") from exc
         if not result.present:
             raise ExpressionError(f"Invalid parameter path {path!r}: missing parameter")
