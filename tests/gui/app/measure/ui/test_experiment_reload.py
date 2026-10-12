@@ -9,9 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QPushButton
-from zcu_tools.gui.app.measure.app import _make_empty_ctx
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
-from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import (
     ControlOptions,
@@ -24,10 +22,12 @@ from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 from tests.gui.app.measure.remote._helpers import (
+    FixtureController,
     open_client,
     recv_response,
     send,
@@ -36,7 +36,7 @@ from tests.gui.app.measure.remote._helpers import (
 
 @dataclass
 class WindowApp:
-    ctrl: Controller
+    ctrl: FixtureController
     window: MainWindow
     state: State
     loader: Loader
@@ -45,11 +45,11 @@ class WindowApp:
 
 @pytest.fixture
 def window_app(qapp) -> Iterator[WindowApp]:
-    state = State(_make_empty_ctx())
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
     registry.register("demo", OldAdapter)
     loader = Loader()
-    ctrl = Controller(
+    ctrl = FixtureController(
         state=state,
         registry=registry,
         view=None,
@@ -63,7 +63,7 @@ def window_app(qapp) -> Iterator[WindowApp]:
     try:
         yield WindowApp(ctrl, window, state, loader, dialogs)
     finally:
-        ctrl._background_svc.quiesce()
+        ctrl.quiesce()
         window.deleteLater()
         qapp.processEvents()
 
@@ -218,12 +218,17 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
         render_view=app.window,
     )
     port = remote.start()
+    owner_client_id = "reload-test-owner"
     try:
         with open_client(port) as client:
             send(client, {"id": "ready", "method": "tab.list_all", "params": {}})
             assert recv_response(client, "ready")["ok"]
+            send(client, {"id": "release", "method": "control.release", "params": {}})
+            assert recv_response(client, "release")["ok"]
 
             def during_load() -> None:
+                app.ctrl.control_identity.connect(owner_client_id, "agent", "owner")
+                assert app.ctrl.control_identity.status().holder == "rpc:agent"
                 scheduler.record = True
                 params: dict[str, object] = {"tab_id": previous}
                 method = "tab.close"
@@ -254,4 +259,5 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 assert "unknown tab_id" in reply["error"]["message"]
             app.dialogs.assert_no_unexpected_messages()
     finally:
+        app.ctrl.control_identity.disconnect(owner_client_id)
         remote.stop()
