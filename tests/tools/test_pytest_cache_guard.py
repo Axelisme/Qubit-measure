@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pytest_cache_guard import GuiCacheGuard
@@ -15,21 +17,38 @@ def run_session(
     """Run an isolated in-process pytest session without this suite's conftest."""
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\naddopts = --import-mode=importlib\n")
-    test_file = tmp_path / "test_cache_client.py"
+    # pytest's importlib mode keeps collected modules in sys.modules. A unique
+    # package lets repeated sessions run fresh source without replacing imports.
+    package_name = f"cache_session_{uuid4().hex}"
+    session_dir = tmp_path / package_name
+    session_dir.mkdir()
+    test_file = session_dir / "test_cache_client.py"
     test_file.write_text(source)
-    return pytest.main(
-        [
-            "-c",
-            str(config),
-            "--confcutdir",
-            str(tmp_path),
-            "-p",
-            "no:cacheprovider",
-            "-q",
-            str(test_file),
-        ],
-        plugins=[plugin],
-    )
+    previous_path = sys.path[:]
+    previous_current_test = os.environ.get("PYTEST_CURRENT_TEST")
+    try:
+        return pytest.main(
+            [
+                "-c",
+                str(config),
+                "--confcutdir",
+                str(tmp_path),
+                "-p",
+                "no:cacheprovider",
+                "-v",
+                str(test_file),
+            ],
+            plugins=[plugin],
+        )
+    finally:
+        sys.path[:] = previous_path
+        if previous_current_test is None:
+            os.environ.pop("PYTEST_CURRENT_TEST", None)
+        else:
+            os.environ["PYTEST_CURRENT_TEST"] = previous_current_test
+        for name in list(sys.modules):
+            if name == package_name or name.startswith(package_name + "."):
+                del sys.modules[name]
 
 
 def test_default_caretaker_writes_only_to_session_cache(tmp_path: Path) -> None:
@@ -39,7 +58,7 @@ def test_default_caretaker_writes_only_to_session_cache(tmp_path: Path) -> None:
     plugin = GuiCacheGuard(real_cache=real_cache, cache_root=isolated_root)
     result = run_session(
         tmp_path,
-        f'''
+        f"""
 from pathlib import Path
 from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
@@ -65,7 +84,7 @@ def test_default_save():
     expected = Path({str(isolated_root)!r}) / "zcu_tools/gui/gui_state_v1.json"
     assert expected.read_text().strip() == '"saved"'
     assert caretaker.state_path == expected
-''',
+""",
         plugin,
     )
     assert result == pytest.ExitCode.OK, "default GUI saves must use session cache"
@@ -91,16 +110,16 @@ def test_protected_cache_mutation_fails_with_polluting_node(
         "remove": "state.unlink()",
     }
     action = actions[mutation]
-    source = f'''
+    source = f"""
 import os
 from pathlib import Path
 import pytest
 cache = Path({str(real_cache)!r})
 state = cache / "gui_state_v1.json"
-'''
+"""
     if phase == "collection":
         source += f"\n{action}\n"
-    source += f'''
+    source += f"""
 @pytest.fixture(autouse=True)
 def cache_client():
     {action if phase == "setup" else "pass"}
@@ -109,7 +128,7 @@ def cache_client():
 
 def test_polluter():
     {action if phase == "call" else "pass"}
-'''
+"""
     result = run_session(
         tmp_path,
         source,
