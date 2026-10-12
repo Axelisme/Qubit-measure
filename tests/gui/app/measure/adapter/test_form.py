@@ -215,3 +215,35 @@ def test_loaded_cfg_with_extras_must_roundtrip_before_accepting_input() -> None:
     restored_state = FormState(restored)
     assert restored.data["extras"] == {"multiplier": 1}
     assert form.to_cfg(require_result(restored_state, env), env) == native
+
+
+class NullableDeviceNames(ConfigBase):
+    """Nullable and required are separate core constraints."""
+
+    optional_dev: str | None = None
+    nullable_required_dev: str | None
+
+
+def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
+    env = FormEnv()
+    form = adapter_api.Form(
+        NullableDeviceNames,
+        {
+            "optional_dev": nodes.AliasName("missing"),
+            "nullable_required_dev": nodes.AliasName("also_missing"),
+        },
+    )
+    state = FormState(form.default_input(env))
+    missing = state.result(env)
+    assert isinstance(missing, FormErrors)
+    assert ("nullable_required_dev",) in missing.messages
+    state.write({("nullable_required_dev",): None}, env)
+    result = require_result(state, env)
+    assert form.to_cfg(result, env) == NullableDeviceNames(nullable_required_dev=None)
+    assert form.model.choices(env) == {
+        ("optional_dev",): (None,),
+        ("nullable_required_dev",): (None,),
+    }
+    required = adapter_api.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
+    assert required.model.choices(env)[("flux_dev",)] == ()
+    assert isinstance(FormState(required.default_input(env)).result(env), FormErrors)
