@@ -766,9 +766,9 @@ def test_open_envelope_rejects_malformed_values_before_begin(
 
 
 @pytest.mark.parametrize(
-    "command,params", [("finish", {}), ("apply", {"extra": 1}), ("undo", {"extra": 1})]
+    "command,params", [("finish", {"extra": 1}), ("apply", {"extra": 1}), ("undo", {"extra": 1})]
 )
-def test_joint_reserved_commands_reject_wrong_kind_and_params(
+def test_joint_reserved_commands_reject_params(
     joint_route: RouteHarness, command: str, params: dict[str, object]
 ):
     link = joint_route.client()
@@ -897,3 +897,39 @@ def test_distance_changes_kept_count_without_rewriting_input_brush_mask(
     count = state["selected_count"]
     assert isinstance(count, int)
     assert count < len(before.selected)
+
+
+def test_filter_finish_publishes_closes_and_reports_each_spectrum(joint_route: RouteHarness):
+    link = joint_route.client()
+    context = _context(joint_route.request(link, "selection.interactive.open"))
+    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.5, 4.5]], width=0.03, mode="erase")["ok"]
+    finished = _joint_command(joint_route, link, context, "finish")
+    assert finished["ok"] is True, finished
+    result = _context(finished)
+    assert result["closed"] is True
+    assert result["can_undo"] is False
+    assert _state(result)["per_spectrum"] == {"a": [2, 3], "empty": [0, 0], "b": [0, 1]}
+    np.testing.assert_array_equal(joint_route.ctrl.state.selection_mask(), [True, False, True, False])
+    assert joint_route.ctrl.interactive.inspect("selection") is None
+    assert joint_route.request(link, "selection.render")["ok"]
+    assert joint_route.ctrl.interactive.inspect("selection") is None
+
+
+def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteHarness):
+    link = joint_route.client()
+    context = _context(joint_route.request(link, "selection.interactive.open"))
+    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.5, 4.5]], width=0.03, mode="erase")["ok"]
+    # The finish promise is covered separately; publish/cancel reaches the same
+    # published input without making this render regression depend on finish.
+    assert _joint_command(joint_route, link, context, "apply")["ok"]
+    assert _joint_command(joint_route, link, context, "cancel")["ok"]
+    observer = joint_route.client(mode="readonly")
+    before = joint_route.ctrl.state.version.snapshot()
+    rendered = joint_route.request(observer, "selection.render")
+    assert rendered["ok"] is True, rendered
+    png = base64.b64decode(rendered["result"]["png_b64"])
+    with Image.open(io.BytesIO(png)) as image:
+        assert image.format == "PNG"
+        assert image.width > 100 and image.height > 100
+    assert joint_route.ctrl.interactive.inspect("selection") is None
+    assert joint_route.ctrl.state.version.snapshot() == before
