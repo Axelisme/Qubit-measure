@@ -1,16 +1,21 @@
 """Sampling intents compose named native drafts and compact detector receipts."""
 
+import base64
 import json
 import sys
 from io import BytesIO, TextIOWrapper
 from typing import Literal
 
 import pytest
+from PIL import Image
+from zcu_tools.mcp.core.reply import ToolReply
 
 from tests.mcp.fluxdep._support import Client, GuiResponse
 
 
-def capture(kind: Literal["onetone", "twotone"], threshold: float) -> dict[str, object]:
+def capture(
+    kind: Literal["onetone", "twotone"], threshold: float, *, closed: bool = False
+) -> dict[str, object]:
     """Scripted app capture with independent point and mask counts."""
     state: dict[str, object] = {"threshold": threshold}
     if kind == "onetone":
@@ -26,7 +31,7 @@ def capture(kind: Literal["onetone", "twotone"], threshold: float) -> dict[str, 
         "context": {
             "context_id": 12,
             "kind": kind,
-            "closed": False,
+            "closed": closed,
             "state": state,
             "can_undo": True,
         },
@@ -120,3 +125,107 @@ def test_settings_report_before_after_and_positional_point_changes(
             },
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "command", "image", "render_method"),
+    [
+        ("onetone", "finish", False, "spectrum.render"),
+        ("twotone", "finish", False, "spectrum.render"),
+        ("onetone", "set_threshold", True, "interactive.render"),
+        ("twotone", "stroke", True, "interactive.render"),
+        ("twotone", "undo", False, None),
+    ],
+)
+def test_sampling_finish_and_image_override_use_native_evidence(
+    client: Client,
+    kind: Literal["onetone", "twotone"],
+    command: str,
+    image: bool,
+    render_method: str | None,
+):
+    params: dict[str, object] = {}
+    if command == "set_threshold":
+        params = {"threshold": 2.0}
+    elif command == "stroke":
+        params = {
+            "vertices": [[-1.0, 4.5], [1.0, 5.1]],
+            "width": 0.08,
+            "mode": "select",
+        }
+    client.transport.replies.extend(
+        [
+            GuiResponse(
+                result={"spec_type": "OneTone" if kind == "onetone" else "TwoTone"}
+            ),
+            GuiResponse(result=capture(kind, 2.0)),
+            GuiResponse(result=capture(kind, 2.0, closed=command == "finish")),
+        ]
+    )
+    if command == "finish":
+        client.transport.replies.append(
+            GuiResponse(
+                result={
+                    "points": {
+                        "fluxs": [0.12345, 0.98765],
+                        "freqs": [4.56789, 5.43210],
+                    },
+                }
+            )
+        )
+    if render_method:
+        buffer = BytesIO()
+        with Image.new("RGB", (12, 8), "red") as png:
+            png.save(buffer, format="PNG")
+        data = buffer.getvalue()
+        client.transport.replies.append(
+            GuiResponse(
+                result={
+                    "png_b64": base64.b64encode(data).decode("ascii"),
+                    "bytes": len(data),
+                }
+            )
+        )
+    value = client.server.tools["fluxdep_sample"]["handler"](
+        {
+            "name": "s",
+            "command": command,
+            "params": params,
+            "image": image,
+        }
+    )
+    reply = value if isinstance(value, ToolReply) else ToolReply(value)
+    assert client.transport.requests[2]["params"] == {
+        "name": "s",
+        "context_id": 12,
+        "command": command,
+        "params": params,
+    }
+    if command == "finish":
+        assert reply.data == {
+            "name": "s",
+            "stage": "sampled",
+            "pending": False,
+            "points": {
+                "count": 2,
+                "flux_range": [0.123, 0.988],
+                "freq_range": [4.568, 5.432],
+            },
+        }
+        assert client.transport.requests[-2]["method"] == "spectrum.snapshot"
+        assert client.transport.requests[-2]["params"] == {"name": "s"}
+    else:
+        assert reply.data["stage"] == "sample"
+        assert reply.data["pending"] is True
+        assert "changes" not in reply.data
+        if kind == "twotone":
+            assert reply.data["mask"] == {"pixels": 20, "changes": [0, 0]}
+            assert reply.data["can_undo"] is True
+    if render_method:
+        assert reply.images[0].data == data
+        assert len(reply.images) == 1
+        assert client.transport.requests[-1]["method"] == render_method
+        assert client.transport.requests[-1]["params"] == {"name": "s"}
+    else:
+        assert not reply.images
+        assert len(client.transport.requests) == 3
