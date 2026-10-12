@@ -1,6 +1,6 @@
 """Front-end-neutral field descriptions survive Pydantic type wrappers."""
 
-from typing import Annotated, Union
+from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, Field
@@ -21,8 +21,10 @@ def test_reads_field_meta_through_annotated_and_union(name: str) -> None:
         direct: Annotated[float, meta]
         outer_optional: Annotated[float | None, meta] = None
         inner_optional: Annotated[float, meta] | None = None
-        union_member: Union[Annotated[float, meta], str]
-        nested: Annotated[Annotated[float, meta] | None, Field(description="Other")] = None
+        union_member: Annotated[float, meta] | str
+        nested: Annotated[Annotated[float, meta] | None, Field(description="Other")] = (
+            None
+        )
 
     assert get_field_meta(Cfg.model_fields[name]) == meta
 
