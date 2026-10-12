@@ -1,8 +1,12 @@
+import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 from zcu_tools.analysis.fitting.multi_decay import (
     TransitionRates,
     fit_dual_transition_rates,
+    fit_dual_with_vadality,
     fit_transition_rates,
+    fit_with_vadality,
     model_func,
 )
 
@@ -43,3 +47,24 @@ def test_fit_dual_transition_rates_returns_named_global_result():
     assert result.fitted_populations2.shape == populations2.shape
     assert result.covariance.shape == (10, 10)
     assert result.shared_fit.parameter_names[:6] == TransitionRates.NAMES
+
+
+@pytest.mark.parametrize("dual", [False, True], ids=["single", "dual"])
+def test_prefix_fit_diagnostics_complete_on_agg(dual):
+    previous_backend = plt.get_backend()
+    previous_figures = set(plt.get_fignums())
+    plt.switch_backend("Agg")
+    try:
+        times = np.linspace(0.0, 20.0, 20)
+        rates = TransitionRates(0.1, 0.05, 0.08, 0.04, 0.02, 0.01)
+        ground = model_func(times, *rates.as_tuple(), 0.96, 0.03)
+        if dual:
+            excited = model_func(times, *rates.as_tuple(), 0.04, 0.95)
+            result = fit_dual_with_vadality(times, ground, excited)
+        else:
+            result = fit_with_vadality(times, ground)
+        assert result is None
+    finally:
+        for figure_number in set(plt.get_fignums()) - previous_figures:
+            plt.close(figure_number)
+        plt.switch_backend(previous_backend)
