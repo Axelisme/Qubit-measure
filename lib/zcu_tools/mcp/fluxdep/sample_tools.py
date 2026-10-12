@@ -8,6 +8,8 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import ToolTable
 
+from .projection import with_png
+
 
 class SampleArguments(TypedDict):
     """Sampling intent; GUI owns spectrum type, detector domains and admission.
@@ -56,12 +58,31 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
             ),
         ).data
         after: InteractiveContextReply = native["context"]
-        changes = native["effect"]["changes"]
         summary: dict[str, object] = {
             "name": name,
-            "stage": "sample",
+            "stage": "sampled" if command == "finish" else "sample",
             "pending": not after["closed"],
         }
+        if "discarded" in opened:
+            summary["discarded"] = opened["discarded"]
+        if command == "finish":
+            published_points = call_gui(
+                bridge, GuiRpcCall("spectrum.snapshot", target, 6.0)
+            ).data["points"]
+            points: dict[str, object] = {"count": len(published_points["freqs"])}
+            for source, field in (("fluxs", "flux_range"), ("freqs", "freq_range")):
+                values = published_points[source]
+                points[field] = (
+                    [round(min(values), 3), round(max(values), 3)] if values else None
+                )
+            summary["points"] = points
+            if "invalidated" in native:
+                summary["invalidated"] = native["invalidated"]
+            return with_png(
+                ToolReply(summary),
+                call_gui(bridge, GuiRpcCall("spectrum.render", target, 31.0)),
+            )
+        changes = native["effect"]["changes"]
         if before["kind"] == "onetone" and after["kind"] == "onetone":
             settings: dict[str, object] = {"threshold": after["state"]["threshold"]}
             changed: dict[str, object] = {}
@@ -103,14 +124,17 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
             raise RuntimeError(
                 "Sampling command returned a different native context kind"
             )
-        if "discarded" in opened:
-            summary["discarded"] = opened["discarded"]
-        return ToolReply(summary)
+        reply = ToolReply(summary)
+        if arguments.get("image", False):
+            return with_png(
+                reply, call_gui(bridge, GuiRpcCall("interactive.render", target, 31.0))
+            )
+        return reply
 
     return {
         bridge.config.tool_prefix + "sample": {
             "handler": sample,
-            "description": "Sample a named aligned spectrum (J3), using its published GUI type. OneTone: set_threshold(threshold in [0,5]), finish. TwoTone: stroke(vertices=device/GHz pairs, width=normalized radius [0,0.1], mode=select|erase), set_settings(threshold in [1,20], sigma in [0,5], smooth_method=wavelet|gaussian; gaussian sigma >=0.001), undo, finish. Settings are dimensionless; set_settings requires at least one value. Initial and reopened TwoTone sampling start empty. Replies summarize settings before/after, detected points and mask pixels separately. GUI owns prerequisites and parameter validation; accepted edits are not retried or rolled back.",
+            "description": "Sample a named aligned spectrum (J3), using its published GUI type. OneTone: set_threshold(threshold in [0,5]), finish. TwoTone: stroke(vertices=device/GHz pairs, width=normalized radius [0,0.1], mode=select|erase), set_settings(threshold in [1,20], sigma in [0,5], smooth_method=wavelet|gaussian; gaussian sigma >=0.001), undo, finish. Settings are dimensionless; set_settings requires at least one value. finish always returns published point ranges and native evidence; image=true requests draft evidence for other commands. Initial and reopened TwoTone sampling start empty. Replies summarize settings before/after, detected points and mask pixels separately. GUI owns prerequisites and parameter validation; accepted edits are not retried or rolled back.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
