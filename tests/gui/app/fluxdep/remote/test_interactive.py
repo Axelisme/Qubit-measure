@@ -594,10 +594,12 @@ def test_invalid_commands_do_not_change_snapshot_undo_versions_or_facts(
     elif case == "name":
         values["name"] = "other"
         one_route.request(link, "spectrum.snapshot", name="other")
+        reason = "no_interactive_context"
     elif case == "selection_target":
         _read_sources(one_route, link)
         method = "selection.interactive.command"
         values.pop("name")
+        reason = "no_interactive_context"
     elif case == "apply":
         values["command"] = "apply"
         code, reason = "invalid_params", "invalid_interactive_command"
@@ -861,9 +863,10 @@ def test_open_envelope_rejects_malformed_values_before_begin(
 
 
 @pytest.mark.parametrize(
-    "command,params", [("finish", {}), ("apply", {"extra": 1}), ("undo", {"extra": 1})]
+    "command,params",
+    [("finish", {"extra": 1}), ("apply", {"extra": 1}), ("undo", {"extra": 1})],
 )
-def test_joint_reserved_commands_reject_wrong_kind_and_params(
+def test_joint_reserved_commands_reject_params(
     joint_route: RouteHarness, command: str, params: dict[str, object]
 ):
     link = joint_route.client()

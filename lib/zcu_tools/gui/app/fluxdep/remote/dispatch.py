@@ -270,6 +270,16 @@ def _h_selection_snapshot(
     }
 
 
+def _h_selection_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    del params
+    figure = Figure(figsize=(8, 5))
+    adapter.ctrl.render_selection(figure)
+    png = render_figure_png(figure)
+    return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
+
+
 def _h_selection_pointcloud(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PointcloudReply:
@@ -560,6 +570,7 @@ _HANDLERS: dict[str, Handler] = {
     "spectrum.reset_alignment": _h_spectrum_reset_alignment,
     "spectrum.reset_points": _h_spectrum_reset_points,
     "selection.snapshot": _h_selection_snapshot,
+    "selection.render": _h_selection_render,
     "selection.pointcloud": _h_selection_pointcloud,
     "interactive.read": h_interactive_read,
     "interactive.render": h_interactive_render,

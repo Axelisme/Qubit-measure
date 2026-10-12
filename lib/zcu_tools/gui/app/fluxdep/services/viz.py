@@ -50,6 +50,38 @@ class _Background:
     signals: NDArray[np.complex128]
 
 
+def render_selection_result(
+    figure: Figure, spectrums: dict[str, SpectrumEntry]
+) -> None:
+    """Draw published sampled points and per-spectrum masks, never live drafts.
+
+    figure is caller-owned and cleared. Backgrounds use native normalization;
+    excluded points are gray crosses, selected points blue dots in flux/GHz.
+    Empty published collections produce empty axes. No state or file is changed.
+    """
+    figure.clear()
+    ax = figure.add_subplot(111)
+    _plot_background(ax, spectrums)
+    for entry in spectrums.values():
+        points = entry.points
+        kept = entry.filter_mask
+        if kept is None:
+            kept = np.ones(entry.point_count, dtype=np.bool_)
+        ax.scatter(
+            points["fluxs"][~kept],
+            points["freqs"][~kept],
+            color="gray",
+            marker="x",
+            zorder=2,
+        )
+        ax.scatter(
+            points["fluxs"][kept], points["freqs"][kept], color="blue", s=12, zorder=3
+        )
+    ax.set_xlabel("Flux")
+    ax.set_ylabel("Frequency (GHz)")
+    figure.tight_layout()
+
+
 def derive_auto_limits(
     spectrums: dict[str, SpectrumEntry],
     s_fluxs: NDArray[np.float64],

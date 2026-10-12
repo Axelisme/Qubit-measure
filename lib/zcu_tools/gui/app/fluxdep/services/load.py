@@ -148,8 +148,16 @@ class LoadService:
         points, so it shows in ResultPreview. Return loaded names. Read the
         persisted spectrum type; legacy missing type defaults to "TwoTone".
         No workflow metadata is required beyond the processed spectrum payload.
+        Reject the entire restore with InvalidInputError if any name already
+        exists, listing all conflicts before publishing any spectrum.
         """
         spectrums = load_spectrums(filepath)
+        conflicts = [name for name in spectrums if name in self._state.spectrums]
+        if conflicts:
+            raise InvalidInputError(
+                "Processed spectrum names already exist: " + ", ".join(conflicts),
+                reason_code="spectrum_name_conflict",
+            )
         names: list[str] = []
         for name, result in spectrums.items():
             spec_type: SpecType = (

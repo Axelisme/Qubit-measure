@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，sampling intent 與空初始遮罩
+**Last updated:** 2026-10-13，sampling intent、空初始遮罩、Filter finish 與採點 checkpoint
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -194,8 +194,9 @@ Project、spectrum、selection 與 fit reads 提供目前 owner projections。
 Spectrum snapshot 包含 calibration、published points 與 raw axes extents，不輸出 complex
 signal matrix。Selection snapshot 提供 published mask 與 normalized min_distance，
 不讀 live Session。Remove、reset 與 active selection 共用 Controller owners。
-Raw load／processed restore 保留 basename replacement、inheritance／transpose 與 completion
-契約，publication 失敗保留已發布前綴，不 rollback。
+Raw load 保留 basename replacement、inheritance／transpose 契約。
+Processed restore 是採點後的 checkpoint，包含零點完成譜。同名衝突在發布前拒絕整批，列出衝突名稱。
+Export 保存所有已採點，不保存 Filter 遮罩。其他 publication 失敗保留已發布前綴，不 rollback。
 Fit replacement 使用 `search_db`，與專案 raw-data root 區分。JSON parser 驗 type／shape／finite；kernel 在發布前驗 transition 類別與能階索引，只有需要能階數才讀 DB metadata，不載入 energies。拒絕或 I/O 失敗不改舊 inputs／result，成功則清掉舊結果，不啟動搜尋。Bounds 與缺少頻率仍在 search 時驗證。
 GUI Show 與 `fit.render` 共用 Controller 的 native overlay 入口。顯示範圍、reference lines 與 transition 子集只改 presentation，不改 search inputs。`fit.database_info` 只讀 DB counts 與參數範圍。
 
@@ -212,7 +213,9 @@ Read 的 optional context_id 與 command identity 保留 owner-lifetime guard。
 Command 核對 identity 與 target 後呼叫同一 plugin Actions、Session Undo 與 app publication。
 TwoTone mask-cell count 與 detected-point count 分開；selection 保留 input mask 與
 downsample 後 kept count。Finish／cancel receipt 保留退休 identity，即使 GUI 已開下一份
-context。Apply 不關閉有效 joint input；publication／rendering 失敗不宣稱 rollback。
+context。Filter finish 發布並關閉全域 context；Apply 仍不關閉有效 joint input。
+readonly selection.render 固定畫已發布點雲與各譜遮罩，interactive.render 只畫 live draft。
+兩者都不建立 Session。publication／rendering 失敗不宣稱 rollback。
 顯示切換不開 Session。Local holder 的人類點譜可另開目前階段 picker，observer RPC 只顯示草稿或已發布資料。
 PNG 不使用 Qt canvas，也不保存為產物。
 

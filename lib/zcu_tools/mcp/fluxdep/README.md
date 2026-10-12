@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, named sampling intent and evidence
+**Last updated:** 2026-10-13, sampling and Filter decisions, sampled checkpoints
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge.
@@ -55,6 +55,17 @@ keep detected point counts separate from mask pixels. Initial and reopened
 TwoTone drafts start empty in both GUI and RPC. finish reads published point
 ranges and attaches spectrum.render evidence; image=true requests draft evidence
 for other commands. MCP exposes no brush mode setter or full-mask command.
+
+`filter_tools.py` implements J6 as `fluxdep_filter(command, params?, image?)`.
+It opens/reuses the global GUI Filter and sends stroke, set_min_distance, undo
+or finish. Counts and per-spectrum [selected, total] pairs come from the GUI.
+Finish publishes and closes once, then attaches selection.render() evidence of
+the published cloud and masks. image=true on unfinished commands requests
+interactive.render(selection) draft evidence. MCP saves no mask or draft image.
+
+Spectrum Export/Restore tools report sampled checkpoint summaries, including
+zero-point completed spectra. Export does not save Filter masks. Restore refuses
+all names before publication when any name conflicts and preserves GUI errors.
 
 `fit_tools.py` composes `fluxdep_fit` as a current-input read, caller overlay,
 complete replacement, search, bounded native awaits until terminal, final result

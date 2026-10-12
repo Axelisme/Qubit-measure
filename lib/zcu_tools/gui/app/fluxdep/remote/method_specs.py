@@ -72,8 +72,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "spectrum.load_processed": MethodSpec(
         30.0,
-        "Restore processed spectra, including empty completed spectra; "
-        "publication is incremental, not rolled back on failure.",
+        "Restore sampled checkpoints, including empty completed spectra. "
+        "Reject all names before publication if any already exist; Filter masks are not restored.",
         params=(ParamSpec("filepath", JsonType.STRING),),
     ),
     "spectrum.remove": MethodSpec(
@@ -105,6 +105,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Read the complete published joint-cloud selection mask and native "
         "normalized min_distance, plus pending for an unfinished Filter draft. "
         "Null mask means all points, not a live Session.",
+        readonly=True,
+    ),
+    "selection.render": MethodSpec(
+        30.0,
+        "Render the published joint cloud and per-spectrum Filter masks as PNG. "
+        "Never opens a Session or reads a draft.",
         readonly=True,
     ),
     "selection.pointcloud": MethodSpec(
@@ -161,8 +167,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "selection.interactive.command": MethodSpec(
         30.0,
         "Command the current joint identity. "
-        "Use plugin commands or parameterless undo, apply, cancel. "
-        "Apply publishes without closing.",
+        "Use plugin commands or parameterless undo, finish, apply, cancel. "
+        "Finish publishes and closes; Apply publishes without closing.",
         params=(
             ParamSpec("context_id", JsonType.INTEGER),
             ParamSpec("command", JsonType.STRING),
