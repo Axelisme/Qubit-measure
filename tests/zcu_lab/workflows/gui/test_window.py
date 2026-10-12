@@ -346,7 +346,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
         token = receipt["operation_id"]
     # No membership check at Start, even for an unknown device name.
     assert isinstance(token, int), token
-    assert window.plan_panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+    assert window.plan_panel.state.input.data["flux_dev"] == device
     context.set_parameter(
         context.read_context().target, "Q1.flux_source", "later_device"
     )
@@ -375,7 +375,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
     _, saved = load_run_with_metadata(destination, spec=spec)
     assert saved.snapshot == metadata.snapshot
     assert saved.snapshot.roles["flux_dev"] == "flux"
-    assert window.plan_panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+    assert window.plan_panel.state.input.data["flux_dev"] == device
 
 
 def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(

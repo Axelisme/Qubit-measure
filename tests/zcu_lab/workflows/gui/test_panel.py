@@ -184,14 +184,14 @@ def test_plan_panel_resolves_default_device_alias_in_fixed_preview(
         preview = panel.preview(make_plan(inputs).snapshot)
         assert isinstance(preview, CoherencePlan), preview
         assert preview.flux_dev == "offline_device"  # Not in any device catalog.
-        assert panel.state.input.data["flux_dev"] == {"expr": "$flux_dev"}
+        assert panel.state.input.data["flux_dev"] == "offline_device"
         shown = panel.editor.findChild(QLabel, "form.value.flux_dev")
         assert shown is not None and "offline_device" in shown.text()
         later = parameters.bind_aliases((AliasRow("flux_dev", "later_device"),), {})
         changed = panel.state.result(FormEnv(parameters=later))
         assert (
             isinstance(changed, CoherencePlanForm)
-            and changed.flux_dev == "later_device"
+            and changed.flux_dev == "offline_device"
         )
         again = panel.preview(make_plan(inputs).snapshot)
         assert isinstance(again, CoherencePlan) and again.flux_dev == "offline_device"

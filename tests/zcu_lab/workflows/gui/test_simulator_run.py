@@ -38,6 +38,9 @@ def start_native(session: SimSession, inputs: Inputs, starter: str, run_id: str)
                 inputs.flux_value + 0.02,
             ],
         },
+        {"path": ["measure_t1"], "value": True},
+        {"path": ["measure_t2ramsey"], "value": False},
+        {"path": ["measure_t2echo"], "value": False},
         {"path": ["points"], "value": 21},
         {"path": ["pi_length_us"], "value": 0.4},
         {"path": ["qub_pulse", "kind"], "value": "ref"},
@@ -48,7 +51,7 @@ def start_native(session: SimSession, inputs: Inputs, starter: str, run_id: str)
     tunables: list[FormWrite] = [
         {"path": ["cal", "span_mhz"], "value": 2.0},
         {"path": ["cal", "rabi_start_factor"], "value": 0.125},
-        {"path": ["rounds"], "value": 2},
+        {"path": ["t1", "rounds"], "value": 2},
     ]
     window = session.app.window
     if starter == "gui":
@@ -105,10 +108,11 @@ def apply_and_resume(
     prior = engine.records(run_id)
     if starter == "gui":
         session.call(
-            "tunables", {"run_id": run_id, "batch": [{"path": ["rounds"], "value": 3}]}
+            "tunables",
+            {"run_id": run_id, "batch": [{"path": ["t1", "rounds"], "value": 3}]},
         )
     else:
-        panel.panel.state.write({("rounds",): 3}, panel.host.env)
+        panel.panel.state.write({("t1", "rounds"): 3}, panel.host.env)
         applied = panel.apply()
         assert isinstance(applied, TunablesSnapshot) and applied.revision == 1
     assert engine.records(run_id) == prior
@@ -159,8 +163,12 @@ def assert_native_files(
         assert native.result.times.shape == native.result.signals.shape == (21,)
         assert np.isfinite(native.result.signals).all()
         point = record.encoded_record.value
-        assert isinstance(point, dict) and point["reason"] is None
-        assert point["lifetime_us"] == pytest.approx(20.0, rel=0.2)
+        assert isinstance(point, dict)
+        measurements = point["measurements"]
+        assert isinstance(measurements, list) and len(measurements) == 1
+        t1 = measurements[0]
+        assert isinstance(t1, dict) and t1["kind"] == "t1" and t1["reason"] is None
+        assert t1["lifetime_us"] == pytest.approx(20.0, rel=0.2)
 
 
 def assert_persisted_records(
