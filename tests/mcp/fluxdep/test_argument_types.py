@@ -11,7 +11,11 @@ from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
         ("fluxdep_spectrum_snapshot", {"name": 123}, "name"),
         (
             "fluxdep_spectrum_load",
-            {"filepath": "/data/raw.hdf5", "spec_type": "OneTone", "transpose_axes": "false"},
+            {
+                "filepath": "/data/raw.hdf5",
+                "spec_type": "OneTone",
+                "transpose_axes": "false",
+            },
             "transpose_axes",
         ),
     ],

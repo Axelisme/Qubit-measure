@@ -79,10 +79,6 @@ def invoke_stdio(
         return json.loads(output_stream.read())
 
 
-
-
-
-
 def test_factory_rejects_an_inconsistent_bridge_binding(
     client: Client, tmp_path: Path
 ) -> None:
@@ -91,16 +87,6 @@ def test_factory_rejects_an_inconsistent_bridge_binding(
         build_fluxdep_server(config, tmp_path, bridge=client.server.bridge)
     assert client.transport.requests == []
     assert client.transport.is_open
-
-
-
-
-
-
-
-
-
-
 
 
 def test_gui_stale_error_preserves_native_diagnostics_without_read_or_retry(
@@ -118,10 +104,6 @@ def test_gui_stale_error_preserves_native_diagnostics_without_read_or_retry(
     assert len(client.transport.requests) == 1
 
 
-
-
-
-
 def test_transport_timeout_has_no_reconnect_or_replay(
     client: Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -130,7 +112,3 @@ def test_transport_timeout_has_no_reconnect_or_replay(
     assert reply["result"].get("isError") is True
     assert len(client.transport.requests) == 1
     assert client.transport.close_count == 1
-
-
-
-

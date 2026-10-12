@@ -19,15 +19,35 @@ def tool_reply(value: ToolReply | dict[str, object]) -> ToolReply:
 def snapshot() -> dict[str, object]:
     """Native complete snapshot with unsorted points and independent extents."""
     return {
-        "name": "raw.hdf5", "exists": True, "spec_type": "TwoTone",
-        "aligned": True, "points_completed": True, "pending": "sample",
-        "flux_half": 1.23456, "flux_int": 3.23456, "flux_period": 4.0,
+        "name": "raw.hdf5",
+        "exists": True,
+        "spec_type": "TwoTone",
+        "aligned": True,
+        "points_completed": True,
+        "pending": "sample",
+        "flux_half": 1.23456,
+        "flux_int": 3.23456,
+        "flux_period": 4.0,
         "alignment": {"inherited_from": "seed.hdf5"},
         "raw_axes": {
-            "dev_values": {"count": 5, "minimum": -1.23456, "maximum": 3.45678, "unit": "native"},
-            "freqs": {"count": 6, "minimum": 4.12345, "maximum": 5.98765, "unit": "GHz"},
+            "dev_values": {
+                "count": 5,
+                "minimum": -1.23456,
+                "maximum": 3.45678,
+                "unit": "native",
+            },
+            "freqs": {
+                "count": 6,
+                "minimum": 4.12345,
+                "maximum": 5.98765,
+                "unit": "GHz",
+            },
         },
-        "points": {"dev_values": [1.1, 0.2, 0.4], "fluxs": [0.53712, 0.20821, 0.3], "freqs": [5.97011, 3.58012, 4.2]},
+        "points": {
+            "dev_values": [1.1, 0.2, 0.4],
+            "fluxs": [0.53712, 0.20821, 0.3],
+            "freqs": [5.97011, 3.58012, 4.2],
+        },
     }
 
 
@@ -43,23 +63,47 @@ def image_reply() -> dict[str, object]:
 
 @pytest.mark.parametrize("load", [False, True])
 def test_snapshot_and_load_return_ranges_and_native_evidence(
-    client: Client, snapshot: dict[str, object], image_reply: dict[str, object], load: bool,
+    client: Client,
+    snapshot: dict[str, object],
+    image_reply: dict[str, object],
+    load: bool,
 ) -> None:
     responses = [GuiResponse(result=snapshot), GuiResponse(result=image_reply)]
     if load:
         responses.insert(0, GuiResponse(result={"name": "raw.hdf5"}))
     client.transport.replies.extend(responses)
     tool = "fluxdep_spectrum_load" if load else "fluxdep_spectrum_snapshot"
-    args = {"filepath": "/raw.hdf5", "spec_type": "TwoTone", "inherit_from": "seed.hdf5", "transpose_axes": True} if load else {"name": "raw.hdf5"}
+    args = (
+        {
+            "filepath": "/raw.hdf5",
+            "spec_type": "TwoTone",
+            "inherit_from": "seed.hdf5",
+            "transpose_axes": True,
+        }
+        if load
+        else {"name": "raw.hdf5"}
+    )
     result = tool_reply(client.server.tools[tool]["handler"](args))
     assert result.data == {
-        "name": "raw.hdf5", "type": "TwoTone", "stage": "sampled", "pending": "sample",
+        "name": "raw.hdf5",
+        "type": "TwoTone",
+        "stage": "sampled",
+        "pending": "sample",
         "axes": {
             "dev": {"count": 5, "min": -1.235, "max": 3.457, "unit": "native"},
             "freq": {"count": 6, "min": 4.123, "max": 5.988, "unit": "GHz"},
         },
-        "alignment": {"flux_half": 1.235, "flux_int": 3.235, "flux_period": 4.0, "inherited_from": "seed.hdf5"},
-        "points": {"count": 3, "flux_range": [0.208, 0.537], "freq_range": [3.58, 5.97]},
+        "alignment": {
+            "flux_half": 1.235,
+            "flux_int": 3.235,
+            "flux_period": 4.0,
+            "inherited_from": "seed.hdf5",
+        },
+        "points": {
+            "count": 3,
+            "flux_range": [0.208, 0.537],
+            "freq_range": [3.58, 5.97],
+        },
     }
     assert len(result.images) == 1
     calls = [(r["method"], r["params"]) for r in client.transport.requests]
@@ -70,37 +114,110 @@ def test_snapshot_and_load_return_ranges_and_native_evidence(
 
 
 @pytest.mark.parametrize("selected", [None, [True, False, True]])
-def test_list_summarizes_stages_filter_and_stale_fit(client: Client, selected: list[bool] | None) -> None:
-    client.transport.replies.extend([
-        GuiResponse(result={"spectrums": [
-            {"name": "a", "spec_type": "TwoTone", "aligned": True, "points_completed": True, "point_count": 3, "pending": None},
-            {"name": "b", "spec_type": "OneTone", "aligned": True, "points_completed": False, "point_count": 0, "pending": "sample"},
-            {"name": "c", "spec_type": "TwoTone", "aligned": False, "points_completed": False, "point_count": 0, "pending": "align"},
-        ]}),
-        GuiResponse(result={"selected": selected, "min_distance": 0.1, "pending": True}),
-        GuiResponse(result={"has_result": True, "stale": True, "stale_reasons": ["filter changed"], "params": {"EJ": 3.0}, "quality": {"residuals": [1.0, 2.0]}}),
-    ])
+def test_list_summarizes_stages_filter_and_stale_fit(
+    client: Client, selected: list[bool] | None
+) -> None:
+    client.transport.replies.extend(
+        [
+            GuiResponse(
+                result={
+                    "spectrums": [
+                        {
+                            "name": "a",
+                            "spec_type": "TwoTone",
+                            "aligned": True,
+                            "points_completed": True,
+                            "point_count": 3,
+                            "pending": None,
+                        },
+                        {
+                            "name": "b",
+                            "spec_type": "OneTone",
+                            "aligned": True,
+                            "points_completed": False,
+                            "point_count": 0,
+                            "pending": "sample",
+                        },
+                        {
+                            "name": "c",
+                            "spec_type": "TwoTone",
+                            "aligned": False,
+                            "points_completed": False,
+                            "point_count": 0,
+                            "pending": "align",
+                        },
+                    ]
+                }
+            ),
+            GuiResponse(
+                result={"selected": selected, "min_distance": 0.1, "pending": True}
+            ),
+            GuiResponse(
+                result={
+                    "has_result": True,
+                    "stale": True,
+                    "stale_reasons": ["filter changed"],
+                    "params": {"EJ": 3.0},
+                    "quality": {"residuals": [1.0, 2.0]},
+                }
+            ),
+        ]
+    )
     result = tool_reply(client.server.tools["fluxdep_spectrum_list"]["handler"]({}))
     assert result.data == {
         "spectrums": [
-            {"name": "a", "type": "TwoTone", "stage": "sampled", "point_count": 3, "pending": None},
-            {"name": "b", "type": "OneTone", "stage": "aligned", "point_count": 0, "pending": "sample"},
-            {"name": "c", "type": "TwoTone", "stage": "loaded", "point_count": 0, "pending": "align"},
+            {
+                "name": "a",
+                "type": "TwoTone",
+                "stage": "sampled",
+                "point_count": 3,
+                "pending": None,
+            },
+            {
+                "name": "b",
+                "type": "OneTone",
+                "stage": "aligned",
+                "point_count": 0,
+                "pending": "sample",
+            },
+            {
+                "name": "c",
+                "type": "TwoTone",
+                "stage": "loaded",
+                "point_count": 0,
+                "pending": "align",
+            },
         ],
-        "filter": {"selected": 3 if selected is None else 2, "total": 3, "pending": True},
+        "filter": {
+            "selected": 3 if selected is None else 2,
+            "total": 3,
+            "pending": True,
+        },
         "fit": {"has_result": True, "stale": True, "stale_reasons": ["filter changed"]},
     }
-    assert [r["method"] for r in client.transport.requests] == ["spectrum.list", "selection.snapshot", "fit.result"]
+    assert [r["method"] for r in client.transport.requests] == [
+        "spectrum.list",
+        "selection.snapshot",
+        "fit.result",
+    ]
 
 
 def test_reopened_alignment_precedes_retained_sampling_completion(
-    client: Client, snapshot: dict[str, object], image_reply: dict[str, object],
+    client: Client,
+    snapshot: dict[str, object],
+    image_reply: dict[str, object],
 ) -> None:
     snapshot["aligned"] = False
     snapshot["points_completed"] = True
     snapshot["pending"] = "align"
-    client.transport.replies.extend([GuiResponse(result=snapshot), GuiResponse(result=image_reply)])
-    result = tool_reply(client.server.tools["fluxdep_spectrum_snapshot"]["handler"]({"name": "raw.hdf5"}))
+    client.transport.replies.extend(
+        [GuiResponse(result=snapshot), GuiResponse(result=image_reply)]
+    )
+    result = tool_reply(
+        client.server.tools["fluxdep_spectrum_snapshot"]["handler"](
+            {"name": "raw.hdf5"}
+        )
+    )
     assert result.data["stage"] == "loaded"
     assert result.data["pending"] == "align"
     assert result.data["points"]["count"] == 3
@@ -108,6 +225,10 @@ def test_reopened_alignment_precedes_retained_sampling_completion(
 
 def test_remove_returns_native_receipt_without_followup_reads(client: Client) -> None:
     client.transport.replies.append(GuiResponse(result={"name": "a", "removed": True}))
-    result = tool_reply(client.server.tools["fluxdep_spectrum_remove"]["handler"]({"name": "a"}))
+    result = tool_reply(
+        client.server.tools["fluxdep_spectrum_remove"]["handler"]({"name": "a"})
+    )
     assert result.data == {"name": "a", "removed": True}
-    assert [(r["method"], r["params"]) for r in client.transport.requests] == [("spectrum.remove", {"name": "a"})]
+    assert [(r["method"], r["params"]) for r in client.transport.requests] == [
+        ("spectrum.remove", {"name": "a"})
+    ]

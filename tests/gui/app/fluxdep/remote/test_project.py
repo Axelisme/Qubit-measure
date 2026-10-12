@@ -19,7 +19,9 @@ def test_setup_emits_native_agent_fact_only_after_guard_admission(
     def record(_payload: ProjectChangedPayload, meta: EventMeta) -> None:
         facts.append(meta)
 
-    subscription = route_harness.ctrl.bus.subscribe_with_meta(ProjectChangedPayload, record)
+    subscription = route_harness.ctrl.bus.subscribe_with_meta(
+        ProjectChangedPayload, record
+    )
     try:
         assert route_harness.request(client, "project.info")["ok"]
         assert facts == []
@@ -39,7 +41,9 @@ def test_setup_computes_paths_from_identity_and_controller_root(
     client = route_harness.client()
     root = route_harness.ctrl.get_project_root()
     for name in ("first", "晶片"):
-        reply = route_harness.request(client, "project.setup", chip_name=name, qub_name="Q:1")
+        reply = route_harness.request(
+            client, "project.setup", chip_name=name, qub_name="Q:1"
+        )
         assert reply["ok"] is True
         project = {
             "chip_name": name,
@@ -56,7 +60,8 @@ def test_setup_computes_paths_from_identity_and_controller_root(
 
 @pytest.mark.parametrize("field", ["result_dir", "data_root"])
 def test_undeclared_paths_do_not_override_gui_computed_project(
-    route_harness: RouteHarness, field: str,
+    route_harness: RouteHarness,
+    field: str,
 ) -> None:
     client = route_harness.client()
     reply = route_harness.request(
@@ -64,11 +69,14 @@ def test_undeclared_paths_do_not_override_gui_computed_project(
     )
     assert reply["ok"] is True
     root = route_harness.ctrl.get_project_root()
-    assert reply["result"] == {"project": {
-        "chip_name": "chip", "qub_name": "Q1",
-        "result_dir": os.path.join(root, "result", "chip", "Q1"),
-        "data_root": os.path.join(root, "Database", "chip", "Q1"),
-    }}
+    assert reply["result"] == {
+        "project": {
+            "chip_name": "chip",
+            "qub_name": "Q1",
+            "result_dir": os.path.join(root, "result", "chip", "Q1"),
+            "data_root": os.path.join(root, "Database", "chip", "Q1"),
+        }
+    }
 
 
 @pytest.mark.parametrize(

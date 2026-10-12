@@ -42,9 +42,7 @@ def test_project_info_payload_values_match():
 
 
 def test_project_info_payload_with_explicit_paths():
-    project = ProjectInfo(
-        chip_name="A", qub_name="B", result_dir="/r", data_root="/d"
-    )
+    project = ProjectInfo(chip_name="A", qub_name="B", result_dir="/r", data_root="/d")
     payload = project_info_payload(project)
     assert payload["result_dir"] == "/r"
     assert payload["data_root"] == "/d"

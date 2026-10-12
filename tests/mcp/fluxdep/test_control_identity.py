@@ -229,9 +229,7 @@ def test_stdio_projects_real_control_rejections_without_losing_holder_data(
     invoke(server, "connect", label="reader", mode=mode)
     if reason == "not_holder":
         method = "spectrum_remove"
-    arguments: dict[str, object] = (
-        {"name": "missing"} if reason == "not_holder" else {}
-    )
+    arguments: dict[str, object] = {"name": "missing"} if reason == "not_holder" else {}
     reply = invoke_stdio(
         server.bridge.config, server.tools, "fluxdep_" + method, arguments
     )
