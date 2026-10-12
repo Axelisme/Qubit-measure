@@ -14,8 +14,7 @@ from zcu_tools.gui.app.workflows.exporting import (
     WorkflowExportBindings,
 )
 from zcu_tools.gui.app.workflows.samples import SampleExportBinding
-from zcu_tools.resources.entry import RecordsLedger
-from zcu_tools.resources.sample_table import JsonlSampleTable
+from zcu_tools.resources.entry import ResultEntry
 
 from tests._native_support import native_metadata
 from tests.experiment.workflows._engine_fakes import Plan, Rig, Tunables
@@ -49,6 +48,11 @@ def test_wrong_export_identity_never_replaces_terminal_run(
     harness.complete_segment()
     previous = controller.status()
     paths = RunPaths(tmp_path / "next-metadata", tmp_path / "next-data")
+    entry = ResultEntry.create(
+        "captured",
+        result_root=tmp_path / "results",
+        database_root=tmp_path / "database",
+    )
     if kind == "fluxdep":
         exports = WorkflowExportBindings(
             fluxdep=FluxdepExportBinding(
@@ -60,11 +64,9 @@ def test_wrong_export_identity_never_replaces_terminal_run(
                     None,
                 ),
                 unusable_science,
-                tmp_path / "entry",
-                tmp_path / "database",
-                RecordsLedger(
-                    tmp_path / "entry", entry_id=native_metadata().snapshot.entry_id
-                ),
+                entry.result_path,
+                entry.database_path,
+                entry.ledger,
             )
         )
     else:
@@ -72,7 +74,7 @@ def test_wrong_export_identity_never_replaces_terminal_run(
             samples=SampleExportBinding(
                 "wrong",
                 "captured",
-                JsonlSampleTable(tmp_path / "samples.jsonl"),
+                entry.samples("Q1"),
                 None,
                 "No sample science",
             )
