@@ -11,6 +11,8 @@ from typing import BinaryIO
 import check_ratchet as ratchet
 import pytest
 
+pytestmark = pytest.mark.requires_subprocess
+
 
 @dataclass
 class CommandReceipts:
