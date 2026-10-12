@@ -112,6 +112,28 @@ _Avoid_: cache metadata, formula cfg
 Formula Recipe 中具有獨立 duration 和 expression 的有序片段。片段使用各自的局部時間，串接後形成完整 waveform。
 _Avoid_: piece, section, pulse part
 
+## Agent 介面
+
+**Agent 介面層級**:
+Agent 可使用的入口依抽象程度分成實驗環境、GUI／Notebook、recipe，以及 workflow 與跨實驗分析四層。層級描述自動化程度，不是權限。
+_Avoid_: operation layer, control level
+
+**Recipe**:
+把一種常用單次實驗包裝成少量參數的自動 GUI 操作，其餘參數自動推導。Agent 把它當成一個整體，控制輸入、接受輸出，中途只在 recipe 宣告的判斷交接處協作。
+_Avoid_: workflow, macro, script
+
+**判斷交接（Decision Handoff）**:
+自動流程在預先宣告的位置停下來，把需要判斷的資訊與選項交給 agent 或使用者，例如缺少必要參數、互動分析或寫回確認。
+_Avoid_: error, prompt, interrupt
+
+**Workflow**:
+一次設定後執行跨多次 Experiment Run 的流程，例如 overnight 或 T1 over flux。中途只在 workflow 宣告的判斷交接處與 agent 協作。
+_Avoid_: recipe, batch script, DAG plan
+
+**跨實驗分析**:
+整合多次量測，甚至多個 qubit 的已保存資料，做單次實驗無法完成的聯合分析，例如 Flux-Dependence Analysis。
+_Avoid_: single-run analysis, tab analysis
+
 ## 操作憑證
 
 **Permit**:
