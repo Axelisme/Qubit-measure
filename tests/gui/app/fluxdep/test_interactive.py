@@ -65,14 +65,17 @@ def test_spectrum_drafts_survive_display_switch_and_finish_by_name(controller: C
     second = owner.begin_line_pick("other")
     second.plugin.execute_command(second.session, "move_line", {"role": "integer", "position": 3.0})
     assert owner.begin_line_pick("sample") is first
-    assert owner.inspect("sample").context is first
-    assert owner.inspect("other").context is second
+    inspected_first = owner.inspect("sample")
+    assert inspected_first is not None and inspected_first.context is first
+    inspected_second = owner.inspect("other")
+    assert inspected_second is not None and inspected_second.context is second
     first.session.undo()
     assert second.session.can_undo()
     owner.finish_line_pick("other")
     assert controller.state.get_spectrum("other").aligned
     assert owner.inspect("other") is None
-    assert owner.inspect("sample").context is first
+    inspected_first = owner.inspect("sample")
+    assert inspected_first is not None and inspected_first.context is first
 
 
 def test_inspect_identity_and_facts_follow_committed_session(controller: Controller):
