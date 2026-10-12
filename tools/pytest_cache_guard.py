@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import sys
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -28,15 +29,19 @@ class _CacheEntry:
 
 def _snapshot(root: Path) -> dict[str, _CacheEntry]:
     """Read tree metadata and content without following directory symlinks."""
-    if not root.exists() and not root.is_symlink():
+    # Test fixtures may replace pathlib.exists for their own I/O error cases.
+    # Read the real filesystem here so that protection does not use that fake.
+    try:
+        os.lstat(root)
+    except FileNotFoundError:
         return {}
     paths = [root, *sorted(root.rglob("*"))]
     entries: dict[str, _CacheEntry] = {}
     for path in paths:
-        info = path.lstat()
-        if path.is_symlink():
+        info = os.lstat(path)
+        if stat.S_ISLNK(info.st_mode):
             content = str(path.readlink())
-        elif path.is_file():
+        elif stat.S_ISREG(info.st_mode):
             content = hashlib.sha256(path.read_bytes()).hexdigest()
         else:
             content = ""
