@@ -24,7 +24,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.cfg import (
-    EvalValue,
     ReferenceValue,
     make_custom_reference_key,
     make_default_value,
@@ -46,9 +45,9 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
 )
 from zcu_lab.v2._support.measure.seeds import (
+    alias_name_seed,
     custom,
     flux_range,
-    literal,
     path_seed,
     res_freq_range,
 )
@@ -181,7 +180,7 @@ class OneToneFluxDepAdapter(
             .device(
                 "flux_dev",
                 label="Flux Device",
-                default=literal(EvalValue("$flux_dev")),
+                default=alias_name_seed("flux_dev"),
             )
             .choice(
                 "flux_unit",
