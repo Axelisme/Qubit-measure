@@ -484,7 +484,7 @@ def test_registered_adapter_does_not_hide_missing_aliases_or_source_faults(
             ),
         ),
     )
-    if name in {"lookback", "onetone/freq", "onetone/power_dep", "onetone/flux_dep"}:
+    if name in {"lookback", "onetone/freq", "onetone/power_dep"}:
         schema = adapter.make_default_cfg(
             SessionEnv(parameters=unavailable, soc=None, soccfg=None)
         )

@@ -204,6 +204,74 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
     assert service.get_summaries(draft, "param-1") == ("3 × 3 matrix", "3 × 3 matrix")
 
 
+@pytest.mark.parametrize(
+    ("value", "summary"),
+    [
+        ([], "list[0]"),
+        (((1, 2), (3, 4)), "2 × 2 matrix"),
+        ([[1], [2, 3]], "list[2]"),
+        ([[], []], "list[2]"),
+        ([[{"value": 1}]], "list[1]"),
+        ([1, 2, 3], "list[3]"),
+    ],
+)
+def test_sequence_proposals_have_bounded_shape_summaries(session, value, summary):
+    _entry, control, _editor, service = session
+    draft = service.create_draft(
+        [ParameterWriteback("general.ext.sequence", "sequence", proposed_value=value)],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    assert service.get_summaries(draft, "param-1")[1] == summary
+    draft.teardown()
+
+
+@pytest.mark.parametrize("edit", [{"path": "freq"}, {"value": 5010.0}])
+def test_malformed_cfg_edits_leave_the_proposal_unchanged(session, edit):
+    _entry, control, _editor, service = session
+    draft = service.create_draft(
+        [ModuleWriteback("Q1.pulses.a", "pulse", edit_schema=pulse_schema())],
+        parameters=control.read_context(),
+        experiment_name="test/writeback",
+    )
+    before = service.preview_values(draft)
+    with pytest.raises(InvalidInputError, match="edits\\[0\\] must be an object"):
+        draft.edit("ml-1", edits=[edit])
+    assert service.preview_values(draft) == before
+    assert service.get_all_applied(draft) == {"ml-1": False}
+    draft.teardown()
+
+
+@pytest.mark.parametrize(
+    ("item", "session_id", "error", "message"),
+    [
+        (
+            ParameterWriteback("general.ext.value", "value", proposed_value=1),
+            "param-1",
+            InvalidInputError,
+            "not a module/waveform item",
+        ),
+        (
+            ModuleWriteback("Q1.pulses.a", "pulse"),
+            "ml-1",
+            FailedPreconditionError,
+            "has no editable cfg model",
+        ),
+    ],
+)
+def test_cfg_edits_require_an_editable_cfg_item(
+    session, item, session_id, error, message
+):
+    _entry, control, _editor, service = session
+    draft = service.create_draft(
+        [item], parameters=control.read_context(), experiment_name="test/writeback"
+    )
+    with pytest.raises(error, match=message):
+        draft.edit(session_id, edits=[])
+    assert service.get_all_applied(draft) == {session_id: False}
+    draft.teardown()
+
+
 def test_applied_state_follows_successful_writes_and_content_edits(session):
     _entry, control, _editor, service = session
     draft = service.create_draft(

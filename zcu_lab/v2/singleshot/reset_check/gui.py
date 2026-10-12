@@ -50,6 +50,7 @@ class SsResetCheckAdapter(
         ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult, NoAnalyzeParams
     ]
 ):
+    experiment_tag: ClassVar[str | None] = ResetCheckExp.persistence_tag()
     exp_cls = ResetCheckExp
     ExpCfg_cls: ClassVar[Any] = ResetCheckCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

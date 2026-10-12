@@ -34,7 +34,7 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import custom, literal
+from zcu_lab.v2._support.measure.seeds import alias_name_seed, custom
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
@@ -91,6 +91,7 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
 class JpaFluxAdapter(
     BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult, NoAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
     exp_cls = FluxExp
     ExpCfg_cls: ClassVar[Any] = FluxCfg
 
@@ -141,7 +142,7 @@ class JpaFluxAdapter(
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default=literal(EvalValue("$flux_dev")),
+                default=alias_name_seed("flux_dev"),
                 required=False,
             )
             .choice(

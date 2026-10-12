@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, Generic, TypeVar, cast
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
+    DirectValue,
     EvalValue,
     ReferenceValue,
     ScalarLeafInput,
     SweepValue,
 )
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
     ScalarType,
@@ -66,6 +68,34 @@ def custom(resolve: Callable[[SessionEnv], T], *, description: str) -> Seed[T]:
     if not description.strip():
         raise ValueError("custom seed description must not be empty")
     return Seed(resolve, description=description)
+
+
+def alias_name_seed(alias: str) -> Seed[DirectValue]:
+    """Freeze a bare alias name as direct input when a fresh cfg is created.
+
+    alias is an alias-table identifier without ``$`` or a field suffix. Invalid
+    identifiers raise ValueError at declaration. The fixed SessionEnv parameter
+    capture resolves the name once; later alias changes do not update this input.
+    Missing captures or alias resolution errors produce a direct Invalid input
+    naming ``$alias``, with no fallback. Other source failures propagate.
+    """
+    AliasTable((AliasRow(alias, ""),))
+    path = f"${alias}"
+
+    def resolve(ctx: SessionEnv) -> DirectValue:
+        if ctx.parameters is None:
+            return DirectValue(
+                None,
+                raw=path,
+                error=f"Cannot resolve {path}: parameter context is unavailable",
+            )
+        try:
+            name = ctx.parameters.resolve_path(path)
+        except RoleResolutionError as exc:
+            return DirectValue(None, raw=path, error=f"Cannot resolve {path}: {exc}")
+        return DirectValue(name)
+
+    return Seed(resolve, description=f"alias name:{path}")
 
 
 def path_seed(
@@ -239,6 +269,7 @@ __all__ = [
     "NO_FALLBACK",
     "Seed",
     "SweepDefault",
+    "alias_name_seed",
     "custom",
     "flux_range",
     "literal",

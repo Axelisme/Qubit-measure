@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-12
 
 # gui/session/ — 量測 session core
 
@@ -17,6 +17,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 - **Entry 與 point** 的持久資源由 [`resources.entry`](../../resources/entry/README.md) 管理，module library 由 [`resources.context`](../../resources/context/README.md) 管理。Session 不重建文件版面，也不在清除選取時刪除資源。
 - **ParameterContext** 是隔離的 point/library/storage 投影，`SavedPoint` 標識來源。`bind_aliases` 固定當次有序 rows。GUI callers 使用空 declarations，Notebook 保留自己的 role kind 契約。裸 `$alias` 回傳解析後的名稱字串。`$alias.path` 只沿這份表解析，bare concrete paths 使用獨立 namespace。名稱不參與數值算術或插值。未綁 alias 可留在 capture；實際讀取才指名失敗，不代用同名元件。讀取不 refresh、不讀 YAML，也不跟隨後續全域修改。Run／storage 的 names 投影包含表中所有已綁 rows，也包含自訂 alias。空列略過。Device 名稱不必在 `point.components` 或裝置表中。歷史 fixed names 不重新展開 alias；元件欄位的有效性仍由其讀取 owner 檢查。
+- **Module slot 錯誤** 由 `parameters.ModuleSlotError(AttributeError)` 區分 unset／dangling slot 與 source 故障。`ParameterContext.library_key` 與沿 slot 的 leaf lookup 保留 slot 路徑和原因。Expression 只轉譯這個明確型別為 `ExpressionError`；cfg reference resolver 只把它當缺 reference。Tab 保留 Invalid cfg 並停用 Run，ordinary `AttributeError` 與其他 source 故障仍向外傳遞。
 - **Alias 瀏覽投影** 使用 `ParameterContext.resolved_aliases()`，回傳有序 `ResolvedAliasRow(alias, value, resolved, error)`。它保留 authored softlinks，對固定 point 使用既有 resolver，不沿用 consumer kind 限制。只有單列 `RoleResolutionError` 變成 resolved=None 與 error；source/readability 失敗仍拒絕整個讀取，不從 live 表或檔案補值。
 - 全域 alias 表由 `ContextService` 持有。`AliasTable` 原子驗證整批語法與重名，拒絕引用自身或後列。元件與 device 使用同一張表，GUI 不做 kind 或裝置可用性檢查。Notebook 的顯式元件 consumer 仍可要求 kind。
   `set_alias_rows` 只改 memory。Dialog Apply 呼叫 `apply_alias_rows`，有 opened entry 時由 resources 原子保存 `aliases.yaml`，未開 entry 時只改 memory。Service 先驗整表，再保存檔案，成功後才安裝 memory 並發布 fact。Storage 失敗保留舊表、舊檔與 dialog draft，顯錯後可 retry。Apply 保持 dialog 開啟，Cancel 不撤已 Apply 的表。

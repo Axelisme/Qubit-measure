@@ -63,6 +63,7 @@ class SsAmpRabiAdapter(
         AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
     ]
 ):
+    experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
     exp_cls = AmpRabiExp
     ExpCfg_cls: ClassVar[Any] = AmpRabiCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(

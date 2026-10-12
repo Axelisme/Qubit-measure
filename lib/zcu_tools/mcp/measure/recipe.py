@@ -165,11 +165,18 @@ class MissingParameter:
     """One missing tool parameter and the instruction for supplying it.
 
     parameter is the public keyword name; reason explains the absent required source
-    or input. Both strings must be non-empty.
+    or input. Both strings must be non-empty. Construction raises ValueError with
+    "missing parameters must contain non-empty names and reasons" if either is empty.
     """
 
     parameter: str
     reason: str
+
+    def __post_init__(self) -> None:
+        if not self.parameter or not self.reason:
+            raise ValueError(
+                "missing parameters must contain non-empty names and reasons"
+            )
 
 
 class RecipeNeedsParameters(Exception):
@@ -1074,16 +1081,26 @@ class RecipeTab:
 
     def use_library(
         self, field: str, name: str | None, *, required: str | None = None
-    ) -> None:
-        """Select a readonly library ref for a module/waveform field.
+    ) -> MissingParameter | None:
+        """Select a readonly library ref at a dotted module/waveform field path.
 
-        None retains its current GUI value. Ref child edits require explicit
-        owner conversion to inline first; this operation never copies content.
+        name is a non-blank explicit reference, or None to retain the current GUI
+        value. Ref child edits require explicit owner conversion to inline first;
+        this operation never copies content.
 
-        required requires membership in the captured library even for explicit
-        names. It names the missing tool parameter when no usable GUI reference
-        exists and name is None. Invalid or non-library explicit required names
-        raise GuiRpcError (invalid_cfg), rather than falling back.
+        required names the public tool parameter and requires a valid reference
+        present in the library, including for explicit names. If name is None and
+        the retained reference is unusable, return MissingParameter with required
+        as its parameter and a supplying instruction as its reason, without
+        editing cfg or recording an origin. The caller collects missing values
+        and raises RecipeNeedsParameters once. A usable selection or retention
+        returns None. Omitting required also returns None, without requiring
+        library membership.
+
+        Explicit invalid references raise GuiRpcError (invalid_cfg), never a
+        missing value or fallback; with required, non-library names also raise it.
+        Blank names or unknown fields raise ValueError. GUI/source/connection
+        errors propagate without retry.
         """
         node = self._reference(field)
         if name is not None:
@@ -1109,14 +1126,11 @@ class RecipeTab:
                 or node.get("error")
             )
         ):
-            raise RecipeNeedsParameters(
-                (
-                    MissingParameter(
-                        required, f"Provide a valid {field} library reference"
-                    ),
-                )
+            return MissingParameter(
+                required, f"Provide a valid {field} library reference"
             )
         self._binding.origins[field] = "explicit" if name is not None else "gui_default"
+        return None
 
     def disable_library(self, field: str) -> None:
         """Disable an optional module field explicitly; reject unknown fields."""

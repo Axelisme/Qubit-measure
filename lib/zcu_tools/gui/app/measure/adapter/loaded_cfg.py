@@ -127,23 +127,34 @@ def _project_node(
             return False, None
         return True, SweepValue(sweep.start, sweep.stop, sweep.expts)
     if isinstance(spec, ReferenceSpec):
-        if raw is None:
-            return spec.optional, None
-        if not isinstance(raw, Mapping):
-            return False, None
-        try:
-            _require_complete(spec, raw, path)
-            wrapper = CfgSectionSpec(fields={"value": spec})
-            projected = materialize_spec_value(
-                wrapper, {"value": raw}, policy=MAIN_PROGRAM_MATERIALIZATION_POLICY
-            )
-            validate_finished_cfg(
-                CfgSchema(spec=wrapper, value=projected), resolve_reference=None
-            )
-        except (RuntimeError, TypeError, ValueError):
-            return False, None
-        return True, projected.fields["value"]
+        return _project_reference(spec, raw, path)
     return False, None
+
+
+def _project_reference(
+    spec: ReferenceSpec, raw: object, path: tuple[str, ...]
+) -> tuple[bool, CfgNodeValue | None]:
+    """Adopt a complete inline reference, declining invalid or partial snapshots.
+
+    Optional null is adopted without materialization. Complete raw mappings must
+    satisfy the program policy and finished-cfg validation without invented defaults.
+    """
+    if raw is None:
+        return spec.optional, None
+    if not isinstance(raw, Mapping):
+        return False, None
+    try:
+        _require_complete(spec, raw, path)
+        wrapper = CfgSectionSpec(fields={"value": spec})
+        projected = materialize_spec_value(
+            wrapper, {"value": raw}, policy=MAIN_PROGRAM_MATERIALIZATION_POLICY
+        )
+        validate_finished_cfg(
+            CfgSchema(spec=wrapper, value=projected), resolve_reference=None
+        )
+    except (RuntimeError, TypeError, ValueError):
+        return False, None
+    return True, projected.fields["value"]
 
 
 def _require_complete_reference(

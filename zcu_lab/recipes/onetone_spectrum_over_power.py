@@ -4,6 +4,7 @@ from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeGenerator,
+    RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
@@ -49,7 +50,7 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         reuse=reuse_tab_id,
     )
     tab.use_library("modules.readout", readout_ref)
-    set_frequency_sweep(
+    missing = set_frequency_sweep(
         tab,
         "sweep.freq",
         calibration=FrequencySweepCalibration(
@@ -59,6 +60,8 @@ def onetone_spectrum_over_power(  # noqa: PLR0913 - Preserve typed tool keywords
         span_mhz=span_mhz,
         expts=freq_points,
     )
+    if missing:
+        raise RecipeNeedsParameters(missing)
     tab.set_sweep(
         "sweep.gain",
         start=None if gain_range is None else gain_range[0],

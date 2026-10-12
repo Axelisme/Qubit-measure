@@ -135,6 +135,7 @@ _SCAN_RECOMMENDED = (
 
 
 class ZigZagScanGainAdapter(_ZigZagScanBase):
+    experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "gain"
     sweep_label: ClassVar[str] = "Gain (a.u.)"
 
@@ -171,6 +172,7 @@ class ZigZagScanGainAdapter(_ZigZagScanBase):
 
 
 class ZigZagScanFreqAdapter(_ZigZagScanBase):
+    experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "freq"
     sweep_label: ClassVar[str] = "Frequency (MHz)"
 
