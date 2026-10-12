@@ -161,6 +161,51 @@ def _joint_command(
     )
 
 
+def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteHarness):
+    link = one_route.client()
+    other = copy.deepcopy(one_route.ctrl.state.get_spectrum("one"))
+    other.name = "other"
+    one_route.ctrl.state.put_spectrum(other)
+    first = _open_picker(one_route, link, "one", "line")
+    second = _open_picker(one_route, link, "other", "line")
+    assert first["context_id"] != second["context_id"]
+    assert _picker_command(one_route, link, first, "move_line", role="half", position=-0.5)["ok"]
+    read = _context(one_route.request(link, "interactive.read", name="one"))
+    assert read["context_id"] == first["context_id"]
+    assert _state(read)["flux_half"] == -0.5
+    assert read["can_undo"] is True
+    rendered = one_route.request(link, "interactive.render", name="one")
+    assert rendered["ok"], rendered
+    encoded = rendered["result"]["png_b64"]
+    assert isinstance(encoded, str)
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
+        assert image.format == "PNG"
+        assert image.size == (640, 480)
+    assert _context(one_route.request(link, "interactive.read", name="one"))["can_undo"] is True
+    denied = one_route.request(link, "spectrum.interactive.command", name="other", context_id=first["context_id"], command="undo")
+    _error(denied, "FAILED_PRECONDITION", "interactive_context_changed")
+    assert _picker_command(one_route, link, first, "finish")["ok"]
+    assert _context(one_route.request(link, "interactive.read", name="other"))["context_id"] == second["context_id"]
+    listed = one_route.request(link, "spectrum.list")
+    assert listed["ok"]
+    assert [row["pending"] for row in listed["result"]["spectrums"]] == [None, "align"]
+
+
+def test_observer_display_selection_is_readonly_and_preserves_drafts(one_route: RouteHarness):
+    owner_link = one_route.client()
+    draft = _open_picker(one_route, owner_link, "one", "line")
+    observer = one_route.client()
+    one_route.request(observer, "control.connect", mode="readonly", label="observer")
+    versions = one_route.ctrl.state.version.snapshot()
+    displayed = one_route.request(observer, "spectrum.set_active", name=None)
+    assert displayed["ok"], displayed
+    assert one_route.ctrl.state.active_spectrum is None
+    assert one_route.ctrl.state.version.snapshot() == versions
+    assert _context(one_route.request(observer, "interactive.read", name="one"))["context_id"] == draft["context_id"]
+    denied = _picker_command(one_route, observer, draft, "undo")
+    _error(denied, "FAILED_PRECONDITION", "readonly_connection")
+
+
 def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     one_route: RouteHarness,
 ):
