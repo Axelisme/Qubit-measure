@@ -33,7 +33,11 @@ from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTPoint
 
 @dataclass(frozen=True)
 class MISTExportReport:
-    """This call's selected writer results and every absent iteration record path."""
+    """Report raw MIST export results so callers can identify missing science inputs.
+
+    outputs lists each selected native/Labber writer result, including path,
+    status and failure reason. missing_records lists every absent iteration
+    record.json path; no trace is fabricated for those iterations."""
 
     outputs: tuple[FluxdepExportOutput, ...]
     missing_records: tuple[Path, ...]
@@ -42,7 +46,9 @@ class MISTExportReport:
 def prepare_export(
     plan: MISTPlan, points: tuple[SavedPoint[MISTPoint], ...]
 ) -> PreparedFluxdepExport:
-    """Prepare raw Flux×actualgain Signal and Flux-only Success (1 or NaN).
+    """Assemble raw MIST response across flux and gain for offline analysis.
+
+    Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
 
     plan is the fixed manifest plan; points are structured saved commits. Only
     named final mist/gain files enter the payload. Missing rows retain NaN.
@@ -115,7 +121,7 @@ def prepare_export(
 def export_run(
     run: Path, *, outputs: tuple[str, ...] = ("merged",), database: Path | None = None
 ) -> MISTExportReport:
-    """Convert one saved mist_fluxdep run, without GUI/engine/live devices.
+    """Export raw MIST response across flux and gain for offline analysis.
 
     run is the metadata directory. Select merged and/or labber; samples and all
     other selections reject. Labber requires explicit --database before any
@@ -145,7 +151,9 @@ def export_run(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI shell over export_run, returning 1 on an isolated writer failure.
+    """Export saved MIST flux/gain data for offline analysis from CLI arguments.
+
+    Return 1 on an isolated writer failure and 0 when all writers succeed.
 
     argv omits the executable. Select --merged and/or --labber. --database is
     necessary only for Labber. Unsupported --samples is an argparse error.

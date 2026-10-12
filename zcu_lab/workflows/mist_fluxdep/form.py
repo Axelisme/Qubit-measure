@@ -38,7 +38,7 @@ from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTTunables
 
 
 class MISTPlanForm(FormModel):
-    """Fixed flux/gain scans and reset/pi/MIST/readout module selections.
+    """Select flux and disturbance gain scans to measure MIST without a threshold fit.
 
     flux_dev/unit/fluxes are explicit absolute driver coordinates. qub_pulse
     supplies the Length-Rabi/calibrated pi waveform/gain; pi_length_us is its
@@ -150,7 +150,7 @@ class MISTPlanForm(FormModel):
 
 
 class MISTTunablesForm(FormModel):
-    """Ordinary calibration, averaging and existing T1-guess relax knobs.
+    """Set calibration and averaging to resolve the raw MIST gain response.
 
     cal controls calibration policy; reps/rounds average the native MIST trace.
     guess_us is a positive microsecond T1 timing estimate (no extra acquisition);

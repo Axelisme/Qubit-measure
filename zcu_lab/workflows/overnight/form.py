@@ -21,7 +21,7 @@ from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunable
 
 
 class OvernightPlanForm(FormModel):
-    """Fixed monitoring inputs, resolved only in the supplied host capture.
+    """Select fixed-flux T1/Echo pairs to monitor lifetime drift without feedback.
 
     flux_dev defaults to the captured $flux_dev expression; flux_unit is required
     A/V/native with no conversion or membership precheck. flux is its absolute
@@ -130,7 +130,7 @@ class OvernightPlanForm(FormModel):
 
 
 class OvernightTunablesForm(FormModel):
-    """Independent overnight averaging, fixed timing and scalar fit thresholds.
+    """Set averaging and acceptance bounds to resolve fixed-flux lifetime drift.
 
     reps/rounds average each native member, not monitoring pairs. Guesses are in
     microseconds; sweep/relax factors multiply their fixed timing. Dimensionless

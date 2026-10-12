@@ -1,57 +1,41 @@
-"""Overnight scalar trends drawn only from journal-authoritative commits."""
+"""Plot fixed-flux lifetime drift from workflow-owned scalar pair summaries."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from math import nan
+from datetime import timedelta
+from math import isfinite, nan
+from typing import TYPE_CHECKING
 
-from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
+from matplotlib.dates import AutoDateLocator, DateFormatter
 from matplotlib.figure import Figure
-from pydantic import TypeAdapter
-from zcu_tools.experiment.workflows import CommittedRecord
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.workflows.overnight.workflow import OvernightPoint
+if TYPE_CHECKING:
+    from zcu_lab.workflows.overnight.workflow import OvernightPoint
 
-_point_adapter = TypeAdapter(OvernightPoint)
 
+def draw_overnight_trend(
+    plots: Plots, points: Sequence[OvernightPoint], *, start_interval_s: float
+) -> None:
+    """Show T1 and Echo lifetime drift without recomputing any scientific values.
 
-def project_overnight_trend(
-    records: Sequence[CommittedRecord],
-) -> tuple[OvernightPoint, ...]:
-    """Decode committed overnight summaries in input commit order.
-
-    records must come from Engine.records for an overnight run. Returns detached
-    scalar evidence in aware UTC actual-start time and microseconds, retaining
-    None uncertainties, values and diagnoses.
-    Empty commits return (). Repr-degraded or invalid summaries raise ValueError;
-    no native trace, GUI draft, fit, threshold or missing-value substitute is used.
+    plots is the active env.plots, not finished/released. points contains typed
+    pair summaries in workflow order with aware UTC actual_start timestamps.
+    start_interval_s is the finite positive plan interval in seconds; a single
+    pair spans its actual start plus/minus that interval. All ticks show UTC
+    HH:MM:SS. Lifetimes stay in microseconds; missing values remain NaN gaps
+    with their diagnoses below the trace. Empty input draws empty axes.
+    Updates occur when the workflow calls this function, not after a journal
+    commit notification. No file is saved. Invalid time/interval raises
+    ValueError; plotting errors propagate without retry.
     """
-    points: list[OvernightPoint] = []
-    for record in records:
-        if record.encoded_record.mode != "json":
-            raise ValueError(
-                f"Overnight commit {record.commit_seq} has no scalar JSON evidence"
-            )
-        point = _point_adapter.validate_python(record.encoded_record.value)
+    if not isfinite(start_interval_s) or start_interval_s <= 0:
+        raise ValueError("Overnight trend interval must be finite and positive")
+    for point in points:
         offset = point.actual_start.utcoffset()
         if offset is None or offset.total_seconds() != 0:
             raise ValueError("Overnight actual_start must be aware UTC")
-        points.append(point)
-    return tuple(points)
-
-
-def draw_overnight_trend(plots: Plots, records: Sequence[CommittedRecord]) -> None:
-    """Update the named overnight_trend Figure from committed scalar evidence.
-
-    plots is the host's active operation-owned Plots, not finished/released.
-    Both members use actual UTC start times and lifetimes in microseconds.
-    Missing/rejected values remain NaN gaps; diagnoses appear at the bottom of
-    each axes in axes coordinates, never as fabricated lifetime measurements.
-    This synchronous owner-thread draw refreshes one Figure, including zero
-    commits. Scalar decoding and host/draw failures propagate without retry.
-    """
-    points = project_overnight_trend(records)
     if "overnight_trend" not in plots:
         plots.subplots("overnight_trend", nrows=2, ncols=1, sharex=True)
 
@@ -81,9 +65,13 @@ def draw_overnight_trend(plots: Plots, records: Sequence[CommittedRecord]) -> No
                         rotation=90,
                         va="bottom",
                     )
+        # Bound a single pair by its plan interval, not Matplotlib's date fallback.
+        if len(points) == 1:
+            interval = timedelta(seconds=start_interval_s)
+            axes[-1].set_xlim(times[0] - interval, times[0] + interval)
         locator = AutoDateLocator(tz="UTC")
         axes[-1].xaxis.set_major_locator(locator)
-        axes[-1].xaxis.set_major_formatter(ConciseDateFormatter(locator, tz="UTC"))
+        axes[-1].xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz="UTC"))
         axes[-1].set_xlabel("Actual start (UTC)")
 
     plots.draw("overnight_trend", draw)
