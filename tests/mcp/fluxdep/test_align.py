@@ -108,8 +108,8 @@ def test_auto_align_polls_named_context_to_terminal(client: Client, error: str |
         "interactive.read",
     ]
     assert [r["params"] for r in client.transport.requests[2:]] == [
-        {"name": "one"},
-        {"name": "one"},
+        {"name": "one", "context_id": 12},
+        {"name": "one", "context_id": 12},
     ]
 
 
