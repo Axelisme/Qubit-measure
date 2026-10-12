@@ -275,17 +275,20 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
         figure = Figure()
         ctrl.render_fit(figure)
         scatters = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
-        np.testing.assert_allclose(scatters[0].get_offsets(), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
-        np.testing.assert_allclose(scatters[1].get_offsets(), [[1.2, 5.0]])
-        np.testing.assert_array_equal(state.fit.result.transition_indices, [1, 0, 1, 0])
+        np.testing.assert_allclose(np.asarray(scatters[0].get_offsets(), dtype=np.float64), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
+        np.testing.assert_allclose(np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]])
+        recorded = state.fit.result
+        if recorded is None:
+            pytest.fail("full search publication must retain attribution")
+        np.testing.assert_array_equal(recorded.transition_indices, [1, 0, 1, 0])
         state.set_selection(np.array([True, False, False, False]))
         source_fluxs[:] = 9
         source_freqs[:] = 10
         assert state.fit_stale_reasons == ["filter changed"]
         ctrl.render_fit(figure)
         scatters = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
-        np.testing.assert_allclose(scatters[0].get_offsets(), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
-        np.testing.assert_allclose(scatters[1].get_offsets(), [[1.2, 5.0]])
+        np.testing.assert_allclose(np.asarray(scatters[0].get_offsets(), dtype=np.float64), [[-0.2, 4.0], [1.5, 6.0], [2.2, 7.0]])
+        np.testing.assert_allclose(np.asarray(scatters[1].get_offsets(), dtype=np.float64), [[1.2, 5.0]])
     finally:
         ctrl.interactive.dispose()
 

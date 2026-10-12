@@ -55,8 +55,15 @@ def test_published_filter_overlays_complete_high_order_kernel_frequencies(monkey
 
     state = FluxDepState()
     state.put_spectrum(_entry())
-    state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2),
-                         {"transitions": [(0, 16)], "mirror20": [(0, 1)]}, None, 20.0)
+    state.set_fit_params(
+        "",
+        (2, 15),
+        (0.2, 2),
+        (0.1, 2),
+        {"transitions": [(0, 16)], "mirror20": [(0, 1)]},
+        None,
+        20.0,
+    )
     state.set_fit_result((3.0, 0.8, 0.5))
     requested_levels: list[int] = []
 
@@ -77,7 +84,7 @@ def test_published_filter_overlays_complete_high_order_kernel_frequencies(monkey
         assert [line.get_label() for line in lines] == expected_labels
         assert requested_levels == [21]
         for index, line in enumerate(lines):
-            np.testing.assert_allclose(line.get_ydata(), expected_freqs[0, index])
+            np.testing.assert_allclose(np.asarray(line.get_ydata(), dtype=np.float64), expected_freqs[0, index])
     finally:
         ctrl.interactive.dispose()
 
