@@ -106,9 +106,9 @@ def control_server(
         harness.close()
 
 
-def invoke(server: FluxdepServer, name: str, **arguments):
+def invoke(server: FluxdepServer, tool_name: str, **arguments):
     """Exercise the assembled public tool handler."""
-    return server.tools["fluxdep_" + name]["handler"](arguments)
+    return server.tools["fluxdep_" + tool_name]["handler"](arguments)
 
 
 def test_owner_connect_acquires_reports_control_and_exposes_release_acquire(
