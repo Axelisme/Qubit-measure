@@ -31,6 +31,7 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 class TemplateComponent(ComponentSchema):
     module: dict[str, str | None]
+    freq: float = 4200.0
 
 
 @pytest.fixture
@@ -349,8 +350,7 @@ def seeded_fallback_definitions(slot: str) -> dict[str, cfg_model.TemplateDef]:
             {
                 "ch": 3,
                 "nqz": 1,
-                "freq": cfg_model.Expr("4200 + 23"),
-                "desc": "{qubit} drive",
+                "freq": cfg_model.Expr("{qubit}.freq + 23"),
                 "gain": 0.37,
                 "waveform.length": 0.08,
             },
@@ -374,8 +374,7 @@ def test_bound_missing_slot_expands_seeded_template_inline(
     entry = fallback_catalog(slot).get("reset")
     first = entry.make_value(environment)
     assert read_value_path(first.value, "pi2_cfg.gain") == DirectValue(0.37)
-    assert read_value_path(first.value, "pi2_cfg.freq") == EvalValue("4200 + 23")
-    assert read_value_path(first.value, "pi2_cfg.desc") == DirectValue("$qubit drive")
+    assert read_value_path(first.value, "pi2_cfg.freq") == EvalValue("$qubit.freq + 23")
     schema = CfgSchema(entry.shape(), first.value)
     wire = schema_to_raw(schema)
     pulse_wire = wire["pi2_cfg"]
@@ -383,7 +382,7 @@ def test_bound_missing_slot_expands_seeded_template_inline(
     assert pulse_wire["chosen_key"] == make_custom_reference_key("Pulse")
     children = pulse_wire["value"]
     assert isinstance(children, dict)
-    assert children["freq"] == {"__kind": "eval", "expr": "4200 + 23"}
+    assert children["freq"] == {"__kind": "eval", "expr": "$qubit.freq + 23"}
     raw = schema_to_raw_dict(schema, environment.parameters)
     pulse = raw["pi2_cfg"]
     assert isinstance(pulse, dict)
@@ -493,7 +492,7 @@ def test_public_reference_defaults_expand_template_using_injected_definitions(
         )
     assert isinstance(first, ReferenceValue)
     assert first.chosen_key == make_custom_reference_key("Pulse")
-    assert read_value_path(first.value, "freq") == EvalValue("4200 + 23")
+    assert read_value_path(first.value, "freq") == EvalValue("$qubit.freq + 23")
     assert read_value_path(first.value, "gain") == DirectValue(0.37)
 
 
