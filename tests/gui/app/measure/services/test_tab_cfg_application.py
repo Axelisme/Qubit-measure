@@ -10,6 +10,7 @@ import pytest
 from pydantic import Field
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import Expr, Range
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import Form, RunRequest
@@ -541,3 +542,40 @@ def test_run_registration_and_failed_submission_allow_operation_reads(
         assert application.ctrl.get_running_tab_id() is None
     assert errors == []
     assert observed == [(True, (), ())] * (2 if fail_submit else 1)
+
+
+class CustomCachedInfo(BaseDeviceInfo):
+    """A non-native device has a nested cached publication, not a live provider."""
+
+    type: str = "custom"
+    notes: dict[str, float]
+
+
+def test_open_captures_detached_native_and_custom_infos_but_not_absent_info(
+    application: Fixture,
+) -> None:
+    native = FakeDeviceInfo(address="native", value=0.25)
+    custom = CustomCachedInfo(address="custom", notes={"gain": 1.0})
+    for name, info in (("native", native), ("custom", custom), ("absent", None)):
+        application.state.put_device(
+            DeviceState(
+                name=name,
+                type_name="memory",
+                address=name,
+                remember=True,
+                status=DeviceStatus.MEMORY_ONLY,
+                info=info,
+            )
+        )
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    resource = application.ctrl.cfg_resources.lookup(tab_id)
+    custom.notes["gain"] = 9.0
+    application.state.set_device_info(
+        "native", FakeDeviceInfo(address="native", value=0.75)
+    )
+    assert set(resource.env.devices) == {"native", "custom"}
+    assert resource.env.devices["native"].model_dump()["value"] == 0.25
+    assert resource.env.devices["custom"].model_dump()["notes"] == {"gain": 1.0}
+    resource.reset()
+    assert resource.env.devices["native"].model_dump()["value"] == 0.75
+    assert resource.env.devices["custom"].model_dump()["notes"] == {"gain": 9.0}
