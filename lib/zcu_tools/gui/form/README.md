@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-13，FormEnv 的 devices 接受 custom driver info
+**Last updated:** 2026-10-13，Display decimals／hidden、段落標題與固定的結構 tag；FormEnv 的 devices 接受 custom driver info
 
 FormModel 的實例只承載普通值。類別上的 defaults、choices 與 input_schema 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
 
@@ -18,6 +18,6 @@ FormEnv 借用 host 捕捉的 ParameterContext、library 與 detached `BaseDevic
 
 FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 view 在 model-invalid draft 中顯示其他欄位的新求值結果。失敗的 expression 或含失敗子值的 whole container 不提供值。成功時包含 Pydantic defaults 與 coercions，不把它們寫回 input。Preview values 不代表可提交；host 仍檢查 errors 與 view 的 local parse errors。
 
-Display 只承載欄位呈現資訊。順序依欄位宣告，分組依 nested model；collapsed 只用於子 model 欄位。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
+Display 只承載欄位呈現資訊。順序依欄位宣告，分組依 nested model；collapsed 只用於子 model 欄位。`decimals` 是 float 欄位顯示的小數位數，只在宣告時進 schema，非 float 欄位宣告就報錯；它不改 input。`hidden=True` 的欄位不畫，值與預設留在 input、照常驗證，schema 仍列出它並標 `hidden`。巢狀 model 欄位沒有 label 時，schema title 是欄位名（底線換空白、只有首字母大寫，`ro_cfg` 是 `Ro cfg`），不是 Pydantic 帶進來的類別名。Model 不經 union selector 到達時，它身為 tagged union branch 的單值 tag 是固定的結構 tag，schema 標 `hidden`；branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，含 branch 的子類別（單獨使用的 `LinRange.kind`、inline readout 的 `ro_cfg.type`）。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
 
 跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是新表單工具，不改 CfgSchema，不接 Measure。

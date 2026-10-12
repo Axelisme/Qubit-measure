@@ -108,6 +108,21 @@ class FiniteFloatSpinBox(QAbstractSpinBox):
                 self.valueChanged.emit(value)
 
 
+def trimmed_decimals(value: float, decimals: int) -> str:
+    """Format value rounded to decimals digits, without trailing zeros.
+
+    At least one digit stays after the point: (1.5, 6) -> "1.5", (2.0, 3) ->
+    "2.0", (1.23456, 3) -> "1.235". decimals=0 shows no point: (1.6, 0) -> "2".
+    """
+    text = f"{value:.{decimals}f}"
+    # strip trailing zeros after decimal point, but keep at least one digit
+    if "." in text:
+        text = text.rstrip("0")
+        if text.endswith("."):
+            text += "0"
+    return text
+
+
 class TrimDoubleSpinBox(QDoubleSpinBox):
     """QDoubleSpinBox that strips trailing zeros, keeping at least one decimal place.
 
@@ -115,10 +130,4 @@ class TrimDoubleSpinBox(QDoubleSpinBox):
     """
 
     def textFromValue(self, v: float) -> str:
-        text = f"{v:.{self.decimals()}f}"
-        # strip trailing zeros after decimal point, but keep at least one digit
-        if "." in text:
-            text = text.rstrip("0")
-            if text.endswith("."):
-                text += "0"
-        return text
+        return trimmed_decimals(v, self.decimals())

@@ -41,9 +41,16 @@ type FormValue = (
 class Display:
     """Presentation metadata carried by Annotated fields.
 
-    label overrides the field-name label. description explains the input; unit
+    label overrides the field title (a model section's default title is its
+    field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
     is its display unit and placeholder is an input hint. None leaves each
     item unspecified. collapsed is an initial fold hint only for model fields.
+    decimals is how many digits a float field shows after the decimal point,
+    rounded with trailing zeros trimmed; None shows the full value. It never
+    rounds input. A negative count raises ValueError here; input_schema raises
+    ValueError when the field is not a float. hidden=True keeps the field out
+    of the editor only: its value and defaults stay in the input, it is still
+    validated, and the input schema still lists it.
     Declaration order sets order; nested models set groups. No layout registry.
     """
 
@@ -52,6 +59,13 @@ class Display:
     unit: str | None = None
     placeholder: str | None = None
     collapsed: bool = False
+    decimals: int | None = None
+    hidden: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject a negative decimals count with ValueError."""
+        if self.decimals is not None and self.decimals < 0:
+            raise ValueError(f"Display decimals must be >= 0, got {self.decimals}")
 
 
 @dataclass(frozen=True)
@@ -200,7 +214,13 @@ class FormModel(BaseModel):
 
         Include Expr alternatives for numeric, complex and string value leaves,
         the shared complex tag, Field constraints, Display metadata and current
-        choices enums. Structural selectors accept only ordinary typed tags,
+        choices enums. Display decimals and hidden appear only where declared.
+        A model field without a Display label is titled by its field name,
+        underscores as spaces and only the first letter capitalized. A model
+        reached without a union selector keeps its one-value structural tag
+        marked hidden: the tag field of a tagged-union branch that this form,
+        ModuleInput or RangeInput declares for the model or a base class.
+        Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
         tags as ordinary JSON values, independent of current choices. Each

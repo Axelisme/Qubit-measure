@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-13，Key/Inline switch for str-or-model fields
+**Last updated:** 2026-10-13, decimals, hidden rows, fixed Literals and section titles
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
 
@@ -13,6 +13,8 @@ String value leaves, including Literal[str] and string Enum values, offer Direct
 An untagged str-or-model field (`str | Model`, such as a pulse's waveform or a readout's pulse_cfg) shows a Key/Inline mode combo in its row, like the tagged-union and ModuleRef/ModuleInline switches. The JSON type selects the mode. A string shows Key mode: a key input, which becomes an editable dropdown of the schema's x-form-library-keys when the captured library has matching keys. An object shows Inline mode: the model's rows, a tagged union with its selector. Switching writes that mode's default, an empty key or `{}` for the core's inline defaults; it never turns the other mode's value into text.
 
 The value label shows only an Expression-mode resolved value; Direct input is not echoed. Empty value and error labels are hidden and take no space; field errors appear under their row. A choice leaf with expression support (Literal, string Enum or a choices entry) shows one dropdown in Direct mode: the current choices, then an `Expression…` entry. Its mode combo appears only in Expression mode. Returning to Direct selects the resolved value when it is a current choice, otherwise the last Direct choice. Discriminators keep their plain tag dropdown.
+
+A one-value Literal (schema const, not nullable) has nothing to choose or compute: its row shows the value as frameless read-only text, without a mode combo, dropdown or expression mode. Fields the schema marks hidden have no row: Display(hidden=True) fields and one-value structural tags outside a union, such as a standalone LinRange's kind. Their input stays in state, and their errors go to the nearest drawn ancestor row or the form-wide error label. A float with schema decimals shows Direct and resolved values rounded to that many digits with trailing zeros trimmed, using the spinbox module's trimmed_decimals; typed text with more digits stays as typed and the state keeps every digit. Section titles come from the schema; a placeholder selector (no branch selected yet) takes the tag title of the branches, like a selected one.
 
 Rows sit 4 px apart and nested groups use small margins. The labels of one model level share a left-aligned column as wide as its widest label, so that level's controls start at one left edge; each nested group has its own column. The editor has no outer margins; hosts add them. One stretch below the last row takes spare height, so nested groups do not grow.
 

@@ -88,7 +88,15 @@ def discriminator(info: FieldInfo) -> str | None:
     """
     if isinstance(info.discriminator, str):
         return info.discriminator
-    annotation = info.annotation
+    return union_tag(info.annotation)
+
+
+def union_tag(annotation: object) -> str | None:
+    """Read the string tag declared in annotation itself, as discriminator does.
+
+    Use this for an annotation outside a model field, such as a union alias;
+    a field's own Field(discriminator=...) needs discriminator(info).
+    """
     while True:
         annotation = _expand_alias(annotation)
         origin = get_origin(annotation)
@@ -167,6 +175,55 @@ def selected(info: FieldInfo, value: JsonValue) -> type[BaseModel] | None:
             (model for model in models if value.get(key) in _tag(model, key)), None
         )
     return None
+
+
+def branch_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
+    """Map each tagged-union branch model reachable from roots to its tag key.
+
+    roots are annotations, such as a form class or a tagged-union alias. Model
+    fields are followed through every reached model, so a union nested in a
+    branch (a module's waveform) contributes too; sequence and mapping items
+    are not followed. A model branched on several keys keeps the first found.
+    """
+    tags: dict[type[BaseModel], str] = {}
+    seen: set[type[BaseModel]] = set()
+    # Each pending item is an annotation with the tag key that selects it.
+    pending = [(root, union_tag(root)) for root in roots]
+    while pending:
+        annotation, key = pending.pop()
+        for model in model_types(annotation):
+            if key is not None:
+                tags.setdefault(model, key)
+            if model not in seen:
+                seen.add(model)
+                pending.extend(
+                    (info.annotation, discriminator(info))
+                    for info in model.model_fields.values()
+                )
+    return tags
+
+
+def fixed_tag(
+    model: type[BaseModel], tags: Mapping[type[BaseModel], str]
+) -> str | None:
+    """Return model's one-value structural tag field, or None.
+
+    tags is a branch_tags result. The first class in model's MRO that tags
+    lists gives the tag key, so a subclass of a branch keeps its tag. Return
+    that key when model's field under it is a Literal of exactly one value;
+    return None for an unlisted model or a tag field with several values.
+    """
+    key = next(
+        (
+            tags[base]
+            for base in model.__mro__
+            if issubclass(base, BaseModel) and base in tags
+        ),
+        None,
+    )
+    if key is None or len(_tag(model, key)) != 1:
+        return None
+    return key
 
 
 def choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, ...]:

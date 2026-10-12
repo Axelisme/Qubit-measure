@@ -41,6 +41,13 @@ class FormEditor[F: FormModel](QWidget):
     the resolved value when it is a current choice, else the last Direct one.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
+    A one-value Literal has form.input.<path> as read-only QLineEdit text of
+    its value, without form.mode or a dropdown. A float with Display decimals
+    shows its Direct and resolved values rounded to that many digits; text
+    typed with more digits stays as typed, and the state keeps every digit.
+    Fields the schema marks hidden (Display(hidden=True), or a one-value
+    structural tag outside a union) have no controls. Their input is kept,
+    and their errors appear at the nearest drawn ancestor row or form.error.
     An untagged str-or-model field (a library key or an inline model) has
     form.mode.<path> with data "key" and "inline" instead: Key mode shows
     form.input.<path> as a QLineEdit, or an editable QComboBox listing the
@@ -217,7 +224,13 @@ class FormEditor[F: FormModel](QWidget):
             and field.kind != "model"
         }
         shape = tuple(
-            (field.path, field.kind, field.options is not None, field.expression)
+            (
+                field.path,
+                field.kind,
+                field.options is not None,
+                field.expression,
+                field.fixed,
+            )
             for field in flat
         )
         old_shape = tuple(
@@ -226,6 +239,7 @@ class FormEditor[F: FormModel](QWidget):
                 row.field.kind,
                 row.field.options is not None,
                 row.field.expression,
+                row.field.fixed,
             )
             for row in self._rows.values()
         )
