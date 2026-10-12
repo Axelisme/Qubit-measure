@@ -302,8 +302,9 @@ def test_record_result_writes_state(tiny_database):
         0.0,
     )
     before = st.version.get(FIT_VERSION_KEY)
-    result = svc.compute_search(svc.capture_search())
-    svc.record_result(result)
+    inputs = svc.capture_search()
+    result = svc.compute_search(inputs)
+    svc.record_result(result, inputs)
     assert st.fit.params == result.params
     assert st.fit.has_result
     assert st.version.get(FIT_VERSION_KEY) == before + 1

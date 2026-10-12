@@ -274,12 +274,13 @@ def test_compute_search_does_not_emit_or_record(tmp_path):
         0.0,
     )
     seen = _record(ctrl, FitChangedPayload)
-    result = ctrl.compute_search(ctrl.capture_search())
+    inputs = ctrl.capture_search()
+    result = ctrl.compute_search(inputs)
     # compute_search is pure: no event, no recorded result
     assert seen == []
     assert ctrl.state.fit.params is None
     # recording it emits + writes
-    ctrl.record_search_result(result)
+    ctrl.record_search_result(result, inputs)
     assert len(seen) == 1
     assert ctrl.state.fit.has_result
 
