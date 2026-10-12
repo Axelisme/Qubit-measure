@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
     PostAnalysisPaneSnapshot,
     RunPaneSnapshot,
+    SavePaneSnapshot,
     TabSnapshot,
 )
 from zcu_tools.gui.app.measure.state import TabInteractionState
@@ -131,6 +132,7 @@ def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
             has_analyze_result=True,
             has_figure=True,
         ),
+        save=SavePaneSnapshot(),
         artifacts=tracker.snapshot(),
     )
 
@@ -153,7 +155,7 @@ def test_all_output_paths_are_read_only_and_refresh_retains_selection(
         ]
         editors = center.findChildren(QLineEdit)
         assert len(editors) == len(paths) == 6
-        assert [editor.text() for editor in editors] == paths
+        assert [editor.toolTip() for editor in editors] == paths
         for editor, path in zip(editors, paths, strict=True):
             editor.setFocus()
             editor.selectAll()
@@ -166,10 +168,11 @@ def test_all_output_paths_are_read_only_and_refresh_retains_selection(
                     "x",
                 ),
             )
-            assert editor.text() == path
+            assert editor.toolTip() == path
             editor.selectAll()
             center.update_from_snapshot(current)
-            assert editor.selectedText() == path
+            # Selection covers the shown (possibly elided) text; the tooltip keeps the path.
+            assert editor.selectedText() == editor.text()
         assert center.findChildren(QLineEdit) == editors
     finally:
         center.deleteLater()
@@ -204,7 +207,7 @@ def test_outputs_follow_actual_report_paths_and_errors(
         tracker.apply_report(SaveReport("20261008T000000Z-a1b2c3", results))
         center.update_from_snapshot(replace(current, artifacts=tracker.snapshot()))
         assert center.findChildren(QLineEdit) == editors
-        assert [editor.text() for editor in editors] == [
+        assert [editor.toolTip() for editor in editors] == [
             str(result.output.path) for result in results
         ]
         assert any(

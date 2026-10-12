@@ -66,6 +66,7 @@ from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.experiment.run_saving import SaveReport
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.aliases import AliasRow
@@ -228,6 +229,18 @@ class RenderView(Protocol):
 
 class ViewProtocol(DiagnosticSink, RenderHost, RenderView, Protocol):
     """A full Qt View (``MainWindow``) implements all three channels."""
+
+
+def _save_summary(report: SaveReport) -> str:
+    """One status line per Save: file counts and run id; paths stay in the Data tab."""
+    total = len(report.outputs)
+    failed = sum(item.status == "failed" for item in report.outputs)
+    if failed:
+        return (
+            f"Saved {total - failed} of {total} files; {failed} failed "
+            f"for run {report.run_id}"
+        )
+    return f"Saved {total} files for run {report.run_id}"
 
 
 class Controller(SessionControllerMixin):
@@ -480,24 +493,21 @@ class Controller(SessionControllerMixin):
     def _on_save_artifacts_finished(
         self, outcome: SaveArtifactsFinishedPayload
     ) -> None:
-        detail = ""
         if outcome.report is not None:
-            detail = "\n".join(
-                f"{item.output.path}: {item.status}"
-                + (f" ({item.error})" if item.error is not None else "")
-                for item in outcome.report.outputs
-            )
-        if outcome.error is None:
-            self._info(detail)
-        else:
+            self._info(_save_summary(outcome.report))
+        if outcome.error is not None:
+            detail = ""
+            if outcome.report is not None:
+                detail = "\n".join(
+                    f"{item.output.path}: {item.status}"
+                    + (f" ({item.error})" if item.error is not None else "")
+                    for item in outcome.report.outputs
+                )
             self._notify("error", "Save failed", detail or outcome.error)
 
     def _on_save_data_finished(self, outcome: SaveDataFinishedPayload) -> None:
         if outcome.report is not None:
-            outputs = "\n".join(
-                f"{item.output.path}: {item.status}" for item in outcome.report.outputs
-            )
-            self._info(f"Data save outputs:\n{outputs}")
+            self._info(_save_summary(outcome.report))
         if outcome.error is not None:
             self._notify("error", "Save data failed", outcome.error)
 

@@ -1,7 +1,6 @@
 """User-facing save evidence over real State, tracker reports and Qt widgets."""
 
 from collections.abc import Generator
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +30,19 @@ from tests.gui.app.measure._native_save_support import (
 )
 
 
+class _QuiescingController(Controller):
+    """Expose owned background teardown for this real-session view fixture."""
+
+    def quiesce(self) -> bool:
+        return self._background_svc.quiesce()
+
+
+class _UndeclaredSavingAdapter(AnalysisSavingAdapter):
+    """Same adapter without a persistence declaration."""
+
+    experiment_tag = None
+
+
 @pytest.fixture
 def saving_view(
     tmp_path: Path,
@@ -41,7 +53,7 @@ def saving_view(
     with native_save_session(tmp_path, qapp) as session:
         registry = Registry()
         registry.register("saving", AnalysisSavingAdapter)
-        ctrl = Controller(
+        ctrl = _QuiescingController(
             session.state,
             registry,
             None,
@@ -58,6 +70,7 @@ def saving_view(
             parameters=original.run.parameters,
         )
         window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+        ctrl.add_view(window)
         window.add_tab_widget(tab_id, "saving")
         center = window.findChild(ArtifactSaveCenter)
         assert center is not None
@@ -68,7 +81,7 @@ def saving_view(
         try:
             yield session, ctrl, window, tab_id, center
         finally:
-            assert ctrl._background_svc.quiesce()
+            assert ctrl.quiesce()
             ctrl.tab_control.close_tab(tab_id)
             window.deleteLater()
             qapp.processEvents()
@@ -154,6 +167,9 @@ def test_paths_use_run_storage_after_switching_entry(
     )
     session.context.install_entry(other)
     window.refresh_tab_interaction(tab_id)
+    # Paths are read on the visible Data pane, where widths are laid out.
+    window.select_tab_pane(tab_id, "data")
+    qapp.processEvents()
     editors = center.findChildren(QLineEdit)
     outputs = [
         output
@@ -165,7 +181,7 @@ def test_paths_use_run_storage_after_switching_entry(
     assert [edit.toolTip() for edit in editors] == [str(out.path) for out in outputs]
     # At a generous width the entire relative text is visible and copyable.
     for edit in editors:
-        edit.resize(1200, 30)
+        edit.setFixedWidth(1200)
     qapp.processEvents()
     assert [edit.text() for edit in editors] == [
         str(out.path.relative_to(tmp_path)) for out in outputs
@@ -175,7 +191,7 @@ def test_paths_use_run_storage_after_switching_entry(
         edit.text().startswith("result/original/points/p/figures/") for edit in editors
     )
     editor = editors[0]
-    editor.resize(200, 30)
+    editor.setFixedWidth(200)
     qapp.processEvents()
     assert "…" in editor.text()
     assert editor.text().startswith("Database/")
@@ -217,7 +233,7 @@ def test_reports_show_inline_symbols_and_summary(saving_view, failed) -> None:
         failure = next(label for label in labels if label.text().startswith("✗"))
         assert "copy denied" in failure.text()
         assert failure.wordWrap()
-    message = window.get_view_snapshot().status_message
+    message = window.get_view_snapshot()["status"]
     assert session.metadata.run_id in message
     assert ("Saved 1 of 2 files; 1 failed" if failed else "Saved 2 files") in message
     assert str(outputs[0].output.path) not in message
@@ -226,7 +242,7 @@ def test_reports_show_inline_symbols_and_summary(saving_view, failed) -> None:
 def test_native_save_completion_uses_summary(saving_view) -> None:
     session, ctrl, window, tab_id, _ = saving_view
     report = ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
-    message = window.get_view_snapshot().status_message
+    message = window.get_view_snapshot()["status"]
     assert "Saved 2 files" in message
     assert report.run_id in message
     assert str(report.outputs[0].output.path) not in message
@@ -238,11 +254,11 @@ def test_native_save_completion_uses_summary(saving_view) -> None:
             report=report,
         )
     )
-    assert window.get_view_snapshot().status_message == message
+    assert window.get_view_snapshot()["status"] == message
 
 
 def test_hint_tracks_declared_support_not_current_outputs(saving_view) -> None:
-    session, ctrl, window, tab_id, center = saving_view
+    session, _ctrl, window, tab_id, center = saving_view
     session.state.clear_tab_results(tab_id)
     window.refresh_tab_interaction(tab_id)
     hint_text = "This experiment does not save to the result entry yet."
@@ -252,8 +268,7 @@ def test_hint_tracks_declared_support_not_current_outputs(saving_view) -> None:
     )
     assert not center.save_all_button.isEnabled()
     # experiment_tag is the existing declaration, not an inference from methods.
-    session.state.get_tab(tab_id).adapter = replace_adapter = AnalysisSavingAdapter()
-    replace_adapter.experiment_tag = None
+    session.state.get_tab(tab_id).adapter = _UndeclaredSavingAdapter()
     window.refresh_tab_interaction(tab_id)
     hints = [
         label for label in center.findChildren(QLabel) if label.text() == hint_text
