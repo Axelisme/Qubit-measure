@@ -27,6 +27,67 @@ def test_parse_collection_requires_success_summary_and_exact_node_count() -> Non
     assert len(result.digest) == 64
 
 
+@pytest.mark.parametrize(
+    ("node_ids", "summary"),
+    [
+        (
+            ("tests/a/test_same.py::test_first",),
+            "1/2 tests collected (1 deselected) in 0.01s",
+        ),
+        (
+            (
+                "tests/b/test_same.py::test_second",
+                "tests/a/test_same.py::test_first",
+            ),
+            "2/3 tests collected (1 deselected) in 0.01s",
+        ),
+    ],
+)
+def test_parse_collection_accepts_filtered_summary(
+    node_ids: tuple[str, ...], summary: str
+) -> None:
+    command = ("pytest",)
+    output = "\n".join((*node_ids, summary, ""))
+
+    result = oracle.parse_collection(
+        command=command, returncode=0, stdout=output, stderr=""
+    )
+
+    assert result.node_ids == tuple(sorted(node_ids))
+    assert result.summary == summary
+    assert result.command == command
+
+
+@pytest.mark.parametrize(
+    ("stdout", "match"),
+    [
+        ("1/2 tests collected (1 deselected) in 0.01s\n", "no test node ids"),
+        (
+            "tests/a/test_x.py::test_x\n"
+            "tests/a/test_x.py::test_x\n"
+            "2/3 tests collected (1 deselected) in 0.01s\n",
+            "duplicate test node ids",
+        ),
+        (
+            "tests/a/test_x.py::test_x\n"
+            "2/3 tests collected (1 deselected) in 0.01s\n",
+            "summary count does not match",
+        ),
+        (
+            "tests/a/test_x.py::test_x\n"
+            "1 test collected in 0.01s\n"
+            "1/2 tests collected (1 deselected) in 0.01s\n",
+            "exactly one pytest summary",
+        ),
+    ],
+)
+def test_parse_collection_rejects_filtered_evidence(stdout: str, match: str) -> None:
+    with pytest.raises(oracle.CollectionOracleError, match=match):
+        oracle.parse_collection(
+            command=("pytest",), returncode=0, stdout=stdout, stderr=""
+        )
+
+
 @pytest.mark.parametrize("entrypoint", ["module", "console"])
 def test_collection_commands_use_the_same_venv_entrypoint(
     entrypoint: str,
