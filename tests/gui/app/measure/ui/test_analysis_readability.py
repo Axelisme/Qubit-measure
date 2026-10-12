@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -270,7 +271,8 @@ def test_writeback_preview_failure_shows_reason_in_place(qapp, pane):
             )
         }
         update([item])
-        qapp.processEvents()
+        # Replaced rows are deleted on the next event-loop pass.
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         assert widget.findChild(QLabel, "writebackPreviewUnavailable") is None
         assert len(widget.findChildren(QCheckBox)) == 1
     finally:

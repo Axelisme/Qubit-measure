@@ -33,6 +33,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
+from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import WritebackItem
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services import TabSnapshot
+    from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
     from zcu_tools.plotting.figures import FigureCollection
 
 
@@ -756,40 +758,61 @@ class ExpTabWidget(QWidget):
         return self.post_analyze_form.has_params()
 
     def update_writeback_items(self, items: list[WritebackItem]) -> None:
+        """Show the primary analysis writeback preview for items.
+
+        A preview failure inside its contract (expected, validation, or I/O
+        error) shows its reason in place; any other failure propagates.
+        """
         self._require_analysis()
-        values = (
-            self._ctrl.writeback_control.get_writeback_values_for_pane(
-                self.tab_id, "analysis"
-            )
-            if items
-            else {}
-        )
         snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
         reasons = (
             snapshot.analysis.unavailable_reasons
             if snapshot.analysis is not None
             else ()
         )
-        self.writeback_widget.populate(items, values, unavailable_reasons=reasons)
-        self.writeback_section.setVisible(bool(items or reasons))
+        self._refresh_writeback(
+            "analysis", items, reasons, self.writeback_widget, self.writeback_section
+        )
 
     def update_post_writeback_items(self, items: list[WritebackItem]) -> None:
+        """Show the post-analysis writeback preview, as update_writeback_items."""
         self._require_post()
-        values = (
-            self._ctrl.writeback_control.get_writeback_values_for_pane(
-                self.tab_id, "post_analysis"
-            )
-            if items
-            else {}
-        )
         snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
         reasons = (
             snapshot.post_analysis.unavailable_reasons
             if snapshot.post_analysis is not None
             else ()
         )
-        self.post_writeback_widget.populate(items, values, unavailable_reasons=reasons)
-        self.post_writeback_section.setVisible(bool(items or reasons))
+        self._refresh_writeback(
+            "post_analysis",
+            items,
+            reasons,
+            self.post_writeback_widget,
+            self.post_writeback_section,
+        )
+
+    def _refresh_writeback(
+        self,
+        pane: WritebackPane,
+        items: list[WritebackItem],
+        reasons: tuple[str, ...],
+        widget: WritebackWidget,
+        section: _LedgerSection,
+    ) -> None:
+        section.setVisible(bool(items or reasons))
+        if not items:
+            widget.populate(items, {}, unavailable_reasons=reasons)
+            return
+        try:
+            values = self._ctrl.writeback_control.get_writeback_values_for_pane(
+                self.tab_id, pane
+            )
+        except (ExpectedError, ValueError, OSError) as error:
+            # Isolate the preview: the pane stays usable and names the failure.
+            logger.exception("Writeback preview failed for %s %s", self.tab_id, pane)
+            widget.show_preview_unavailable(str(error))
+            return
+        widget.populate(items, values, unavailable_reasons=reasons)
 
     def get_comment(self) -> str:
         return self._save_center.get_comment()

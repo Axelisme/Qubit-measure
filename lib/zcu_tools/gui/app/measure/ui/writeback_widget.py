@@ -346,6 +346,20 @@ class WritebackWidget(QWidget):
 
         self._refresh_apply_enabled()
 
+    def show_preview_unavailable(self, reason: str) -> None:
+        """Replace every row with one failure line naming why preview failed.
+
+        reason is the owner's failure text, shown verbatim and wrapped. The
+        view keeps no items, so Apply stays disabled until the next populate.
+        """
+        self.populate([], {})
+        label = QLabel(f"Writeback preview unavailable: {reason}")
+        label.setObjectName("writebackPreviewUnavailable")
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setStyleSheet("color: #b00020;")
+        label.setWordWrap(True)
+        self._rows_layout.addWidget(label)
+
     def populate(
         self,
         items: Sequence[WritebackItem],
