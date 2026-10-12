@@ -38,7 +38,10 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
-from zcu_lab.workflows.calibration import Calibrated, CalibrationFailed
+from zcu_lab.workflows.calibration import (
+    Calibrated,
+    CalibrationFailed,
+)
 from zcu_lab.workflows.t1 import T1Plan, T1Point, T1Tunables
 
 from ._sim_inputs import Inputs, make_plan, seed_from_inputs
@@ -141,13 +144,19 @@ def synthetic_run(
                     None,
                     None,
                     "missing calibration",
+                    None,
+                    None,
                 ),
                 state + 1,
             )
-        yield from env.run(
-            acquire, TraceCfg(state, "synthetic/calibration"), save=save_trace
+        calibration = yield from env.run(
+            acquire, TraceCfg(state, "synthetic/calibration")
         )
-        yield from env.run(acquire, TraceCfg(state, "twotone/ge/t1"), save=save_trace)
+        assert isinstance(calibration, Completed)
+        save_trace(calibration, env.iteration_dir / "calibration.h5")
+        final = yield from env.run(acquire, TraceCfg(state, "twotone/ge/t1"))
+        assert isinstance(final, Completed)
+        save_trace(final, env.iteration_dir / "decay.h5")
         if state == 3:
             clock.on_wait = lambda _signal: engine.stop(run_id)
             yield from env.wait_until(clock.now() + timedelta(seconds=1))
@@ -159,6 +168,8 @@ def synthetic_run(
                 20.0 if state == 0 else None,
                 1.0 if state == 0 else None,
                 None if state == 0 else "T1 fit rejected",
+                None,
+                "decay.h5",
             ),
             state + 1,
         )

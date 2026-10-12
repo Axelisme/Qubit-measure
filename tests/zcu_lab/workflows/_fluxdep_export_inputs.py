@@ -34,7 +34,11 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
-from zcu_lab.workflows.calibration import Calibrated, CalibratedPi2, CalibrationFailed
+from zcu_lab.workflows.calibration import (
+    Calibrated,
+    CalibratedPi2,
+    CalibrationFailed,
+)
 from zcu_lab.workflows.mist import MISTPlan, MISTPoint, MISTTunables
 from zcu_lab.workflows.t2 import T2EchoTunables, T2Plan, T2Point
 
@@ -83,15 +87,19 @@ def synthetic_t2_run(
                     None,
                     None,
                     "missing",
+                    None,
+                    None,
                 ),
                 state + 1,
             )
-        yield from env.run(
-            acquire, TraceCfg(state, "synthetic/calibration"), save=save_trace
+        calibration = yield from env.run(
+            acquire, TraceCfg(state, "synthetic/calibration")
         )
-        yield from env.run(
-            acquire, TraceCfg(state, f"twotone/ge/t2{kind}"), save=save_trace
-        )
+        assert isinstance(calibration, Completed)
+        save_trace(calibration, env.iteration_dir / "calibration.h5")
+        final = yield from env.run(acquire, TraceCfg(state, f"twotone/ge/t2{kind}"))
+        assert isinstance(final, Completed)
+        save_trace(final, env.iteration_dir / "decay.h5")
         return Next(
             T2Point(
                 state,
@@ -100,6 +108,8 @@ def synthetic_t2_run(
                 20.0 if state == 0 else None,
                 1.0 if state == 0 else None,
                 None if state == 0 else "T2 fit rejected",
+                None,
+                "decay.h5",
             ),
             state + 1,
         )
@@ -192,11 +202,26 @@ def synthetic_mist_run(
                     CalibrationFailed("rabi", "missing"),
                     False,
                     "missing",
+                    None,
+                    None,
                 ),
                 state + 1,
             )
-        yield from env.run(acquire_gain, TraceCfg(state, "mist/gain"), save=save_gain)
-        return Next(MISTPoint(state, plan.fluxes[state], cal, True, None), state + 1)
+        final = yield from env.run(acquire_gain, TraceCfg(state, "mist/gain"))
+        assert isinstance(final, Completed)
+        save_gain(final, env.iteration_dir / "mist.h5")
+        return Next(
+            MISTPoint(
+                state,
+                plan.fluxes[state],
+                cal,
+                True,
+                None,
+                None,
+                "mist.h5",
+            ),
+            state + 1,
+        )
 
     engine.start(
         step,

@@ -29,6 +29,7 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.v2.twotone.freq.core import FreqExp
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
@@ -185,7 +186,7 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
         lifetime = point["lifetime_us"]
         assert isinstance(lifetime, float) and lifetime == pytest.approx(20.0, rel=0.2)
         experiments: list[str] = []
-        for filename in record.run_files:
+        for filename in point_files(record):
             path = tmp_path / "data" / record.iteration_dir / filename
             saved = load_run_data(path)
             assert saved.metadata.completion == "complete"
@@ -202,13 +203,13 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
             expected.append(FreqGainExp().persistence_spec().tag)
         expected.append(T1Exp().persistence_spec().tag)
         assert experiments == expected
-        path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+        path = tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
         assert source.cfg is not None and source.cfg.rounds == 2
         assert source.result.times.shape == source.result.signals.shape == (21,)
         assert np.isfinite(source.result.signals).all()
         assert metadata.run_id != "workflow"
-    assert len(run_ids) == sum(len(record.run_files) for record in records)
+    assert len(run_ids) == sum(len(point_files(record)) for record in records)
     assert inputs.t1.model_dump(mode="python") == before
     events = [
         json.loads(line)
@@ -219,9 +220,6 @@ def test_native_t1_multi_point_run_commits_scalars_and_loadable_acquisitions(
     commits = [event for event in events if event["kind"] == "step_committed"]
     assert [event["encoded_record"]["value"] for event in commits] == [
         record.encoded_record.value for record in records
-    ]
-    assert [event["run_files"] for event in commits] == [
-        list(record.run_files) for record in records
     ]
     assert events[-1]["kind"] == "run_ended"
     assert events[-1]["lifecycle"] == "done"
@@ -246,16 +244,16 @@ def test_calibration_relax_uses_initial_guess_then_latest_accepted_t1(
     assert len(records) == 2
     estimate = tun.guess_us
     for record in records:
-        assert len(record.run_files) == 4
+        assert len(point_files(record)) == 4
         root = tmp_path / "data" / record.iteration_dir
         frequency, _ = load_run_with_metadata(
-            root / record.run_files[0], spec=FreqExp().persistence_spec()
+            root / point_files(record)[0], spec=FreqExp().persistence_spec()
         )
         rabi, _ = load_run_with_metadata(
-            root / record.run_files[1], spec=LenRabiExp().persistence_spec()
+            root / point_files(record)[1], spec=LenRabiExp().persistence_spec()
         )
         readout, _ = load_run_with_metadata(
-            root / record.run_files[2], spec=FreqGainExp().persistence_spec()
+            root / point_files(record)[2], spec=FreqGainExp().persistence_spec()
         )
         assert frequency.cfg is not None
         assert rabi.cfg is not None and readout.cfg is not None
@@ -331,7 +329,7 @@ def test_flux_bound_native_t1_acquires_each_committed_setpoint(
         assert point["flux"] == flux
         assert point["reason"] is None
         assert point["lifetime_us"] == pytest.approx(20.0, rel=0.2)
-        path = roots.database / record.iteration_dir / record.run_files[-1]
+        path = roots.database / record.iteration_dir / point_files(record)[-1]
         source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
         assert metadata.device_snapshot is not None
         assert metadata.device_snapshot["flux"]["value"] == flux
@@ -361,8 +359,9 @@ def test_failed_calibration_commits_reason_and_never_runs_t1(
         assert isinstance(point, dict)
         assert point["lifetime_us"] is None and point["error_us"] is None
         assert point["reason"] == "No accepted frequency fit"
-        assert len(record.run_files) == len(tun.cal.qf_widen)
-        for filename in record.run_files:
+        assert point["calibration_files"] is None
+        for attempt in range(1, len(tun.cal.qf_widen) + 1):
+            filename = f"frequency-{attempt:02d}.h5"
             path = tmp_path / "data" / record.iteration_dir / filename
             saved = load_run_data(path)
             assert saved.metadata.experiment != T1Exp().persistence_spec().tag
@@ -387,7 +386,7 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
         assert point["reason"] == "T1 fit rejected"
         rabi_paths: list[Path] = []
         rabi_spec = LenRabiExp().persistence_spec()
-        for filename in record.run_files:
+        for filename in point_files(record):
             path = tmp_path / "data" / record.iteration_dir / filename
             if load_run_data(path).metadata.experiment == rabi_spec.tag:
                 rabi_paths.append(path)
@@ -395,7 +394,7 @@ def test_rejected_t1_fit_keeps_raw_data_but_not_lifetime_history(
         rabi, _ = load_run_with_metadata(rabi_paths[0], spec=rabi_spec)
         assert rabi.cfg is not None
         assert rabi.cfg.relax_delay == 5 * tun.guess_us
-        path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+        path = tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         source, _metadata = load_run_with_metadata(
             path, spec=T1Exp().persistence_spec()
         )
@@ -448,7 +447,7 @@ def test_pause_during_native_acquisition_discards_step_then_uses_new_revision(
     assert len(records) == 2 and all(record.revision == 1 for record in records)
     assert devices.values == [("flux", 1.0), ("flux", 1.0), ("flux", 1.1)]
     for record in records:
-        path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+        path = tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         source, _metadata = load_run_with_metadata(
             path, spec=T1Exp().persistence_spec()
         )
@@ -492,7 +491,7 @@ def test_stop_during_native_acquisition_preserves_only_prior_committed_point(
     assert len(records) == 1
     point = records[0].encoded_record.value
     assert isinstance(point, dict) and point["flux"] == 1.0
-    path = tmp_path / "data" / records[0].iteration_dir / records[0].run_files[-1]
+    path = tmp_path / "data" / records[0].iteration_dir / point_files(records[0])[-1]
     source, metadata = load_run_with_metadata(path, spec=T1Exp().persistence_spec())
     assert source.cfg is not None and np.isfinite(source.result.signals).all()
     assert metadata.completion == "complete"
@@ -514,9 +513,17 @@ def test_flux_unit_mismatch_fails_before_setup_or_acquisition(
     assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))
 
 
-def test_point_names_native_decay_and_each_calibration_stage(inputs: Inputs, tmp_path: Path) -> None:
+def test_point_names_native_decay_and_each_calibration_stage(
+    inputs: Inputs, tmp_path: Path
+) -> None:
     plots = Plots(NonPresentingHost())
-    engine = start_t1(inputs, tmp_path, T1Tunables(cal=CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125)), RecordingDevices(), plots)
+    engine = start_t1(
+        inputs,
+        tmp_path,
+        T1Tunables(cal=CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125)),
+        RecordingDevices(),
+        plots,
+    )
     try:
         status = engine.execute("workflow")
         assert status.lifecycle == "done", status.reason
@@ -526,10 +533,25 @@ def test_point_names_native_decay_and_each_calibration_stage(inputs: Inputs, tmp
         assert point["decay_file"] == "t1.h5"
         files = point["calibration_files"]
         assert isinstance(files, dict)
-        assert files == {"frequency": ["frequency-01.h5"], "rabi": "rabi.h5", "readout": "readout.h5"}
+        assert files == {
+            "frequency": ["frequency-01.h5"],
+            "rabi": "rabi.h5",
+            "readout": "readout.h5",
+        }
         root = tmp_path / "data" / record.iteration_dir
-        for filename, experiment in (("t1.h5", T1Exp()), ("frequency-01.h5", FreqExp()), ("rabi.h5", LenRabiExp()), ("readout.h5", FreqGainExp())):
-            native, metadata = load_run_with_metadata(root / filename, spec=experiment.persistence_spec())
+        loaded = (
+            load_run_with_metadata(root / "t1.h5", spec=T1Exp().persistence_spec()),
+            load_run_with_metadata(
+                root / "frequency-01.h5", spec=FreqExp().persistence_spec()
+            ),
+            load_run_with_metadata(
+                root / "rabi.h5", spec=LenRabiExp().persistence_spec()
+            ),
+            load_run_with_metadata(
+                root / "readout.h5", spec=FreqGainExp().persistence_spec()
+            ),
+        )
+        for native, metadata in loaded:
             assert native.cfg is not None
             assert metadata.snapshot == make_snapshot()
             assert metadata.device_snapshot is not None

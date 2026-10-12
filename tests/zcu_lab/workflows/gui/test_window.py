@@ -25,6 +25,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated
@@ -239,8 +240,8 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     engine = controller.engine
     assert engine is not None
     record = engine.records(status.run_id)[0]
-    assert len(record.run_files) >= 4
-    for relative in record.run_files:
+    assert len(point_files(record)) >= 4
+    for relative in point_files(record):
         assert (
             entry.database_path / "workflows/native" / record.iteration_dir / relative
         ).is_file()
@@ -320,7 +321,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
         / "workflows"
         / run_id
         / record.iteration_dir
-        / record.run_files[-1]
+        / point_files(record)[-1]
     )
     spec = T1Exp().persistence_spec()
     native, metadata = load_run_with_metadata(source, spec=spec)

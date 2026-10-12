@@ -22,6 +22,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 
 from tests.experiment.workflows._engine_fakes import RecordingBar, RecordingDevices
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab import workflows
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
@@ -100,7 +101,7 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
             assert data["t1_us"] == pytest.approx(20.0, abs=2.0)
             assert data["t2_us"] == pytest.approx(10.0, abs=2.0)
             assert data["t1_reason"] is None and data["t2_reason"] is None
-            assert len(record.run_files) == 2
+            assert len(point_files(record)) == 2
             assert_native_pair(paths, record, plan, tun)
         journal = [
             json.loads(line)
@@ -108,8 +109,13 @@ def test_overnight_commits_fixed_native_pairs_and_round_progress(
         ]
         commits = [event for event in journal if event["kind"] == "step_committed"]
         assert len(commits) == 3
-        assert [event["run_files"] for event in commits] == [
-            list(record.run_files) for record in records
+        assert [event["encoded_record"] for event in commits] == [
+            {
+                "mode": record.encoded_record.mode,
+                "value": record.encoded_record.value,
+                "error": record.encoded_record.error,
+            }
+            for record in records
         ]
     finally:
         driver.close()
@@ -124,13 +130,13 @@ def assert_native_pair(
     """Read both native members and verify fixed cfg and acquisition metadata."""
     root = paths.data_root / record.iteration_dir
     t1, t1_metadata = load_run_with_metadata(
-        root / record.run_files[0], spec=T1Exp().persistence_spec()
+        root / point_files(record)[0], spec=T1Exp().persistence_spec()
     )
     t2, t2_metadata = load_run_with_metadata(
-        root / record.run_files[1], spec=T2EchoExp().persistence_spec()
+        root / point_files(record)[1], spec=T2EchoExp().persistence_spec()
     )
-    assert "run_t1" in record.run_files[0]
-    assert "run_t2echo" in record.run_files[1]
+    assert point_files(record)[0] == "t1.h5"
+    assert point_files(record)[1] == "t2echo.h5"
     assert t1_metadata.device_snapshot is not None
     assert t2_metadata.device_snapshot == t1_metadata.device_snapshot
     assert t1_metadata.snapshot == plan.snapshot
@@ -267,7 +273,7 @@ def test_pause_discards_incomplete_pair_and_resume_redoes_then_stop_keeps_commit
     )
     # T1 of the cancelled second pair remains native evidence but is not a commit.
     discarded = tmp_path / "data" / "iter" / "000002"
-    assert len(tuple(discarded.glob("runs/*run_t1.h5"))) == 1
+    assert len(tuple(discarded.glob("t1.h5"))) == 1
     Event().wait(0.3)
     resumed_at = datetime.now(UTC)
     engine.resume("overnight")
@@ -278,7 +284,7 @@ def test_pause_discards_incomplete_pair_and_resume_redoes_then_stop_keeps_commit
     assert records[0] == prior[0]
     assert len(records) == 2
     assert records[1].call_seq == 3
-    assert len(records[1].run_files) == 2
+    assert len(point_files(records[1])) == 2
     assert pair_time(records[1], "scheduled_start") >= resumed_at
     assert pair_time(records[1], "actual_start") >= resumed_at
     assert any(
@@ -295,8 +301,12 @@ def test_point_names_each_native_pair_member(inputs: Inputs, tmp_path: Path) -> 
     point = record.encoded_record.value
     assert isinstance(point, dict)
     assert (point["t1_file"], point["t2_file"]) == ("t1.h5", "t2echo.h5")
-    for filename, experiment in (("t1.h5", T1Exp()), ("t2echo.h5", T2EchoExp())):
-        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / filename, spec=experiment.persistence_spec())
+    root = tmp_path / "data" / record.iteration_dir
+    loaded = (
+        load_run_with_metadata(root / "t1.h5", spec=T1Exp().persistence_spec()),
+        load_run_with_metadata(root / "t2echo.h5", spec=T2EchoExp().persistence_spec()),
+    )
+    for native, metadata in loaded:
         assert native.cfg is not None
         assert metadata.snapshot == make_snapshot()
         assert metadata.device_snapshot is not None

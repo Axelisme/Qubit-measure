@@ -4,6 +4,7 @@ import pytest
 from qtpy.QtWidgets import QApplication, QComboBox
 from zcu_tools.gui.form import FormErrors
 
+from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.gui.remote import FormWrite
 
@@ -80,7 +81,9 @@ def test_selected_overnight_gui_and_mcp_commit_same_native_pairs(
     engine = controller.engine
     assert engine is not None
     records = engine.records("overnight-host")
-    assert len(records) == 2 and all(len(record.run_files) == 2 for record in records)
+    assert len(records) == 2 and all(
+        len(point_files(record)) == 2 for record in records
+    )
     with pytest.raises(ValueError, match="fluxdep export binding"):
         window.export_fluxdep("overnight-host")
 

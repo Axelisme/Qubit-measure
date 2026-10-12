@@ -9,6 +9,7 @@ from pydantic import JsonValue
 from zcu_tools.datafile import load_run_data, save_run_data
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.workflows import export
 from zcu_lab.workflows.calibration import CalibratedPi2
 from zcu_lab.workflows.t1 import T1Point
@@ -37,6 +38,8 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
                 20 + i if i < 2 else None,
                 0.5 if i < 2 else None,
                 None if i < 2 else "rejected",
+                None,
+                "decay.h5",
             ),
             seed=seed,
         )
@@ -62,6 +65,8 @@ def test_samples_use_committed_scalars_and_last_native_snapshot(
                 20 + i if i < 2 else None,
                 0.5 if i < 2 else None,
                 None if i < 2 else "rejected",
+                None,
+                "decay.h5",
             ),
             seed=seed,
         )
@@ -107,12 +112,12 @@ def test_prevalidation_rejects_missing_snapshot_before_any_append(
     engine, paths, _devices = sample_engine(
         plan,
         tmp_path,
-        lambda i: T1Point(i, plan.fluxes[i], seed, 20.0, 1.0, None),
+        lambda i: T1Point(i, plan.fluxes[i], seed, 20.0, 1.0, None, None, "decay.h5"),
         seed=seed,
     )
     records = engine.records("sample-run")
     last = records[-1]
-    path = paths.data_root / last.iteration_dir / last.run_files[-1]
+    path = paths.data_root / last.iteration_dir / point_files(last)[-1]
     native = load_run_data(path)
     save_run_data(
         path,
@@ -175,6 +180,8 @@ def test_partial_io_count_cause_and_retry_latest(
             20.0 if i < 2 else None,
             1.0 if i < 2 else None,
             None if i < 2 else "rejected",
+            None,
+            "decay.h5",
         ),
         seed=seed,
     )

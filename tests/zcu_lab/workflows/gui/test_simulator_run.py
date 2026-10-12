@@ -16,6 +16,7 @@ from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.resources.entry import workflow_roots
 
+from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.gui.remote import FormWrite
@@ -142,9 +143,9 @@ def assert_native_files(
 ) -> None:
     """Load the native acquisitions, verifying captured metadata and measured T1."""
     for record in records:
-        assert record.run_files[-1].endswith("-run_t1.h5")
+        assert point_files(record)[-1] == "t1.h5"
         native, metadata = load_run_with_metadata(
-            data_root / record.iteration_dir / record.run_files[-1],
+            data_root / record.iteration_dir / point_files(record)[-1],
             spec=T1Exp().persistence_spec(),
         )
         assert native.cfg is not None and native.cfg.rounds == record.revision + 2
@@ -186,7 +187,6 @@ def assert_persisted_records(
             "revision": r.revision,
             "encoded_record": asdict(r.encoded_record),
             "iteration_dir": r.iteration_dir,
-            "run_files": list(r.run_files),
         }
         for r in records
     ]

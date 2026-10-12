@@ -16,7 +16,7 @@ def committed_points() -> tuple[CommittedRecord, ...]:
     """Independent scalar examples, including rejection and missing evidence."""
     return tuple(
         CommittedRecord(
-            index + 1, index + 1, 0, encode_record(point), f"iter/{index + 1:06}", ()
+            index + 1, index + 1, 0, encode_record(point), f"iter/{index + 1:06}"
         )
         for index, point in enumerate(
             (
@@ -31,6 +31,8 @@ def committed_points() -> tuple[CommittedRecord, ...]:
                     40.0,
                     2.0,
                     None,
+                    None,
+                    None,
                 ),
                 OvernightPoint(
                     1,
@@ -42,6 +44,8 @@ def committed_points() -> tuple[CommittedRecord, ...]:
                     "T1 fit rejected",
                     42.0,
                     2.5,
+                    None,
+                    None,
                     None,
                 ),
                 OvernightPoint(
@@ -55,6 +59,8 @@ def committed_points() -> tuple[CommittedRecord, ...]:
                     None,
                     None,
                     "acquisition failed",
+                    None,
+                    None,
                 ),
                 OvernightPoint(
                     3,
@@ -65,6 +71,8 @@ def committed_points() -> tuple[CommittedRecord, ...]:
                     None,
                     None,
                     45.0,
+                    None,
+                    None,
                     None,
                     None,
                 ),

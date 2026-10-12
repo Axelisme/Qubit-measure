@@ -114,11 +114,15 @@ def sample_engine[R](
         devices.drivers["flux"].setup(
             FakeDeviceInfo(address="none", value=10 + state), progress=False
         )
-        yield from env.run(acquire, CaptureCfg(state), save=save_capture)
+        calibration = yield from env.run(acquire, CaptureCfg(state))
+        assert isinstance(calibration, Completed)
+        save_capture(calibration, env.iteration_dir / "calibration.h5")
         devices.drivers["flux"].setup(
             FakeDeviceInfo(address="none", value=40 + state), progress=False
         )
-        yield from env.run(acquire, CaptureCfg(state), save=save_capture)
+        final = yield from env.run(acquire, CaptureCfg(state))
+        assert isinstance(final, Completed)
+        save_capture(final, env.iteration_dir / "decay.h5")
         return Next(record(state), state + 1)
 
     engine.start(

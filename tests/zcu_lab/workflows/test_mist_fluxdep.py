@@ -17,6 +17,7 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepExp
 from zcu_lab.workflows import analysis
 from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
@@ -99,7 +100,7 @@ def test_mist_commits_two_gain_traces_with_calibrated_preparation(
         assert point["success"] is True and point["reason"] is None
         cal = point["calibration"]
         assert isinstance(cal, dict)
-        final = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+        final = tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         stored = load_run_data(final)
         assert stored.metadata.experiment == "mist/gain"
         assert stored.metadata.snapshot == make_snapshot()
@@ -135,7 +136,7 @@ def test_mist_commits_two_gain_traces_with_calibrated_preparation(
     ] == [r.encoded_record.value for r in records]
     assert "mist/gain" in plots and "mist/vs_flux" in plots
     last = records[-1]
-    final = tmp_path / "data" / last.iteration_dir / last.run_files[-1]
+    final = tmp_path / "data" / last.iteration_dir / point_files(last)[-1]
     source, _ = load_run_with_metadata(final, spec=PowerDepExp().persistence_spec())
     np.testing.assert_allclose(
         np.asarray(plots["mist/gain"].axes[0].lines[0].get_ydata()),
@@ -154,7 +155,7 @@ def test_mist_map_uses_actual_native_gain_and_flux_coordinates(
         assert len(records) == 2
         sources = [
             load_run_with_metadata(
-                tmp_path / "data" / record.iteration_dir / record.run_files[-1],
+                tmp_path / "data" / record.iteration_dir / point_files(record)[-1],
                 spec=PowerDepExp().persistence_spec(),
             )[0]
             for record in records
@@ -202,7 +203,10 @@ def test_point_names_native_gain_trace(inputs: Inputs, tmp_path: Path) -> None:
         point = record.encoded_record.value
         assert isinstance(point, dict)
         assert point["gain_file"] == "mist.h5"
-        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / "mist.h5", spec=PowerDepExp().persistence_spec())
+        native, metadata = load_run_with_metadata(
+            tmp_path / "data" / record.iteration_dir / "mist.h5",
+            spec=PowerDepExp().persistence_spec(),
+        )
         assert native.cfg is not None
         assert metadata.snapshot == make_snapshot()
         assert metadata.device_snapshot is not None

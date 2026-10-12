@@ -100,7 +100,6 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
         "revision": first.revision,
         "encoded_record": asdict(first.encoded_record),
         "iteration_dir": first.iteration_dir,
-        "run_files": list(first.run_files),
     }
     assert rpc("workflow.records", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
@@ -131,7 +130,6 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
         "revision": records[0].revision,
         "encoded_record": asdict(records[0].encoded_record),
         "iteration_dir": records[0].iteration_dir,
-        "run_files": list(records[0].run_files),
     }
     assert result == {"run_id": "tuning", "records": [expected]}
     assert engine.records("tuning")[0] == first
@@ -174,7 +172,6 @@ def test_rpc_records_running_empty_and_committed_native_summary(
         "revision": native.revision,
         "encoded_record": asdict(native.encoded_record),
         "iteration_dir": native.iteration_dir,
-        "run_files": list(native.run_files),
     }
     assert observations[1]["result"] == {"run_id": "reader", "records": [expected]}
     assert native.encoded_record.value == {"measurement": 2.5}

@@ -12,6 +12,7 @@ from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
@@ -58,7 +59,7 @@ def test_manual_export_keeps_accepted_origin_after_source_and_selection_change(
         / "workflows"
         / run_id
         / record.iteration_dir
-        / record.run_files[-1]
+        / point_files(record)[-1]
     )
     assert native.metadata.device_snapshot is not None
     value = native.metadata.device_snapshot["flux"]["value"]

@@ -21,6 +21,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
@@ -166,7 +167,6 @@ def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
         "revision": record.revision,
         "encoded_record": asdict(record.encoded_record),
         "iteration_dir": record.iteration_dir,
-        "run_files": list(record.run_files),
     }
     assert mcp_tools["workflows_workflow_records"]["handler"](
         {"run_id": "mcp-native"}
@@ -174,8 +174,8 @@ def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
         "run_id": "mcp-native",
         "records": [expected],
     }
-    assert len(record.run_files) >= 4
-    for relative in record.run_files:
+    assert len(point_files(record)) >= 4
+    for relative in point_files(record):
         assert (
             entry.database_path
             / "workflows/mcp-native"

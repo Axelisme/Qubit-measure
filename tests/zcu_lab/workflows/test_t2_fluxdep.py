@@ -18,6 +18,7 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyExp
 from zcu_lab.workflows.calibration import Calibrated, CalibrationTunables
@@ -116,7 +117,7 @@ def test_t2_fluxdep_commits_two_native_points_with_fitted_pi2(
         assert point["lifetime_us"] == pytest.approx(10.0, rel=0.3)
         calibration = point["calibration"]
         assert isinstance(calibration, dict)
-        final_path = tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+        final_path = tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         stored = load_run_data(final_path)
         assert stored.metadata.experiment == f"twotone/ge/t2{kind}"
         assert stored.metadata.snapshot == make_snapshot()
@@ -173,7 +174,7 @@ def test_t2_fluxdep_rejects_overlong_fit_but_preserves_native_trace(
         assert point["lifetime_us"] is None and point["error_us"] is None
         assert "exceeds" in str(point["reason"])
         stored = load_run_data(
-            tmp_path / "data" / record.iteration_dir / record.run_files[-1]
+            tmp_path / "data" / record.iteration_dir / point_files(record)[-1]
         )
         assert stored.metadata.experiment == f"twotone/ge/t2{kind}"
         trace = next(iter(stored.payload.variables.values()))
@@ -181,7 +182,9 @@ def test_t2_fluxdep_rejects_overlong_fit_but_preserves_native_trace(
 
 
 @pytest.mark.parametrize("kind", ["echo", "ramsey"])
-def test_point_names_native_t2_decay(inputs: Inputs, tmp_path: Path, kind: Literal["echo", "ramsey"]) -> None:
+def test_point_names_native_t2_decay(
+    inputs: Inputs, tmp_path: Path, kind: Literal["echo", "ramsey"]
+) -> None:
     engine, _, plots = start_t2(inputs, tmp_path, kind)
     try:
         status = engine.execute("workflow")
@@ -190,8 +193,15 @@ def test_point_names_native_t2_decay(inputs: Inputs, tmp_path: Path, kind: Liter
         point = record.encoded_record.value
         assert isinstance(point, dict)
         assert point["decay_file"] == f"t2{kind}.h5"
-        spec = T2EchoExp().persistence_spec() if kind == "echo" else T2RamseyExp().persistence_spec()
-        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / f"t2{kind}.h5", spec=spec)
+        path = tmp_path / "data" / record.iteration_dir / f"t2{kind}.h5"
+        if kind == "echo":
+            native, metadata = load_run_with_metadata(
+                path, spec=T2EchoExp().persistence_spec()
+            )
+        else:
+            native, metadata = load_run_with_metadata(
+                path, spec=T2RamseyExp().persistence_spec()
+            )
         assert native.cfg is not None
         assert metadata.snapshot == make_snapshot()
         assert metadata.device_snapshot is not None

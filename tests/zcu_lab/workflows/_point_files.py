@@ -13,7 +13,7 @@ def point_files(record: CommittedRecord) -> tuple[str, ...]:
     point = record.encoded_record.value
     assert isinstance(point, dict)
     result: list[str] = []
-    if "calibration_files" in point:
+    if "calibration_files" in point and point["calibration_files"] is not None:
         calibration = point["calibration_files"]
         assert isinstance(calibration, dict)
         frequency = calibration["frequency"]
