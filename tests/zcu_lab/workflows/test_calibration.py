@@ -1,6 +1,6 @@
 """Calibration policy through the public Engine/calibrate/native simulator seam.
 
-Recording writers exercise Engine publication, not native storage acceptance.
+Recording writers exercise calibration-selected paths, not native storage acceptance.
 """
 
 from copy import deepcopy
@@ -33,6 +33,7 @@ from tests.experiment.workflows._engine_fakes import (
     RecordingBar,
     RecordingDevices,
 )
+from tests.zcu_lab.workflows._point_files import point_files
 from zcu_lab.v2.twotone.freq.core import FreqCfg
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg
@@ -51,6 +52,7 @@ from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
     CalibrationFailed,
+    CalibrationFiles,
     CalibrationSavers,
     CalibrationTunables,
     calibrate,
@@ -70,6 +72,7 @@ class State:
 class Record:
     result: Calibrated | CalibrationFailed
     carry: CalCarry
+    calibration_files: CalibrationFiles
 
 
 @dataclass
@@ -157,6 +160,7 @@ class Rig:
         ) -> Step[State, Record]:
             if state.index == count:
                 return Done()
+            files = CalibrationFiles()
             result = yield from calibrate(
                 env,
                 qub_pulse=plan.qub_pulse,
@@ -165,6 +169,7 @@ class Rig:
                 flux=float(state.index),
                 carry=state.carry,
                 t1_estimate_us=t1_estimate_us,
+                files=files,
                 savers=CalibrationSavers(
                     self.save_frequency, self.save_rabi, self.save_readout
                 ),
@@ -172,7 +177,7 @@ class Rig:
             self.results.append(result)
             self.carries.append(deepcopy(state.carry))
             state.index += 1
-            return Next(Record(result, state.carry), state)
+            return Next(Record(result, state.carry, files), state)
 
         self.engine.start(
             step,
@@ -264,8 +269,8 @@ def test_calibration_uses_native_fits_and_commits_complete_scalar_carry(
     assert rig.plan == original
     records = rig.engine.records("calibration")
     assert len(records) == 1
-    assert len(records[0].run_files) == 3
-    for run_file in records[0].run_files:
+    assert len(point_files(records[0])) == 3
+    for run_file in point_files(records[0]):
         assert (tmp_path / "data" / records[0].iteration_dir / run_file).is_file()
 
 
@@ -349,7 +354,7 @@ def test_readout_cadence_counts_only_successes_and_preserves_prior_readout(
     assert rig.carries[-1].n_calibrated == 3
     assert len(rig.carries[-1].f01_by_flux) == 3
     assert tuple(
-        len(record.run_files) for record in rig.engine.records("calibration")
+        len(point_files(record)) for record in rig.engine.records("calibration")
     ) == (3, 2, 3)
 
 
@@ -376,7 +381,7 @@ def test_unavailable_frequency_diagnostics_reject_every_span_without_carry_updat
     assert rig.frequencies[1].cfg.sweep.freq.stop - rig.frequencies[
         1
     ].cfg.sweep.freq.start == pytest.approx(4.0)
-    assert len(rig.engine.records("calibration")[0].run_files) == 2
+    assert len(point_files(rig.engine.records("calibration")[0])) == 2
 
 
 def test_rabi_schedule_failure_retains_frequency_file_but_not_calibration(
@@ -393,7 +398,7 @@ def test_rabi_schedule_failure_retains_frequency_file_but_not_calibration(
     assert "length" in result.reason
     assert rig.carries == [CalCarry(rig.seed)]
     assert not rig.rabis and not rig.readouts
-    assert len(rig.engine.records("calibration")[0].run_files) == 1
+    assert len(point_files(rig.engine.records("calibration")[0])) == 1
 
 
 def test_readout_rejection_does_not_commit_partial_frequency_or_pi(
@@ -419,7 +424,7 @@ def test_readout_rejection_does_not_commit_partial_frequency_or_pi(
     assert 2 <= len(rig.frequencies) <= 2 * len(CalibrationTunables().qf_widen)
     records = rig.engine.records("calibration")
     assert len(records) == 2
-    assert sum(len(record.run_files) for record in records) == (
+    assert sum(len(point_files(record)) for record in records) == (
         len(rig.frequencies) + len(rig.rabis) + len(rig.readouts)
     )
 
@@ -434,7 +439,7 @@ def test_pause_discards_calibration_and_resume_uses_new_tunables(
     assert rig.engine.execute("calibration").lifecycle == "paused"
     assert not rig.engine.records("calibration")
     assert not rig.results and not rig.carries
-    assert len(tuple((tmp_path / "data/iter").glob("*/runs/*.h5"))) == 1
+    assert len(tuple((tmp_path / "data/iter").glob("*/*.h5"))) == 1
     rig.engine.update_tunables(
         "calibration",
         (TunableChange("qf_reps", 200),),
@@ -450,3 +455,22 @@ def test_pause_discards_calibration_and_resume_uses_new_tunables(
     assert last is not None
     assert rig.carries[0].f01_by_flux == [(0.0, last.f01_mhz)]
     assert len(rig.engine.records("calibration")) == 1
+
+
+def test_calibration_success_returns_scalars_and_named_native_files(inputs: Inputs, tmp_path: Path) -> None:
+    rig = Rig(inputs, tmp_path)
+    rig.start(CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125))
+    status = rig.engine.execute("calibration")
+    assert status.lifecycle == "done", status.reason
+    result = rig.results[0]
+    assert hasattr(result, "calibration"), "Successful calibration must return scalars and file evidence together"
+    assert isinstance(result, calibration.CalibrationSuccess)
+    assert result.calibration.f01_mhz == pytest.approx(rig.seed.f01_mhz, abs=10.0)
+    assert result.files.frequency == ("frequency-01.h5",)
+    assert result.files.rabi == "rabi.h5"
+    assert result.files.readout == "readout.h5"
+    root = tmp_path / "data" / "iter/000001"
+    assert (root / result.files.frequency[0]).read_text(encoding="utf-8") == rig.frequencies[0].result.evidence.run_id
+    assert (root / result.files.rabi).read_text(encoding="utf-8") == rig.rabis[0].result.evidence.run_id
+    assert result.files.readout is not None
+    assert (root / result.files.readout).read_text(encoding="utf-8") == rig.readouts[0].result.evidence.run_id
