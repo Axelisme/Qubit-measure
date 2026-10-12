@@ -79,7 +79,7 @@ def test_move_line_composes_conjugate_and_reports_only_changed_lines(client: Cli
             },
         ),
     ]
-    assert not result.extra_content
+    assert not result.content
 
 
 @pytest.mark.parametrize("error", [None, "alignment failed"])
@@ -141,6 +141,6 @@ def test_finish_and_image_override_return_native_evidence(
     assert result.data["pending"] is (command != "finish")
     assert result.data["stage"] == ("aligned" if command == "finish" else "align")
     assert result.data["discarded"] == "sample"
-    assert len(result.extra_content) == 1
+    assert len(result.content) == 1
     assert client.transport.requests[-1]["method"] == render_method
     assert client.transport.requests[-1]["params"] == {"name": "one"}
