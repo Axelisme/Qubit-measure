@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-12, composed connection and spectrum summaries
+**Last updated:** 2026-10-13, composed fit search and quality summaries
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge.
@@ -33,6 +33,22 @@ rounds numerical spectrum summaries to three decimals and preserves GUI
 alignment provenance. Load and snapshot attach the native evidence PNG as image
 content, not base64 text or an image file. PNG integrity uses the same core
 producer as Measure. MCP retains no spectrum, draft, provenance or fit state.
+
+`fit_tools.py` composes `fluxdep_fit` as a current-input read, caller overlay,
+complete replacement, search, bounded native awaits until terminal, final result
+read and successful-result render. Omitted fields retain the GUI's current choices;
+explicit null clears separate frequencies. It stores no choices and introduces no
+business defaults or validators. Schemas reuse GUI declarations, including numeric
+limits; the patch interface makes fields optional and permits frequency nulls.
+`fluxdep_database_info(path)` returns native parameter/flux ranges and entry/level
+counts without changing a fit.
+
+Fit quality comes from the recorded GUI result, not a new pointcloud read.
+Summaries round GHz residuals to three decimals and keep every compiled transition
+in order, including duplicate labels and unused lines with null residuals. The
+input point count sums recorded attribution counts. Unrecorded quality cannot be
+represented as zero statistics. Successful fits attach the native Show overlay PNG;
+failed/cancelled outcomes return status/error without an image or parameter result.
 
 The stdio entry supplies connection settings and instructions. Server exit only
 disconnects; it does not kill or shut down the GUI. Tools preserve scalar JSON

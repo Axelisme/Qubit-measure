@@ -10,6 +10,8 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import ToolTable
 
+from .projection import search_summary, with_png
+
 
 class DatabaseArguments(TypedDict):
     """path names a GUI-local search database to inspect, without loading a fit."""
@@ -40,8 +42,9 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
 
     Fit reads current inputs, overlays provided keys, sends complete replacement,
     starts search and waits in 30-second slices until terminal, then rereads result.
-    Failed/cancelled outcomes are data, not invocation failures. GUI validates
-    inputs and owns operations/I/O. Errors propagate without retry or rollback.
+    Finished fits return recorded quality and native PNG; failed/cancelled outcomes
+    are data, not invocation failures. GUI validates inputs and owns operations/I/O.
+    Missing quality or invocation/image errors propagate without retry or rollback.
     """
 
     def database_info(arguments: DatabaseArguments) -> ToolReply:
@@ -65,20 +68,45 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
             ).data
             if waited["reason"] == "completed":
                 break
-        call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
-        return ToolReply(dict(waited["outcome"]))
+        recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
+        outcome = waited["outcome"]
+        if outcome["status"] != "finished":
+            return ToolReply(dict(outcome))
+        summary = search_summary(recorded)
+        rendered = call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
+        return with_png(summary, rendered)
 
     # Reuse native declarations, changing only the agent patch/clear interface.
     properties: dict[str, object] = {
         spec.name: schema_property(spec)
         for spec in METHOD_SPECS["fit.set_params"].params
     }
-    for name in ("r_f", "sample_f"):
-        properties[name] = {"type": ["number", "null"]}
+    for spec in METHOD_SPECS["fit.set_params"].params:
+        if spec.name in ("r_f", "sample_f"):
+            properties[spec.name] = {
+                **schema_property(spec),
+                "type": ["number", "null"],
+            }
     return {
         bridge.config.tool_prefix + "fit": {
             "handler": fit,
-            "description": "Fit current Filter points: read current GUI inputs, overlay provided fields, replace inputs, search and wait until terminal. Omitted parameters retain current GUI values; explicit null clears r_f/sample_f. No retry or rollback.",
+            "description": (
+                "Fit current Filter points: read GUI inputs, overlay provided fields, "
+                "replace inputs, search and wait until terminal. Omitted fields retain "
+                "current GUI values; null clears r_f/sample_f. No local business "
+                "validation, retry or rollback. search_db is the search DB, not data_root. "
+                "EJb/ECb/ELb are finite [lower, upper] GHz bounds; inspect database_info "
+                "for available ranges and M levels. transitions maps category names "
+                "to [i,j] pairs with indices 0..M-1. For delta=E_j-E_i (GHz), "
+                "categories/formulas are: transitions=|delta|; blue side=|delta+r_f|; "
+                "red side=|r_f-delta|; mirror=|sample_f-delta|; "
+                "mirror blue=|sample_f-r_f-delta|; mirror red=|delta+sample_f-r_f|; "
+                "transitions{n}=|delta/n|; mirror{n}=|sample_f-delta/n|, "
+                "integer n=2..M-1 without leading zeroes. r_f is the GHz sideband "
+                "reference frequency; sample_f is the GHz sampling/alias frequency "
+                "used by mirror categories. Nonempty sidebands need r_f; nonempty "
+                "mirrors need sample_f, and mirror blue/red need both."
+            ),
             "inputSchema": {"type": "object", "properties": properties},
         },
         bridge.config.tool_prefix + "database_info": {
