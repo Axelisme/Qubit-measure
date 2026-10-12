@@ -1,7 +1,6 @@
 """Filter publication and native evidence through public owner and RPC seams."""
 
 import base64
-import copy
 import io
 from collections.abc import Mapping
 
@@ -10,22 +9,11 @@ import pytest
 from matplotlib.collections import PathCollection
 from matplotlib.figure import Figure
 from PIL import Image
-from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import InteractiveChangedPayload
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
-
-
-@pytest.fixture
-def joint_route(
-    route_harness: RouteHarness, cross_controller: Controller
-) -> RouteHarness:
-    for entry in cross_controller.state.spectrums.values():
-        route_harness.ctrl.state.put_spectrum(copy.deepcopy(entry))
-    route_harness.ctrl.set_active_spectrum(cross_controller.state.active_spectrum)
-    return route_harness
 
 
 def _context(reply: RouteReply) -> dict[str, object]:

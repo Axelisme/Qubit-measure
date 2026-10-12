@@ -7,6 +7,7 @@ No socket, QApplication or background worker is created.
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from collections.abc import Callable
@@ -147,3 +148,11 @@ class RouteHarness:
         for link in self.links.copy():
             self.disconnect(link)
         self.ctrl.interactive.dispose()
+
+
+def copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:
+    """Seed a route with detached Controller sources and the same display target."""
+    for entry in ctrl.state.spectrums.values():
+        harness.ctrl.state.put_spectrum(copy.deepcopy(entry))
+    harness.ctrl.set_active_spectrum(ctrl.state.active_spectrum)
+    return harness

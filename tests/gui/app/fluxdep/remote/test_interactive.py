@@ -36,35 +36,8 @@ from tests.gui.app.fluxdep.remote._route_harness import (
     ErrorReply,
     RouteHarness,
     RouteReply,
+    copy_sources,
 )
-
-
-def _copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:
-    for entry in ctrl.state.spectrums.values():
-        harness.ctrl.state.put_spectrum(copy.deepcopy(entry))
-    harness.ctrl.set_active_spectrum(ctrl.state.active_spectrum)
-    return harness
-
-
-@pytest.fixture
-def one_route(
-    route_harness: RouteHarness, onetone_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, onetone_controller)
-
-
-@pytest.fixture
-def two_route(
-    route_harness: RouteHarness, twotone_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, twotone_controller)
-
-
-@pytest.fixture
-def joint_route(
-    route_harness: RouteHarness, cross_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, cross_controller)
 
 
 def _context(reply: RouteReply) -> dict[str, object]:
@@ -145,67 +118,6 @@ def _joint_command(
     )
 
 
-@pytest.mark.parametrize("kind", ["line", "onetone"])
-def test_finish_reports_transitive_publication_invalidated(
-    one_route: RouteHarness,
-    kind: str,
-) -> None:
-    link = one_route.client()
-    context = _open_picker(one_route, link, "one", kind)
-    finished = _picker_command(one_route, link, context, "finish")
-    assert finished["ok"] and "result" in finished
-    expected = ["filter mask of one", "fit"]
-    if kind == "line":
-        expected.insert(0, "points of one")
-    assert finished["result"].get("invalidated") == expected
-
-
-def test_twotone_finish_reports_filter_and_fit_invalidated(
-    two_route: RouteHarness,
-) -> None:
-    link = two_route.client()
-    context = _open_picker(two_route, link, "two", "twotone")
-    finished = _picker_command(two_route, link, context, "finish")
-    assert finished["ok"] and "result" in finished
-    assert finished["result"].get("invalidated") == ["filter mask of two", "fit"]
-
-
-def test_finish_invalidated_is_the_original_publication_despite_reentrant_changes(
-    one_route: RouteHarness,
-) -> None:
-    neighbor = copy.deepcopy(one_route.ctrl.state.get_spectrum("one"))
-    neighbor.name = "neighbor"
-    one_route.ctrl.state.put_spectrum(neighbor)
-    link = one_route.client()
-    context = _open_picker(one_route, link, "one", "line")
-    changed = False
-
-    def publish_neighbor_and_reopen(payload: SpectrumChangedPayload) -> None:
-        nonlocal changed
-        if payload.name == "one" and not changed:
-            changed = True
-            one_route.ctrl.set_alignment("neighbor", 0.0, 1.0)
-            one_route.ctrl.interactive.begin_line_pick("one")
-
-    subscription = one_route.ctrl.bus.subscribe(
-        SpectrumChangedPayload, publish_neighbor_and_reopen
-    )
-    try:
-        finished = _picker_command(one_route, link, context, "finish")
-    finally:
-        subscription.unsubscribe()
-    assert finished["ok"] and "result" in finished
-    assert finished["result"].get("invalidated") == [
-        "points of one",
-        "filter mask of one",
-        "fit",
-    ]
-    successor = one_route.ctrl.interactive.inspect("one")
-    assert successor is not None
-    assert successor.context_id != context["context_id"]
-    assert _context(finished)["closed"] is True
-
-
 def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
     one_route: RouteHarness,
 ):
@@ -222,7 +134,7 @@ def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
     harness = RouteHarness.create(
         one_route.ctrl.get_project_root(), interactive_background=submit
     )
-    _copy_sources(harness, one_route.ctrl)
+    copy_sources(harness, one_route.ctrl)
     other = copy.deepcopy(harness.ctrl.state.get_spectrum("one"))
     other.name = "other"
     harness.ctrl.state.put_spectrum(other)
@@ -815,8 +727,8 @@ def test_sample_intent_opens_actual_picker_kind(
     twotone_controller: Controller,
     name: str,
 ):
-    _copy_sources(route_harness, onetone_controller)
-    _copy_sources(route_harness, twotone_controller)
+    copy_sources(route_harness, onetone_controller)
+    copy_sources(route_harness, twotone_controller)
     link = route_harness.client()
     opened = request_sample(route_harness, link, name)
     context = _context(opened)

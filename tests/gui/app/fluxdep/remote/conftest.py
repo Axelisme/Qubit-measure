@@ -6,8 +6,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from zcu_tools.gui.app.fluxdep.controller import Controller
 
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
+from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
 
 
 @pytest.fixture
@@ -16,3 +17,24 @@ def route_harness(tmp_path: Path) -> Iterator[RouteHarness]:
     harness = RouteHarness.create(str(tmp_path))
     yield harness
     harness.close()
+
+
+@pytest.fixture
+def one_route(
+    route_harness: RouteHarness, onetone_controller: Controller
+) -> RouteHarness:
+    return copy_sources(route_harness, onetone_controller)
+
+
+@pytest.fixture
+def two_route(
+    route_harness: RouteHarness, twotone_controller: Controller
+) -> RouteHarness:
+    return copy_sources(route_harness, twotone_controller)
+
+
+@pytest.fixture
+def joint_route(
+    route_harness: RouteHarness, cross_controller: Controller
+) -> RouteHarness:
+    return copy_sources(route_harness, cross_controller)
