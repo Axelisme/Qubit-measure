@@ -91,9 +91,7 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
 class JpaFluxAdapter(
     BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult, NoAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        FluxExp.AXES_SPEC.tag if FluxExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
     exp_cls = FluxExp
     ExpCfg_cls: ClassVar[Any] = FluxCfg
 

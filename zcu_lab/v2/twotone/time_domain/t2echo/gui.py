@@ -125,9 +125,7 @@ class T2EchoAdapter(
         T2EchoAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        T2EchoExp.AXES_SPEC.tag if T2EchoExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = T2EchoExp.persistence_tag()
     exp_cls = T2EchoExp
     ExpCfg_cls: ClassVar[Any] = T2EchoCfg
 

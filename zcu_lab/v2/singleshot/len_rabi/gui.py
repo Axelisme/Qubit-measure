@@ -68,9 +68,7 @@ class SsLenRabiAdapter(
         LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, SsLenRabiAnalyzeParams
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        LenRabiExp.AXES_SPEC.tag if LenRabiExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 

@@ -204,11 +204,7 @@ class _SsT1ToneSweepBase(
 
 
 class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
-    experiment_tag: ClassVar[str | None] = (
-        T1WithToneSweepExp.AXES_SPEC.tag
-        if T1WithToneSweepExp.AXES_SPEC is not None
-        else None
-    )
+    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_key: ClassVar[str] = "gain"
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
     outer_default: ClassVar[SweepValue] = SweepValue(start=0.0, stop=1.0, expts=21)
@@ -252,11 +248,7 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
 
 
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
-    experiment_tag: ClassVar[str | None] = (
-        T1WithToneSweepExp.AXES_SPEC.tag
-        if T1WithToneSweepExp.AXES_SPEC is not None
-        else None
-    )
+    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_key: ClassVar[str] = "freq"
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
     outer_default: ClassVar[SweepValue] = SweepValue(

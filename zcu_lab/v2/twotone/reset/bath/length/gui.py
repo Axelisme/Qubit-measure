@@ -50,9 +50,7 @@ class BathLengthAdapter(
         NoAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        LengthExp.AXES_SPEC.tag if LengthExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 

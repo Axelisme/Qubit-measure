@@ -74,9 +74,7 @@ class JpaAutoAnalyzeResult(AnalyzeResultBase):
 class JpaAutoOptimizeAdapter(
     BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult, NoAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        AutoOptimizeExp.AXES_SPEC.tag if AutoOptimizeExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = AutoOptimizeExp.persistence_tag()
     exp_cls = AutoOptimizeExp
     ExpCfg_cls: ClassVar[Any] = JPAOptCfg
 

@@ -61,9 +61,7 @@ class RoOptAutoAdapter(
         RoOptAutoAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        AutoOptExp.AXES_SPEC.tag if AutoOptExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = AutoOptExp.persistence_tag()
     exp_cls = AutoOptExp
     ExpCfg_cls = AutoOptCfg
 

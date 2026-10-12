@@ -144,9 +144,7 @@ class AmpRabiAdapter(
         AmpRabiAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        AmpRabiExp.AXES_SPEC.tag if AmpRabiExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
     exp_cls = AmpRabiExp
     ExpCfg_cls = AmpRabiCfg
 

@@ -43,9 +43,7 @@ class SsT1AnalyzeResult(AnalyzeResultBase):
 class SsT1Adapter(
     BaseAdapter[T1Cfg, SsT1RunResult, SsT1AnalyzeResult, NoAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        T1Exp.AXES_SPEC.tag if T1Exp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
     exp_cls = T1Exp
     ExpCfg_cls: ClassVar[Any] = T1Cfg
 

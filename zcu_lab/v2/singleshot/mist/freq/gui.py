@@ -52,9 +52,7 @@ class MistFreqAnalyzeResult(AnalyzeResultBase):
 class MistFreqAdapter(
     BaseAdapter[FreqCfg, MistFreqRunResult, MistFreqAnalyzeResult, NoAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        FreqDepExp.AXES_SPEC.tag if FreqDepExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = FreqDepExp.persistence_tag()
     exp_cls = FreqDepExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 

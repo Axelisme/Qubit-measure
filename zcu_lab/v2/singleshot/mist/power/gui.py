@@ -62,9 +62,7 @@ class MistPowerAdapter(
         PowerCfg, MistPowerRunResult, MistPowerAnalyzeResult, MistPowerAnalyzeParams
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        PowerExp.AXES_SPEC.tag if PowerExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
 

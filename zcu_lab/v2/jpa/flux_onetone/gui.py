@@ -47,9 +47,7 @@ _JPA_FLUX_ONETONE_FREQ_EXPTS = 101
 
 
 class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]):
-    experiment_tag: ClassVar[str | None] = (
-        OneToneFluxExp.AXES_SPEC.tag if OneToneFluxExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = OneToneFluxExp.persistence_tag()
     exp_cls = OneToneFluxExp
     ExpCfg_cls: ClassVar[Any] = OneToneFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

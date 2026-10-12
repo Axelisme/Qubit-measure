@@ -57,9 +57,7 @@ class AllXYAnalyzeResult(AnalyzeResultBase):
 class AllXYAdapter(
     BaseAdapter[AllXYCfg, AllXYRunResult, AllXYAnalyzeResult, AllXYAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        AllXY_Exp.AXES_SPEC.tag if AllXY_Exp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = AllXY_Exp.persistence_tag()
     exp_cls = AllXY_Exp
     ExpCfg_cls: ClassVar[Any] = AllXYCfg
 

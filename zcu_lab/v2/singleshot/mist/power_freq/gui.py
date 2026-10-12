@@ -58,9 +58,7 @@ class MistPowerFreqAdapter(
         NoAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = (
-        FreqPowerExp.AXES_SPEC.tag if FreqPowerExp.AXES_SPEC is not None else None
-    )
+    experiment_tag: ClassVar[str | None] = FreqPowerExp.persistence_tag()
     exp_cls = FreqPowerExp
     ExpCfg_cls: ClassVar[Any] = FreqPowerCfg
 
