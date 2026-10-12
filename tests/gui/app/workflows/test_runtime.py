@@ -25,7 +25,6 @@ from tests.experiment.workflows._engine_fakes import (
     Rig,
     State,
     Tunables,
-    save_integer,
 )
 
 from ._start_fakes import StartHarness
@@ -214,7 +213,7 @@ def test_worker_captures_each_run_after_setup_before_callback(
             yield from env.setup_device(
                 "flux", driver.info.model_copy(update={"value": value})
             )
-            yield from env.run(acquire, Cfg(), save=save_integer)
+            yield from env.run(acquire, Cfg())
         return Done()
 
     rig.start(step)
@@ -245,7 +244,7 @@ def test_capture_failure_stops_before_callback_but_zero_devices_is_explicit(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg(), save=save_integer)
+        yield from env.run(acquire, Cfg())
         return Done()
 
     rig.start(step)

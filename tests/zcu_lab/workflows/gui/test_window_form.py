@@ -11,6 +11,7 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
+from ._coherence_input import t1_input
 from ._window_support import RpcRequest
 
 
@@ -50,20 +51,20 @@ def test_form_inspection_rpc_candidate_does_not_write_start_draft(
     before = state.input.data, state.base.data
     reply = rpc(
         "workflow.form",
-        {"form": "tunables", "batch": [{"path": ["guess_us"], "value": value}]},
+        {"form": "tunables", "batch": [{"path": ["t1", "guess_us"], "value": value}]},
     )
     assert reply["ok"] is True
     result = reply["result"]
     assert isinstance(result, dict)
     candidate = result["input"]
-    assert isinstance(candidate, dict) and candidate["guess_us"] == value
+    assert isinstance(candidate, dict) and t1_input(candidate)["guess_us"] == value
     assert (state.input.data, state.base.data) == before
     if value == {"expr": "2 * 7"}:
-        assert {"path": ["guess_us"], "value": 14.0} in result["values"]
+        assert {"path": ["t1", "guess_us"], "value": 14.0} in result["values"]
         assert result["errors"] == []
     else:
-        assert any(e["path"] == ["guess_us"] for e in result["errors"])
-        assert not any(v["path"] == ["guess_us"] for v in result["values"])
+        assert any(e["path"] == ["t1", "guess_us"] for e in result["errors"])
+        assert not any(v["path"] == ["t1", "guess_us"] for v in result["values"])
 
 
 def test_form_inspection_rpc_preserves_complex_tag_on_invalid_numeric_candidate(
@@ -74,14 +75,14 @@ def test_form_inspection_rpc_preserves_complex_tag_on_invalid_numeric_candidate(
         "workflow.form",
         {
             "form": "tunables",
-            "batch": [{"path": ["guess_us"], "value": tagged}],
+            "batch": [{"path": ["t1", "guess_us"], "value": tagged}],
         },
     )
     assert reply["ok"] is True
     result = reply["result"]
     assert isinstance(result, dict)
-    assert {"path": ["guess_us"], "value": tagged} in result["values"]
-    assert any(e["path"] == ["guess_us"] for e in result["errors"])
+    assert {"path": ["t1", "guess_us"], "value": tagged} in result["values"]
+    assert any(e["path"] == ["t1", "guess_us"] for e in result["errors"])
 
 
 def test_form_inspection_rpc_plan_branch_batch_does_not_change_gui(
@@ -124,8 +125,8 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
     engine = window.controller.engine
     assert panel is not None and engine is not None
     state = panel.host.state
-    state.write({("guess_us",): {"expr": "3 * 11"}}, panel.host.env)
-    local = panel.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
+    state.write({("t1", "guess_us"): {"expr": "3 * 11"}}, panel.host.env)
+    local = panel.panel.editor.findChild(QLineEdit, "form.input.t1.sweep_factor")
     assert isinstance(local, QLineEdit)
     local.setText("-")
     before = (
@@ -142,12 +143,12 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
     assert isinstance(result, dict)
     assert result["input"] == before[0]
     assert result["revision"] == before[3].revision
-    assert {"path": ["guess_us"], "value": 33.0} in result["values"]
-    assert any(e["path"] == ["sweep_factor"] for e in result["errors"])
+    assert {"path": ["t1", "guess_us"], "value": 33.0} in result["values"]
+    assert any(e["path"] == ["t1", "sweep_factor"] for e in result["errors"])
     for batch in (
         [],
-        [{"path": ["guess_us"], "value": {"expr": "2 * 20"}}],
-        [{"path": ["guess_us"], "value": -1}],
+        [{"path": ["t1", "guess_us"], "value": {"expr": "2 * 20"}}],
+        [{"path": ["t1", "guess_us"], "value": -1}],
     ):
         reply = rpc(
             "workflow.form",
@@ -160,13 +161,13 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
         assert reply["ok"] is True
         preview = reply["result"]
         assert isinstance(preview, dict)
-        assert not any(e["path"] == ["sweep_factor"] for e in preview["errors"])
+        assert not any(e["path"] == ["t1", "sweep_factor"] for e in preview["errors"])
         if batch == []:
             assert preview["input"] == before[0]
         elif batch[0]["value"] == -1:
-            assert any(e["path"] == ["guess_us"] for e in preview["errors"])
+            assert any(e["path"] == ["t1", "guess_us"] for e in preview["errors"])
         else:
-            assert {"path": ["guess_us"], "value": 40.0} in preview["values"]
+            assert {"path": ["t1", "guess_us"], "value": 40.0} in preview["values"]
     assert (
         state.input.data,
         state.base.data,
@@ -188,8 +189,8 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
         {
             "form": "tunables",
             "batch": [
-                {"path": ["reps"], "value": 2},
-                {"path": ["reps"], "value": 3},
+                {"path": ["t1", "reps"], "value": 2},
+                {"path": ["t1", "reps"], "value": 3},
             ],
         },
     ],

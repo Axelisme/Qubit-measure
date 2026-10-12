@@ -146,7 +146,7 @@ def test_start_is_deferred_and_commits_precede_done(rig: Rig) -> None:
     assert [record.commit_seq for record in rig.engine.records("run", since=1)] == [2]
     assert rig.engine.records("run", since=2) == ()
     assert len(tuple((rig.paths.data_root / "iter").iterdir())) == 3
-    assert (rig.paths.data_root / "iter/000003/files").is_dir()
+    assert (rig.paths.data_root / "iter/000003").is_dir()
     manifest = json.loads((rig.paths.metadata_root / "manifest.json").read_text())
     assert manifest["lifecycle"] == "done"
     assert manifest["ended_at"] is not None
@@ -692,7 +692,7 @@ def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
         if port == "soc":
-            yield from env.run(needs_soc, Cfg(), save=lambda _source, _path: None)
+            yield from env.run(needs_soc, Cfg())
         else:
             yield from env.setup_device(
                 "flux", FakeDeviceInfo(address="memory", value=1.0)

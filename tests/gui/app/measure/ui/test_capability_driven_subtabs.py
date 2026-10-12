@@ -555,7 +555,7 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     assert center is not None
     edits = center.findChildren(QLineEdit)
     assert all(edit.isReadOnly() for edit in edits)
-    assert [edit.text() for edit in edits] == [
+    assert [edit.toolTip() for edit in edits] == [
         str(output.path)
         for section in snap.artifacts
         for artifact in section.artifacts

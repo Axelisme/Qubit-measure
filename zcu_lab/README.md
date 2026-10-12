@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-12，ref-free Run、離線 migrations、共用 alias preset 與 component predictor 預填
+**Last updated:** 2026-10-12
 
 `zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
 
@@ -16,12 +16,15 @@
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
 
-五個 Measure flux adapters 使用 deferred `$flux_dev` 初值：`onetone/flux_dep` 與
+五個 Measure flux adapters 使用共用 `alias_name_seed` 建立 direct 初值：`onetone/flux_dep` 與
 `twotone/fluxdep` 的 `dev.flux_dev`，以及 `jpa/auto_optimize`、`jpa/flux_onetone`
-與 `jpa/flux` 的 `dev.jpa_flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，
+與 `jpa/flux` 的 `dev.jpa_flux_dev`。Fresh cfg 或 default reset 建立時解析一次 `$flux_dev`，
+將名稱保存為 direct input。Alias 變更不更新既有 direct cfg／draft；新 cfg 或 reset 才讀新名稱。
+使用者仍可切成 eval，明填 `$flux_dev`。顯式 caller cfg 保留，不使用靜態 device 名稱 fallback，
 也不改 core 的 required dev／flux_unit。名稱不要求出現在 point 的元件表。
-Cfg editor 顯示名稱預覽，缺列或未綁定時指名 Invalid。Run 沿固定 capture 保存
-當次名稱，後續 Analyze／WB／Save 不重新解析目前表。裝置存在性由實際使用的 owner 檢查。
+Cfg editor 顯示 direct 名稱，缺列或未綁定時顯示指名 `flux_dev` alias 的 Invalid。
+Run 沿固定 capture 保存當次名稱，後續 Analyze／WB／Save 不重新解析目前表。
+裝置存在性由實際使用的 owner 檢查。
 
 Framework 的 `RecipeTab` 只提供通用 cfg 操作、expression／library／field 讀取與 cached device snapshot。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。

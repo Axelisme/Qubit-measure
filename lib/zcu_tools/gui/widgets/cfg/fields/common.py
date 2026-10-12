@@ -6,19 +6,19 @@ import json
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
 
-from qtpy.QtCore import QSize, Qt
+from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtGui import QDoubleValidator, QIntValidator
 from qtpy.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
     QSizePolicy,
     QSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -232,67 +232,16 @@ def make_scalar_widget(spec: ScalarSpec, value: Any) -> QWidget:
     )
 
 
-def _sweep_cell(label: QLabel, widget: QWidget) -> QWidget:
-    cell = QWidget()
-    cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    row = QHBoxLayout(cell)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(4)
-    label.setMinimumWidth(0)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    row.addWidget(label)
-    row.addWidget(widget, stretch=1)
-    return cell
-
-
-class _SweepPairRow(QWidget):
-    """Two sweep cells whose outer widths are always split 50/50."""
-
-    _SPACING = 4
-
-    def __init__(self, left: QWidget, right: QWidget) -> None:
-        super().__init__()
-        self._left = left
-        self._right = right
-        self._left.setParent(self)
-        self._right.setParent(self)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-    def sizeHint(self) -> QSize:
-        left_hint = self._left.sizeHint()
-        right_hint = self._right.sizeHint()
-        return QSize(
-            2 * max(left_hint.width(), right_hint.width()) + self._SPACING,
-            max(left_hint.height(), right_hint.height()),
-        )
-
-    def minimumSizeHint(self) -> QSize:
-        left_hint = self._left.minimumSizeHint()
-        right_hint = self._right.minimumSizeHint()
-        return QSize(
-            2 * max(left_hint.width(), right_hint.width()) + self._SPACING,
-            max(left_hint.height(), right_hint.height()),
-        )
-
-    def resizeEvent(self, event: Any) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
-        available = max(0, self.width() - self._SPACING)
-        left_width = available // 2
-        right_width = available - left_width
-        self._left.setGeometry(0, 0, left_width, self.height())
-        self._right.setGeometry(
-            left_width + self._SPACING, 0, right_width, self.height()
-        )
-
-
-def _sweep_pair(
-    left_label: QLabel, left_widget: QWidget, right_label: QLabel, right_widget: QWidget
-) -> QWidget:
-    return _SweepPairRow(
-        _sweep_cell(left_label, left_widget),
-        _sweep_cell(right_label, right_widget),
-    )
+def _add_sweep_rows(
+    layout: QGridLayout, rows: tuple[tuple[QLabel, QWidget], ...]
+) -> None:
+    """Place each (label, control) pair on its own row; controls take the width."""
+    layout.setColumnStretch(1, 1)
+    for row, (label, control) in enumerate(rows):
+        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(label, row, 0, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(control, row, 1)
 
 
 def _edge_decoration(
@@ -443,9 +392,9 @@ class ScalarInputWidget(QWidget):
         self._text_input_enhancer = text_input_enhancer
         self._input_enhancement: object | None = None
         self._mode = ""
-        self._layout = QHBoxLayout(self)
+        self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(4)
+        self._layout.setSpacing(2)
 
         self._rebuild_ui()
 
@@ -497,6 +446,9 @@ class ScalarInputWidget(QWidget):
             if isinstance(val, EvalValue):
                 assert isinstance(inp, QLineEdit)
                 _show_text(inp, val.expr)
+                if not inp.hasFocus():
+                    # A publication from elsewhere shows the expression's start.
+                    inp.setCursorPosition(0)
                 self._sync_eval_ghost(val)
                 return
 
@@ -530,6 +482,8 @@ class ScalarInputWidget(QWidget):
             inp.setToolTip(value.expr)
             inp.textChanged.connect(inp.setToolTip)
             self._input = inp
+            inp.installEventFilter(self)
+            inp.setCursorPosition(0)
             inp.setMinimumWidth(FIELD_INPUT_MIN_WIDTH)
             inp.setEnabled(self._spec.editable)
             inp.textChanged.connect(self._on_ui_changed)
@@ -538,6 +492,13 @@ class ScalarInputWidget(QWidget):
             self._layout.addWidget(inp, stretch=1)
 
             self._ghost = QLabel()
+            self._ghost.setWordWrap(True)
+            self._ghost.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            )
+            font = self._ghost.font()
+            font.setPointSizeF(max(1.0, font.pointSizeF() - 1.0))
+            self._ghost.setFont(font)
             self._layout.addWidget(self._ghost)
             self._sync_eval_ghost(value)
         else:
@@ -565,6 +526,16 @@ class ScalarInputWidget(QWidget):
             self._connect_direct_input()
 
         self._install_context_menu(self._input)
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        """Show the expression's beginning on blur without changing its text."""
+        if (
+            isinstance(a0, QLineEdit)
+            and a1 is not None
+            and a1.type() == QEvent.Type.FocusOut
+        ):
+            a0.setCursorPosition(0)
+        return super().eventFilter(a0, a1)
 
     def _clear_layout(self) -> None:
         while self._layout.count():
@@ -728,7 +699,7 @@ def _range_input_text(value: DirectValue | EvalValue) -> str:
 
 
 class SweepInputWidget(QWidget):
-    """Inline 2x2 input for start/stop/points/step with synchronized updates."""
+    """Full-width rows for start/stop/points/step with synchronized updates."""
 
     def __init__(
         self,
@@ -794,15 +765,14 @@ class SweepInputWidget(QWidget):
         apply_decoration(start_label, self._start_widget, start_decoration)
         apply_decoration(stop_label, self._stop_widget, stop_decoration)
 
-        layout.addWidget(
-            _sweep_pair(start_label, self._start_widget, stop_label, self._stop_widget),
-            0,
-            0,
-        )
-        layout.addWidget(
-            _sweep_pair(self._points_label, self._expts, self._step_label, self._step),
-            1,
-            0,
+        _add_sweep_rows(
+            layout,
+            (
+                (start_label, self._start_widget),
+                (stop_label, self._stop_widget),
+                (self._points_label, self._expts),
+                (self._step_label, self._step),
+            ),
         )
 
         self.display(value)
@@ -897,17 +867,14 @@ class CenteredSweepInputWidget(QWidget):
             center_label.setToolTip(center_tooltip)
             self._center_widget.setToolTip(center_tooltip)
 
-        layout.addWidget(
-            _sweep_pair(
-                center_label, self._center_widget, self._span_label, self._span
+        _add_sweep_rows(
+            layout,
+            (
+                (center_label, self._center_widget),
+                (self._span_label, self._span),
+                (self._points_label, self._expts),
+                (self._step_label, self._step),
             ),
-            0,
-            0,
-        )
-        layout.addWidget(
-            _sweep_pair(self._points_label, self._expts, self._step_label, self._step),
-            1,
-            0,
         )
 
         self.display(value)

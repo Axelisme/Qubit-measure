@@ -42,15 +42,15 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.mcp import build_workflow_tools
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input, library_env
 from ._recording_transport import WindowTransport, WireRoute
+from ._reload_source import InjectedCatalog
 from ._sim_session import SimSession, connect_tools, wait_owner
 from ._window_support import RpcRequest
 
@@ -86,7 +86,9 @@ def native_app(
     """Keep real Qt workers alive through cancellation, delivery and drain."""
     del native_registry
     (tmp_path / "result").mkdir()
-    app = WorkflowsGuiBehavior(project_root=str(tmp_path))
+    app = WorkflowsGuiBehavior(
+        project_root=str(tmp_path), cache_dir=tmp_path / "cache", clean=True
+    )
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
     assert isinstance(adapter, T1RemoteControlAdapter)
@@ -164,10 +166,21 @@ def sim_session(
 
 
 @pytest.fixture
+def catalog_source(tmp_path: Path) -> Iterator[InjectedCatalog]:
+    """Keep public catalog/loader injection isolated from other test modules."""
+    source = InjectedCatalog(tmp_path)
+    try:
+        yield source
+    finally:
+        source.close()
+
+
+@pytest.fixture
 def attachment(
     qapp: QApplication,
     tmp_path: Path,
     inputs: Inputs,
+    catalog_source: InjectedCatalog,
 ) -> Iterator[tuple[T1WorkflowWindow, StartHarness, ResultEntry]]:
     before = registry_state()
     kind = "qubit/workflow-window-test"
@@ -210,6 +223,8 @@ def attachment(
             harness.state,
             harness.services,
             harness.owner,
+            catalog=catalog_source.catalog,
+            loader=catalog_source.loader,
         )
         window.plan_panel.state.reset(inline_input(inputs))
         yield window, harness, entry
@@ -357,29 +372,34 @@ def mcp_tools(mcp_transport: WindowTransport, tmp_path: Path) -> Iterator[ToolTa
 @pytest.fixture
 def paused_tuning(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> list[tuple[int, float, int]]:
     """One committed step, followed by an owner-delivered paused step."""
     window, harness, _entry = run_attachment
     attempts: list[tuple[int, float, int]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("tuning-paused", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "tuning-paused", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, float]:
         del plan
         if state == 2:
             return Done()
-        attempts.append((state, tun.guess_us, tun.reps))
+        attempts.append((state, tun.t1.guess_us, tun.t1.reps))
         if state == 1 and len(attempts) == 2:
             window.pause("tuning")
             yield from env.wait_until(env.started_at)
-        return Next(tun.guess_us, state + 1)
+        return Next(tun.t1.guess_us, state + 1)
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     token = window.start("tuning")
     assert isinstance(token, int)
     harness.complete_segment()

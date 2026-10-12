@@ -123,7 +123,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Apply a pane's persistent writeback draft as-is (edit it first via "
             "rpc_call on tab.writeback_set). Requires (tab_id, subtab_id) with closed "
             "values analysis|post_analysis. Optional ids applies only those items without "
-            "changing GUI selection; omitted ids uses selected items. Empty ids writes "
+            "changing GUI selection; omitted or null ids uses selected items. Empty ids writes "
             "nothing; unknown or duplicate IDs fail before writing. Returns "
             "{applied_ids, written, context_version, destination_context}: written lists the destination "
             "names actually pushed, split by kind ({md, ml_modules, ml_waveforms}); "

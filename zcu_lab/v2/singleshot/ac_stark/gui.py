@@ -111,6 +111,7 @@ class SsAcStarkAdapter(
         NoAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = AcStarkExp.persistence_tag()
     exp_cls = AcStarkExp
     ExpCfg_cls: ClassVar[Any] = AcStarkCfg
 

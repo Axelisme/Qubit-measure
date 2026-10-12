@@ -13,6 +13,7 @@ from zcu_tools.gui.cfg import (
     EvalValue,
     ReferenceValue,
     SweepValue,
+    read_value_path,
 )
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.value_lookup import (
@@ -25,6 +26,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from zcu_lab.components import QubitSchema, ResonatorSchema
+from zcu_lab.v2._support.measure import seeds
 from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder, ModuleInit
 from zcu_lab.v2._support.measure.seeds import (
     SweepDefault,
@@ -63,6 +65,52 @@ def _ctx(
         soccfg=None,
         values=values if values is not None else EmptyValueLookup(),
     )
+
+
+def test_alias_name_default_is_direct_and_fixed_per_instance() -> None:
+    definition = (
+        MeasureCfgBuilder()
+        .device(
+            "flux_dev", label="Flux Device", default=seeds.alias_name_seed("flux_dev")
+        )
+        .build()
+    )
+    parameters = parameter_capture()
+    first_ctx = SessionEnv(
+        parameters=parameters.bind_aliases((AliasRow("flux_dev", "yoko1"),), {}),
+        soc=None,
+        soccfg=None,
+    )
+    first = definition.instantiate(first_ctx)
+    second_ctx = SessionEnv(
+        parameters=parameters.bind_aliases((AliasRow("flux_dev", "yoko2"),), {}),
+        soc=None,
+        soccfg=None,
+    )
+    second = definition.instantiate(second_ctx)
+    assert read_value_path(first.value, "dev.flux_dev") == DirectValue("yoko1")
+    assert read_value_path(second.value, "dev.flux_dev") == DirectValue("yoko2")
+
+
+def test_unbound_alias_name_default_retains_direct_invalid_input() -> None:
+    definition = (
+        MeasureCfgBuilder()
+        .device(
+            "flux_dev", label="Flux Device", default=seeds.alias_name_seed("flux_dev")
+        )
+        .build()
+    )
+    ctx = SessionEnv(
+        parameters=parameter_capture().bind_aliases((AliasRow("flux_dev", ""),), {}),
+        soc=None,
+        soccfg=None,
+    )
+    schema = definition.instantiate(ctx)
+    value = read_value_path(schema.value, "dev.flux_dev")
+    assert isinstance(value, DirectValue)
+    assert value.value is None
+    assert value.raw == "$flux_dev"
+    assert value.error is not None and "flux_dev" in value.error
 
 
 def _readout_raw(*, gain: float = 0.2) -> CfgInputMap:

@@ -34,6 +34,16 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
     #: Single or grouped mapping required by both explicit persistence formats.
     AXES_SPEC: ClassVar[AxesSpec[Any, Any] | GroupedAxesSpec[Any, Any] | None] = None
 
+    @classmethod
+    def persistence_tag(cls) -> str | None:
+        """Return the declared persistence tag without constructing an instance.
+
+        None is a valid result meaning this experiment declares no persistence.
+        This class-level query performs no I/O or live capture.
+        """
+        spec = cls.AXES_SPEC
+        return spec.tag if spec is not None else None
+
     def persistence_spec(
         self,
     ) -> AxesSpec[T_Result, T_Config] | GroupedAxesSpec[T_Result, T_Config]:

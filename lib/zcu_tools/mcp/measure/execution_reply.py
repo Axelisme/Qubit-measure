@@ -364,19 +364,7 @@ def project_execution(
         run_id = report["run_id"]
         for section, captures in report["artifacts"].items():
             artifacts.setdefault(section, {}).update(captures)
-    raw_step: StepReply | None = None
-    if raw is not None:
-        raw_artifacts = [
-            artifact
-            for section in raw["artifacts"].values()
-            for artifact in section.values()
-        ]
-        raw_step = _step(
-            "saved"
-            if raw_artifacts
-            and all(artifact["status"] == "Saved" for artifact in raw_artifacts)
-            else "incomplete"
-        )
+    raw_step = _raw_save_step(raw)
     outcome = snapshot.get("run_outcome")
     run = _step(
         outcome["status"]
@@ -431,3 +419,21 @@ def project_execution(
             "error": snapshot["error"],
         }
     )
+
+
+def _raw_save_step(raw: dict[str, Any] | None) -> StepReply | None:
+    """Describe raw Save evidence without inferring admission from absent reports."""
+    raw_step: StepReply | None = None
+    if raw is not None:
+        raw_artifacts = [
+            artifact
+            for section in raw["artifacts"].values()
+            for artifact in section.values()
+        ]
+        raw_step = _step(
+            "saved"
+            if raw_artifacts
+            and all(artifact["status"] == "Saved" for artifact in raw_artifacts)
+            else "incomplete"
+        )
+    return raw_step

@@ -50,7 +50,6 @@ from zcu_tools.resources.entry import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.control_identity import ControlIdentity
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.context_types import EntryInfo
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
@@ -109,22 +108,16 @@ class ComponentTreeWidget(QWidget):
         self,
         control: ContextControlPort,
         parent: QWidget | None = None,
-        *,
-        control_identity: ControlIdentity | None = None,
     ) -> None:
         """Bind the owner-thread control and render its current document.
 
         Without an entry or parameter context the tree is empty, the owner's
         message shows as a hint and "Add component…" is disabled. Field edits
         go through the source owner; setup mode edits only the entry template.
-        control_identity=None means this app has no control authority; domain
-        and set_read_only gates still apply. When supplied, this same authority
-        gates each Add dialog's fields/Add, not Cancel/Close, and the dialog
-        reads current status before writing. Tree browsing remains available.
+        set_read_only disables writes while retaining tree browsing.
         """
         super().__init__(parent)
         self._control = control
-        self._control_identity = control_identity
         self._read_only = False
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
         self._expanded: dict[_RowKey, bool] = {}
@@ -215,7 +208,6 @@ class ComponentTreeWidget(QWidget):
             setup=self._is_setup(),
             on_added=self._show_added,
             parent=self,
-            control_identity=self._control_identity,
         )
         dialog.finished.connect(dialog.deleteLater)
         dialog.open()

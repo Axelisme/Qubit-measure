@@ -49,28 +49,18 @@ def search_proper_g(
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 1)
 
     # Create parameter input widgets
-    qub_dim_input = widgets.IntText(
-        value=default_qub_dim,
-        description="qub_dim:",
-        style={"description_width": "initial"},
-    )
-
-    qub_cutoff_input = widgets.IntText(
-        value=default_qub_cutoff,
-        description="qub_cutoff:",
-        style={"description_width": "initial"},
-    )
-
-    res_dim_input = widgets.IntText(
-        value=default_res_dim,
-        description="res_dim:",
-        style={"description_width": "initial"},
-    )
-
-    step_input = widgets.IntText(
-        value=default_step,
-        description="step:",
-        style={"description_width": "initial"},
+    qub_dim_input, qub_cutoff_input, res_dim_input, step_input = (
+        widgets.IntText(
+            value=value,
+            description=description,
+            style={"description_width": "initial"},
+        )
+        for value, description in (
+            (default_qub_dim, "qub_dim:"),
+            (default_qub_cutoff, "qub_cutoff:"),
+            (default_res_dim, "res_dim:"),
+            (default_step, "step:"),
+        )
     )
 
     # finish button
@@ -195,12 +185,15 @@ def search_proper_g(
         ax.set_title(f"g = {1e3 * cur_g:.1f} MHz, r_f = {1e3 * cur_rf:.1f} MHz")
 
     # Add observers for all widgets
-    g_MHz_slider.observe(lambda _: update_plot(), names="value")
-    rf_MHz_slider.observe(lambda _: update_plot(), names="value")
-    qub_dim_input.observe(lambda _: update_plot(), names="value")
-    qub_cutoff_input.observe(lambda _: update_plot(), names="value")
-    res_dim_input.observe(lambda _: update_plot(), names="value")
-    step_input.observe(lambda _: update_plot(), names="value")
+    for widget in (
+        g_MHz_slider,
+        rf_MHz_slider,
+        qub_dim_input,
+        qub_cutoff_input,
+        res_dim_input,
+        step_input,
+    ):
+        widget.observe(lambda _: update_plot(), names="value")
 
     # Layout everything together
     parameter_box = widgets.HBox(

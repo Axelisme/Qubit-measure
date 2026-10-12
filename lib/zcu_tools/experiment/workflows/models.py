@@ -60,11 +60,12 @@ type Step[S, R] = Generator[Effect, None, Next[R, S] | Done | Aborted]
 
 @dataclass(frozen=True)
 class Completed[Cfg, Result]:
-    """Saved successful experiment output.
+    """Successful experiment output, without a persistence guarantee.
 
     ``cfg`` is a deepcopy of run.cfg at experiment return, never the last
     Schedule's local cfg. ``result`` is the experiment's returned data.
-    The engine invokes the saver before returning this value to the workflow.
+    Completed means measurement succeeded. The workflow decides whether and
+    where to save this pair.
     """
 
     cfg: Cfg
@@ -75,7 +76,7 @@ class Completed[Cfg, Result]:
 class Failed:
     """Recoverable Schedule failure; ``reason`` describes its original cause.
 
-    No partial Result or run file accompanies this value. The journal retains
+    No partial Result accompanies this value. The journal retains
     the original exception diagnostics; workflow code decides how to continue.
     """
 
@@ -163,9 +164,8 @@ class RunPaths:
 
     ``metadata_root`` holds manifest/journal. ``data_root`` holds iterations.
     Engine.start validates distinct roots and refuses existing directories.
-    The data-root filesystem must support same-directory hard links for atomic
-    no-clobber publication. Unsupported-link errors fail the run with their
-    original I/O cause; there is no overwrite fallback or automatic retry.
+    Workflow authors own any files beneath an invocation root. Engine-owned
+    manifest and iteration summaries use same-directory temporary plus replace.
     """
 
     metadata_root: Path
@@ -215,8 +215,7 @@ class CommittedRecord:
     ``commit_seq`` counts Next commits; ``call_seq`` counts step invocations.
     ``revision`` is the tunables version captured for this invocation.
     ``encoded_record`` contains the point summary. ``iteration_dir`` is relative
-    to data_root. ``run_files`` are final paths relative to that iteration, in
-    effect order. Temporary files are not listed.
+    to data_root. File references belong to the encoded point, not the Engine.
     """
 
     commit_seq: int
@@ -224,7 +223,6 @@ class CommittedRecord:
     revision: int
     encoded_record: EncodedRecord
     iteration_dir: str
-    run_files: tuple[str, ...]
 
 
 class MissingCapability(RuntimeError):

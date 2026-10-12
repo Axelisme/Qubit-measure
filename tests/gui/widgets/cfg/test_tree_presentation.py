@@ -192,40 +192,21 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
         assert reference.chosen_key == "<Custom:Pulse>"
 
 
-def _assert_balanced_row(
-    qapp: QApplication, left_label: QLabel, right_label: QLabel
-) -> QWidget:
-    left = left_label.parentWidget()
-    right = right_label.parentWidget()
-    assert left is not None and right is not None
-    row = left.parentWidget()
-    assert row is not None and row is right.parentWidget()
-    row.resize(801, row.sizeHint().height())
-    qapp.processEvents()
-    assert abs(left.width() - right.width()) <= 1
-    for cell in (left, right):
-        layout = cell.layout()
-        assert layout is not None
-        editor_item = layout.itemAt(1)
-        assert editor_item is not None
-        editor = editor_item.widget()
-        assert editor is not None
-        assert editor.width() >= 20
-    return row
-
-
 def _assert_sweep_layout(
-    qapp: QApplication, widget: QWidget, first_row_labels: tuple[str, str]
+    qapp: QApplication, widget: QWidget, edge_labels: tuple[str, str]
 ) -> None:
+    """Each sweep field sits on its own row, in order."""
+    qapp.processEvents()
     labels = {label.text(): label for label in widget.findChildren(QLabel)}
-    assert set(labels) == {*first_row_labels, "points", "step"}
-    first_row = _assert_balanced_row(qapp, *(labels[text] for text in first_row_labels))
-    second_row = _assert_balanced_row(qapp, labels["points"], labels["step"])
-    assert first_row is not second_row
-    assert first_row.y() < second_row.y()
+    order = (*edge_labels, "points", "step")
+    assert set(labels) == set(order)
+    tops = [
+        labels[text].mapTo(widget, labels[text].rect().topLeft()).y() for text in order
+    ]
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
 
 
-def test_sweep_renderers_use_balanced_range_sampling_rows(qapp, ctrl):
+def test_sweep_renderers_put_each_range_field_on_its_own_row(qapp, ctrl):
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
@@ -597,3 +578,91 @@ def test_tree_outer_reenable_preserves_decoration_disabled_containers(qapp, ctrl
             assert _enabled_states(form, tuple(enabled)) == expected
             assert form.decoration_for_path("outer.inner_section").enabled is False
             assert form.decoration_for_path("outer.inner_ref").enabled is False
+
+
+def _label_text_center_y(form: CfgFormWidget, path: str) -> float:
+    """Vertical centre of the painted label pixels of one tree row."""
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    assert viewport is not None
+    rect = tree.visualItemRect(tree_item(form, path))
+    image = viewport.grab().toImage()
+    dark_rows = [
+        y
+        for y in range(rect.top(), rect.bottom() + 1)
+        if any(
+            image.pixelColor(x, y).lightness() < 128
+            for x in range(rect.left() + 2, tree.columnWidth(0))
+        )
+    ]
+    assert dark_rows, path
+    return (dark_rows[0] + dark_rows[-1]) / 2
+
+
+def _input_line_center_y(form: CfgFormWidget, path: str) -> float:
+    from qtpy.QtCore import QPoint
+    from qtpy.QtWidgets import QLineEdit
+
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    editor = tree.itemWidget(tree_item(form, path), 1)
+    assert viewport is not None and editor is not None
+    line = editor.findChild(QLineEdit)
+    assert line is not None
+    top = line.mapTo(viewport, QPoint(0, 0)).y()
+    return top + line.height() / 2
+
+
+def _branch_stub_y(form: CfgFormWidget, path: str) -> int:
+    """Row of the connector stub painted just left of a tree row's label."""
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    assert viewport is not None
+    rect = tree.visualItemRect(tree_item(form, path))
+    image = viewport.grab().toImage()
+    background = image.pixelColor(rect.left() - 2, rect.top())
+    stub_rows = [
+        y
+        for y in range(rect.top(), rect.bottom() + 1)
+        if image.pixelColor(rect.left() - 2, y) != background
+    ]
+    assert len(stub_rows) == 1, (path, stub_rows)
+    return stub_rows[0]
+
+
+def test_tree_label_sits_on_the_input_line_above_an_expression_preview(qapp, ctrl):
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "pulse": CfgSectionSpec(
+                    label="Pulse",
+                    fields={
+                        "reps": ScalarSpec(label="Reps", type=int),
+                        "count": ScalarSpec(label="Count", type=int),
+                    },
+                )
+            }
+        ),
+        value=CfgSectionValue(
+            fields={
+                "pulse": CfgSectionValue(
+                    fields={"reps": DirectValue(10), "count": EvalValue("1 + 1")}
+                )
+            }
+        ),
+    )
+    with _attached_form(schema, ctrl) as (form, _draft):
+        form.resize(600, 400)
+        form.show()
+        qapp.processEvents()
+        tree = tree_widget(form)
+        preview_row = tree.visualItemRect(tree_item(form, "pulse.count"))
+        plain_row = tree.visualItemRect(tree_item(form, "pulse.reps"))
+        # The preview makes the expression row taller than a plain row.
+        assert preview_row.height() > plain_row.height()
+        for path in ("pulse.reps", "pulse.count"):
+            label = _label_text_center_y(form, path)
+            line = _input_line_center_y(form, path)
+            assert abs(label - line) <= 3, (path, label, line)
+            # The connector stub points at the label, not at the cell centre.
+            assert abs(_branch_stub_y(form, path) - line) <= 2, path

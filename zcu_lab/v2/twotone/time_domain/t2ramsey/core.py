@@ -42,6 +42,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.twotone.time_domain.detune import actual_detune
+
 
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
@@ -107,22 +109,13 @@ class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
         length_sweep = cfg.sweep.length
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
-        # calculate true scanned detune based on rounding lengths
-        if detune != 0.0:
-            detune_lengths = sweep2array(
-                cfg.sweep.length,
-                "phase",
-                {
-                    "soccfg": soccfg,
-                    "gen_ch": modules.pi2_pulse.ch,
-                    "scaler": 360 * detune,
-                },
-            )
-            mask = lengths > 0
-            detune_ratio = np.mean(detune_lengths[mask] / lengths[mask]).item()
-            true_detune = detune * detune_ratio
-        else:
-            true_detune = 0.0
+        true_detune = actual_detune(
+            cfg.sweep.length,
+            detune=detune,
+            gen_ch=modules.pi2_pulse.ch,
+            soccfg=soccfg,
+            time_scaler=1.0,
+        )
 
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         viewer = context.plots.liveplot_1d(

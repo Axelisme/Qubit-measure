@@ -9,7 +9,6 @@ from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
-from zcu_tools.gui.control_identity import ControlIdentity
 
 
 def _preview(item: ParameterWriteback | ModuleWriteback) -> dict[str, WritebackValues]:
@@ -26,17 +25,9 @@ def _preview(item: ParameterWriteback | ModuleWriteback) -> dict[str, WritebackV
 
 
 @pytest.fixture
-def control_factory() -> Iterator[Callable[[], MagicMock]]:
-    """Own each fake application authority until dependent views are deleted."""
-    controllers: list[MagicMock] = []
-
-    def create() -> MagicMock:
-        ctrl = MagicMock(control_identity=ControlIdentity())
-        controllers.append(ctrl)
-        return ctrl
-
-    yield create
-    controllers.clear()
+def control_factory() -> Callable[[], MagicMock]:
+    """Construct the controller collaborators used by local writeback dialogs."""
+    return MagicMock
 
 
 @pytest.fixture

@@ -79,6 +79,7 @@ def _relabel_power_figure(fig: Figure) -> None:
 class JpaPowerAdapter(
     BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeResult, NoAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
 

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tokenize
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
@@ -268,15 +268,31 @@ def complexity_summary(snapshot: Snapshot, *, top: int = 10) -> dict[str, JsonVa
     }
 
 
-def radon_findings(root: Path) -> tuple[Finding, ...]:
-    """Analyze selected source with fixed options, independent of CLI config."""
+def radon_findings(
+    root: Path,
+    *,
+    paths: Iterable[str] | None = None,
+    roots: tuple[str, ...] = ("lib", "tools"),
+) -> tuple[Finding, ...]:
+    """Measure Python functions, methods and closures under the selected roots.
+
+    `root` is the source tree; `paths` optionally narrows it to repo-relative
+    filenames. Missing files and scanner-excluded directories are skipped.
+    `roots` selects top-level directories, defaulting to the advisory report
+    scope. Class aggregates are excluded, duplicate methods are counted once,
+    and asserts are included regardless of Radon CLI configuration.
+
+    Findings remain uncounted advisory metrics. Each details mapping contains
+    the qualified name, integer complexity and letter rank. Import, source-read,
+    syntax and invalid-output errors propagate rather than becoming zero metrics.
+    """
     from radon.cli.tools import cc_to_dict
     from radon.complexity import cc_visit
 
     payload: dict[str, JsonValue] = {}
-    for path in _support.python_files(root):
+    for path in _support.python_files(root, paths=paths):
         relative = path.relative_to(root)
-        if relative.parts[0] not in ("lib", "tools"):
+        if relative.parts[0] not in roots:
             continue
         with tokenize.open(path) as source:
             blocks = cc_visit(source.read(), no_assert=False)

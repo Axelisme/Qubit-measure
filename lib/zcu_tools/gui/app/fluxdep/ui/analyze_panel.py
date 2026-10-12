@@ -62,7 +62,6 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
@@ -127,7 +126,7 @@ class AnalyzePanelWidget(QWidget):
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ctrl = ctrl
-        self._edit_gate = RemoteEditGate(ctrl.control_identity, self)
+        self._writable = True
         self._bus_subs = EventSubscriptions()
         self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
@@ -151,10 +150,7 @@ class AnalyzePanelWidget(QWidget):
             else None
         )
         self._refresh_search()
-        self._edit_gate.watch(
-            lambda editable: self._set_tab_availability(editable=editable),
-            lifetime=self,
-        )
+        self.set_writable(writable=self._writable)
         # MainWindow explicitly activates this singleton on every Analyze click.
 
     # --- construction ----------------------------------------------------
@@ -208,9 +204,7 @@ class AnalyzePanelWidget(QWidget):
             context, on_apply=self._ctrl.interactive.apply_cross_selection
         )
         self._filter_widget = selector
-        self._edit_gate.watch(
-            lambda editable: selector.set_editable(editable=editable), lifetime=selector
-        )
+        selector.set_editable(editable=self._writable)
         self._filter_layout.addWidget(selector)
 
     # --- Search tab ------------------------------------------------------
@@ -243,7 +237,7 @@ class AnalyzePanelWidget(QWidget):
     def _build_search_form(self) -> QGroupBox:
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
-        self._edit_gate.bind(form_box)
+        self._search_form = form_box
 
         self._db_edit = QLineEdit()
         browse = QPushButton("Browse…")
@@ -451,6 +445,14 @@ class AnalyzePanelWidget(QWidget):
             self._filter_widget = None
         self._filter_context_id = None
 
+    def set_writable(self, *, writable: bool) -> None:
+        """Gate domain input while preserving Show and canvas viewing."""
+        self._writable = writable
+        self._search_form.setEnabled(writable)
+        self._set_tab_availability(editable=writable)
+        if self._filter_widget is not None:
+            self._filter_widget.set_editable(editable=writable)
+
     def _set_tab_availability(self, *, editable: bool) -> None:
         # Entering Filter opens input; leaving it cancels input. Search/Show
         # switching without Filter input is pure viewing and remains available.
@@ -464,9 +466,7 @@ class AnalyzePanelWidget(QWidget):
             self._tabs.setTabEnabled(index, editable or self.current_tab != "filter")
 
     def _on_tab_changed(self, index: int) -> None:
-        self._set_tab_availability(
-            editable=self._ctrl.control_identity.status().holder == "gui"
-        )
+        self._set_tab_availability(editable=self._writable)
         if self._tabs.tabText(index) == "Filter":
             self._refresh_filter_tab()
         else:
@@ -533,9 +533,13 @@ class AnalyzePanelWidget(QWidget):
                 self._ctrl.state.project, self._ctrl.get_project_root()
             )
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select database", start, filter="HDF5 (*.h5 *.hdf5);;All files (*)"
+            self,
+            "Select database",
+            start,
+            filter="HDF5 (*.h5 *.hdf5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if path and self._edit_gate.local_editing:
+        if path:
             self._db_edit.setText(path)
 
     def _on_search(self) -> None:
@@ -644,7 +648,6 @@ class AnalyzePanelWidget(QWidget):
 
     def dispose(self) -> None:
         """Release subscriptions and presentation after app search has drained."""
-        self._edit_gate.dispose()
         self._bus_subs.unsubscribe_all()
         if self._progress_dispose is not None:
             self._progress_dispose()

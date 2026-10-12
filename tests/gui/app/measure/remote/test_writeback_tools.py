@@ -235,7 +235,7 @@ def test_apply_passes_explicit_ids_without_editing_selection(ids):
     ctrl.writeback_control.set_writeback_item_for_pane.assert_not_called()
 
 
-@pytest.mark.parametrize("ids", [None, "param-1", [""], [1]])
+@pytest.mark.parametrize("ids", ["param-1", [""], [1]])
 def test_apply_rejects_malformed_ids_before_service(ids):
     ctrl = _ctrl()
     with pytest.raises(RemoteError):

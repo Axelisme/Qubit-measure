@@ -29,7 +29,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryInfo,
@@ -38,11 +37,6 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    local_write_allowed,
-)
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
@@ -128,21 +122,15 @@ class SetupDialog(QDialog):
     wrapped status label without retry; a missing result root is shown as a
     hint because New entry creates it. Track device only suggests an
     editable label from cached value/unit, preserving manual edits and None.
-    Optional control_identity gates the owned content but not Close. New-entry
-    text prompts recheck that application owner before creating any resources.
-    Omitted authority preserves the behavior of apps without control identity.
     """
 
     def __init__(
         self,
         controller: SetupControlPort,
         parent: QWidget | None = None,
-        *,
-        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
-        self._control_identity = control_identity
         self.setWindowTitle("Setup")
         self.resize(900, 680)
 
@@ -304,7 +292,6 @@ class SetupDialog(QDialog):
         splitter.addWidget(right_widget)
 
         splitter.setSizes([450, 450])
-        bind_control_enabled(splitter, control_identity, retirement_dialog=self)
 
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -335,19 +322,6 @@ class SetupDialog(QDialog):
         self._bus_subs_active = True
         self.finished.connect(self._cleanup_bus_subscriptions)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
@@ -518,7 +492,7 @@ class SetupDialog(QDialog):
 
     def _on_new_entry_clicked(self) -> None:
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
-        if not accepted or not local_write_allowed(self._control_identity):
+        if not accepted:
             return
         try:
             info = self._ctrl.new_entry(EntryRequest(name))

@@ -44,7 +44,8 @@ class ControlIdentityError(FailedPreconditionError):
     """Control refusal with a stable reason_code and current status projection."""
 
     def __init__(self, reason: str, status: ControlStatus) -> None:
-        super().__init__(reason.replace("_", " "), reason_code=reason)
+        message = "Local 使用中" if reason == "local_busy" else reason.replace("_", " ")
+        super().__init__(message, reason_code=reason)
         self.status = status
 
 
@@ -89,12 +90,16 @@ class ControlIdentity:
 
         return dispose
 
-    def connect(self, client_id: str, label: str, mode: ControlMode) -> None:
+    def connect(
+        self, client_id: str, label: str, mode: ControlMode, *, local_busy: bool = False
+    ) -> None:
         """Initialize a socket; conflicting repeat raises InvalidInputError.
 
         Empty labels/unknown modes are invalid. Successful owner initialization
         auto-acquires only unlocked Local; a held/locked GUI keeps the socket
         connected without authority. Repeating connect never reacquires.
+        local_busy is the frontend's owner-turn modal query; when auto-acquiring
+        Local it refuses initialization with local_busy, without changing holder.
         """
         self._assert_owner()
         if not label.strip():
@@ -110,6 +115,13 @@ class ControlIdentity:
                 )
             return
         before = self.status()
+        if (
+            mode == "owner"
+            and before.holder == "gui"
+            and not before.locked
+            and local_busy
+        ):
+            raise ControlIdentityError("local_busy", before)
         self._connections[client_id] = identity
         if mode == "owner" and self._holder == "gui" and not self._locked:
             self._holder = f"rpc:{label}"
@@ -137,11 +149,12 @@ class ControlIdentity:
         if not self.is_holder(client_id):
             raise ControlIdentityError("not_holder", self.status())
 
-    def acquire(self, client_id: str) -> None:
+    def acquire(self, client_id: str, *, local_busy: bool = False) -> None:
         """Acquire Local or offline Remote; reject readonly, locked or held.
 
         Same-label owner sockets already hold authority and succeed unchanged.
-        Refusals carry readonly_connection, control_locked or control_held.
+        local_busy is the frontend's owner-turn modal query. Refusals carry
+        readonly_connection, control_locked, local_busy or control_held.
         """
         identity = self._owner_identity(client_id)
         if self.is_holder(client_id):
@@ -149,6 +162,8 @@ class ControlIdentity:
         before = self.status()
         if before.locked:
             raise ControlIdentityError("control_locked", before)
+        if before.holder == "gui" and local_busy:
+            raise ControlIdentityError("local_busy", before)
         if before.holder != "gui" and before.online:
             raise ControlIdentityError("control_held", before)
         self._holder = f"rpc:{identity.label}"

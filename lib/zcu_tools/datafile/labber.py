@@ -1188,6 +1188,65 @@ def _read_v2_log_channel_bookkeeping(
     return channel_names, channels_dataset, instrument_config
 
 
+def _require_v2_step_bookkeeping(
+    source: h5py.File | h5py.Group,
+    channels_dataset: h5py.Dataset,
+    instrument_config: h5py.Group,
+    step_names: list[str],
+) -> None:
+    """Require consistent ordered step names across all Labber metadata tables."""
+    configured_steps = [
+        _decode(row["name"]) or ""
+        for row in channels_dataset[()]
+        if _decode(row["instrument"]) == _INSTR_STEP
+    ]
+    step_list = source.get("Step list")
+    step_config = source.get("Step config")
+    step_instrument = instrument_config.get(_INSTR_STEP)
+    if (
+        configured_steps != step_names
+        or not isinstance(step_list, h5py.Dataset)
+        or [_decode(row["channel_name"]) or "" for row in step_list[()]] != step_names
+        or not isinstance(step_config, h5py.Group)
+        or set(step_config) != set(step_names)
+        or not isinstance(step_instrument, h5py.Group)
+        or {
+            name
+            for name in step_instrument.attrs
+            if isinstance(name, str) and name != "Installed options"
+        }
+        != set(step_names)
+    ):
+        raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
+
+
+def _decode_v2_step_grid(
+    data: np.ndarray, step_dims: list[int], step_names: list[str], units: dict[str, str]
+) -> list[tuple[str, str, np.ndarray]]:
+    """Decode inner-first axes and require every stored coordinate to match the grid."""
+    n_x, _n_col, n_entry = data.shape
+    n_axes = len(step_names)
+    axes: list[tuple[str, str, np.ndarray]] = []
+    outer_strides = np.cumprod([1, *step_dims[1:-1]])
+    for k, name in enumerate(step_names):
+        values = (
+            data[:, 0, 0]
+            if k == 0
+            else data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
+        )
+        axes.append((name, units.get(name, ""), np.asarray(values)))
+
+    expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
+    expected_steps[:, 0, :] = axes[0][2][:, None]
+    for col in range(n_axes - 1, 0, -1):
+        indices = (np.arange(n_entry) // outer_strides[col - 1]) % step_dims[col]
+        expected_steps[:, col, :] = axes[col][2][indices][None, :]
+    if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
+        raise ValueError("grouped v2 step-coordinate columns do not match the grid")
+
+    return axes
+
+
 def _read_uniform_multi_channel_log(
     f: h5py.File, log: h5py.File | h5py.Group
 ) -> tuple[
@@ -1235,49 +1294,13 @@ def _read_uniform_multi_channel_log(
         log, data_group, n_x=n_x, n_entry=n_entry, n_axes=n_axes
     )
     step_names = [name for name, _info in columns[:n_axes]]
-    configured_steps = [
-        _decode(row["name"]) or ""
-        for row in channels_dataset[()]
-        if _decode(row["instrument"]) == _INSTR_STEP
-    ]
-    step_list = source.get("Step list")
-    step_config = source.get("Step config")
-    step_instrument = instrument_config.get(_INSTR_STEP)
-    if (
-        configured_steps != step_names
-        or not isinstance(step_list, h5py.Dataset)
-        or [_decode(row["channel_name"]) or "" for row in step_list[()]] != step_names
-        or not isinstance(step_config, h5py.Group)
-        or set(step_config) != set(step_names)
-        or not isinstance(step_instrument, h5py.Group)
-        or {
-            name
-            for name in step_instrument.attrs
-            if isinstance(name, str) and name != "Installed options"
-        }
-        != set(step_names)
-    ):
-        raise ValueError("grouped v2 step-channel bookkeeping is inconsistent")
+    _require_v2_step_bookkeeping(
+        source, channels_dataset, instrument_config, step_names
+    )
 
     # Decode inner-first axes, then verify every stored coordinate against them.
     units = _channel_units(f, log)
-    axes: list[tuple[str, str, np.ndarray]] = []
-    outer_strides = np.cumprod([1, *step_dims[1:-1]])
-    for k, name in enumerate(step_names):
-        values = (
-            data[:, 0, 0]
-            if k == 0
-            else data[0, k, outer_strides[k - 1] * np.arange(step_dims[k])]
-        )
-        axes.append((name, units.get(name, ""), np.asarray(values)))
-
-    expected_steps = np.zeros((n_x, n_axes, n_entry), dtype=float)
-    expected_steps[:, 0, :] = axes[0][2][:, None]
-    for col in range(n_axes - 1, 0, -1):
-        indices = (np.arange(n_entry) // outer_strides[col - 1]) % step_dims[col]
-        expected_steps[:, col, :] = axes[col][2][indices][None, :]
-    if not np.array_equal(data[:, :n_axes, :], expected_steps, equal_nan=True):
-        raise ValueError("grouped v2 step-coordinate columns do not match the grid")
+    axes = _decode_v2_step_grid(data, step_dims, step_names, units)
 
     values_by_channel: dict[str, tuple[str, np.ndarray]] = {}
     for index, name in enumerate(channel_names):
