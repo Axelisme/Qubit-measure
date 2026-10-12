@@ -16,6 +16,21 @@ from ._recipe_field_support import SweepGui as _SweepGui
 from ._recipe_support import LookbackGui, recipe_client
 
 
+@pytest.mark.parametrize(
+    "parameter,reason",
+    [
+        pytest.param("", "Provide a readout reference", id="empty-parameter"),
+        pytest.param("readout_ref", "", id="empty-reason"),
+    ],
+)
+def test_missing_parameter_rejects_empty_name_or_reason(parameter, reason):
+    with pytest.raises(
+        ValueError,
+        match="^missing parameters must contain non-empty names and reasons$",
+    ):
+        MissingParameter(parameter, reason)
+
+
 @pytest.mark.parametrize("mode", ["inline", "ref"])
 def test_author_reads_owner_reference_mode_and_child_readonly(tmp_path, mode):
     gui = LookbackGui()
