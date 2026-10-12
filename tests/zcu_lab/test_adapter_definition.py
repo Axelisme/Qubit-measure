@@ -32,6 +32,7 @@ from zcu_tools.gui.cfg.binding.observation import CfgNodeObservation
 from zcu_tools.gui.cfg.binding.ports import ResolvedReference
 from zcu_tools.gui.cfg.resource import (
     CfgEdit,
+    CfgObservation,
     CfgResolution,
     CfgResource,
     CfgStatus,
@@ -374,6 +375,20 @@ def _assert_calibration_moves_sweep_centers(
     assert checked > 0
 
 
+def _refresh_or_reset_direct_defaults(resource: CfgResource) -> CfgObservation:
+    inputs = resource.snapshot_inputs()
+    refreshed = resource.refresh(resource.observe().ref.revision)
+    assert resource.snapshot_inputs() == inputs
+    devices = inputs.value.fields.get("dev")
+    if isinstance(devices, CfgSectionValue) and any(
+        isinstance(value, DirectValue) and value.error is not None
+        for value in devices.fields.values()
+    ):
+        assert refreshed.status is CfgStatus.INVALID
+        return resource.reset(refreshed.ref.revision)
+    return refreshed
+
+
 @pytest.mark.parametrize("name", _specified_defaults())
 def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
     name: str,
@@ -399,7 +414,6 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             or "$jpa" in item.message
             for item in missing.diagnostics
         )
-        inputs = resource.snapshot_inputs()
         environment = _ctx(rich=True)
         parameters = environment.parameters
         assert parameters is not None
@@ -413,15 +427,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
             environment,
             parameters=parameters.bind_aliases(rows, {}),
         )
-        calibrated = resource.refresh(missing.ref.revision)
-        assert resource.snapshot_inputs() == inputs
-        devices = inputs.value.fields.get("dev")
-        if isinstance(devices, CfgSectionValue) and any(
-            isinstance(value, DirectValue) and value.error is not None
-            for value in devices.fields.values()
-        ):
-            assert calibrated.status is CfgStatus.INVALID
-            calibrated = resource.reset(calibrated.ref.revision)
+        calibrated = _refresh_or_reset_direct_defaults(resource)
         assert calibrated.status is CfgStatus.VALID, calibrated.diagnostics
         accepted = resource.accept(calibrated.ref.revision)
         point = parameters.document()
