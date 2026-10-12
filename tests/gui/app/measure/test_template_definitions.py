@@ -350,6 +350,7 @@ def seeded_fallback_definitions(slot: str) -> dict[str, cfg_model.TemplateDef]:
                 "ch": 3,
                 "nqz": 1,
                 "freq": cfg_model.Expr("4200 + 23"),
+                "desc": "{qubit} drive",
                 "gain": 0.37,
                 "waveform.length": 0.08,
             },
@@ -374,6 +375,7 @@ def test_bound_missing_slot_expands_seeded_template_inline(
     first = entry.make_value(environment)
     assert read_value_path(first.value, "pi2_cfg.gain") == DirectValue(0.37)
     assert read_value_path(first.value, "pi2_cfg.freq") == EvalValue("4200 + 23")
+    assert read_value_path(first.value, "pi2_cfg.desc") == DirectValue("$qubit drive")
     schema = CfgSchema(entry.shape(), first.value)
     wire = schema_to_raw(schema)
     pulse_wire = wire["pi2_cfg"]
@@ -427,7 +429,7 @@ def test_unbound_slot_keeps_linked_empty_despite_template_fallback(
     ("fallback_id", "module", "message"),
     [
         ("unknown", cfg_model.PulseSpec, "Unknown template.*unknown"),
-        ("drive", cfg_model.ReadoutSpec, "incompatible.*ReadoutSpec"),
+        ("drive", cfg_model.PulseReadoutSpec, "incompatible.*PulseReadoutSpec"),
         ("drive", cfg_model.ConstWaveformCfg, "incompatible.*ConstWaveformCfg"),
     ],
     ids=["unknown-id", "wrong-module", "waveform"],
@@ -493,3 +495,25 @@ def test_public_reference_defaults_expand_template_using_injected_definitions(
     assert first.chosen_key == make_custom_reference_key("Pulse")
     assert read_value_path(first.value, "freq") == EvalValue("4200 + 23")
     assert read_value_path(first.value, "gain") == DirectValue(0.37)
+
+
+@pytest.mark.parametrize("option", ["set", "lock", "qubit", "resonator"])
+def test_unsupported_fallback_template_options_fail_at_registration(
+    option: str,
+) -> None:
+    fallbacks = {
+        "set": cfg_model.Template("drive", set={"gain": 0.2}),
+        "lock": cfg_model.Template("drive", lock={"ch": 0}),
+        "qubit": cfg_model.Template("drive", qubit="$q2"),
+        "resonator": cfg_model.Template("drive", resonator="$r2"),
+    }
+    definitions = seeded_fallback_definitions("unset")
+    definitions["reset"] = cfg_model.TemplateDef(
+        cfg_model.BathResetSpec,
+        "Reset",
+        {"pi2_cfg": cfg_model.Slot("$qubit.module.unset", fallback=fallbacks[option])},
+    )
+    catalog = TemplateCatalog()
+    with pytest.raises(TypeError, match=f"reset.*pi2_cfg.*drive.*{option}"):
+        catalog.register_definitions(definitions)
+    assert not catalog.has("reset")
