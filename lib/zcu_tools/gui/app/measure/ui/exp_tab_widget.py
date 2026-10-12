@@ -57,14 +57,6 @@ _RED_STOP_STYLESHEET = (
     "background-color: #f44336; color: white; font-weight: bold; "
     "border: 1px solid #d32f2f; border-radius: 4px;"
 )
-_GREEN_RESET_STYLESHEET = (
-    "QPushButton#resetButton { background-color: #2e8b57; color: white; "
-    "font-weight: 600; border: 1px solid #246f46; border-radius: 4px; }"
-    "QPushButton#resetButton:hover:!disabled { background-color: #369d65; }"
-    "QPushButton#resetButton:pressed:!disabled { background-color: #226b43; }"
-    "QPushButton#resetButton:disabled { background-color: #9dbdaa; color: #eef5f0; "
-    "border-color: #8eab99; }"
-)
 
 
 if TYPE_CHECKING:
@@ -346,7 +338,6 @@ class ExpTabWidget(QWidget):
         bar_layout.setSpacing(6)
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.setObjectName("resetButton")
-        self.reset_btn.setStyleSheet(_GREEN_RESET_STYLESHEET)
         self.reset_btn.setToolTip("Discard current config and restore adapter defaults")
         self.reset_btn.setFixedHeight(30)
         self.reset_btn.setSizePolicy(

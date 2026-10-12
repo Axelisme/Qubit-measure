@@ -518,3 +518,84 @@ def test_save_button_persists_without_remote_png(
         assert errors == []
     finally:
         dialog.close()
+
+
+@pytest.fixture
+def entry_waveform_dialog(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Bind the waveform service to an entry installed by the real context owner."""
+    from zcu_tools.gui.event_bus import BaseEventBus
+    from zcu_tools.gui.session.services.context import ContextService
+    from zcu_tools.resources.entry import ResultEntry
+
+    # No public reset exists; restore the process-global path the way this module does.
+    monkeypatch.setattr(
+        ArbWaveformDatabase,
+        "_database_path",
+        vars(ArbWaveformDatabase)["_database_path"],
+    )
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    context = ContextService(
+        state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
+    )
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    context.install_entry(entry)
+    assets = arb_waveform.ArbWaveformService(state)
+    dialog = ArbWaveformDialog(assets)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        yield dialog, assets
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_empty_assets_hint_tracks_refresh(entry_waveform_dialog) -> None:
+    from qtpy.QtWidgets import QLabel
+
+    dialog, assets = entry_waveform_dialog
+    hint = next(
+        (
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.text() == "No waveforms saved yet"
+        ),
+        None,
+    )
+    assert hint is not None
+    assert hint.isVisible()
+    assert "gray" in hint.styleSheet()
+    recipe = FormulaRecipe.from_raw(
+        {"segments": [{"duration": 0.1, "formula": "1"}], "normalize": "peak"}
+    )
+    assets.set_formula("wave", recipe, overwrite=False)
+    dialog.refresh()
+    assert not hint.isVisible()
+    assets.delete("wave")
+    dialog.refresh()
+    assert hint.isVisible()
+
+
+def test_close_is_in_bottom_right_footer(entry_waveform_dialog, qapp) -> None:
+    from qtpy.QtCore import QPoint
+    from qtpy.QtWidgets import QPushButton, QSplitter
+
+    dialog, _ = entry_waveform_dialog
+    close = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Close")
+    splitter = dialog.findChild(QSplitter)
+    assert splitter is not None
+    close_top = close.mapTo(dialog, QPoint(0, 0))
+    splitter_bottom = splitter.mapTo(dialog, QPoint(0, splitter.height()))
+    assert close_top.y() >= splitter_bottom.y()
+    assert close_top.x() > dialog.width() / 2
+    dialog.resize(dialog.width() + 100, dialog.height() + 100)
+    qapp.processEvents()
+    assert (
+        close.mapTo(dialog, QPoint(0, 0)).y()
+        >= splitter.mapTo(dialog, QPoint(0, splitter.height())).y()
+    )
+    close.click()
+    assert not dialog.isVisible()
