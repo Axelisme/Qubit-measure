@@ -119,3 +119,35 @@ def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths
     assert isinstance(resource.result(), FormErrors)
     assert resource.write_compatible({"amount": "not a number"}) == (("amount",),)
     assert resource.input.data == {"amount": {"expr": "unfinished +"}}
+
+
+def test_subscriber_failure_keeps_committed_result_and_notifies_other_subscribers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    resource = resource_api.TabFormResource(
+        Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+        mutation_allowed=lambda: True,
+    )
+    observed: list[ConfigBase | FormErrors] = []
+
+    def failing_subscriber() -> None:
+        raise RuntimeError("observer failed")
+
+    resource.subscribe(failing_subscriber)
+    resource.subscribe(lambda: observed.append(resource.result()))
+    try:
+        resource.write({("amount",): 4.0})
+    except RuntimeError:
+        pytest.fail("A subscriber must not reject a committed write")
+    assert resource.input.data == {"amount": 4.0}
+    assert observed == [ScalarCore(amount=4.0)]
+    resource.write({("amount",): 5.0})
+    assert resource.result() == ScalarCore(amount=5.0)
+    assert observed == [ScalarCore(amount=4.0), ScalarCore(amount=5.0)]
+    faults = [record for record in caplog.records if record.exc_info is not None]
+    assert len(faults) == 2
+    assert all(
+        record.exc_info and isinstance(record.exc_info[1], RuntimeError)
+        for record in faults
+    )
