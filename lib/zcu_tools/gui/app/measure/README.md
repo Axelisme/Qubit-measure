@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
+**Last updated:** 2026-10-12
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -95,20 +95,16 @@ Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次
 同時套用 holder 和既有 busy/readiness 條件，不因背景事件自動收回。GUI 檢視 tab 不改 Remote
 holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
 
-`gui.widgets.remote_edit_gate` 綁定 owner watch 與 Qt destruction。Setup、Aliases、Predictor、
-ArbWaveform 和巢狀 writeback dialogs 只 gate owner 擁有的內容區與寫入 controls，維持既有
-modal 呈現，Cancel／Close／✕ 可用。關閉後再按主窗燈收回，不因關閉自動轉移 holder。
-Shared dialog 的 optional `control_identity` 指向同一 application owner；未提供時保留其他 app
-既有行為。Static file／text chooser 與 confirmation 不改呈現，返回後、寫入前重查 holder；
-非 Local 時不提交 cfg reset、entry create、predictor trial edits、data load、waveform mutation、
-Inspect Apply／Delete、tab close 或 reload。Inspect Delete 先固定 `ParameterContext`，再以
-`Controller.apply_library_change` 刪除該 target；不因確認期間 context switch 改寫新 point。
-DeviceDialog 與 Inspect 保留只讀瀏覽，分別套用自己的 read-only presentation gate。
-Inspect 將同一 application authority 交給 component tree 與單次 Add dialog。
-Remote 停用 Add 的欄位及提交，Cancel／Close 保持可用。Finished 退休輸入與 watches，
-之後送達的 submit 不因 Local 收回而重新寫入。
-只有量測 Stop 和 device setup Stop
-在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
+MainWindow 是唯一 Qt authority 訂閱者。`set_writable` 更新主窗與目前 tabs，
+新 tab 建立時套用當下狀態。Tab 與 interactive frontend 只接收可寫狀態。
+Local modal 期間，Qt remote adapter 拒絕 owner 取得，回 `local_busy` 與「Local 使用中」。
+Chooser 使用非 native option。Dialog 不訂閱 control，也不在寫入前重查 holder。
+Inspect 與 Device 的查看入口提供靜態 read-only mode，Inspect 不開放 Add、
+library mutation 或 Arb Waveforms。Inspect Delete 先固定 `ParameterContext`，
+再用 `Controller.apply_library_change` 刪除該 target，不因確認期間 context switch 改寫新 point。
+Add 與 RunLoad 的 finished 仍退休單次輸入，晚到提交不能重新寫入。
+只有量測 Stop 和 device setup Stop 在 Remote 收回 Local locked 並請求 cancellation。
+收回本身不取消 operation。
 Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
 pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。
 
@@ -144,11 +140,14 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   backgrounds, whole-row folding, reference shape elision, viewport follows
   available panel height with scrolling only when content exceeds viewport);
   Run action row is status-free with Reset 20% / Run 80% of available width；
-  idle Reset與Run同高，Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
+  idle Reset與Run同高，Reset為一般按鈕、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
   settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
   whole-header folding for `Analysis parameters` and `Writeback preview` and a
   full-width `Analyze` immediately after parameters and before Writeback preview
-  (A6). Presentation
+  (A6). Post-Analysis uses the same ledger, form font, full-width primary button
+  (`Run Post-Analysis`, below its gate hint) and `Writeback preview` section, so
+  both analysis steps present alike; a known parameter type without fields shows
+  the form's no-parameters hint in either pane. Presentation
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
@@ -387,6 +386,8 @@ Loader 不猜 namespace 或套件位置。Preserved prefix 優先於 reload pref
 import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定 module identity，且每個
 prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
 
+Bounded source inventory、prepare/load、fixed-source restart 與共同 token/error 型別由 `gui.catalog_loader` 擁有。Measure 的 SourceExperimentCatalogLoader 保留原簽名，只注入 Registry/register_all/validate builder；Controller 的 recovery 與 UI 政策不變。
+
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
 可重載 code 的 import 不得操作硬體或啟動背景工作。此取捨不放寬資料丟棄確認或 lifecycle 保護。
 
@@ -612,13 +613,20 @@ fixed ParameterContext, not the currently selected point or global aliases. `Cfg
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
-五個有 flux device 的 Measure adapter 使用 `$flux_dev` 作為初始名稱 expression，
-包括 JPA 的 jpa_flux_dev 欄位。明確 caller 設定不被 preset 覆蓋。
-String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
-使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
-並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
-可用性，實際使用名稱時由實驗 device owner 報錯。RunMetadata 與 data.h5 保存
-當次的 `flux_dev → yoko1`；Analyze、WB 與 Save 不重新讀取目前 alias 表。
+五個有 flux device 的 Measure adapter 預設使用 direct mode，包括 JPA 的
+`jpa_flux_dev` 欄位。建立預設 cfg 時，seed 從當時固定的 parameter capture
+只解析一次 `$flux_dev`，將名稱保存為 `DirectValue`，表單顯示例如 `yoko1`。
+未綁定時 cfg 發布 Invalid 並指名 alias，不 fallback。後續 alias 變更不更新
+已建立的 direct cfg 或 draft；新預設 cfg 才使用當時 capture 的解析結果。
+明確 caller 設定不被 preset 覆蓋。
+
+使用者仍可手動切成 eval mode 並輸入 `$flux_dev`。這時 string cfg 保留
+authored expression，與固定的 direct 初值不同。Preview、refresh 與 Run
+使用各自固定的 alias capture 解析 expression，顯示例如 `= "yoko1"`。
+未綁或缺列發布 Invalid 並指名 alias；無 context 或來源故障不沿用舊名稱。
+Alias 與 preview 不查 device 可用性，實際使用名稱時由實驗 device owner 報錯。
+RunMetadata 與 data.h5 保存當次的 `flux_dev → yoko1`；Analyze、WB 與 Save
+不重新讀取目前 alias 表。
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定

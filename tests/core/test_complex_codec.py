@@ -2,6 +2,7 @@
 
 import json
 
+import numpy as np
 import pytest
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 
@@ -12,10 +13,15 @@ from zcu_tools.core.complex_codec import decode_complex, encode_complex
         complex(0.012345678901234567, -0.03456789012345678),
         complex(-3.25, 0.0),
         complex(0.0, -2.5),
+        pytest.param(
+            np.complex128(0.012345678901234567 - 0.03456789012345678j),
+            id="numpy-complex128",
+        ),
     ],
 )
 def test_complex_scalar_survives_json_without_rounding(value: complex) -> None:
     tag = encode_complex(value)
+    assert [type(component) for component in tag["__complex__"]] == [float, float]
     assert tag == {"__complex__": [value.real, value.imag]}
     assert decode_complex(json.loads(json.dumps(tag))) == value
 

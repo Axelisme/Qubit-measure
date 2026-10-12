@@ -86,6 +86,8 @@ class FakeFreqAdapter(
 ):
     """Simulated one-tone frequency sweep.  No hardware required."""
 
+    experiment_tag: ClassVar[str | None] = FakeFreqExp.persistence_tag()
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=True
     )

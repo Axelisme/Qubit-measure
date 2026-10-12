@@ -29,7 +29,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryInfo,
@@ -38,11 +37,6 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    local_write_allowed,
-)
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
@@ -128,21 +122,15 @@ class SetupDialog(QDialog):
     wrapped status label without retry; a missing result root is shown as a
     hint because New entry creates it. Track device only suggests an
     editable label from cached value/unit, preserving manual edits and None.
-    Optional control_identity gates the owned content but not Close. New-entry
-    text prompts recheck that application owner before creating any resources.
-    Omitted authority preserves the behavior of apps without control identity.
     """
 
     def __init__(
         self,
         controller: SetupControlPort,
         parent: QWidget | None = None,
-        *,
-        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._ctrl = controller
-        self._control_identity = control_identity
         self.setWindowTitle("Setup")
         self.resize(900, 680)
 
@@ -153,54 +141,11 @@ class SetupDialog(QDialog):
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, stretch=1)
 
-        splitter.addWidget(self._build_project_panel())
-        splitter.addWidget(self._build_connection_panel())
-
-        splitter.setSizes([450, 450])
-        bind_control_enabled(splitter, control_identity, retirement_dialog=self)
-
-        # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btn_box.rejected.connect(self.reject)
-        # Full-width status keeps long project messages to as few lines as possible.
-        self._project_status = _wrapping_label("setup_status")
-        root_layout.addWidget(self._project_status)
-        root_layout.addWidget(btn_box)
-
-        # initialise
-        self._refresh_entries()
-        self._prefill_from_preferences()
-        self._refresh_device_list()
-        self._refresh_context_list()
-        self._maybe_show_current_cfg()
-
-        # EventBus subscriptions for live updates
-        from zcu_tools.gui.session.events import (
-            ContextSwitchedPayload,
-            DeviceChangedPayload,
-            SocChangedPayload,
-        )
-
-        bus = controller.get_bus()
-        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
-        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
-        self._bus_subs_active = True
-        self.finished.connect(self._cleanup_bus_subscriptions)
-        self.destroyed.connect(self._cleanup_bus_subscriptions)
-
-    def _build_project_panel(self) -> QWidget:
-        """Compose explicit entry binding, working-point selection and point creation."""
+        # ── Left panel: Project ──────────────────────────────────────────
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(4, 4, 4, 4)
-        left_layout.addWidget(self._build_entry_group())
-        left_layout.addWidget(self._build_working_points_group(), stretch=1)
-        left_layout.addWidget(self._build_new_point_group())
-        return left_widget
 
-    def _build_entry_group(self) -> QGroupBox:
-        """Build entry actions and owner-provided result/database path displays."""
         # Entry binding is explicit; changing the selection only edits the form.
         entry_group = QGroupBox("Result entry")
         entry_form = QFormLayout(entry_group)
@@ -236,10 +181,8 @@ class SetupDialog(QDialog):
         entry_form.addRow(
             "Database:", self._path_row(self._database_path, self._database_open)
         )
-        return entry_group
+        left_layout.addWidget(entry_group)
 
-    def _build_working_points_group(self) -> QGroupBox:
-        """Build point selection, its description and the explicit switch action."""
         # context list
         ctx_group = QGroupBox("Working points")
         ctx_layout = QVBoxLayout(ctx_group)
@@ -262,10 +205,8 @@ class SetupDialog(QDialog):
         self._switch_btn.clicked.connect(self._on_switch_clicked)
         switch_row.addWidget(self._switch_btn)
         ctx_layout.addLayout(switch_row)
-        return ctx_group
+        left_layout.addWidget(ctx_group, stretch=1)
 
-    def _build_new_point_group(self) -> QGroupBox:
-        """Build the independent point-creation form with cached device suggestions."""
         # new context
         new_group = QGroupBox("New working point")
         new_form = QFormLayout(new_group)
@@ -299,10 +240,11 @@ class SetupDialog(QDialog):
         self._new_ctx_btn = QPushButton("Create")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
         new_form.addRow("", self._new_ctx_btn)
-        return new_group
+        left_layout.addWidget(new_group)
 
-    def _build_connection_panel(self) -> QWidget:
-        """Build connection settings, simulation selection and read-only SoC description."""
+        # project status label
+        splitter.addWidget(left_widget)
+
         # ── Right panel: Connection ──────────────────────────────────────
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -347,20 +289,39 @@ class SetupDialog(QDialog):
         right_layout.addWidget(self._cfg_text, stretch=1)
 
         right_layout.addStretch()
-        return right_widget
+        splitter.addWidget(right_widget)
 
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
+        splitter.setSizes([450, 450])
 
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
+        # ── Close button ─────────────────────────────────────────────────
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(self.reject)
+        # Full-width status keeps long project messages to as few lines as possible.
+        self._project_status = _wrapping_label("setup_status")
+        root_layout.addWidget(self._project_status)
+        root_layout.addWidget(btn_box)
 
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
+        # initialise
+        self._refresh_entries()
+        self._prefill_from_preferences()
+        self._refresh_device_list()
+        self._refresh_context_list()
+        self._maybe_show_current_cfg()
+
+        # EventBus subscriptions for live updates
+        from zcu_tools.gui.session.events import (
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
+            SocChangedPayload,
+        )
+
+        bus = controller.get_bus()
+        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
+        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
+        self._bus_subs_active = True
+        self.finished.connect(self._cleanup_bus_subscriptions)
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
@@ -531,7 +492,7 @@ class SetupDialog(QDialog):
 
     def _on_new_entry_clicked(self) -> None:
         name, accepted = QInputDialog.getText(self, "New entry", "Entry name:")
-        if not accepted or not local_write_allowed(self._control_identity):
+        if not accepted:
             return
         try:
             info = self._ctrl.new_entry(EntryRequest(name))

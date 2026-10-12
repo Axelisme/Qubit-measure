@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11, single-holder remote and modal editing gates
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -223,11 +223,13 @@ RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 Local、Local 鎖定及 Remote label／在線狀態。點燈呼叫 `toggle_local`，收回成 Local
 鎖定或切換 Local 鎖定；轉移本身不取消 search 或 interactive Session。
 
-`RemoteEditGate` 只投影 Local 編輯是否可用。MainWindow 停用 collection／project／IO
-命令、spectrum list 選取及 redo controls。可寫 dialog 維持 modal，只停用內容與
-OK；Cancel／✕ 可關閉，關閉後可按主窗指示燈收回。Dialog owner 綁定共用 gate，
-chooser 返回後與 accepted callback 執行寫入前都重查當下 holder。Picker 停用 controls 與 domain pointer gestures，
-但 canvas 保持可用；接管時丟棄未提交的 Local pointer preview。
+MainWindow 的 `set_writable` 停用 collection／project／IO 命令、spectrum 選取與
+redo controls，並推送給 Analyze panel 和目前 picker。新 view 套用當下狀態，
+子元件不訂閱 authority。Picker 停用 controls 與 domain pointer gestures，
+canvas 保持可用，接管時丟棄未提交的 Local pointer preview。
+Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt remote adapter
+在 owner turn 查 active modal，chooser 使用非 native option。Dialog 不接 control，
+chooser 返回與 accepted callback 不重查 holder。
 
 Analyze 的 Search form（含 Cancel search）在 Remote 停用。Filter tab 的進出會開啟或
 取消 Session，所以在 Remote 停用；無 Filter input 時 Search／Show 切換及 Show
@@ -235,8 +237,8 @@ Analyze 的 Search form（含 Cancel search）在 Remote 停用。Filter tab 的
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
 Remote 關窗先確認，拒絕不開始 shutdown。接受後沿原 search cancel／drain 與
-interactive dispose 契約處理，不自動收回控制權。Close 釋放 gate 的 watch 與
-Qt destruction listeners，避免 view teardown 回呼保留舊 widget。
+interactive dispose 契約處理，不自動收回控制權。Close 釋放主視窗的 authority watch。背景 drain、app-owned Session 與 EventBus
+subscriptions 保留原 lifetime。
 
 ### Database search 的 app ownership
 `FitService.capture_search` 在 State owner capture detached `SearchInput`。

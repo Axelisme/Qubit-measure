@@ -145,6 +145,25 @@ def h_tab_writeback_preview(
     }
 
 
+def _pane_cfg_edits(raw: object) -> list[dict[str, object]]:
+    """Parse pane edits, preserving order and coercing paths to text.
+
+    Unlike batch writes, this surface permits extra fields and non-string paths.
+    Malformed lists or entries raise the pane-specific INVALID_PARAMS error.
+    """
+    if not isinstance(raw, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
+    edits: list[dict[str, object]] = []
+    for i, edit in enumerate(raw):
+        if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"edits[{i}] must be an object with 'path' and 'value'",
+            )
+        edits.append({"path": str(edit["path"]), "value": edit["value"]})
+    return edits
+
+
 def h_tab_writeback_set(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -188,18 +207,7 @@ def h_tab_writeback_set(
         # Python type so the applied md value matches what preview serialized.
         changes["proposed_value"] = coerce_wire_value(params["proposed_value"])
     if has_edits:
-        raw_edits = params["edits"]
-        if not isinstance(raw_edits, list):
-            raise RemoteError(ErrorCode.INVALID_PARAMS, "'edits' must be a list")
-        edits: list[dict[str, object]] = []
-        for i, edit in enumerate(raw_edits):
-            if not isinstance(edit, dict) or "path" not in edit or "value" not in edit:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"edits[{i}] must be an object with 'path' and 'value'",
-                )
-            edits.append({"path": str(edit["path"]), "value": edit["value"]})
-        changes["edits"] = edits
+        changes["edits"] = _pane_cfg_edits(params["edits"])
     pane = subtab_id  # type: ignore[assignment]
     agg = adapter.writeback_control.set_writeback_item_for_pane(
         tab_id,
@@ -304,8 +312,8 @@ def h_tab_writeback_apply(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     pane = "analysis" if subtab_id == "analysis" else "post_analysis"
     item_ids = None
-    if "ids" in params:
-        ids = params["ids"]
+    ids = params.get("ids")
+    if ids is not None:
         if not isinstance(ids, list) or any(
             not isinstance(item, str) or not item for item in ids
         ):

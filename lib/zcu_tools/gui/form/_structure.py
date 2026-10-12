@@ -405,6 +405,16 @@ def _restore_field(
 ) -> JsonValue:
     tag = discriminator(info)
     child = selected(info, saved)
+    if child is None and tag is None and isinstance(saved, dict):
+        # Raw shape, not evaluation/Pydantic coercion, identifies an untagged
+        # branch only when exactly one declared model is compatible.
+        matches = tuple(
+            model
+            for model in model_types(info.annotation)
+            if _compatible_type(model, saved)
+        )
+        if len(matches) == 1:
+            child = matches[0]
     if isinstance(saved, dict) and tag is not None and tag not in saved:
         child = selected(info, current)
     if child is not None and isinstance(saved, dict):
@@ -412,8 +422,28 @@ def _restore_field(
         if tag is not None and isinstance(saved.get(tag), dict):
             dropped.append((*path, tag))
             saved = {name: value for name, value in saved.items() if name != tag}
-        seed = _restore_branch_seed(child, current, saved, tag, env, path)
-        # Descend only into the selected model so dropped paths stay branch-local.
+        prior = current if isinstance(current, dict) else {}
+        if tag is not None and tag in saved and saved[tag] != prior.get(tag):
+            try:
+                seed = _branch_defaults(child, env, prior)
+            except PydanticCustomError as exc:
+                from ._sources import prefix_error
+
+                raise prefix_error(exc, path) from exc
+            seed.update(
+                {
+                    name: prior[name]
+                    for name in child.model_fields
+                    if name != tag and name in prior
+                }
+            )
+            seed[tag] = saved[tag]
+        else:
+            seed = (
+                copy_object(prior)
+                if isinstance(current, dict)
+                else static_defaults(child)
+            )
         return _restore_model(child, seed, saved, env, path, dropped)
     if isinstance(saved, dict) and model_types(info.annotation):
         dropped.append(path)
@@ -422,35 +452,6 @@ def _restore_field(
         return copy_json(saved)
     dropped.append(path)
     return current
-
-
-def _restore_branch_seed(
-    model: type[BaseModel],
-    current: JsonValue,
-    saved: Mapping[str, JsonValue],
-    tag: str | None,
-    env: FormEnv,
-    path: FormPath,
-) -> dict[str, JsonValue]:
-    """Seed a switched branch from defaults, carrying only its same-name prior fields."""
-    prior = current if isinstance(current, dict) else {}
-    if tag is not None and tag in saved and saved[tag] != prior.get(tag):
-        try:
-            seed = _branch_defaults(model, env, prior)
-        except PydanticCustomError as exc:
-            from ._sources import prefix_error
-
-            raise prefix_error(exc, path) from exc
-        seed.update(
-            {
-                name: prior[name]
-                for name in model.model_fields
-                if name != tag and name in prior
-            }
-        )
-        seed[tag] = saved[tag]
-        return seed
-    return copy_object(prior) if isinstance(current, dict) else static_defaults(model)
 
 
 def _restore_model(

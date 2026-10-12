@@ -21,7 +21,6 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.fluxdep.services.export import default_export_path
-from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 
 class ExportSpectrumsDialog(QDialog):
@@ -35,7 +34,6 @@ class ExportSpectrumsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
         self.resize(560, 130)
-        self._edit_gate: RemoteEditGate | None = None
         self._build_ui(default_export_path(result_dir))
 
     def _build_ui(self, default_path: str) -> None:
@@ -68,24 +66,15 @@ class ExportSpectrumsDialog(QDialog):
         buttons.addWidget(cancel)
         root.addLayout(buttons)
 
-    def bind_edit_gate(self, gate: RemoteEditGate) -> None:
-        """Gate fields and OK through the view's authority owner, leaving Cancel live.
-
-        Bind once before opening. The caller retains/disposes the gate; dialog
-        destruction detaches its containers. Ungated callers behave unchanged.
-        """
-        self._edit_gate = gate
-        gate.bind(self._content)
-        gate.bind(self._write_buttons)
-
     def _on_browse(self) -> None:
         filepath, _ = QFileDialog.getSaveFileName(
             self,
             "Export spectrums.hdf5",
             self._path_edit.text(),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if filepath and (self._edit_gate is None or self._edit_gate.local_editing):
+        if filepath:
             self._path_edit.setText(filepath)
 
     def export_path(self) -> str | None:

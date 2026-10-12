@@ -6,6 +6,8 @@ status: accepted
 
 ## 問題與選擇
 
+2026-10-12，使用者「採用」主視窗推送可寫狀態與 modal 期間拒絕接管的方案。使用者指出「過度設計，監控幹嘛」，並說「而且method可以只標記只讀的方法嗎？這個方案我比較認同」。這個方案只在 RPC admission、主視窗投影與 modal 取得入口處理控制權，省去子元件的 authority callbacks 與解除時序。代價是 Local dialog 開著時 agent 要等。
+
 GUI 使用者與 agent 寫入同一份 application state。若每條連線維護 seen map、宣告 resource dependencies、比對 cfg revision，caller 就得在每次寫入前建立完整觀察。這仍沒有告訴使用者現在誰在控制。
 
 Measure 與 fluxdep 使用單一 holder。非 holder 不能送業務命令，holder 不必再以版本比對證明資料沒有被另一個控制身份修改。GUI 指示燈顯示控制身份，使用者明確收回或解鎖。Dispersive 與 autofluxdep 的 remote 仍只讀，不接入這套控制身份。
@@ -18,17 +20,18 @@ Measure 與 fluxdep 使用單一 holder。非 holder 不能送業務命令，hol
 
 Label 是信任 LAN 上的控制身份，不是 authentication credential。同名 owner 連線共享控制權，不區分重連與同名競爭。Dispatch 從 socket 判定身份，不信任業務 params 自稱的 label。Token authentication、method exposure、輸入驗證與硬體授權照常適用。Event origin 只供歸因，不授權命令。
 
-既有 import contracts 約束依賴方向。`mcp-remote-only`（C13）限制 MCP 使用 GUI remote 契約，`layers`（C8）與 `top-level-acyclic`（C9）約束跨 package 分層及無循環。`session-no-app`（C2）與 `interactive-below-apps`（C17）禁止共用機制反向依賴 app policy。Qt indicator／edit gate 只投影 authority，不另維護 holder 規則。
+既有 import contracts 約束依賴方向。`mcp-remote-only`（C13）限制 MCP 使用 GUI remote 契約，`layers`（C8）與 `top-level-acyclic`（C9）約束跨 package 分層及無循環。`session-no-app`（C2）與 `interactive-below-apps`（C17）禁止共用機制反向依賴 app policy。主視窗只投影 authority，不另維護 holder 規則。
 
 ## 連線與轉移
 
 認證與 wire 檢查之後，caller 送 `control.connect(label="agent", mode="owner")`。兩個參數的預設如示例。初始化前 socket 是 observer，readonly methods、`rpc.catalog` 與 `control.status` 可讀；業務命令回 `not_holder`，acquire／release 回 `readonly_connection`。`control.*` 永遠可進 dispatch，再按各命令契約判定。
 
-初始化後 label／mode 固定。相同初始化是冪等的，不重新 acquire；不同 label 或 mode 回 `invalid_params`，原身份不變。換身份須重連。Owner connect 只在未鎖定 Local 自動取得，GUI 鎖定或其他 holder 不阻止連線。Readonly 永不取得，即使 label 相同也不能寫入或 acquire。
+初始化後 label／mode 固定。相同初始化是冪等的，不重新 acquire；不同 label 或 mode 回 `invalid_params`，原身份不變。換身份須重連。Owner connect 只在未鎖定且沒有 modal dialog 的 Local 自動取得，GUI 鎖定或其他 holder 不阻止連線。Readonly 永不取得，即使 label 相同也不能寫入或 acquire。
 
 | 命令或事件 | 結果 |
 | --- | --- |
 | Owner `control.acquire`，未鎖定 Local | 取得，holder 為該 label。 |
+| Owner connect 自動取得或 acquire，Local 有 modal dialog | `local_busy`，訊息「Local 使用中」，holder 不變。 |
 | Owner acquire，Local 鎖定 | `control_locked`，holder 不變。 |
 | Owner acquire，其他 label 在線 | `control_held`，holder 不變。 |
 | Owner acquire，其他 label 離線 | 取得，holder 為該 label。 |
@@ -47,9 +50,11 @@ RPC 預設要求 holder。Method 明確宣告 `readonly=True` 才允許 observer
 
 Remote 時，GUI 停用欄位與寫入容器，不改變子元件原本的 busy／valid／input-open gate。純檢視、縮放、捲動、截圖、Log Browser 及 Inspect 只讀照常可用。Fluxdep spectrum 選取與 Filter 切換會改 domain，所以停用；search cancel 與 interactive cancel 也須先收回。
 
-可寫 dialog 維持 modal。Remote 只停用內容與寫入操作，Cancel／Close／✕ 可關閉。使用者關閉後再按主窗燈，未提交輸入不保留。Static chooser 與 confirmation 不改呈現，返回後、真正寫入前重查 holder；權限已轉移就不寫入，不自動收回。
+主視窗是唯一的 Qt 控制狀態訂閱者。`set_writable(bool)` 設定主窗的寫入按鈕與選單，並推送給開著的 tab／view。新 view 建立時套用當下狀態。Tab、interactive frontend、component tree 與 dialog 不訂閱 authority，也不為 authority 管理解除綁定或覆寫 `deleteLater`。
 
-View owner 在 teardown 前釋放 edit gate 的 watches 與 Qt destruction callbacks。Measure 的單次 RunLoadDialog 在 finished 同期 dispose，主窗 teardown 先 reject 它，晚回 file chooser 不能重新 accept。這不是所有 dialog 都在 finished 退訂的規則；persistent hide／reuse dialog 保留自身 lifetime。
+Local 有任何 modal dialog 時，owner connect 自動取得與 acquire 回 `local_busy`，訊息為「Local 使用中」。Qt app remote adapter 在 owner turn 查詢 `QApplication.activeModalWidget()`；共用 ControlIdentity 不依賴 Qt。相關 file chooser 使用非 native option，讓 Qt 能查到。Readonly 連線、既有冪等 connect 與 Remote 同 label 重連不因純檢視 modal 而拒絕。拒絕不轉移 holder、不寫入 domain。
+
+Dialog 不接控制狀態，也不在 chooser／confirmation 返回後重查 holder。Local 的合法輸入、取消、path、busy 與 validation 沿各 owner 契約。Finished 仍可退休單次輸入，防止關閉後的晚到提交。Inspect 與 Device 的 Remote 查看入口提供靜態 read-only mode；Inspect 不開放 Add、library mutation 或 Arb Waveforms 寫入入口。
 
 Measure 量測 Stop 與 device operation Stop 在 Remote 仍可按。按下先收回成 Local 鎖定，再請求取消。Stop 是僅有的自動收回入口，取消不代表硬體已停止。Remote 關主窗先確認，拒絕不開始 teardown，接受沿既有 shutdown／cancel／cleanup 契約，不另加 reclaim。Fluxdep 沒有硬體緊急 Stop。
 

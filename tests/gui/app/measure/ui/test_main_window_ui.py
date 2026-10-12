@@ -781,7 +781,7 @@ def test_main_window_named_dialog_facade_delegates_to_registry(control_factory, 
     assert window.take_dialog_screenshot(DialogName.SETUP) == b"png"
 
     registry.close.assert_called_once_with(DialogName.PREDICTOR)
-    registry.open.assert_called_once_with(DialogName.PREDICTOR)
+    registry.open.assert_called_once_with(DialogName.PREDICTOR, writable=True)
     registry.visible_names.assert_called_once_with()
     registry.take_screenshot.assert_called_once_with(DialogName.SETUP)
 

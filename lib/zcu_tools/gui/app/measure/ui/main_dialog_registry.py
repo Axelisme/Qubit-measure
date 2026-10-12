@@ -10,7 +10,6 @@ from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
-from zcu_tools.gui.widgets.remote_edit_gate import watch_control
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -38,8 +37,8 @@ def _visible_dialog_names(
 class MainDialogRegistry:
     """Retain the named dialogs exposed through ``MainWindow``.
 
-    Keep each dialog's existing modal presentation. Dialog owners gate their
-    content and writes; the registry never disables a dialog's Cancel/Close.
+    Keep each dialog's modal presentation. Inspect and Device receive a static
+    read-only mode from the main window when opened for Remote viewing.
     """
 
     def __init__(
@@ -61,7 +60,7 @@ class MainDialogRegistry:
         self._dialog_refs.discard(name)
         self._dialog_names.pop(name, None)
 
-    def _build_dialog(self, name: DialogName) -> QDialog:
+    def _build_dialog(self, name: DialogName, *, writable: bool) -> QDialog:
         """Construct a fresh QDialog for ``name``.
 
         Per-name imports stay lazy to avoid loading unused dialog modules during
@@ -73,17 +72,18 @@ class MainDialogRegistry:
             return SetupDialog(
                 self._ctrl.setup_control,
                 parent=self._parent,
-                control_identity=self._ctrl.control_identity,
             )
         if name is DialogName.DEVICE:
             from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
-            return DeviceDialog(
+            dialog = DeviceDialog(
                 self._ctrl.device_control,
                 parameter_provider=self._ctrl.context_control.read_context,
                 parent=self._parent,
                 before_stop=self._reclaim_for_stop,
             )
+            dialog.set_read_only(not writable)
+            return dialog
         if name is DialogName.PREDICTOR:
             from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 
@@ -93,23 +93,23 @@ class MainDialogRegistry:
                 device=self._ctrl.device_control,
                 parameter_provider=self._ctrl.context_control.read_context,
                 persistent_on_close=True,
-                control_identity=self._ctrl.control_identity,
             )
             dialog.enable_parameter_cache()
             return dialog
         if name is DialogName.INSPECT:
             from .inspect_dialog import InspectDialog
 
-            return InspectDialog(
+            dialog = InspectDialog(
                 self._ctrl, bus=self._ctrl.get_bus(), parent=self._parent
             )
+            dialog.set_read_only(read_only=not writable)
+            return dialog
         if name is DialogName.ALIASES:
             from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 
             return AliasDialog(
                 self._ctrl.context_control,
                 parent=self._parent,
-                control_identity=self._ctrl.control_identity,
             )
         if name is DialogName.ARB_WAVEFORM:
             from .arb_waveform_dialog import ArbWaveformDialog
@@ -117,11 +117,10 @@ class MainDialogRegistry:
             return ArbWaveformDialog(
                 self._ctrl.arb_waveforms,
                 parent=self._parent,
-                control_identity=self._ctrl.control_identity,
             )
         raise ValueError(f"Unknown DialogName: {name!r}")  # pragma: no cover
 
-    def open(self, name: DialogName) -> None:
+    def open(self, name: DialogName, *, writable: bool = True) -> None:
         """Open with the existing modal policy, or raise a retained instance."""
         existing = self._dialog(name)
         if existing is not None:
@@ -129,24 +128,12 @@ class MainDialogRegistry:
                 existing.raise_()
                 existing.activateWindow()
                 if not existing.isVisible():
-                    existing.show()
+                    existing.open()
                 return
             except RuntimeError:
                 self._forget(name)
 
-        dialog = self._build_dialog(name)
-        if name is DialogName.DEVICE:
-            from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
-
-            if not isinstance(dialog, DeviceDialog):
-                raise TypeError("Device dialog has no inspection gate")
-            dispose = watch_control(
-                dialog,
-                self._ctrl.control_identity,
-                lambda status: dialog.set_read_only(status.holder != "gui"),
-            )
-            # Device dialogs retire on finished; Predictor's hide/reuse does not.
-            dialog.finished.connect(dispose)
+        dialog = self._build_dialog(name, writable=writable)
         self._dialog_names[name] = None
         if name in _PERSISTENT_DIALOGS:
             self._dialog_refs.retain_named(

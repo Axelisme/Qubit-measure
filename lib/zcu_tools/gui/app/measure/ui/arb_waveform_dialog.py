@@ -29,12 +29,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.control_identity import ControlIdentity
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    local_write_allowed,
-)
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformError,
@@ -205,21 +199,16 @@ class _PreviewCanvas(QWidget):
 class ArbWaveformDialog(QDialog):
     """Qubit-scoped arbitrary waveform asset manager.
 
-    Optional control_identity gates recipe/asset controls, not Close or preview.
-    Rename, overwrite and deletion recheck that owner after their modal decision.
-    Omitted authority leaves the existing standalone dialog behavior unchanged.
+    Rename, overwrite and deletion require explicit modal confirmation.
     """
 
     def __init__(
         self,
         assets: ArbWaveformPort,
         parent: QWidget | None = None,
-        *,
-        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._assets = assets
-        self._control_identity = control_identity
         self._current_data_key: str | None = None
         self._suppress_segment_change = False
         # Cheap path state: updated synchronously on every structure/data_key change.
@@ -239,14 +228,8 @@ class ArbWaveformDialog(QDialog):
         self.setMinimumSize(980, 720)
 
         root = QVBoxLayout(self)
-        header = QHBoxLayout()
-        header.addStretch()
-        self._close_btn = QPushButton("Close")
-        header.addWidget(self._close_btn)
-        root.addLayout(header)
-
         splitter = QSplitter(Qt.Orientation.Vertical)
-        root.addWidget(splitter)
+        root.addWidget(splitter, stretch=1)
 
         top = QWidget()
         top_layout = QHBoxLayout(top)
@@ -254,7 +237,6 @@ class ArbWaveformDialog(QDialog):
         top_layout.addWidget(self._build_asset_group(), stretch=2)
         top_layout.addWidget(self._build_recipe_group(), stretch=3)
         splitter.addWidget(top)
-        bind_control_enabled(top, control_identity, retirement_dialog=self)
 
         preview_group = QGroupBox("Preview")
         preview_layout = QVBoxLayout(preview_group)
@@ -263,27 +245,20 @@ class ArbWaveformDialog(QDialog):
         splitter.addWidget(preview_group)
         splitter.setSizes([360, 360])
 
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self._close_btn = QPushButton("Close")
+        footer.addWidget(self._close_btn)
+        root.addLayout(footer)
         self._close_btn.clicked.connect(self.reject)
         self.refresh()
         self._reset_draft()
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def refresh(self) -> None:
         selected = self._current_data_key
         infos = self._assets.list_infos()
         self._asset_table.setRowCount(0)
+        self._empty_assets_hint.setVisible(not infos)
         for row, info in enumerate(infos):
             self._asset_table.insertRow(row)
             values = (
@@ -322,6 +297,9 @@ class ArbWaveformDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self._asset_table.itemSelectionChanged.connect(self._on_asset_selection_changed)
         layout.addWidget(self._asset_table)
+        self._empty_assets_hint = QLabel("No waveforms saved yet")
+        self._empty_assets_hint.setStyleSheet("color: gray;")
+        layout.addWidget(self._empty_assets_hint)
 
         btns = QHBoxLayout()
         refresh_btn = QPushButton("Refresh")
@@ -674,8 +652,6 @@ class ArbWaveformDialog(QDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        if not local_write_allowed(self._control_identity):
-            return
         # Save try: service renders the recipe once and persists it.
         try:
             self._assets.set_formula(data_key, recipe, overwrite=exists)
@@ -712,7 +688,7 @@ class ArbWaveformDialog(QDialog):
             "New data_key:",
             text=old_key,
         )
-        if not accepted or not local_write_allowed(self._control_identity):
+        if not accepted:
             return
         new_key = new_key.strip()
         if new_key == old_key:
@@ -750,9 +726,7 @@ class ArbWaveformDialog(QDialog):
             "Delete waveform",
             f"Delete arbitrary waveform {data_key!r}?",
         )
-        if answer != QMessageBox.StandardButton.Yes or not local_write_allowed(
-            self._control_identity
-        ):
+        if answer != QMessageBox.StandardButton.Yes:
             return
         try:
             self._assets.delete(data_key)

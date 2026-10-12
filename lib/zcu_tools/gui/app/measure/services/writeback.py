@@ -28,7 +28,7 @@ from zcu_tools.resources.entry import RoleResolutionError, document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
-from .ports import CfgEdit, CfgEditorPort
+from .ports import CfgEdit, CfgEditorPort, CfgEditResult
 
 logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
@@ -534,27 +534,38 @@ class WritebackService:
 
         result = None
         if edits is not None:
-            if not isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                raise InvalidInputError(
-                    f"{session_id!r} is not a module/waveform item; edits invalid"
-                )
-            if entry.editor_id is None:
-                raise FailedPreconditionError(
-                    f"{session_id!r} has no editable cfg model to apply edits to"
-                )
-            typed_edits: list[CfgEdit] = []
-            for i, edit in enumerate(edits):
-                if "path" not in edit or "value" not in edit:
-                    raise InvalidInputError(
-                        f"edits[{i}] must be an object with 'path' and 'value'"
-                    )
-                typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-            result = self._cfg_editor.set_fields(
-                entry.editor_id, typed_edits, agent_edit=True
-            )
+            result = self._edit_cfg_entry(entry, edits)
         if result is None:
             return {"valid": True, "removed": [], "added": []}
         return result.to_wire()
+
+    def _edit_cfg_entry(
+        self, entry: _DraftEntry, edits: list[dict[str, object]]
+    ) -> CfgEditResult:
+        """Validate ordered cfg edits and return the editor's aggregate result.
+
+        Non-cfg items and missing sessions fail before parsing. Missing edit fields
+        fail before calling the editor; otherwise its result or failure propagates.
+        """
+        session_id = entry.item.session_id
+        if not isinstance(entry.item, (ModuleWriteback, WaveformWriteback)):
+            raise InvalidInputError(
+                f"{session_id!r} is not a module/waveform item; edits invalid"
+            )
+        if entry.editor_id is None:
+            raise FailedPreconditionError(
+                f"{session_id!r} has no editable cfg model to apply edits to"
+            )
+        typed_edits: list[CfgEdit] = []
+        for i, edit in enumerate(edits):
+            if "path" not in edit or "value" not in edit:
+                raise InvalidInputError(
+                    f"edits[{i}] must be an object with 'path' and 'value'"
+                )
+            typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
+        return self._cfg_editor.set_fields(
+            entry.editor_id, typed_edits, agent_edit=True
+        )
 
     def get_item_draft(self, draft: WritebackDraft, session_id: str) -> CfgDraft:
         """Return an item model for a viewer without exposing its editor id."""
@@ -819,24 +830,29 @@ class WritebackService:
         if isinstance(value, complex):
             return f"{value.real:.4g}{value.imag:+.4g}j"
         if isinstance(value, (list, tuple)):
-            if value and all(isinstance(row, (list, tuple)) for row in value):
-                row_lengths = {len(row) for row in value}
-                scalar_cells = all(
-                    not isinstance(cell, (list, tuple, dict))
-                    for row in value
-                    for cell in row
-                )
-                if (
-                    len(row_lengths) == 1
-                    and next(iter(row_lengths)) > 0
-                    and scalar_cells
-                ):
-                    return f"{len(value)} × {next(iter(row_lengths))} matrix"
-            return f"list[{len(value)}]"
+            return WritebackService._format_sequence_summary(value)
         if isinstance(value, dict):
             return f"map[{len(value)}]"
         text = repr(value)
         return text if len(text) <= 48 else f"{text[:45]}..."
+
+    @staticmethod
+    def _format_sequence_summary(value: list[object] | tuple[object, ...]) -> str:
+        """Summarize rectangular nonempty scalar rows as a matrix, else as a list."""
+        rows: list[list[object] | tuple[object, ...]] = []
+        for row in value:
+            if not isinstance(row, (list, tuple)):
+                return f"list[{len(value)}]"
+            rows.append(row)
+        if not rows:
+            return f"list[{len(value)}]"
+        row_lengths = {len(row) for row in rows}
+        scalar_cells = all(
+            not isinstance(cell, (list, tuple, dict)) for row in rows for cell in row
+        )
+        if len(row_lengths) == 1 and next(iter(row_lengths)) > 0 and scalar_cells:
+            return f"{len(value)} × {next(iter(row_lengths))} matrix"
+        return f"list[{len(value)}]"
 
     def _capture_baseline(
         self, entry: _DraftEntry, parameters: ParameterContext | None

@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from zcu_tools.core.complex_codec import encode_complex
+from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 
 
 def _json_value(value: object) -> object:
@@ -110,9 +111,13 @@ class AcceptedWrite(_LedgerModel):
 
     path is a concrete destination with nonempty segments; no escaping or
     indexing is supported. value stores strict JSON in working units.
-    Native complex input at this field alone becomes the shared __complex__
-    tag before JSON validation. Nested complex, non-finite components and
-    other non-JSON values raise ValueError; strings are never decoded.
+    At the field root, numpy floating scalars become Python float with normal
+    rounding, and numpy integer scalars become Python int without loss.
+    Non-finite results, including finite extended floats that overflow Python
+    float, raise ValueError. Native complex input at this field alone becomes
+    the shared __complex__ tag before JSON validation. Nested numpy scalars,
+    nested complex, non-finite components and other non-JSON values raise
+    ValueError; strings are never decoded.
     """
 
     path: _Nonempty
@@ -120,7 +125,8 @@ class AcceptedWrite(_LedgerModel):
 
     @field_validator("value", mode="before")
     @classmethod
-    def _encode_complex_value(cls, value: object) -> object:
+    def _normalize_scalar_value(cls, value: object) -> object:
+        value = normalize_numpy_scalar(value)
         if isinstance(value, complex):
             return encode_complex(value)
         return value

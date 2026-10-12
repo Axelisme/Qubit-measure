@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-11, single-holder dispatch
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
@@ -25,3 +25,7 @@ connection-local lifecycle and lazy serialization/backpressure behavior.
 Wire details live in the [measure remote README](../app/measure/remote/README.md).
 App composition and error boundaries are in
 [ADR-0068](../../../../docs/adr/0068-remote-transport.md).
+
+Local modal dialogs refuse owner acquisition with `local_busy` and "Local 使用中".
+Qt app adapters query the active modal on the owner turn; shared control remains
+Qt-free. Readonly and existing Remote holder reconnects keep their contracts.

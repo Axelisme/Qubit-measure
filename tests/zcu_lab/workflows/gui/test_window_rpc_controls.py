@@ -20,10 +20,10 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
 from ._window_scenarios import install_rpc_pause_workflow
 from ._window_support import RpcRequest
 
@@ -108,10 +108,12 @@ def test_rpc_without_attached_run_reports_native_target(
 def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
-    attempts, receipts = install_rpc_pause_workflow(window, harness, rpc, monkeypatch)
+    attempts, receipts = install_rpc_pause_workflow(
+        window, harness, rpc, catalog_source
+    )
     token = window.start("rpc-run")
     assert isinstance(token, int)
     harness.complete_segment()
@@ -169,20 +171,20 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
 def test_rpc_old_target_does_not_change_current_run(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     phase: str,
 ) -> None:
     window, harness, _entry = attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("rpc-target", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("rpc-target", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
         env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state
@@ -191,7 +193,7 @@ def test_rpc_old_target_does_not_change_current_run(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("old"), int)
     window.stop("old")
     harness.complete_segment()
@@ -240,19 +242,19 @@ def test_rpc_old_target_does_not_change_current_run(
 def test_rpc_running_stop_retains_lease_until_owner_delivery(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = attachment
     receipts: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("rpc-stop", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("rpc-stop", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
         env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state
@@ -261,7 +263,7 @@ def test_rpc_running_stop_retains_lease_until_owner_delivery(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("stop-rpc"), int)
     harness.background.execute()
     assert harness.gate.snapshot() and not window.plan_panel.isEnabled()

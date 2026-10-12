@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -37,7 +38,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
 from zcu_tools.gui.session.state import DeviceStatus
@@ -47,11 +47,6 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshotCodec,
 )
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    local_write_allowed,
-)
 from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
@@ -145,9 +140,6 @@ class PredictorDialog(QDialog):
     explicit trials. params optionally prefills complete or partial local inputs.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
-    Optional control_identity gates the controls but leaves Close and plots
-    usable. Browse rechecks that owner after the file chooser before trial edits.
-    Omitted authority preserves the behavior of apps without control identity.
     """
 
     state_changed = Signal()
@@ -160,12 +152,10 @@ class PredictorDialog(QDialog):
         device: DeviceControlPort | None = None,
         parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
-        control_identity: ControlIdentity | None = None,
         params: ModelParams | None = None,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
-        self._control_identity = control_identity
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
@@ -197,72 +187,11 @@ class PredictorDialog(QDialog):
         # Root layout: left controls | right tab widget.
         root_layout = QHBoxLayout(self)
 
-        left_widget = self._build_controls()
-        tabs = self._build_canvases()
-        root_layout.addWidget(left_widget, stretch=0)
-        root_layout.addWidget(tabs, stretch=1)
-
-        self._initialize_trial(params)
-
-        self._unsubscribe_device_changed: Callable[[], None] | None = (
-            device.on_device_changed(self._on_device_changed)
-            if device is not None
-            else None
-        )
-        self.finished.connect(self._cleanup_subscriptions)
-        self.destroyed.connect(self._cleanup_subscriptions)
-
-    def _build_controls(self) -> QWidget:
-        """Compose editing groups, status and actions, then bind their authority gates."""
         # ── Left: controls column ─────────────────────────────────────────
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        model_group = self._build_model_group()
-        left_layout.addWidget(model_group)
-        transitions_group = self._build_transitions_group()
-        left_layout.addWidget(transitions_group, stretch=1)
-        calibration_group = self._build_calibration_group()
-        left_layout.addWidget(calibration_group)
-
-        # ── status label ──────────────────────────────────────────────────
-        self._status_label = QLabel("")
-        self._status_label.setObjectName("predictor_status")
-        left_layout.addWidget(self._status_label)
-
-        # ── Remove + Close on one horizontal row (saves vertical space) ────
-        # Remove removes ALL currently selected transition rows; Close closes
-        # the dialog. A spacer pushes Close to the right edge.
-        action_row = QHBoxLayout()
-        self._remove_btn = QPushButton("Remove")
-        self._remove_btn.clicked.connect(self._on_remove_selected)
-        remove_region = QWidget()
-        remove_layout = QHBoxLayout(remove_region)
-        remove_layout.setContentsMargins(0, 0, 0, 0)
-        remove_layout.addWidget(self._remove_btn)
-        action_row.addWidget(remove_region)
-        action_row.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self._on_close_requested)
-        action_row.addWidget(close_btn)
-        left_layout.addLayout(action_row)
-        for content in (
-            model_group,
-            transitions_group,
-            calibration_group,
-            remove_region,
-        ):
-            bind_control_enabled(
-                content,
-                self._control_identity,
-                retirement_dialog=None if self._persistent_on_close else self,
-            )
-
-        return left_widget
-
-    def _build_model_group(self) -> QGroupBox:
-        """Build model/component selection and file loading beside trial energy fields."""
         # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
         # File loading only prefills independent trial parameters.
         model_group = QGroupBox("Model params")
@@ -303,11 +232,6 @@ class PredictorDialog(QDialog):
         # squeezed the edit and buttons to a few pixels inside the form row.
         model_form.addRow("params.json:", params_path_row)
 
-        self._add_energy_fields(model_form)
-        return model_group
-
-    def _add_energy_fields(self, model_form: QFormLayout) -> None:
-        """Add nullable energy and flux rows, preserving model-dependent visibility."""
         # Energies in GHz; flux anchors and bias in device-value units. Wide
         # ranges + many decimals allow exploration. The params classes own physics
         # validation; unchecked fields remain unknown rather than zero-filled.
@@ -347,8 +271,8 @@ class PredictorDialog(QDialog):
             ),
         )
 
-    def _build_transitions_group(self) -> QGroupBox:
-        """Build device/transition control rows and the shared multi-selection result table."""
+        left_layout.addWidget(model_group)
+
         # ── Tracked transitions group (predict controls + table + remove) ──
         transitions_group = QGroupBox("Tracked transitions")
         transitions_layout = QVBoxLayout(transitions_group)
@@ -356,26 +280,6 @@ class PredictorDialog(QDialog):
         # Controls above the table.  Keep device value/device selector and
         # transition-add controls on separate rows so long device names do not
         # force the whole left column wider than the plot area needs.
-        transitions_layout.addLayout(self._build_value_controls())
-        transitions_layout.addLayout(self._build_transition_controls())
-
-        # 4-column table: Transition | f (MHz) | |n| | |phi|
-        # Multi-row selection enabled; individual delete buttons are gone.
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
-        header = self._table.horizontalHeader()
-        if header is not None:
-            header.setStretchLastSection(True)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.itemSelectionChanged.connect(self._on_selection_changed)
-        transitions_layout.addWidget(self._table)
-
-        return transitions_group
-
-    def _build_value_controls(self) -> QHBoxLayout:
-        """Build the marker value and optional device selector/read controls."""
         self._value_controls_row = QHBoxLayout()
 
         self._value_controls_row.addWidget(QLabel("Device value:"))
@@ -414,10 +318,8 @@ class PredictorDialog(QDialog):
             self._device_read_btn = device_read_btn
 
         self._value_controls_row.addStretch()
-        return self._value_controls_row
+        transitions_layout.addLayout(self._value_controls_row)
 
-    def _build_transition_controls(self) -> QHBoxLayout:
-        """Build the authored from/to pair and its explicit Add action."""
         self._transition_controls_row = QHBoxLayout()
         self._transition_controls_row.addWidget(QLabel("Transition:"))
         self._transition_controls_row.addWidget(QLabel("from"))
@@ -435,10 +337,29 @@ class PredictorDialog(QDialog):
         self._transition_controls_row.addWidget(self._add_btn)
 
         self._transition_controls_row.addStretch()
-        return self._transition_controls_row
+        transitions_layout.addLayout(self._transition_controls_row)
 
-    def _build_calibration_group(self) -> QGroupBox:
-        """Build expression-bearing calibration controls for the selected transition."""
+        # 4-column table: Transition | f (MHz) | |n| | |phi|
+        # Multi-row selection enabled; individual delete buttons are gone.
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
+        header = self._table.horizontalHeader()
+        if header is not None:
+            # Value columns follow their text so frequencies are never cut to
+            # "134...."; |phi| takes the remaining width.
+            for column in range(3):
+                header.setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.ResizeToContents
+                )
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
+        transitions_layout.addWidget(self._table)
+
+        left_layout.addWidget(transitions_group, stretch=1)
+
         # ── Calibration: measured frequency -> predictor flux_bias ────────
         calibration_group = QGroupBox("Calibration")
         calibration_form = QFormLayout(calibration_group)
@@ -457,10 +378,30 @@ class PredictorDialog(QDialog):
         self._calibrate_btn.clicked.connect(self._on_calibrate_clicked)
         self._calibration_freq_field.raw_changed.connect(self._sync_calibration_button)
         calibration_form.addRow("Selected transition:", self._calibrate_btn)
-        return calibration_group
+        left_layout.addWidget(calibration_group)
 
-    def _build_canvases(self) -> QTabWidget:
-        """Build independent plot tabs with shared marker callbacks and synchronized x limits."""
+        # ── status label ──────────────────────────────────────────────────
+        self._status_label = QLabel("")
+        self._status_label.setObjectName("predictor_status")
+        left_layout.addWidget(self._status_label)
+
+        # ── Remove + Close on one horizontal row (saves vertical space) ────
+        # Remove removes ALL currently selected transition rows; Close closes
+        # the dialog. A spacer pushes Close to the right edge.
+        action_row = QHBoxLayout()
+        self._remove_btn = QPushButton("Remove")
+        self._remove_btn.clicked.connect(self._on_remove_selected)
+        remove_region = QWidget()
+        remove_layout = QHBoxLayout(remove_region)
+        remove_layout.setContentsMargins(0, 0, 0, 0)
+        remove_layout.addWidget(self._remove_btn)
+        action_row.addWidget(remove_region)
+        action_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self._on_close_requested)
+        action_row.addWidget(close_btn)
+        left_layout.addLayout(action_row)
+
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
         # follow/lock callbacks, so a click-follow on any tab drives the others.
@@ -500,10 +441,9 @@ class PredictorDialog(QDialog):
         self._tab_widget.addTab(self._mat_n_tab, "|n|")
         self._tab_widget.addTab(self._mat_phi_tab, "|phi|")
 
-        return self._tab_widget
+        root_layout.addWidget(left_widget, stretch=0)
+        root_layout.addWidget(self._tab_widget, stretch=1)
 
-    def _initialize_trial(self, params: ModelParams | None) -> None:
-        """Populate initial data and connect debounced trial updates after widgets exist."""
         # ── Debounce timer for per-row column updates ─────────────────────
         # Used both by the spinbox and by the marker follow-loop so cursor motion
         # updates the spinbox/table/markers at the debounce cadence, not per pixel.
@@ -538,18 +478,13 @@ class PredictorDialog(QDialog):
         self._params_path_edit.textChanged.connect(self._emit_state_changed)
         self._tab_widget.currentChanged.connect(self._emit_state_changed)
 
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
+        self._unsubscribe_device_changed: Callable[[], None] | None = (
+            device.on_device_changed(self._on_device_changed)
+            if device is not None
+            else None
+        )
+        self.finished.connect(self._cleanup_subscriptions)
+        self.destroyed.connect(self._cleanup_subscriptions)
 
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
@@ -1680,9 +1615,13 @@ class PredictorDialog(QDialog):
             self._set_status("Live mode keeps model params read-only.", error=False)
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
+            self,
+            "Select params.json",
+            "",
+            "JSON files (*.json);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if not path or not local_write_allowed(self._control_identity):
+        if not path:
             return
         self._params_path_edit.setText(path)
         self._load_params_file(path)

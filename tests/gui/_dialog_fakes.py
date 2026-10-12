@@ -31,10 +31,13 @@ class RecordingDialogPresenter:
         *,
         confirm_answers: Iterable[bool] | None = None,
         destructive_answers: Iterable[bool] | None = None,
+        defer_confirm: bool = False,
     ) -> None:
         self.calls: list[DialogCall] = []
         self._confirm_answers = deque(confirm_answers or ())
         self._destructive_answers = deque(destructive_answers or ())
+        self._defer_confirm = defer_confirm
+        self._pending_confirm: deque[Callable[[bool], None]] = deque()
 
     def queue_confirm(self, *answers: bool) -> None:
         self._confirm_answers.extend(answers)
@@ -80,7 +83,17 @@ class RecordingDialogPresenter:
         on_decision: Callable[[bool], None],
         default: bool = False,
     ) -> None:
+        if self._defer_confirm:
+            self.calls.append(DialogCall("confirm", title, message, default=default))
+            self._pending_confirm.append(on_decision)
+            return
         on_decision(self.confirm(parent, title, message, default=default))
+
+    def decide_confirm(self, accepted: bool) -> None:
+        """Deliver one pending asynchronous confirmation decision."""
+        if not self._pending_confirm:
+            raise AssertionError("No pending asynchronous confirmation")
+        self._pending_confirm.popleft()(accepted)
 
     def destructive_confirm(
         self,

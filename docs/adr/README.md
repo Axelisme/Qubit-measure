@@ -43,7 +43,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 與每次 env.run 前的 connected device capture。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：新 workflows 的單一 run owner、一 run 一 operation、Pause／Resume 、每次 env.run 前的 connected device capture 與 workflow 自行保存 iteration 檔案。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、NotebookAdapter 與 GUI adapter 分工、RunContext／CfgEnv、具名原生圖與多圖保存、instance DeviceManager 與模擬環境 coordinator。
 
 
@@ -67,6 +67,7 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [模組定位與依賴邊界](draft/module-boundaries.md)：各 package 的定位、五層、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約與債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13/C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；其餘債務尚未清除。
 
+- [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Cfg 編輯接縫與使用邊界](draft/cfg-editing-boundaries.md)：measure tab 的 resource、refresh／override、當前 Valid acceptance 與 atomic batch 已落實；library-entry editing port、selected Apply 與其他 app 仍待收斂。
 - [Cfg 資源公開契約與同步發布](draft/cfg-resource-contract.md)：measure tab 的 resource-bound editing、可寫節點、同步 publication、expression capture 與固定 acceptance 設計及驗收記錄；其他 app 未因這條接線完成而全面遷移。

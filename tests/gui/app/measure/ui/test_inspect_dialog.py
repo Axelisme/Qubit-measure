@@ -35,7 +35,6 @@ from zcu_tools.gui.app.measure.ui.inspect_dialog import (
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
@@ -86,7 +85,7 @@ def _make_ml() -> ParameterContext:
 
 
 def _make_ctrl() -> MagicMock:
-    ctrl = MagicMock(control_identity=ControlIdentity())
+    ctrl = MagicMock()
     ctrl.context_control = ctrl
     ctrl.inspect_document.side_effect = lambda **_kwargs: ctrl.read_context().document()
     return ctrl

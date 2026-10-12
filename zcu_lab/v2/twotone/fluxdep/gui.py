@@ -23,7 +23,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import EvalValue
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
@@ -41,7 +40,11 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import flux_range, literal, qub_freq_range
+from zcu_lab.v2._support.measure.seeds import (
+    alias_name_seed,
+    flux_range,
+    qub_freq_range,
+)
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
 if TYPE_CHECKING:
@@ -57,6 +60,7 @@ FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
+    experiment_tag: ClassVar[str | None] = FreqFluxExp.persistence_tag()
     exp_cls = FreqFluxExp
     ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
@@ -147,7 +151,7 @@ class FluxDepAdapter(
             .device(
                 "flux_dev",
                 label="Flux Device",
-                default=literal(EvalValue("$flux_dev")),
+                default=alias_name_seed("flux_dev"),
             )
             .choice(
                 "flux_unit",

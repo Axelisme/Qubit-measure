@@ -8,6 +8,7 @@ from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
+    QLabel,
     QLineEdit,
     QVBoxLayout,
     QWidget,
@@ -57,6 +58,12 @@ class AnalyzeFormWidget(QWidget):
         self._form.setSpacing(4)
         self._form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
         layout.addLayout(self._form)
+        self._empty_hint = QLabel("This analysis has no parameters.")
+        self._empty_hint.setObjectName("analysisNoParameters")
+        self._empty_hint.setStyleSheet("color: gray;")
+        self._empty_hint.setWordWrap(True)
+        self._empty_hint.setVisible(False)
+        layout.addWidget(self._empty_hint)
 
     def populate(self, params_instance: object) -> None:
         """Build form from a dataclass instance."""
@@ -95,6 +102,7 @@ class AnalyzeFormWidget(QWidget):
                 )
             )
         self._bindings = tuple(bindings)
+        self._empty_hint.setVisible(not self._bindings)
 
         for binding in self._bindings:
             initial = getattr(params_instance, binding.name)
@@ -117,6 +125,8 @@ class AnalyzeFormWidget(QWidget):
         self._widgets.clear()
         self._bindings = ()
         self._params_cls = None
+        # Without a parameter contract the form makes no claim about parameters.
+        self._empty_hint.setVisible(False)
 
     def read_params(self) -> object:
         """Read widgets and return a typed dataclass instance."""

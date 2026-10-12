@@ -66,6 +66,7 @@ class RoOptLengthAdapter(
         RoOptLengthAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 

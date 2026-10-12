@@ -9,9 +9,37 @@ from functools import partial
 from typing import Any
 
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.execution_reply import project_control, project_execution
+from zcu_tools.mcp.measure.execution_reply import (
+    ReplyDetail,
+    project_control,
+    project_execution,
+)
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+
+def _execution_status(
+    ctx: MeasureToolContext, key: str, detail: ReplyDetail
+) -> dict[str, Any]:
+    """Project a local recipe or standalone execution without reconnecting."""
+    if key.startswith("recipe-"):
+        snapshot = asdict(ctx.session.recipes.get(key).snapshot())
+        definition = next(
+            item
+            for item in ctx.session.recipes.definitions
+            if item.name == snapshot["recipe"]
+        )
+        return project_execution(
+            snapshot,
+            definition=definition,
+            recipes=ctx.session.recipes.definitions,
+            detail=detail,
+        )
+    return project_execution(
+        asdict(ctx.session.executions.get(key).snapshot()),
+        recipes=ctx.session.recipes.definitions,
+        detail=detail,
+    )
 
 
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -22,25 +50,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     if detail == "full" and "execution" not in arguments:
         raise ValueError("detail=full requires execution")
     if "execution" in arguments:
-        key = _execution_id(arguments)
-        if key.startswith("recipe-"):
-            snapshot = asdict(ctx.session.recipes.get(key).snapshot())
-            definition = next(
-                item
-                for item in ctx.session.recipes.definitions
-                if item.name == snapshot["recipe"]
-            )
-            return project_execution(
-                snapshot,
-                definition=definition,
-                recipes=ctx.session.recipes.definitions,
-                detail=detail,
-            )
-        return project_execution(
-            asdict(ctx.session.executions.get(key).snapshot()),
-            recipes=ctx.session.recipes.definitions,
-            detail=detail,
-        )
+        return _execution_status(ctx, _execution_id(arguments), detail)
     session = ctx.gui
     has_project = bool(session.read_internal("state.has_project", {})["value"])
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
@@ -59,15 +69,16 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         }
         for tab in session.read_internal("tab.snapshot", {})["tabs"]
     ]
-    missing = []
-    if not has_project:
-        missing.append("entry")
-    if not has_context:
-        missing.append("active_context")
-    if not has_soc:
-        missing.append("soc")
-    if not tabs:
-        missing.append("tab")
+    missing = [
+        name
+        for name, present in (
+            ("entry", has_project),
+            ("active_context", has_context),
+            ("soc", has_soc),
+            ("tab", bool(tabs)),
+        )
+        if not present
+    ]
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
     ] + [asdict(item) for item in ctx.session.recipes.snapshots()]

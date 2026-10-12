@@ -7,6 +7,7 @@ from typing import ClassVar, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import Field
 from qtpy.QtWidgets import QApplication
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
@@ -280,6 +281,7 @@ def test_run_registration_notification_blocks_tab_mutation(
 
 class SourceDrive(ComponentSchema):
     gain: float
+    module: dict[str, str | None] = Field(default_factory=dict)
 
 
 class GlobalSourceAdapter(FakeAdapter):
@@ -301,6 +303,13 @@ class GlobalSourceAdapter(FakeAdapter):
         return schema
 
 
+class MissingModuleSlotAdapter(GlobalSourceAdapter):
+    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+        schema = super().make_default_cfg(ctx)
+        schema.value.fields["gain"] = EvalValue("Q1.module.x180.gain")
+        return schema
+
+
 @pytest.fixture
 def global_sources(
     qapp: QApplication, tmp_path: Path
@@ -310,6 +319,7 @@ def global_sources(
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
     registry.register("global-source", GlobalSourceAdapter)
+    registry.register("missing-slot", MissingModuleSlotAdapter)
     try:
         services = build_app_services(
             alias_preset=ALIAS_PRESET,
@@ -326,7 +336,7 @@ def global_sources(
         try:
             services.setup_control.new_entry(EntryRequest("sources"))
             services.context.add_component(
-                "Q1", "cfg/drive", {"gain": 10.0}, setup=True
+                "Q1", "cfg/drive", {"gain": 10.0, "module": {"x180": None}}, setup=True
             )
             services.context.add_component(
                 "Q2", "cfg/drive", {"gain": 20.0}, setup=True
@@ -347,6 +357,29 @@ def global_sources(
     finally:
         component_registry.unregister("cfg/drive")
         assert component_registry.kinds() == before
+
+
+def test_missing_module_slot_keeps_tab_invalid_and_blocks_run(
+    global_sources: tuple[AppServices, State],
+) -> None:
+    services, state = global_sources
+    try:
+        tab_id = services.tab.new_tab("missing-slot")
+    except AttributeError as exc:
+        pytest.fail(f"Missing module slot must keep an Invalid tab: {exc}")
+
+    assert state.has_tab(tab_id)
+    observed = state.get_tab(tab_id).cfg.observe()
+    assert observed.status is CfgStatus.INVALID
+    assert any(
+        diagnostic.path == ("gain",)
+        and "Unset module slot: 'Q1.module.x180'" in diagnostic.message
+        for diagnostic in observed.diagnostics
+    )
+    with pytest.raises(CfgPreconditionError) as caught:
+        services.guard.capture_run_inputs(tab_id)
+    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    assert state.get_tab(tab_id).cfg.observe() == observed
 
 
 def test_named_aliases_preview_and_admission_share_capture_without_publication(

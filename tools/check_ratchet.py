@@ -1,9 +1,11 @@
 """Report violation-count increases between a candidate and its base.
 
-Ruff, Pyright and the file-size check report pre-existing violations. This
+Ruff, Pyright, Radon and the file-size check report pre-existing violations. This
 compares counts per (file, rule) on both trees and reports FAIL when a count
 rises. File size contributes one violation per file over 1000 lines, not its
-line count: growth of an already oversize file adds no violation.
+line count: growth of an already oversize file adds no violation. Radon counts
+functions with CC > 20 per file, not their raw scores; score changes above the
+threshold add no violation.
 
 Count increases are review signals, not automatic delivery blockers. Reviewers
 classify each increase as non-substantive or substantive, record accepted
@@ -37,6 +39,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import _support
+from quality_report import radon_findings
 from suppression_comparison import IGNORE_KINDS, compare_ignores
 
 _DEFAULT_BASE_BRANCH: Final = "main"
@@ -247,6 +250,26 @@ def file_size_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str
     }
 
 
+def radon_counts(tree: Path, files: Iterable[str]) -> Mapping[tuple[str, str], int]:
+    """Count functions with CC > 20 per (path, cyclomatic-complexity).
+
+    `tree` is the source root; `files` names repo-relative Python paths. Only
+    lib/ and zcu_lab/ sources are measured, including recipes and workflows.
+    Missing and scanner-excluded files are skipped. Methods and closures count
+    independently, without class aggregates; asserts count toward CC.
+    Raise RatchetError if Radon is unavailable or cannot analyze a source file.
+    """
+    try:
+        findings = radon_findings(tree, paths=files, roots=("lib", "zcu_lab"))
+    except (ImportError, OSError, ValueError, SyntaxError) as error:
+        raise RatchetError(f"Radon failed in {tree}: {error}") from error
+    return collections.Counter(
+        (item.path, item.rule)
+        for item in findings
+        if int(item.details["complexity"]) > 20
+    )
+
+
 def path_correspondence_counts(
     tree: Path, files: Iterable[str]
 ) -> Mapping[tuple[str, str], int]:
@@ -378,6 +401,7 @@ _DETECTORS: Final = {
     "ruff": ruff_counts,
     "pyright": pyright_counts,
     "file-size": file_size_counts,
+    "radon": radon_counts,
     "path-correspondence": path_correspondence_counts,
     "test-structure": test_structure_counts,
 }

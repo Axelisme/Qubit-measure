@@ -4,6 +4,7 @@ from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParame
 from zcu_tools.mcp.measure.recipe import (
     RecipeDefinition,
     RecipeGenerator,
+    RecipeNeedsParameters,
     RecipeRun,
     RecipeSession,
 )
@@ -50,7 +51,7 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         tab.disable_library("modules.init_pulse")
     else:
         tab.use_library("modules.init_pulse", init_pulse_ref)
-    set_frequency(
+    missing = set_frequency(
         tab,
         "modules.readout",
         frequency_mhz,
@@ -58,6 +59,8 @@ def lookback(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
         prefer_library=readout_ref is not None,
         required="frequency_mhz",
     )
+    if missing is not None:
+        raise RecipeNeedsParameters((missing,))
     tab.set(
         "modules.readout.ro_cfg.ro_length",
         readout_length_us,

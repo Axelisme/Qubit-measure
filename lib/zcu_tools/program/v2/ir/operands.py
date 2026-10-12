@@ -422,9 +422,9 @@ def parse_alu_expr(val: AluExpr | str | None) -> AluExpr | None:
     if not tokens:
         raise ValueError(f"Invalid ALU expression: {val!r}")
 
-    if len(tokens) >= 3:
-        if len(tokens) > 3:
-            raise ValueError(f"ALU expression has too many tokens: {val!r}")
+    if len(tokens) > 3:
+        raise ValueError(f"ALU expression has too many tokens: {val!r}")
+    if len(tokens) == 3:
         lhs = parse_register(tokens[0])
         try:
             op = AluOp(tokens[1])
@@ -445,12 +445,9 @@ def parse_alu_expr(val: AluExpr | str | None) -> AluExpr | None:
             return AluExpr(lhs, op=op)
         raise ValueError(f"Cannot parse ALU operand: {tokens[1]}")
 
-    if len(tokens) == 1:
-        lhs = parse_register(tokens[0])
-        if lhs:
-            return AluExpr(lhs, op=AluOp.NONE)
-        raise ValueError(f"Cannot parse ALU expression: {val!r}")
-
+    lhs = parse_register(tokens[0])
+    if lhs:
+        return AluExpr(lhs, op=AluOp.NONE)
     raise ValueError(f"Cannot parse ALU expression: {val!r}")
 
 

@@ -33,6 +33,20 @@ def _schema(
     )
 
 
+def test_direct_input_error_is_admitted_but_cannot_lower() -> None:
+    schema = _schema(
+        {"device": ScalarSpec("Device", str)},
+        {
+            "device": DirectValue(
+                None, raw="$flux_dev", error="Alias flux_dev is not bound"
+            )
+        },
+    )
+    validate_finished_cfg(schema, resolve_reference=None)
+    with pytest.raises(RuntimeError, match="device.*flux_dev"):
+        lower_finished_cfg(schema, resolve_expression=None, resolve_reference=None)
+
+
 def _missing_expression(expr: str) -> float:
     raise RuntimeError(f"Missing parameter: {expr!r}")
 
