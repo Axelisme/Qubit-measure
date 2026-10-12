@@ -93,6 +93,8 @@ def _decode_sequence(
             if fixed and index < len(args)
             else (args[0] if args and not fixed else object)
         )
+        # Items can nest sequences, mappings, or tagged models; re-enter the full
+        # decoder to preserve expression evaluation, tag collection, and error paths.
         decoded.append(
             _decode(
                 FieldInfo.from_annotation(item_type),

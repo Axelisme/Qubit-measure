@@ -301,14 +301,24 @@ class TreeCfgWidget(QWidget):
             if p.startswith(path + ".")
         ]
         for leaf_path in descendant_leaf_paths:
-            widget = self._leaf_path_to_widget.pop(leaf_path, None)
+            widget = self._unregister_leaf_editor(leaf_path)
             if widget is not None:
-                _teardown_editor(widget)
-                try:
-                    self._leaf_widgets.remove(widget)
-                except ValueError:
-                    pass
                 _delete_editor(cast(QWidget, widget))
+
+    def _unregister_leaf_editor(self, path: str) -> FieldWidgetProtocol | None:
+        """Pop a leaf, best-effort unsubscribe, and remove it from widget tracking.
+
+        Return the editor for caller-owned Qt disposal, or None if absent.
+        An editor missing from the tracking list is already untracked.
+        """
+        widget = self._leaf_path_to_widget.pop(path, None)
+        if widget is not None:
+            _teardown_editor(widget)
+            try:
+                self._leaf_widgets.remove(widget)
+            except ValueError:
+                pass
+        return widget
 
     def _clear_reference_row(self, path: str) -> None:
         """Release a descendant reference header, callbacks and row bookkeeping."""
@@ -603,13 +613,8 @@ class TreeCfgWidget(QWidget):
     def _remove_reference_leaf_editors(self, paths: list[str]) -> None:
         """Release old shape leaves during identity changes, then forget their rows."""
         for path in paths:
-            widget = self._leaf_path_to_widget.pop(path, None)
+            widget = self._unregister_leaf_editor(path)
             if widget is not None:
-                _teardown_editor(widget)
-                try:
-                    self._leaf_widgets.remove(widget)
-                except ValueError:
-                    pass
                 cast(QWidget, widget).deleteLater()
             self._path_to_item.pop(path, None)
 
