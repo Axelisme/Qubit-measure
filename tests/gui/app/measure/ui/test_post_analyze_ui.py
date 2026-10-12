@@ -64,11 +64,11 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl.get_left_panel_width.return_value = 500
         return ctrl
 
-
     try:
         yield create_ctrl
     finally:
         owned_authorities.clear()
+
 
 @pytest.fixture
 def exp_tab_widget(make_ctrl):
@@ -153,7 +153,9 @@ def _snapshot(
     return with_artifacts(snapshot)
 
 
-def test_post_tab_visible_only_for_post_analysis_adapter(qapp, make_ctrl, exp_tab_widget):
+def test_post_tab_visible_only_for_post_analysis_adapter(
+    qapp, make_ctrl, exp_tab_widget
+):
 
     tab_with = exp_tab_widget(
         "tab-1",
@@ -180,7 +182,9 @@ def test_post_tab_visible_only_for_post_analysis_adapter(qapp, make_ctrl, exp_ta
         tab_without.get_post_container()
 
 
-def test_post_form_disabled_without_primary_analyze_result(qapp, make_ctrl, exp_tab_widget):
+def test_post_form_disabled_without_primary_analyze_result(
+    qapp, make_ctrl, exp_tab_widget
+):
     """No primary analyze result → the post form + Run are disabled and the gate
     hint is shown."""
 
@@ -215,7 +219,9 @@ def test_post_form_enabled_with_primary_analyze_result(qapp, make_ctrl, exp_tab_
     assert tab._post_gate_label.isHidden() is True
 
 
-def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatch, make_ctrl, exp_tab_widget):
+def test_initial_attach_hides_zero_field_post_parameter_section(
+    qapp, monkeypatch, make_ctrl, exp_tab_widget
+):
 
     tab = exp_tab_widget(
         "tab-1",
@@ -237,7 +243,9 @@ def test_initial_attach_hides_zero_field_post_parameter_section(qapp, monkeypatc
     assert tab.post_analyze_btn.isEnabled() is True
 
 
-def test_empty_post_params_hide_only_parameter_section_across_gate_states(qapp, make_ctrl, exp_tab_widget):
+def test_empty_post_params_hide_only_parameter_section_across_gate_states(
+    qapp, make_ctrl, exp_tab_widget
+):
 
     tab = exp_tab_widget(
         "tab-1",
@@ -332,7 +340,9 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
         window.deleteLater()
 
 
-def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_ctrl, exp_tab_widget):
+def test_post_content_refresh_populates_form_and_figure(
+    qapp, monkeypatch, make_ctrl, exp_tab_widget
+):
     """A content event with a post result populates the post form and renders the
     post figure into its independent post pane container."""
     from matplotlib.figure import Figure
@@ -372,7 +382,9 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_
             ),
         )
 
-        bus.emit(TabContentChangedPayload("tab-1", TabContentFact.POST_ANALYSIS_COMMITTED))
+        bus.emit(
+            TabContentChangedPayload("tab-1", TabContentFact.POST_ANALYSIS_COMMITTED)
+        )
 
         assert tab_w.has_post_analyze_params() is True
         # The post figure was attached to its independent post container.
@@ -381,7 +393,9 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_
         window.deleteLater()
 
 
-def test_post_figure_refresh_clears_invalidated_presentation(qapp, make_ctrl, exp_tab_widget):
+def test_post_figure_refresh_clears_invalidated_presentation(
+    qapp, make_ctrl, exp_tab_widget
+):
     """A primary commit invalidates the canonical and displayed Post figure."""
     from matplotlib.figure import Figure
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -423,7 +437,6 @@ def test_pane_containers_are_independent_for_post(qapp, make_ctrl, exp_tab_widge
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
     try:
-
         tab_w = exp_tab_widget(
             "tab-1",
             ctrl,
@@ -455,7 +468,6 @@ def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl, exp_tab_wi
     ctrl.get_bus.return_value = EventBus()
     window = MainWindow(ctrl)
     try:
-
         tab_w = exp_tab_widget(
             "tab-1",
             ctrl,
@@ -537,7 +549,9 @@ def test_post_artifact_save_requires_post_result(qapp, make_ctrl, exp_tab_widget
     ]
 
 
-def test_post_artifact_save_disabled_without_active_context(qapp, make_ctrl, exp_tab_widget):
+def test_post_artifact_save_disabled_without_active_context(
+    qapp, make_ctrl, exp_tab_widget
+):
 
     tab = exp_tab_widget(
         "tab-1",
