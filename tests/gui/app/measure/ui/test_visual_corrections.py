@@ -58,11 +58,11 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl.get_session_env.return_value = exp_ctx
         return ctrl
 
-
     try:
         yield create_ctrl
     finally:
         owned_authorities.clear()
+
 
 def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     from matplotlib.figure import Figure
@@ -240,7 +240,9 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget, make_ct
     tab.detach()
 
 
-def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widget, make_ctrl):
+def test_A5_Run_action_row_status_free_and_20_80_proportions(
+    qapp, exp_tab_widget, make_ctrl
+):
     """A5: Run action row has no status text; Reset 20% / Run 80% with retained treatments."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
@@ -334,7 +336,9 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
     tab.detach()
 
 
-def test_A6_Analyze_full_width_below_params_before_writeback(qapp, exp_tab_widget, make_ctrl):
+def test_A6_Analyze_full_width_below_params_before_writeback(
+    qapp, exp_tab_widget, make_ctrl
+):
     """A6: Analyze immediately below params and before Writeback, 100% width, availability preserved."""
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=False)
