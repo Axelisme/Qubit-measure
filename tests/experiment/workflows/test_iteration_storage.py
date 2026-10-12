@@ -24,7 +24,8 @@ def test_iteration_root_exists_is_read_only_and_resume_allocates_new_call(
         assert directory.is_absolute() and directory.is_dir()
         assert directory == rig.paths.data_root / f"iter/{len(directories) + 1:06d}"
         with pytest.raises(AttributeError):
-            setattr(env, "iteration_dir", tmp_path)
+            # Exercise the property descriptor at runtime without a type suppression.
+            object.__setattr__(env, "iteration_dir", tmp_path)
         directories.append(directory)
         if len(directories) == 1:
             rig.engine.pause("run")
