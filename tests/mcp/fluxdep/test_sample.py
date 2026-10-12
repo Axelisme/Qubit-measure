@@ -167,11 +167,11 @@ def test_sampling_finish_and_image_override_use_native_evidence(
                 }
             )
         )
+    buffer = BytesIO()
+    with Image.new("RGB", (12, 8), "red") as png:
+        png.save(buffer, format="PNG")
+    data = buffer.getvalue()
     if render_method:
-        buffer = BytesIO()
-        with Image.new("RGB", (12, 8), "red") as png:
-            png.save(buffer, format="PNG")
-        data = buffer.getvalue()
         client.transport.replies.append(
             GuiResponse(
                 result={
