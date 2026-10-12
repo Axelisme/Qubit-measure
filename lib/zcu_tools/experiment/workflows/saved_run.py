@@ -1,4 +1,4 @@
-"""Saved workflow envelopes for the two independent fluxdep conversion tools."""
+"""Typed Engine summaries for offline workflow-specific conversion tools."""
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+
 from zcu_tools.experiment.workflows import (
     EncodedRecord,
     Lifecycle,
@@ -18,6 +19,11 @@ from zcu_tools.experiment.workflows.journal import ErrorInfo
 class SavedManifest(BaseModel):
     """Fixed startup identity/plan/roots and known UTC lifecycle times.
 
+    identity is the run ID/software provenance; workflow the declaration name;
+    plan and initial_tunables are startup JSON captures. roots identifies the
+    metadata and data directories. started_at/updated_at/ended_at are UTC times,
+    with ended_at=None before termination. lifecycle is an Engine lifecycle value;
+    reason is its optional terminal diagnosis.
     journal is retained only as a schema field; tools never open it. format and
     version must match the Engine document. Roots must be absolute and distinct.
     """
@@ -39,7 +45,12 @@ class SavedManifest(BaseModel):
 
 
 class SavedStarted(BaseModel):
-    """Invocation identity: positive call number, prior commits and revision."""
+    """Invocation identity in an iteration_started envelope.
+
+    kind is the fixed event tag; call_seq is the positive invocation number,
+    commit_seq the number of prior commits, and revision the tunable capture
+    revision. Counts and revision are nonnegative.
+    """
 
     model_config = ConfigDict(extra="forbid")
     kind: Literal["iteration_started"]
@@ -49,7 +60,11 @@ class SavedStarted(BaseModel):
 
 
 class SavedResult(BaseModel):
-    """Common result identity and data-root-relative iteration reference."""
+    """Common result identity and data-root-relative iteration reference.
+
+    call_seq is a positive invocation number; revision is its nonnegative
+    tunable revision; iteration_dir names iter/<at least six decimal digits>.
+    """
 
     model_config = ConfigDict(extra="forbid")
     call_seq: int = Field(gt=0)
@@ -58,7 +73,12 @@ class SavedResult(BaseModel):
 
 
 class SavedCommit(SavedResult):
-    """Only this result classification contributes a scientific point."""
+    """Committed point: kind=step_committed, positive commit_seq, encoded_record.
+
+    encoded_record is the Engine record encoding; readers require mode=json and
+    no encoding error before validating it through the caller's point adapter.
+    Identity/reference fields follow SavedResult.
+    """
 
     kind: Literal["step_committed"]
     commit_seq: int = Field(gt=0)
@@ -66,7 +86,10 @@ class SavedCommit(SavedResult):
 
 
 class SavedFinished(SavedResult):
-    """Done/aborted returns do not contain a point."""
+    """Nonpoint terminal result: kind=step_finished, outcome=done or aborted.
+
+    reason is an optional workflow diagnosis; identity fields follow SavedResult.
+    """
 
     kind: Literal["step_finished"]
     outcome: Literal["done", "aborted"]
@@ -74,21 +97,32 @@ class SavedFinished(SavedResult):
 
 
 class SavedDiscarded(SavedResult):
-    """Pause/Stop leftovers do not contain committed point evidence."""
+    """Discarded invocation: kind=step_discarded, reason=pause or stop.
+
+    No point is committed; identity/reference fields follow SavedResult.
+    """
 
     kind: Literal["step_discarded"]
     reason: Literal["pause", "stop"]
 
 
 class SavedFailed(SavedResult):
-    """Unexpected failure diagnosis, never a scientific point."""
+    """Unexpected failure: kind=step_failed and error carries ErrorInfo.
+
+    No point is committed; identity/reference fields follow SavedResult.
+    """
 
     kind: Literal["step_failed"]
     error: ErrorInfo
 
 
 class SavedIteration(BaseModel):
-    """Complete Engine summary including fixed inputs and classified result."""
+    """Engine summary with format=zcu-workflow-iteration and format_version=1.
+
+    identity/workflow/plan repeat the manifest's fixed startup values. tunables
+    is this invocation's ordinary JSON capture; started identifies its revision
+    and sequence; result discriminates committed/finished/discarded/failed.
+    """
 
     model_config = ConfigDict(extra="forbid")
     format: Literal["zcu-workflow-iteration"]
@@ -106,7 +140,11 @@ class SavedIteration(BaseModel):
 
 @dataclass(frozen=True)
 class SavedPoint[P]:
-    """One structured committed point and the exact record/iteration it came from."""
+    """A caller-validated point and its exact source summary.
+
+    point has the caller's P type; record_path is the source record.json Path.
+    directory exposes its invocation root, not a discovery policy.
+    """
 
     point: P
     record_path: Path

@@ -22,6 +22,12 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_tools.gui.cfg import (
     CfgSchema,
     ReferenceValue,
@@ -41,12 +47,6 @@ from zcu_lab.v2._support.measure.seeds import (
     module_seed,
     path_seed,
     scaled_path_seed,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
 )
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiAnalyzeOptions,

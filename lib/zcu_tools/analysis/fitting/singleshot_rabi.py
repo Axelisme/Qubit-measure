@@ -1,3 +1,5 @@
+"""Joint raw-IQ Rabi fitting, independent of experiment and presentation owners."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -9,6 +11,7 @@ from iminuit import Minuit
 from numpy.typing import NDArray
 from scipy.optimize import OptimizeResult, minimize_scalar
 from scipy.special import expit
+
 from zcu_tools.analysis.fitting.singleshot import (
     transition_state_bin_probabilities,
     transition_state_circle_probabilities,
@@ -53,6 +56,13 @@ class _RabiModel:
 
 @dataclass(frozen=True)
 class RabiProjection:
+    """Pooled PCA projection of a raw sweep with shape (coordinate, shot).
+
+    projected contains scalar shots in IQ units; bin_edges delimit pooled bins;
+    counts holds integer per-row histograms. origin is the complex pooled mean,
+    axis the unit complex PCA direction, and perpendicular_offset its orthogonal
+    mean component. The axis orientation is deterministic, not a physical label."""
+
     projected: NDArray[np.float64]
     bin_edges: NDArray[np.float64]
     counts: NDArray[np.int64]
@@ -63,7 +73,14 @@ class RabiProjection:
 
 @dataclass(frozen=True)
 class RabiPhysicalParams:
-    """p_e0 is the pre-pulse population, before the phase offset acts."""
+    """Physical population and readout parameters for the joint model.
+
+    p_e0 is pre-pulse excited population and p_inf the long-drive baseline,
+    both in [0, 1]. center_g/center_e are projected IQ centers; sigma is positive
+    shared IQ width. p_avg is the readout stationary population in [0, 1];
+    length_ratio is readout duration / relaxation time. t_r is positive Rabi
+    decay time in coordinate units or None for constant envelope; omega is
+    radians per coordinate unit. phase is the residual angle in radians."""
 
     p_e0: float
     p_inf: float
@@ -80,6 +97,14 @@ class RabiPhysicalParams:
 
 @dataclass(frozen=True)
 class RabiBackendResult:
+    """Optimizer diagnostics in the internal transformed parameterization.
+
+    parameter_names orders values and both covariance dimensions. valid reports
+    accepted convergence and calibration; covariance_accurate, reached_call_limit
+    and hesse_failed retain Minuit flags. edm is estimated distance to minimum,
+    nll the multinomial negative log-likelihood, and calls the function count.
+    Failed fits may contain NaN values/covariance and infinite nll/edm."""
+
     parameter_names: tuple[str, ...]
     values: NDArray[np.float64]
     covariance: NDArray[np.float64]
@@ -94,6 +119,17 @@ class RabiBackendResult:
 
 @dataclass(frozen=True)
 class RabiJointFitResult:
+    """Joint fit and classification calibration for a coordinate sweep.
+
+    initial_populations is the pre-pulse [g, e, other] vector; p_inf, t_r, omega,
+    sigma, p_avg, length_ratio and phase follow RabiPhysicalParams. Projected
+    g/e centers are scalar IQ coordinates; g_center/e_center are complex IQ
+    centers. radius is the positive circle-classification radius. confusion_matrix
+    maps true to measured [g, e, other] populations; condition_number diagnoses
+    its invertibility. measured_populations and fitted_populations have shape
+    (coordinate, 3). projection retains the PCA/histograms and backend retains
+    optimizer diagnostics. Failed fits retain the schema but use NaN outputs."""
+
     # Pre-pulse populations, before the residual rotation from pulse shaping.
     initial_populations: NDArray[np.float64]
     p_inf: float
@@ -149,6 +185,10 @@ def _cluster_projected_iq(
 def project_rabi_iq(
     signals: NDArray[np.complex128],
 ) -> RabiProjection:
+    """Project finite complex IQ of shape (coordinate, shot) onto pooled PCA.
+
+    Requires at least two rows and shots, an identifiable axis and histogram
+    bins; violations raise ValueError. Return projection and per-row counts."""
     raw = np.asarray(signals, dtype=np.complex128)
     if raw.ndim != 2 or raw.shape[0] < 2 or raw.shape[1] < 2:
         raise ValueError("Rabi joint fit requires a two-dimensional raw-IQ sweep")
@@ -198,6 +238,10 @@ def project_rabi_iq(
 def rabi_excited_population(
     lengths: NDArray[np.float64], params: RabiPhysicalParams
 ) -> NDArray[np.float64]:
+    """Evaluate excited population at lengths using params in coordinate units.
+
+    Return a float array matching lengths; None t_r disables envelope decay.
+    The caller supplies physical parameters; no fitting or clipping occurs."""
     times = np.asarray(lengths, dtype=np.float64)
     envelope = 1.0 if params.t_r is None else np.exp(-times / params.t_r)
     return params.p_inf + (params.p_e0 - params.p_inf) * envelope * np.cos(
@@ -237,6 +281,11 @@ def model_bin_probabilities(
     bin_edges: NDArray[np.float64],
     params: RabiPhysicalParams,
 ) -> NDArray[np.float64]:
+    """Return normalized histogram-bin probabilities for each sweep coordinate.
+
+    lengths is a coordinate vector; bin_edges delimit projected IQ bins.
+    params describes populations and readout transitions. Invalid population or
+    readout parameters yield a (len(lengths), len(bin_edges)-1) NaN array."""
     p_e = rabi_excited_population(lengths, params)
     if np.any(~np.isfinite(p_e)) or np.any((p_e < 0.0) | (p_e > 1.0)):
         return np.full((lengths.size, bin_edges.size - 1), np.nan)
@@ -260,6 +309,11 @@ def model_bin_probabilities(
 def multinomial_nll(
     counts: NDArray[np.int64], probabilities: NDArray[np.float64]
 ) -> float:
+    """Compute negative log-likelihood for same-shaped (row, bin) arrays.
+
+    counts must be nonnegative; probabilities must have unit row sums. Shape or
+    normalization errors raise ValueError; nonpositive/nonfinite predictions
+    return infinity. The multinomial constant independent of params is omitted."""
     observed = np.asarray(counts)
     predicted = np.asarray(probabilities, dtype=np.float64)
     if observed.shape != predicted.shape:
@@ -558,9 +612,8 @@ def _mixture_populations(
             return float(-np.sum(row * np.log(probabilities)))
 
         # The bounded method returns OptimizeResult; custom methods widen the inferred type.
-        optimum: OptimizeResult = minimize_scalar(
-            objective, bounds=(0.0, 1.0), method="bounded"
-        )
+        optimum = minimize_scalar(objective, bounds=(0.0, 1.0), method="bounded")
+        assert isinstance(optimum, OptimizeResult)
         p_e = float(optimum.x) if optimum.success else np.nan
         populations[index] = (1.0 - p_e, p_e, 0.0)
     return populations
@@ -587,12 +640,13 @@ def _confusion_matrix(
         return condition if np.isfinite(condition) else _PENALTY
 
     # The bounded method returns OptimizeResult; custom methods widen the inferred type.
-    optimum: OptimizeResult = minimize_scalar(
+    optimum = minimize_scalar(
         objective,
         bounds=(max_radius * 1e-6, max_radius),
         method="bounded",
         options={"xatol": max(max_radius * 1e-8, 1e-12)},
     )
+    assert isinstance(optimum, OptimizeResult)
     radius = float(optimum.x)
     if not optimum.success or not np.isfinite(radius):
         raise RuntimeError("classification-radius optimization failed")

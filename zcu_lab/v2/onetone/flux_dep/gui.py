@@ -23,6 +23,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
@@ -51,7 +52,6 @@ from zcu_lab.v2._support.measure.seeds import (
     path_seed,
     res_freq_range,
 )
-from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 
 if TYPE_CHECKING:

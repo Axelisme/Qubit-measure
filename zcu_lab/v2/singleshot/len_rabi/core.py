@@ -9,6 +9,10 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import field_serializer
+from zcu_tools.analysis.fitting.singleshot_rabi import (
+    RabiJointFitResult,
+    fit_rabi_joint,
+)
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -37,7 +41,6 @@ from zcu_lab.v2._support.singleshot.rabi_analysis import (
     classify_rabi_iq,
     plot_rabi_joint,
 )
-from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult, fit_rabi_joint
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
 

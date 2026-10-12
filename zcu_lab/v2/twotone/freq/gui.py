@@ -21,6 +21,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     make_custom_reference_key,
@@ -37,12 +43,6 @@ from zcu_lab.v2._support.measure.seeds import (
     module_seed,
     path_seed,
     qub_freq_range,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
 )
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalyzeOptions,

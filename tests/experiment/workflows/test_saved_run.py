@@ -8,8 +8,7 @@ from pydantic import BaseModel, TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import EncodedRecord, RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.journal import ErrorInfo
-
-from zcu_lab.workflows.export_inputs import (
+from zcu_tools.experiment.workflows.saved_run import (
     SavedCommit,
     SavedDiscarded,
     SavedFailed,

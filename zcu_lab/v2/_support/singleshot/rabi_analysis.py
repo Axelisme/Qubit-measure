@@ -8,11 +8,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
+from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.experiment import config
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadoutCfg, ReadoutCfg
 
-from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult
 from zcu_lab.v2._support.singleshot.util import classify_result
 
 

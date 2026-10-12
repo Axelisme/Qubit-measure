@@ -16,6 +16,10 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindingHost,
     MeasureCfgBindings,
 )
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_readout_module_spec,
+)
 from zcu_tools.gui.cfg import (
     CfgSectionValue,
     DirectValue,
@@ -53,10 +57,6 @@ from zcu_lab.v2._support.measure.seeds import (
     module_seed,
     path_seed,
     scaled_path_seed,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_readout_module_spec,
 )
 
 

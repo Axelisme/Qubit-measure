@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
 import pytest
-
-from zcu_lab.v2._support.singleshot.rabi_fit import (
+from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiPhysicalParams,
     fit_rabi_joint,
     rabi_excited_population,
@@ -107,18 +106,19 @@ def test_joint_fit_labels_physical_states_at_zero_drive(
 
 
 def test_joint_fit_rejects_unknown_initial_state() -> None:
+    invalid_state: Any = "unknown"
     with pytest.raises(ValueError, match="Unknown initial state"):
         fit_rabi_joint(
             np.array([0.0, 1.0]),
             np.zeros((2, 2), dtype=np.complex128),
-            initial_state=cast(Any, "unknown"),
+            initial_state=invalid_state,
         )
 
 
 def test_joint_fit_rejects_candidate_with_failed_calibration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import zcu_lab.v2._support.singleshot.rabi_fit as rabi_fit
+    import zcu_tools.analysis.fitting.singleshot_rabi as rabi_fit
 
     rng = np.random.default_rng(84)
     gains = np.linspace(0.0, 1.0, 15)

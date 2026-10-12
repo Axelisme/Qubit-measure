@@ -1,6 +1,6 @@
 # `experiment.workflows` — 具名 workflow 核心
 
-**Last updated:** 2026-10-12，iteration 保存與獨立 workflow conversion 分工
+**Last updated:** 2026-10-12，saved-run reader 與獨立 workflow writers
 
 此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [workflows ADR 草稿](../../../../docs/adr/draft/workflows-engine.md)。
 
@@ -38,7 +38,9 @@ Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init�
 
 獨立 GUI app 已接線。Window 使用同一份 SessionServices 的 runner／progress，app 重用 zcu_lab 的單一 ALIAS_PRESET。這些組裝屬於宿主，不改變核心的 device、run 或保存契約。具體 forms、source reload 與 input 保存由 zcu_lab.workflows.gui 擁有。
 
-各 workflow 的獨立工具在 zcu_lab 讀 manifest、iteration record.json 與 point 具名 native reference。框架不提供 reader、export-only carrier 或通用 dispatcher，不解讀具體實驗、device snapshot 或單位。GUI/Controller 不保留 export binding。工具的輸入驗證、科學 payload 與 writers 分工見 zcu_lab.workflows。缺 record 不代表無量測，不能從 leftover native 檔創造提交點。
+`saved_run` 提供 typed manifest／iteration reader，由 caller 傳入 workflow 名稱與 point TypeAdapter。它只消費 structured committed summaries，指名缺失與 malformed source，不讀 journal 或從 leftover native 檔創造提交點。`export` 以 caller 的 native declaration 讀具名 trace，並對已準備好的 grouped payload 分別寫 merged native 與 Labber。Writer failure 保留各自 path／error，不操作 ledger 或修復 run identity。
+
+各 workflow 的獨立工具留在 zcu_lab，擁有科學 payload、channel、單位與樣本政策。框架不提供通用 dispatcher，不解讀具體實驗或 device snapshot。GUI/Controller 不保留 export binding。缺 record 不代表無量測。
 
 ## 驗證 owner
 

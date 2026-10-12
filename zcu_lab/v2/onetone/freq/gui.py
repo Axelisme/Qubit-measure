@@ -22,6 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_tools.gui.cfg import (
     ReferenceValue,
     ScalarSpec,
@@ -36,7 +37,6 @@ from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgDefinition,
 )
 from zcu_lab.v2._support.measure.seeds import custom, path_seed, res_freq_range
-from zcu_lab.v2._support.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_lab.v2._support.measure.writeback_helpers import (
     pulse_readout_module_writeback_items,
 )

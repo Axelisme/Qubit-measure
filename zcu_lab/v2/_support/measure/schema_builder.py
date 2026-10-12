@@ -8,6 +8,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Self
 
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_bath_reset_module_spec,
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_pulse_reset_module_spec,
+    make_readout_module_spec,
+    make_reset_module_spec,
+    make_two_pulse_reset_module_spec,
+)
 from zcu_tools.gui.cfg import (
     CfgNodeSpec,
     CfgSchema,
@@ -36,15 +45,6 @@ from zcu_lab.v2._support.measure.seeds import (
     custom,
     literal,
     value_source,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_bath_reset_module_spec,
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_pulse_reset_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-    make_two_pulse_reset_module_spec,
 )
 
 if TYPE_CHECKING:

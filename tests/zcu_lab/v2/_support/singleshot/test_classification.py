@@ -111,7 +111,7 @@ def test_transition_regions_match_sampled_transition_distribution() -> None:
 
 
 def test_rabi_optimizer_searches_up_to_separation() -> None:
-    from zcu_lab.v2._support.singleshot.rabi_fit import (
+    from zcu_tools.analysis.fitting.singleshot_rabi import (
         RabiPhysicalParams,
         _confusion_matrix,
     )

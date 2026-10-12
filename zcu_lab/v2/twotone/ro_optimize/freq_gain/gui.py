@@ -20,6 +20,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_tools.gui.cfg import (
     EvalValue,
     ReferenceValue,
@@ -38,11 +43,6 @@ from zcu_lab.v2._support.measure.seeds import (
     module_seed,
     path_seed,
     scaled_path_seed,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
 )
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (

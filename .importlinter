@@ -302,7 +302,7 @@ name = Workflow export science does not import frontend owners
 type = forbidden
 source_modules =
     zcu_lab.workflows.export
-    zcu_lab.workflows.export_inputs
+    zcu_tools.experiment.workflows.saved_run
     zcu_lab.workflows.coherence_export
     zcu_lab.workflows.mist_export
     zcu_lab.workflows.samples

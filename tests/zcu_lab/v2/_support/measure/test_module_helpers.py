@@ -7,9 +7,6 @@ if TYPE_CHECKING:
 
 from zcu_tools.cfg_model import module_spec_from_raw
 from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionValue,
-    DirectValue,
     ReferenceValue,
 )
 from zcu_tools.gui.session.aliases import AliasRow
@@ -22,11 +19,6 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.v2._support.measure.defaults.role_table import ROLE_TABLE, role_ref
-from zcu_lab.v2._support.measure.spec_helpers import schema_from_module
-
-
-def test_schema_from_module_returns_none_for_none():
-    assert schema_from_module(None) is None
 
 
 def _pulse_readout(*, freq: float = 6000.0) -> PulseReadoutCfg:
@@ -50,41 +42,6 @@ def _pulse_readout(*, freq: float = 6000.0) -> PulseReadoutCfg:
     )
     assert isinstance(cfg, PulseReadoutCfg)
     return cfg
-
-
-def test_schema_from_module_converts_proposed_readout_faithfully():
-    """edit_schema is the spec+value view of the proposed module (freq carried).
-
-    The proposed module is built the way adapters now build it: a direct
-    with_updates on the strongly-typed PulseReadoutCfg.
-    """
-    readout = _pulse_readout()
-    proposed = readout.with_updates(
-        pulse_cfg=readout.pulse_cfg.with_updates(freq=6150.0),
-        ro_cfg=readout.ro_cfg.with_updates(ro_freq=6150.0),
-    )
-
-    schema = schema_from_module(proposed)
-
-    assert isinstance(schema, CfgSchema)
-    pulse_cfg = schema.value.fields["pulse_cfg"]
-    assert isinstance(pulse_cfg, CfgSectionValue)
-    freq = pulse_cfg.fields["freq"]
-    assert isinstance(freq, DirectValue)
-    assert freq.value == 6150.0
-
-
-def test_schema_from_module_converts_proposed_waveform_faithfully():
-    """A proposed waveform cfg auto-routes through the waveform converter."""
-    readout = _pulse_readout()
-    proposed = readout.pulse_cfg.waveform.with_updates(length=4.5)
-
-    schema = schema_from_module(proposed)
-
-    assert isinstance(schema, CfgSchema)
-    length = schema.value.fields["length"]
-    assert isinstance(length, DirectValue)
-    assert length.value == 4.5
 
 
 def _make_ctx(library: LibrarySnapshot | None = None) -> SessionEnv:

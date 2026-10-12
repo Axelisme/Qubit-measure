@@ -1,6 +1,8 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-07, periodic phase fitting
+**Last updated:** 2026-10-12, joint raw-IQ Rabi fitting
+
+`singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics，不讀 cfg 或建立圖。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
 ## fitting helpers
 

@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
+from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -32,7 +33,6 @@ from zcu_lab.v2._support.measure.schema_builder import (
 )
 from zcu_lab.v2._support.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
-from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult
 from zcu_lab.v2.singleshot.len_rabi.core import (
     LenRabiAnalyzeOptions,
     LenRabiCfg,

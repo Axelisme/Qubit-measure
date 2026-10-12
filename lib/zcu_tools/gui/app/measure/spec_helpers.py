@@ -19,6 +19,11 @@ def _module_shape(discriminator: str) -> CfgSectionSpec:
 def make_readout_module_spec(
     label: str = "Readout", optional: bool = False
 ) -> ReferenceSpec:
+    """Build a fresh direct or pulse readout reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -34,6 +39,11 @@ def make_readout_module_spec(
 def make_pulse_readout_module_spec(
     label: str = "Readout", optional: bool = False
 ) -> ReferenceSpec:
+    """Build a fresh pulse readout reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -46,6 +56,11 @@ def make_pulse_readout_module_spec(
 def make_pulse_module_spec(
     label: str = "Init Pulse", optional: bool = False
 ) -> ReferenceSpec:
+    """Build a fresh pulse reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -58,6 +73,11 @@ def make_pulse_module_spec(
 def make_reset_module_spec(
     label: str = "Reset", optional: bool = False
 ) -> ReferenceSpec:
+    """Build a fresh none, pulse, two-pulse or bath reset reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -86,7 +106,11 @@ def make_reset_module_spec(
 def make_pulse_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
 ) -> ReferenceSpec:
-    """Single-shape ``reset/pulse`` ref (the tested reset of a one-pulse sweep)."""
+    """Build a fresh pulse reset reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -99,7 +123,11 @@ def make_pulse_reset_module_spec(
 def make_two_pulse_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
 ) -> ReferenceSpec:
-    """Single-shape ``reset/two_pulse`` ref (the tested reset of a two-pulse sweep)."""
+    """Build a fresh two-pulse reset reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",
@@ -112,7 +140,11 @@ def make_two_pulse_reset_module_spec(
 def make_bath_reset_module_spec(
     label: str = "Tested Reset", optional: bool = False
 ) -> ReferenceSpec:
-    """Single-shape ``reset/bath`` ref (the tested reset of a bath-reset sweep)."""
+    """Build a fresh bath reset reference spec.
+
+    label is the displayed section title; optional allows a disabled reference.
+    Shapes use the measure program policy and are isolated on each call.
+    """
     return ReferenceSpec(
         kind="module",
         discriminator="type",

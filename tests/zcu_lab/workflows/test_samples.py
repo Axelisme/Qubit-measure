@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import load_run_data, save_run_data
+from zcu_tools.experiment.workflows.saved_run import SavedPoint
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from zcu_lab.workflows.calibration import FrequencyResult, RabiResult, ReadoutResult
 from zcu_lab.workflows.coherence import CoherencePlan, CoherencePoint
 from zcu_lab.workflows.coherence_measurements import LifetimeKind, LifetimeResult
-from zcu_lab.workflows.export_inputs import SavedPoint
 from zcu_lab.workflows.samples import SampleExportError, append_samples, prepare_samples
 
 from ._sample_inputs import sample_engine
