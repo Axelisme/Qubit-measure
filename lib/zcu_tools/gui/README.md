@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，shared source catalogs、entry alias 表與 workflow admission
+**Last updated:** 2026-10-12，shared source catalogs、entry alias 表與 workflow input restoration
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -178,7 +178,10 @@ directly. Measurement-session apps keep their domain composition in app behavior
 classes and launcher-provided factories. The workflows launcher composes
 `zcu_lab.workflows.gui.app.WorkflowsGuiBehavior`: one fresh EMPTY session, one
 T1 Window/Controller, and an optional RPC adapter over those same owners. It opens
-shared Setup non-modally; launch does not restore input or connect hardware.
+shared Setup non-modally. Assembly normally restores saved parsed plan/knobs
+input before display; `--clean` skips reading the previous input file. Successful
+close still saves current input. Launch does not restore native runs or connect
+hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control/project flags and converts parser output into
