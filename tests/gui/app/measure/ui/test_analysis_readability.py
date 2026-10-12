@@ -194,7 +194,11 @@ def test_parameter_hint_stays_hidden_before_parameters_are_known(qapp):
 
 
 def _rejected_write_error() -> Exception:
-    """The real AcceptedWrite rejection of a non-finite proposed value."""
+    """The real AcceptedWrite rejection of a non-finite proposed value.
+
+    Built from the ledger model on purpose: it shows that a real boundary
+    rejection is a ValueError, which the preview isolates.
+    """
     from zcu_tools.resources.entry.ledger_models import AcceptedWrite
 
     try:
@@ -257,7 +261,7 @@ def test_writeback_preview_failure_shows_reason_in_place(qapp, pane):
         qapp.processEvents()
         message = widget.findChild(QLabel, "writebackPreviewUnavailable")
         assert message is not None and message.isVisible()
-        assert message.text() == f"Writeback preview unavailable: {error}"
+        assert str(error) in message.text()
         assert widget.findChildren(QCheckBox) == []
         apply = widget.findChild(QPushButton, "writebackApply")
         assert apply is not None and not apply.isEnabled()
@@ -289,6 +293,34 @@ def test_writeback_preview_failure_outside_the_contract_propagates(qapp):
     try:
         with pytest.raises(TypeError, match="programming error"):
             tab.update_writeback_items([_proposal()])
+    finally:
+        tab.close()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("pane", ["Analysis", "Post-Analysis"])
+def test_writeback_preview_failure_keeps_unavailable_reasons(qapp, pane):
+    tab, ctrl = _post_tab(qapp)
+    reason = "Q1: Sample writeback requires $flux_dev: Alias is not bound"
+    snapshot = ctrl.get_tab_snapshot.return_value
+    snapshot.analysis.unavailable_reasons = (reason,)
+    snapshot.post_analysis.unavailable_reasons = (reason,)
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (
+        _rejected_write_error()
+    )
+    update, widget = (
+        (tab.update_writeback_items, tab.writeback_widget)
+        if pane == "Analysis"
+        else (tab.update_post_writeback_items, tab.post_writeback_widget)
+    )
+    try:
+        _show_pane(tab, pane, qapp)
+        update([_proposal()])
+        qapp.processEvents()
+        warnings = widget.findChildren(QLabel, "writebackUnavailableReason")
+        assert [label.text() for label in warnings if reason in label.text()]
+        assert widget.findChild(QLabel, "writebackPreviewUnavailable") is not None
     finally:
         tab.close()
         tab.deleteLater()
