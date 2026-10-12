@@ -988,3 +988,24 @@ def test_published_filter_figure_marks_masks_without_reading_live_draft(
     )
     np.testing.assert_allclose(np.asarray(scatter[-2].get_offsets()), [[0.5, 4.5]])
     assert joint_route.ctrl.interactive.inspect("selection") is not None
+
+
+def test_filter_finish_retains_receipt_without_closing_reentrant_successor(joint_route: RouteHarness):
+    link = joint_route.client()
+    context = _context(joint_route.request(link, "selection.interactive.open"))
+    replaced = False
+    def reopen(payload: InteractiveChangedPayload, _meta: EventMeta) -> None:
+        nonlocal replaced
+        if payload.kind == "selection" and payload.phase == "updated" and not replaced:
+            replaced = True
+            joint_route.ctrl.interactive.cancel("selection")
+            joint_route.ctrl.interactive.begin_cross_selection()
+    subscription = joint_route.ctrl.bus.subscribe_with_meta(InteractiveChangedPayload, reopen)
+    try:
+        finished = _joint_command(joint_route, link, context, "finish")
+    finally:
+        subscription.unsubscribe()
+    assert _context(finished)["closed"] is True
+    successor = joint_route.ctrl.interactive.inspect("selection")
+    assert successor is not None
+    assert successor.context_id != context["context_id"]
