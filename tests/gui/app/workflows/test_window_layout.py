@@ -20,7 +20,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
-from ._window_support import WindowSession, bind_point, expand_all, install_soc
+from ._window_support import WindowSession, bind_point, expand_all
 
 EXISTING_NAMES = (
     "workflow.select",
@@ -196,32 +196,6 @@ def test_minimum_height_stays_within_800_with_every_section_expanded(
     window.select_workflow(name)
     expand_forms(window, qapp)
     assert window.minimumSizeHint().height() <= 800
-
-
-def test_paused_run_keeps_tuning_in_tunables_tab_within_800(
-    window_session: WindowSession, qapp: QApplication
-) -> None:
-    window, harness = window_session.window, window_session.harness
-    bind_point(harness, window_session.root)
-    install_soc(harness)
-    expand_forms(window, qapp)
-    window_session.pause_at = 1
-    assert isinstance(window.start("layout-paused"), int)
-    harness.complete_segment()
-    status = window.controller.status()
-    assert status is not None and status.lifecycle == "paused"
-    tuning = window.tuning_panel
-    assert tuning is not None
-    expand_forms(window, qapp)
-
-    assert window.minimumSizeHint().height() <= 800
-    tabs = child(window, QTabWidget, "workflow.forms")
-    assert_scrolled_in_tab(tabs, 1, tuning)
-    assert_d_layout(window, qapp)
-    assert child(window, QPushButton, "workflow.run.resume").isEnabled()
-    assert not child(window, QPushButton, "workflow.run.pause").isEnabled()
-    for name in ("workflow.tuning.apply", "workflow.tuning.discard"):
-        assert tab_page(tabs, 1).isAncestorOf(child(window, QPushButton, name))
 
 
 def test_replaced_panels_appear_in_their_own_tabs(

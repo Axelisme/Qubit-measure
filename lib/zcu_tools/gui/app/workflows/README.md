@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-13，圖區改成 focus 大圖加縮圖列；泛型宿主與獨立 MCP 組合根
+**Last updated:** 2026-10-13，run 狀態列與 Tunables 分頁原位換成 live tuning panel；圖區改成 focus 大圖加縮圖列；泛型宿主與獨立 MCP 組合根
 
 ## 註冊與組裝
 
@@ -14,7 +14,9 @@
 
 `layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session chips。最上面一列是 chips（Entry／Point、`$qubit` 解析出的元件與 kind、已連線裝置、ZCU 狀態）與 Setup…、Aliases…、Prepare forms、Reload source。Chips 只讀 services，收到 context、alias、point 內容、SoC、裝置事件時刷新，Setup／Aliases 關閉與 Prepare forms 後也刷新；過長的診斷截斷，完整文字放在 tooltip，不撐寬視窗。
 
-下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。Accepted run 的 tuning panel 放在 Tunables 分頁、Start knobs 的下方。右欄是 run 訊息列與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
+下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。右欄依序是 run 狀態列（`run_status.py`）、診斷訊息列 `workflow.run.message` 與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
+
+`run_view.py` 的 `WorkflowRunView` 把 Controller 目前的 run 呈現在這些控制項上，只讀 Controller 與 forms，不下指令。狀態列是徽章（ready、pending、running、pausing、paused、stopping、done、aborted、stopped、failed）、workflow native 名稱、「n committed」與 run_id；宿主不知道總點數。選單選的 workflow 與 attached run 不同時，狀態列前面加 `Previous run:`，圖區仍是那個 run 的圖。輪詢只寫狀態列；Start 的 FormErrors 與例外、指令錯誤、terminal 錯誤或 native failed／aborted 原因寫在下方的診斷列，不被輪詢蓋掉。從 Start 到 terminal delivery，Plan 分頁停用並在上方註明 plan 已固定；run 被 accept 後，Tunables 分頁在同一位置改放這個 run 的 tuning panel，分頁名稱是 `Tunables (live)`，Start knobs 隱藏，所以畫面上只有一份 tunables。Paused delivery 自動切到這個分頁，並顯示「Resume 會重做未提交的點、可以先 Apply」的提示，送出 Resume 後提示消失。Terminal delivery 換回 Start knobs，內容重設成這次 run 最後接受的 input，可以再編輯並 Start；tuning panel 隱藏但保留，讓 RPC 的 form 與 Apply 照舊對到這個 run。Stop 只在 pending、running、pausing、paused 時啟用；Pause 在 running、Resume 在 delivered paused 時啟用。
 
 ## Run 與表單
 
