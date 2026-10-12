@@ -23,11 +23,11 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._recording_transport import WindowTransport
+from ._reload_source import InjectedCatalog
 from ._window_support import start_plan_batch
 
 
@@ -36,7 +36,7 @@ def mcp_paused_controls(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
     mcp_tools: ToolTable,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> tuple[list[tuple[int, float, float, str | None]], list[dict[str, object]]]:
     """Pause via MCP after one commit; return attempts and later Stop receipts.
 
@@ -75,7 +75,7 @@ def mcp_paused_controls(
             return Done()
         return Next(tun.guess_us, state + 1)
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     pending = mcp_tools["workflows_workflow_start"]["handler"](
         {
             "run_id": "mcp-controls",

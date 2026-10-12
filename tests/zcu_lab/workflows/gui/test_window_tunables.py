@@ -26,17 +26,17 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest
 
 
 def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_capture(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
     observed: list[tuple[float, int]] = []
@@ -74,7 +74,7 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
         observed.append((tun.guess_us, tun.reps))
         return Next(tun.guess_us, state + 1)
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("running"), int)
     harness.complete_segment()
     assert harness.background.error is None

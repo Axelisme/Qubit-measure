@@ -12,7 +12,7 @@ from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel
 from zcu_tools.experiment.workflows import InvalidRunState
 from zcu_tools.gui.catalog_loader import CatalogReloadError
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors, FormInput
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
@@ -151,8 +151,9 @@ def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
     assert window.plan_panel is not plan
     # Successful retry clears reload admission; ordinary EMPTY-source admission
     # is now the only reason Start cannot run this source-free view.
-    with pytest.raises(RuntimeError, match="parameter"):
+    with pytest.raises(FailedPreconditionError) as failure:
         window.start("empty")
+    assert failure.value.reason_code == "no_context"
 
 
 def test_current_start_and_tuning_use_new_catalog_but_old_export_stays_fixed(

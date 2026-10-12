@@ -28,7 +28,6 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
 from zcu_lab.workflows.gui.plan import T1PlanForm
 from zcu_lab.workflows.gui.remote import FormWrite
 from zcu_lab.workflows.gui.tunables import T1TunablesForm
@@ -36,6 +35,7 @@ from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input
+from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest, start_plan_batch
 
 
@@ -43,7 +43,7 @@ def test_window_services_run_and_progress_share_session(
     run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
     qapp: QApplication,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     _existing_window, harness, _entry = run_attachment
     closed: list[str] = []
@@ -51,6 +51,8 @@ def test_window_services_run_and_progress_share_session(
         harness.state,
         harness.services,
         harness.owner,
+        catalog=catalog_source.catalog,
+        loader=catalog_source.loader,
         parent=None,
         on_close=lambda: closed.append("closed"),
     )
@@ -71,7 +73,7 @@ def test_window_services_run_and_progress_share_session(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     try:
         token = window.start("session-services")
         assert isinstance(token, int)
@@ -132,7 +134,7 @@ def test_startup_source_failure_is_not_replaced_by_old_constructor_capture(
 
 def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
     context = harness.services.context
@@ -152,7 +154,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
         yield from ()
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    catalog_source.install(observe, window)
 
     def edit_on_progress_notification() -> None:
         window.tunables_panel.state.write({("guess_us",): 77.0}, FormEnv())
@@ -337,7 +339,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     inputs: Inputs,
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, entry = attachment
     context = harness.services.context
@@ -357,7 +359,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
         yield from ()
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", observe)
+    catalog_source.install(observe, window)
     reply = rpc(
         "workflow.start",
         {

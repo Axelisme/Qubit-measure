@@ -50,7 +50,7 @@ def tuning(
     qapp: QApplication,
     inputs: Inputs,
     tmp_path: Path,
-) -> Iterator[tuple[T1TuningPanel, Engine[Calibrated]]]:
+) -> Iterator[tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]]]:
     env = FormEnv()
     accepted = T1TunablesForm.default_input(env)
     result = FormState(accepted).result(env)
@@ -113,7 +113,7 @@ def tuning(
 
 
 def test_gui_apply_and_json_edits_share_native_t1_revision(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     widget.panel.state.write({("guess_us",): {"expr": "10 * 3"}}, FormEnv())
@@ -132,7 +132,7 @@ def test_gui_apply_and_json_edits_share_native_t1_revision(
 
 
 def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
@@ -152,7 +152,7 @@ def test_incomplete_gui_text_blocks_apply_and_discard_restores_control(
 
 
 def test_external_edit_submits_pending_parsed_gui_values_in_the_same_batch(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     widget.panel.state.write({("guess_us",): 31.0}, FormEnv())
@@ -169,7 +169,7 @@ def test_external_edit_submits_pending_parsed_gui_values_in_the_same_batch(
 
 
 def test_successful_external_edit_replaces_unparseable_view_text(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     control = widget.panel.editor.findChild(QLineEdit, "form.input.sweep_factor")
@@ -187,7 +187,7 @@ def test_successful_external_edit_replaces_unparseable_view_text(
 
 
 def test_journal_failure_propagates_without_accepting_input_or_clearing_local_text(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
     tmp_path: Path,
 ) -> None:
     widget, engine = tuning
@@ -218,7 +218,7 @@ def test_journal_failure_propagates_without_accepting_input_or_clearing_local_te
 
 
 def test_invalid_native_t1_batch_retains_input_without_partial_publication(
-    tuning: tuple[T1TuningPanel, Engine[Calibrated]],
+    tuning: tuple[T1TuningPanel[T1TunablesForm, Calibrated], Engine[Calibrated]],
 ) -> None:
     widget, engine = tuning
     before = engine.tunables("tuning")
