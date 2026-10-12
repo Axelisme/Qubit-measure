@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
@@ -15,6 +16,7 @@ from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
+from zcu_tools.gui.control_identity import ControlIdentity
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
@@ -31,19 +33,31 @@ class DummyPostParams:
     p: int = 2
 
 
-def make_ctrl():
-    ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
-    ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
-    ctrl.progress_control.attach_progress.return_value = lambda: None
-    ctrl.progress_control.progress_bars.return_value = []
-    ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
-    ctrl.get_cfg_editor_draft.return_value = MagicMock()
-    ctrl.active_operation_count.return_value = 0
-    return ctrl
+@pytest.fixture
+def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
+    """Retain every Local authority until this case retires its owned views."""
+    owned_authorities: list[ControlIdentity] = []
 
+    def create_ctrl() -> MagicMock:
+        ctrl = MagicMock()
+        ctrl.control_identity = ControlIdentity()
+        owned_authorities.append(ctrl.control_identity)
+        configure_cfg_lookup(ctrl)
+        ctrl.get_left_panel_width.return_value = 500
+        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.get_adapter_guide.return_value = {}
+        ctrl.progress_control.attach_progress.return_value = lambda: None
+        ctrl.progress_control.progress_bars.return_value = []
+        ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())
+        ctrl.get_cfg_editor_draft.return_value = MagicMock()
+        ctrl.active_operation_count.return_value = 0
+        return ctrl
+
+
+    try:
+        yield create_ctrl
+    finally:
+        owned_authorities.clear()
 
 def make_snapshot(
     tab_id: str,
@@ -127,7 +141,7 @@ def make_snapshot(
 
 
 @pytest.fixture
-def exp_tab_widget(qapp, monkeypatch):
+def exp_tab_widget(qapp, monkeypatch, make_ctrl):
     """Provide ExpTabWidget with cfg population stubbed for isolation."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
 
@@ -144,12 +158,26 @@ def exp_tab_widget(qapp, monkeypatch):
         return w
 
     monkeypatch.setattr(mod, "attach_existing_figure_to_container", mock_attach)
-    yield mod.ExpTabWidget
-    monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
+    owned_tabs: list[mod.ExpTabWidget] = []
+
+    def create_tab(
+        tab_id: str, ctrl: MagicMock, capabilities: AdapterCapabilities
+    ) -> mod.ExpTabWidget:
+        tab = mod.ExpTabWidget(tab_id, ctrl, capabilities)
+        owned_tabs.append(tab)
+        return tab
+
+    try:
+        yield create_tab
+    finally:
+        for tab in owned_tabs:
+            tab.deleteLater()
+        owned_tabs.clear()
+        monkeypatch.setattr(mod, "attach_existing_figure_to_container", orig_attach)
 
 
 @pytest.mark.parametrize("post", [False, True])
-def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post):
+def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post, make_ctrl):
     from qtpy.QtWidgets import QTabWidget
 
     snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=post)
@@ -170,9 +198,7 @@ def test_explicit_pane_selection_and_unavailable_pane(qapp, exp_tab_widget, post
     tab.deleteLater()
 
 
-def test_main_window_follow_selects_subpane_on_already_selected_tab(
-    qapp, exp_tab_widget
-):
+def test_main_window_follow_selects_subpane_on_already_selected_tab(qapp, exp_tab_widget, make_ctrl):
     from qtpy.QtWidgets import QTabWidget
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -184,29 +210,29 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
         post=True,
     )
     window = MainWindow(ctrl)
-    window.add_tab_widget("tab-1", "fake")
-    window.add_tab_widget("tab-2", "fake")
-    window.select_tab_pane("tab-1", "data")
-    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
-    window.select_tab_pane("tab-1", "analysis")
-    assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
-    pages = [
-        widget
-        for widget in window.findChildren(QTabWidget)
-        if widget.tabText(0) == "Run"
-    ]
-    assert sorted(widget.tabText(widget.currentIndex()) for widget in pages) == [
-        "Analysis",
-        "Run",
-    ]
-    window.remove_tab_widget("tab-1")
-    window.remove_tab_widget("tab-2")
-    window.deleteLater()
+    try:
+        window.add_tab_widget("tab-1", "fake")
+        window.add_tab_widget("tab-2", "fake")
+        window.select_tab_pane("tab-1", "data")
+        assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+        window.select_tab_pane("tab-1", "analysis")
+        assert window.get_view_snapshot()["active_tab_id"] == "tab-1"
+        pages = [
+            widget
+            for widget in window.findChildren(QTabWidget)
+            if widget.tabText(0) == "Run"
+        ]
+        assert sorted(widget.tabText(widget.currentIndex()) for widget in pages) == [
+            "Analysis",
+            "Run",
+        ]
+        window.remove_tab_widget("tab-1")
+        window.remove_tab_widget("tab-2")
+    finally:
+        window.deleteLater()
 
 
-def test_no_analysis_capability_constructs_only_run_data_and_guide(
-    qapp, exp_tab_widget
-):
+def test_no_analysis_capability_constructs_only_run_data_and_guide(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap_none = make_snapshot(
         "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
@@ -253,7 +279,7 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
     tab_none.detach()
 
 
-def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_widget):
+def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap_analysis = make_snapshot(
         "tab-2", analysis=AnalysisMode.FIT, post=False, load=True
@@ -287,7 +313,7 @@ def test_fit_capability_constructs_analysis_between_run_and_data(qapp, exp_tab_w
     tab_analysis.detach()
 
 
-def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_widget):
+def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True, load=True)
     assert snap_both.capabilities is not None
@@ -303,9 +329,7 @@ def test_post_capability_constructs_post_analysis_after_analysis(qapp, exp_tab_w
     tab_both.detach()
 
 
-def test_main_window_refresh_projects_post_writeback_into_post_widget(
-    qapp, exp_tab_widget
-):
+def test_main_window_refresh_projects_post_writeback_into_post_widget(qapp, exp_tab_widget, make_ctrl):
     from zcu_tools.gui.app.measure.adapter import ParameterWriteback
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
@@ -343,9 +367,7 @@ def test_main_window_refresh_projects_post_writeback_into_post_widget(
     tab.detach()
 
 
-def test_figure_containers_remain_stable_across_tab_switch_and_busy(
-    qapp, exp_tab_widget
-):
+def test_figure_containers_remain_stable_across_tab_switch_and_busy(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True)
     assert snap.capabilities is not None
@@ -397,9 +419,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     tab.detach()
 
 
-def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure(
-    qapp, exp_tab_widget
-):
+def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
@@ -442,9 +462,7 @@ def test_primary_analysis_lifecycle_clears_only_its_pane_and_restores_on_failure
         "POST_ANALYZE_START_REJECTED",
     ],
 )
-def test_analysis_terminal_restores_retained_figures_via_coordinator(
-    qapp, exp_tab_widget, monkeypatch, fact_name
-):
+def test_analysis_terminal_restores_retained_figures_via_coordinator(qapp, exp_tab_widget, monkeypatch, fact_name, make_ctrl):
     """Terminal reactions restore retained primary then post figures."""
     from zcu_tools.gui.app.measure.events.tab import (
         TabInteractionChangedPayload,
@@ -468,40 +486,41 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
         post_analysis_figure=fig_p_retained,
     )
     window = MainWindow(ctrl)
-    # Tab must be constructed with the same capabilities as the snapshot the window will fetch
-    # The mock's get_tab_snapshot returns a FIT+post snapshot; reuse those caps
-    _tmp_snap = make_snapshot(
-        "tab-1",
-        analysis=AnalysisMode.FIT,
-        post=True,
-        has_post_result=True,
-        analysis_figure=Figure(),
-        post_analysis_figure=Figure(),
-    )
-    tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
-    tab.attach(ctrl.get_tab_snapshot.return_value, MagicMock())
-    window._tab_widgets["tab-1"] = tab
-    # Seed figures
-    fig_a = Figure()
-    fig_p = Figure()
-    tab.show_analysis_figures(ready_figures(fig_a))
-    tab.show_post_analysis_figures(ready_figures(fig_p))
-    # Clear post to simulate start, then emit failure fact which should restore both from State
-    tab.prepare_post_container()
-    assert tab.get_current_figure_for_pane("post_analysis") is None
-    # Snapshot on failure returns retained figures (same objects as above)
-    # Emitting the domain fact exercises the subscribed coordinator reaction.
-    bus.emit(
-        TabInteractionChangedPayload("tab-1", getattr(TabInteractionFact, fact_name))
-    )
-    assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
-    assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained
-    tab.detach()
+    try:
+        # Tab must be constructed with the same capabilities as the snapshot the window will fetch
+        # The mock's get_tab_snapshot returns a FIT+post snapshot; reuse those caps
+        _tmp_snap = make_snapshot(
+            "tab-1",
+            analysis=AnalysisMode.FIT,
+            post=True,
+            has_post_result=True,
+            analysis_figure=Figure(),
+            post_analysis_figure=Figure(),
+        )
+        tab = exp_tab_widget("tab-1", ctrl, _tmp_snap.capabilities)
+        tab.attach(ctrl.get_tab_snapshot.return_value, MagicMock())
+        window._tab_widgets["tab-1"] = tab
+        # Seed figures
+        fig_a = Figure()
+        fig_p = Figure()
+        tab.show_analysis_figures(ready_figures(fig_a))
+        tab.show_post_analysis_figures(ready_figures(fig_p))
+        # Clear post to simulate start, then emit failure fact which should restore both from State
+        tab.prepare_post_container()
+        assert tab.get_current_figure_for_pane("post_analysis") is None
+        # Snapshot on failure returns retained figures (same objects as above)
+        # Emitting the domain fact exercises the subscribed coordinator reaction.
+        bus.emit(
+            TabInteractionChangedPayload("tab-1", getattr(TabInteractionFact, fact_name))
+        )
+        assert tab.get_current_figure_for_pane("analysis") is fig_a_retained
+        assert tab.get_current_figure_for_pane("post_analysis") is fig_p_retained
+        tab.detach()
+    finally:
+        window.deleteLater()
 
 
-def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
-    qapp, exp_tab_widget
-):
+def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, load=True, has_post_result=True
@@ -555,7 +574,7 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     tab.detach()
 
 
-def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget):
+def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     snap_idle = make_snapshot(
         "tab-1",
@@ -590,7 +609,7 @@ def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget):
     tab.detach()
 
 
-def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget):
+def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     # Setup controller mock to track pane-qualified calls
     ctrl.set_writeback_item_for_pane = MagicMock(return_value={"valid": True})
