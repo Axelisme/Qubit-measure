@@ -13,6 +13,7 @@ from zcu_tools.gui.session.types import (
 )
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
+from .cfg_input import CfgInputDifference, CfgInputRejected
 from .form import Form
 from .interactive import InteractivePluginProvider
 from .protocol import AdapterCfgDefinition, ExpAdapterProtocol
