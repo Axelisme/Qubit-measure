@@ -1,10 +1,11 @@
 # zcu_tools.core — shared stateless contracts
 
-**Last updated:** 2026-10-09，complex view 與 raw capture 分界
+**Last updated:** 2026-10-12，共用 numpy numeric scalar 投影
 
 `core` 提供 resources 與 program 共用的無狀態契約。Repo 內只依賴 utils，不持有 GUI、資源 scope 或硬體。
 
 - `complex_codec` 擁有唯一 `{"__complex__": [re, im]}` scalar 格式，供 GUI 與 resources 共用。Schema 決定有限值限制，expression 決定數值語意。Resources view 將 scalar tag 讀為 native complex，手動 scalar 寫入編回 tag。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag。
+- `numeric_scalar.normalize_numpy_scalar` 將單一 numpy floating／integer scalar 投影為 Python float／int，供 AnalysisDocument 與 AcceptedWrite 共用。它不遞迴；finite 與 strict JSON 驗證留在各邊界。
 - `waveform_format` 擁有 NPZ samples、opaque JSON recipe、codec 與單一格式錯誤。它不讀寫檔案，也不解讀公式。
 - Resources 負責 formula 語意、資產命名及檔案生命週期。Program 與 sim 播放 path 指定的 samples。
 - `cfg_model` 與頂層 `format_version.py` 尚未搬入 core。搬遷排在 waveform 接線後。

@@ -57,7 +57,9 @@ def test_format_entry_rejects_non_json_or_non_finite_input(values: object) -> No
         pytest.param(np.uint8(255), 255, id="uint8"),
         pytest.param(np.uint16(65535), 65535, id="uint16"),
         pytest.param(np.uint32(4294967295), 4294967295, id="uint32"),
-        pytest.param(np.uint64(18446744073709551615), 18446744073709551615, id="uint64"),
+        pytest.param(
+            np.uint64(18446744073709551615), 18446744073709551615, id="uint64"
+        ),
     ],
 )
 def test_summary_numpy_scalar_normalizes_and_encodes(
@@ -76,20 +78,29 @@ def test_summary_numpy_scalar_normalizes_and_encodes(
     assert document.summary["value"] == expected
     stored = json.loads(encode_analysis_document(document))["summary"]
     assert type(stored["value"]) is type(expected)
-    assert stored == {"value": expected, "details": {"weights": [1.0, None], "accepted": True}}
+    assert stored == {
+        "value": expected,
+        "details": {"weights": [1.0, None], "accepted": True},
+    }
     assert summary["value"] is value
     summary["details"] = {"changed": True}
     assert document.summary["details"] == {"weights": [1.0, None], "accepted": True}
 
 
-@pytest.mark.parametrize("scalar_type", [np.float16, np.float32, np.float64, np.longdouble])
+@pytest.mark.parametrize(
+    "scalar_type", [np.float16, np.float32, np.float64, np.longdouble]
+)
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
 def test_summary_numpy_scalar_rejects_nonfinite(
     scalar_type: type[np.floating], value: str
 ) -> None:
     with pytest.raises(ValueError, match="strict JSON|finite"):
         AnalysisDocument.model_validate(
-            {"pane": "analysis", "parameters": {}, "summary": {"value": scalar_type(value)}}
+            {
+                "pane": "analysis",
+                "parameters": {},
+                "summary": {"value": scalar_type(value)},
+            }
         )
 
 
