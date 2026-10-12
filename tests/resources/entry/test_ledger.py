@@ -150,7 +150,7 @@ def test_accepted_numpy_scalar_rejects_nonfinite(
 
 
 @pytest.mark.skipif(
-    np.finfo(np.longdouble).max <= np.finfo(np.float64).max,
+    bool(np.finfo(np.longdouble).max <= np.finfo(np.float64).max),
     reason="longdouble has no extended range on this platform",
 )
 def test_accepted_numpy_scalar_rejects_finite_float_overflow() -> None:
