@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitTrace,
     ParameterSpec,
+    SharedFitResult,
     fit_shared,
     fitlor,
     lorfunc,
@@ -90,6 +91,154 @@ def get_resonance_freq(
         s_freqs.append(curr_freq)
 
     return np.array(s_xs), np.array(s_freqs)
+
+
+def _fit_resonance_traces(
+    g_res_freqs: NDArray[np.float64],
+    g_qub_freqs: NDArray[np.float64],
+    e_res_freqs: NDArray[np.float64],
+    e_qub_freqs: NDArray[np.float64],
+) -> SharedFitResult:
+    """Jointly fit resonance traces with shared baseline, scale and width.
+
+    Independent Lorentzian fits seed the joint fit; each state's center stays
+    local and both slopes are fixed to zero.
+    """
+    # y0, slope, yscale, x0, gamma
+    fixedparams: list[float | None] = [None] * 5
+    fixedparams[1] = 0.0  # fix slope to 0
+
+    g_params, _ = fitlor(g_res_freqs, g_qub_freqs, fixedparams=fixedparams)
+    e_params, _ = fitlor(e_res_freqs, e_qub_freqs, fixedparams=fixedparams)
+
+    y0 = 0.5 * (e_params[0] + g_params[0])
+    yscale = 0.5 * (e_params[2] + g_params[2])
+    gamma = 0.5 * (e_params[4] + g_params[4])
+
+    return fit_shared(
+        traces=(
+            FitTrace(
+                g_res_freqs,
+                g_qub_freqs,
+                lorfunc,
+                ("baseline", "g_slope", "scale", "g_res_freq", "width"),
+            ),
+            FitTrace(
+                e_res_freqs,
+                e_qub_freqs,
+                lorfunc,
+                ("baseline", "e_slope", "scale", "e_res_freq", "width"),
+            ),
+        ),
+        parameters=(
+            ParameterSpec("baseline", y0),
+            ParameterSpec("g_slope", 0.0, fixed=True),
+            ParameterSpec("e_slope", 0.0, fixed=True),
+            ParameterSpec("scale", yscale),
+            ParameterSpec(
+                "g_res_freq",
+                g_params[3],
+                limits=(float(g_res_freqs.min()), float(g_res_freqs.max())),
+            ),
+            ParameterSpec(
+                "e_res_freq",
+                e_params[3],
+                limits=(float(e_res_freqs.min()), float(e_res_freqs.max())),
+            ),
+            ParameterSpec("width", gamma, limits=(0.0, None)),
+        ),
+    )
+
+
+def _plot_resonance_maps(
+    result: CKP_Result,
+    amps: NDArray[np.float64],
+    fit_result: SharedFitResult,
+    analysis: CKPAnalysis,
+    traces: tuple[
+        tuple[NDArray[np.float64], NDArray[np.float64]],
+        tuple[NDArray[np.float64], NDArray[np.float64]],
+    ],
+    *,
+    plots: Plots,
+) -> None:
+    """Validate derived covariance, then publish both joint-fit resonance maps."""
+    chi_variance = fit_result.projected_variance(
+        {"g_res_freq": -0.5, "e_res_freq": 0.5}
+    )
+    kappa_variance = fit_result.projected_variance({"width": 2.0})
+    if (
+        not np.isfinite(chi_variance)
+        or not np.isfinite(kappa_variance)
+        or chi_variance < -1e-12
+        or kappa_variance < -1e-12
+    ):
+        raise RuntimeError("CKP shared fit produced invalid derived covariance")
+    chi_err = np.sqrt(max(0.0, chi_variance))
+    kappa_err = np.sqrt(max(0.0, kappa_variance))
+
+    res_freqs, qub_freqs = result.res_freqs, result.qub_freqs
+    (g_res_freqs, g_qub_freqs), (e_res_freqs, e_qub_freqs) = traces
+    chi, kappa, res_freq = analysis.chi, analysis.kappa, analysis.res_freq
+    baseline, scale, width = (
+        fit_result.values["baseline"],
+        fit_result.values["scale"],
+        fit_result.values["width"],
+    )
+    g_freq, e_freq = fit_result.values["g_res_freq"], fit_result.values["e_res_freq"]
+    g_params = (baseline, 0.0, scale, g_freq, width)
+    e_params = (baseline, 0.0, scale, e_freq, width)
+    g_fit_freqs = lorfunc(res_freqs, *g_params)
+    e_fit_freqs = lorfunc(res_freqs, *e_params)
+
+    fig, _ = plots.subplots("fit", nrows=2, ncols=1, figsize=(8, 6), sharex=True)
+    ax1, ax2 = fig.axes
+
+    fig.suptitle(
+        rf"$\chi/(2\pi): {chi:.3f}\pm {chi_err:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\pm {kappa_err:.3f}\ MHz$",
+        fontsize=14,
+    )
+
+    factor = 1.0
+    if np.max(amps[0]) + np.min(amps[0]) < 2 * np.median(amps[0]):
+        factor = -1.0
+
+    ax1.imshow(
+        factor * amps[0].T,
+        extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+        cmap="RdBu_r",
+    )
+    ax1.scatter(g_res_freqs, g_qub_freqs, color="b", s=5)
+    ax1.plot(res_freqs, g_fit_freqs, color="b", label="Ground")
+    ax1.plot(res_freqs, e_fit_freqs, color="r", label="Excited", linestyle="--")
+    ax1.axvline(g_freq, color="b")
+    ax1.axvline(e_freq, color="r", linestyle="--")
+    ax1.axvline(res_freq, color="k", linestyle=":")
+    ax1.set_ylabel("Qubit Probe Frequency (MHz)")
+    ax1.legend()
+
+    ax2.imshow(
+        factor * amps[1].T,
+        extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+        cmap="RdBu_r",
+    )
+    ax2.scatter(e_res_freqs, e_qub_freqs, color="r", s=5)
+    ax2.plot(res_freqs, e_fit_freqs, color="r", label="Excited")
+    ax2.plot(res_freqs, g_fit_freqs, color="b", label="Ground", linestyle="--")
+    ax2.axvline(e_freq, color="r")
+    ax2.axvline(g_freq, color="b", linestyle="--")
+    ax2.axvline(res_freq, color="k", linestyle=":")
+    ax2.set_xlabel("Resonator Drive Frequency (MHz)")
+    ax2.set_ylabel("Qubit Probe Frequency (MHz)")
+    ax2.legend()
+
+    fig.tight_layout()
 
 
 class CKPModuleCfg(ConfigBase):
@@ -218,8 +367,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
             signals=signals_buffer.array,
         )
 
-    # Keep the shared fit, covariance projection, and two-state plot together.
-    def analyze(  # noqa: PLR0915
+    def analyze(
         self,
         source: RunRecord[CKP_Cfg, CKP_Result],
         options: None,
@@ -243,49 +391,8 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
                 "CKP resonance extraction requires at least five finite points per state"
             )
 
-        # y0, slope, yscale, x0, gamma
-        fixedparams: list[float | None] = [None] * 5
-        fixedparams[1] = 0.0  # fix slope to 0
-
-        g_params, _ = fitlor(g_res_freqs, g_qub_freqs, fixedparams=fixedparams)
-        e_params, _ = fitlor(e_res_freqs, e_qub_freqs, fixedparams=fixedparams)
-
-        y0 = 0.5 * (e_params[0] + g_params[0])
-        yscale = 0.5 * (e_params[2] + g_params[2])
-        gamma = 0.5 * (e_params[4] + g_params[4])
-
-        fit_result = fit_shared(
-            traces=(
-                FitTrace(
-                    g_res_freqs,
-                    g_qub_freqs,
-                    lorfunc,
-                    ("baseline", "g_slope", "scale", "g_res_freq", "width"),
-                ),
-                FitTrace(
-                    e_res_freqs,
-                    e_qub_freqs,
-                    lorfunc,
-                    ("baseline", "e_slope", "scale", "e_res_freq", "width"),
-                ),
-            ),
-            parameters=(
-                ParameterSpec("baseline", y0),
-                ParameterSpec("g_slope", 0.0, fixed=True),
-                ParameterSpec("e_slope", 0.0, fixed=True),
-                ParameterSpec("scale", yscale),
-                ParameterSpec(
-                    "g_res_freq",
-                    g_params[3],
-                    limits=(float(g_res_freqs.min()), float(g_res_freqs.max())),
-                ),
-                ParameterSpec(
-                    "e_res_freq",
-                    e_params[3],
-                    limits=(float(e_res_freqs.min()), float(e_res_freqs.max())),
-                ),
-                ParameterSpec("width", gamma, limits=(0.0, None)),
-            ),
+        fit_result = _fit_resonance_traces(
+            g_res_freqs, g_qub_freqs, e_res_freqs, e_qub_freqs
         )
         diagnostics = fit_result.diagnostics
         if not diagnostics.valid or not diagnostics.covariance_accurate:
@@ -295,13 +402,9 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
                 f"covariance_accurate={diagnostics.covariance_accurate})"
             )
 
-        baseline = fit_result.values["baseline"]
-        scale = fit_result.values["scale"]
         width = fit_result.values["width"]
         g_freq = fit_result.values["g_res_freq"]
         e_freq = fit_result.values["e_res_freq"]
-        g_params = (baseline, 0.0, scale, g_freq, width)
-        e_params = (baseline, 0.0, scale, e_freq, width)
         chi = abs(e_freq - g_freq) / 2
         kappa = 2.0 * width
 
@@ -309,70 +412,13 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         if kappa < 2 * chi:
             res_freq += np.sqrt(chi**2 - (kappa / 2) ** 2) * np.sign(e_freq - g_freq)
 
-        chi_variance = fit_result.projected_variance(
-            {"g_res_freq": -0.5, "e_res_freq": 0.5}
+        analysis = CKPAnalysis(chi, kappa, res_freq)
+        _plot_resonance_maps(
+            result,
+            amps,
+            fit_result,
+            analysis,
+            ((g_res_freqs, g_qub_freqs), (e_res_freqs, e_qub_freqs)),
+            plots=plots,
         )
-        kappa_variance = fit_result.projected_variance({"width": 2.0})
-        if (
-            not np.isfinite(chi_variance)
-            or not np.isfinite(kappa_variance)
-            or chi_variance < -1e-12
-            or kappa_variance < -1e-12
-        ):
-            raise RuntimeError("CKP shared fit produced invalid derived covariance")
-        chi_err = np.sqrt(max(0.0, chi_variance))
-        kappa_err = np.sqrt(max(0.0, kappa_variance))
-
-        g_fit_freqs = lorfunc(res_freqs, *g_params)
-        e_fit_freqs = lorfunc(res_freqs, *e_params)
-
-        fig, _ = plots.subplots("fit", nrows=2, ncols=1, figsize=(8, 6), sharex=True)
-        ax1, ax2 = fig.axes
-
-        fig.suptitle(
-            rf"$\chi/(2\pi): {chi:.3f}\pm {chi_err:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\pm {kappa_err:.3f}\ MHz$",
-            fontsize=14,
-        )
-
-        factor = 1.0
-        if np.max(amps[0]) + np.min(amps[0]) < 2 * np.median(amps[0]):
-            factor = -1.0
-
-        ax1.imshow(
-            factor * amps[0].T,
-            extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            cmap="RdBu_r",
-        )
-        ax1.scatter(g_res_freqs, g_qub_freqs, color="b", s=5)
-        ax1.plot(res_freqs, g_fit_freqs, color="b", label="Ground")
-        ax1.plot(res_freqs, e_fit_freqs, color="r", label="Excited", linestyle="--")
-        ax1.axvline(g_freq, color="b")
-        ax1.axvline(e_freq, color="r", linestyle="--")
-        ax1.axvline(res_freq, color="k", linestyle=":")
-        ax1.set_ylabel("Qubit Probe Frequency (MHz)")
-        ax1.legend()
-
-        ax2.imshow(
-            factor * amps[1].T,
-            extent=(res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]),
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            cmap="RdBu_r",
-        )
-        ax2.scatter(e_res_freqs, e_qub_freqs, color="r", s=5)
-        ax2.plot(res_freqs, e_fit_freqs, color="r", label="Excited")
-        ax2.plot(res_freqs, g_fit_freqs, color="b", label="Ground", linestyle="--")
-        ax2.axvline(e_freq, color="r")
-        ax2.axvline(g_freq, color="b", linestyle="--")
-        ax2.axvline(res_freq, color="k", linestyle=":")
-        ax2.set_xlabel("Resonator Drive Frequency (MHz)")
-        ax2.set_ylabel("Qubit Probe Frequency (MHz)")
-        ax2.legend()
-
-        fig.tight_layout()
-
-        return CKPAnalysis(chi, kappa, res_freq)
+        return analysis

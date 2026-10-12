@@ -121,7 +121,9 @@ Exit 0 只表示報表成功，不表示品質合格；即使有診斷或 import
 
 ### Radon CC advisory
 
-Radon 是 opt-in 報表，不加入 `gate.py` 或 ratchet，也不取代 Ruff `C901`。
+`quality_report.py --with-radon` 是 opt-in 分數報表，保留 advisory 計量，不取代 Ruff `C901`。
+ratchet 另外預設啟用 `radon` detector，只比較 CC > 20 的函式數，不比較分數漲跌。
+快速 `gate.py` 透過 ratchet 執行這項比較。兩者共用 Radon 解析，但掃描範圍不同。
 先安裝 locked quality 環境，再產生快照：
 
 ```bash
@@ -153,7 +155,9 @@ Radon distribution 版本隨既有 method.distributions 保存；方法或選用
 
 ## ratchet 是審查訊號
 
-`check_ratchet.py` 把七項檢查對照 base，逐個檔案及規則列出計數上升。
+`check_ratchet.py` 把八項檢查對照 base，逐個檔案及規則列出計數上升。
+detector 名稱為 `ruff`、`pyright`、`radon`、`file-size`、`path-correspondence`、
+`test-structure`、`capabilities` 與 `suppressions`。
 驗收看是否新增實質問題，不要求所有指標都不能增加。每項上升都要歸類，交付時列出
 path、detector／rule、before／after、分類及理由。無法判定時交 advisor，不自行忽略。
 
@@ -169,6 +173,13 @@ File-size 對每個檔案只計是否超過 1000 行。超過計 1，否則計 0
 1135 → 1137 是 1 → 1，不新增 regression；998 → 1003 與新檔 1001 行都是 0 → 1。
 恰好 1000 行未超標。`check_file_size.py` 仍列出實際行數，既有 oversize 檔案增長是
 非實質的大小變化，不會增加 file-size 計數。各檔獨立比較，刪除其他檔案不能抵銷新超標。
+
+Radon 對 `lib/` 與 `zcu_lab/` 全部 Python 來源計數，包括 recipes／workflows，
+不含 tests、tools 或 scripts。沿用 repo 掃描器的排除規則，計入 assert，排除 class aggregate。
+每個 CC > 20 的函式、方法或 closure 計 1，rule 為 `cyclomatic-complexity`。
+CC 20 → 21 是 0 → 1；21 → 40 與 40 → 21 都是 1 → 1；21 → 20 是 1 → 0。
+各檔案只比超標函式總數，不追蹤函式身分，也不比較 raw CC 分數。
+未安裝 Radon、讀檔失敗或解析錯誤時 exit 2，不當作零筆。
 
 一般診斷及設定抑制逐個檔案及規則比較。Git 以 20% 相似度確認的 rename 沿用原檔來源；
 其餘新檔從零比較。拆檔只有一個新檔可成為 Git rename，其餘路徑的診斷上升要逐項判讀。
@@ -217,7 +228,7 @@ uv run --no-sync -- python tools/check_ratchet.py --base <ref> --detector pyrigh
 
 ## 檢查項目
 
-`lint-imports` 與 `check_pytest_collection.py` 是獨立的硬性檢查；前者由 `gate.py` 呼叫，後者需另外執行。Ruff、Pyright、file size、test path／structure／capabilities 與 suppressions 等計量項由 `check_ratchet.py` 對照 base 判斷。單獨執行 detector 顯示現況，不代表 regression 驗收。pytest 行為選集仍需另跑。
+`lint-imports` 與 `check_pytest_collection.py` 是獨立的硬性檢查；前者由 `gate.py` 呼叫，後者需另外執行。Ruff、Pyright、Radon、file size、test path／structure／capabilities 與 suppressions 等計量項由 `check_ratchet.py` 對照 base 判斷。單獨執行 detector 顯示現況，不代表 regression 驗收。pytest 行為選集仍需另跑。
 
 實際規則和掃描範圍見 `pyproject.toml`、`.importlinter` 與各 detector。新增 lint 規則與 missing-import 檢查仍由 ratchet 判定；optional profile 未安裝時的 import 診斷保留可見，不為消除診斷而全域關閉 import 檢查。
 

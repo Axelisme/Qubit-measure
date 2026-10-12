@@ -186,6 +186,34 @@ CAYLEY, INVERSE_INDEX = _build_cayley_and_inverse()
 NUM_RECOVERY_SLOTS = 2
 
 
+def _physical_gates(ci: int, phase_axis: int) -> tuple[list[int], int]:
+    """Decompose one Clifford in the incoming virtual-Z frame.
+
+    Return physical pulse IDs and the outgoing frame axis (0..3). Recovery uses
+    the same incoming frame but discards the returned frame at readout.
+    """
+    # fmt: off
+    axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
+    gate_map = {
+        "Id":   (BasicGate.Id,   BasicGate.Id,   BasicGate.Id,   BasicGate.Id),
+        "X90":  (BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90),
+        "X180": (BasicGate.X180, BasicGate.Y180, BasicGate.X180, BasicGate.Y180),
+        "-X90": (BasicGate.MX90, BasicGate.MY90, BasicGate.X90,  BasicGate.Y90),
+        "Y90":  (BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90, BasicGate.X90),
+        "Y180": (BasicGate.Y180, BasicGate.X180, BasicGate.Y180, BasicGate.X180),
+        "-Y90": (BasicGate.MY90, BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90),
+    }
+    # fmt: on
+
+    physical_gates: list[int] = []
+    for gate in CLIFFORD_GROUP[ci]:
+        if gate in gate_map:
+            physical_gates.append(int(gate_map[gate][phase_axis]))
+        else:
+            phase_axis = (phase_axis + axis_map[gate]) % 4
+    return physical_gates, phase_axis
+
+
 def build_seed_program_tables(
     total_clifford_seq: list[int],
     recovery_idx_by_pos: list[int],
@@ -214,31 +242,7 @@ def build_seed_program_tables(
             f"{len(total_clifford_seq)}"
         )
 
-    phase_axis: int = 0
-
-    def convert_gate(gate: GateName) -> BasicGate | None:
-        nonlocal phase_axis
-
-        # fmt: off
-        axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
-        gate_map = {
-            "Id":   (BasicGate.Id,   BasicGate.Id,   BasicGate.Id,   BasicGate.Id),
-            "X90":  (BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90),
-            "X180": (BasicGate.X180, BasicGate.Y180, BasicGate.X180, BasicGate.Y180),
-            "-X90": (BasicGate.MX90, BasicGate.MY90, BasicGate.X90,  BasicGate.Y90),
-            "Y90":  (BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90, BasicGate.X90),
-            "Y180": (BasicGate.Y180, BasicGate.X180, BasicGate.Y180, BasicGate.X180),
-            "-Y90": (BasicGate.MY90, BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90),
-        }
-        # fmt: on
-
-        if gate in gate_map:
-            return gate_map[gate][phase_axis]
-
-        # virtual Z gate
-        phase_axis = (phase_axis + axis_map[gate]) % 4
-
-        return None
+    phase_axis = 0
 
     rand_gate_seq: list[int] = []
     prefix_len_all: list[int] = [0] * (max_depth + 1)
@@ -250,13 +254,7 @@ def build_seed_program_tables(
 
         # Recovery inherits the virtual-Z frame accumulated by the prefix;
         # its own frame advance is discarded (nothing follows before readout).
-        saved_phase = phase_axis
-        recovery_gates: list[int] = []
-        for r_gate in CLIFFORD_GROUP[recovery_idx_by_pos[d]]:
-            basic_gate = convert_gate(r_gate)
-            if basic_gate is not None:
-                recovery_gates.append(int(basic_gate))
-        phase_axis = saved_phase
+        recovery_gates, _ = _physical_gates(recovery_idx_by_pos[d], phase_axis)
 
         if len(recovery_gates) > NUM_RECOVERY_SLOTS:
             raise ValueError(
@@ -269,11 +267,10 @@ def build_seed_program_tables(
             recovery_gate1_all[d] = recovery_gates[1]
 
         if d < max_depth:
-            ci = total_clifford_seq[d]
-            for gate in CLIFFORD_GROUP[ci]:
-                basic_gate = convert_gate(gate)
-                if basic_gate is not None:
-                    rand_gate_seq.append(int(basic_gate))
+            physical_gates, phase_axis = _physical_gates(
+                total_clifford_seq[d], phase_axis
+            )
+            rand_gate_seq.extend(physical_gates)
 
     prefix_len_by_depth: list[int] = []
     recovery_gate0_by_depth: list[int] = []
