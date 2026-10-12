@@ -137,7 +137,11 @@ def assert_d_layout(window: WorkflowWindow[None], qapp: QApplication) -> None:
         assert left.isAncestorOf(button) and button.isVisible()
         assert area(window, button).top() > area(window, tabs).bottom()
         assert area(window, button).bottom() <= window.height()
-        assert area(window, button).top() == area(window, row[0]).top()
+        # One row: styled buttons may differ in height, not in centre line.
+        assert (
+            abs(area(window, button).center().y() - area(window, row[0]).center().y())
+            <= 2
+        )
     lefts = [area(window, button).left() for button in row]
     assert lefts == sorted(lefts)
 

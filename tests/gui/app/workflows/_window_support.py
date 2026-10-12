@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
+from matplotlib.figure import Figure
 from pydantic import Field
 from qtpy.QtWidgets import QApplication, QPushButton, QWidget
 from zcu_tools.datafile import RunSnapshot
@@ -100,7 +101,7 @@ def _init(env: InitEnv[None], plan: Plan) -> State:
 def wide_registration(
     on_point: Callable[[int], None],
 ) -> WorkflowAttachment[Plan, Tunables, State, int, WidePlanForm, WideKnobsForm, None]:
-    """Declare "synthetic_wide": one figure, then on_point before each point.
+    """Declare "synthetic_wide": a live figure and bar, then on_point per point.
 
     on_point receives the point index on the worker; a test may request Pause
     there, and the following wait discards that uncommitted point.
@@ -111,6 +112,13 @@ def wide_registration(
     ) -> Step[State, int]:
         if FIGURE not in env.plots:
             env.plots.subplots(FIGURE)
+
+        def draw(figure: Figure) -> None:
+            figure.clear()
+            figure.subplots().plot(range(len(state.values)), state.values)
+
+        env.plots.draw(FIGURE, draw)
+        env.pbar("points", plan.count).refresh()
         if state.index >= plan.count:
             return Done()
         on_point(state.index)

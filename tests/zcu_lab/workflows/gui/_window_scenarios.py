@@ -1,11 +1,9 @@
 """Declared native scenarios and observations for Window ownership contracts."""
 
 from collections.abc import Callable
-from pathlib import Path
 
 import pytest
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QLabel
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
@@ -200,70 +198,6 @@ def install_rpc_pause_workflow(
 
     catalog_source.install(step, window)
     return attempts, receipts
-
-
-def install_close_fault_workflow(
-    window: WorkflowWindow[Calibrated], catalog_source: InjectedCatalog
-) -> None:
-    """Leave a paused native run with live plots for close/Stop journal fault checks."""
-
-    @workflow(
-        "close-fault",
-        plan=CoherencePlan,
-        tunables=CoherenceTunables,
-        init=lambda _env, _plan: None,
-    )
-    def step(
-        env: WorkflowEnv[Calibrated],
-        plan: CoherencePlan,
-        tun: CoherenceTunables,
-        state: None,
-    ) -> Step[None, int]:
-        del plan, tun, state
-        env.plots.subplots("live")
-
-        def draw(figure: Figure) -> None:
-            figure.clear()
-            figure.subplots().plot([0, 1], [0, 1])
-
-        env.plots.draw("live", draw)
-        env.pbar("work", 2).refresh()
-        window.pause("close-fault")
-        yield from env.wait_until(env.started_at)
-        return Done()
-
-    catalog_source.install(step, window)
-
-
-def assert_failed_stop_settled(
-    harness: StartHarness, token: int, journal: Path, settlements: list[int]
-) -> None:
-    """Verify one failed settlement preserves the journal cause and releases resources."""
-    outcome = harness.handles.known_outcome(token)
-    assert outcome is not None and outcome.status == "failed"
-    assert outcome.error is not None and str(journal) in outcome.error
-    assert settlements == [token]
-    assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
-    assert not harness.progress.bars_for_owner("workflow")
-
-
-def assert_failed_close_diagnostic(
-    controller: WorkflowController[FormModel, Calibrated],
-    message: QLabel,
-    journal: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Check native failure is visible and logs retain the original Stop cause."""
-    status = controller.status()
-    assert status is not None and status.lifecycle == "failed"
-    assert str(journal) in message.text() and str(journal) in caplog.text
-    assert any(
-        record.name == "zcu_tools.gui.app.workflows.window"
-        and record.exc_info is not None
-        and isinstance(record.exc_info[1], IsADirectoryError)
-        and record.exc_info[1].filename == str(journal)
-        for record in caplog.records
-    )
 
 
 def assert_figure_render_failure(

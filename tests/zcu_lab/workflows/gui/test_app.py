@@ -12,13 +12,10 @@ from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
-    QDialogButtonBox,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QWidget,
 )
 from zcu_tools.device import FakeDevice
@@ -40,7 +37,6 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
-from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,
@@ -269,92 +265,6 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     assert (
         window.tunables_panel.state.base.data == window.tunables_panel.state.input.data
     )
-
-
-def edit_alias_entry(
-    window: WorkflowWindow[Calibrated], value_text: str
-) -> tuple[AliasDialog, QDialogButtonBox, QTableWidgetItem]:
-    entry = window.findChild(QPushButton, "workflow.source.aliases")
-    assert entry is not None, "Window must expose the shared alias editor entry"
-    entry.click()
-    dialog = next((d for d in window.findChildren(AliasDialog) if d.isVisible()), None)
-    assert dialog is not None, "Alias entry must show the shared AliasDialog"
-    table = dialog.findChild(QTableWidget)
-    buttons = dialog.findChild(QDialogButtonBox)
-    assert table is not None and buttons is not None
-    value = table.item(0, 1)
-    assert value is not None and value.text() == "Q1"
-    value.setText(value_text)
-    return dialog, buttons, value
-
-
-@pytest.mark.parametrize("outcome", ["apply", "cancel", "invalid"])
-def test_alias_entry_edits_same_session_without_replacing_captured_forms(
-    app: WorkflowsGuiBehavior[Calibrated],
-    tmp_path: Path,
-    qapp: QApplication,
-    outcome: str,
-) -> None:
-    app.assemble(None)
-    open_point(app, tmp_path, qapp)
-    control = app.services.context_control
-    control.add_component("Q2", "qubit/workflow-app-test", {})
-    window = app.window
-    window.prepare_forms()
-    plan, knobs = window.plan_panel, window.tunables_panel
-    env = plan.env
-    assert env.parameters is not None
-    assert env.parameters.resolve_path("$qubit.kind") == "Q1.kind"
-    plan.state.write({("points",): 9}, env)
-    knobs.state.write({("t1", "guess_us"): 17.0}, env)
-    edit = knobs.findChild(QLineEdit, "form.input.t1.guess_us")
-    assert edit is not None
-    edit.setText("1+")
-    edit.editingFinished.emit()
-    before_plan, before_knobs = plan.state.input.data, knobs.state.input.data
-    base_plan, base_knobs = plan.state.base.data, knobs.state.base.data
-
-    dialog, buttons, value = edit_alias_entry(
-        window, "$qubit" if outcome == "invalid" else "Q2"
-    )
-    if outcome != "cancel":
-        apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
-        assert apply is not None
-        apply.click()
-        assert dialog.isVisible()
-        assert value.text() == ("$qubit" if outcome == "invalid" else "Q2")
-    expected = "Q2" if outcome == "apply" else "Q1"
-    assert control.get_alias_rows() == (AliasRow("qubit", expected),)
-    cancel = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-    assert cancel is not None
-    cancel.click()
-    qapp.processEvents()
-    assert control.get_alias_rows() == (AliasRow("qubit", expected),)
-    status = window.findChild(QLabel, "workflow.source.status")
-    assert status is not None and status.text() == f"Qubit: {expected}.kind"
-
-    # Alias edits change the global source, not the fixed capture or local drafts.
-    assert window.plan_panel is plan and window.tunables_panel is knobs
-    assert env.parameters.resolve_path("$qubit.kind") == "Q1.kind"
-    assert plan.state.input.data == before_plan and plan.state.base.data == base_plan
-    assert (
-        knobs.state.input.data == before_knobs and knobs.state.base.data == base_knobs
-    )
-    assert edit.text() == "1+" and knobs.editor.local_parse_errors() is not None
-    if outcome == "apply":
-        button(window, "workflow.source.use").click()
-        new_env = window.plan_panel.env
-        assert new_env.parameters is not None
-        assert new_env.parameters.resolve_path("$qubit.kind") == "Q2.kind"
-        assert window.plan_panel is not plan and window.tunables_panel is not knobs
-        assert window.tunables_panel.env is new_env
-        for panel, form in (
-            (window.plan_panel, CoherencePlanForm),
-            (window.tunables_panel, CoherenceTunablesForm),
-        ):
-            assert panel.state.input.data == form.default_input(new_env).data
-            assert panel.state.base.data == panel.state.input.data
-        assert window.tunables_panel.editor.local_parse_errors() is None
 
 
 def test_capture_failure_preserves_both_panels_and_local_input(

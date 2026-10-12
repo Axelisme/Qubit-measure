@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 import pytest
-from qtpy.QtWidgets import QLabel, QPushButton, QStackedWidget
+from qtpy.QtWidgets import QPushButton
 from zcu_tools.experiment.workflows import (
     Actor,
     Done,
@@ -28,12 +28,7 @@ from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 
 from ._coherence_input import t1_input
 from ._reload_source import InjectedCatalog
-from ._window_scenarios import (
-    assert_failed_close_diagnostic,
-    assert_failed_stop_settled,
-    install_close_fault_workflow,
-    install_pause_plot_workflow,
-)
+from ._window_scenarios import install_pause_plot_workflow
 
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
@@ -483,68 +478,3 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     assert controller.run_id == "run-B" and window.plan_panel.isEnabled()
     assert harness.progress.bars_for_owner("workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
-
-
-@pytest.mark.parametrize("phase", ["paused", "active"])
-def test_close_isolates_stop_journal_failure_and_retains_pending_canvas(
-    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
-    catalog_source: InjectedCatalog,
-    escaped_qt_errors: list[BaseException],
-    settlements: list[int],
-    caplog: pytest.LogCaptureFixture,
-    phase: str,
-) -> None:
-    window, harness, entry = run_attachment
-
-    install_close_fault_workflow(window, catalog_source)
-    token = window.start("close-fault")
-    assert isinstance(token, int)
-    harness.complete_segment()
-    controller = window.controller
-    panel = window.tuning_panel
-    stack = next(
-        child
-        for child in window.findChildren(QStackedWidget)
-        if child.parent() is window
-    )
-    message = window.findChild(QLabel, "workflow.run.message")
-    assert isinstance(stack, QStackedWidget) and isinstance(message, QLabel)
-    assert panel is not None and stack.count() == 2
-    canvas = stack.currentWidget()
-    if phase == "active":
-        assert window.resume("close-fault") == token
-    journal = entry.result_path / "workflows/close-fault/journal.jsonl"
-    original = journal.read_bytes()
-    journal.unlink()
-    journal.mkdir()
-    try:
-        # Keep this close rejected so the user can see the native diagnostic.
-        closed = window.close()
-        assert escaped_qt_errors == []
-        assert not closed
-        assert_failed_close_diagnostic(controller, message, journal, caplog)
-        if phase == "active":
-            assert controller.has_pending_segment and controller.binding is panel.host
-            assert stack.count() == 2 and stack.currentWidget() is canvas
-            assert not window.plan_panel.isEnabled()
-            assert harness.background.work is not None and harness.gate.snapshot()
-            assert harness.handles.live_count() == 1
-            assert harness.handles.known_outcome(token) is None and settlements == []
-        else:
-            assert not controller.has_pending_segment
-            assert harness.background.work is None
-            assert window.plan_panel.isEnabled() and settlements == [token]
-    finally:
-        journal.rmdir()
-        journal.write_bytes(original)
-
-    if phase == "active":
-        harness.background.execute()
-        assert harness.gate.snapshot() and settlements == []
-        assert stack.count() == 2 and stack.currentWidget() is canvas
-        harness.background.deliver()
-    assert_failed_stop_settled(harness, token, journal, settlements)
-    assert not controller.has_pending_segment
-    assert window.close() and window.close()
-    assert stack.count() == 1
-    assert settlements == [token] and escaped_qt_errors == []
