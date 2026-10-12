@@ -103,7 +103,8 @@ class FieldRow:
     field is the displayed FieldView; widget/layout own its Qt row. label is
     the left-aligned name label at the start of the header; its parent sets
     one width for a model level's labels so their controls share a left edge.
-    input is its optional scalar control; mode selects direct/Expr; enabled toggles
+    input is its optional scalar control; mode selects direct/Expr; switch
+    selects Key or Inline on a str-or-model field; enabled toggles
     nullable models; group hosts model children. value/error are public-named
     presentation labels, hidden while empty: value shows only an
     Expression-mode resolved value, error shows below the header. On choice
@@ -136,14 +137,19 @@ class FieldRow:
         self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
         self.mode: QComboBox | None = None
+        self.switch: QComboBox | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
         self.label = _tight_label(field.label, self.widget)
         header.addWidget(self.label)
+        if field.key_or_inline:
+            self._build_switch(header)
         if field.kind == "model":
             self._build_group(header)
+        elif field.kind == "key":
+            self._build_key(header)
         else:
             self._build_input(header)
         if field.unit:
@@ -192,6 +198,45 @@ class FieldRow:
         header.addWidget(fold)
         fold.clicked.connect(lambda: self._fold(fold))
         self.layout.addWidget(self.group)
+
+    def _build_switch(self, header: QHBoxLayout) -> None:
+        # Shares form.mode.<path> with Direct/Expression; data is key/inline.
+        self.switch = QComboBox(self.widget)
+        self.switch.setObjectName(self._name("mode"))
+        self.switch.addItem("Key", "key")
+        self.switch.addItem("Inline", "inline")
+        self.switch.setCurrentIndex(1 if self.field.kind == "model" else 0)
+        self.switch.currentIndexChanged.connect(self._switch_changed)
+        header.addWidget(self.switch)
+
+    def _build_key(self, header: QHBoxLayout) -> None:
+        # A library key is free text; captured keys are suggestions in an
+        # editable combo, so a key outside them stays typeable.
+        widget = make_value_widget(str, "", self.field.options)
+        widget.setParent(self.widget)
+        widget.setObjectName(self._name("input"))
+        if isinstance(widget, QComboBox):
+            widget.setEditable(True)
+            # Take the spare width like a line edit, leaving the switch compact.
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            widget.editTextChanged.connect(self._key_changed)
+        elif isinstance(widget, QLineEdit):
+            widget.setPlaceholderText(self.field.placeholder)
+            widget.textChanged.connect(self._key_changed)
+        self.input = widget
+        header.addWidget(widget)
+
+    def _switch_changed(self, _index: int) -> None:
+        if self._displaying or self.switch is None:
+            return
+        # Each mode starts from its own default; the other mode's value is
+        # never converted: "" is an empty key, {} the inline model defaults.
+        inline = self.switch.currentData() == "inline"
+        self._changed(self.field.path, {} if inline else "")
+
+    def _key_changed(self, text: str) -> None:
+        if not self._displaying:
+            self._changed(self.field.path, text)
 
     def _fold(self, button: QPushButton) -> None:
         if self.group is not None:
@@ -356,8 +401,31 @@ class FieldRow:
         finally:
             self._displaying = False
 
+    def _display_key(self, *, editable: bool) -> None:
+        widget = self.input
+        text = "" if self.field.raw is None else str(self.field.raw)
+        if isinstance(widget, QComboBox):
+            widget.setEnabled(editable)
+            keys = [str(key) for key in self.field.options or ()]
+            if [widget.itemText(index) for index in range(widget.count())] != keys:
+                widget.clear()
+                widget.addItems(keys)
+            # Avoid resetting cursor/selection on unchanged publications.
+            if widget.currentText() != text:
+                widget.setEditText(text)
+        elif isinstance(widget, QLineEdit):
+            widget.setEnabled(editable)
+            if widget.text() != text:
+                widget.setText(text)
+
     def _display_input(self, local: LocalText | None, *, editable: bool) -> None:
         field = self.field
+        if self.switch is not None:
+            self.switch.setCurrentIndex(1 if field.kind == "model" else 0)
+            self.switch.setEnabled(editable)
+        if field.kind == "key":
+            self._display_key(editable=editable)
+            return
         expression = local.expression if local else _expression(field)
         if field.options is not None and not expression:
             self._direct_raw = field.raw

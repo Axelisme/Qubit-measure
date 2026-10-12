@@ -203,7 +203,13 @@ class FormModel(BaseModel):
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
         tags as ordinary JSON values, independent of current choices. Each
         branch reachable through model fields is one concrete model; a named
-        nested union tagged on the same key expands into its members. This
+        nested union tagged on the same key expands into its members. An
+        untagged str-or-model field (str | Model, Model possibly a tagged
+        union) uses the JSON type as its structural selector: its string branch
+        is a plain library key without Expr, and its object branch is the
+        inline model. With a captured library, that string branch's
+        x-form-library-keys lists the library keys whose Spec is one of the
+        field's models; they are suggestions, not choices. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """
@@ -298,6 +304,11 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
+        A str-or-model field takes a string key as an ordinary leaf. Writing {}
+        there switches a key or unfilled value to the inline model's defaults
+        (a tagged inline union starts at its first branch and tag) and leaves
+        an inline object unchanged; the old key is never converted. Other
+        whole objects are model replacement and raise ValueError.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing

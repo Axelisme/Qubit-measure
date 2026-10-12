@@ -41,6 +41,12 @@ class FormEditor[F: FormModel](QWidget):
     the resolved value when it is a current choice, else the last Direct one.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
+    An untagged str-or-model field (a library key or an inline model) has
+    form.mode.<path> with data "key" and "inline" instead: Key mode shows
+    form.input.<path> as a QLineEdit, or an editable QComboBox listing the
+    captured library keys whose Spec matches; Inline mode shows the model's
+    child rows, a tagged union with its selector. Switching writes the new
+    mode's default ("" or {}); the other mode's value is never converted.
     form.enabled.<path> is a nullable-model activation QCheckBox.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
