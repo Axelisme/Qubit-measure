@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，holder admission、明確工作點選取、完整 device setup 與獨立 predictor 查詢
+**Last updated:** 2026-10-13，MCP 組合根、holder admission、明確工作點選取、完整 device setup 與獨立 predictor 查詢
 
 # `zcu_tools/mcp/measure/`
 
