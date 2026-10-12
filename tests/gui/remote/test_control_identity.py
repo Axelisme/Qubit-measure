@@ -71,7 +71,9 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
 
 @pytest.mark.parametrize("dialog_type", [QDialog, QFileDialog, QMessageBox])
 @pytest.mark.parametrize("command", ["connect", "acquire"])
-def test_local_modal_refuses_owner_until_closed(control_rpc, qapp, dialog_type, command):
+def test_local_modal_refuses_owner_until_closed(
+    control_rpc, qapp, dialog_type, command
+):
     h = control_rpc
     link = raw_client(h)
     original = result(h.request(link, "project.info"))
@@ -90,10 +92,16 @@ def test_local_modal_refuses_owner_until_closed(control_rpc, qapp, dialog_type, 
         reason(reply, "local_busy")
         assert reply["error"]["message"] == "Local 使用中"
         assert result(h.request(link, "control.status"))["holder"] == "gui"
-        reason(h.request(link, "project.setup", chip_name="bad", qub_name="bad"), "not_holder")
+        reason(
+            h.request(link, "project.setup", chip_name="bad", qub_name="bad"),
+            "not_holder",
+        )
         assert result(h.request(link, "project.info")) == original
         reader = raw_client(h)
-        assert result(h.request(reader, "control.connect", mode="readonly"))["holder"] == "gui"
+        assert (
+            result(h.request(reader, "control.connect", mode="readonly"))["holder"]
+            == "gui"
+        )
         reason(h.request(reader, "control.acquire"), "readonly_connection")
     finally:
         dialog.reject()
@@ -116,9 +124,13 @@ def test_remote_modal_allows_same_holder_reconnect_and_queries(control_rpc, qapp
     try:
         assert result(h.request(link, "control.connect", label="same"))["me"] is True
         reconnect = raw_client(h)
-        assert result(h.request(reconnect, "control.connect", label="same"))["me"] is True
+        assert (
+            result(h.request(reconnect, "control.connect", label="same"))["me"] is True
+        )
         assert result(h.request(reconnect, "control.acquire"))["me"] is True
-        assert result(h.request(raw_client(h), "control.status"))["holder"] == "rpc:same"
+        assert (
+            result(h.request(raw_client(h), "control.status"))["holder"] == "rpc:same"
+        )
     finally:
         dialog.reject()
 

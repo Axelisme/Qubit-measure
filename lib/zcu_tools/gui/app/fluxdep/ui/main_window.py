@@ -65,15 +65,12 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
-from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    dispose_control_watches as dispose_owned_control_watches,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +97,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._ctrl = ctrl
         self._dialogs = dialog_presenter or QtDialogPresenter()
-        self._edit_gate = RemoteEditGate(ctrl.control_identity, self)
+        self._writable = ctrl.control_identity.status().holder == "gui"
         self._control_disposed = False
         self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
@@ -119,6 +116,24 @@ class MainWindow(QMainWindow):
         self._subscribe_events()
         self._refresh_list()
         self._rebuild_editor()
+        self._dispose_control = ctrl.control_identity.watch(self._refresh_control)
+
+    def _refresh_control(self, status: ControlStatus) -> None:
+        self._indicator.set_status(status)
+        self.set_writable(writable=status.holder == "gui")
+
+    def set_writable(self, *, writable: bool) -> None:
+        """Push Local write availability, preserving canvas and non-writing tabs."""
+        self._writable = writable
+        for control in self._write_controls:
+            control.setEnabled(writable)
+        if isinstance(
+            self._current_editor,
+            (LinePickerWidget, OneToneWidget, FindPointsWidget, ResultPreviewWidget),
+        ):
+            self._current_editor.set_editable(editable=writable)
+        if self._analyze_panel is not None:
+            self._analyze_panel.set_writable(writable=writable)
 
     # --- construction ----------------------------------------------------
 
@@ -142,7 +157,7 @@ class MainWindow(QMainWindow):
         if self._control_disposed:
             return
         self._control_disposed = True
-        dispose_owned_control_watches(self)
+        self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
                 self.dispose_control_watches
@@ -160,7 +175,8 @@ class MainWindow(QMainWindow):
 
         # Left panel: collection management above the list, global actions below.
         left = QVBoxLayout()
-        left.addWidget(ControlIndicator(self._ctrl.control_identity, self))
+        self._indicator = ControlIndicator(self._ctrl.control_identity, self)
+        left.addWidget(self._indicator)
 
         # Above the list: add a raw spectrum / remove this one.
         # Project (chip / qubit names) — drives the default export layout.
@@ -227,7 +243,7 @@ class MainWindow(QMainWindow):
         splitter.setSizes([280, 820])
         root.addWidget(splitter)
         self.setCentralWidget(central)
-        for control in (
+        self._write_controls = (
             self._project_btn,
             self._add_btn,
             self._remove_btn,
@@ -235,8 +251,7 @@ class MainWindow(QMainWindow):
             self._reload_btn,
             self._export_btn,
             self._analyze_btn,
-        ):
-            self._edit_gate.bind(control)
+        )
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
@@ -397,9 +412,7 @@ class MainWindow(QMainWindow):
             widget,
             (LinePickerWidget, OneToneWidget, FindPointsWidget, ResultPreviewWidget),
         ):
-            self._edit_gate.watch(
-                lambda editable: widget.set_editable(editable=editable), lifetime=widget
-            )
+            widget.set_editable(editable=self._writable)
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
@@ -470,6 +483,8 @@ class MainWindow(QMainWindow):
         stage-driven ``_current_editor`` but leaves this panel alive, so its
         tabs / form / database path / figures are preserved across switches.
         """
+        if not self._writable:
+            return
         if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._show_error("No points", "Select points on a spectrum first.")
             return
@@ -481,11 +496,14 @@ class MainWindow(QMainWindow):
         self._clear_editor()
         if self._analyze_panel is None:
             self._analyze_panel = AnalyzePanelWidget(self._ctrl)
+            self._analyze_panel.set_writable(writable=self._writable)
             self._editor_stack.addWidget(self._analyze_panel)
         self._analyze_panel.show_tab(tab or self._analyze_panel.current_tab)
         self._editor_stack.setCurrentWidget(self._analyze_panel)
 
     def _on_load_clicked(self) -> None:
+        if not self._writable:
+            return
         from .load_dialog import LoadSpectrumDialog
         from .paths import raw_spectrum_dir
 
@@ -498,11 +516,7 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        dialog.bind_edit_gate(self._edit_gate)
-
         def _on_accepted() -> None:
-            if self._ctrl.control_identity.status().holder != "gui":
-                return
             req = dialog.result_request()
             if req is None:
                 return
@@ -526,6 +540,8 @@ class MainWindow(QMainWindow):
 
     def _on_reload_clicked(self) -> None:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
+        if not self._writable:
+            return
         from qtpy.QtWidgets import QFileDialog
 
         from .paths import processed_spectrum_dir
@@ -535,8 +551,9 @@ class MainWindow(QMainWindow):
             "Load spectrums.hdf5",
             processed_spectrum_dir(self._ctrl.state.project),
             filter="HDF5 (*.hdf5 *.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if not filepath or self._ctrl.control_identity.status().holder != "gui":
+        if not filepath:
             return
         try:
             names = self._ctrl.load_processed_spectrums(filepath)
@@ -548,6 +565,8 @@ class MainWindow(QMainWindow):
             self._ctrl.set_active_spectrum(names[0])
 
     def _on_remove_clicked(self) -> None:
+        if not self._writable:
+            return
         name = self._ctrl.state.active_spectrum
         if name is None:
             return
@@ -565,6 +584,8 @@ class MainWindow(QMainWindow):
 
     def _on_project_clicked(self) -> None:
         """Edit the project chip/qubit names (and optional roots)."""
+        if not self._writable:
+            return
         from zcu_tools.gui.widgets.project_dialog import ProjectDialog
 
         dialog = ProjectDialog(
@@ -577,11 +598,8 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        dialog.bind_edit_gate(self._edit_gate)
-
         def _on_accepted() -> None:
-            if self._ctrl.control_identity.status().holder == "gui":
-                self._ctrl.setup_project(dialog.result_project())
+            self._ctrl.setup_project(dialog.result_project())
 
         dialog.accepted.connect(_on_accepted)
         # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
@@ -592,6 +610,8 @@ class MainWindow(QMainWindow):
         dialog.open()
 
     def _on_export_clicked(self) -> None:
+        if not self._writable:
+            return
         from .export_dialog import ExportSpectrumsDialog
 
         # The default path comes from the project's result dir (set via Project…);
@@ -602,11 +622,7 @@ class MainWindow(QMainWindow):
         # socket) responsive; the post-accept logic moves onto the accepted signal.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        dialog.bind_edit_gate(self._edit_gate)
-
         def _on_accepted() -> None:
-            if self._ctrl.control_identity.status().holder != "gui":
-                return
             path = dialog.export_path()
             if path is None:
                 return
@@ -681,5 +697,4 @@ class MainWindow(QMainWindow):
         if self._analyze_panel is not None:
             self._analyze_panel.quiesce()
             self._analyze_panel.dispose()
-        self._edit_gate.dispose()
         super().closeEvent(a0)

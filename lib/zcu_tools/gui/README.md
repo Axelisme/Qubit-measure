@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12，holder admission、entry alias 表、shared session owner 與 workflows app
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -48,15 +48,16 @@ The owner loop checks current authority before domain effects. Reads provide
 current data, not per-connection version baselines. Authentication, domain busy,
 result provenance and operation lifetimes remain separate checks.
 
-The indicator shows Local, locked Local or Remote with label and online state.
-Remote gates dedicated editing containers, preserving child busy/valid gates and
-pure viewing. Writable dialogs stay modal with Cancel/Close available; chooser
-and confirmation return paths recheck holder before writes. Close the dialog,
-then click the main-window indicator to reclaim. Only measure's Run and device
-Stop buttons reclaim automatically before requesting cancellation. View owners
-release watches before teardown; persistent hide/reuse dialogs keep their own
-lifetimes. See [ADR-0070](../../../docs/adr/0070-control-identity.md) and
-[remote boundaries](remote/README.md).
+The main window alone observes control identity. Its `set_writable` updates
+write controls and pushes availability into existing and new tabs/views. Domain
+busy/valid gates and pure viewing remain separate. Local modal dialogs refuse
+owner acquisition with `local_busy` and "Local 使用中" on the Qt owner turn.
+Choosers use non-native presentation so Qt can detect them. Dialogs do not
+subscribe to authority or recheck holder after choices. Remote Inspect/Device
+open with static read-only modes. Only Measure Run and device Stop reclaim
+locked Local before requesting cancellation. Main windows dispose their own
+watch on final teardown; domain sessions and background drains retain their
+existing lifetimes. See [ADR-0070](../../../docs/adr/0070-control-identity.md).
 
 ## Remote parameter declarations
 
@@ -218,13 +219,12 @@ Remote control does not change a dialog's modal presentation. Long-running flows
 use `open()` and their owner retains the dialog until accepted/finished cleanup.
 Short-lived modal choices may use a nested event loop, including measure's
 single RunLoadDialog interaction. The global unhandled-exception presenter also
-blocks while the process is crashing. Callers recheck current holder after a
-chooser or confirmation returns, before writing.
+blocks while the process is crashing. Modal owner admission protects Local
+input, including file choosers and confirmations, without dialog control wiring.
 
-RunLoadDialog retires its control watches on finished while content is alive.
-MainWindow rejects it before teardown, and a late file chooser cannot accept a
-new selection. Persistent dialogs that hide and reopen keep their owner lifetime;
-finished is not a universal unsubscribe boundary.
+RunLoadDialog discards further input on finished. MainWindow rejects it before
+teardown, and a late file chooser cannot accept a new selection. Persistent
+dialogs that hide and reopen keep their existing owner lifetime.
 
 Short-lived modal confirmations, error reports, and text prompts are the
 deliberate exception. A synchronous `QMessageBox.question` / `.warning` /

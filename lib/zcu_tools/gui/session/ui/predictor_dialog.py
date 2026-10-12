@@ -38,7 +38,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
 from zcu_tools.gui.session.state import DeviceStatus
@@ -48,11 +47,6 @@ from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshotCodec,
 )
 from zcu_tools.gui.session.ui.predictor_canvas import PredictorCurveCanvas
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-    local_write_allowed,
-)
 from zcu_tools.gui.widgets.spinbox import FiniteFloatSpinBox, TrimDoubleSpinBox
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
@@ -146,9 +140,6 @@ class PredictorDialog(QDialog):
     explicit trials. params optionally prefills complete or partial local inputs.
     Unresolved frequency paths disable calibration without substituting a value.
     persistent_on_close hides instead of finishing, retaining the plotted model.
-    Optional control_identity gates the controls but leaves Close and plots
-    usable. Browse rechecks that owner after the file chooser before trial edits.
-    Omitted authority preserves the behavior of apps without control identity.
     """
 
     state_changed = Signal()
@@ -161,12 +152,10 @@ class PredictorDialog(QDialog):
         device: DeviceControlPort | None = None,
         parameter_provider: Callable[[], ParameterContext | None] | None = None,
         persistent_on_close: bool = False,
-        control_identity: ControlIdentity | None = None,
         params: ModelParams | None = None,
     ) -> None:
         super().__init__(parent)
         self._pred = predictor
-        self._control_identity = control_identity
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
@@ -412,17 +401,6 @@ class PredictorDialog(QDialog):
         close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
         left_layout.addLayout(action_row)
-        for content in (
-            model_group,
-            transitions_group,
-            calibration_group,
-            remove_region,
-        ):
-            bind_control_enabled(
-                content,
-                control_identity,
-                retirement_dialog=None if self._persistent_on_close else self,
-            )
 
         # ── Right: QTabWidget with three canvases ─────────────────────────
         # Frequency, |n|, |phi|. All three share one marker value and one set of
@@ -507,19 +485,6 @@ class PredictorDialog(QDialog):
         )
         self.finished.connect(self._cleanup_subscriptions)
         self.destroyed.connect(self._cleanup_subscriptions)
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def parameters(self) -> ModelParams:
         """Return the selected model's local trial: GHz energies and native affine inputs.
@@ -1650,9 +1615,13 @@ class PredictorDialog(QDialog):
             self._set_status("Live mode keeps model params read-only.", error=False)
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select params.json", "", "JSON files (*.json);;All files (*)"
+            self,
+            "Select params.json",
+            "",
+            "JSON files (*.json);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if not path or not local_write_allowed(self._control_identity):
+        if not path:
             return
         self._params_path_edit.setText(path)
         self._load_params_file(path)

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata、SavedPoint writeback、獨立 predictor 與 Post-Analysis／Analysis 一致的呈現
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -95,20 +95,16 @@ Remote 時只停用寫入區，不停用主 root、tab 檢視與 canvas。每次
 同時套用 holder 和既有 busy/readiness 條件，不因背景事件自動收回。GUI 檢視 tab 不改 Remote
 holder 的 application active tab，關窗先顯示含 holder label 的確認，再沿既有 shutdown 流程。
 
-`gui.widgets.remote_edit_gate` 綁定 owner watch 與 Qt destruction。Setup、Aliases、Predictor、
-ArbWaveform 和巢狀 writeback dialogs 只 gate owner 擁有的內容區與寫入 controls，維持既有
-modal 呈現，Cancel／Close／✕ 可用。關閉後再按主窗燈收回，不因關閉自動轉移 holder。
-Shared dialog 的 optional `control_identity` 指向同一 application owner；未提供時保留其他 app
-既有行為。Static file／text chooser 與 confirmation 不改呈現，返回後、寫入前重查 holder；
-非 Local 時不提交 cfg reset、entry create、predictor trial edits、data load、waveform mutation、
-Inspect Apply／Delete、tab close 或 reload。Inspect Delete 先固定 `ParameterContext`，再以
-`Controller.apply_library_change` 刪除該 target；不因確認期間 context switch 改寫新 point。
-DeviceDialog 與 Inspect 保留只讀瀏覽，分別套用自己的 read-only presentation gate。
-Inspect 將同一 application authority 交給 component tree 與單次 Add dialog。
-Remote 停用 Add 的欄位及提交，Cancel／Close 保持可用。Finished 退休輸入與 watches，
-之後送達的 submit 不因 Local 收回而重新寫入。
-只有量測 Stop 和 device setup Stop
-在 Remote 時收回成 Local locked 並提交 cancellation；收回本身不取消 operation。
+MainWindow 是唯一 Qt authority 訂閱者。`set_writable` 更新主窗與目前 tabs，
+新 tab 建立時套用當下狀態。Tab 與 interactive frontend 只接收可寫狀態。
+Local modal 期間，Qt remote adapter 拒絕 owner 取得，回 `local_busy` 與「Local 使用中」。
+Chooser 使用非 native option。Dialog 不訂閱 control，也不在寫入前重查 holder。
+Inspect 與 Device 的查看入口提供靜態 read-only mode，Inspect 不開放 Add、
+library mutation 或 Arb Waveforms。Inspect Delete 先固定 `ParameterContext`，
+再用 `Controller.apply_library_change` 刪除該 target，不因確認期間 context switch 改寫新 point。
+Add 與 RunLoad 的 finished 仍退休單次輸入，晚到提交不能重新寫入。
+只有量測 Stop 和 device setup Stop 在 Remote 收回 Local locked 並請求 cancellation。
+收回本身不取消 operation。
 Mounted `InteractiveFrontend.set_read_only(read_only=...)` 必須停用 plugin command controls 和
 pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 alignment busy gate。
 

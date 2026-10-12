@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata 與 SavedPoint writeback
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 # gui/session/ — 量測 session core
 
@@ -119,7 +119,7 @@ introduced.
 
 ## 關鍵設計
 
-- **Add dialog authority**：`ComponentTreeWidget` 將 optional application authority 傳給單次 `AddComponentDialog`。None 表示該 app 沒有 control authority，不增加身份 gate，既有 domain／read-only 條件照常。傳入 authority 時，Remote 停用欄位與 Add，Cancel／Close 保持可用。提交讀取當下 holder。Finished 退休輸入與 watches，晚到 submit 不會在 Local 收回後重新寫入。
+- **Add input lifetime**：ComponentTree 的 read-only mode 停用 Add。Local Add dialog 不接 control authority；modal 期間 remote adapter 拒絕 Local 接管。Finished 退休輸入，晚到 submit 不會重新寫入。
 
 - **expected failure逐一opt in**：session service只讓caller可修正的concrete exceptions加入
   `ExpectedError` taxonomy；`OperationConflictError`、context validation、predictor readiness與

@@ -18,11 +18,6 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
-from zcu_tools.gui.control_identity import ControlIdentity
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    RemoteEditGate,
-    local_write_allowed,
-)
 
 
 class RunLoadDialog(QDialog):
@@ -35,11 +30,7 @@ class RunLoadDialog(QDialog):
     Point/experiment filters are exact; time filter matches recorded_at text.
     Rows without data_path remain visible but cannot be loaded. Paths may have
     disappeared; the existing Load owner reports that failure after selection.
-    Optional control_identity gates the owned selection content but not Cancel.
-    File selection rechecks the owner on return; the caller must recheck again
-    before loading. Omitted authority leaves the existing selection behavior.
-    This is a single Load interaction: finished retires its control watches and
-    disconnects child destruction callbacks while the content is still alive.
+    This is a single Load interaction; finished discards further selection input.
     The owning window must reject it before window teardown. The caller reads
     selected_path() after exec() and then schedules this dialog's deleteLater().
     A file chooser returning after retirement cannot accept a new selection.
@@ -52,17 +43,10 @@ class RunLoadDialog(QDialog):
         initial_point: str,
         start_directory: str,
         parent: QWidget | None = None,
-        control_identity: ControlIdentity | None = None,
     ) -> None:
         super().__init__(parent)
         self._runs = runs
-        self._control_identity = control_identity
         self._interaction_finished = False
-        self._edit_gate = (
-            RemoteEditGate(control_identity, self)
-            if control_identity is not None
-            else None
-        )
         self.finished.connect(self._finish_interaction)
         self._visible_runs: tuple[SavedRunInfo, ...] = ()
         self._start_directory = start_directory
@@ -101,9 +85,6 @@ class RunLoadDialog(QDialog):
         command_layout.addWidget(self._load)
         buttons.addWidget(commands)
         buttons.addWidget(cancel)
-        if self._edit_gate is not None:
-            for content in (filters, self._table, commands):
-                self._edit_gate.bind(content)
         layout.addLayout(buttons)
         self._point.currentIndexChanged.connect(self._refresh)
         self._experiment.currentIndexChanged.connect(self._refresh)
@@ -113,8 +94,6 @@ class RunLoadDialog(QDialog):
 
     def _finish_interaction(self) -> None:
         self._interaction_finished = True
-        if self._edit_gate is not None:
-            self._edit_gate.dispose()
 
     def _build_filters(self, initial_point: str) -> QHBoxLayout:
         filters = QHBoxLayout()
@@ -206,11 +185,8 @@ class RunLoadDialog(QDialog):
             "Load native data file",
             self._start_directory,
             "Native HDF5 (*.h5);;All files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if (
-            path
-            and not self._interaction_finished
-            and local_write_allowed(self._control_identity)
-        ):
+        if path and not self._interaction_finished:
             self._selected_path = path
             self.accept()

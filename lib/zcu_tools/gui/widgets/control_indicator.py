@@ -3,7 +3,6 @@
 from qtpy.QtWidgets import QPushButton, QWidget
 
 from zcu_tools.gui.control_identity import ControlIdentity, ControlStatus
-from zcu_tools.gui.widgets.remote_edit_gate import watch_control
 
 
 class ControlIndicator(QPushButton):
@@ -15,18 +14,10 @@ class ControlIndicator(QPushButton):
         super().__init__(parent)
         self.setObjectName("control_indicator")
         self.clicked.connect(authority.toggle_local)
-        self._dispose_control = watch_control(self, authority, self._render)
+        self.set_status(authority.status())
 
-    def dispose_control_watch(self) -> None:
-        """Retire the holder projection before its view owner deletes this lamp."""
-        self._dispose_control()
-
-    def deleteLater(self) -> None:
-        """Retire authority projection before scheduling owner-thread deletion."""
-        self.dispose_control_watch()
-        super().deleteLater()
-
-    def _render(self, status: ControlStatus) -> None:
+    def set_status(self, status: ControlStatus) -> None:
+        """Display the main window's current holder projection."""
         if status.holder == "gui":
             self.setText("Local locked" if status.locked else "Local")
             self.setStyleSheet(

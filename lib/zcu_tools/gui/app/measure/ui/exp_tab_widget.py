@@ -292,6 +292,7 @@ class ExpTabWidget(QWidget):
         self._has_analysis = capabilities.analysis is not AnalysisMode.NONE
         self._has_post = bool(capabilities.post_analysis)
         self._dialog_presenter = dialog_presenter or QtDialogPresenter()
+        self._writable = True
         self._progress_control = ctrl.progress_control
         self._cfg = ctrl.cfg_resources.lookup(tab_id)
         # The action boundary is retained for Reset; button slots close over it.
@@ -889,8 +890,6 @@ class ExpTabWidget(QWidget):
         for index in reversed(range(self._analysis_stack.count())):
             widget = self._analysis_stack.widget(index)
             if isinstance(widget, widget_type):
-                if isinstance(widget, InteractiveFrontend):
-                    widget.dispose_control_watch()
                 self._analysis_stack.removeWidget(widget)
                 widget.deleteLater()
         self._analysis_stack.setCurrentWidget(self._analysis_placeholder)
@@ -1015,7 +1014,7 @@ class ExpTabWidget(QWidget):
             "Reset config to defaults? This discards the current configuration.",
             default=False,
         )
-        if not confirmed or self._ctrl.control_identity.status().holder != "gui":
+        if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
         self._cfg.reset()
@@ -1083,6 +1082,14 @@ class ExpTabWidget(QWidget):
         # Guide
         self._right_stack.setCurrentWidget(self._right_placeholder)
 
+    def set_writable(self, *, writable: bool) -> None:
+        """Receive Local write availability; domain and Stop gates remain separate."""
+        self._writable = writable
+        for frontend in self.findChildren(InteractiveFrontend):
+            frontend.set_read_only(read_only=not writable)
+        if self._actions is not None:
+            self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
+
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
         assert snapshot.interaction is not None
         if snapshot.capabilities is None:
@@ -1096,7 +1103,7 @@ class ExpTabWidget(QWidget):
             )
         state = snapshot.interaction
         capabilities = snapshot.capabilities
-        writable = self._ctrl.control_identity.status().holder == "gui"
+        writable = self._writable
         local_busy = state.is_running or state.is_analyzing
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
         if state.is_running:
@@ -1230,22 +1237,8 @@ class ExpTabWidget(QWidget):
         models = tuple(m for _, m in self._progress_control.progress_bars(self.tab_id))
         self.progress_stack.render_models(models)
 
-    def dispose_control_watches(self) -> None:
-        """Retire mounted authority projections before the view's Qt children."""
-        from zcu_tools.gui.widgets.remote_edit_gate import dispose_control_watches
-
-        dispose_control_watches(self)
-        for frontend in self.findChildren(InteractiveFrontend):
-            frontend.dispose_control_watch()
-
-    def deleteLater(self) -> None:
-        """Retire view watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
-
     def detach(self) -> None:
         """Tear this tab widget down."""
-        self.dispose_control_watches()
         if self._actions is None:
             raise RuntimeError(f"tab {self.tab_id!r} is not attached")
         self.cfg_form.validity_changed.disconnect(self._validity_cb)

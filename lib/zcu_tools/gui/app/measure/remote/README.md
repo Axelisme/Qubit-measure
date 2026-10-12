@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，holder admission、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
+**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -415,3 +415,7 @@ The MCP `connect` tool attaches to an existing GUI or explicitly launches one;
 exiting MCP disconnects without closing the GUI.
 
 Entry open/new leaves point selection empty. Select or create a working point before Run, WB or current-point Inspect writes. Unselected application commands fail with existing failed-precondition categories; wire rejection retains the existing dispatch policy. Selection admits WB but never replaces its captured SavedPoint destination. Cfg/editor drafts and WB proposal previews remain available under their own contracts.
+
+Local modal dialogs refuse owner acquisition with `local_busy` and "Local 使用中".
+Qt app adapters query the active modal on the owner turn; shared control remains
+Qt-free. Readonly and existing Remote holder reconnects keep their contracts.

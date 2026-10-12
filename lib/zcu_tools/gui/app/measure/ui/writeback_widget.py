@@ -34,10 +34,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    bind_control_enabled,
-    dispose_control_watches,
-)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -349,19 +345,6 @@ class WritebackWidget(QWidget):
         self._rows: list[_WritebackRow] = []
 
         self._refresh_apply_enabled()
-
-    def dispose_control_watches(self) -> None:
-        """Retire owned authority projections before final view destruction.
-
-        Hiding a persistent dialog is not retirement. Call on the owner thread
-        before its parent shuts down or schedules the view's Qt deletion.
-        """
-        dispose_control_watches(self)
-
-    def deleteLater(self) -> None:
-        """Release authority watches before direct owner-thread Qt deletion."""
-        self.dispose_control_watches()
-        super().deleteLater()
 
     def show_preview_unavailable(
         self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
@@ -726,10 +709,6 @@ class WritebackWidget(QWidget):
                 logger.exception("failed to edit writeback value %s", item.session_id)
                 QMessageBox.critical(dialog, "Validation Error", str(exc))
 
-        for content in (name_edit, value_edit, save_btn):
-            bind_control_enabled(
-                content, self._ctrl.control_identity, retirement_dialog=dialog
-            )
         save_btn.clicked.connect(save)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
@@ -770,8 +749,6 @@ class WritebackWidget(QWidget):
         layout.addLayout(name_row)
 
         def _commit_name() -> None:
-            if self._ctrl.control_identity.status().holder != "gui":
-                return
             text = name_edit.text().strip()
             if not text:
                 name_edit.setText(item.target_name)  # revert, no blank target
@@ -804,7 +781,7 @@ class WritebackWidget(QWidget):
         scroll.setWidget(form_widget)
         layout.addWidget(scroll, stretch=1)
 
-        self._add_cfg_close_action(dialog, layout, content=(name_edit, scroll))
+        self._add_cfg_close_action(dialog, layout)
 
         def _on_finished(*_: object) -> None:
             try:
@@ -818,14 +795,8 @@ class WritebackWidget(QWidget):
         dialog.finished.connect(_on_finished)
         dialog.open()
 
-    def _add_cfg_close_action(
-        self, dialog: QDialog, layout: QVBoxLayout, *, content: tuple[QWidget, ...]
-    ) -> None:
-        """Gate the editor content while keeping its close action available."""
-        for widget in content:
-            bind_control_enabled(
-                widget, self._ctrl.control_identity, retirement_dialog=dialog
-            )
+    def _add_cfg_close_action(self, dialog: QDialog, layout: QVBoxLayout) -> None:
+        """Append a Close action to the modal editor."""
         button_row = QHBoxLayout()
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)
