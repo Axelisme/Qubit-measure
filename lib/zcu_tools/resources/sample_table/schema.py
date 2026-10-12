@@ -325,6 +325,17 @@ def validate_sample_table_v2(
         )
     dev_values = _coerce_numeric_column(samples, DEV_VALUE_COLUMN)
     _require_finite_non_null(dev_values, column=DEV_VALUE_COLUMN)
+    _require_device_units(samples)
+    if FLUX_COLUMN in samples.columns:
+        _require_finite_where_present(
+            _coerce_numeric_column(samples, FLUX_COLUMN), column=FLUX_COLUMN
+        )
+    if has_int:
+        _require_row_frames(samples)
+
+
+def _require_device_units(samples: pd.DataFrame) -> None:
+    """Require a non-null supported unit for every device-value row."""
     dev_units = samples[DEV_UNIT_COLUMN]
     null_unit_indexes = np.flatnonzero(dev_units.isna().to_numpy()).tolist()
     if null_unit_indexes:
@@ -343,34 +354,33 @@ def validate_sample_table_v2(
             reason="invalid_unit",
             data={"units": invalid_units},
         )
-    if FLUX_COLUMN in samples.columns:
-        _require_finite_where_present(
-            _coerce_numeric_column(samples, FLUX_COLUMN), column=FLUX_COLUMN
+
+
+def _require_row_frames(samples: pd.DataFrame) -> None:
+    """Require paired finite-or-null frame values and positive present periods."""
+    int_values = _coerce_numeric_column(samples, FLUX_INT_COLUMN)
+    period_values = _coerce_numeric_column(samples, FLUX_PERIOD_COLUMN)
+    _require_finite_where_present(int_values, column=FLUX_INT_COLUMN)
+    _require_finite_where_present(period_values, column=FLUX_PERIOD_COLUMN)
+    int_null = np.isnan(int_values)
+    period_null = np.isnan(period_values)
+    mismatched = np.flatnonzero(int_null != period_null).tolist()
+    if mismatched:
+        raise SampleTableV2Error(
+            f"row(s) {mismatched} must have flux_int and flux_period either "
+            "both finite or both null",
+            reason="orphan_frame_column",
+            data={"indexes": mismatched},
         )
-    if has_int:
-        int_values = _coerce_numeric_column(samples, FLUX_INT_COLUMN)
-        period_values = _coerce_numeric_column(samples, FLUX_PERIOD_COLUMN)
-        _require_finite_where_present(int_values, column=FLUX_INT_COLUMN)
-        _require_finite_where_present(period_values, column=FLUX_PERIOD_COLUMN)
-        int_null = np.isnan(int_values)
-        period_null = np.isnan(period_values)
-        mismatched = np.flatnonzero(int_null != period_null).tolist()
-        if mismatched:
-            raise SampleTableV2Error(
-                f"row(s) {mismatched} must have flux_int and flux_period either "
-                "both finite or both null",
-                reason="orphan_frame_column",
-                data={"indexes": mismatched},
-            )
-        nonpositive = np.flatnonzero(
-            ~np.isnan(period_values) & (period_values <= 0)
-        ).tolist()
-        if nonpositive:
-            raise SampleTableV2Error(
-                f"flux_period must be > 0 for row(s) {nonpositive}",
-                reason="invalid_period",
-                data={"indexes": nonpositive},
-            )
+    nonpositive = np.flatnonzero(
+        ~np.isnan(period_values) & (period_values <= 0)
+    ).tolist()
+    if nonpositive:
+        raise SampleTableV2Error(
+            f"flux_period must be > 0 for row(s) {nonpositive}",
+            reason="invalid_period",
+            data={"indexes": nonpositive},
+        )
 
 
 def resolve_sample_flux(
