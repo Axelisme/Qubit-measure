@@ -222,8 +222,8 @@ def test_sampling_finish_and_image_override_use_native_evidence(
             assert reply.data["mask"] == {"pixels": 20, "changes": [0, 0]}
             assert reply.data["can_undo"] is True
     if render_method:
-        assert reply.images[0].data == data
         assert len(reply.images) == 1
+        assert reply.images[0].data == data
         assert client.transport.requests[-1]["method"] == render_method
         assert client.transport.requests[-1]["params"] == {"name": "s"}
     else:
