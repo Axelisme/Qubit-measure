@@ -205,3 +205,27 @@ def test_apply_failure_keeps_input_and_releases_self_publication_guard(
             context.plugin.clear.execute(context.session, None)
     finally:
         owner.dispose()
+
+
+def test_reopened_cloud_backgrounds_follow_replaced_spectrum_signals(
+    cross_controller,
+):
+    from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
+
+    ctrl = cross_controller
+    first = ctrl.interactive.begin_cross_selection()
+    before = {bg.name: bg.real_signals for bg in first.plugin.inputs.backgrounds}
+    ctrl.interactive.cancel()
+    reopened = ctrl.interactive.begin_cross_selection()
+    for background in reopened.plugin.inputs.backgrounds:
+        np.testing.assert_array_equal(background.real_signals, before[background.name])
+    ctrl.interactive.cancel()
+
+    entry = ctrl.state.spectrums["a"]
+    signals = np.arange(15, dtype=np.float64).reshape(5, 3) * (1 + 1j)
+    ctrl.state.put_spectrum(replace(entry, raw={**entry.raw, "signals": signals}))
+    replaced = ctrl.interactive.begin_cross_selection()
+    background = next(bg for bg in replaced.plugin.inputs.backgrounds if bg.name == "a")
+    np.testing.assert_array_equal(
+        background.real_signals, cast2real_and_norm(signals, use_phase=True)
+    )

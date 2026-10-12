@@ -50,6 +50,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
     FluxDepState,
+    SpectrumEntry,
     spectrum_version_key,
 )
 from zcu_tools.gui.app.fluxdep.twotone import TwoTonePickPlugin
@@ -235,6 +236,12 @@ class FluxDepInteractiveOwner:
         self._derive_pointcloud = ports.derive_pointcloud
         self._publish_selection = ports.publish_selection
         self._context: InteractiveContext | None = None
+        # name -> (spectrum version, raw signals, normalized background). Leaving
+        # Filter cancels its context, so each return would otherwise redo the
+        # wavelet normalization of every unchanged spectrum.
+        self._normalized_backgrounds: dict[
+            str, tuple[int, NDArray[np.complex128], NDArray[np.float64]]
+        ] = {}
         self._context_id = 0
         self._next_context_id = 1
         self._context_subscriptions: tuple[Callable[[], None], ...] = ()
@@ -692,9 +699,7 @@ class FluxDepInteractiveOwner:
                 entry.name,
                 entry.raw["fluxs"],
                 entry.raw["freqs"],
-                cast2real_and_norm(
-                    entry.raw["signals"], use_phase=entry.spec_type == "TwoTone"
-                ),
+                self._normalized_background(entry),
             )
             for entry in self._state.spectrums.values()
             if entry.point_count > 0
@@ -708,6 +713,27 @@ class FluxDepInteractiveOwner:
             max(float(freqs.max()), *(float(bg.freqs.max()) for bg in backgrounds)),
         )
         return CrossSelectionInputs(fluxs, freqs, backgrounds, flux_bound, freq_bound)
+
+    def _normalized_background(self, entry: SpectrumEntry) -> NDArray[np.float64]:
+        """Return entry's read-only normalized signals, reused while unchanged.
+
+        A cached result is valid only for the same spectrum version and raw
+        signals object; any republication recomputes it.
+        """
+        version = self._state.version.get(spectrum_version_key(entry.name))
+        signals = entry.raw["signals"]
+        cached = self._normalized_backgrounds.get(entry.name)
+        if cached is not None and cached[0] == version and cached[1] is signals:
+            return cached[2]
+        normalized = cast2real_and_norm(signals, use_phase=entry.spec_type == "TwoTone")
+        normalized.flags.writeable = False
+        self._normalized_backgrounds = {
+            name: item
+            for name, item in self._normalized_backgrounds.items()
+            if name in self._state.spectrums
+        }
+        self._normalized_backgrounds[entry.name] = (version, signals, normalized)
+        return normalized
 
     def current_cross_selection(self) -> CrossSelectionContext | None:
         """Return valid open context or None on owner loop, without starting one.
