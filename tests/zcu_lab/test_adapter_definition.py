@@ -408,7 +408,7 @@ def test_canonical_defaults_resolve_without_md_and_refresh_fixed_alias_sources(
         )
         calibrated = resource.refresh(missing.ref.revision)
         assert resource.snapshot_inputs() == inputs
-        devices = inputs.fields.get("dev")
+        devices = inputs.value.fields.get("dev")
         if isinstance(devices, CfgSectionValue) and any(
             isinstance(value, DirectValue) and value.error is not None
             for value in devices.fields.values()
