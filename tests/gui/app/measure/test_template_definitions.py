@@ -1,5 +1,6 @@
 """Injected definitions drive the existing library creation catalog."""
 
+import pytest
 from zcu_tools import cfg_model
 from zcu_tools.experiment.cfg_editing import PROGRAM_SHAPES
 from zcu_tools.gui.app.measure.specs import MAIN_PROGRAM_SPEC_POLICY
@@ -66,6 +67,42 @@ def test_injected_definitions_provide_module_and_waveform_creation_values() -> N
     assert read_value_path(second.value, "gain") == DirectValue(0.2)
     ramp = catalog.get("ramp").make_value(env)
     assert read_value_path(ramp.value, "length") == EvalValue("$resonator.length")
+
+
+@pytest.mark.parametrize("option", ["copy", "set", "lock", "fallback"])
+def test_form_only_slot_options_fail_at_catalog_registration(option: str) -> None:
+    slots = {
+        "copy": cfg_model.Slot("$qubit.module.x90", copy=True),
+        "set": cfg_model.Slot("$qubit.module.x90", set={"gain": 0.2}),
+        "lock": cfg_model.Slot("$qubit.module.x90", lock={"ch": 0}),
+        "fallback": cfg_model.Slot(
+            "$qubit.module.x90", fallback=cfg_model.Template("drive")
+        ),
+    }
+    catalog = TemplateCatalog()
+    with pytest.raises(TypeError, match="Slot\\(path\\)"):
+        catalog.register_definitions(
+            {
+                "reset": cfg_model.TemplateDef(
+                    cfg_model.BathResetSpec, "Reset", {"pi2_cfg": slots[option]}
+                )
+            }
+        )
+    assert not catalog.has("reset")
+
+
+def test_slot_seed_requires_a_reference_field() -> None:
+    catalog = TemplateCatalog()
+    with pytest.raises(TypeError, match="reference"):
+        catalog.register_definitions(
+            {
+                "drive": cfg_model.TemplateDef(
+                    cfg_model.PulseSpec,
+                    "Drive",
+                    {"freq": cfg_model.Slot("$qubit.module.x90")},
+                )
+            }
+        )
 
 
 def test_empty_seeds_keep_structural_blank_defaults_and_no_name_suggestion() -> None:
