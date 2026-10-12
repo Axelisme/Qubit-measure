@@ -37,7 +37,6 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
-    h_resources_versions,
 )
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
@@ -81,6 +80,14 @@ from .interactive import (
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
+
+
+def _h_resources_versions(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return {"versions": adapter.ctrl.state.resource_versions()}
+
 
 # Precise per-app handler alias (assignable to the shared, unconstrained
 # ``method_spec.Handler``): every handler takes this app's RemoteControlAdapter.
@@ -325,7 +332,10 @@ def _h_fit_result(
                 for item in recorded.per_transition
             ],
         }
+    reasons = adapter.ctrl.state.fit_stale_reasons
     return {
+        "stale": bool(reasons),
+        "stale_reasons": reasons,
         "quality": quality,
         "has_result": fit.has_result,
         "params": params_payload,
@@ -607,7 +617,7 @@ _HANDLERS: dict[str, Handler] = {
     "operation.await": _h_operation_await,
     "export.spectrums": _h_export_spectrums,
     "fit.export_params": _h_fit_export_params,
-    "resources.versions": h_resources_versions,
+    "resources.versions": _h_resources_versions,
     "state.check": _h_state_check,
 }
 

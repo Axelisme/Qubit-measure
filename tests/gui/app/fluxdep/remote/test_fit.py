@@ -11,15 +11,15 @@ import numpy as np
 import pytest
 from PIL import Image
 from zcu_tools.analysis.fluxdep.models import PointsData
-from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, SpectrumEntry
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
     SearchQuality,
     TransitionResidual,
 )
+from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, SpectrumEntry
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -51,11 +51,15 @@ def _source(name: str) -> SpectrumEntry:
         name=name,
         spec_type="OneTone",
         raw=SpectrumData(
-            dev_values=axis.copy(), fluxs=axis.copy(), freqs=axis.copy(),
+            dev_values=axis.copy(),
+            fluxs=axis.copy(),
+            freqs=axis.copy(),
             signals=np.ones((3, 3), dtype=np.complex128),
         ),
         points=PointsData(
-            dev_values=np.empty(0), fluxs=np.empty(0), freqs=np.empty(0),
+            dev_values=np.empty(0),
+            fluxs=np.empty(0),
+            freqs=np.empty(0),
         ),
         aligned=True,
         points_completed=True,
@@ -74,18 +78,29 @@ def _source(name: str) -> SpectrumEntry:
     ],
 )
 def test_upstream_publication_retains_fit_marks_stale_and_refuses_export(
-    route_harness: RouteHarness, tmp_path: Path, change: str, reason: str,
+    route_harness: RouteHarness,
+    tmp_path: Path,
+    change: str,
+    reason: str,
 ) -> None:
     state = route_harness.ctrl.state
     state.put_spectrum(_source("empty"))
     state.set_fit_result((3.0, 0.8, 0.5))
     match change:
         case "align":
-            state.set_alignment("empty", AlignmentPublication(0.1, 0.6, 1.0),
-                                np.array([0.1, 0.6, 1.1]), np.empty(0))
+            state.set_alignment(
+                "empty",
+                AlignmentPublication(0.1, 0.6, 1.0),
+                np.array([0.1, 0.6, 1.1]),
+                np.empty(0),
+            )
         case "points":
-            state.set_points("empty", PointsData(dev_values=np.empty(0),
-                             fluxs=np.empty(0), freqs=np.empty(0)))
+            state.set_points(
+                "empty",
+                PointsData(
+                    dev_values=np.empty(0), fluxs=np.empty(0), freqs=np.empty(0)
+                ),
+            )
         case "filter":
             state.set_selection(np.empty(0, dtype=np.bool_))
         case "add":

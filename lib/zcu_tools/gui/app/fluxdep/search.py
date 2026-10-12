@@ -12,12 +12,8 @@ from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, SearchCancel
 from zcu_tools.gui.app.fluxdep.event_bus import EventBus, SearchChangedPayload
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
 from zcu_tools.gui.app.fluxdep.state import (
-    FIT_VERSION_KEY,
     PROJECT_VERSION_KEY,
-    SELECTION_VERSION_KEY,
-    SPECTRUM_SET_VERSION_KEY,
     FluxDepState,
-    spectrum_version_key,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.operation_handles import (
@@ -167,14 +163,10 @@ class FluxDepSearchOwner:
         if self._progress_control is None:
             raise RuntimeError("search progress service is unavailable")
         inputs = self._fit.capture_search()
-        keys = (
-            PROJECT_VERSION_KEY,
-            FIT_VERSION_KEY,
-            SELECTION_VERSION_KEY,
-            SPECTRUM_SET_VERSION_KEY,
-            *(spectrum_version_key(name) for name in self._state.spectrums),
+        dependencies = (
+            (PROJECT_VERSION_KEY, self._state.version.get(PROJECT_VERSION_KEY)),
+            *((stage.version_key, stage.version) for stage in inputs.stages),
         )
-        dependencies = tuple((key, self._state.version.get(key)) for key in keys)
         stop = Event()
 
         def work(factory: PbarFactory | None) -> DatabaseSearchResult:

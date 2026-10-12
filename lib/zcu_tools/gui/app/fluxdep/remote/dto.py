@@ -297,6 +297,10 @@ class FitResultReply(TypedDict):
     r_f/sample_f are separate optional GHz inputs, None when unset.
     """
 
+    # True when recorded search input versions changed; absent result is fresh.
+    stale: bool
+    # Ordered root-change descriptions from the app dependency graph.
+    stale_reasons: list[str]
     # None when no full kernel search result has been recorded.
     quality: FitQualityReply | None
     has_result: bool

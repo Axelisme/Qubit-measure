@@ -37,7 +37,11 @@ from zcu_tools.analysis.fluxdep.search_models import (
     transition_requires_levels,
     validate_transition_levels,
 )
-from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
+from zcu_tools.gui.app.fluxdep.state import (
+    FluxDepState,
+    PipelineStage,
+    transitions_with_freqs,
+)
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
@@ -76,6 +80,8 @@ class SearchInput:
     freqs: NDArray[np.float64]
     transitions: TransitionDict
     bounds: ParamBounds
+    # Owner-captured dependency graph/counters, including zero-point sources.
+    stages: tuple[PipelineStage, ...]
 
 
 class FitService:
@@ -174,6 +180,7 @@ class FitService:
                 transitions_with_freqs(fit.transitions, fit.r_f, fit.sample_f)
             ),
             bounds=ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
+            stages=self._state.pipeline_snapshot(),
         )
 
     def compute_search(
@@ -241,6 +248,13 @@ class FitService:
             raise FailedPreconditionError(
                 "no fit result to export (run search first)",
                 reason_code="no_fit_result",
+            )
+
+        reasons = self._state.fit_stale_reasons
+        if reasons:
+            raise FailedPreconditionError(
+                f"fit is stale: {'; '.join(reasons)}",
+                reason_code="fit_stale",
             )
 
         aligned = next((e for e in self._state.spectrums.values() if e.aligned), None)
