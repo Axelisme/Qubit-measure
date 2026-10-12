@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from zcu_tools.analysis.fluxdep.onetone import (
+    THRESHOLD_MAX,
+    THRESHOLD_MIN,
     OneToneInputs,
     OneTonePickResult,
     OneTonePickState,
@@ -38,7 +40,14 @@ class OneTonePickPlugin(PluginDefinition[OneTonePickState, OneTonePickResult]):
         Finish builds native device/GHz points, including an empty selection.
         """
         seed = pick_onetone_state(inputs, threshold)
-        threshold_params = (ParamSpec("threshold", JsonType.NUMBER),)
+        threshold_params = (
+            ParamSpec(
+                "threshold",
+                JsonType.NUMBER,
+                minimum=THRESHOLD_MIN,
+                maximum=THRESHOLD_MAX,
+            ),
+        )
 
         def calculate(_state: OneTonePickState, value: float) -> OneTonePickState:
             try:

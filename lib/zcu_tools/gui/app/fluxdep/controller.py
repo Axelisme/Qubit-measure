@@ -16,8 +16,8 @@ import logging
 from collections.abc import Callable
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
@@ -41,11 +41,11 @@ from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
-from zcu_tools.gui.app.fluxdep.services.viz import render_fit_result
+from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, render_fit_result
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.control_identity import ControlIdentity
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.controller_base import BaseController
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -250,8 +250,12 @@ class Controller(BaseController[FluxDepState, EventBus]):
         return self._fit.selected_pointcloud()
 
     def render_fit(
-        self, figure: Figure, *, xlim: tuple[float, float] | None = None,
-        ylim: tuple[float, float] | None = None, show_const_freq: bool = True,
+        self,
+        figure: Figure,
+        *,
+        xlim: tuple[float, float] | None = None,
+        ylim: tuple[float, float] | None = None,
+        show_const_freq: bool = True,
         plot_transitions: TransitionDict | None = None,
     ) -> None:
         """Draw the native Show overlay into caller-owned figure on owner thread.
@@ -266,11 +270,17 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self.state.assert_owner_thread()
         fit = self.state.fit
         if fit.params is None:
-            raise FailedPreconditionError("no fit result to render", reason_code="no_fit_result")
+            raise FailedPreconditionError(
+                "no fit result to render", reason_code="no_fit_result"
+            )
         fluxs, freqs = self.selected_pointcloud()
-        render_fit_result(figure, fit, self.state.spectrums, fluxs, freqs,
-                          xlim=xlim, ylim=ylim, show_const_freq=show_const_freq,
-                          plot_transitions=plot_transitions)
+        display = FitDisplay(
+            xlim=xlim,
+            ylim=ylim,
+            show_const_freq=show_const_freq,
+            plot_transitions=plot_transitions,
+        )
+        render_fit_result(figure, fit, self.state.spectrums, fluxs, freqs, display)
 
     def capture_search(self) -> SearchInput:
         """Capture detached search inputs on State's owner; invalid inputs raise."""

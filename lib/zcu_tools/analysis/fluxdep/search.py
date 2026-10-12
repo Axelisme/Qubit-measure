@@ -49,19 +49,41 @@ def database_info(path: str) -> DatabaseInfo:
         flux_table = database["fluxs" if "fluxs" in database else "flxs"]
         param_table = database["params"]
         energy_table = database["energies"]
-        if not isinstance(flux_table, Dataset) or not isinstance(param_table, Dataset) or not isinstance(energy_table, Dataset):
+        if (
+            not isinstance(flux_table, Dataset)
+            or not isinstance(param_table, Dataset)
+            or not isinstance(energy_table, Dataset)
+        ):
             raise ValueError("database tables must be datasets")
         fluxs = np.asarray(flux_table, dtype=np.float64)
         params = np.asarray(param_table, dtype=np.float64)
         shape = energy_table.shape
-        if (fluxs.ndim != 1 or fluxs.size == 0 or params.ndim != 2
-            or params.shape[1] != 3 or params.shape[0] == 0 or len(shape) != 3
-            or shape[:2] != (params.shape[0], fluxs.size) or shape[2] < 1
-            or not np.all(np.isfinite(fluxs)) or not np.all(np.isfinite(params))):
+        if (
+            fluxs.ndim != 1
+            or fluxs.size == 0
+            or params.ndim != 2
+            or params.shape[1] != 3
+            or params.shape[0] == 0
+            or len(shape) != 3
+            or shape[:2] != (params.shape[0], fluxs.size)
+            or shape[2] < 1
+            or not np.all(np.isfinite(fluxs))
+            or not np.all(np.isfinite(params))
+        ):
             raise ValueError("invalid database dimensions or parameter values")
-        ranges = [(float(np.min(params[:, index])), float(np.max(params[:, index]))) for index in range(3)]
-        return DatabaseInfo(path, shape[0], shape[2], ranges[0], ranges[1], ranges[2],
-                            (float(np.min(fluxs)), float(np.max(fluxs))))
+        ranges = [
+            (float(np.min(params[:, index])), float(np.max(params[:, index])))
+            for index in range(3)
+        ]
+        return DatabaseInfo(
+            path,
+            shape[0],
+            shape[2],
+            ranges[0],
+            ranges[1],
+            ranges[2],
+            (float(np.min(fluxs)), float(np.max(fluxs))),
+        )
 
 
 class SearchCancelled(RuntimeError):

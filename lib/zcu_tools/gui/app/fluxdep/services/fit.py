@@ -29,13 +29,16 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
-    database_info,
     SearchExecution,
+    database_info,
     search_database,
+)
+from zcu_tools.analysis.fluxdep.search_models import (
+    transition_requires_levels,
+    validate_transition_levels,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.analysis.fluxdep.search_models import transition_requires_levels, validate_transition_levels
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -110,9 +113,7 @@ class FitService:
                 validate_transition_levels(transitions, levels)
             except ValueError as exc:
                 raise InvalidInputError(str(exc)) from exc
-        self._state.set_fit_params(
-            search_db, EJb, ECb, ELb, transitions, r_f, sample_f
-        )
+        self._state.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
 
     # --- derived ---------------------------------------------------------
 

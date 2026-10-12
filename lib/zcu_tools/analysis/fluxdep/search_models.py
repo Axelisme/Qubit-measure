@@ -66,7 +66,12 @@ def transition_requires_levels(transitions: TransitionDict) -> bool:
             continue
         prefix = "transitions" if name.startswith("transitions") else "mirror"
         suffix = name.removeprefix(prefix)
-        if not suffix.isascii() or not suffix.isdecimal() or int(suffix) < 2 or str(int(suffix)) != suffix:
+        if (
+            not suffix.isascii()
+            or not suffix.isdecimal()
+            or int(suffix) < 2
+            or str(int(suffix)) != suffix
+        ):
             raise ValueError(f"unknown transition category: {name!r}")
         needs_levels = True
     return needs_levels
@@ -86,10 +91,16 @@ def validate_transition_levels(transitions: TransitionDict, levels: int) -> None
         if name in ("r_f", "sample_f"):
             continue
         if name not in allowed:
-            raise ValueError(f"transition category {name!r} exceeds database levels {levels}")
+            raise ValueError(
+                f"transition category {name!r} exceeds database levels {levels}"
+            )
+        if not isinstance(pairs, list):
+            raise ValueError(f"transition category {name!r} must contain level pairs")
         for i, j in pairs:
             if not 0 <= i < levels or not 0 <= j < levels:
-                raise ValueError(f"transition {name!r} pair {(i, j)} must use levels 0..{levels - 1}")
+                raise ValueError(
+                    f"transition {name!r} pair {(i, j)} must use levels 0..{levels - 1}"
+                )
 
 
 def transition_labels(transitions: TransitionDict, levels: int) -> tuple[str, ...]:

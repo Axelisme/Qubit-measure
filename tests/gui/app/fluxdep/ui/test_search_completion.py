@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
+
 from io import BytesIO
 
 import numpy as np
@@ -14,7 +16,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
-    DatabaseSearchResult,
     ParamBounds,
     SearchExecution,
 )
@@ -30,7 +31,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 
 
 @pytest.fixture
-def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
+def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch):
     runner = BackgroundRunner()
     transport = QtProgressTransport()
     ctrl = Controller(
@@ -41,11 +42,9 @@ def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
-    db_path = tmp_path / "database.h5"
-    db_path.touch()
     bounds = ParamBounds(EJ=(2.0, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0))
     ctrl.set_fit_params(
-        str(db_path),
+        search_database_hdf5,
         bounds.EJ,
         bounds.EC,
         bounds.EL,
@@ -53,18 +52,7 @@ def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
         None,
         None,
     )
-    result = DatabaseSearchResult(
-        params=(5.0, 1.0, 0.5),
-        best_distance=0.1,
-        best_scale=1.0,
-        best_index=0,
-        entry_results=np.array([[0.1, 1.0]]),
-        entry_params=np.array([[5.0, 1.0, 0.5]]),
-        fluxs=np.array([0.0, 0.1]),
-        freqs=np.array([5.0, 5.1]),
-        predicted_freqs=np.array([5.0, 5.1]),
-        bounds=bounds,
-    )
+    result = perfect_fit_result(np.array([0.0, 0.1]), np.array([5.0, 5.1]), bounds)
     if failure == "submit":
 
         def fail_submit(*args, **kwargs):
@@ -79,7 +67,7 @@ def search_input(qapp, tmp_path, spectrum_hdf5, failure, monkeypatch):
 
 @pytest.fixture
 def completed_search(qapp, search_input, monkeypatch, failure):
-    from zcu_tools.gui.app.fluxdep.services import fit
+    from zcu_tools.gui.app.fluxdep.services import fit, viz
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
     ctrl, result, runner = search_input
@@ -120,12 +108,12 @@ def completed_search(qapp, search_input, monkeypatch, failure):
     monkeypatch.setattr(analyze_panel, "make_search_diagnostic_figure", build)
     monkeypatch.setattr(analyze_panel.QtPlotHost, "present", present)
     monkeypatch.setattr(
-        analyze_panel,
+        viz,
         "calculate_energy_vs_flux",
         lambda *args, **kwargs: (None, np.zeros((1000, 15))),
     )
     monkeypatch.setattr(
-        analyze_panel, "render_fit_figure", lambda *args, **kwargs: None
+        viz, "render_fit_figure", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
         QMessageBox,

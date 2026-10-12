@@ -12,7 +12,22 @@ from zcu_tools.utils.process import SmoothMethod
 
 from .line_state import FluxPickInputs
 from .processing import cast2real_and_norm, spectrum2d_findpoint
-from .stroke import BrushMode, BrushPoint, BrushStroke, BrushTool, apply_mask_stroke
+from .stroke import (
+    BRUSH_WIDTH_MAX,
+    BRUSH_WIDTH_MIN,
+    BrushMode,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+    apply_mask_stroke,
+)
+
+# Inclusive dimensionless detector limits; Gaussian smoothing needs nonzero sigma.
+THRESHOLD_MIN = 1.0
+THRESHOLD_MAX = 20.0
+SIGMA_MIN = 0.0
+SIGMA_MAX = 5.0
+GAUSSIAN_SIGMA_MIN = 0.001
 
 
 @dataclass(frozen=True)
@@ -199,7 +214,7 @@ def stroke_twotone_state(
     Validate the complete sampling budget before painting. Return detached
     state; ValueError leaves state/inputs unchanged for every invalid gesture.
     """
-    _number(params.width, "width", 0, 0.1)
+    _number(params.width, "width", BRUSH_WIDTH_MIN, BRUSH_WIDTH_MAX)
     if params.mode not in ("select", "erase"):
         raise ValueError("mode must be select or erase")
     candidate = set_twotone_tool(inputs, state, BrushTool(params.width, params.mode))
@@ -340,10 +355,15 @@ def _number(value: object, name: str, lower: float, upper: float) -> None:
 
 
 def _validate_detector(threshold: float, sigma: float, method: SmoothMethod) -> None:
-    _number(threshold, "threshold", 1, 20)
+    _number(threshold, "threshold", THRESHOLD_MIN, THRESHOLD_MAX)
     if method not in ("wavelet", "gaussian"):
         raise ValueError("smooth_method must be wavelet or gaussian")
-    _number(sigma, "sigma", 0.001 if method == "gaussian" else 0, 5)
+    _number(
+        sigma,
+        "sigma",
+        GAUSSIAN_SIGMA_MIN if method == "gaussian" else SIGMA_MIN,
+        SIGMA_MAX,
+    )
 
 
 def _validate_vertices(vertices: tuple[BrushPoint, ...]) -> None:
@@ -372,14 +392,14 @@ def _validate_state(inputs: TwoToneInputs, state: TwoTonePickState) -> None:
 
     validate_mask(state.mask)
     _validate_detector(state.threshold, state.sigma, state.smooth_method)
-    _number(state.width, "width", 0, 0.1)
+    _number(state.width, "width", BRUSH_WIDTH_MIN, BRUSH_WIDTH_MAX)
     if state.mode not in ("select", "erase"):
         raise ValueError("mode must be select or erase")
     if state.last_change is not None:
         change = state.last_change
         validate_mask(change.mask)
         _validate_detector(change.threshold, change.sigma, change.smooth_method)
-        _number(change.width, "width", 0, 0.1)
+        _number(change.width, "width", BRUSH_WIDTH_MIN, BRUSH_WIDTH_MAX)
         if change.vertices:
             _validate_vertices(change.vertices)
 

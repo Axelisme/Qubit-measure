@@ -27,17 +27,26 @@ def search_db(tmp_path: Path) -> str:
     return str(path)
 
 
+def _png_data(figure: object) -> bytes:
+    assert isinstance(figure, dict)
+    encoded = figure["png_b64"]
+    assert isinstance(encoded, str)
+    data = base64.b64decode(encoded, validate=True)
+    assert figure["bytes"] == len(data)
+    return data
+
+
 def test_fit_render_returns_png_at_shared_geometry(
     route_harness: RouteHarness,
 ) -> None:
-    route_harness.ctrl.state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {"transitions": [(0, 1)]}, None, None)
+    route_harness.ctrl.state.set_fit_params(
+        "", (2, 15), (0.2, 2), (0.1, 2), {"transitions": [(0, 1)]}, None, None
+    )
     route_harness.ctrl.state.set_fit_result((3.0, 0.8, 0.5))
     reply = route_harness.request(route_harness.client(), "fit.render")
     assert reply["ok"]
     assert "result" in reply
-    figure = reply["result"]["figure"]
-    data = base64.b64decode(figure["png_b64"], validate=True)
-    assert figure["bytes"] == len(data)
+    data = _png_data(reply["result"]["figure"])
     with Image.open(io.BytesIO(data)) as image:
         assert image.format == "PNG"
         assert image.size == (640, 480)
@@ -53,15 +62,23 @@ def test_fit_render_without_result_is_a_precondition_failure(
 
 
 def test_database_info_reports_native_ranges_without_changing_fit(
-    route_harness: RouteHarness, search_db: str,
+    route_harness: RouteHarness,
+    search_db: str,
 ) -> None:
     initial = route_harness.ctrl.state.fit
-    reply = route_harness.request(route_harness.client(), "fit.database_info", path=search_db)
+    reply = route_harness.request(
+        route_harness.client(), "fit.database_info", path=search_db
+    )
     assert reply["ok"]
     assert "result" in reply
     assert reply["result"] == {
-        "path": search_db, "entries": 2, "levels": 4,
-        "EJ": [3.0, 9.5], "EC": [0.2, 2.0], "EL": [0.1, 1.5], "flux": [0.0, 1.0],
+        "path": search_db,
+        "entries": 2,
+        "levels": 4,
+        "EJ": [3.0, 9.5],
+        "EC": [0.2, 2.0],
+        "EL": [0.1, 1.5],
+        "flux": [0.0, 1.0],
     }
     assert route_harness.ctrl.state.fit is initial
 
@@ -79,7 +96,8 @@ def _inputs(db_path: str, **overrides: object) -> dict[str, object]:
 
 
 def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_search(
-    route_harness: RouteHarness, search_db: str,
+    route_harness: RouteHarness,
+    search_db: str,
 ) -> None:
     client = route_harness.client()
     state = route_harness.ctrl.state
@@ -95,7 +113,8 @@ def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_searc
         assert read["ok"]
         assert "result" in read
         assert read["result"]["params"] == {"EJ": 5.0, "EC": 1.0, "EL": 0.5}
-        inputs = _inputs(search_db,
+        inputs = _inputs(
+            search_db,
             transitions={"mirror": [[0, 3]], "r_f": 6, "sample_f": 7.5},
             r_f=8,
             sample_f=9,
@@ -176,13 +195,16 @@ def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_searc
     ],
 )
 def test_nested_fit_admission_fails_before_publication(
-    route_harness: RouteHarness, search_db: str,
+    route_harness: RouteHarness,
+    search_db: str,
     overrides: dict[str, object],
 ) -> None:
     client = route_harness.client()
     assert route_harness.request(client, "fit.result")["ok"]
     initial = route_harness.ctrl.state.fit
-    reply = route_harness.request(client, "fit.set_params", **_inputs(search_db, **overrides))
+    reply = route_harness.request(
+        client, "fit.set_params", **_inputs(search_db, **overrides)
+    )
     assert not reply["ok"]
     assert "error" in reply
     assert reply["error"]["code"] == "invalid_params"
@@ -203,30 +225,47 @@ def test_nested_fit_admission_fails_before_publication(
     ],
 )
 def test_top_level_fit_admission_uses_shared_param_validation(
-    route_harness: RouteHarness, search_db: str,
+    route_harness: RouteHarness,
+    search_db: str,
     overrides: dict[str, object],
 ) -> None:
     client = route_harness.client()
     assert route_harness.request(client, "fit.result")["ok"]
     initial = route_harness.ctrl.state.fit
     with pytest.raises(RemoteError) as caught:
-        route_harness.request(client, "fit.set_params", **_inputs(search_db, **overrides))
+        route_harness.request(
+            client, "fit.set_params", **_inputs(search_db, **overrides)
+        )
     assert caught.value.code is ErrorCode.INVALID_PARAMS
     assert route_harness.ctrl.state.fit is initial
     assert route_harness.ctrl.state.version.get("fit") == 0
 
 
-@pytest.mark.parametrize("transitions", [
-    {"transitons": []}, {"transitions1": []}, {"mirror01": []},
-    {"transitions": [[-1, 1]]}, {"transitions": [[0, 4]]},
-    {"mirror4": []}, {"transitions4": [[0, 1]]},
-])
+@pytest.mark.parametrize(
+    "transitions",
+    [
+        {"transitons": []},
+        {"transitions1": []},
+        {"mirror01": []},
+        {"transitions": [[-1, 1]]},
+        {"transitions": [[0, 4]]},
+        {"mirror4": []},
+        {"transitions4": [[0, 1]]},
+    ],
+)
 def test_transition_rejection_does_not_publish(
-    route_harness: RouteHarness, search_db: str, transitions: dict[str, object],
+    route_harness: RouteHarness,
+    search_db: str,
+    transitions: dict[str, object],
 ) -> None:
     client = route_harness.client()
     initial = route_harness.ctrl.state.fit
-    reply = route_harness.request(client, "fit.set_params", database_path=search_db, **_inputs(search_db, transitions=transitions))
+    reply = route_harness.request(
+        client,
+        "fit.set_params",
+        database_path=search_db,
+        **_inputs(search_db, transitions=transitions),
+    )
     assert not reply["ok"]
     assert "error" in reply
     assert reply["error"]["code"] == "invalid_params"
@@ -234,18 +273,26 @@ def test_transition_rejection_does_not_publish(
     assert route_harness.ctrl.state.version.get("fit") == 0
 
 
-@pytest.mark.parametrize("transitions,code", [
-    ({}, None), ({"transitions": [], "mirror": []}, None),
-    ({"transitons": []}, "invalid_params"),
-    ({"transitions2": []}, "controller_error"),
-    ({"transitions": [[0, 1]]}, "controller_error"),
-])
+@pytest.mark.parametrize(
+    "transitions,code",
+    [
+        ({}, None),
+        ({"transitions": [], "mirror": []}, None),
+        ({"transitons": []}, "invalid_params"),
+        ({"transitions2": []}, "controller_error"),
+        ({"transitions": [[0, 1]]}, "controller_error"),
+    ],
+)
 def test_database_is_read_only_when_validation_needs_levels(
-    route_harness: RouteHarness, tmp_path: Path, transitions: dict[str, object], code: str | None,
+    route_harness: RouteHarness,
+    tmp_path: Path,
+    transitions: dict[str, object],
+    code: str | None,
 ) -> None:
     initial = route_harness.ctrl.state.fit
     reply = route_harness.request(
-        route_harness.client(), "fit.set_params",
+        route_harness.client(),
+        "fit.set_params",
         database_path=str(tmp_path / "missing.h5"),
         **_inputs(str(tmp_path / "missing.h5"), transitions=transitions),
     )
@@ -259,7 +306,8 @@ def test_database_is_read_only_when_validation_needs_levels(
 
 
 def test_bounds_semantics_remain_search_owned(
-    route_harness: RouteHarness, search_db: str,
+    route_harness: RouteHarness,
+    search_db: str,
 ) -> None:
     client = route_harness.client()
     assert route_harness.request(client, "fit.result")["ok"]
@@ -270,4 +318,3 @@ def test_bounds_semantics_remain_search_owned(
     )
     assert reply["ok"]
     assert route_harness.ctrl.state.fit.EJb == (9.0, -1.0)
-

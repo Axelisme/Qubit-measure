@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import h5py
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
@@ -14,6 +17,17 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 @pytest.fixture(autouse=True, name="_drain_qt_events")
 def isolate_non_ui_qt_events() -> None:
     """Keep non-UI Fluxdep tests independent of QApplication."""
+
+
+@pytest.fixture
+def search_database_hdf5(tmp_path: Path) -> str:
+    """Small legal DB for input validation; energy computation can be replaced."""
+    path = tmp_path / "search-inputs.h5"
+    with h5py.File(path, "w") as database:
+        database.create_dataset("fluxs", data=[0.0, 0.5, 1.0])
+        database.create_dataset("params", data=[[5.0, 1.0, 0.5]])
+        database.create_dataset("energies", data=np.zeros((1, 3, 3)))
+    return str(path)
 
 
 @pytest.fixture

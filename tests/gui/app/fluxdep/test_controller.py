@@ -255,7 +255,7 @@ def test_set_fit_params_emits_fit_changed(tmp_path):
         0.0,
     )
     assert len(seen) == 1
-    assert ctrl.state.fit.database_path != ""
+    assert ctrl.state.fit.search_db != ""
 
 
 def test_compute_search_does_not_emit_or_record(tmp_path):

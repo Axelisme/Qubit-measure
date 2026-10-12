@@ -7,13 +7,15 @@ spin boxes, and Search being blocked when the database path is empty / missing.
 
 from __future__ import annotations
 
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
+
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
 from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
@@ -37,7 +39,7 @@ def panel(qapp):
 @pytest.mark.parametrize("publish_before_panel", [False, True])
 @pytest.mark.parametrize("frequencies", [(None, None), (7.0, 3.0)])
 def test_published_fit_inputs_reach_search_and_show(
-    qapp, publish_before_panel, frequencies
+    qapp, publish_before_panel, frequencies, search_database_hdf5
 ):
     ctrl = Controller(FluxDepState())
     widget = None
@@ -45,7 +47,7 @@ def test_published_fit_inputs_reach_search_and_show(
         widget = AnalyzePanelWidget(ctrl)
     try:
         ctrl.set_fit_params(
-            "/task/database.h5",
+            search_database_hdf5,
             (3.0, 12.0),
             (0.3, 1.5),
             (0.2, 1.2),
@@ -61,7 +63,7 @@ def test_published_fit_inputs_reach_search_and_show(
             if group.title() == "Search parameters"
         )
         assert any(
-            edit.text() == ctrl.state.fit.database_path
+            edit.text() == ctrl.state.fit.search_db
             for edit in search_form.findChildren(QLineEdit)
         ), "Search must display the currently published database"
         assert [box.value() for box in search_form.findChildren(QDoubleSpinBox)] == [
@@ -93,13 +95,13 @@ def test_published_fit_inputs_reach_search_and_show(
 
 @pytest.mark.parametrize("display_edit", ["none", "subset", "missing_frequency"])
 def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
-    panel, monkeypatch, display_edit
+    panel, monkeypatch, display_edit, search_database_hdf5
 ):
-    from zcu_tools.gui.app.fluxdep.ui import analyze_panel
+    from zcu_tools.gui.app.fluxdep.services import viz
 
     widget, ctrl = panel
     ctrl.set_fit_params(
-        "/task/database.h5",
+        search_database_hdf5,
         (3.0, 12.0),
         (0.3, 1.5),
         (0.2, 1.2),
@@ -124,22 +126,11 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     display_before_result = show_form.get_transitions()
     bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
     ctrl.record_search_result(
-        DatabaseSearchResult(
-            params=(5.0, 1.0, 0.5),
-            best_distance=0.1,
-            best_scale=1.0,
-            best_index=0,
-            entry_results=np.array([[0.1, 1.0]]),
-            entry_params=np.array([[5.0, 1.0, 0.5]]),
-            fluxs=np.array([0.0, 0.1]),
-            freqs=np.array([1.0, 1.0]),
-            predicted_freqs=np.array([1.0, 1.0]),
-            bounds=bounds,
-        )
+        perfect_fit_result(np.array([0.0, 0.1]), np.array([1.0, 1.0]), bounds)
     )
     assert show_form.get_transitions() == display_before_result
     monkeypatch.setattr(
-        analyze_panel,
+        viz,
         "calculate_energy_vs_flux",
         lambda params, fluxs, **kwargs: (
             None,
@@ -196,7 +187,7 @@ def test_search_blocked_on_empty_database_path(panel):
     w._db_edit.setText("")
     w._on_search()
     assert "database" in w._status.text().lower()
-    assert ctrl.state.fit.database_path == ""
+    assert ctrl.state.fit.search_db == ""
 
 
 def test_search_blocked_on_missing_database_file(panel):

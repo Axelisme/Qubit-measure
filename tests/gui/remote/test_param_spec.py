@@ -231,7 +231,9 @@ def test_json_schema_property_is_untyped_but_keeps_description():
 
 
 @pytest.mark.parametrize("kind", [JsonType.NUMBER, JsonType.INTEGER])
-@pytest.mark.parametrize("limits", [{"minimum": 0}, {"maximum": 5}, {"minimum": 0, "maximum": 5}])
+@pytest.mark.parametrize(
+    "limits", [{"minimum": 0}, {"maximum": 5}, {"minimum": 0, "maximum": 5}]
+)
 def test_numeric_limits_project_without_changing_optional_admission(kind, limits):
     spec = ParamSpec("x", kind, required=False, **limits)
     property_schema = build_input_schema((spec,))["properties"]["x"]

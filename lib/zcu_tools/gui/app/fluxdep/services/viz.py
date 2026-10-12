@@ -29,9 +29,13 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2transition
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 from zcu_tools.analysis.fluxdep.search_models import count_max_evals
-from zcu_tools.gui.app.fluxdep.state import FitState, SpectrumEntry, transitions_with_freqs
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
+from zcu_tools.gui.app.fluxdep.state import (
+    FitState,
+    SpectrumEntry,
+    transitions_with_freqs,
+)
 from zcu_tools.simulate import flux2value
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 logger = logging.getLogger(__name__)
 
@@ -208,13 +212,28 @@ def _add_dev_value_axis(
     _ = num_ticks  # secondary_xaxis auto-ticks; kept for signature parity
 
 
+@dataclass(frozen=True)
+class FitDisplay:
+    """Show overlay presentation, independent of the search inputs.
+
+    xlim/ylim are normalized flux/GHz axis endpoints; None uses auto limits.
+    show_const_freq toggles frequency references. plot_transitions overrides
+    displayed line choices only; None uses the fit choices.
+    """
+
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
+    show_const_freq: bool = True
+    plot_transitions: TransitionDict | None = None
+
+
 def render_fit_result(
-    figure: Figure, fit: FitState, spectrums: dict[str, SpectrumEntry],
-    s_fluxs: NDArray[np.float64], s_freqs: NDArray[np.float64], *,
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
-    show_const_freq: bool = True,
-    plot_transitions: TransitionDict | None = None,
+    figure: Figure,
+    fit: FitState,
+    spectrums: dict[str, SpectrumEntry],
+    s_fluxs: NDArray[np.float64],
+    s_freqs: NDArray[np.float64],
+    display: FitDisplay,
 ) -> None:
     """Simulate and draw the current fitted Show overlay into figure.
 
@@ -227,24 +246,39 @@ def render_fit_result(
     if fit.params is None:
         raise ValueError("fit params are required for rendering")
     auto_x, _ = derive_auto_limits(spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f)
-    flux_lo, flux_hi = xlim if xlim is not None else auto_x
+    flux_lo, flux_hi = display.xlim if display.xlim is not None else auto_x
     if flux_hi <= flux_lo:
         flux_lo, flux_hi = 0.0, 1.0
     t_fluxs = np.linspace(flux_lo, flux_hi, 1000)
-    display_transitions = plot_transitions if plot_transitions is not None else fit.transitions
+    display_transitions = (
+        display.plot_transitions
+        if display.plot_transitions is not None
+        else fit.transitions
+    )
     _, energies = calculate_energy_vs_flux(
-        fit.params, t_fluxs, cutoff=40,
+        fit.params,
+        t_fluxs,
+        cutoff=40,
         evals_count=max(15, count_max_evals(display_transitions)),
     )
     aligned = next((entry for entry in spectrums.values() if entry.aligned), None)
     render_fit_figure(
-        figure, spectrums, t_fluxs, energies, fit.transitions, s_fluxs, s_freqs,
-        r_f=fit.r_f, sample_f=fit.sample_f,
+        figure,
+        spectrums,
+        t_fluxs,
+        energies,
+        fit.transitions,
+        s_fluxs,
+        s_freqs,
+        r_f=fit.r_f,
+        sample_f=fit.sample_f,
         flux_half=aligned.flux_half if aligned else None,
         flux_period=aligned.flux_period if aligned else None,
         title=f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, {fit.params[2]:.2f})",
-        xlim=xlim, ylim=ylim, show_const_freq=show_const_freq,
-        plot_transitions=plot_transitions,
+        xlim=display.xlim,
+        ylim=display.ylim,
+        show_const_freq=display.show_const_freq,
+        plot_transitions=display.plot_transitions,
     )
 
 

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from zcu_tools.analysis.fluxdep.stroke import BrushPoint, BrushStroke, BrushTool
+from zcu_tools.analysis.fluxdep.stroke import (
+    BRUSH_WIDTH_MAX,
+    BRUSH_WIDTH_MIN,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+)
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import (
@@ -16,12 +22,20 @@ from zcu_tools.gui.remote.param_spec import (
 
 # These declarations accompany the payload decoders; both plugins expose them.
 TOOL_PARAMS = (
-    ParamSpec("width", JsonType.NUMBER, required=False),
+    ParamSpec(
+        "width",
+        JsonType.NUMBER,
+        required=False,
+        minimum=BRUSH_WIDTH_MIN,
+        maximum=BRUSH_WIDTH_MAX,
+    ),
     ParamSpec("mode", JsonType.STRING, required=False, enum=("select", "erase")),
 )
 STROKE_PARAMS = (
     ParamSpec("vertices", JsonType.NUMBER_PAIRS),
-    ParamSpec("width", JsonType.NUMBER),
+    ParamSpec(
+        "width", JsonType.NUMBER, minimum=BRUSH_WIDTH_MIN, maximum=BRUSH_WIDTH_MAX
+    ),
     ParamSpec("mode", JsonType.STRING, enum=("select", "erase")),
 )
 

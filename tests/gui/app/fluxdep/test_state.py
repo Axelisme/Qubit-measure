@@ -407,7 +407,7 @@ def test_set_fit_params_bumps_and_clears_result():
     )
     # changing inputs clears the stale result and bumps the version
     assert st.fit.params is None
-    assert st.fit.database_path == "db.h5"
+    assert st.fit.search_db == "db.h5"
     assert st.fit.r_f == 5.5
     assert st.version.get(FIT_VERSION_KEY) == before + 1
 

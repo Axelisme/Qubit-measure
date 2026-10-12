@@ -21,8 +21,9 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.figure import Figure
-from zcu_tools.gui.plotting.figure_export import render_figure_png
 from numpy.typing import NDArray
+
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -353,21 +354,34 @@ def _fit_transitions(value: object) -> TransitionDict:
 def _h_fit_render(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> FigureReply:
+    del params
     figure = Figure()
     adapter.ctrl.render_fit(figure)
     data = render_figure_png(figure)
-    return {"figure": {"png_b64": base64.b64encode(data).decode("ascii"), "bytes": len(data)}}
+    return {
+        "figure": {
+            "png_b64": base64.b64encode(data).decode("ascii"),
+            "bytes": len(data),
+        }
+    }
 
 
 def _h_fit_database_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> DatabaseInfoReply:
+    del adapter
     path = params["path"]
     assert isinstance(path, str)
     info = database_info(path)
-    return {"path": info.path, "entries": info.entries, "levels": info.levels,
-            "EJ": list(info.EJ), "EC": list(info.EC), "EL": list(info.EL),
-            "flux": list(info.flux)}
+    return {
+        "path": info.path,
+        "entries": info.entries,
+        "levels": info.levels,
+        "EJ": list(info.EJ),
+        "EC": list(info.EC),
+        "EL": list(info.EL),
+        "flux": list(info.flux),
+    }
 
 
 def _h_fit_set_params(
@@ -387,9 +401,7 @@ def _h_fit_set_params(
         if params["sample_f"] is not None
         else None
     )
-    adapter.ctrl.set_fit_params(
-        search_db, EJb, ECb, ELb, transitions, r_f, sample_f
-    )
+    adapter.ctrl.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
     return {"fit": _h_fit_result(adapter, {})}
 
 

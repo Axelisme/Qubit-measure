@@ -299,7 +299,7 @@ class DeferredSearch:
 
 
 @pytest.fixture
-def pending_window(qapp, cross_controller, tmp_path):
+def pending_window(qapp, cross_controller, search_database_hdf5):
     background = DeferredSearch()
     ctrl = Controller(
         cross_controller.state,
@@ -307,10 +307,8 @@ def pending_window(qapp, cross_controller, tmp_path):
             background, ProgressService(QtProgressTransport())
         ),
     )
-    path = tmp_path / "db.h5"
-    path.touch()
     ctrl.set_fit_params(
-        str(path),
+        search_database_hdf5,
         (2, 15),
         (0.2, 2),
         (0.1, 2),
