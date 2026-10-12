@@ -262,6 +262,32 @@ class TransitionWire(ExtTypedDict, extra_items=list[list[int]]):
     sample_f: NotRequired[float]
 
 
+class TransitionQualityReply(TypedDict):
+    """One compiled transition's recorded absolute GHz residuals.
+
+    transition is its kernel label; duplicates retain separate entries. points
+    counts attribution, including zero. mean/max are None for zero points.
+    """
+
+    transition: str
+    points: int
+    mean: float | None
+    max: float | None
+
+
+class FitQualityReply(TypedDict):
+    """Recorded kernel quality with full precision GHz values.
+
+    mean is the absolute residual average. outliers counts residuals strictly
+    above outlier_threshold. per_transition retains all compiled columns in order.
+    """
+
+    mean: float
+    outliers: int
+    outlier_threshold: float
+    per_transition: list[TransitionQualityReply]
+
+
 class FitResultReply(TypedDict):
     """Complete editable fit snapshot and current result availability.
 
@@ -271,6 +297,8 @@ class FitResultReply(TypedDict):
     r_f/sample_f are separate optional GHz inputs, None when unset.
     """
 
+    # None when no full kernel search result has been recorded.
+    quality: FitQualityReply | None
     has_result: bool
     params: FitParametersReply | None
     search_db: str

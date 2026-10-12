@@ -221,7 +221,7 @@ class FitService:
         candidate is feasible, so a ``DatabaseSearchResult`` here always carries a real
         result.
         """
-        self._state.set_fit_result(result.params)
+        self._state.set_fit_result(result.params, result=result)
         logger.debug("record_result: params=%s", result.params)
 
     # --- export ----------------------------------------------------------

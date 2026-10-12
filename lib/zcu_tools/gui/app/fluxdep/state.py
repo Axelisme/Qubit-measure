@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
@@ -192,6 +193,9 @@ class FitState:
     r_f: float | None = None
     sample_f: float | None = None
     params: tuple[float, float, float] | None = None  # (EJ, EC, EL)
+
+    # Recorded kernel diagnostics/attribution; None for params-only publication.
+    result: DatabaseSearchResult | None = None
 
     @property
     def has_result(self) -> bool:
@@ -477,10 +481,20 @@ class FluxDepState:
         )
         self.version.bump(FIT_VERSION_KEY)
 
-    def set_fit_result(self, params: tuple[float, float, float]) -> None:
-        """Record a search result onto the current fit inputs."""
+    def set_fit_result(
+        self,
+        params: tuple[float, float, float],
+        *,
+        result: DatabaseSearchResult | None = None,
+    ) -> None:
+        """Record EJ/EC/EL GHz and optional kernel diagnostics on current inputs.
+
+        result carries recorded attribution and quality, never synthesized values.
+        None publishes params only, so consumers must report absent quality.
+        Owner-thread only; advances the existing fit version once.
+        """
         self._assert_owner()
-        self.fit = replace(self.fit, params=params)
+        self.fit = replace(self.fit, params=params, result=result)
         self.version.bump(FIT_VERSION_KEY)
 
     def assert_owner_thread(self) -> None:

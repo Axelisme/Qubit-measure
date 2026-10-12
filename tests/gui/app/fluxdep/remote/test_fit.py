@@ -85,8 +85,18 @@ def test_fit_result_projects_recorded_quality_without_rounding_or_merging(
         "outliers": 1,
         "outlier_threshold": 0.370370367,
         "per_transition": [
-            {"transition": "transitions 0-1", "points": 2, "mean": 0.123456789, "max": 0.4},
-            {"transition": "transitions 0-1", "points": 1, "mean": 0.025678912, "max": 0.025678912},
+            {
+                "transition": "transitions 0-1",
+                "points": 2,
+                "mean": 0.123456789,
+                "max": 0.4,
+            },
+            {
+                "transition": "transitions 0-1",
+                "points": 1,
+                "mean": 0.025678912,
+                "max": 0.025678912,
+            },
             {"transition": "mirror 0-2", "points": 0, "mean": None, "max": None},
         ],
     }

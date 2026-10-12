@@ -47,6 +47,7 @@ from .dto import (
     DatabaseInfoReply,
     FigureReply,
     FitParametersReply,
+    FitQualityReply,
     FitResultReply,
     FitUpdatedReply,
     NameReply,
@@ -307,7 +308,25 @@ def _h_fit_result(
             transitions_payload["r_f"] = value
         elif key == "sample_f":
             transitions_payload["sample_f"] = value
+    quality: FitQualityReply | None = None
+    if fit.result is not None:
+        recorded = fit.result.quality
+        quality = {
+            "mean": recorded.mean,
+            "outliers": recorded.outliers,
+            "outlier_threshold": recorded.outlier_threshold,
+            "per_transition": [
+                {
+                    "transition": item.transition,
+                    "points": item.points,
+                    "mean": item.mean,
+                    "max": item.max,
+                }
+                for item in recorded.per_transition
+            ],
+        }
     return {
+        "quality": quality,
         "has_result": fit.has_result,
         "params": params_payload,
         "search_db": fit.search_db,
