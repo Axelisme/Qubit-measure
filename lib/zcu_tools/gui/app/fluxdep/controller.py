@@ -41,7 +41,11 @@ from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
-from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, render_fit_result
+from zcu_tools.gui.app.fluxdep.services.viz import (
+    FitDisplay,
+    render_fit_result,
+    render_selection_result,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.controller_base import BaseController
@@ -261,6 +265,14 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._fit.selected_pointcloud()
+
+    def render_selection(self, figure: Figure) -> None:
+        """Draw published Filter evidence into caller-owned figure without a Session.
+
+        Uses every spectrum\'s published sampled points and Filter mask. No state,
+        draft or display selection is changed; rendering failures propagate.
+        """
+        render_selection_result(figure, self.state.spectrums)
 
     def render_fit(
         self,

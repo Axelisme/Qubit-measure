@@ -139,6 +139,8 @@ class CrossSelectionContext:
     plugin: CrossSelectionPlugin
     session: Session[CrossSelectionState]
     source_versions: tuple[tuple[str, int], ...]
+    # Captured insertion-order sizes map retained results to their source names.
+    source_point_counts: tuple[tuple[str, int], ...]
     spectrum_set_version: int
     selection_version: int
 
@@ -677,6 +679,10 @@ class FluxDepInteractiveOwner:
                 (name, self._state.version.get(spectrum_version_key(name)))
                 for name in self._state.spectrums
             ),
+            source_point_counts=tuple(
+                (name, entry.point_count)
+                for name, entry in self._state.spectrums.items()
+            ),
             spectrum_set_version=self._state.version.get(SPECTRUM_SET_VERSION_KEY),
             selection_version=self._state.version.get(SELECTION_VERSION_KEY),
         )
@@ -799,6 +805,16 @@ class FluxDepInteractiveOwner:
             context.selection_version = self._state.version.get(SELECTION_VERSION_KEY)
             self._publishing_selection = False
         self._updated(active)
+        return result
+
+    def finish_cross_selection(self) -> CrossSelectionResult:
+        """Publish the latest kept mask and retire Filter after successful publication.
+
+        Require a valid global context. Publication failures propagate without
+        closing input or claiming rollback. Off-owner use raises RuntimeError.
+        """
+        result = self.apply_cross_selection()
+        self.cancel("selection")
         return result
 
     def cancel(self, name: str | None = None) -> None:

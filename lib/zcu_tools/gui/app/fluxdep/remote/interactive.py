@@ -97,6 +97,8 @@ def _execute(
             owner.finish_line_pick(name)
         elif kind == "onetone":
             owner.finish_onetone_pick(name)
+        elif kind == "selection":
+            owner.finish_cross_selection()
         else:
             owner.finish_twotone_pick(name)
     else:
@@ -247,6 +249,17 @@ def _reply(
         view_selection = project_cross_selection(
             context.plugin.inputs, state_selection, previous=previous_selection
         )
+        per_spectrum: dict[str, list[int]] = {}
+        offset = 0
+        # Retained source sizes include zero-point spectra and preserve identities.
+        for name, total in context.source_point_counts:
+            count = int(
+                np.count_nonzero(
+                    view_selection.result.selected[offset : offset + total]
+                )
+            )
+            per_spectrum[name] = [count, total]
+            offset += total
         closed = _closed(owner, active) if command is not None else False
         wire = {
             **_base(
@@ -264,6 +277,7 @@ def _reply(
                 "mode": state_selection.mode,
                 "selected": state_selection.selected.tolist(),
                 "selected_count": int(np.count_nonzero(view_selection.result.selected)),
+                "per_spectrum": per_spectrum,
             },
         }
         changes = {
@@ -408,9 +422,7 @@ def _command(
             reason_code="interactive_context_changed",
         )
     if command in ("undo", "finish", "apply", "cancel") and (
-        command_params
-        or (selection and command == "finish")
-        or (not selection and command == "apply")
+        command_params or (not selection and command == "apply")
     ):
         raise InvalidInputError(
             "reserved command has invalid params or target kind",
@@ -441,7 +453,8 @@ def h_selection_interactive_command(
 
     params has validated positive context_id, command and params object
     (default empty). Require current joint identity before mutation. Plugin
-    validates domain commands; undo/apply/cancel reject nonempty params.
+    validates domain commands; undo/finish/apply/cancel reject nonempty params.
+    Finish publishes and closes the global draft.
     Return retained identity's state/effect. Apply publishes without closing
     valid input/Undo. ExpectedError and native failures propagate unchanged;
     publication failure does not imply rollback.

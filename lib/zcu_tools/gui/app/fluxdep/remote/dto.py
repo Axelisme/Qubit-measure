@@ -76,6 +76,8 @@ class SelectionStateReply(TypedDict):
     mode: Literal["select", "erase"]
     selected: list[bool]
     selected_count: int
+    # Source names map to [kept count after downsampling, total captured points].
+    per_spectrum: dict[str, list[int]]
 
 
 class ContextReplyBase(TypedDict):
