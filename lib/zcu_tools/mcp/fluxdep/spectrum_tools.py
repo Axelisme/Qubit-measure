@@ -49,6 +49,22 @@ def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
     def remove(arguments: SpectrumNameArguments) -> ToolReply:
         return call_gui(bridge, GuiRpcCall("spectrum.remove", dict(arguments), 6.0))
 
+    def export_spectrums(arguments: dict[str, object]) -> ToolReply:
+        receipt = call_gui(bridge, GuiRpcCall("export.spectrums", arguments, 31.0))
+        rows = spectrum_summaries(call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0)))
+        return ToolReply({
+            "filepath": receipt.data["filepath"],
+            "spectrums": [
+                {"name": row["name"], "stage": row["stage"], "point_count": row["point_count"]}
+                for row in rows
+            ],
+            "note": "filter mask not saved",
+        })
+
+    def restore(arguments: dict[str, object]) -> ToolReply:
+        call_gui(bridge, GuiRpcCall("spectrum.load_processed", arguments, 31.0))
+        return ToolReply({"spectrums": spectrum_summaries(call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0)))})
+
     def list_spectrums(_arguments: dict[str, object]) -> ToolReply:
         spectrums = spectrum_summaries(
             call_gui(bridge, GuiRpcCall("spectrum.list", {}, 6.0))
@@ -99,6 +115,23 @@ def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
                     "transpose_axes": {"type": "boolean", "default": False},
                 },
                 "required": ["filepath", "spec_type"],
+            },
+        },
+        prefix + "export_spectrums": {
+            "handler": export_spectrums,
+            "description": "Save a sampled checkpoint with native alignment and all sampled points, including empty completed spectra. Filter masks are not saved. Defaults to create-only; overwrite=true explicitly replaces. Return the resolved GUI path and bounded published spectrum summaries.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"filepath": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}},
+            },
+        },
+        prefix + "spectrum_load_processed": {
+            "handler": restore,
+            "description": "Restore a sampled checkpoint and return published spectrum summaries. GUI rejects the entire restore if any name already exists, listing conflicts. Filter masks are not restored.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"filepath": {"type": "string"}},
+                "required": ["filepath"],
             },
         },
         prefix + "spectrum_remove": {
