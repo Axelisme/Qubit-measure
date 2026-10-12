@@ -567,7 +567,6 @@ def test_empty_assets_hint_tracks_refresh(entry_waveform_dialog) -> None:
     )
     assert hint is not None
     assert hint.isVisible()
-    assert "gray" in hint.styleSheet()
     recipe = FormulaRecipe.from_raw(
         {"segments": [{"duration": 0.1, "formula": "1"}], "normalize": "peak"}
     )

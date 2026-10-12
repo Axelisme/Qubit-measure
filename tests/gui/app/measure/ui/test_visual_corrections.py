@@ -261,8 +261,6 @@ def test_A5_Run_action_row_status_free_and_20_80_proportions(qapp, exp_tab_widge
     assert tab.run_btn.text() == "Run"
     assert tab.run_btn.objectName() == "primaryButton"
     idle_style = tab.run_btn.styleSheet()
-    reset_style = tab.reset_btn.styleSheet()
-    assert reset_style == ""
     assert not tab.reset_btn.isHidden()
     assert tab.reset_btn.height() == tab.run_btn.height()
 

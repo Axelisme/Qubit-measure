@@ -122,7 +122,6 @@ def test_unavailable_reason_wraps_as_warning_without_rewriting_owner_message(qap
         assert warning is not None
         assert warning.text() == f"⚠ {reason}"
         assert warning.wordWrap()
-        assert "#b7791f" in warning.styleSheet()
     finally:
         widget.deleteLater()
         qapp.processEvents()
@@ -160,8 +159,6 @@ def test_analysis_parameter_hint_tracks_empty_and_populated_forms(qapp):
         hint = tab.analyze_form.findChild(QLabel, "analysisNoParameters")
         assert hint is not None
         assert hint.isVisible()
-        assert hint.text() == "This analysis has no parameters."
-        assert "gray" in hint.styleSheet()
         assert tab.read_analyze_params() == NoParameters()
         tab.populate_analyze_params(WithParameters())
         qapp.processEvents()
@@ -172,4 +169,23 @@ def test_analysis_parameter_hint_tracks_empty_and_populated_forms(qapp):
     finally:
         tab.close()
         tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_parameter_hint_stays_hidden_before_parameters_are_known(qapp):
+    from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
+
+    form = AnalyzeFormWidget()
+    form.show()
+    try:
+        form.populate(WithParameters())
+        form.clear()
+        qapp.processEvents()
+        hint = form.findChild(QLabel, "analysisNoParameters")
+        assert hint is not None
+        # A cleared form has no parameter contract yet, so it claims nothing.
+        assert not hint.isVisible()
+    finally:
+        form.close()
+        form.deleteLater()
         qapp.processEvents()

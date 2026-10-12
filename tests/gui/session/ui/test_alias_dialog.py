@@ -374,7 +374,7 @@ def test_resolution_without_entry_or_selected_point_is_empty_and_read_only(
     for index in range(table.rowCount()):
         result = table.item(index, 2)
         assert result is not None
-        assert result.text() in ("", "(unbound)")
+        assert result.text() == ""
         assert not result.flags() & Qt.ItemFlag.ItemIsEditable
 
 
