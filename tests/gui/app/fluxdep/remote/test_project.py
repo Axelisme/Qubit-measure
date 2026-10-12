@@ -54,6 +54,23 @@ def test_setup_computes_paths_from_identity_and_controller_root(
     assert route_harness.ctrl.state.version.get("project") == 2
 
 
+@pytest.mark.parametrize("field", ["result_dir", "data_root"])
+def test_undeclared_paths_do_not_override_gui_computed_project(
+    route_harness: RouteHarness, field: str,
+) -> None:
+    client = route_harness.client()
+    reply = route_harness.request(
+        client, "project.setup", chip_name="chip", qub_name="Q1", **{field: "/override"}
+    )
+    assert reply["ok"] is True
+    root = route_harness.ctrl.get_project_root()
+    assert reply["result"] == {"project": {
+        "chip_name": "chip", "qub_name": "Q1",
+        "result_dir": os.path.join(root, "result", "chip", "Q1"),
+        "data_root": os.path.join(root, "Database", "chip", "Q1"),
+    }}
+
+
 @pytest.mark.parametrize(
     "params",
     [
@@ -63,8 +80,6 @@ def test_setup_computes_paths_from_identity_and_controller_root(
         {"chip_name": None, "qub_name": "Q1"},
         {"chip_name": 1, "qub_name": "Q1"},
         {"chip_name": "chip", "qub_name": False},
-        {"chip_name": "chip", "qub_name": "Q1", "result_dir": "/override"},
-        {"chip_name": "chip", "qub_name": "Q1", "data_root": "/override"},
     ],
 )
 def test_malformed_setup_is_rejected_before_publication(

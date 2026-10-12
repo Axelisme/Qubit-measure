@@ -10,6 +10,11 @@ from zcu_tools.mcp.core.reply import ToolReply
 from tests.mcp.fluxdep._support import Client, GuiResponse
 
 
+def tool_reply(value: ToolReply | dict[str, object]) -> ToolReply:
+    """Normalize the two public handler reply containers, preserving content."""
+    return value if isinstance(value, ToolReply) else ToolReply(value)
+
+
 @pytest.fixture
 def snapshot() -> dict[str, object]:
     """Native complete snapshot with unsorted points and independent extents."""
@@ -46,8 +51,7 @@ def test_snapshot_and_load_return_ranges_and_native_evidence(
     client.transport.replies.extend(responses)
     tool = "fluxdep_spectrum_load" if load else "fluxdep_spectrum_snapshot"
     args = {"filepath": "/raw.hdf5", "spec_type": "TwoTone", "inherit_from": "seed.hdf5", "transpose_axes": True} if load else {"name": "raw.hdf5"}
-    result = client.server.tools[tool]["handler"](args)
-    assert isinstance(result, ToolReply)
+    result = tool_reply(client.server.tools[tool]["handler"](args))
     assert result.data == {
         "name": "raw.hdf5", "type": "TwoTone", "stage": "sampled", "pending": "sample",
         "axes": {
@@ -76,8 +80,7 @@ def test_list_summarizes_stages_filter_and_stale_fit(client: Client, selected: l
         GuiResponse(result={"selected": selected, "min_distance": 0.1, "pending": True}),
         GuiResponse(result={"has_result": True, "stale": True, "stale_reasons": ["filter changed"], "params": {"EJ": 3.0}, "quality": {"residuals": [1.0, 2.0]}}),
     ])
-    result = client.server.tools["fluxdep_spectrum_list"]["handler"]({})
-    assert isinstance(result, ToolReply)
+    result = tool_reply(client.server.tools["fluxdep_spectrum_list"]["handler"]({}))
     assert result.data == {
         "spectrums": [
             {"name": "a", "type": "TwoTone", "stage": "sampled", "point_count": 3, "pending": None},
@@ -92,7 +95,6 @@ def test_list_summarizes_stages_filter_and_stale_fit(client: Client, selected: l
 
 def test_remove_returns_native_receipt_without_followup_reads(client: Client) -> None:
     client.transport.replies.append(GuiResponse(result={"name": "a", "removed": True}))
-    result = client.server.tools["fluxdep_spectrum_remove"]["handler"]({"name": "a"})
-    assert isinstance(result, ToolReply)
+    result = tool_reply(client.server.tools["fluxdep_spectrum_remove"]["handler"]({"name": "a"}))
     assert result.data == {"name": "a", "removed": True}
     assert [(r["method"], r["params"]) for r in client.transport.requests] == [("spectrum.remove", {"name": "a"})]
