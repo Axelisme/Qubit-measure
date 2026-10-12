@@ -3,6 +3,7 @@
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from logging import getLogger
 
 from pydantic import JsonValue
 
@@ -27,6 +28,8 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.session.expression import validate_scalar_expr
 from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.resources.entry import RoleResolutionError
+
+_logger = getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -194,7 +197,8 @@ class TabFormResource:
 
         No initial callback is delivered. Observations are allowed during delivery;
         mutation, acceptance and lifetime changes are not. Subscriber exceptions
-        propagate after installation and do not roll back the committed input.
+        are logged with traceback after installation; delivery continues to other
+        subscribers without retry or rollback of the committed input.
         """
         self._require_open()
         self._callbacks.append(callback)
@@ -250,7 +254,10 @@ class TabFormResource:
         self._notifying = True
         try:
             for callback in tuple(self._callbacks):
-                callback()
+                try:
+                    callback()
+                except Exception:
+                    _logger.exception("Tab form subscriber failed")
         finally:
             self._notifying = False
 
