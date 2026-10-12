@@ -35,6 +35,29 @@ class NumericOtherBranch(FormModel):
     other: float = 4.0
 
 
+class SingleTaggedBranchForm(FormModel):
+    """A single branch still declares a structural selector, not a value leaf."""
+
+    branch: Annotated[NumericAliasBranch, Field(discriminator="kind")]
+
+
+@pytest.mark.parametrize("selector", [{"expr": "1"}, {"__complex__": [1.0, 0.0]}])
+def test_compatible_restore_drops_selector_envelopes_but_keeps_other_leaves(
+    selector: JsonValue,
+) -> None:
+    env = FormEnv()
+    state = FormState(
+        FormInput(SingleTaggedBranchForm, {"branch": {"kind": 2, "amount": 3.0}})
+    )
+    assert state.write_compatible(
+        {"branch": {"kind": selector, "amount": 8.0}}, env
+    ) == (("branch", "kind"),)
+    assert state.input.data == {"branch": {"kind": 2, "amount": 8.0}}
+    assert state.result(env) == SingleTaggedBranchForm(
+        branch=NumericAliasBranch(kind=2, amount=8.0)
+    )
+
+
 class DiscriminatorChoicesForm(FormModel):
     """The host may restrict selector choices without changing branch identity."""
 

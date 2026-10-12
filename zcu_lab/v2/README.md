@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-12，shared actual-detune owner
+**Last updated:** 2026-10-13，框架測試與實驗定義分離
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
@@ -36,4 +36,4 @@ zcu_lab/
 - [Measure support](_support/measure/README.md) 提供共享 domain mechanics。
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
 
-測試位於 `tests/zcu_lab/`。套件層的通用契約由 registry 選出每個 adapter；`tests/zcu_lab/v2/` 保留共用 helper、role defaults 與使用者要求的 AllXY、ZigZag、ZigZagScan 特例，不逐實驗測 cfg、fit 或 writeback 政策。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。
+框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開接縫，不 import `zcu_lab`。本套件的實驗定義不寫個別測試，也不以 lab registry 選取測試材料。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。Core-only caller 明確 import `core`；GUI callers 明確選擇其附件。

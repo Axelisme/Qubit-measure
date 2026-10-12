@@ -102,6 +102,29 @@ def test_put_spectrum_replace_does_not_bump_set():
     assert st.version.get(SPECTRUM_SET_VERSION_KEY) == 1  # set unchanged
 
 
+@pytest.mark.parametrize("name", ["a", "new"])
+def test_put_spectrum_rejects_filter_mask_without_mutation(name: str):
+    st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_active("a")
+    st.set_selection(np.empty(0, dtype=np.bool_), 0.2)
+    stored_entry = st.get_spectrum("a")
+    before_versions = st.version.snapshot()
+    incoming = _make_entry(name)
+    incoming.filter_mask = np.empty(0, dtype=np.bool_)
+    incoming_mask = incoming.filter_mask
+
+    with pytest.raises(ValueError, match="cannot carry a Filter mask"):
+        st.put_spectrum(incoming)
+
+    assert incoming.filter_mask is incoming_mask
+    assert list(st.spectrums) == ["a"]
+    assert st.get_spectrum("a") is stored_entry
+    assert st.active_spectrum == "a"
+    assert st.selection.min_distance == 0.2
+    assert st.version.snapshot() == before_versions
+
+
 def test_remove_spectrum_drops_key_bumps_set():
     st = FluxDepState()
     st.put_spectrum(_make_entry("a"))
@@ -291,9 +314,16 @@ def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
 
 def test_set_selection_bumps_selection():
     st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_points(
+        "a",
+        PointsData(
+            dev_values=np.arange(3.0), fluxs=np.arange(3.0), freqs=np.arange(3.0)
+        ),
+    )
     st.set_selection(np.array([True, False, True]))
     assert st.version.get(SELECTION_VERSION_KEY) == 1
-    assert st.selection.selected is not None
+    assert st.selection_mask() is not None
 
 
 def test_set_project_bumps_project():

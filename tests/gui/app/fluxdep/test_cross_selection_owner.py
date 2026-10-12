@@ -59,7 +59,7 @@ def test_apply_publishes_exact_snapshot_once_retaining_input_and_undo(cross_cont
         )
         result = ctrl.interactive.apply_cross_selection()
         np.testing.assert_array_equal(result.selected, [True, False, True, False])
-        np.testing.assert_array_equal(ctrl.state.selection.selected, result.selected)
+        np.testing.assert_array_equal(ctrl.state.selection_mask(), result.selected)
         assert len(notifications) == 1
         assert ctrl.state.version.get(SELECTION_VERSION_KEY) == before_version + 1
         assert context.selection_version == before_version + 1
@@ -92,7 +92,7 @@ def test_apply_result_mutation_cannot_change_published_or_committed_mask(
         result = ctrl.interactive.apply_cross_selection()
         result.selected[:] = False
         np.testing.assert_array_equal(
-            ctrl.state.selection.selected, [True, False, True, False]
+            ctrl.state.selection_mask(), [True, False, True, False]
         )
         np.testing.assert_array_equal(
             context.session.snapshot().selected, [True, False, True, False]
@@ -198,10 +198,34 @@ def test_apply_failure_keeps_input_and_releases_self_publication_guard(
         assert owner.current_cross_selection() is context
         assert context.session.undo().selected.all()
         if publish_before_failure:
-            assert not ctrl.state.selection.selected.any()
+            assert not ctrl.state.selection_mask().any()
         ctrl.set_selection(np.ones(4, dtype=bool), 0.0)
         assert owner.current_cross_selection() is None
         with pytest.raises(FailedPreconditionError):
             context.plugin.clear.execute(context.session, None)
     finally:
         owner.dispose()
+
+
+def test_reopened_cloud_backgrounds_follow_replaced_spectrum_signals(
+    cross_controller,
+):
+    from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
+
+    ctrl = cross_controller
+    first = ctrl.interactive.begin_cross_selection()
+    before = {bg.name: bg.real_signals for bg in first.plugin.inputs.backgrounds}
+    ctrl.interactive.cancel()
+    reopened = ctrl.interactive.begin_cross_selection()
+    for background in reopened.plugin.inputs.backgrounds:
+        np.testing.assert_array_equal(background.real_signals, before[background.name])
+    ctrl.interactive.cancel()
+
+    entry = ctrl.state.spectrums["a"]
+    signals = np.arange(15, dtype=np.float64).reshape(5, 3) * (1 + 1j)
+    ctrl.state.put_spectrum(replace(entry, raw={**entry.raw, "signals": signals}))
+    replaced = ctrl.interactive.begin_cross_selection()
+    background = next(bg for bg in replaced.plugin.inputs.backgrounds if bg.name == "a")
+    np.testing.assert_array_equal(
+        background.real_signals, cast2real_and_norm(signals, use_phase=True)
+    )

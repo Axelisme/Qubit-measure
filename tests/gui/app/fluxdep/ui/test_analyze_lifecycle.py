@@ -133,7 +133,7 @@ def test_activate_detaches_old_view_reuses_context_and_filter_search_resets(
         assert ctrl.interactive.current_cross_selection() is context
         assert selector.preview_view() is None
         stale_apply.click()
-        assert ctrl.state.selection.selected is None
+        assert ctrl.state.selection_mask() is None
         tabs = panel.findChild(QtWidgets.QTabWidget)
         assert tabs is not None
         tabs.setCurrentIndex(1)

@@ -1,6 +1,6 @@
 # v2 experiment authoring
 
-**Last updated:** 2026-10-08，移除舊 Autofluxdep 與 overnight 入口
+**Last updated:** 2026-10-13，框架測試與實驗定義分離
 
 `zcu_lab/v2/` 擁有使用 program/v2 的具體實驗。每個實驗的 `core.py` 保存 cfg、Result、run 與分析政策。共同實驗介面、Result 保存映射與 cfg 組裝見[框架 README](../../lib/zcu_tools/experiment/README.md)。本頁保留實驗家族、具體 workflow 與撰寫慣例。
 
@@ -8,9 +8,9 @@
 
 ## 使用者實驗的測試
 
-`zcu_lab` 使用通用、參數化契約測試逐一走過 registry，確認實驗可載入、spec 宣告有效、adapter 符合框架契約。新增或移除 registry entry 就更新測試選集，不另維護一份具體實驗清單。這讓使用者修改實驗時，不必同步修改綁定其實作的測試。
+本套件的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。實驗錯誤由 GUI 啟動或載入直接回報，不逐一走過 lab registry 來選取測試材料。
 
-不為個別實驗新增 cfg、fit 數值或 acquisition 細節的測試。需要測試的邏輯，先抽成具有公開介面的共用工具，依責任放在 `zcu_lab/v2/_support/` 或 framework，再測工具的 seam 與對外契約。既有的使用者指定 AllXY、ZigZag 與 ZigZagScan round-trip 案例保留，不據此新增其他實驗的特例。
+框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開 seam 與對外契約，不 import `zcu_lab`，也不用其 fake 實驗。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。實驗共用 helper 留在本套件，不因可抽成 helper 就新增 pytest；框架共用機制依責任放在 lib，由該 owner 的合成材料測試驗證。
 
 案例歸屬、fixture 與搬遷規則見 [tests README](../../tests/README.md)。
 
