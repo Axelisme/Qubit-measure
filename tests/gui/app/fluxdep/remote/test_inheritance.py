@@ -30,13 +30,8 @@ def _snapshot(harness: RouteHarness, name: str) -> dict[str, object]:
     return reply["result"]
 
 
-def _inline_background(compute: Callable[[], object], on_done: Callable[[object], None], on_error: Callable[[Exception], None]) -> None:
-    try:
-        value = compute()
-    except Exception as exc:
-        on_error(exc)
-    else:
-        on_done(value)
+def _inline_background(compute: Callable[[], object], on_done: Callable[[object], None], _on_error: Callable[[Exception], None]) -> None:
+    on_done(compute())
 
 
 @pytest.mark.parametrize("action", ["unchanged", "manual", "auto", "discard", "direct"])

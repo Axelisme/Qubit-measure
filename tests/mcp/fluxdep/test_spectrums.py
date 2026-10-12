@@ -93,6 +93,19 @@ def test_list_summarizes_stages_filter_and_stale_fit(client: Client, selected: l
     assert [r["method"] for r in client.transport.requests] == ["spectrum.list", "selection.snapshot", "fit.result"]
 
 
+def test_reopened_alignment_precedes_retained_sampling_completion(
+    client: Client, snapshot: dict[str, object], image_reply: dict[str, object],
+) -> None:
+    snapshot["aligned"] = False
+    snapshot["points_completed"] = True
+    snapshot["pending"] = "align"
+    client.transport.replies.extend([GuiResponse(result=snapshot), GuiResponse(result=image_reply)])
+    result = tool_reply(client.server.tools["fluxdep_spectrum_snapshot"]["handler"]({"name": "raw.hdf5"}))
+    assert result.data["stage"] == "loaded"
+    assert result.data["pending"] == "align"
+    assert result.data["points"]["count"] == 3
+
+
 def test_remove_returns_native_receipt_without_followup_reads(client: Client) -> None:
     client.transport.replies.append(GuiResponse(result={"name": "a", "removed": True}))
     result = tool_reply(client.server.tools["fluxdep_spectrum_remove"]["handler"]({"name": "a"}))

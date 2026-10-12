@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import sys
 from dataclasses import replace
@@ -11,20 +10,15 @@ from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
 import pytest
-from PIL import Image
 from zcu_tools.mcp.core.bridge import (
     GuiTransportTimeoutError,
-    McpBridge,
-    MCPBridgeConfig,
 )
-from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server
 
 from tests.mcp.fluxdep._support import (
     Client,
     GuiError,
     GuiResponse,
-    RecordingTransport,
 )
 
 
