@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-11，離線遷移測試歸屬
+**Last updated:** 2026-10-13，GUI cache 隔離生命週期
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -49,6 +49,12 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 （偵測到 `PYTEST_XDIST_WORKER`）把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
 設為 `"1"`，避免 worker 與多執行緒 BLAS 相互過訂。Serial 跑法不設這些變數，適合 debug。
 Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive`。
+
+GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接報錯。
+`tests/conftest.py` 在子目錄 conftest 與產品模組 import 前設定 `XDG_CACHE_HOME`，
+指向 worktree 內獨立的暫存目錄。每個 xdist worker 各自建立目錄，不使用會被 pytest
+清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
+巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
 
