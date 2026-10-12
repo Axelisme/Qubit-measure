@@ -22,7 +22,7 @@ from zcu_lab.workflows.gui.remote_methods import METHOD_SPECS
 def build_workflow_tools(
     config: MCPBridgeConfig, bridge: McpBridge, repo_root: Path
 ) -> ToolTable:
-    """Assemble the nine workflow RPC tools and shared lifecycle callbacks.
+    """Assemble declared workflow RPC tools and shared lifecycle callbacks.
 
     config supplies tool names and connection/launch settings; bridge must use
     that same config, otherwise raise ValueError before assembling any tools.
@@ -34,6 +34,8 @@ def build_workflow_tools(
     removes base64 from text and returns run_id/name plus inline image content.
     Corrupt base64/PNG raises without retry or file creation. All other native
     replies are unchanged, including failed operation outcomes.
+    No acquisition, conversion, file destination or save policy is implemented
+    in MCP. Independent workflow tools own conversion of saved runs.
     """
     if bridge.config != config:
         raise ValueError("bridge config must match workflow MCP config")

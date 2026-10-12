@@ -62,6 +62,23 @@ def test_rabi_fit_recovers_pi_length_for_both_zero_drive_extrema(
     np.testing.assert_array_equal(result.signals, original)
 
 
+def test_rabi_fit_preserves_phase_aware_pi2_instead_of_halving_pi() -> None:
+    lengths = np.linspace(0.0, 1.6, 101)
+    signals = (
+        (1.0 + 0.4j) * (0.3 + 0.8 * np.cos(2 * np.pi * lengths / 0.8 + np.pi / 3))
+    ).astype(np.complex128)
+    original = signals.copy()
+
+    fit = analyze_len_rabi(LenRabiResult(lengths, signals))
+
+    assert hasattr(fit, "pi2_length_us"), "Length-Rabi must retain its fitted pi2"
+    assert fit.pi_length_us == pytest.approx(4.0 / 15, abs=0.001)
+    assert fit.pi2_length_us == pytest.approx(1.0 / 15, abs=0.001)
+    assert fit.pi2_length_us != pytest.approx(fit.pi_length_us / 2, abs=0.001)
+    assert np.isfinite(fit.pi2_error_us) and fit.pi2_error_us >= 0.0
+    np.testing.assert_array_equal(signals, original)
+
+
 def test_echo_fit_excludes_first_sample_before_projection() -> None:
     times = np.linspace(0.0, 80.0, 41)
     signals = ((1.0 + 0.4j) * (0.1 + 0.9 * np.exp(-times / 20.0))).astype(np.complex128)

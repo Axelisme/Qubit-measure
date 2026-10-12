@@ -24,6 +24,55 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
+class FrequencyBranch(BaseModel):
+    """One untagged model shape, with a numeric expression-capable leaf."""
+
+    frequency: float
+
+
+class AmplitudeBranch(BaseModel):
+    """A distinct untagged model shape."""
+
+    amplitude: float
+
+
+class OtherFrequencyBranch(BaseModel):
+    """Same shape as FrequencyBranch: raw input cannot distinguish them."""
+
+    frequency: float
+
+
+class UntaggedForm(FormModel):
+    """Restore must infer only a structurally unique raw input branch."""
+
+    payload: FrequencyBranch | AmplitudeBranch
+
+
+class AmbiguousForm(FormModel):
+    """An ambiguous union stays unfilled rather than choosing the first member."""
+
+    payload: FrequencyBranch | OtherFrequencyBranch
+
+
+def test_compatible_restore_selects_only_unique_untagged_shape() -> None:
+    env = FormEnv()
+    state = FormState(UntaggedForm.default_input(env))
+    dropped = state.write_compatible({"payload": {"frequency": {"expr": "2 * 3"}}}, env)
+    assert dropped == ()
+    assert state.input.data == {"payload": {"frequency": {"expr": "2 * 3"}}}
+
+
+@pytest.mark.parametrize("saved", [{"frequency": {"expr": "2 * 3"}}, {"unknown": 3}])
+def test_compatible_restore_drops_ambiguous_or_unmatched_untagged_shape(
+    saved: dict[str, JsonValue],
+) -> None:
+    env = FormEnv()
+    state = FormState(AmbiguousForm.default_input(env))
+    dropped = state.write_compatible({"payload": saved}, env)
+    assert dropped == (("payload",),)
+    assert state.input.data == {}
+
+
 class PlainSection(BaseModel):
     """Nested ordinary Pydantic models need no form hooks."""
 

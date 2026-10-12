@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
+from zcu_tools.gui.catalog_loader import CatalogReloadError as CatalogReloadError
+from zcu_tools.gui.catalog_loader import PreparedCatalogReload as PreparedCatalogReload
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
 from .registry import Registry
@@ -23,19 +24,6 @@ class ExperimentAccess:
             raise FailedPreconditionError(
                 "Experiments are unavailable during reload or shutdown"
             )
-
-
-@dataclass(frozen=True, eq=False)
-class PreparedCatalogReload:
-    """Opaque, loader-owned, single-use source revision token."""
-
-
-class CatalogReloadError(RuntimeError):
-    """A reload failure with an explicit recovery disposition."""
-
-    def __init__(self, message: str, *, restart_required: bool = False) -> None:
-        super().__init__(message)
-        self.restart_required = restart_required
 
 
 class ExperimentCatalogLoader(Protocol):

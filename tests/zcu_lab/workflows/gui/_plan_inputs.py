@@ -9,13 +9,13 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.workflows.gui.plan import T1PlanForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
 
 
-def inline_input(inputs: Inputs) -> FormInput[T1PlanForm]:
+def inline_input(inputs: Inputs) -> FormInput[CoherencePlanForm]:
     """Select the simulator drive/readout as ordinary inline module Specs."""
     return FormInput(
-        T1PlanForm,
+        CoherencePlanForm,
         {
             "flux_dev": "flux",
             "flux_unit": "native",

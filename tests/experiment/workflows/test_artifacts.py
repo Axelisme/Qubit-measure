@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
@@ -14,6 +14,17 @@ from pydantic import TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.workflows import (
+    Aborted,
+    Done,
+    Engine,
+    EnginePorts,
+    Next,
+    Run,
+    Step,
+    TunableChange,
+    WorkflowEnv,
+)
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.encoding import encode_record
 from zcu_tools.experiment.workflows.journal import (
@@ -35,9 +46,22 @@ from zcu_tools.experiment.workflows.journal import (
 )
 from zcu_tools.experiment.workflows.models import (
     Actor,
-    Completed,
     RunIdentity,
     RunPaths,
+)
+
+from ._engine_fakes import (
+    START,
+    Plan,
+    Rig,
+    State,
+    Tunables,
+)
+from ._engine_fakes import (
+    Cfg as EngineCfg,
+)
+from ._engine_fakes import (
+    ManualClock as EngineClock,
 )
 
 
@@ -84,15 +108,6 @@ def metadata(tmp_path: Path, clock: ManualClock) -> RunMetadata:
 @pytest.fixture
 def artifacts(metadata: RunMetadata, clock: ManualClock) -> RunArtifacts:
     return RunArtifacts(metadata, clock, RLock())
-
-
-@dataclass
-class Cfg:
-    reps: int = 2
-
-
-def save_text(completed: Completed[Cfg, str], path: Path) -> None:
-    path.write_text(f"{completed.cfg.reps}:{completed.result}", encoding="utf-8")
 
 
 def test_start_documents_are_detached_and_use_identity_not_slug(
@@ -178,18 +193,9 @@ def test_relative_unicode_roots_remain_absolute_after_cwd_changes(
     monkeypatch.chdir(elsewhere)
     iteration = artifacts.new_iteration(1)
 
-    def closed_saver(value: Completed[Cfg, str], path: Path) -> None:
-        with path.open("x", encoding="utf-8", newline="\n") as writer:
-            writer.write(value.result)
-        assert writer.closed
-
-    iteration.save(1, "run_t1", Completed(Cfg(), "完整結果"), closed_saver)
-    artifacts.append(
-        StepFinished(1, 0, iteration.iteration_dir, iteration.run_files, "done", None)
-    )
+    artifacts.append(StepFinished(1, 0, iteration.iteration_dir, "done", None))
     artifacts.set_lifecycle("done")
-    final = tmp_path / "data 資料" / "iter/000001/runs/01-run_t1.h5"
-    assert final.read_text(encoding="utf-8") == "完整結果"
+    assert iteration.root == tmp_path / "data 資料" / "iter/000001"
     assert artifacts.paths.metadata_root == tmp_path / "metadata 資料"
     assert artifacts.paths.data_root == tmp_path / "data 資料"
     assert not tuple(elsewhere.iterdir())
@@ -233,7 +239,6 @@ def test_journal_round_trips_all_outcomes_in_append_order(
     artifacts: RunArtifacts, clock: ManualClock
 ) -> None:
     iteration = artifacts.new_iteration(1)
-    iteration.save(2, "run_t1", Completed(Cfg(), "signal"), save_text)
     error = describe_error(ValueError("original cause"))
     events = (
         IterationStarted(1, 0, 0, iteration.iteration_dir),
@@ -244,11 +249,10 @@ def test_journal_round_trips_all_outcomes_in_append_order(
             0,
             encode_record({"t1": 8}),
             iteration.iteration_dir,
-            iteration.run_files,
         ),
-        StepFinished(1, 0, iteration.iteration_dir, iteration.run_files, "done", None),
-        StepDiscarded(1, 0, iteration.iteration_dir, iteration.run_files, "pause"),
-        StepFailed(1, 0, iteration.iteration_dir, iteration.run_files, error),
+        StepFinished(1, 0, iteration.iteration_dir, "done", None),
+        StepDiscarded(1, 0, iteration.iteration_dir, "pause"),
+        StepFailed(1, 0, iteration.iteration_dir, error),
         TunablesChanged(Actor("agent", "協作者"), 0, 1, (ChangedValue("reps", 2, 3),)),
         PauseRequested(clock.now(), 1),
         Paused(1, 1),
@@ -272,7 +276,6 @@ def test_journal_round_trips_all_outcomes_in_append_order(
         "value": {"t1": 8},
         "error": None,
     }
-    assert committed["run_files"] == ["runs/02-run_t1.h5"]
     assert lines[2]["error"]["message"] == "original cause"
     assert "ValueError: original cause" in lines[6]["error"]["traceback"]
     assert "result" not in lines[2]
@@ -306,142 +309,10 @@ def test_lifecycle_manifest_replaces_only_on_change(
 def test_iteration_numbers_do_not_wrap(artifacts: RunArtifacts, call_seq: int) -> None:
     iteration = artifacts.new_iteration(call_seq)
     assert iteration.iteration_dir == f"iter/{call_seq:06d}"
-    assert (
-        iteration.files_dir
-        == artifacts.paths.data_root / iteration.iteration_dir / "files"
-    )
-    assert iteration.files_dir.is_dir()
-    assert (iteration.files_dir.parent / "runs").is_dir()
+    assert iteration.root == artifacts.paths.data_root / iteration.iteration_dir
+    assert iteration.root.is_dir()
     with pytest.raises(FileExistsError):
         artifacts.new_iteration(call_seq)
-
-
-def test_completed_publication_uses_exact_temporary_and_retains_final(
-    artifacts: RunArtifacts,
-) -> None:
-    iteration = artifacts.new_iteration(1)
-    completed = Completed(Cfg(5), "full result")
-    seen: list[Path] = []
-    final = iteration.files_dir.parent / "runs" / "03-run_t1.h5"
-
-    def saver(value: Completed[Cfg, str], path: Path) -> None:
-        assert value is completed
-        assert not final.exists()
-        assert path.parent == final.parent
-        assert path.name.startswith(".03-run_t1-")
-        assert path.name.endswith(".tmp.h5")
-        seen.append(path)
-        save_text(value, path)
-
-    iteration.save(3, "run_t1", completed, saver)
-    assert final.read_text(encoding="utf-8") == "5:full result"
-    assert iteration.run_files == ("runs/03-run_t1.h5",)
-    assert len(seen) == 1
-    assert not seen[0].exists()
-    assert not tuple(iteration.files_dir.iterdir())
-
-
-def test_existing_final_is_never_overwritten(artifacts: RunArtifacts) -> None:
-    iteration = artifacts.new_iteration(1)
-    final = iteration.files_dir.parent / "runs" / "01-run_t1.h5"
-    final.write_text("original", encoding="utf-8")
-    with pytest.raises(FileExistsError, match="already exists"):
-        iteration.save(1, "run_t1", Completed(Cfg(), "replacement"), save_text)
-    assert final.read_text(encoding="utf-8") == "original"
-    assert iteration.run_files == ()
-    assert not tuple(final.parent.glob("*.tmp.h5"))
-
-
-def test_final_created_during_saver_is_not_overwritten(artifacts: RunArtifacts) -> None:
-    iteration = artifacts.new_iteration(1)
-    final = iteration.files_dir.parent / "runs" / "01-run_t1.h5"
-
-    def racing_saver(value: Completed[Cfg, str], path: Path) -> None:
-        save_text(value, path)
-        final.write_text("external final", encoding="utf-8")
-
-    with pytest.raises(FileExistsError):
-        iteration.save(1, "run_t1", Completed(Cfg(), "replacement"), racing_saver)
-    assert final.read_text(encoding="utf-8") == "external final"
-    assert iteration.run_files == ()
-    assert len(tuple(final.parent.glob(".01-run_t1-*.tmp.h5"))) == 1
-
-
-def test_saver_failure_retains_partial_temporary_and_original_cause(
-    artifacts: RunArtifacts,
-) -> None:
-    iteration = artifacts.new_iteration(1)
-    cause = OSError("writer failed after partial data")
-    seen: list[Path] = []
-
-    def broken_saver(value: Completed[Cfg, str], path: Path) -> None:
-        path.write_text(value.result[:3], encoding="utf-8")
-        seen.append(path)
-        raise cause
-
-    with pytest.raises(OSError, match="writer failed") as caught:
-        iteration.save(1, "run_t1", Completed(Cfg(), "partial"), broken_saver)
-    assert caught.value is cause
-    assert seen[0].read_text(encoding="utf-8") == "par"
-    assert not seen[0].with_name("01-run_t1.h5").exists()
-    assert iteration.run_files == ()
-
-
-def test_link_failure_does_not_retry_or_publish(
-    artifacts: RunArtifacts, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    iteration = artifacts.new_iteration(1)
-    cause = OSError("filesystem does not support hard links")
-    attempts: list[tuple[Path, Path]] = []
-
-    def broken_link(source: Path, destination: Path) -> None:
-        attempts.append((source, destination))
-        raise cause
-
-    monkeypatch.setattr(os, "link", broken_link)
-    with pytest.raises(OSError, match="does not support") as caught:
-        iteration.save(1, "run_t1", Completed(Cfg(), "full"), save_text)
-    assert caught.value is cause
-    assert len(attempts) == 1
-    source, final = attempts[0]
-    assert source.read_text(encoding="utf-8") == "2:full"
-    assert not final.exists()
-    assert iteration.run_files == ()
-
-
-def test_unlink_failure_retains_published_final_in_failure_journal(
-    artifacts: RunArtifacts, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    iteration = artifacts.new_iteration(1)
-    cause = OSError("temporary cleanup denied")
-    originals = Path.unlink
-    seen: list[Path] = []
-
-    def broken_unlink(path: Path, *, missing_ok: bool = False) -> None:
-        if path.name.endswith(".tmp.h5"):
-            seen.append(path)
-            raise cause
-        originals(path, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", broken_unlink)
-    with pytest.raises(OSError, match="cleanup denied") as caught:
-        iteration.save(1, "run_t1", Completed(Cfg(), "full"), save_text)
-    assert caught.value is cause
-    final = iteration.files_dir.parent / "runs" / "01-run_t1.h5"
-    assert final.read_text(encoding="utf-8") == "2:full"
-    assert iteration.run_files == ("runs/01-run_t1.h5",)
-    assert os.path.samefile(seen[0], final)
-    artifacts.append(
-        StepFailed(
-            1, 0, iteration.iteration_dir, iteration.run_files, describe_error(cause)
-        )
-    )
-    failed = json.loads(
-        artifacts.journal_path.read_text(encoding="utf-8").splitlines()[-1]
-    )
-    assert failed["kind"] == "step_failed"
-    assert failed["run_files"] == ["runs/01-run_t1.h5"]
-    assert failed["error"]["message"] == "temporary cleanup denied"
 
 
 def test_manifest_failure_retains_last_document_and_temporary(
@@ -554,3 +425,305 @@ def test_journal_rejects_external_path_references(
     with pytest.raises(ValueError, match="relative paths"):
         artifacts.append(IterationStarted(1, 0, 0, reference))
     assert artifacts.journal_path.read_bytes() == before
+
+
+@pytest.fixture
+def record_rig(tmp_path: Path) -> Rig:
+    return Rig(tmp_path)
+
+
+def iteration_document(rig: Rig, call_seq: int) -> dict[str, object]:
+    """Read a completed invocation through its on-disk JSON contract."""
+    path = rig.paths.data_root / f"iter/{call_seq:06d}/record.json"
+    assert path.is_file(), f"Completed invocation {call_seq} must have record.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_iteration_record_contains_inputs_and_journal_result_after_next_and_done(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+
+    def experiment(run: Run[EngineCfg]) -> int:
+        return run.cfg.value * 10
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        assert not (env.iteration_dir / "record.json").exists()
+        if state.index == plan.count:
+            return Done()
+        yield from env.run(experiment, EngineCfg(tun.value))
+        state.index += 1
+        return Next(tun.value, state)
+
+    rig.start(step, plan=Plan(count=1, values=[10, 20]))
+    assert not tuple(rig.paths.data_root.rglob("record.json"))
+    final = rig.engine.execute("run")
+    assert (final.lifecycle, final.committed_seq) == ("done", 1)
+    committed = iteration_document(rig, 1)
+    finished = iteration_document(rig, 2)
+    for document in (committed, finished):
+        assert set(document) == {
+            "format",
+            "format_version",
+            "identity",
+            "workflow",
+            "plan",
+            "tunables",
+            "started",
+            "result",
+        }
+        assert document["format"] == "zcu-workflow-iteration"
+        assert document["format_version"] == 1
+        assert document["identity"] == rig.events()[0]["identity"]
+        assert document["workflow"] == "example"
+        assert document["plan"] == {"count": 1, "values": [10, 20]}
+        assert document["tunables"] == {"value": 1}
+    assert committed["started"] == {
+        "call_seq": 1,
+        "commit_seq": 0,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert committed["result"] == {
+        "kind": "step_committed",
+        "call_seq": 1,
+        "commit_seq": 1,
+        "revision": 0,
+        "encoded_record": {"mode": "json", "value": 1, "error": None},
+        "iteration_dir": "iter/000001",
+    }
+    assert finished["started"] == {
+        "call_seq": 2,
+        "commit_seq": 1,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert finished["result"] == {
+        "kind": "step_finished",
+        "call_seq": 2,
+        "revision": 0,
+        "iteration_dir": "iter/000002",
+        "outcome": "done",
+        "reason": None,
+    }
+    assert rig.engine.records("run")[0].encoded_record.value == 1
+    assert not tuple(rig.paths.data_root.rglob("*.tmp.json"))
+
+
+def test_iteration_record_pause_resume_retains_captured_tunables(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if state.index == plan.count:
+            return Done()
+        yield from env.wait_until(START + timedelta(seconds=1))
+        state.index += 1
+        return Next(tun.value, state)
+
+    def change_and_pause(_signal: StopSignal) -> None:
+        rig.engine.update_tunables(
+            "run",
+            (TunableChange("value", 8),),
+            expected_revision=0,
+            actor=Actor("agent", "test"),
+        )
+        rig.engine.pause("run")
+
+    rig.clock.on_wait = change_and_pause
+    rig.start(step, plan=Plan(count=1))
+    assert rig.engine.execute("run").lifecycle == "paused"
+    discarded = iteration_document(rig, 1)
+    assert discarded["tunables"] == {"value": 1}
+    assert discarded["started"] == {
+        "call_seq": 1,
+        "commit_seq": 0,
+        "revision": 0,
+        "kind": "iteration_started",
+    }
+    assert discarded["result"] == {
+        "kind": "step_discarded",
+        "call_seq": 1,
+        "revision": 0,
+        "iteration_dir": "iter/000001",
+        "reason": "pause",
+    }
+    assert rig.engine.records("run") == ()
+    rig.clock.on_wait = None
+    rig.engine.resume("run")
+    assert rig.engine.execute("run").lifecycle == "done"
+    resumed = iteration_document(rig, 2)
+    assert resumed["tunables"] == {"value": 8}
+    assert resumed["started"] == {
+        "call_seq": 2,
+        "commit_seq": 0,
+        "revision": 1,
+        "kind": "iteration_started",
+    }
+    assert rig.engine.records("run")[0].encoded_record.value == 8
+    assert iteration_document(rig, 1) == discarded
+
+
+@pytest.mark.parametrize("outcome", ["failed", "aborted", "stop", "interrupt"])
+def test_iteration_record_preserves_failure_abort_and_stop_classification(
+    record_rig: Rig,
+    outcome: str,
+) -> None:
+    rig = record_rig
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        if outcome == "failed":
+            raise ValueError("original workflow cause")
+        if outcome == "aborted":
+            return Aborted("quality rejected")
+        if outcome == "interrupt":
+            raise KeyboardInterrupt()
+        rig.engine.stop("run")
+        yield from env.wait_until(START)
+        return Done()
+
+    rig.start(step)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == (
+        outcome if outcome in ("failed", "aborted") else "stopped"
+    )
+    document = iteration_document(rig, 1)
+    result = document["result"]
+    assert isinstance(result, dict)
+    assert result == {
+        key: value
+        for key, value in rig.events()[-2].items()
+        if key not in ("format_version", "seq", "run_id", "time")
+    }
+    if outcome == "failed":
+        assert result["kind"] == "step_failed"
+        assert result["error"]["message"] == "original workflow cause"
+    elif outcome == "aborted":
+        assert result["kind"] == "step_finished"
+        assert result["reason"] == "quality rejected"
+    else:
+        assert result["kind"] == "step_discarded"
+        assert result["reason"] == "stop"
+    assert rig.engine.records("run") == ()
+
+
+class JournalObservingClock(EngineClock):
+    """Observe a real journal append through the injected clock port."""
+
+    before_now: Callable[[], None] | None = None
+
+    def now(self) -> datetime:
+        observer = self.before_now
+        self.before_now = None
+        if observer is not None:
+            observer()
+        return super().now()
+
+
+def test_iteration_record_is_absent_until_result_is_written_to_journal(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+    clock = JournalObservingClock()
+    rig.engine = Engine(
+        EnginePorts(rig.plots, rig.progress, clock, context=7, devices=rig.devices)
+    )
+    observed: list[str] = []
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        path = env.iteration_dir / "record.json"
+        assert not path.exists()
+        if state.index == 1:
+            iteration_document(rig, 1)
+            return Done()
+
+        def before_result_append() -> None:
+            assert rig.kinds()[-1] == "iteration_started"
+            assert not path.exists()
+            observed.append("no record before journal result")
+
+        state.index += 1
+        yield from env.wait_until(START)
+        clock.before_now = before_result_append
+        return Next(tun.value, state)
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert observed == ["no record before journal result"]
+    iteration_document(rig, 2)
+
+
+def test_iteration_record_replace_failure_logs_and_keeps_commits_and_next_state(
+    record_rig: Rig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = record_rig
+    reached: list[int] = []
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        reached.append(state.index)
+        if state.index == 0:
+            # A real filesystem conflict fails replace, not journal or run files.
+            (env.iteration_dir / "record.json").mkdir()
+        elif state.index == 1:
+            assert rig.kinds()[-2:] == ("step_committed", "iteration_started")
+            assert len(rig.engine.records("run")) == 1
+        else:
+            return Done()
+        state.index += 1
+        yield from env.wait_until(START)
+        return Next(tun.value, state)
+
+    rig.start(step)
+    final = rig.engine.execute("run")
+    assert (final.lifecycle, final.committed_seq) == ("done", 2)
+    assert reached == [0, 1, 2]
+    # Later invocations still publish their own summaries and state is committed.
+    iteration_document(rig, 2)
+    iteration_document(rig, 3)
+    assert [record.commit_seq for record in rig.engine.records("run")] == [1, 2]
+    assert "step_failed" not in rig.kinds()
+    errors = [
+        (record.getMessage(), record.exc_info[1])
+        for record in caplog.records
+        if record.exc_info is not None
+    ]
+    assert any(
+        "record" in message.lower() and isinstance(error, OSError)
+        for message, error in errors
+    )
+    assert (rig.paths.data_root / "iter/000001/record.json").is_dir()
+
+
+def test_iteration_record_publication_replaces_instead_of_editing_destination(
+    record_rig: Rig,
+) -> None:
+    rig = record_rig
+    external = rig.root / "external.json"
+    external.write_text("unrelated file", encoding="utf-8")
+
+    def step(
+        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        yield from env.wait_until(START)
+        # A real destination symlink distinguishes replace from in-place writes.
+        (env.iteration_dir / "record.json").symlink_to(external)
+        return Done()
+
+    rig.start(step)
+    assert rig.engine.execute("run").lifecycle == "done"
+    path = rig.paths.data_root / "iter/000001/record.json"
+    assert not path.is_symlink()
+    assert iteration_document(rig, 1)["format"] == "zcu-workflow-iteration"
+    assert external.read_text(encoding="utf-8") == "unrelated file"

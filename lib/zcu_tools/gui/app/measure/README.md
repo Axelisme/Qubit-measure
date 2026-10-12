@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，flux device 的固定 direct 初值與 eval 來源解析
+**Last updated:** 2026-10-12，shared source catalog、SavedPoint、Post-Analysis 與 flux device 的固定 direct 初值及 eval 解析
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -365,6 +365,8 @@ Loader 不猜 namespace 或套件位置。Preserved prefix 優先於 reload pref
 固定 source 的內容變更或刪除要求重啟。新增尚未 import 的固定檔案不阻擋重載，但重載中
 import 新的固定 dependency 要求重啟。Loader 在所有來源保留固定 module identity，且每個
 prepare plan 只能使用一次。它在重載失敗時清除部分 owned modules，不回滾任意 import side effect。
+
+Bounded source inventory、prepare/load、fixed-source restart 與共同 token/error 型別由 `gui.catalog_loader` 擁有。Measure 的 SourceExperimentCatalogLoader 保留原簽名，只注入 Registry/register_all/validate builder；Controller 的 recovery 與 UI 政策不變。
 
 依賴重載是 best-effort，不全面保證 deferred/dynamic import 的一致性，也不禁止函式內 import；
 可重載 code 的 import 不得操作硬體或啟動背景工作。此取捨不放寬資料丟棄確認或 lifecycle 保護。
