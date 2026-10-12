@@ -88,8 +88,42 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
 
     def fit_result(arguments: FitResultArguments) -> ToolReply:
         recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
-        summary = search_summary(recorded)
-        stale = recorded.data["stale"]
+        data = recorded.data
+        if not data["has_result"]:
+            return ToolReply(
+                {
+                    "status": "no_result",
+                    "params": data["params"],
+                    "stale": data["stale"],
+                    "stale_reasons": data["stale_reasons"],
+                }
+            )
+        if data["quality"] is None:
+            summary = ToolReply(
+                {
+                    "status": "finished",
+                    "params": data["params"],
+                    "inputs": {
+                        **{
+                            name: data[name]
+                            for name in (
+                                "search_db",
+                                "EJb",
+                                "ECb",
+                                "ELb",
+                                "r_f",
+                                "sample_f",
+                            )
+                        },
+                        "points": None,
+                    },
+                    "residual": None,
+                    "per_transition": None,
+                }
+            )
+        else:
+            summary = search_summary(recorded)
+        stale = data["stale"]
         summary.data.update(
             {
                 "stale": stale,
@@ -98,7 +132,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         )
         if stale:
             summary.data["note"] = "rerun fluxdep_fit to refresh"
-        if not stale and arguments.get("image", True):
+        if data["quality"] is not None and not stale and arguments.get("image", True):
             return with_png(
                 summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
             )

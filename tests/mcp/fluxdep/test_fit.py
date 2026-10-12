@@ -212,23 +212,36 @@ def test_fit_result_projects_freshness_and_only_renders_fresh_requested_evidence
         assert reply.data["note"] == "rerun fluxdep_fit to refresh"
 
 
-@pytest.mark.parametrize("has_result,stale", [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize(
+    "has_result,stale", [(False, False), (True, False), (True, True)]
+)
 def test_fit_result_without_recorded_quality_is_observation_data_not_zero_statistics(
-    client: Client, recorded_fit: dict[str, object], has_result: bool, stale: bool,
+    client: Client,
+    recorded_fit: dict[str, object],
+    has_result: bool,
+    stale: bool,
 ) -> None:
-    recorded_fit.update({
-        "has_result": has_result, "quality": None, "stale": stale,
-        "stale_reasons": ["filter changed"] if stale else [],
-    })
+    recorded_fit.update(
+        {
+            "has_result": has_result,
+            "quality": None,
+            "stale": stale,
+            "stale_reasons": ["filter changed"] if stale else [],
+        }
+    )
     if not has_result:
         recorded_fit["params"] = None
     client.transport.replies.append(GuiResponse(result=recorded_fit))
     try:
-        reply = tool_reply(client.server.tools["fluxdep_fit_result"]["handler"]({"image": True}))
+        reply = tool_reply(
+            client.server.tools["fluxdep_fit_result"]["handler"]({"image": True})
+        )
     except RuntimeError as error:
         if str(error) != "Finished fit has no recorded quality":
             raise
-        pytest.fail("fit_result must project absent recorded quality as observation data")
+        pytest.fail(
+            "fit_result must project absent recorded quality as observation data"
+        )
     assert reply.data["status"] == ("finished" if has_result else "no_result")
     assert reply.data["params"] == recorded_fit["params"]
     assert reply.data["stale"] is stale
@@ -239,10 +252,15 @@ def test_fit_result_without_recorded_quality_is_observation_data_not_zero_statis
         assert reply.data["per_transition"] is None
     else:
         assert reply.data == {
-            "status": "no_result", "params": None, "stale": False, "stale_reasons": [],
+            "status": "no_result",
+            "params": None,
+            "stale": False,
+            "stale_reasons": [],
         }
     assert reply.images == ()
-    assert [request["method"] for request in client.transport.requests] == ["fit.result"]
+    assert [request["method"] for request in client.transport.requests] == [
+        "fit.result"
+    ]
 
 
 def test_finished_fit_returns_bounded_quality_and_native_png(
