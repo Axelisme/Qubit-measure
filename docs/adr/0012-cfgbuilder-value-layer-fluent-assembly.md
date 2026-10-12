@@ -30,7 +30,7 @@ draft。adapter 作者只維護一份 context-free `MeasureCfgDefinition`：
 @classmethod
 def cfg_definition(cls) -> MeasureCfgDefinition:
     return (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories=ROLE_FACTORIES)
         .reset("reset", optional=True)
         .pulse("pi_pulse", role_id="pi_pulse", label="Pi Pulse")
         .readout("readout")
@@ -86,7 +86,8 @@ module declaration 同地保存 `role_id`、initialization、`blank_overrides`�
   assembler 對齊 literal value。
 
 role alias priority、shape 與參數路徑 seed 的 SSOT仍是 [[0009]] 的 `ROLE_TABLE` / `ROLE_FACTORIES`。
-builder只消費這份資料，不掃描任意 library name，也不複製 role policy。
+角色表與三個 scan-range 政策留在使用者套件；framework builder／seeds 不 import zcu_lab（C16）。
+builder由 caller 注入 role_factories，只消費這份資料，不掃描任意 library name，也不複製 role policy。
 
 ### 4. shared assembler 只共用 mechanics
 

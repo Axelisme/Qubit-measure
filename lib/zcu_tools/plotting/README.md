@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-10-09 — Owner-thread 自由繪圖與保存
+**Last updated:** 2026-10-13 — singleshot charts
 
 本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 standalone caller 與明確 axes 的共用繪圖使用；詳見 [liveplot/README.md](liveplot/README.md)。
 
@@ -33,3 +33,5 @@ shared plotting 不依賴 Qt。Experiment 與 application callers 顯式傳遞 P
 只有需要共用的繪圖能力才納入此家族。Notebook 專用圖、實驗特化圖與 app 專用 renderer 保留在各自 owner；此處不建立通用 PlotManager、統一 Figure schema 或新 plugin framework。根 package 的 `__init__.py` 不載入子 package，避免只匯入家族名稱就載入個別 frontend 或 backend。
 
 Qt canvas 與 figure container 的接入由 [gui/plotting](../gui/plotting/README.md) 負責。GUI 注入 explicit QtPlotHost，透過 owner scheduler 更新 artists 與呈現。Standalone liveplot backend 仍服務其 public plotters，與 operation-owned Plots 分開。依賴方向為 GUI → plotting，不由 liveplot 偵測 GUI。
+
+`singleshot.py` 畫分類 IQ 與區域邊界，`singleshot_rabi.py` 畫 joint-fit population／histogram／confusion 圖。Caller 明傳 readout 長度（µs）與圖尺寸，不把 program cfg 或 experiment defaults 帶入繪圖能力。

@@ -1,11 +1,9 @@
-"""Synthetic workflow registrations and session owners for Window view contracts.
+"""Window RPC call types, Start batches, and synthetic Window view sessions.
 
-Nothing here imports user workflow packages. The forms only need enough
+Nothing here imports user workflow packages. The layout forms only need enough
 fields and collapsible sections to make the old single-column layout tall.
 """
 
-import importlib
-import sys
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -25,8 +23,8 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
 from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+from zcu_tools.gui.app.workflows.remote import FormWrite
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
-from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 from zcu_tools.gui.form import Display, FormEnv, FormModel
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -35,10 +33,22 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.experiment.workflows._engine_fakes import Plan, State, Tunables
 
+from ._reload_source import SourceNamespace
 from ._start_fakes import StartHarness
+
+RpcRequest = Callable[[str, dict[str, object]], dict[str, object]]
 
 QUBIT_KIND = "fake/layout-qubit"
 FIGURE = "synthetic/trend"
+
+
+def start_plan_batch() -> list[FormWrite]:
+    """Supply a branch and expression, leaving points to fresh Start defaults."""
+    return [
+        {"path": ["samples", "kind"], "value": "list"},
+        {"path": ["samples", "values"], "value": [1.0, 1.1]},
+        {"path": ["scale"], "value": {"expr": "0.06 * 2"}},
+    ]
 
 
 class SectionForm(FormModel):
@@ -171,38 +181,6 @@ def small_registration() -> WorkflowAttachment[
     )
 
 
-class SyntheticCatalog:
-    """Own an isolated source namespace whose loader returns the current catalog.
-
-    catalog is what the next Reload publishes; tests replace it before calling
-    the Window's public reload. close retires the namespace and sys.path entry.
-    """
-
-    def __init__(self, root: Path, catalog: WorkflowCatalog[None]) -> None:
-        package = root / "synthetic_layout_source"
-        package.mkdir()
-        (package / "__init__.py").write_text("")
-        self._path = str(root)
-        sys.path.insert(0, self._path)
-        self.catalog = catalog
-        self.loader = SourceCatalogLoader(
-            sources=(SourcePackage("synthetic_layout_source", package),),
-            reload_modules=("synthetic_layout_source",),
-            preserved_modules=(),
-            catalog_module="synthetic_layout_source",
-            catalog_builder=lambda: self.catalog,
-        )
-
-    def close(self) -> None:
-        sys.path.remove(self._path)
-        for name in tuple(sys.modules):
-            if name == "synthetic_layout_source" or name.startswith(
-                "synthetic_layout_source."
-            ):
-                del sys.modules[name]
-        importlib.invalidate_caches()
-
-
 def bind_point(harness: StartHarness, root: Path) -> ResultEntry:
     """Open entry "sample" at point "source" with $qubit bound to Q1.
 
@@ -250,16 +228,19 @@ def expand_all(widget: QWidget, qapp: QApplication) -> None:
 class WindowSession:
     """One real Window over StartHarness owners and the synthetic catalog.
 
-    The catalog lists synthetic_wide (default) then synthetic_small. pause_at is
-    the wide workflow's point index at which its own worker requests Pause;
-    None lets it run to Done. close drains pending work before closing Qt.
+    The catalog lists synthetic_wide (default) then synthetic_small; source.catalog
+    is what the next Reload publishes. pause_at is the wide workflow's point
+    index at which its own worker requests Pause; None lets it run to Done.
+    close drains pending work before closing Qt.
     """
 
     def __init__(self, root: Path) -> None:
         self.harness = StartHarness()
         self.root = root
         self.pause_at: int | None = None
-        self.source = SyntheticCatalog(root, self.fresh_catalog())
+        self.source = SourceNamespace(
+            root, "synthetic_layout_source", self.fresh_catalog()
+        )
         self.window = WorkflowWindow(
             self.harness.state,
             self.harness.services,

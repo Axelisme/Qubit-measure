@@ -20,13 +20,15 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.plotting.plots import Plots
-
-from zcu_lab.v2._support.measure.schema_builder import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import res_freq_range, scaled_path_seed
+from zcu_tools.gui.app.measure.seeds import scaled_path_seed
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
+from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqAnalyzeOptions,
@@ -105,7 +107,9 @@ class RoOptFreqAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("qub_pulse", role_id="pi_pulse")
             .readout(

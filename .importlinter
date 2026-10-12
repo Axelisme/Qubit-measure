@@ -301,17 +301,22 @@ forbidden_modules =
 name = Workflow export science does not import frontend owners
 type = forbidden
 source_modules =
-    zcu_lab.workflows.export
-    zcu_lab.workflows.export_inputs
-    zcu_lab.workflows.coherence_export
-    zcu_lab.workflows.mist_export
-    zcu_lab.workflows.samples
+    zcu_lab.workflows.coherence_fluxdep.lifetime_export
+    zcu_tools.experiment.workflows.saved_run
+    zcu_lab.workflows.coherence_fluxdep.export
+    zcu_lab.workflows.mist_fluxdep.export
+    zcu_lab.workflows.coherence_fluxdep.samples
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp
     zcu_tools.notebook
-    zcu_lab.workflows.gui
-    zcu_lab.workflows.mcp
+    zcu_lab.workflows.coherence_fluxdep.form
+    zcu_lab.workflows.coherence_fluxdep.t1_form
+    zcu_lab.workflows.coherence_fluxdep.t2_form
+    zcu_lab.workflows.mist_fluxdep.form
+    zcu_lab.workflows.overnight.form
+    zcu_lab.workflows.common.calibration_form
+    zcu_lab.workflows.common.calibration_modules
     qtpy
     PyQt5
     PyQt6
@@ -332,12 +337,13 @@ forbidden_modules =
 name = Workflow calibration and coherence science do not depend on frontend owners
 type = forbidden
 source_modules =
-    zcu_lab.workflows.calibration
-    zcu_lab.workflows.coherence
-    zcu_lab.workflows.coherence_measurements
-    zcu_lab.workflows.mist
-    zcu_lab.workflows.t1
-    zcu_lab.workflows.t2
+    zcu_lab.workflows.common.calibration
+    zcu_lab.workflows.coherence_fluxdep.calibration
+    zcu_lab.workflows.coherence_fluxdep.workflow
+    zcu_lab.workflows.coherence_fluxdep.measurements
+    zcu_lab.workflows.mist_fluxdep.workflow
+    zcu_lab.workflows.coherence_fluxdep.t1
+    zcu_lab.workflows.coherence_fluxdep.t2
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp
@@ -353,7 +359,7 @@ forbidden_modules =
 name = Overnight trend science does not depend on frontend owners
 type = forbidden
 source_modules =
-    zcu_lab.workflows.trend
+    zcu_lab.workflows.overnight.trend
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp

@@ -20,8 +20,7 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
-from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
-from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
 from ._helpers import Fixture, call, open_client
 from ._point_application import PointAdapter, PointApplication
@@ -92,7 +91,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
     wire_after,
 ):
     monkeypatch.setattr(
-        FakeAdapter,
+        SampleAdapter,
         "get_writeback_items",
         lambda self, request: [
             ParameterWriteback(
@@ -117,7 +116,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
         tab = fx.ctrl.new_tab("fake")
         for operation in (
             lambda: fx.ctrl.start_run(tab),
-            lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
+            lambda: fx.ctrl.analyze(tab, SampleParams()),
         ):
             assert (
                 call(
@@ -194,7 +193,7 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
     module_schema = CfgSchema(*module_cfg_to_value(module))
     waveform_schema = CfgSchema(*waveform_cfg_to_value(waveform))
     monkeypatch.setattr(
-        FakeAdapter,
+        SampleAdapter,
         "get_writeback_items",
         lambda self, request: [
             ModuleWriteback(
@@ -227,7 +226,7 @@ def test_batch_write_keeps_same_named_module_and_waveform_results(
         tab = fx.ctrl.new_tab("fake")
         for operation in (
             lambda: fx.ctrl.start_run(tab),
-            lambda: fx.ctrl.analyze(tab, FakeAnalyzeParams()),
+            lambda: fx.ctrl.analyze(tab, SampleParams()),
         ):
             assert (
                 call(
@@ -292,7 +291,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     qapp, monkeypatch
 ):
     monkeypatch.setattr(
-        FakeAdapter,
+        SampleAdapter,
         "get_writeback_items",
         lambda self, request: [
             ParameterWriteback(
@@ -318,7 +317,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
             ]["status"]
             == "finished"
         )
-        analyze = fx.ctrl.analyze(tab, FakeAnalyzeParams())
+        analyze = fx.ctrl.analyze(tab, SampleParams())
         assert (
             call(sock, "operation.await", {"operation_id": analyze, "timeout": 2})[
                 "result"
@@ -438,7 +437,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     )
     analyzed = application.result(
         "operation.await",
-        {"operation_id": controller.analyze(tab, T1AnalyzeParams()), "timeout": 2},
+        {"operation_id": controller.analyze(tab, SampleParams()), "timeout": 2},
     )
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(captured.target, "Q1.ext.value", 19.9)

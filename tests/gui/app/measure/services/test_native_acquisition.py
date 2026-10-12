@@ -53,12 +53,12 @@ from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
 )
+from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.resources.entry.fakes import (
     register_fakes,
     registry_state,
     restore_registry,
 )
-from zcu_lab.definitions import ALIAS_PRESET
 
 from ._native_acquisition_support import RoleSavingAdapter
 

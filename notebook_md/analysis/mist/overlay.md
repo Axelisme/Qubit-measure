@@ -64,13 +64,14 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
 
-from zcu_lab.v2._support.notebook.flux_dep import FluxDepAnalyzer
+from zcu_tools.notebook.flux_dep import FluxDepAnalyzer
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 
 flux_run = ze.onetone.flux_dep.core.FluxDepExp().load(Path(filepath))
 spectrum = flux_run.result
 flxs, fpts, signals = spectrum.values, spectrum.freqs, spectrum.signals
 flux_analyzer = FluxDepAnalyzer()
-actline = flux_analyzer.start(flux_run)  # Select the two lines, then click Done.
+actline = flux_analyzer.start(flux_run, FluxPickInputs(flux_run.result.signals, flux_run.result.values, flux_run.result.freqs))  # Select the two lines, then click Done.
 ```
 
 ```python

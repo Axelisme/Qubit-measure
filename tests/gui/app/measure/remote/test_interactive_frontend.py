@@ -11,6 +11,8 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -19,10 +21,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.resources.entry import component_registry
 
+from tests.gui.app.measure._components import register_all as register_components
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import register_all as register_components
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 
 from ._helpers import mcp_client, open_client
 from ._interactive_support import (
@@ -147,7 +147,7 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
     mounted_fx, qapp, pane: Literal["run", "data"], terminal: str
 ) -> None:
     fx, window = mounted_fx
-    tab_id, token, widget = start_mounted(fx, window, "onetone/flux_dep", pane=pane)
+    tab_id, token, widget = start_mounted(fx, window, "synthetic/magnitude", pane=pane)
     qapp.processEvents()
     assert widget.isVisibleTo(window)
     with open_client(fx.service.port) as sock:
@@ -202,7 +202,7 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
     tab_id, token, widget = start_mounted(
         fx,
         window,
-        "onetone/flux_dep",
+        "synthetic/magnitude",
         native_source=tmp_path / "source.h5" if terminal == "done" else None,
     )
     source = fx.state.get_tab(tab_id).run.metadata
@@ -293,7 +293,7 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
     fx, window = mounted_fx
     previous_params = TaggedFluxPickParams(label="previous request")
     tab_id, previous_token, _ = start_mounted(
-        fx, window, "onetone/flux_dep", analyze_params=previous_params
+        fx, window, "synthetic/magnitude", analyze_params=previous_params
     )
     with open_client(fx.service.port) as sock:
         assert interact(sock, tab_id, {"command": "done"})["ok"] is True
@@ -354,7 +354,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
 ) -> None:
     fx, window = mounted_fx
     tab_id, _, widget = start_mounted(
-        fx, window, "onetone/flux_dep", native_source=tmp_path / "source.h5"
+        fx, window, "synthetic/magnitude", native_source=tmp_path / "source.h5"
     )
     source = fx.state.get_tab(tab_id).run.metadata
     captured = fx.state.get_tab(tab_id).run.parameters
@@ -474,8 +474,8 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         bridge.disconnect()
 
 
-@pytest.mark.parametrize("adapter", ["onetone/flux_dep", "twotone/flux_dep"])
-def test_production_flux_adapter_mounts_remote_preview_and_original_writeback(
+@pytest.mark.parametrize("adapter", ["synthetic/magnitude", "synthetic/phase"])
+def test_registered_flux_adapter_mounts_remote_preview_and_original_writeback(
     mounted_fx, adapter: str, qapp
 ) -> None:
     fx, window = mounted_fx
@@ -551,7 +551,7 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
     parameters = fx.ctrl.context_control.read_context()
     fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_half", 0.0)
     fx.ctrl.context_control.set_parameter(parameters.target, "Q1.flux_int", 0.0)
-    tab_id, token, widget = start_mounted(fx, window, "onetone/flux_dep")
+    tab_id, token, widget = start_mounted(fx, window, "synthetic/magnitude")
     with open_client(fx.service.port) as sock:
         rejected = interact(sock, tab_id, {"command": "done"})
         assert rejected["error"]["code"] == "precondition_failed"
@@ -574,9 +574,11 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
 
 def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -> None:
     fx, window = mounted_fx
-    first_id, first_token, first_widget = start_mounted(fx, window, "onetone/flux_dep")
+    first_id, first_token, first_widget = start_mounted(
+        fx, window, "synthetic/magnitude"
+    )
     second_id, second_token, second_widget = start_mounted(
-        fx, window, "twotone/flux_dep"
+        fx, window, "synthetic/phase"
     )
     assert window.interactive_presentation(first_id)[0] is first_widget.figure
     assert window.interactive_presentation(second_id)[0] is second_widget.figure
@@ -619,7 +621,7 @@ def test_interactive_commands_follow_before_commit_but_reads_do_not(
     mounted_fx, monkeypatch
 ) -> None:
     fx, window = mounted_fx
-    tab_id, token, _ = start_mounted(fx, window, "onetone/flux_dep")
+    tab_id, token, _ = start_mounted(fx, window, "synthetic/magnitude")
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     follow = window.select_tab_pane

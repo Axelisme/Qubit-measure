@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +16,6 @@ from zcu_tools.datafile import RunSnapshot, SoftwareProvenance, load_run_data
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -37,12 +35,14 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.device._snapshot_fakes import SnapshotDevice
+from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from tests.gui.app.measure._native_save_support import native_save_session
+from tests.gui.app.measure._native_save_support import (
+    SavingAdapter,
+    native_save_session,
+)
+from tests.gui.app.measure._synthetic import SampleResult
 from tests.gui.app.measure.services._snapshot_adapter import SnapshotAdapter
-from zcu_lab.v2.fake.stub.core import FakeResult
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
-from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 
 from ._run_support import (
     make_inputs,
@@ -78,7 +78,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     monkeypatch: pytest.MonkeyPatch, stopped: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    record = RunRecord(cfg=ExpCfgModel(), result=FakeResult(np.array([1.0])))
+    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
     adapter.run.return_value = record
     provenance = _provenance()
     capture = MagicMock(return_value=provenance)
@@ -156,7 +156,7 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
     )
     capture = MagicMock(return_value=_provenance())
     monkeypatch.setattr(
@@ -206,56 +206,33 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     capture.assert_not_called()
 
 
-def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
+def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # This producer seam substitutes the public cfg assembly/acquisition
     # collaborators. It does not claim the pending assembler/core integration.
     state, tab_id, _mock_adapter = make_state()
-    adapter = T1Adapter()
-    pulse = {
-        "type": "pulse",
-        "waveform": {"style": "const", "length": 0.1},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 4400.0,
-        "gain": 0.2,
-    }
-    cfg = T1Cfg.model_validate(
-        {
-            "modules": {
-                "pi_pulse": pulse,
-                "readout": {
-                    "type": "readout/pulse",
-                    "pulse_cfg": pulse,
-                    "ro_cfg": {
-                        "ro_ch": 0,
-                        "ro_freq": 4400.0,
-                        "ro_length": 1.0,
-                        "trig_offset": 0.5,
-                        "gen_ch": 0,
-                    },
-                },
-            },
-            "sweep": {"length": {"start": 0.0, "stop": 1.0, "expts": 2, "step": 1.0}},
-        }
-    )
-    result = T1Result(
-        times=np.array([0.0, 1.0]), signals=np.array([1.0 + 0j, 0.5 + 0j])
+    adapter = SavingAdapter()
+    cfg = SavingCfg(gain=2.0)
+    result = SavingResult(
+        frequency=np.array([0.0, 1.0]), signal=np.array([1.0 + 0j, 0.5 + 0j])
     )
 
-    def assemble(
-        self: T1Adapter, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> T1Cfg:
-        return cfg
-
-    def acquire(self: T1Exp, config: T1Cfg, *, context: RunContext) -> T1Result:
+    def acquire(
+        self: SavingCore, config: SavingCfg, *, context: RunContext
+    ) -> SavingResult:
         assert config is cfg
         assert not context.cancel_signal.is_set()
         return result
 
-    monkeypatch.setattr(T1Adapter, "build_exp_cfg", assemble)
-    monkeypatch.setattr(T1Exp, "run", acquire)
+    monkeypatch.setattr(
+        SavingAdapter,
+        "run",
+        lambda self, req, raw_cfg, *, context: RunRecord(
+            cfg, acquire(SavingCore(), cfg, context=context)
+        ),
+    )
+    monkeypatch.setattr(SavingCore, "run", acquire)
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
         MagicMock(return_value=_provenance()),
@@ -264,7 +241,7 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
     tab.adapter = adapter
     inputs = RunInputs(
         tab_id=tab_id,
-        adapter_name="twotone/t1",
+        adapter_name="test/saving",
         adapter=adapter,
         request=RunRequest(soc=None, soccfg=None, cfg_context=None),
         accepted_cfg=tab.cfg.accept(),
@@ -277,11 +254,11 @@ def test_gui_run_publishes_the_concrete_t1_record_and_declared_metadata(
     record = state.get_tab(tab_id).run.result
     metadata = state.get_tab(tab_id).run.metadata
     assert isinstance(record, RunRecord)
-    assert isinstance(record.cfg, T1Cfg)
+    assert isinstance(record.cfg, SavingCfg)
     assert record.cfg == cfg
     assert record.result is result
     assert metadata is not None
-    assert metadata.experiment == T1Exp().persistence_spec().tag
+    assert metadata.experiment == SavingCore().persistence_spec().tag
     assert metadata.completion == "complete"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
@@ -292,7 +269,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=FakeResult(np.array([1.0]))
+        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
     )
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance",

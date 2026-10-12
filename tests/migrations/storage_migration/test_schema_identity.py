@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -36,6 +37,92 @@ from tests.migrations.storage_migration.fakes import (
 )
 
 pytestmark = pytest.mark.usefixtures("registry_guard")
+
+
+@pytest.mark.parametrize("version", ["1.bad", "1", "1.0.1", "2.0"])
+def test_unconvertible_cfg_version_is_pending_and_can_be_corrected(
+    request_data: MigrationRequest, mapping: MigrationMapping, version: str
+) -> None:
+    request, source = write_run(request_data)
+    path = request.result_root.parent / "evidence.json"
+    document = json.loads(path.read_text())
+    document["entries"][0]["cfg"]["schema_version"] = version
+    path.write_text(json.dumps(document))
+    request = replace(request, part="data", run_evidence=load_run_evidence(path))
+    before = source.read_bytes()
+
+    def check_native(path: Path, tag: str, cfg_type: str) -> None:
+        assert source.read_bytes() == before
+        noop_validation(path, tag, cfg_type)
+
+    report = migrate_storage(
+        request,
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=check_native,
+    )
+    assert report.converted_files == report.moved_labber_files == ()
+    assert any(item.source == source for item in report.pending)
+    assert source.read_bytes() == before
+    manifest = json.loads(manifest_path(request).read_text())
+    assert manifest["runs"] == []
+    assert not any(item["operation"] == "native" for item in manifest["files"])
+    assert manifest["evidence"] == document
+
+    document["entries"][0]["cfg"]["schema_version"] = "1.0"
+    path.write_text(json.dumps(document))
+    result = migrate_storage(
+        replace(request, resume=True, run_evidence=load_run_evidence(path)),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=check_native,
+    )
+    assert result.entry_id == report.entry_id
+    assert len(result.converted_files) == len(result.moved_labber_files) == 1
+    stored = load_run_data(result.converted_files[0].destination)
+    assert stored.cfg.values == document["entries"][0]["cfg"]["values"]
+    assert stored.cfg.schema_version == "1.0"
+    assert result.moved_labber_files[0].destination.read_bytes() == before
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_converter_preserves_raw_cfg_during_validation(
+    request_data: MigrationRequest, mapping: MigrationMapping, dry_run: bool
+) -> None:
+    request, source = write_run(
+        request_data,
+        cfg_values={"frequency": 12.5, "future_cfg": {"nested": [{"keep": True}]}},
+    )
+    before = deepcopy(request.run_evidence)
+    source_bytes = source.read_bytes()
+    checked: list[CfgSnapshot] = []
+
+    def check_cfg(tag: str, cfg: CfgSnapshot) -> None:
+        validate_cfg(tag, cfg)
+        checked.append(deepcopy(cfg))
+
+    def check_native(path: Path, tag: str, cfg_type: str) -> None:
+        assert source.read_bytes() == source_bytes
+        noop_validation(path, tag, cfg_type)
+
+    report = migrate_storage(
+        replace(request, part="data", dry_run=dry_run),
+        mapping=mapping,
+        validate_cfg=check_cfg,
+        validate_native=check_native,
+    )
+    assert request.run_evidence == before
+    assert before is not None
+    assert checked == [before.entries[0].cfg]
+    if dry_run:
+        assert source.read_bytes() == source_bytes
+        assert not (request.database_root / request.name).exists()
+        assert not (request.results_root / request.name).exists()
+    else:
+        assert len(report.converted_files) == 1
+        stored = load_run_data(report.converted_files[0].destination)
+        assert stored.cfg == before.entries[0].cfg
+        assert report.moved_labber_files[0].destination.read_bytes() == source_bytes
 
 
 def test_parameters_do_not_validate_acquisition_cfg(

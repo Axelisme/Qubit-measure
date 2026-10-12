@@ -1,9 +1,9 @@
-**Last updated:** 2026-10-12，固定 alias 名稱的 direct defaults
+**Last updated:** 2026-10-13，框架搬遷
 
 # Measure domain support
 
 這個 private package 擁有至少兩個 measure experiment adapters 共用的 implementation
-mechanics：context-free cfg definition builder、typed default seeds、module role/default assembly、
+mechanics：實驗 scan-range seeds、module role/default assembly、
 analysis carriers、writeback helpers與跨實驗的 context utilities。
 
 `analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
@@ -13,16 +13,14 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一 adapter 的 domain policy 留在其 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的 `alias_name_seed` 在 fresh cfg 建立時解析 bare alias，保存 direct 名稱；未綁定時保留指名 alias 的 direct Invalid input，不代用靜態名稱。既有 cfg 和 draft 不隨 alias 變更，新 cfg 才讀新的解析結果。其他 scalar seed
-保存 canonical `EvalValue`，建立 defaults 時不查校準，也不代用靜態 fallback。module seed 按明確的 module 槽或 library root 掛載校準內容，
-module 校準缺少時使用既有 fresh fallback。`path_seed` 與 `scaled_path_seed` 遇到宣告但未綁的角色，直接保存 `EvalValue`，不讀該路徑或使用 fallback。Cfg 求值時發布指名角色的 Invalid；綁定後 refresh 求值，reset 才重跑 defaults。`module_seed` 遇到未綁角色，保存 linked empty section，即使 optional/fallback=None 也啟用。Cfg 發布含 alias 路徑的 missing-reference Invalid；綁後 refresh 由 catalog 提供 shape 與內容。手動關掉 optional 後 refresh 不重掛，缺少槽的 fallback 仍由 reset 重跑 defaults 才採用。非 null 的錯誤值、來源與 materialization 故障仍報錯。
+通用 context-free builder、seeds 與 role factory 契約位於 `zcu_tools.gui.app.measure`。Caller 明填 `MeasureCfgBuilder(role_factories=ROLE_FACTORIES)`；角色表和 res_freq_range／qub_freq_range／flux_range 留在此 package，沿用既有實驗政策。
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run `ParameterContext` 讀取分類、chi/kappa 和可選分析校準。
 沒有 capture 時明示失敗，不讀目前 alias；可選校準 leaf 缺少或 null 時才交給 core 的既有分析預設。
 MIST `log_scale` 是 typed analysis input，不是儲存參數。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
 預設值，startup TemplateCatalog 也重用其 shape／blank factories。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
 core不得反向 import measure domain。
 
-`flux_pick_plugin.py` 把 onetone/twotone flux picker 的 shared typed actions、ParamSpec commands 與 Auto Align single-flight 放在同一個 plugin instance。GUI frontend 維持本地 preview；remote 從同一個 service-owned session 讀取 committed state，worker 回覆只在 owner loop 提交，Done/cancel 後忽略晚到結果。move_line 的 role enum 來自 domain FluxLineRole，共用 ParamSpec 負責 schema 與 request 驗證，typed Action 仍保留 domain 驗證。兩個 concrete adapters 都指定終止 result builder。終止 renderer 重用 Qt-free kernel 與原生圖 builder，產生 GUI-owned FluxPickResult 和 `pick` 圖。OneTone 明確拆開 RunRecord，TwoTone 的 bare factory 入口保持不變。
+Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gui.app.measure`。Adapter 從固定 Run capture 讀初始參數，交 FluxPickInputs 與普通數值。Lib 不讀具體 Result 或 ctx_helpers。兩個 adapter 保留各自的 magnitude-only 政策，共用原有 kernel／plugin。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的

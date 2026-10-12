@@ -24,7 +24,7 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
-from zcu_lab.workflows.acquire import (
+from zcu_lab.workflows.common.acquire import (
     FrequencyAcquisition,
     RabiAcquisition,
     ReadoutAcquisition,
@@ -36,7 +36,7 @@ from zcu_lab.workflows.acquire import (
     run_t1,
     run_t2echo,
 )
-from zcu_lab.workflows.analysis import analyze_t2echo
+from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 
 
 class _Arguments(argparse.Namespace):
