@@ -4,6 +4,8 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor
 from qtpy.QtWidgets import QDialogButtonBox, QLabel, QPushButton, QTableWidget
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -14,6 +16,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -23,6 +26,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
 @pytest.fixture
@@ -265,3 +269,133 @@ def test_storage_error_keeps_dialog_draft_and_installed_table_for_retry(
     )
     fresh.install_entry(entry)
     assert fresh.get_alias_rows() == (AliasRow("qubit", "Q2"),)
+
+
+@pytest.fixture
+def resolved_editor(qapp, tmp_path: Path):
+    """An opened entry and point with real owner-backed component links."""
+    before = registry_state()
+    register_fakes()
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
+    entry.new_point("working")
+    service = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    service.install_entry(entry)
+    control = ContextControlFacet(context=service)
+    control.use_point(PointUseRequest("working"))
+    control.add_component("R1", "fake/sensor", {})
+    control.add_component("Q1", "fake/drive/a", {"sense": "R1"})
+    control.set_alias_rows(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("resonator", "$qubit.sense"),
+            AliasRow("flux_dev", ""),
+            AliasRow("broken", "$qubit.no_such_field"),
+        )
+    )
+    dialog = AliasDialog(control)
+    dialog.show()
+    try:
+        yield dialog, control
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+        restore_registry(before)
+
+
+def test_resolution_column_shows_owner_projection_and_read_only_cells(
+    resolved_editor,
+) -> None:
+    dialog, control = resolved_editor
+    table = dialog.findChild(QTableWidget)
+    assert table is not None
+    assert table.columnCount() == 3
+    resolved = [table.item(index, 2) for index in range(table.rowCount())]
+    assert all(item is not None for item in resolved)
+    direct, linked, unbound, broken = resolved
+    assert direct is not None and linked is not None
+    assert unbound is not None and broken is not None
+    assert direct.text() == "Q1"
+    assert linked.text() == "R1"
+    assert unbound.text() == "(unbound)"
+    assert unbound.foreground().color() == QColor("gray")
+    error = control.read_context().resolved_aliases()[3].error
+    assert error is not None
+    assert broken.text() == error
+    assert broken.toolTip() == error
+    assert broken.foreground().color() == QColor("red")
+    for item in resolved:
+        assert item is not None
+        assert not item.flags() & Qt.ItemFlag.ItemIsEditable
+    for column in (0, 1):
+        item = table.item(0, column)
+        assert item is not None
+        assert item.flags() & Qt.ItemFlag.ItemIsEditable
+
+
+def test_resolution_stays_applied_until_successful_apply(resolved_editor) -> None:
+    dialog, control = resolved_editor
+    table = dialog.findChild(QTableWidget)
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert table is not None and buttons is not None
+    assert table.columnCount() == 3
+    value, result = table.item(0, 1), table.item(0, 2)
+    assert value is not None and result is not None
+    apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
+    assert apply is not None
+    value.setText("$resonator")
+    apply.click()
+    assert table.item(0, 2).text() == "Q1"
+    value.setText("R1")
+    assert table.item(0, 2).text() == "Q1"
+    apply.click()
+    assert control.get_alias_rows()[0].value == "R1"
+    assert table.item(0, 2).text() == "R1"
+    linked = table.item(1, 2)
+    assert linked is not None
+    assert linked.text() == control.read_context().resolved_aliases()[1].error
+    assert linked.toolTip() == linked.text()
+
+
+@pytest.mark.parametrize("fixture_name", ["alias_editor", "entry_editor"])
+def test_resolution_without_entry_or_selected_point_is_empty_and_read_only(
+    fixture_name: str, request: pytest.FixtureRequest
+) -> None:
+    dialog = request.getfixturevalue(fixture_name)[0]
+    table = dialog.findChild(QTableWidget)
+    assert table is not None
+    assert table.columnCount() == 3
+    for index in range(table.rowCount()):
+        result = table.item(index, 2)
+        assert result is not None
+        assert result.text() in ("", "(unbound)")
+        assert not result.flags() & Qt.ItemFlag.ItemIsEditable
+
+
+def test_added_resolution_cell_is_read_only_and_updates_on_apply(
+    resolved_editor,
+) -> None:
+    dialog, _ = resolved_editor
+    table = dialog.findChild(QTableWidget)
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert table is not None and buttons is not None
+    add = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Add")
+    add.click()
+    result = table.item(4, 2)
+    assert result is not None
+    assert result.text() == ""
+    assert not result.flags() & Qt.ItemFlag.ItemIsEditable
+    alias, value = table.item(4, 0), table.item(4, 1)
+    assert alias is not None and value is not None
+    alias.setText("spare")
+    value.setText("R1")
+    apply = buttons.button(QDialogButtonBox.StandardButton.Apply)
+    assert apply is not None
+    apply.click()
+    assert table.item(4, 2).text() == "R1"
