@@ -6,6 +6,7 @@ from zcu_tools.experiment import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    Form,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -19,6 +20,7 @@ class SnapshotAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]
     """Use actual assembly and core acquisition with no mocked run method."""
 
     exp_cls = SnapshotRecordCore
+    form = Form(SavingCfg, {})
     ExpCfg_cls = SavingCfg
     experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import Range
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -14,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
+    Form,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -68,6 +70,7 @@ class SampleAnalysis(AnalyzeResultBase):
 
 
 class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SampleParams]):
+    form = Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
     )

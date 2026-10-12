@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -28,6 +29,7 @@ from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
+    Form,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -38,14 +40,6 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind,
 )
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ScalarSpec,
-)
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -54,8 +48,14 @@ from zcu_tools.gui.expected_error import (
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.program.v2 import ProgramV2Cfg
 
-from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleResult, SampleRun
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import make_form
+from tests.gui.app.measure._synthetic import (
+    SampleAdapter,
+    SampleCfg,
+    SampleResult,
+    SampleRun,
+)
 
 from ._run_support import (
     ConstructorFailingProgram,
@@ -207,11 +207,11 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
-    schema = CfgSchema(
-        CfgSectionSpec(fields={"gain": ScalarSpec(label="Gain", type=float)}),
-        CfgSectionValue(fields={"gain": EvalValue("general.ext.gain")}),
-    )
-    cfg = make_cfg(schema, state=state)
+
+    class CapturedGain(ConfigBase):
+        gain: float
+
+    cfg = make_form(Form(CapturedGain, {"gain": Expr("general.ext.gain")}), state=state)
     state.get_tab(tab_id).cfg = cfg
     inputs = make_inputs(state, tab_id, adapter)
     svc, gate, bg, _ = make_run_service(state)
@@ -220,12 +220,11 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     plots = make_plots()
 
     svc.start_run(inputs, plots=plots)
-    schema.value.fields["gain"] = DirectValue(0.75)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    cfg.refresh()
+    assert cfg.accept().values["gain"] == 0.25
     bg.run_work()
 
     context = adapter.run.call_args.kwargs["context"]
@@ -243,6 +242,14 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(SampleAdapter):
+        form = Form(
+            SampleCfg,
+            {
+                "gain": Expr("general.ext.gain"),
+                "sweep": Range.between(5, 6, expts=11),
+            },
+        )
+
         def run(
             self,
             req: RunRequest,
@@ -261,9 +268,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
-    schema = adapter.make_default_cfg(state.session_env)
-    schema.value.fields["gain"] = EvalValue("general.ext.gain")
-    cfg = make_cfg(schema, state=state)
+    cfg = make_form(adapter.form, state=state)
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
     inputs = make_inputs(state, tab_id, adapter)
@@ -275,7 +280,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         replace(state.session_env, parameters=parameter_capture(gain=0.75))
     )
     state.version.bump("context")
-    after = cfg.refresh()
+    assert cfg.accept().source_basis == accepted_basis
     background.run_work()
 
     result = state.get_tab(tab_id).run.result
@@ -283,7 +288,9 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     assert result.cfg is not None
     assert result.cfg.gain == 0.25
     assert inputs.accepted_cfg.source_basis == accepted_basis
-    assert after.source_basis != accepted_basis
+    cfg.reset()
+    assert cfg.accept().source_basis != accepted_basis
+    assert cfg.accept().values["gain"] == 0.75
 
 
 def test_start_run_rejects_when_tab_busy():

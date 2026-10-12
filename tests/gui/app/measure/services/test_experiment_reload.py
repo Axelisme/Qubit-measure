@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import Form, SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabClosedPayload
 from zcu_tools.gui.app.measure.registry import Registry
@@ -15,16 +15,17 @@ from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    DirectValue,
-    schema_to_raw,
-)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
-from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
+from tests.gui.app.measure._reload_fakes import (
+    Loader,
+    NewAdapter,
+    OldAdapter,
+    ReloadCfg,
+)
 
 
 @dataclass
@@ -46,14 +47,14 @@ def app() -> App:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     registry = Registry()
-    registry.register("demo", OldAdapter)
+    registry.register("demo", OldAdapter, form=OldAdapter.form)
     writeback = MagicMock()
     tabs = TabService(
         state,
         registry,
         writeback,
-        cfg_resources(state),
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
         captured_parameters=lambda _aliases: None,
     )
     workspace = WorkspaceService(state, tabs, bus)
@@ -239,7 +240,7 @@ def test_restart_required_failure_cannot_retry(app: App) -> None:
 def test_partial_restore_retries_only_skipped_entries_without_stealing_selection(
     app: App,
 ) -> None:
-    app.registry.register("missing", OldAdapter)
+    app.registry.register("missing", OldAdapter, form=OldAdapter.form)
     app.controls.new_tab("demo")
     app.controls.new_tab("missing")
     report = app.reload.reload_confirmed(app.reload.prepare_reload())
@@ -247,7 +248,7 @@ def test_partial_restore_retries_only_skipped_entries_without_stealing_selection
     assert len(report.rejected_tabs) == 1
     retained = app.state.list_tab_ids()[0]
     app.state.set_active_tab(retained)
-    app.registry.register("missing", NewAdapter)
+    app.registry.register("missing", NewAdapter, form=NewAdapter.form)
     report = app.reload.retry_skipped_tabs()
     assert report.restored_tabs == 1
     assert app.state.list_tab_ids()[0] == retained
@@ -258,17 +259,20 @@ def test_partial_restore_retries_only_skipped_entries_without_stealing_selection
 
 
 def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -> None:
-    class InvalidAdapter(OldAdapter):
-        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
+    class BrokenForm(Form[ReloadCfg]):
+        def default_input(self, env: FormEnv) -> FormInput[FormModel]:
             raise ValueError("missing calibration")
 
-    app.registry.register("bad", OldAdapter)
-    app.loader.candidate.register("bad", InvalidAdapter)
+    class InvalidAdapter(OldAdapter):
+        form = BrokenForm(ReloadCfg, {})
+
+    app.registry.register("bad", OldAdapter, form=OldAdapter.form)
+    app.loader.candidate.register("bad", InvalidAdapter, form=InvalidAdapter.form)
     app.controls.new_tab("bad")
     app.controls.new_tab("demo")
     report = app.reload.reload_confirmed(app.reload.prepare_reload())
     assert report.restored_tabs == 1
-    assert "invalid adapter defaults" in report.rejected_tabs[0].message
+    assert "missing calibration" in report.rejected_tabs[0].message
     assert app.reload.skipped_count == 1
 
 
@@ -286,7 +290,7 @@ def test_driving_gate_and_nested_reload_are_blocked_during_import(app: App) -> N
 
 
 def test_new_reload_discard_is_explicit_in_preview(app: App) -> None:
-    app.registry.register("missing", OldAdapter)
+    app.registry.register("missing", OldAdapter, form=OldAdapter.form)
     app.controls.new_tab("missing")
     app.reload.reload_confirmed(app.reload.prepare_reload())
     preview = app.reload.prepare_reload()
@@ -299,12 +303,12 @@ def test_new_reload_discard_is_explicit_in_preview(app: App) -> None:
 def test_ram_snapshot_is_detached_from_retired_cfg(app: App) -> None:
     key = app.controls.new_tab("demo")
     retired = app.state.get_tab(key)
-    detached = retired.cfg.snapshot_inputs()
-    expected = schema_to_raw(detached)
+    detached = retired.cfg.input.data
+    expected = dict(detached)
     app.loader.failure = CatalogReloadError("bad import")
     app.reload.reload_confirmed(app.reload.prepare_reload())
-    detached.value.fields["knob"] = DirectValue(99)
+    detached["knob"] = 99
     app.loader.failure = None
     app.reload.retry_failed_reload()
     fresh = app.state.get_tab(app.state.list_tab_ids()[0])
-    assert schema_to_raw(fresh.cfg.snapshot_inputs()) == expected
+    assert fresh.cfg.input.data == expected

@@ -98,3 +98,24 @@ def test_capture_tokens_are_fixed_before_atomic_input_write() -> None:
     resource.reset()
     resource.write({("amount",): {"expr": "2 * @{device.flux.value}"}})
     assert resource.result() == ScalarCore(amount=10.0)
+
+
+def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths() -> (
+    None
+):
+    resource = resource_api.TabFormResource(
+        Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+        mutation_allowed=lambda: True,
+    )
+    assert hasattr(resource, "write_compatible"), (
+        "Missing public compatible input restoration"
+    )
+    dropped = resource.write_compatible(
+        {"amount": {"expr": "unfinished +"}, "removed": 9}
+    )
+    assert dropped == (("removed",),)
+    assert resource.input.data == {"amount": {"expr": "unfinished +"}}
+    assert isinstance(resource.result(), FormErrors)
+    assert resource.write_compatible({"amount": "not a number"}) == (("amount",),)
+    assert resource.input.data == {"amount": {"expr": "unfinished +"}}
