@@ -53,7 +53,7 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
     def __init__(
         self, inputs: TwoToneInputs, threshold: float = 1.0, brush_width: float = 0.05
     ) -> None:
-        """Declare twotone_pick commands on an all-selected seed.
+        """Declare twotone_pick commands on an empty selection seed.
 
         set_settings accepts optional threshold/sigma/smooth_method; set_tool
         accepts optional width/mode. Both require at least one non-null value.
@@ -64,6 +64,8 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
         and closes input, including for a successful empty selection.
         """
         seed = make_twotone_state(inputs, threshold=threshold, width=brush_width)
+        # GUI sampling starts fresh; the numerical/Notebook seed remains all-selected.
+        seed.mask.fill(False)
         settings_params = (
             ParamSpec(
                 "threshold",
