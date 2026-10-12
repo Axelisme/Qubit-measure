@@ -123,10 +123,14 @@ def test_prevalidation_rejects_missing_snapshot_before_any_append(
     )
     table = JsonlSampleTable(tmp_path / "history.jsonl")
     with pytest.raises(ValueError, match="snapshot"):
-        rows = export.export_t1_samples(
-            SampleRun("sample-run", plan, paths.data_root, records)
+        append_samples(
+            "sample-run",
+            rows=export.export_t1_samples(
+                SampleRun("sample-run", plan, paths.data_root, records)
+            ),
+            table=table,
+            point="captured",
         )
-        append_samples("sample-run", rows=rows, table=table, point="captured")
     assert not table.path.exists()
 
 
