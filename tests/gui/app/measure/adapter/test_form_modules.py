@@ -87,3 +87,47 @@ def test_module_reference_or_inline_materializes_to_native_core(mode: str) -> No
     assert cfg.modules.probe.freq == (100 if mode == "ref" else 200)
     assert cfg.modules.probe.waveform.length == (0.1 if mode == "ref" else 0.2)
     assert form.model.input_schema(env)
+
+
+def test_native_cfg_backfill_is_detached_inline_and_direct_range() -> None:
+    from zcu_tools.cfg_model import Expr, Hidden
+    from zcu_tools.program.v2.sweep import SweepCfg
+
+    class LoadedCore(ModuleCore):
+        sweep: SweepCfg
+        amplitude: complex = 1j
+        hidden: float = 7.0
+
+    form = Form(LoadedCore, {"amplitude": Expr("2j"), "hidden": Hidden()})
+    native = LoadedCore(
+        modules=ModuleSection(
+            probe=PulseCfg.model_validate(
+                {
+                    "ch": 2,
+                    "nqz": 1,
+                    "freq": 200,
+                    "gain": 0.1,
+                    "waveform": {"style": "const", "length": 0.2},
+                }
+            )
+        ),
+        sweep=SweepCfg(start=10, stop=14, expts=3, step=2),
+        amplitude=2 + 3j,
+    )
+    assert hasattr(form, "cfg_input"), "Form must own native cfg backfill"
+    backfill = form.cfg_input(native)
+    data = backfill.data
+    assert data["sweep"] == {"kind": "linrange", "start": 10.0, "stop": 14.0, "n": 3}
+    assert data["amplitude"] == {"__complex__": [2.0, 3.0]}
+    assert "hidden" not in data
+    env = FormEnv()
+    state = FormState(backfill)
+    result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    assert cfg == native
+    native.modules.probe.gain = 0.7
+    assert cfg.modules.probe.gain == 0.1
