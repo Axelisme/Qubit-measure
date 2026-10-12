@@ -66,6 +66,7 @@ from .dto import (
 )
 from .interactive import (
     h_interactive_read,
+    h_interactive_render,
     h_selection_interactive_command,
     h_selection_interactive_open,
     h_spectrum_interactive_command,
@@ -109,7 +110,6 @@ def _h_spectrum_list(
 ) -> SpectrumListReply:
     del params
     spectrums = adapter.ctrl.state.spectrums
-    active = adapter.ctrl.interactive.inspect()
     return {
         "spectrums": [
             SpectrumListItem(
@@ -123,6 +123,7 @@ def _h_spectrum_list(
                 else None,
             )
             for entry in spectrums.values()
+            for active in (adapter.ctrl.interactive.inspect(entry.name),)
         ]
     }
 
@@ -146,7 +147,7 @@ def _h_spectrum_snapshot(
     entry = adapter.ctrl.state.spectrums.get(name)
     if entry is None:
         return {"name": name, "exists": False}
-    active = adapter.ctrl.interactive.inspect()
+    active = adapter.ctrl.interactive.inspect(name)
     return {
         "name": entry.name,
         "exists": True,
@@ -525,6 +526,7 @@ _HANDLERS: dict[str, Handler] = {
     "selection.snapshot": _h_selection_snapshot,
     "selection.pointcloud": _h_selection_pointcloud,
     "interactive.read": h_interactive_read,
+    "interactive.render": h_interactive_render,
     "spectrum.interactive.open": h_spectrum_interactive_open,
     "spectrum.interactive.command": h_spectrum_interactive_command,
     "selection.interactive.open": h_selection_interactive_open,

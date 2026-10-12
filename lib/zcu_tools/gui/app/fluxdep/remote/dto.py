@@ -92,9 +92,7 @@ class ContextReplyBase(TypedDict):
     context_id: int
     closed: bool
     plugin: str
-    commands: list[CommandDeclaration]
     can_undo: bool
-    figure: PngImage
 
 
 class LineContextReply(ContextReplyBase):
@@ -193,6 +191,7 @@ class InteractiveReply(TypedDict):
     effect is null for reads/opens and populated only after a successful command.
     """
 
+    discarded: NotRequired[Literal["align", "sample"]]
     context: InteractiveContextReply | None
     effect: InteractiveEffect | None
 

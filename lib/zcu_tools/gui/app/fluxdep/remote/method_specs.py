@@ -85,6 +85,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Select a spectrum for display. Null or "
         "omitted name clears display selection without changing source versions.",
+        readonly=True,
         params=(ParamSpec("name", JsonType.STRING, required=False),),
     ),
     "spectrum.reset_alignment": MethodSpec(
@@ -115,14 +116,21 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "interactive.read": MethodSpec(
         30.0,
         "Inspect the live context without opening input or changing display. "
-        "Returns state and native PNG, or null when inactive.",
+        "Returns committed state, or null when inactive. name=selection reads Filter.",
+        params=(ParamSpec("name", JsonType.STRING),),
         readonly=True,
+    ),
+    "interactive.render": MethodSpec(
+        30.0,
+        "Render a named current context as PNG without editing or switching display. name=selection renders Filter.",
+        readonly=True,
+        params=(ParamSpec("name", JsonType.STRING),),
     ),
     "spectrum.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse a picker for an already active literal spectrum. "
+        "Open/reuse a picker by literal spectrum name. "
         "kind is line, onetone or twotone. Returns the "
-        "owner identity, commands, state and native PNG.",
+        "owner identity and committed state.",
         params=(
             ParamSpec("name", JsonType.STRING),
             ParamSpec("kind", JsonType.STRING, enum=("line", "onetone", "twotone")),
@@ -142,8 +150,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "selection.interactive.open": MethodSpec(
         30.0,
-        "Open/reuse the joint-cloud selection. "
-        "Returns identity, commands, input state and native PNG.",
+        "Open/reuse the joint-cloud selection. Returns identity and input state.",
     ),
     "selection.interactive.command": MethodSpec(
         30.0,

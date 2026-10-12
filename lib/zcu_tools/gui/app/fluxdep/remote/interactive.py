@@ -27,14 +27,12 @@ from zcu_tools.gui.app.fluxdep.interactive import (
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.plotting.figure_export import render_figure_png
-from zcu_tools.gui.remote.param_spec import build_input_schema
 from zcu_tools.plotting.fluxdep.cross_selection import make_cross_selection_figure
 from zcu_tools.plotting.fluxdep.onetone import make_onetone_pick_figure
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.fluxdep.twotone import make_twotone_pick_figure
 
 from .dto import (
-    CommandDeclaration,
     ContextReplyBase,
     InteractiveContextReply,
     InteractiveReply,
@@ -63,32 +61,18 @@ def _base(
     session: Session[_S],
     *,
     closed: bool,
-    selection: bool,
-    figure: Figure,
 ) -> ContextReplyBase:
-    commands: list[CommandDeclaration] = []
-    if not closed:
-        commands = [
-            {"name": command.name, "schema": build_input_schema(command.params)}
-            for command in plugin.commands
-        ]
-        commands.extend(
-            {"name": name, "schema": build_input_schema(())}
-            for name in ("undo", "apply" if selection else "finish", "cancel")
-        )
     return {
         "context_id": context_id,
         "closed": closed,
         "plugin": plugin.plugin_id,
-        "commands": commands,
         "can_undo": not closed and session.can_undo(),
-        "figure": _png(figure),
     }
 
 
-def _closed(owner: FluxDepInteractiveOwner, context_id: int) -> bool:
-    current = owner.inspect()
-    return current is None or current.context_id != context_id
+def _closed(owner: FluxDepInteractiveOwner, active: ActiveInteractiveContext) -> bool:
+    current = owner.inspect(active.spectrum_name or "selection")
+    return current is None or current.context_id != active.context_id
 
 
 def _execute(
@@ -98,22 +82,23 @@ def _execute(
     kind: str,
     command: str | None,
     params: Mapping[str, object],
+    name: str | None,
 ) -> None:
     if command is None:
         return
     if command == "undo":
         session.undo()
     elif command == "cancel":
-        owner.cancel()
+        owner.cancel(name or "selection")
     elif command == "apply":
         owner.apply_cross_selection()
     elif command == "finish":
         if kind == "line":
-            owner.finish_line_pick()
+            owner.finish_line_pick(name)
         elif kind == "onetone":
-            owner.finish_onetone_pick()
+            owner.finish_onetone_pick(name)
         else:
-            owner.finish_twotone_pick()
+            owner.finish_twotone_pick(name)
     else:
         plugin.execute_command(session, command, params)
 
@@ -132,17 +117,23 @@ def _reply(
     # reference, not owner.inspect()'s successor, supplies the after snapshot.
     if isinstance(context, LinePickContext):
         before = context.session.snapshot()
-        _execute(owner, context.plugin, context.session, "line", command, values)
+        _execute(
+            owner,
+            context.plugin,
+            context.session,
+            "line",
+            command,
+            values,
+            active.spectrum_name,
+        )
         state = context.session.snapshot()
-        closed = _closed(owner, active.context_id) if command is not None else False
+        closed = _closed(owner, active) if command is not None else False
         wire = {
             **_base(
                 active.context_id,
                 context.plugin,
                 context.session,
                 closed=closed,
-                selection=False,
-                figure=make_flux_pick_figure(context.plugin.inputs, state),
             ),
             "kind": "line",
             "spectrum_name": context.spectrum_name,
@@ -164,22 +155,23 @@ def _reply(
         }
     elif isinstance(context, OneTonePickContext):
         before_one = context.session.snapshot()
-        _execute(owner, context.plugin, context.session, "onetone", command, values)
+        _execute(
+            owner,
+            context.plugin,
+            context.session,
+            "onetone",
+            command,
+            values,
+            active.spectrum_name,
+        )
         state_one = context.session.snapshot()
-        closed = _closed(owner, active.context_id) if command is not None else False
+        closed = _closed(owner, active) if command is not None else False
         wire = {
             **_base(
                 active.context_id,
                 context.plugin,
                 context.session,
                 closed=closed,
-                selection=False,
-                figure=make_onetone_pick_figure(
-                    context.plugin.inputs,
-                    state_one,
-                    flux_half=context.flux_half,
-                    flux_int=context.flux_int,
-                ),
             ),
             "kind": "onetone",
             "spectrum_name": context.spectrum_name,
@@ -201,27 +193,27 @@ def _reply(
         }
     elif isinstance(context, TwoTonePickContext):
         before_two = context.session.snapshot()
-        _execute(owner, context.plugin, context.session, "twotone", command, values)
+        _execute(
+            owner,
+            context.plugin,
+            context.session,
+            "twotone",
+            command,
+            values,
+            active.spectrum_name,
+        )
         state_two = context.session.snapshot()
         previous_two = before_two if command is not None else None
         view_two = project_twotone_pick(
             context.plugin.inputs, state_two, previous=previous_two
         )
-        closed = _closed(owner, active.context_id) if command is not None else False
+        closed = _closed(owner, active) if command is not None else False
         wire = {
             **_base(
                 active.context_id,
                 context.plugin,
                 context.session,
                 closed=closed,
-                selection=False,
-                figure=make_twotone_pick_figure(
-                    context.plugin.inputs,
-                    state_two,
-                    previous=previous_two,
-                    show_changes=True,
-                    show_mask=True,
-                ),
             ),
             "kind": "twotone",
             "spectrum_name": context.spectrum_name,
@@ -245,26 +237,27 @@ def _reply(
         }
     else:
         before_selection = context.session.snapshot()
-        _execute(owner, context.plugin, context.session, "selection", command, values)
+        _execute(
+            owner,
+            context.plugin,
+            context.session,
+            "selection",
+            command,
+            values,
+            active.spectrum_name,
+        )
         state_selection = context.session.snapshot()
         previous_selection = before_selection if command is not None else None
         view_selection = project_cross_selection(
             context.plugin.inputs, state_selection, previous=previous_selection
         )
-        closed = _closed(owner, active.context_id) if command is not None else False
+        closed = _closed(owner, active) if command is not None else False
         wire = {
             **_base(
                 active.context_id,
                 context.plugin,
                 context.session,
                 closed=closed,
-                selection=True,
-                figure=make_cross_selection_figure(
-                    context.plugin.inputs,
-                    state_selection,
-                    previous=previous_selection,
-                    show_changes=True,
-                ),
             ),
             "kind": "selection",
             "spectrum_name": None,
@@ -297,9 +290,10 @@ def h_interactive_read(
     Return committed state/commands/PNG without opening input or switching view.
     Inactive returns null context/effect. Native projection/render errors propagate.
     """
-    del params
+    name = params["name"]
+    assert isinstance(name, str)
     owner = adapter.ctrl.interactive
-    active = owner.inspect()
+    active = owner.inspect(name)
     return (
         _reply(owner, active)
         if active is not None
@@ -321,19 +315,23 @@ def h_spectrum_interactive_open(
     name, kind = params["name"], params["kind"]
     assert isinstance(name, str)  # Shared ParamSpec validated name and kind.
     owner = adapter.ctrl.interactive
+    previous = owner.inspect(name)
     if kind == "line":
         context = owner.begin_line_pick(name)
     elif kind == "onetone":
         context = owner.begin_onetone_pick(name)
     else:
         context = owner.begin_twotone_pick(name)
-    active = owner.inspect()
+    active = owner.inspect(name)
     if active is None or active.context is not context:
         raise FailedPreconditionError(
             "opened context retired during GUI reaction",
             reason_code="interactive_context_changed",
         )
-    return _reply(owner, active)
+    reply = _reply(owner, active)
+    if previous is not None and previous.context is not context:
+        reply["discarded"] = "align" if previous.kind == "line" else "sample"
+    return reply
 
 
 def h_selection_interactive_open(
@@ -349,7 +347,7 @@ def h_selection_interactive_open(
     del params
     owner = adapter.ctrl.interactive
     context = owner.begin_cross_selection()
-    active = owner.inspect()
+    active = owner.inspect("selection")
     if active is None or active.context is not context:
         raise FailedPreconditionError(
             "opened context retired during GUI reaction",
@@ -381,7 +379,9 @@ def _command(
         )
     command_params: dict[str, object] = {key: value for key, value in values.items()}
     owner = adapter.ctrl.interactive
-    active = owner.inspect()
+    target = "selection" if selection else params["name"]
+    assert isinstance(target, str)
+    active = owner.inspect(target)
     if active is None:
         raise FailedPreconditionError(
             "no live interactive context", reason_code="no_interactive_context"
@@ -435,3 +435,37 @@ def h_selection_interactive_command(
     publication/render failure does not imply rollback.
     """
     return _command(adapter, params, selection=True)
+
+
+def h_interactive_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    """Render a named current draft; never open input, edit or change display."""
+    name = params["name"]
+    assert isinstance(name, str)
+    active = adapter.ctrl.interactive.inspect(name)
+    if active is None:
+        raise FailedPreconditionError(
+            "no live interactive context", reason_code="no_interactive_context"
+        )
+    context = active.context
+    if isinstance(context, LinePickContext):
+        figure = make_flux_pick_figure(
+            context.plugin.inputs, context.session.snapshot()
+        )
+    elif isinstance(context, OneTonePickContext):
+        figure = make_onetone_pick_figure(
+            context.plugin.inputs,
+            context.session.snapshot(),
+            flux_half=context.flux_half,
+            flux_int=context.flux_int,
+        )
+    elif isinstance(context, TwoTonePickContext):
+        figure = make_twotone_pick_figure(
+            context.plugin.inputs, context.session.snapshot(), show_mask=True
+        )
+    else:
+        figure = make_cross_selection_figure(
+            context.plugin.inputs, context.session.snapshot()
+        )
+    return _png(figure)
