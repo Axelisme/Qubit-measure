@@ -38,7 +38,8 @@ from .module import (
     TwoPulseResetSpec,
 )
 from .references import remap_module_references, remap_waveform_references
-from .templates import Expr, TemplateDef, TemplateSeed, expand_path
+from .template_nodes import Expr, Slot, Template, TemplateLiteral, TemplateSeed
+from .templates import TemplateDef, expand_path
 from .waveform import (
     AbsWaveformCfg,
     ArbWaveformCfg,
@@ -57,6 +58,9 @@ from .waveform import (
 __all__ = [
     "ConfigBase",
     "Expr",
+    "Slot",
+    "Template",
+    "TemplateLiteral",
     "TemplateDef",
     "TemplateSeed",
     "expand_path",
