@@ -57,7 +57,13 @@ class SavedRun:
 
 
 def save_input(
-    path: Path, tag: str, values: np.ndarray, *, coordinate: float, gain: bool = False
+    path: Path,
+    tag: str,
+    values: np.ndarray,
+    *,
+    coordinate: float,
+    gain: bool = False,
+    axis: tuple[str, str] = ("Time", "s"),
 ) -> None:
     """Use the native writer, never hand-encode native files."""
     save_run_data(
@@ -73,8 +79,8 @@ def save_input(
                     ),
                     [
                         (
-                            "Drive Power" if gain else "Time",
-                            "a.u." if gain else "s",
+                            "Drive Power" if gain else axis[0],
+                            "a.u." if gain else axis[1],
                             values,
                         )
                     ],
@@ -139,6 +145,7 @@ def coherence_run(
             "twotone/ge/freq",
             np.array([1.0, 2.0, 3.0]),
             coordinate=10 + state,
+            axis=("Frequency", "Hz"),
         )
         frequency = FrequencyResult(
             "accepted" if state != 3 else "rejected",
@@ -147,6 +154,15 @@ def coherence_run(
             (file,),
         )
         rabi = RabiResult("skipped", "dependency", None, None, None, None)
+        if state < 2:
+            save_input(
+                env.iteration_dir / "rabi.h5",
+                "twotone/ge/rabi_length",
+                np.array([0.0, 1e-6, 2e-6]),
+                coordinate=30 + state,
+                axis=("Length", "s"),
+            )
+            rabi = RabiResult("accepted", None, 5000.0 + state, 0.4, 0.2, "rabi.h5")
         readout = ReadoutResult("skipped", "cadence", None, None, None)
         measurements: list[LifetimeResult] = []
         for kind, enabled, count, coordinate in (
