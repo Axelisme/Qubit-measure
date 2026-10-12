@@ -283,15 +283,12 @@ def test_injected_definitions_provide_module_and_waveform_creation_values() -> N
     assert read_value_path(ramp.value, "length") == EvalValue("$resonator.length")
 
 
-@pytest.mark.parametrize("option", ["copy", "set", "lock", "fallback"])
+@pytest.mark.parametrize("option", ["copy", "set", "lock"])
 def test_form_only_slot_options_fail_at_catalog_registration(option: str) -> None:
     slots = {
         "copy": cfg_model.Slot("$qubit.module.x90", copy=True),
         "set": cfg_model.Slot("$qubit.module.x90", set={"gain": 0.2}),
         "lock": cfg_model.Slot("$qubit.module.x90", lock={"ch": 0}),
-        "fallback": cfg_model.Slot(
-            "$qubit.module.x90", fallback=cfg_model.Template("drive")
-        ),
     }
     catalog = TemplateCatalog()
     with pytest.raises(TypeError, match="Slot\\(path\\)"):
@@ -331,3 +328,168 @@ def test_empty_seeds_keep_structural_blank_defaults_and_no_name_suggestion() -> 
         schema_to_raw(CfgSchema(expected_spec, make_default_value(expected_spec)))
     )
     assert entry.default_name == ""
+
+
+def seeded_fallback_definitions(slot: str) -> dict[str, cfg_model.TemplateDef]:
+    """Synthetic forward reference with nonstructural scalar/expression seeds."""
+    return {
+        "reset": cfg_model.TemplateDef(
+            cfg_model.BathResetSpec,
+            "Reset",
+            {
+                "pi2_cfg": cfg_model.Slot(
+                    f"{{qubit}}.module.{slot}",
+                    fallback=cfg_model.Template("drive"),
+                )
+            },
+        ),
+        "drive": cfg_model.TemplateDef(
+            cfg_model.PulseSpec,
+            "Drive",
+            {
+                "ch": 3,
+                "nqz": 1,
+                "freq": cfg_model.Expr("4200 + 23"),
+                "gain": 0.37,
+                "waveform.length": 0.08,
+            },
+        ),
+    }
+
+
+def fallback_catalog(slot: str) -> TemplateCatalog:
+    catalog = TemplateCatalog()
+    try:
+        catalog.register_definitions(seeded_fallback_definitions(slot))
+    except TypeError as exc:
+        pytest.fail(f"Library catalog must accept Slot Template fallback: {exc}")
+    return catalog
+
+
+@pytest.mark.parametrize("slot", ["unset", "dangling"])
+def test_bound_missing_slot_expands_seeded_template_inline(
+    environment: SessionEnv, slot: str
+) -> None:
+    entry = fallback_catalog(slot).get("reset")
+    first = entry.make_value(environment)
+    assert read_value_path(first.value, "pi2_cfg.gain") == DirectValue(0.37)
+    assert read_value_path(first.value, "pi2_cfg.freq") == EvalValue("4200 + 23")
+    schema = CfgSchema(entry.shape(), first.value)
+    wire = schema_to_raw(schema)
+    pulse_wire = wire["pi2_cfg"]
+    assert isinstance(pulse_wire, dict)
+    assert pulse_wire["chosen_key"] == make_custom_reference_key("Pulse")
+    children = pulse_wire["value"]
+    assert isinstance(children, dict)
+    assert children["freq"] == {"__kind": "eval", "expr": "4200 + 23"}
+    raw = schema_to_raw_dict(schema, environment.parameters)
+    pulse = raw["pi2_cfg"]
+    assert isinstance(pulse, dict)
+    assert pulse["ch"] == 3
+    assert pulse["freq"] == 4223.0
+    assert pulse["gain"] == 0.37
+    assert pulse["waveform"] == {"style": "const", "length": 0.08}
+    first.value.with_field("pi2_cfg.gain", 0.9)
+    assert read_value_path(
+        entry.make_value(environment).value, "pi2_cfg.gain"
+    ) == DirectValue(0.37)
+
+
+def test_available_slot_keeps_smart_link_despite_template_fallback(
+    environment: SessionEnv,
+) -> None:
+    entry = fallback_catalog("x90").get("reset")
+    reference = read_value_path(entry.make_value(environment).value, "pi2_cfg")
+    assert isinstance(reference, ReferenceValue)
+    assert reference.chosen_key == "$qubit.module.x90"
+    assert read_value_path(reference.value, "gain") == DirectValue(0.25)
+    assert read_value_path(reference.value, "freq") == DirectValue(4200.0)
+
+
+@pytest.mark.parametrize("captured", [True, False], ids=["unbound-alias", "no-context"])
+def test_unbound_slot_keeps_linked_empty_despite_template_fallback(
+    environment: SessionEnv, captured: bool
+) -> None:
+    assert environment.parameters is not None
+    parameters = (
+        environment.parameters.bind_aliases((AliasRow("qubit", ""),), {})
+        if captured
+        else None
+    )
+    entry = fallback_catalog("unset").get("reset")
+    value = entry.make_value(SessionEnv(parameters=parameters, soc=None, soccfg=None))
+    assert read_value_path(value.value, "pi2_cfg") == ReferenceValue(
+        "$qubit.module.unset", CfgSectionValue()
+    )
+
+
+@pytest.mark.parametrize(
+    ("fallback_id", "module", "message"),
+    [
+        ("unknown", cfg_model.PulseSpec, "Unknown template.*unknown"),
+        ("drive", cfg_model.ReadoutSpec, "incompatible.*ReadoutSpec"),
+        ("drive", cfg_model.ConstWaveformCfg, "incompatible.*ConstWaveformCfg"),
+    ],
+    ids=["unknown-id", "wrong-module", "waveform"],
+)
+def test_invalid_slot_fallback_fails_registration_with_template_field_path(
+    fallback_id: str, module: type[cfg_model.ConfigBase], message: str
+) -> None:
+    definitions = seeded_fallback_definitions("unset")
+    definitions["reset"] = cfg_model.TemplateDef(
+        cfg_model.BathResetSpec,
+        "Reset",
+        {
+            "pi2_cfg": cfg_model.Slot(
+                "$qubit.module.unset", fallback=cfg_model.Template(fallback_id)
+            )
+        },
+    )
+    definitions["drive"] = cfg_model.TemplateDef(module, "Drive", {})
+    catalog = TemplateCatalog()
+    with pytest.raises((ValueError, TypeError), match=f"reset.*pi2_cfg.*{message}"):
+        catalog.register_definitions(definitions)
+    assert not catalog.has("reset")
+
+
+@pytest.mark.parametrize("option", ["copy", "set", "lock"])
+def test_unsupported_slot_option_reports_template_field_at_registration(
+    option: str,
+) -> None:
+    slots = {
+        "copy": cfg_model.Slot("$qubit.module.unset", copy=True),
+        "set": cfg_model.Slot("$qubit.module.unset", set={"gain": 0.2}),
+        "lock": cfg_model.Slot("$qubit.module.unset", lock={"ch": 0}),
+    }
+    catalog = TemplateCatalog()
+    with pytest.raises(TypeError, match="reset.*pi2_cfg.*Slot"):
+        catalog.register_definitions(
+            {
+                "reset": cfg_model.TemplateDef(
+                    cfg_model.BathResetSpec, "Reset", {"pi2_cfg": slots[option]}
+                )
+            }
+        )
+
+
+def test_public_reference_defaults_expand_template_using_injected_definitions(
+    environment: SessionEnv,
+) -> None:
+    from zcu_tools.gui.app.measure.reference_defaults import resolve_library_reference
+
+    try:
+        first = resolve_library_reference(
+            "$qubit.module.unset",
+            environment,
+            kind="module",
+            fallback=cfg_model.Template("drive"),
+            templates=seeded_fallback_definitions("unset"),
+        )
+    except TypeError as exc:
+        pytest.fail(
+            f"Public resolver must accept Template and injected definitions: {exc}"
+        )
+    assert isinstance(first, ReferenceValue)
+    assert first.chosen_key == make_custom_reference_key("Pulse")
+    assert read_value_path(first.value, "freq") == EvalValue("4200 + 23")
+    assert read_value_path(first.value, "gain") == DirectValue(0.37)
