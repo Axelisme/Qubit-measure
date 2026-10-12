@@ -133,7 +133,9 @@ class CrossSelectionContext:
     insertion-ordered (name, version) facts, including zero-point entries.
     spectrum_set_version captures the collection identity. selection_version is
     the captured publication version, updated only after this context's Apply.
-    Views may detach; closed old sessions reject writes but retain snapshots.
+    source_point_counts preserves each source's captured cloud size for retained
+    result projection, including zero-point sources. Views may detach; closed
+    old sessions reject writes but retain snapshots.
     """
 
     plugin: CrossSelectionPlugin
@@ -813,8 +815,12 @@ class FluxDepInteractiveOwner:
         Require a valid global context. Publication failures propagate without
         closing input or claiming rollback. Off-owner use raises RuntimeError.
         """
+        self._require_owner()
+        context = self.current_cross_selection()
         result = self.apply_cross_selection()
-        self.cancel("selection")
+        # Publication facts may retire this identity and open a successor.
+        if self.current_cross_selection() is context:
+            self.cancel("selection")
         return result
 
     def cancel(self, name: str | None = None) -> None:
