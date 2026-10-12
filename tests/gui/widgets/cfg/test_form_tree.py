@@ -20,12 +20,13 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, FieldDecorationPatch
 from zcu_tools.gui.widgets.cfg.fields import ReferenceWidget
 
+from tests.gui._component_fakes import Qubit as QubitSchema
+from tests.gui._component_fakes import Resonator as ResonatorSchema
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._form_support import attach_draft, section_schema
 from tests.gui.widgets.cfg._tree_support import click_row as _click_row
 from tests.gui.widgets.cfg._tree_support import tree_item as _item
 from tests.gui.widgets.cfg._tree_support import tree_widget as _tree
-from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 def _readout_shape(ctrl: MagicMock) -> tuple[CfgSectionSpec, CfgSectionValue]:

@@ -51,7 +51,7 @@ def test_recipe_observes_run_save_and_analysis_on_one_worker(tmp_path):
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert reply.data["status"] == "awaiting_answer", reply.data
         assert reply.data["question_items"] == ("trigger_offset",)
@@ -89,7 +89,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
     def call_recipe():
         replies.append(
             full_execution_reply(
-                client, client.call("lookback", {"frequency_mhz": 6020.0})
+                client, client.call("pipeline", {"frequency_mhz": 6020.0})
             )
         )
         returned.set()
@@ -202,7 +202,7 @@ def test_lookback_interaction_handoff_keeps_the_original_pipeline_alive(
     interactive_recipe, handoff_failure
 ):
     client, writeback_read = interactive_recipe
-    initial = client.call("lookback", {"frequency_mhz": 6020.0})
+    initial = client.call("pipeline", {"frequency_mhz": 6020.0})
     handoff = full_execution_reply(client, initial)
     assert handoff.data["status"] == "interactive"
     assert handoff.data["raw_save"] == asdict(RAW_REPORT)
@@ -281,7 +281,7 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
 
     monkeypatch.setattr(client.transport, "close", disconnect)
     try:
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert pending.wait(1)
         client.context.session.close()
         before = len(client.transport.sent)
@@ -294,7 +294,7 @@ def test_session_close_drains_recipe_work_and_rejects_new_admission(
         if held_op == 82:
             assert result["raw_save"] is None
         with pytest.raises(GuiRpcError, match="closed"):
-            client.call("lookback", {"frequency_mhz": 6020.0})
+            client.call("pipeline", {"frequency_mhz": 6020.0})
         client.context.session.close()
         assert len(client.transport.sent) == before
     finally:
@@ -323,7 +323,7 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
         cancelled = client.call("cancel", {"execution": execution})
@@ -377,7 +377,7 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
         early = client.call("finish_early", {"op": initial.data["run_op"]})
@@ -464,7 +464,7 @@ def admitted_raw_save(tmp_path, monkeypatch, request):
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert saving.wait(1)
         yield (
@@ -560,7 +560,7 @@ def test_recipe_cancel_after_analysis_admission_joins_the_true_outcome(
     client = make_client(tmp_path, respond)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert initial.data["status"] == "interactive"
         execution = initial.data["execution"]
@@ -623,7 +623,7 @@ def test_recipe_cancel_delegates_to_the_existing_analysis_owner(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert analyzing.wait(1)
         execution = initial.data["execution"]
@@ -688,7 +688,7 @@ def test_recipe_cancel_blocks_the_next_phase_while_an_admitted_read_finishes(
     controller = None
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert pending.wait(1)
         execution = initial.data["execution"]
@@ -764,7 +764,7 @@ def test_recipe_control_reaches_the_original_operation_after_a_late_receipt(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert pending.wait(1)
         execution = initial.data["execution"]
@@ -819,7 +819,7 @@ def test_recipe_cancel_during_preparation_keeps_the_missing_parameter_handoff(
     client = make_client(tmp_path, respond)
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
-        initial = client.call("lookback", {})
+        initial = client.call("pipeline", {})
         assert pending.wait(1)
         execution = initial.data["execution"]
         cancelled = client.call("cancel", {"execution": execution})
@@ -846,7 +846,7 @@ def test_recipe_worker_start_failure_returns_a_terminal_receipt_and_closes_safel
 
     with recipe_client(tmp_path, LookbackGui()) as client:
         monkeypatch.setattr(Thread, "start", fail_start)
-        reply = client.call("lookback", {"frequency_mhz": 6020.0})
+        reply = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["phase"] == "preparing"
@@ -883,7 +883,7 @@ def test_recipe_cancel_during_admitted_writeback_preserves_result_and_intent(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert reading.wait(1)
         execution = initial.data["execution"]
@@ -941,7 +941,7 @@ def test_lookback_rejects_a_post_run_snapshot_from_another_source(
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -972,7 +972,7 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         reply = full_execution_reply(
             client,
             client.call(
-                "lookback",
+                "pipeline",
                 {
                     "reuse_tab_id": "t" if reuse else None,
                     "frequency_mhz": 6020.0,
@@ -1101,7 +1101,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
 
     with recipe_client(tmp_path, respond) as client:
         arguments = {} if reuse_tab_id is None else {"reuse_tab_id": reuse_tab_id}
-        reply = client.call("lookback", arguments)
+        reply = client.call("pipeline", arguments)
         assert isinstance(reply, ToolReply)
         assert reply.data["status"] == "needs_parameters"
         assert reply.data["tab"] == tab
@@ -1113,59 +1113,6 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
         assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
-
-
-@pytest.mark.parametrize(
-    "source", ["r_f", "library", "library_error", "library_invalid"]
-)
-def test_lookback_uses_only_valid_frequency_sources_and_keeps_gui_defaults(
-    tmp_path, source
-):
-    gui = LookbackGui()
-    gui.md["$resonator.freq"] = 6500.0
-    readout = gui.publication["tree"]["children"]["modules"]["children"]["readout"]
-    pulse = readout["children"]["pulse_cfg"]["children"]["freq"]
-    adc = readout["children"]["ro_cfg"]["children"]["ro_freq"]
-    pulse["input"]["resolved"] = 6100.0
-    adc["input"]["resolved"] = 6110.0
-    arguments = {} if source == "r_f" else {"readout_ref": "R1.readout.calibrated"}
-    if source == "library_error":
-        pulse["input"]["error"] = "unresolved"
-    if source == "library_invalid":
-        pulse["valid"] = False
-        pulse["input"]["validation_error"] = "outside range"
-
-    gui.library = {"R1.readout.calibrated": {}}
-
-    def respond(method, params):
-        return gui(method, params)
-
-    with recipe_client(tmp_path, respond) as client:
-        reply = full_execution_reply(client, client.call("lookback", arguments))
-        assert reply.data["status"] == "awaiting_answer", reply.data
-        answered = client.call(
-            "answer", {"recipe": reply.data["execution"], "decision": "skipped"}
-        )
-        assert answered.data["status"] == "finished"
-        assert not answered.data["writeback"]["receipts"]
-        fields = reply.data["actual"]
-        expected_pulse = 6100.0 if source == "library" else 6500.0
-        expected_adc = 6500.0 if source == "r_f" else 6110.0
-        assert (
-            cfg_value(gui.publication, "modules.readout.pulse_cfg.freq")
-            == expected_pulse
-        )
-        assert (
-            cfg_value(gui.publication, "modules.readout.ro_cfg.ro_freq") == expected_adc
-        )
-        assert fields["frequency_mhz"]["source"] == (
-            "library:R1.readout.calibrated"
-            if source == "library"
-            else "$resonator.freq"
-        )
-        assert cfg_value(gui.publication, "modules.readout.ro_cfg.ro_length") == 2.0
-        assert cfg_value(gui.publication, "modules.readout.ro_cfg.trig_offset") == 0.1
-        assert cfg_value(gui.publication, "rounds") == 3
 
 
 @pytest.mark.parametrize(
@@ -1190,7 +1137,7 @@ def test_lookback_invalid_explicit_inputs_never_fall_back_or_create_tab(
     gui = LookbackGui()
     gui.md["$resonator.freq"] = 6500.0
     with recipe_client(tmp_path, gui) as client:
-        reply = client.call("lookback", arguments)
+        reply = client.call("pipeline", arguments)
         assert reply.is_error
         assert reply.data["status"] == "failed"
         assert reply.data["tab"] is None
@@ -1212,7 +1159,7 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6000.0})
+            client, client.call("pipeline", {"frequency_mhz": 6000.0})
         )
         assert reply.data["status"] == "cancelled"
         assert not reply.data["cancel_requested"]
@@ -1223,41 +1170,6 @@ def test_manual_gui_run_cancel_never_starts_the_recipe_save_pipeline(
         assert "tab.save_data" not in methods
         assert "tab.analyze" not in methods
         assert "operation.cancel" not in methods
-
-
-@pytest.mark.parametrize(
-    ("argument", "module"),
-    [
-        ("readout_ref", "readout"),
-        ("use_reset", "reset"),
-        ("init_pulse_ref", "init_pulse"),
-    ],
-)
-def test_explicit_invalid_library_reference_is_not_disabled_or_replaced(
-    tmp_path, argument, module
-):
-    gui = LookbackGui()
-    gui.md["$resonator.freq"] = 6500.0
-    gui.publication["tree"]["children"]["modules"]["children"][module].update(
-        valid=False, error="missing library entry"
-    )
-    with recipe_client(tmp_path, gui) as client:
-        reply = client.call("lookback", {argument: "missing"})
-        assert reply.is_error
-        assert reply.data["status"] == "failed"
-        assert reply.data["error"]["reason"] == "invalid_cfg"
-        assert reply.data["tab"] == "t"
-        attempted = [
-            edit
-            for method, params in client.transport.sent
-            if method == "tab.edit_cfg"
-            for edit in params["edits"]
-            if edit["path"] == ["modules", module]
-        ]
-        assert attempted == [
-            {"path": ["modules", module], "value": {"__ref": "missing"}}
-        ]
-        assert "tab.run_start" not in [method for method, _ in client.transport.sent]
 
 
 @pytest.mark.parametrize("failure", ["wrong_experiment", "busy", "missing", "stale"])
@@ -1283,7 +1195,7 @@ def test_lookback_reuse_errors_do_not_create_replacement_or_retry(tmp_path, fail
             snapshot["tabs"][0]["adapter_name"] = "other"
         client.transport.replies["tab.snapshot"] = {"ok": True, "result": snapshot}
     try:
-        reply = client.call("lookback", {"reuse_tab_id": "t", "frequency_mhz": 6000.0})
+        reply = client.call("pipeline", {"reuse_tab_id": "t", "frequency_mhz": 6000.0})
         assert reply.is_error
         assert reply.data["tab"] == "t"
         methods = [method for method, _ in client.transport.sent]

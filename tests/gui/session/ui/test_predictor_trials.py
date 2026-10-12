@@ -19,7 +19,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.transmon import TransmonParams
 
-import zcu_lab.components as components
+import tests.gui._component_fakes as components
 from tests.gui._predictor_fakes import FailingPredictorService
 
 
@@ -107,7 +107,7 @@ def test_dialog_trial_calibration_leaves_real_point_unchanged(
     before_kinds = component_registry.kinds()
     added = "qubit/fluxonium" not in before_kinds
     if added:
-        component_registry.register("qubit/fluxonium", components.QubitSchema)
+        component_registry.register("qubit/fluxonium", components.Qubit)
     installed = component_registry.kinds()
     try:
         entry = ResultEntry.create(
@@ -158,7 +158,7 @@ def component_context(tmp_path: Path):
     """Provide a real point with a complete and an incomplete qubit."""
     added = "qubit/fluxonium" not in component_registry.kinds()
     if added:
-        component_registry.register("qubit/fluxonium", components.QubitSchema)
+        component_registry.register("qubit/fluxonium", components.Qubit)
     try:
         entry = ResultEntry.create(
             "prefill",

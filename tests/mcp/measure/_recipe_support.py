@@ -11,11 +11,21 @@ from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
-
-from zcu_lab.components import QubitSchema, ResonatorSchema
+from zcu_tools.resources.entry.schema import (
+    ComponentSchema,
+    PointDocument,
+    PointGeneral,
+)
 
 from ._support import make_client
+
+
+class FormulaComponent(ComponentSchema):
+    freq: float | None = None
+    kappa: float | None = None
+    flux_half: float | None = None
+    flux_int: float | None = None
+
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
@@ -142,7 +152,7 @@ class LookbackGui:
         Bare aliases return resolved names; arithmetic returns numeric values.
         Direct native model construction requires no process-global registry.
         """
-        resonator = ResonatorSchema.model_validate(
+        resonator = FormulaComponent.model_validate(
             {
                 "kind": "resonator",
                 **{
@@ -152,7 +162,7 @@ class LookbackGui:
                 },
             }
         )
-        qubit = QubitSchema.model_validate(
+        qubit = FormulaComponent.model_validate(
             {
                 "kind": "qubit/transmon",
                 **{
