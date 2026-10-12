@@ -38,9 +38,9 @@ def test_database_info_reports_native_ranges_without_changing_fit(
     assert route_harness.ctrl.state.fit is initial
 
 
-def _inputs(search_db: str, **overrides: object) -> dict[str, object]:
+def _inputs(db_path: str, **overrides: object) -> dict[str, object]:
     inputs: dict[str, object] = {
-        "search_db": search_db,
+        "search_db": db_path,
         "EJb": [3, 9.5],
         "ECb": [0.2, 2],
         "ELb": [0.1, 1.5],
@@ -209,8 +209,8 @@ def test_transition_rejection_does_not_publish(
 @pytest.mark.parametrize("transitions,code", [
     ({}, None), ({"transitions": [], "mirror": []}, None),
     ({"transitons": []}, "invalid_params"),
-    ({"transitions2": []}, "internal_error"),
-    ({"transitions": [[0, 1]]}, "internal_error"),
+    ({"transitions2": []}, "controller_error"),
+    ({"transitions": [[0, 1]]}, "controller_error"),
 ])
 def test_database_is_read_only_when_validation_needs_levels(
     route_harness: RouteHarness, tmp_path: Path, transitions: dict[str, object], code: str | None,
