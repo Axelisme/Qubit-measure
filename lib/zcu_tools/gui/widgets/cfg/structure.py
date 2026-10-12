@@ -34,6 +34,7 @@ from .presentation import (
     apply_tree_item_decoration,
     choice_visible_keys,
     decorated_label,
+    input_line_height,
     is_hidden,
 )
 from .registry import FieldRenderContext, FieldWidgetProtocol
@@ -61,8 +62,14 @@ class _TreeBranchStyle(QProxyStyle):
     """Classic vertical/horizontal branch lines without triangles.
 
     Guide lines are depth-colored via TREE_DEPTH_COLORS cycling; rows no
-    longer use depth backgrounds (A1).
+    longer use depth backgrounds (A1). The horizontal stub sits on the row's
+    input line of line_height pixels, where InputLineLabelDelegate paints the
+    label; rows no taller than one line keep it at their centre.
     """
+
+    def __init__(self, line_height: int) -> None:
+        super().__init__()
+        self._line_height = line_height
 
     def drawPrimitive(
         self,
@@ -84,7 +91,7 @@ class _TreeBranchStyle(QProxyStyle):
             return
         rect = option.rect
         x = rect.center().x()
-        y = rect.center().y()
+        y = rect.top() + (min(rect.height(), self._line_height) - 1) // 2
         # Use the logical indentation column, not the clipped viewport position.
         logical_x = rect.x()
         if isinstance(widget, QTreeWidget):
@@ -121,8 +128,9 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     font = tree.font()
     font.setPixelSize(_TREE_FONT_SIZE_PX)
     tree.setFont(font)
-    tree.setItemDelegateForColumn(0, InputLineLabelDelegate(tree))
-    style = _TreeBranchStyle()
+    line_height = input_line_height(font)
+    tree.setItemDelegateForColumn(0, InputLineLabelDelegate(line_height, tree))
+    style = _TreeBranchStyle(line_height)
     style.setParent(tree)
     tree.setStyle(style)
     header = tree.header()

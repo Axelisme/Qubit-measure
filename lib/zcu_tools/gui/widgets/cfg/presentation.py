@@ -194,7 +194,7 @@ def apply_tree_item_decoration(
         pass
 
 
-def _input_line_height(font: QFont) -> int:
+def input_line_height(font: QFont) -> int:
     """Height of one single-line editor (line edit or combo box) in font."""
     heights = []
     for editor in (QLineEdit(), QComboBox()):
@@ -213,10 +213,14 @@ class InputLineLabelDelegate(QStyledItemDelegate):
     paint exactly as the default delegate does.
     """
 
-    def __init__(self, tree: QTreeWidget) -> None:
-        """Measure one input line in tree's font; tree owns the delegate."""
+    def __init__(self, line_height: int, tree: QTreeWidget) -> None:
+        """Paint labels within line_height pixels; tree owns the delegate.
+
+        line_height is input_line_height of the tree's font, shared with the
+        tree's branch style so connector stubs point at the same line.
+        """
         super().__init__(tree)
-        self._line_height = _input_line_height(tree.font())
+        self._line_height = line_height
 
     def paint(
         self,
