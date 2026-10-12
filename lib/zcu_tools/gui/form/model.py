@@ -201,7 +201,9 @@ class FormModel(BaseModel):
         choices enums. Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. This
+        tags as ordinary JSON values, independent of current choices. Each
+        branch reachable through model fields is one concrete model; a named
+        nested union tagged on the same key expands into its members. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """

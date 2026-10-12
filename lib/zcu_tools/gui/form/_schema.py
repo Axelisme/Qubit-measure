@@ -201,6 +201,38 @@ def _container_nodes(
     return ()
 
 
+def _tagged_branches(
+    variants: list[JsonValue], tag_key: str, root: dict[str, JsonValue]
+) -> list[tuple[list[JsonValue], dict[str, JsonValue]]]:
+    """Inline emitted tagged branches as (intrinsic tags, model branch) pairs.
+
+    Pydantic emits a named union member (a ``type`` alias) that is tagged on
+    the same key as one branch carrying all of its members' tags. Replace that
+    branch with its own branches, recursively, so every branch is one concrete
+    model with its own tags, as the field annotation's flattened union is.
+    Raise ValueError for a non-object branch or one without emitted tags.
+    """
+    branches: list[tuple[list[JsonValue], dict[str, JsonValue]]] = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise ValueError("Tagged schema branch must be an object")
+        tags = variant.get("x-form-discriminator-values")
+        if not isinstance(tags, list):
+            raise ValueError("Tagged schema branch lacks intrinsic identities")
+        _inline_ref(variant, root)
+        nested = variant.get("oneOf")
+        marker = variant.get("discriminator")
+        if (
+            isinstance(nested, list)
+            and isinstance(marker, dict)
+            and marker.get("propertyName") == tag_key
+        ):
+            branches.extend(_tagged_branches(nested, tag_key, root))
+        else:
+            branches.append((tags, variant))
+    return branches
+
+
 def _child_nodes(
     info: FieldInfo, target: dict[str, JsonValue], root: dict[str, JsonValue]
 ) -> tuple[tuple[type[BaseModel], dict[str, JsonValue]], ...]:
@@ -211,14 +243,10 @@ def _child_nodes(
     variants = node.get("oneOf")
     if isinstance(variants, list):
         if (tag_key := discriminator(info)) is not None:
+            tagged = _tagged_branches(variants, tag_key, root)
+            node["oneOf"] = [variant for _, variant in tagged]
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
-            for variant in variants:
-                if not isinstance(variant, dict):
-                    raise ValueError("Tagged schema branch must be an object")
-                tags = variant.get("x-form-discriminator-values")
-                if not isinstance(tags, list):
-                    raise ValueError("Tagged schema branch lacks intrinsic identities")
-                _inline_ref(variant, root)
+            for tags, variant in tagged:
                 properties = variant.get("properties")
                 selector = (
                     properties.get(tag_key) if isinstance(properties, dict) else None
