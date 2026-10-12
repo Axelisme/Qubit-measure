@@ -1,6 +1,8 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-12，expression、結構 selector 與唯一相容 union 還原
+**Last updated:** 2026-10-13，公開 static defaults 與 None 缺席
+
+`static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
 
 FormModel 的實例只承載普通值。類別上的 defaults、choices 與 input_schema 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
 
@@ -18,4 +20,4 @@ FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 vi
 
 Display 只承載欄位呈現資訊。順序依欄位宣告，分組依 nested model；collapsed 只用於子 model 欄位。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
 
-跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是新表單工具，不改 CfgSchema，不接 Measure。
+跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是共用表單工具，不改 CfgSchema。Measure 的 core cfg 推導與 module materialization 由上層 adapter 框架組合，不放進本 package。

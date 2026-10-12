@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from .templates import Expr, TemplateSeed
+from .template_nodes import Expr, Template, TemplateSeed
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,5 +79,11 @@ class Hidden:
 
 
 type FormNode = (
-    TemplateSeed | Range | AliasName | Locked | Hidden | Mapping[str, FormNode]
+    TemplateSeed
+    | Template
+    | Range
+    | AliasName
+    | Locked
+    | Hidden
+    | Mapping[str, FormNode]
 )

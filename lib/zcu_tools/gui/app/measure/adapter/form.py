@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from types import new_class
+from types import MappingProxyType, new_class
 from typing import Annotated
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
@@ -17,6 +17,9 @@ from zcu_tools.cfg_model import (
     Hidden,
     Locked,
     Range,
+    Slot,
+    Template,
+    TemplateDef,
     get_field_meta,
 )
 from zcu_tools.gui.form import (
@@ -122,6 +125,8 @@ class _Section:
                 continue
             annotation = self._annotation(name, info, node)
             field_info = _field_info(info)
+            if name in self.modules and not self.modules[name].locks:
+                field_info.discriminator = "kind"
             if isinstance(node, Locked):
                 field_info.default = node.value
             annotations[name] = annotation
@@ -162,7 +167,11 @@ class _Section:
         if isinstance(node, Locked):
             return literal_type(node.value)
         if module_specs(info.annotation):
-            field = ModuleField(info.annotation, (*self.path, name))
+            field = ModuleField(
+                info.annotation,
+                (*self.path, name),
+                node if isinstance(node, (Slot, Template)) else None,
+            )
             self.modules[name] = field
             return (
                 union_type((field.annotation, type(None)))
@@ -190,6 +199,10 @@ class _Section:
                 continue
             if name in self.children:
                 data[name] = self.children[name].default_data(env)
+            elif name in self.modules:
+                data.pop(name, None)
+                if (module := self.modules[name].initial_input(env)) is not None:
+                    data[name] = module
             elif isinstance(node, Range):
                 data[name] = {
                     "kind": "linrange",
@@ -209,6 +222,19 @@ class _Section:
             if name not in data and self.core.model_fields[name].is_required():
                 data[name] = child.default_data(env)
         return data
+
+    def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
+        for field in self.modules.values():
+            try:
+                field.validate_templates(catalog)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"Adapter {adapter!r}, {'.'.join(field.path)}: {exc}"
+                ) from exc
+        for child in self.children.values():
+            child.bind_templates(catalog, adapter)
+        for field in self.modules.values():
+            field.catalog = catalog
 
     def to_raw(
         self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
@@ -255,8 +281,13 @@ class Form[C: ConfigBase]:
     names. Unspecified fields derive shape and defaults from core declarations.
     Hidden requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
-    defaults resolve names once against the supplied captured FormEnv; hosts use
-    the same env until Reset. Optional extras adds an 'extras' section and requires
+    default_input resolves names once against the supplied captured FormEnv;
+    hosts use the same env until Reset. Register with Registry.register(form=...)
+    or call bind_templates before resolving Template/fallback nodes. Slot copies
+    and Template defaults are detached persistent Specs, not library-editor
+    structural defaults. Only Expr nodes become expression envelopes. Ordinary
+    strings, including $-prefixed strings, remain literal. Module locks remove
+    the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     """
 
@@ -297,6 +328,19 @@ class Form[C: ConfigBase]:
                 raise TypeError("Generated extras model must implement FormModel")
             self.model = model
             self._section.model = model
+
+    def bind_templates(
+        self, templates: Mapping[str, TemplateDef], *, adapter: str
+    ) -> None:
+        """Bind a detached catalog and validate authored templates before publication.
+
+        Registry.register calls this explicitly. adapter is the registry name,
+        included with the consuming field path in ValueError for unknown IDs,
+        incompatible families or malformed seed trees. No sources are read.
+        Call before default_input when the tree contains Template/fallback nodes.
+        Definitions remain immutable and the caller's mapping is never retained.
+        """
+        self._section.bind_templates(MappingProxyType(dict(templates)), adapter)
 
     def default_input(self, env: FormEnv) -> FormInput[FormModel]:
         """Build fresh input from captured env; required unresolved names stay absent.

@@ -59,8 +59,10 @@ class Slot:
     dotted paths to initial literal, Expr or Slot seeds; ``lock`` maps relative
     scalar paths to fixed literals and forces inline form content. ``fallback``
     optionally requests a fresh Template when the slot is unset, dangling or its
-    alias is unbound. Without fallback, forms leave an unfilled Invalid input.
-    Set is initialization-only; locks are reapplied on form branch switches.
+    alias is unbound. Without fallback, forms leave the input absent: required
+    core fields are Invalid; nullable core fields with a None default remain
+    disabled and Valid. Set is initialization-only; locks are reapplied on form
+    branch switches.
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or

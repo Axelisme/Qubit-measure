@@ -4,9 +4,9 @@ import logging
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from zcu_tools.cfg_model import TemplateDef
+from zcu_tools.cfg_model import ConfigBase, TemplateDef
 
-from .adapter import AdapterCapabilities, ExpAdapterProtocol
+from .adapter import AdapterCapabilities, ExpAdapterProtocol, Form
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,25 @@ class Registry:
         """Return the immutable injected catalog; clearing adapters retains it."""
         return self._templates
 
-    def register(self, name: str, adapter_cls: type[ExpAdapterProtocol]) -> None:
+    def register[C: ConfigBase](
+        self,
+        name: str,
+        adapter_cls: type[ExpAdapterProtocol],
+        *,
+        form: Form[C] | None = None,
+    ) -> None:
+        """Register an adapter, optionally validating its explicitly supplied form.
+
+        name is the public experiment ID; adapter_cls is constructed by create.
+        form retains its concrete cfg generic and binds this registry's catalog.
+        Duplicate names or invalid templates raise ValueError without publishing
+        the adapter. The registry does not infer or probe an adapter form hook.
+        """
         logger.debug("register: name=%r adapter=%s", name, adapter_cls.__name__)
         if name in self._mapping:
             raise ValueError(f"Adapter {name!r} is already registered")
+        if form is not None:
+            form.bind_templates(self.templates, adapter=name)
         self._mapping[name] = adapter_cls
 
     def create(self, name: str) -> ExpAdapterProtocol:

@@ -1,11 +1,12 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-08，WaveformSamples 移到 core 與公開資產 path
+**Last updated:** 2026-10-13，前端中立的表單宣告
 
 `cfg_model` 提供不含執行行為或 I/O 的配置模型與具名依賴契約。
 Caller 從 package root import 公開名稱。
 
 - `ConfigBase` 提供 Pydantic 欄位驗證、巢狀更新與序列化。非 module consumer 的行為保持不變。
+- `FieldMeta` 描述 core 欄位；`Expr`、`Range`、`AliasName`、`Hidden`、`Locked`、`Slot` 與 `Template` 是前端中立的起始值宣告。它們不求值、不讀來源。上層 Form 將它們翻成輸入與 cfg；`TemplateDef` 的持久 Spec 目錄由呼叫者注入。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。
 - `ModuleCfg`／`WaveformCfg` 表示已展開的執行參數。它們只提供欄位驗證與 `set_param`，不建立 program runtime 物件。
