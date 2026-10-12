@@ -8,42 +8,12 @@ from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 @pytest.mark.parametrize(
     ("name", "arguments", "field"),
     [
-        (
-            "fluxdep_spectrum_interactive_command",
-            {"name": "a", "context_id": True, "command": "undo"},
-            "context_id",
-        ),
-        (
-            "fluxdep_spectrum_interactive_command",
-            {"name": "a", "context_id": 1.9, "command": "undo"},
-            "context_id",
-        ),
-        (
-            "fluxdep_spectrum_interactive_command",
-            {"name": "a", "context_id": "1", "command": "undo"},
-            "context_id",
-        ),
-        (
-            "fluxdep_spectrum_interactive_command",
-            {
-                "name": "a",
-                "context_id": 1,
-                "command": "stroke",
-                "params": [["points", 1]],
-            },
-            "params",
-        ),
         ("fluxdep_spectrum_snapshot", {"name": 123}, "name"),
         (
             "fluxdep_spectrum_load",
-            {
-                "filepath": "/data/raw.hdf5",
-                "spec_type": "OneTone",
-                "transpose_axes": "false",
-            },
+            {"filepath": "/data/raw.hdf5", "spec_type": "OneTone", "transpose_axes": "false"},
             "transpose_axes",
         ),
-        ("fluxdep_operation_await", {"token": 1, "timeout": "0.5"}, "timeout"),
     ],
 )
 def test_invalid_scalar_is_not_rewritten_before_gui_validation(

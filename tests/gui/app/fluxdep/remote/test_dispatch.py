@@ -159,6 +159,7 @@ def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
                 "aligned": True,
                 "points_completed": True,
                 "point_count": 0,
+                "pending": None,
             }
         ]
     finally:

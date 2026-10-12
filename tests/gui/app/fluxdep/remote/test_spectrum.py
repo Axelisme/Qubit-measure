@@ -69,6 +69,8 @@ def test_snapshot_preserves_complete_native_state_for_literal_names(
         "aligned": True,
         "points_completed": True,
         "alignment_seeded": True,
+        "pending": None,
+        "alignment": {"inherited_from": None},
         "flux_half": 1.4,
         "flux_int": 2.4,
         "flux_period": 2.0,
