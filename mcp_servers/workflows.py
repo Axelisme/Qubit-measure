@@ -7,6 +7,7 @@ from zcu_tools.gui.app.workflows.remote.methods import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig
 from zcu_tools.mcp.workflows.server import run_workflow_mcp
 
+
 def main() -> None:
     """Delegate workflow stdio tools with the repository GUI launch configuration.
 

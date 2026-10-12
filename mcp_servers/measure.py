@@ -7,6 +7,7 @@ from zcu_tools.resources.entry.registry import component_registry
 from zcu_lab.components import register_all
 from zcu_lab.recipes import RECIPES
 
+
 def main() -> None:
     """Bootstrap lab components and delegate recipes to the measure stdio server.
 
