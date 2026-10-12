@@ -11,7 +11,10 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.models import (
+    TransitionDict,
+    validate_transition_frequencies,
+)
 
 
 def count_max_evals(transitions: TransitionDict) -> int:
@@ -38,22 +41,7 @@ def compile_transitions(
     M = energies.shape[1] — needed to know which `transitions{n}` / `mirror{n}`
     keys to consume.
     """
-    if (
-        any(
-            transitions.get(name, [])
-            for name in ("blue side", "red side", "mirror blue", "mirror red")
-        )
-        and "r_f" not in transitions
-    ):
-        raise ValueError(
-            "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
-        )
-    if (
-        any("mirror" in name for name in transitions)
-        and "r_f" not in transitions
-        and "sample_f" not in transitions
-    ):
-        raise ValueError("sample_f is required for mirror transitions")
+    validate_transition_frequencies(transitions)
 
     r_f = 0.0
     if "r_f" in transitions:
