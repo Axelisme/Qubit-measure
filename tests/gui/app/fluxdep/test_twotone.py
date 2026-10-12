@@ -115,8 +115,6 @@ def test_command_and_typed_stroke_share_kernel_and_single_commit(
     np.testing.assert_array_equal(result.dev_values, other.dev_values)
     np.testing.assert_array_equal(result.freqs, other.freqs)
     assert_same_state(action_session.undo(), before)
-    if mode == "erase":
-        action_session.undo()  # Undo the explicit full-selection prerequisite.
     with pytest.raises(FailedPreconditionError):
         action_session.undo()
 
