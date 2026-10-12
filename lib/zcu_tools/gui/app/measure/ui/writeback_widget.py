@@ -169,6 +169,15 @@ class _MiddleElidedLabel(QLabel):
         self._update_text()
 
 
+def _value_label(item: WritebackItem, text: str) -> QLabel:
+    """Return a middle-elided label for a scalar parameter, else a plain one."""
+    if isinstance(item, ParameterWriteback) and _is_scalar_md_value(
+        item.proposed_value
+    ):
+        return _MiddleElidedLabel(text)
+    return QLabel(text)
+
+
 # ---------------------------------------------------------------------------
 # Private row helper — owns responsive arrangement for one item
 # ---------------------------------------------------------------------------
@@ -406,13 +415,7 @@ class WritebackWidget(QWidget):
         cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
         self._checks[item.session_id] = cb
 
-        label_type = (
-            _MiddleElidedLabel
-            if isinstance(item, ParameterWriteback)
-            and _is_scalar_md_value(item.proposed_value)
-            else QLabel
-        )
-        current_label = label_type(self._display_current(item, compact=True))
+        current_label = _value_label(item, self._display_current(item, compact=True))
         current_label.setToolTip(self._display_current(item, compact=False))
         current_label.setObjectName("writebackCurrent")
         current_label.setStyleSheet("color: #5e6b7d;")
@@ -445,13 +448,7 @@ class WritebackWidget(QWidget):
     def _make_proposed_view(
         self, item: WritebackItem, fact: WritebackValues
     ) -> tuple[QLabel, QTableWidget | None]:
-        label_type = (
-            _MiddleElidedLabel
-            if isinstance(item, ParameterWriteback)
-            and _is_scalar_md_value(item.proposed_value)
-            else QLabel
-        )
-        proposed_label = label_type(self._display_proposed(item, compact=True))
+        proposed_label = _value_label(item, self._display_proposed(item, compact=True))
         proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             fact.proposed

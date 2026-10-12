@@ -98,10 +98,16 @@ class AliasDialog(QDialog):
         result.setFlags(result.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self._table.setItem(index, 2, result)
 
+    def _result_item(self, index: int) -> QTableWidgetItem:
+        """Return row index's resolution cell, which _append_row always creates."""
+        item = self._table.item(index, 2)
+        if item is None:
+            raise RuntimeError(f"Alias row {index} has no resolution cell")
+        return item
+
     def _refresh_resolutions(self) -> None:
         for index in range(self._table.rowCount()):
-            item = self._table.item(index, 2)
-            assert item is not None
+            item = self._result_item(index)
             item.setText("")
             item.setToolTip("")
             item.setForeground(self._table.palette().text())
@@ -110,8 +116,7 @@ class AliasDialog(QDialog):
         except ContextSourceUnavailableError as error:
             # A source fault prevents the whole projection; keep it visible.
             for index in range(self._table.rowCount()):
-                item = self._table.item(index, 2)
-                assert item is not None
+                item = self._result_item(index)
                 item.setText(str(error))
                 item.setToolTip(str(error))
                 item.setForeground(QColor("red"))
@@ -120,8 +125,7 @@ class AliasDialog(QDialog):
             # No entry or selected point: there is no applied projection to show.
             return
         for index, row in enumerate(rows):
-            item = self._table.item(index, 2)
-            assert item is not None
+            item = self._result_item(index)
             if not row.value:
                 item.setText("(unbound)")
                 item.setForeground(QColor("gray"))

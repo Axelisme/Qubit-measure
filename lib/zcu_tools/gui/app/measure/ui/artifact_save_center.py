@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,7 +21,11 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.app.measure.artifact_tracker import ArtifactSnapshot, SaveStatus
+from zcu_tools.gui.app.measure.artifact_tracker import (
+    ArtifactSnapshot,
+    OutputSnapshot,
+    SaveStatus,
+)
 from zcu_tools.resources.entry import ArtifactKey
 
 if TYPE_CHECKING:
@@ -45,6 +50,9 @@ _SECTION_TITLE = {
     "post_analysis": "Post-analysis results",
 }
 _NO_PERSISTENCE_HINT = "This experiment does not save to the result entry yet."
+# QLineEdit draws its text inside a frame and cursor inset that contentsRect
+# and textMargins do not report; without this slack the elided text clips.
+_LINE_EDIT_TEXT_INSET = 8
 
 
 def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
@@ -55,16 +63,16 @@ def _display_path(path: Path, bases: tuple[Path, ...]) -> str:
     return str(path)
 
 
-def _output_status_text(status: str) -> str:
+def _output_status_text(output: OutputSnapshot) -> str:
     """Return the row-end mark: a check when saved, empty otherwise."""
-    return "✓" if status == "saved" else ""
+    return "✓" if output.status == "saved" else ""
 
 
-def _output_error_text(status: str, error: str | None) -> str:
+def _output_error_text(output: OutputSnapshot) -> str:
     """Return the full-width failure line, or empty when the output did not fail."""
-    if status != "failed":
+    if output.status != "failed":
         return ""
-    return f"✗ {error}" if error else "✗"
+    return f"✗ {output.error}" if output.error else "✗"
 
 
 def _hint_label(text: str) -> QLabel:
@@ -105,12 +113,39 @@ class _ElidedPathEdit(QLineEdit):
 
     def _update_text(self) -> None:
         margins = self.textMargins()
-        width = self.contentsRect().width() - margins.left() - margins.right() - 8
+        width = (
+            self.contentsRect().width()
+            - margins.left()
+            - margins.right()
+            - _LINE_EDIT_TEXT_INSET
+        )
         text = self.fontMetrics().elidedText(
             self._display, Qt.TextElideMode.ElideMiddle, max(width, 0)
         )
         if self.text() != text:
             self.setText(text)
+
+
+@dataclass(frozen=True)
+class _ArtifactRow:
+    """Widgets of one artifact: header title, status, Save, and its outputs."""
+
+    container: QWidget
+    title: QLabel
+    status: QLabel
+    save: QPushButton
+    outputs: QVBoxLayout
+
+
+@dataclass(frozen=True)
+class _OutputRow:
+    """Widgets of one member output: file name, path, saved mark and failure."""
+
+    container: QWidget
+    name: QLabel
+    path: _ElidedPathEdit
+    status: QLabel
+    error: QLabel
 
 
 class ArtifactSaveCenter(QWidget):
@@ -129,16 +164,8 @@ class ArtifactSaveCenter(QWidget):
         super().__init__(parent)
         self._has_load = capabilities.load_data
         self._snapshots: dict[ArtifactRef, ArtifactSnapshot] = {}
-        self._rows: dict[ArtifactRef, QWidget] = {}
-        self._status_labels: dict[ArtifactRef, QLabel] = {}
-        self._titles: dict[ArtifactRef, QLabel] = {}
-        self._save_btns: dict[ArtifactRef, QPushButton] = {}
-        self._output_layouts: dict[ArtifactRef, QVBoxLayout] = {}
-        self._output_rows: dict[tuple[ArtifactKey, int], QWidget] = {}
-        self._path_edits: dict[tuple[ArtifactKey, int], _ElidedPathEdit] = {}
-        self._file_names: dict[tuple[ArtifactKey, int], QLabel] = {}
-        self._output_status: dict[tuple[ArtifactKey, int], QLabel] = {}
-        self._output_errors: dict[tuple[ArtifactKey, int], QLabel] = {}
+        self._rows: dict[ArtifactRef, _ArtifactRow] = {}
+        self._output_rows: dict[tuple[ArtifactKey, int], _OutputRow] = {}
         self._save_handler: Callable[[ArtifactRef], None] | None = None
 
         outer = QVBoxLayout(self)
@@ -178,7 +205,7 @@ class ArtifactSaveCenter(QWidget):
         outer.addLayout(self._rows_layout)
         outer.addStretch()
 
-    def _build_row(self, ref: ArtifactRef) -> QWidget:
+    def _build_row(self, ref: ArtifactRef) -> _ArtifactRow:
         container = QWidget(self)
         layout = QVBoxLayout(container)
         header = QHBoxLayout()
@@ -187,23 +214,19 @@ class ArtifactSaveCenter(QWidget):
         font.setBold(True)
         title.setFont(font)
         header.addWidget(title)
-        self._titles[ref] = title
         header.addStretch()
         status = QLabel()
         header.addWidget(status)
-        self._status_labels[ref] = status
         save = QPushButton("Save")
         save.setFixedWidth(72)
         save.clicked.connect(lambda _checked=False, r=ref: self._save_artifact(r))
         header.addWidget(save)
-        self._save_btns[ref] = save
         layout.addLayout(header)
         outputs = QVBoxLayout()
         layout.addLayout(outputs)
-        self._output_layouts[ref] = outputs
-        return container
+        return _ArtifactRow(container, title, status, save, outputs)
 
-    def _build_output(self, identity: tuple[ArtifactKey, int]) -> QWidget:
+    def _build_output(self) -> _OutputRow:
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -211,10 +234,8 @@ class ArtifactSaveCenter(QWidget):
         row = QHBoxLayout()
         name = QLabel()
         row.addWidget(name)
-        self._file_names[identity] = name
         edit = _ElidedPathEdit()
         row.addWidget(edit, stretch=1)
-        self._path_edits[identity] = edit
         open_folder = QPushButton("Open folder")
         open_folder.clicked.connect(
             lambda _checked=False, e=edit: self._open_folder(e.full_path())
@@ -222,7 +243,6 @@ class ArtifactSaveCenter(QWidget):
         row.addWidget(open_folder)
         status = QLabel()
         row.addWidget(status)
-        self._output_status[identity] = status
         layout.addLayout(row)
         # A failure message needs the full width to wrap readably.
         error = QLabel()
@@ -231,8 +251,7 @@ class ArtifactSaveCenter(QWidget):
         error.setStyleSheet("color: #b00020;")
         error.hide()
         layout.addWidget(error)
-        self._output_errors[identity] = error
-        return container
+        return _OutputRow(container, name, edit, status, error)
 
     def _save_artifact(self, ref: ArtifactRef) -> None:
         if self._save_handler is not None:
@@ -293,13 +312,9 @@ class ArtifactSaveCenter(QWidget):
         }
         for ref in tuple(self._rows):
             if ref not in artifacts:
-                widget = self._rows.pop(ref)
-                self._rows_layout.removeWidget(widget)
-                widget.deleteLater()
-                self._status_labels.pop(ref)
-                self._titles.pop(ref)
-                self._save_btns.pop(ref)
-                self._output_layouts.pop(ref)
+                row = self._rows.pop(ref)
+                self._rows_layout.removeWidget(row.container)
+                row.container.deleteLater()
         wanted_outputs = {
             (member.key, index)
             for artifact in artifacts.values()
@@ -308,12 +323,7 @@ class ArtifactSaveCenter(QWidget):
         }
         for identity in tuple(self._output_rows):
             if identity not in wanted_outputs:
-                widget = self._output_rows.pop(identity)
-                widget.deleteLater()
-                self._path_edits.pop(identity)
-                self._file_names.pop(identity)
-                self._output_status.pop(identity)
-                self._output_errors.pop(identity)
+                self._output_rows.pop(identity).container.deleteLater()
         bases = snapshot.save.display_bases
         self._no_persistence_hint.setVisible(not snapshot.save.saves_to_entry)
         per_section = {
@@ -341,32 +351,28 @@ class ArtifactSaveCenter(QWidget):
         ref = artifact.ref
         if ref not in self._rows:
             self._rows[ref] = self._build_row(ref)
-        self._rows_layout.insertWidget(index, self._rows[ref])
-        self._titles[ref].setText(title)
-        self._status_labels[ref].setText(_STATUS_TEXT[artifact.status])
-        self._status_labels[ref].setStyleSheet(
-            f"color: {_STATUS_COLOR[artifact.status]};"
-        )
+        row = self._rows[ref]
+        self._rows_layout.insertWidget(index, row.container)
+        row.title.setText(title)
+        row.status.setText(_STATUS_TEXT[artifact.status])
+        row.status.setStyleSheet(f"color: {_STATUS_COLOR[artifact.status]};")
         output_index = 0
         for member in artifact.members:
             for member_output_index, output in enumerate(member.outputs):
                 identity = (member.key, member_output_index)
                 if identity not in self._output_rows:
-                    self._output_rows[identity] = self._build_output(identity)
-                self._output_layouts[ref].insertWidget(
-                    output_index, self._output_rows[identity]
-                )
+                    self._output_rows[identity] = self._build_output()
+                output_row = self._output_rows[identity]
+                row.outputs.insertWidget(output_index, output_row.container)
                 output_index += 1
-                self._file_names[identity].setText(output.path.name)
-                self._path_edits[identity].set_path(
+                output_row.name.setText(output.path.name)
+                output_row.path.set_path(
                     _display_path(output.path, bases), str(output.path)
                 )
-                self._output_status[identity].setText(
-                    _output_status_text(output.status)
-                )
-                error_text = _output_error_text(output.status, output.error)
-                self._output_errors[identity].setText(error_text)
-                self._output_errors[identity].setVisible(bool(error_text))
+                output_row.status.setText(_output_status_text(output))
+                error_text = _output_error_text(output)
+                output_row.error.setText(error_text)
+                output_row.error.setVisible(bool(error_text))
 
     def update_interaction(self, snapshot: TabSnapshot) -> None:
         """Refresh evidence and enable commands only for idle, ready tabs.
@@ -379,8 +385,8 @@ class ArtifactSaveCenter(QWidget):
         self.update_from_snapshot(snapshot)
         state = snapshot.interaction
         idle = not (state.is_running or state.is_analyzing)
-        for button in self._save_btns.values():
-            button.setEnabled(idle and state.has_active_context)
+        for row in self._rows.values():
+            row.save.setEnabled(idle and state.has_active_context)
         self._comment_edit.setEnabled(idle)
         if self._has_load:
             self.load_button.setEnabled(idle and state.has_context)

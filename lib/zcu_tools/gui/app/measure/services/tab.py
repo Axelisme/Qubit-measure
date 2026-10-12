@@ -364,4 +364,6 @@ def _display_bases(storage: PointStorageBinding | None) -> tuple[Path, ...]:
     """Parents of the Run's result/database roots, or () without storage."""
     if storage is None:
         return ()
+    # Entry directories are <root>/<entry name>; one level above the root keeps
+    # the root and entry names visible in the displayed path.
     return (storage.database_path.parent.parent, storage.result_path.parent.parent)
