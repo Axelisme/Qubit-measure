@@ -959,6 +959,29 @@ def test_predictor_dialog_spinbox_change_updates_all_markers(qapp):
     mat_phi_mock.assert_called_with(0.3)
 
 
+def test_transition_value_columns_refit_after_values_update(qapp):
+    from qtpy.QtWidgets import QTableWidget
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        table = dialog.findChild(QTableWidget)
+        assert table is not None and table.rowCount() > 0
+        # Reopening the dialog recomputes the values at the current marker.
+        dialog.hide()
+        ctrl.predict_freq.return_value = 123456789.5
+        dialog.show()
+        qapp.processEvents()
+        item = table.item(0, _COL_FREQ)
+        assert item is not None and item.text() == "123456789.5000"
+        needed = table.fontMetrics().horizontalAdvance(item.text())
+        assert table.columnWidth(_COL_FREQ) >= needed
+    finally:
+        dialog.close()
+
+
 def test_predictor_dialog_value_columns_updated_after_debounce(qapp):
     """After _update_value_columns, each row's f / |n| / |phi| cells are filled."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
