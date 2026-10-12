@@ -100,7 +100,8 @@ def search_case(cross_controller, monkeypatch, search_database_hdf5):
         None,
         None,
     )
-    result = perfect_fit_result(np.array([0.0]), np.array([4.0]), bounds)
+    inputs = ctrl.capture_search()
+    result = perfect_fit_result(inputs.fluxs, inputs.freqs, bounds)
     captured = []
 
     def compute(fluxs, freqs, path, transitions, bounds, *, execution):
@@ -343,7 +344,7 @@ def test_failed_publication_releases_admission(search_case, monkeypatch):
 
     ctrl, bg, _owner, _progress, result, _captured = search_case
 
-    def fail_record(self, result):
+    def fail_record(self, result, inputs):
         raise ValueError("commit refused")
 
     monkeypatch.setattr(FitService, "record_result", fail_record)
