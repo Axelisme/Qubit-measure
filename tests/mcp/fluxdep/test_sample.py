@@ -9,8 +9,9 @@ from typing import Literal
 import pytest
 from PIL import Image
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 
-from tests.mcp.fluxdep._support import Client, GuiResponse
+from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 
 
 def capture(
@@ -59,9 +60,6 @@ def test_settings_report_before_after_and_positional_point_changes(
     opened["discarded"] = "align"
     client.transport.replies.extend(
         [
-            GuiResponse(
-                result={"spec_type": "OneTone" if kind == "onetone" else "TwoTone"}
-            ),
             GuiResponse(result=opened),
             GuiResponse(result=capture(kind, 2.0)),
         ]
@@ -113,8 +111,7 @@ def test_settings_report_before_after_and_positional_point_changes(
     assert json.loads(reply["result"]["content"][0]["text"]) == expected
     assert len(reply["result"]["content"]) == 1
     assert [(r["method"], r["params"]) for r in client.transport.requests] == [
-        ("spectrum.snapshot", {"name": "s"}),
-        ("spectrum.interactive.open", {"name": "s", "kind": kind}),
+        ("spectrum.interactive.open", {"name": "s", "kind": "sample"}),
         (
             "spectrum.interactive.command",
             {
@@ -155,9 +152,6 @@ def test_sampling_finish_and_image_override_use_native_evidence(
         }
     client.transport.replies.extend(
         [
-            GuiResponse(
-                result={"spec_type": "OneTone" if kind == "onetone" else "TwoTone"}
-            ),
             GuiResponse(result=capture(kind, 2.0)),
             GuiResponse(result=capture(kind, 2.0, closed=command == "finish")),
         ]
@@ -195,7 +189,8 @@ def test_sampling_finish_and_image_override_use_native_evidence(
         }
     )
     reply = value if isinstance(value, ToolReply) else ToolReply(value)
-    assert client.transport.requests[2]["params"] == {
+    assert client.transport.requests[0]["params"] == {"name": "s", "kind": "sample"}
+    assert client.transport.requests[1]["params"] == {
         "name": "s",
         "context_id": 12,
         "command": command,
@@ -228,4 +223,30 @@ def test_sampling_finish_and_image_override_use_native_evidence(
         assert client.transport.requests[-1]["params"] == {"name": "s"}
     else:
         assert not reply.images
-        assert len(client.transport.requests) == 3
+        assert len(client.transport.requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "reason"),
+    [
+        ("invalid_params", "no spectrum named 'absent'", "unknown_spectrum"),
+        ("precondition_failed", "one-tone picking requires an aligned spectrum", None),
+    ],
+)
+def test_sampling_native_admission_is_not_preread_or_retried(
+    client: Client,
+    code: str,
+    message: str,
+    reason: str | None,
+):
+    client.transport.replies.append(GuiResponse(error=GuiError(code, message, reason)))
+    with pytest.raises(GuiInvocationError) as rejected:
+        client.server.tools["fluxdep_sample"]["handler"](
+            {"name": "absent", "command": "finish"}
+        )
+    assert [(r["method"], r["params"]) for r in client.transport.requests] == [
+        ("spectrum.interactive.open", {"name": "absent", "kind": "sample"}),
+    ]
+    assert rejected.value.code == code
+    assert rejected.value.reason == reason
+    assert str(rejected.value) == message
