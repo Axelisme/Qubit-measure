@@ -166,7 +166,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
 
     cfg = ctrl.cfg_resources.lookup(tab_id)
     cfg.edit((CfgEdit(("rounds",), 1),))
-    ctrl.start_run(tab_id, cfg.observe().ref)
+    ctrl.start_run(tab_id)
 
     def wait_for(predicate: Callable[[], bool]) -> None:
         loop = QEventLoop()
