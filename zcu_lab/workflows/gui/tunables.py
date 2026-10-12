@@ -41,33 +41,43 @@ class CalibrationTunablesForm(FormModel):
     span_mhz: Annotated[float, Display(label="Spectroscopy span", unit="MHz")] = Field(
         default=30.0, gt=0, description="Base spectroscopy span"
     )
-    qf_widen: tuple[Annotated[float, Field(gt=0)], ...] = Field(
+    qf_widen: Annotated[
+        tuple[Annotated[float, Field(gt=0)], ...],
+        Display(label="Span multipliers"),
+    ] = Field(
         default=(1.0, 2.0, 4.0),
         min_length=1,
         description="Ordered spectroscopy span multipliers",
     )
-    max_frequency_rel_err: float = Field(
+    max_frequency_rel_err: Annotated[
+        float, Display(label="Max frequency relative error")
+    ] = Field(
         default=0.3, gt=0, le=1, description="Strict center-error/FWHM upper bound"
     )
-    max_rabi_rel_err: float = Field(
-        default=0.3, gt=0, le=1, description="Strict pi-error/pi-duration upper bound"
+    max_rabi_rel_err: Annotated[float, Display(label="Max Rabi relative error")] = (
+        Field(
+            default=0.3,
+            gt=0,
+            le=1,
+            description="Strict pi-error/pi-duration upper bound",
+        )
     )
-    max_fit_residual: float = Field(
+    max_fit_residual: Annotated[float, Display(label="Max fit residual")] = Field(
         default=0.2,
         gt=0,
         le=1,
         description="Strict normalized residual RMS upper bound",
     )
-    min_readout_snr: float = Field(
+    min_readout_snr: Annotated[float, Display(label="Min readout SNR")] = Field(
         default=5.0, gt=0, description="Inclusive minimum readout SNR"
     )
-    ro_every: int = Field(
-        default=5, ge=1, description="Flux-point readout scan cadence"
-    )
-    rabi_start_factor: float = Field(
+    ro_every: Annotated[
+        int, Display(label="Readout scan interval", unit="flux points")
+    ] = Field(default=5, ge=1, description="Flux-point readout scan cadence")
+    rabi_start_factor: Annotated[float, Display(label="Rabi start factor")] = Field(
         default=0.1, gt=0, description="Sweep start divided by prior pi duration"
     )
-    rabi_stop_factor: float = Field(
+    rabi_stop_factor: Annotated[float, Display(label="Rabi stop factor")] = Field(
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
@@ -112,28 +122,26 @@ class T1TunablesForm(FormModel):
     knobs need neither library nor device infos. Submission belongs to the host.
     """
 
-    reps: Annotated[int, Display(label="T1 averages")] = Field(
+    reps: Annotated[int, Display(label="Averages")] = Field(
         default=100, ge=1, description="T1 averages"
     )
-    rounds: Annotated[int, Display(label="T1 rounds")] = Field(
+    rounds: Annotated[int, Display(label="Rounds")] = Field(
         default=10, ge=1, description="T1 averaging rounds"
     )
     guess_us: Annotated[
         float,
-        Display(
-            label="Initial lifetime", unit="us", placeholder="general.ext.guess_us"
-        ),
-    ] = Field(default=20.0, gt=0, description="Initial lifetime in us")
-    sweep_factor: float = Field(
+        Display(label="Initial guess", unit="µs", placeholder="general.ext.guess_us"),
+    ] = Field(default=20.0, gt=0, description="Initial lifetime in µs")
+    sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=5.0, gt=0, description="Sweep end divided by lifetime guess"
     )
-    relax_factor: float = Field(
+    relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=3.0, gt=0, description="Relax delay divided by lifetime guess"
     )
-    max_rel_err: float = Field(
+    max_rel_err: Annotated[float, Display(label="Max relative error")] = Field(
         default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"
     )
-    max_fit_residual: float = Field(
+    max_fit_residual: Annotated[float, Display(label="Max fit residual")] = Field(
         default=0.2, gt=0, le=1, description="Strict normalized residual RMS bound"
     )
 
