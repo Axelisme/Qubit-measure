@@ -225,6 +225,21 @@ class PointcloudReply(TypedDict):
     freqs: list[float]
 
 
+class DatabaseInfoReply(TypedDict):
+    """Search DB path, candidate/level counts and inclusive parameter ranges.
+
+    EJ/EC/EL ranges are GHz; flux is normalized Phi_0. Every range is [min, max].
+    """
+
+    path: str
+    entries: int
+    levels: int
+    EJ: list[float]
+    EC: list[float]
+    EL: list[float]
+    flux: list[float]
+
+
 class FitParametersReply(TypedDict):
     """EJ, EC and EL are the accepted fit's energy parameters in GHz."""
 

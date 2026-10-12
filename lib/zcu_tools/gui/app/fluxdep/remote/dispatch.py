@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.analysis.fluxdep.search import database_info
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
@@ -38,6 +39,7 @@ from zcu_tools.gui.remote.readonly_handlers import (
 from .dto import (
     ActiveSpectrumReply,
     AxisSnapshot,
+    DatabaseInfoReply,
     FitParametersReply,
     FitResultReply,
     FitUpdatedReply,
@@ -344,6 +346,17 @@ def _fit_transitions(value: object) -> TransitionDict:
     return transitions
 
 
+def _h_fit_database_info(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> DatabaseInfoReply:
+    path = params["path"]
+    assert isinstance(path, str)
+    info = database_info(path)
+    return {"path": info.path, "entries": info.entries, "levels": info.levels,
+            "EJ": list(info.EJ), "EC": list(info.EC), "EL": list(info.EL),
+            "flux": list(info.flux)}
+
+
 def _h_fit_set_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> FitUpdatedReply:
@@ -507,6 +520,7 @@ _HANDLERS: dict[str, Handler] = {
     "selection.interactive.command": h_selection_interactive_command,
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
+    "fit.database_info": _h_fit_database_info,
     "fit.search": _h_fit_search,
     "operation.status": _h_operation_status,
     "operation.cancel": _h_operation_cancel,

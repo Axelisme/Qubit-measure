@@ -159,6 +159,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
         readonly=True,
     ),
+    "fit.database_info": MethodSpec(
+        30.0,
+        "Read search DB path, entry/level counts and inclusive EJ/EC/EL GHz and "
+        "normalized flux ranges without loading energy values.",
+        params=(ParamSpec("path", JsonType.STRING),),
+        readonly=True,
+    ),
     "fit.set_params": MethodSpec(
         5.0,
         "Replace all fit inputs; clear the old result "
