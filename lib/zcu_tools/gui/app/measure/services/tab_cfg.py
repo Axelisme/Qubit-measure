@@ -19,6 +19,9 @@ from zcu_tools.gui.cfg.resource import (
     CfgResource,
 )
 
+from .tab_form import TabFormResource as TabFormResource
+from .tab_form import TabFormSources as TabFormSources
+
 
 class TabCfgLookup(Protocol):
     def lookup(self, tab_id: str) -> CfgEditing: ...
