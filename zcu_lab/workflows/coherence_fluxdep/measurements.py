@@ -83,21 +83,6 @@ def _plot(env: WorkflowEnv[Calibrated], kind: LifetimeKind) -> LinePlot:
     )
 
 
-def _t1_rejection(fit: DecayFit, tun: T1Tunables) -> str | None:
-    residual = fit.quality.normalized_residual_rms
-    if not (
-        np.isfinite(fit.lifetime_us)
-        and fit.lifetime_us > 0
-        and np.isfinite(fit.error_us)
-        and fit.error_us >= 0
-        and fit.error_us / fit.lifetime_us < tun.max_rel_err
-        and residual is not None
-        and residual < tun.max_fit_residual
-    ):
-        return "T1 fit rejected"
-    return None
-
-
 def _t2_rejection(fit: DecayFit, maximum: float) -> str | None:
     if fit.lifetime_us > 2 * maximum:
         return "T2 lifetime exceeds twice the maximum delay"
@@ -136,7 +121,7 @@ def measure_t1(
     cal: CalibratedPi2,
     guess_us: float,
 ) -> Generator[Effect, None, LifetimeResult]:
-    """Acquire/save/fit T1 with its own positive microsecond grid estimate.
+    """Measure energy relaxation to estimate T1 independently of dephasing.
 
     plan supplies fixed routing/grid resolution/snapshot, tun supplies native
     averaging/timing/fit gates, and cal is this point's accepted frequency/pi
@@ -144,6 +129,7 @@ def measure_t1(
     Normal Schedule failures return failed without a file. Unexpected errors
     propagate; Engine owns cancellation. History updates belong to the caller.
     """
+    # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(env, "t1")
     outcome = yield from env.run(
         run_t1,
@@ -152,9 +138,21 @@ def measure_t1(
     )
     if isinstance(outcome, Failed):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
+    # Save every completed trace before fitting and applying acceptance gates.
     save_t1(outcome, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
     fit = analyze_t1(outcome.result)
-    return _finish(env, "t1", fit, outcome.result.times, _t1_rejection(fit, tun))
+    residual = fit.quality.normalized_residual_rms
+    accepted = (
+        np.isfinite(fit.lifetime_us)
+        and fit.lifetime_us > 0
+        and np.isfinite(fit.error_us)
+        and fit.error_us >= 0
+        and fit.error_us / fit.lifetime_us < tun.max_rel_err
+        and residual is not None
+        and residual < tun.max_fit_residual
+    )
+    reason = None if accepted else "T1 fit rejected"
+    return _finish(env, "t1", fit, outcome.result.times, reason)
 
 
 def measure_ramsey(
@@ -164,13 +162,19 @@ def measure_ramsey(
     cal: CalibratedPi2,
     guess_us: float,
 ) -> Generator[Effect, None, LifetimeResult]:
-    """Acquire/save/fringe-fit Ramsey on its independent microsecond delay grid.
+    """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
-    Inputs share measure_t1's native/exception contract. Fitted pi2 is not pi/2.
+    plan supplies fixed routing, grid resolution and historical snapshot; tun
+    supplies averaging, timing and detuning. cal contains this point's accepted
+    frequency/pi/pi2 and retained legal readout. guess_us is this lifetime's
+    positive microsecond delay estimate. Save precedes fit; Schedule failures
+    return failed without a file and unexpected errors propagate. Engine owns
+    cancellation; history updates belong to the caller. Fitted pi2 is not pi/2.
     Detune remains detune_ratio/length_step; native actual detune is retained.
     Relax remains relax_factor*tun.guess_us, not the current T1 or delay EWMA.
     Original overlong/mean-absolute-error gates apply, with rejected raw retained.
     """
+    # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(env, "t2ramsey")
     outcome = yield from env.run(
         run_t2ramsey,
@@ -179,6 +183,7 @@ def measure_ramsey(
     )
     if isinstance(outcome, Failed):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
+    # Save every completed trace before fitting and applying acceptance gates.
     save_t2ramsey(outcome, env.iteration_dir / "t2ramsey.h5", snapshot=plan.snapshot)
     fit = analyze_t2ramsey(outcome.result)
     return _finish(
@@ -197,12 +202,17 @@ def measure_echo(
     cal: CalibratedPi2,
     guess_us: float,
 ) -> Generator[Effect, None, LifetimeResult]:
-    """Acquire/save/decay-fit zero-detune Echo on its independent delay grid.
+    """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
-    Inputs share measure_ramsey's native timing, fitted-pi2 and error contract.
-    The original whole-trace fluxdep projection and T2 gates remain unchanged.
+    plan supplies fixed routing, grid resolution and historical snapshot; tun
+    supplies averaging and fixed relaxation timing. cal contains this point's
+    accepted frequency/pi/pi2 and retained legal readout. guess_us is Echo's
+    positive microsecond delay estimate. Save precedes fit; Schedule failures
+    return failed without a file and unexpected errors propagate. Engine owns
+    cancellation. Whole-trace fluxdep projection and T2 gates remain unchanged.
     No extra T1 measurement or fallback is made; history belongs to the caller.
     """
+    # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(env, "t2echo")
     outcome = yield from env.run(
         run_t2echo,
@@ -211,6 +221,7 @@ def measure_echo(
     )
     if isinstance(outcome, Failed):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
+    # Save every completed trace before fitting and applying acceptance gates.
     save_t2echo(outcome, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)
     fit = analyze_t2echo_fluxdep(outcome.result)
     return _finish(

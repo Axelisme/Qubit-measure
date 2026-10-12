@@ -96,7 +96,7 @@ class T2EchoAcquisition(T2EchoResult):
 
 
 def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
-    """Acquire a qubit-frequency sweep using a complete native FreqCfg.
+    """Sweep drive frequency to locate the qubit resonance.
 
     Run must supply soc/soccfg. Reset and optional init pulse precede the
     frequency-swept qubit pulse and readout. Return native MHz coordinates,
@@ -117,6 +117,7 @@ def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
 
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         freq_sweep = sched.cfg.sweep.freq
@@ -131,6 +132,7 @@ def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
             .build_and_acquire()
         )
 
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,
@@ -143,7 +145,7 @@ def run_qubit_freq(run: Run[FreqCfg]) -> FrequencyAcquisition:
 
 
 def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
-    """Acquire a length-Rabi sweep using a complete native LenRabiCfg.
+    """Sweep pulse duration to observe Rabi oscillations and calibrate rotations.
 
     Run must supply soc/soccfg. The qubit waveform must be const or flat_top;
     other styles raise ValueError before acquisition. Reset and optional init
@@ -166,6 +168,7 @@ def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
 
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         length_sweep = sched.cfg.sweep.length
@@ -180,6 +183,7 @@ def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
             .build_and_acquire()
         )
 
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,
@@ -192,7 +196,7 @@ def run_len_rabi(run: Run[LenRabiCfg]) -> RabiAcquisition:
 
 
 def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
-    """Acquire a g/e readout frequency/gain sweep using native FreqGainCfg.
+    """Compare ground and excited readout to map discrimination versus settings.
 
     Run must supply soc/soccfg. Use the existing MomentTracker/SNR scorer and
     cfg.skew_penalty. Return native MHz/gain coordinates, real SNR magnitude
@@ -210,6 +214,7 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
 
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         freq_sweep = sched.cfg.sweep.freq
@@ -235,6 +240,7 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
             )
         )
 
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,
@@ -249,7 +255,7 @@ def run_ro_landscape(run: Run[FreqGainCfg]) -> ReadoutAcquisition:
 
 
 def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
-    """Acquire uniform T1 using a complete native T1Cfg, without an Exp host.
+    """Measure population after a pi pulse and delay to observe energy relaxation.
 
     Run must supply soc/soccfg. cfg.uniform must be True and sweep.length must
     be SweepCfg; otherwise raise ValueError before acquisition. Reset, pi pulse,
@@ -268,6 +274,7 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
 
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         # Use the validated Run sweep without mutating it; modules are schedule-local.
@@ -285,6 +292,7 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
             .build_and_acquire()
         )
 
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,
@@ -297,7 +305,7 @@ def run_t1(run: Run[T1Cfg]) -> T1Acquisition:
 
 
 def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
-    """Acquire a native uniform, zero-detune Hahn-echo decay using Run.
+    """Measure Hahn-echo decay to observe coherence with slow noise refocused.
 
     Supply a complete T2EchoCfg with its SweepCfg total length and native
     pi/2, pi, reset and readout modules, and Run soc/soccfg capabilities.
@@ -319,6 +327,7 @@ def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
     started_at = datetime.now(UTC)
     run_id = new_run_id(started_at)
 
+    # Execute the pulse sequence using schedule-local modules and sweeps.
     with run.schedule(buffer) as sched:
         modules = sched.cfg.modules
         length_sweep = cfg.sweep.length
@@ -338,6 +347,7 @@ def run_t2echo(run: Run[T2EchoCfg]) -> T2EchoAcquisition:
             .build_and_acquire()
         )
 
+    # Retain acquisition identity, device evidence and partial-stop status.
     evidence = AcquisitionEvidence(
         run_id=run_id,
         started_at=started_at,

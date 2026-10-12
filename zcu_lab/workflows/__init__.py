@@ -21,10 +21,7 @@ from zcu_lab.workflows.mist_fluxdep.workflow import (
     MISTTunables,
     mist_fluxdep,
 )
-from zcu_lab.workflows.overnight.trend import (
-    draw_overnight_trend,
-    project_overnight_trend,
-)
+from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 from zcu_lab.workflows.overnight.workflow import (
     OvernightPlan,
     OvernightPoint,

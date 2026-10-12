@@ -80,7 +80,7 @@ class DecayFit:
 
 
 def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
-    """Fit the complete canonical 1-D frequency trace with a Lorentzian.
+    """Fit the spectroscopy trace to estimate the qubit resonance and linewidth.
 
     result uses MHz coordinates and complex128 signals of matching shape.
     Reuse the native background-removal/magnitude projection without skipping
@@ -89,6 +89,7 @@ def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
     Native projection/fitting errors and optimizer warnings propagate; native
     fallback values remain distinguishable through errors/quality.
     """
+    # Remove the native background, then fit the complete resonance trace.
     observed = qubfreq_signal2real(result.signals)
     frequency, error, width, width_error, fitted, _optimizer = fit_qubit_freq(
         result.freqs, observed, type="lor"
@@ -107,7 +108,7 @@ def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
 
 
 def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
-    """Fit the complete canonical length-Rabi trace, with free phase and no decay.
+    """Fit Rabi oscillations to estimate phase-aware pi and pi/2 durations.
 
     result uses microsecond coordinates and complex128 signals of matching
     1-D shape. Reuse the native real-axis rotation and phase-aware pi estimate.
@@ -117,6 +118,7 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
     Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
     Native projection/fitting errors and optimizer warnings propagate.
     """
+    # Rotate IQ to the signal axis, then fit oscillations with free phase.
     observed = rabi_signal2real(result.signals)
     pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit_rabi(
         result.lengths, observed, decay=False, init_phase=None
@@ -134,7 +136,7 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
 
 
 def analyze_t1(result: T1Result) -> DecayFit:
-    """Fit the complete canonical T1 trace with a single exponential.
+    """Fit population decay to estimate the energy-relaxation lifetime.
 
     result uses microsecond coordinates and complex128 signals of matching
     1-D shape. Reuse the native real-axis rotation without skipping/masking.
@@ -142,6 +144,7 @@ def analyze_t1(result: T1Result) -> DecayFit:
     mutate result or acquire, plot, save, or apply an acceptance threshold.
     Native projection/fitting errors and optimizer warnings propagate.
     """
+    # Rotate IQ to the signal axis, then fit a single exponential.
     observed = t1_signal2real(result.signals)
     lifetime, error, fitted, _optimizer = fit_decay(result.times, observed)
     # Preserve the native estimate and error; residual diagnostics do not refit.

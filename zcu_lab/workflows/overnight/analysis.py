@@ -8,7 +8,7 @@ from zcu_lab.workflows.common.analysis import DecayFit
 
 
 def analyze_t2echo(result: T2EchoResult) -> DecayFit:
-    """Fit a native zero-detune echo trace with a single exponential.
+    """Fit zero-detune Echo decay to summarize lifetime drift with one exponential.
 
     Supply matching 1-D float64 times in microseconds and complex128 IQ.
     true_activate_detune must explicitly be 0.0, not None or a fringe value.

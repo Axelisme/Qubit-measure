@@ -5,7 +5,7 @@ from numpy.typing import NDArray
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Project MIST IQ with the old centred-magnitude/spread policy, no fit.
+    """Project centred MIST IQ magnitude/spread to display gain response without a fit.
 
     signals is one complex 1-D gain trace. Return same-shaped absolute centred
     magnitude divided by its population standard deviation. All-NaN traces

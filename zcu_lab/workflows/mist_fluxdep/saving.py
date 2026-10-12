@@ -21,7 +21,7 @@ def save_mist(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write raw MIST gain trace with native mist/gain schema to exact path.
+    """Save raw MIST gain response so later analysis can use its original IQ.
 
     source owns actual gains/IQ/cfg and acquisition/device evidence; snapshot is
     the historical Start entry/roles capture. Parent must exist and destination

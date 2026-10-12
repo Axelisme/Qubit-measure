@@ -17,7 +17,7 @@ from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepRes
 
 @dataclass(frozen=True)
 class MISTAcquisition(PowerDepResult):
-    """Raw native MIST gain trace and acquisition/device evidence.
+    """Retain raw MIST gain response and evidence for analysis without refitting.
 
     gains is the actual rounded dimensionless gain vector. signals is complex
     IQ with the same shape. evidence contains fixed UTC acquisition boundaries,
@@ -28,7 +28,7 @@ class MISTAcquisition(PowerDepResult):
 
 
 def run_mist(run: Run[PowerDepCfg]) -> MISTAcquisition:
-    """Acquire reset, calibrated pi preparation, MIST gain pulse and readout.
+    """Acquire a disturbance gain trace to resolve MIST after calibrated pi preparation.
 
     Supply native PowerDepCfg: init_pulse is required here and represents the
     calibrated pi pulse; probe_pulse is the fixed MIST disturbance waveform.

@@ -1,5 +1,7 @@
 """Fixed-flux T1 followed by zero-detune Hahn echo, committed as one pair."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
@@ -30,10 +32,11 @@ from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.saving import save_t1, save_t2echo
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
+from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
 
 class OvernightPlan(BaseModel):
-    """Fixed measurement choices, with no calibration or fit feedback.
+    """Monitor T1 and Echo drift at fixed flux without calibration or fit feedback.
 
     flux_dev names the connected driver; required flux_unit is A, V or native
     (Fake), with no conversion. flux is its absolute setpoint. outer_rounds counts
@@ -66,7 +69,7 @@ class OvernightPlan(BaseModel):
 
 
 class OvernightTunables(BaseModel):
-    """Acquisition averaging, fixed timing and scalar summary acceptance.
+    """Resolve lifetime drift using fixed timing, averaging and fit acceptance.
 
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive delay estimates in microseconds.
@@ -102,20 +105,24 @@ class OvernightTunables(BaseModel):
 
 @dataclass
 class OvernightState:
-    """Committed pair cursor and wall-clock timing, copied by Engine.
+    """Track lifetime pairs and their start times to display fixed-flux drift.
 
     round_index is the next zero-based pair index. last_actual_start is the
     preceding committed pair's aware UTC start, or None before the first pair.
-    Uncommitted changes disappear on Pause/Stop; Resume repeats that pair.
+    trend_points contains completed scalar pairs in start order, never Figures
+    or axes. Engine copies this state; uncommitted changes disappear on
+    Pause/Stop and Resume repeats that pair. A live plot may already show the
+    discarded pair until the next workflow draw; it is not journal authority.
     """
 
     round_index: int = 0
     last_actual_start: datetime | None = None
+    trend_points: tuple[OvernightPoint, ...] = ()
 
 
 @dataclass(frozen=True)
 class OvernightPoint:
-    """One committed pair's scalar evidence, never a trace or calibration.
+    """Summarize one T1/Echo pair to monitor lifetime drift without feedback.
 
     round_index is zero-based; scheduled_start/actual_start are aware UTC
     wall-clock times. flux is in the plan's explicit unit. t1_us/t2_us and their
@@ -142,13 +149,22 @@ class OvernightPoint:
 
 
 def init_overnight[C](_env: InitEnv[C], _plan: OvernightPlan) -> OvernightState:
-    """Initialize a fresh pair cursor without hardware, timing or capture reads."""
+    """Start lifetime monitoring with no pairs or historical drift values.
+
+    _env and _plan are unused; no hardware, timing or capture reads occur.
+    """
     return OvernightState()
 
 
 def _summary(
     fit: DecayFit, tun: OvernightTunables, name: str
 ) -> tuple[float | None, float | None, str | None]:
+    """Apply the shared scalar acceptance bounds to either lifetime fit.
+
+    fit contains microsecond lifetime/error and residual quality; tun holds
+    strict dimensionless bounds. name identifies rejected members. Return
+    accepted lifetime/error or None values with a diagnosis, without feedback.
+    """
     residual = fit.quality.normalized_residual_rms
     if not (
         isfinite(fit.lifetime_us)
@@ -181,14 +197,22 @@ def overnight[C](
     does not freeze wall time; Resume repeats the discarded pair under the same
     rule. Progress counts committed pairs only. Drive, readout and timing are fixed;
     fit acceptance only affects scalar summaries, never the next native cfg.
+    Refresh the scalar trend on entry and after each complete pair, before
+    returning Next; live plots are not proof of journal commit. No trend file
+    is saved and no Figure or axes is retained in copied state.
     """
+    # Check capabilities and refresh the previously completed scalar pairs.
     _ = env.soc
     _ = env.devices
     env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(
         state.round_index
     )
+    draw_overnight_trend(
+        env.plots, state.trend_points, start_interval_s=plan.start_interval_s
+    )
     if state.round_index == plan.outer_rounds:
         return Done()
+    # Space actual pair starts without catching up after overruns.
     scheduled = datetime.now(UTC)
     if state.last_actual_start is not None:
         scheduled = max(
@@ -197,7 +221,9 @@ def overnight[C](
         )
     yield from env.wait_until(scheduled)
     actual = datetime.now(UTC)
+    # Set the fixed flux before acquiring either member.
     yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
+    # Acquire and save T1 before fitting its scalar summary.
     t1_stop = tun.sweep_factor * tun.t1_guess_us
     t1_cfg = T1Cfg(
         reps=tun.reps,
@@ -223,6 +249,7 @@ def overnight[C](
         if isinstance(t1, Failed)
         else _summary(analyze_t1(t1.result), tun, "T1")
     )
+    # Acquire zero-detune Echo even if the T1 member failed.
     t2_stop = tun.sweep_factor * tun.t2_guess_us
     t2_cfg = T2EchoCfg(
         reps=tun.reps,
@@ -252,6 +279,7 @@ def overnight[C](
         if isinstance(t2, Failed)
         else _summary(analyze_t2echo(t2.result), tun, "T2 Echo")
     )
+    # Publish the complete pair and update the workflow-owned trend.
     point = OvernightPoint(
         state.round_index,
         scheduled,
@@ -264,6 +292,10 @@ def overnight[C](
     )
     state.round_index += 1
     state.last_actual_start = actual
+    state.trend_points += (point,)
+    draw_overnight_trend(
+        env.plots, state.trend_points, start_interval_s=plan.start_interval_s
+    )
     return Next(point, state)
 
 
