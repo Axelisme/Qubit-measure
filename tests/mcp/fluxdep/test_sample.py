@@ -249,4 +249,4 @@ def test_sampling_native_admission_is_not_preread_or_retried(
     ]
     assert rejected.value.code == code
     assert rejected.value.reason == reason
-    assert str(rejected.value) == message
+    assert rejected.value.message == message
