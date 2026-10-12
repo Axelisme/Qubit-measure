@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import io
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
+from PIL import Image
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -22,6 +25,31 @@ def search_db(tmp_path: Path) -> str:
         database.create_dataset("params", data=[[3.0, 0.2, 0.1], [9.5, 2.0, 1.5]])
         database.create_dataset("energies", data=np.zeros((2, 3, 4)))
     return str(path)
+
+
+def test_fit_render_returns_png_at_shared_geometry(
+    route_harness: RouteHarness,
+) -> None:
+    route_harness.ctrl.state.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {"transitions": [(0, 1)]}, None, None)
+    route_harness.ctrl.state.set_fit_result((3.0, 0.8, 0.5))
+    reply = route_harness.request(route_harness.client(), "fit.render")
+    assert reply["ok"]
+    assert "result" in reply
+    figure = reply["result"]["figure"]
+    data = base64.b64decode(figure["png_b64"], validate=True)
+    assert figure["bytes"] == len(data)
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.format == "PNG"
+        assert image.size == (640, 480)
+
+
+def test_fit_render_without_result_is_a_precondition_failure(
+    route_harness: RouteHarness,
+) -> None:
+    reply = route_harness.request(route_harness.client(), "fit.render")
+    assert not reply["ok"]
+    assert "error" in reply
+    assert reply["error"]["code"] == "precondition_failed"
 
 
 def test_database_info_reports_native_ranges_without_changing_fit(
