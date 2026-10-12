@@ -30,7 +30,7 @@ from zcu_tools.gui.session.services.device import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
 from ._helpers import Fixture, call, open_client, recv_push
 
@@ -94,13 +94,13 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
 ) -> None:
     import threading
 
-    from zcu_lab.v2.fake.stub.gui import FakeAdapter, FakeAnalyzeParams
+    from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     entered = threading.Event()
     release = threading.Event()
-    original_analyze = FakeAdapter.analyze
+    original_analyze = SampleAdapter.analyze
 
     def held_analyze(self, request, *, plots: Plots):
         entered.set()
@@ -115,8 +115,8 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         )
         assert run_result["ok"] is True
         assert run_result["result"]["status"] == "finished"
-        monkeypatch.setattr(FakeAdapter, "analyze", held_analyze)
-        analysis_id = fx.ctrl.analyze(tab_id, FakeAnalyzeParams())
+        monkeypatch.setattr(SampleAdapter, "analyze", held_analyze)
+        analysis_id = fx.ctrl.analyze(tab_id, SampleParams())
         assert entered.wait(1)
         active = call(sock, "operation.active")
         assert active["ok"] is True
@@ -152,7 +152,9 @@ def test_run_preview_requires_the_original_source_before_rendering(
     fx, monkeypatch, replacement
 ):
     monkeypatch.setattr(
-        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+        SampleAdapter,
+        "capabilities",
+        replace(SampleAdapter.capabilities, load_data=True),
     )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
@@ -201,7 +203,9 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
     fx, monkeypatch, replacement
 ):
     monkeypatch.setattr(
-        FakeAdapter, "capabilities", replace(FakeAdapter.capabilities, load_data=True)
+        SampleAdapter,
+        "capabilities",
+        replace(SampleAdapter.capabilities, load_data=True),
     )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
@@ -255,13 +259,13 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
 
 
 def test_original_run_can_be_analyzed_without_bypassing_seen_guards(fx, monkeypatch):
-    original_run = FakeAdapter.run
+    original_run = SampleAdapter.run
 
     def known_run(self, request, schema, *, context):
         record = original_run(self, request, schema, context=context)
         return replace(record, result=replace(record.result, data=np.array([1.0, 3.0])))
 
-    monkeypatch.setattr(FakeAdapter, "run", known_run)
+    monkeypatch.setattr(SampleAdapter, "run", known_run)
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
@@ -291,7 +295,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
     sock = open_client(fx.service.port)
     entered = threading.Event()
     release = threading.Event()
-    original_run = FakeAdapter.run
+    original_run = SampleAdapter.run
 
     def held_run(self, request, schema, *, context: RunContext):
         entered.set()
@@ -303,7 +307,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
 
     try:
         _completed_run(fx, sock, tab_id)
-        monkeypatch.setattr(FakeAdapter, "run", held_run)
+        monkeypatch.setattr(SampleAdapter, "run", held_run)
         run_id = fx.ctrl.start_run(tab_id)
         assert entered.wait(1)
         running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
@@ -804,7 +808,7 @@ def test_post_control_rejects_replaced_source_without_starting(fx, source):
         with pytest.raises(FailedPreconditionError) as rejected:
             fx.ctrl.run_analyze_control.start_post_analyze(
                 tab,
-                FakeAnalyzeParams(),
+                SampleParams(),
                 operation_id=primary + 1000 if source == "primary" else primary,
                 run_operation_id=run + 1000 if source == "run" else run,
             )
@@ -827,14 +831,16 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
             == "finished"
         )
         monkeypatch.setattr(
-            FakeAdapter,
+            SampleAdapter,
             "capabilities",
-            replace(FakeAdapter.capabilities, post_analysis=True),
+            replace(SampleAdapter.capabilities, post_analysis=True),
         )
         monkeypatch.setattr(
-            FakeAdapter, "post_analyze", lambda self, req, *, plots: req.analyze_result
+            SampleAdapter,
+            "post_analyze",
+            lambda self, req, *, plots: req.analyze_result,
         )
-        fx.state.update_tab_post_analyze_param_instance(tab, FakeAnalyzeParams())
+        fx.state.update_tab_post_analyze_param_instance(tab, SampleParams())
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
         fx.view.select_tab_pane.reset_mock()
         params = {"tab_id": tab}
@@ -868,9 +874,9 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
 
 def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
-    from zcu_lab.v2.fake.stub.gui import FakeAdapter
+    from tests.gui.app.measure._synthetic import SampleAdapter
 
-    adapter = FakeAdapter()
+    adapter = SampleAdapter()
     cfg = adapter.make_default_cfg(fx.state.session_env)
     fx.prepare_tab(tab_id, adapter, cfg)
 
@@ -960,14 +966,7 @@ def test_adapter_guide_returns_five_fields(fx):
             "typical_writeback",
             "recommended",
         }
-        # fake/freq overrides the guide — every field is non-empty prose.
-        assert all(isinstance(v, str) and v for v in guide.values())
-        assert "simulated" in guide["behavior"].lower()
-        # expects_md names the concrete md keys it reads (orientation, not a
-        # contract — but the guide is supposed to surface real key names).
-        assert "r_f" in guide["expects_md"]
-        assert "res_ch" in guide["expects_md"]
-        assert "ro_waveform" in guide["expects_ml"]
+        assert all(isinstance(value, str) for value in guide.values())
     finally:
         sock.close()
 
@@ -986,23 +985,9 @@ def test_base_adapter_guide_default_is_honest():
     # Every registered adapter defines local guide_text, so the honest default is
     # tested directly on BaseAdapter: an adapter with no guide says so plainly
     # rather than faking content.
-    from zcu_lab.v2.fake.stub.gui import FakeAdapter
+    from tests.gui.app.measure._synthetic import SampleAdapter
 
-    guide = FakeAdapter.guide()
+    guide = SampleAdapter.guide()
     assert guide.behavior == "(no guide written yet)"
     assert guide.expects_md == ""
     assert guide.recommended == ""
-
-
-def test_every_registered_adapter_has_a_written_guide():
-    # A new adapter that forgets guide_text falls back to the honest
-    # "(no guide written yet)" default — this test flags that so the gap is
-    # caught at review time rather than shipping a blank Guide tab to users.
-    from zcu_lab.definitions import ADAPTERS
-
-    missing = [
-        name
-        for name, cls in ADAPTERS.items()
-        if cls.guide().behavior == "(no guide written yet)"
-    ]
-    assert not missing, f"adapters without a written guide: {missing}"

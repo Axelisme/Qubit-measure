@@ -38,13 +38,6 @@ from tests.gui.widgets.cfg._tree_support import tree_item, tree_widget
 # Fixtures
 # ---------------------------------------------------------------------------
 
-
-def _make_ctx():
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
-
-    return SessionEnv(parameters=None, soc=None, soccfg=None)
-
-
 # ---------------------------------------------------------------------------
 # schema_to_dict — SweepValue
 # ---------------------------------------------------------------------------
@@ -887,11 +880,20 @@ def test_literal_decoration_reveals_read_only_value(qapp, ctrl):
         draft.close()
 
 
-def test_populate_full_fake_freq_schema(qapp, ctrl):
-    """The adapter's bound schema survives form attachment and readback."""
-    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
-
-    schema = FakeFreqAdapter().make_default_cfg(_make_ctx())
+def test_populate_bound_nested_schema(qapp, ctrl):
+    """A nested schema with an unresolved expression survives form readback."""
+    schema = section_schema(
+        {
+            "reps": ScalarSpec(label="Reps", type=int),
+            "sweep": CfgSectionSpec(fields={"freq": SweepSpec()}),
+            "offset": ScalarSpec(label="Offset", type=float),
+        },
+        {
+            "reps": DirectValue(3),
+            "sweep": CfgSectionValue(fields={"freq": SweepValue(1.0, 2.0, 5)}),
+            "offset": EvalValue("missing"),
+        },
+    )
     draft = MeasureCfgBindings(ctrl).new_draft(schema, parameters=None)
     form = CfgFormWidget()
     try:
