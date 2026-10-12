@@ -299,6 +299,24 @@ def test_centered_sweep_roundtrip_preserves_center_shape():
     assert sweep.expts == 201
 
 
+@pytest.mark.parametrize("spec", [SweepSpec("Range"), CenteredSweepSpec("Range")])
+def test_range_restore_rejects_non_object_payload(spec: SweepSpec | CenteredSweepSpec):
+    base = _empty(CfgSectionSpec(fields={"range": spec}))
+    with pytest.raises(SessionCodecError, match="payload must be an object"):
+        raw_to_schema(base, {"range": [1, 2, 3]})
+
+
+def test_centered_range_restore_coerces_numeric_controls_and_requires_step():
+    base = _empty(CfgSectionSpec(fields={"range": CenteredSweepSpec("Range")}))
+    raw = {"center": 5, "span": "2.5", "expts": "6", "step": "0.5"}
+    restored = raw_to_schema(base, {"range": raw})
+    value = restored.value.fields["range"]
+    assert isinstance(value, CenteredSweepValue)
+    assert (value.center, value.span, value.expts, value.step) == (5.0, 2.5, 6, 0.5)
+    with pytest.raises(SessionCodecError, match="Centered sweep step is required"):
+        raw_to_schema(base, {"range": {**raw, "step": None}})
+
+
 def test_waveform_ref_roundtrip():
     inner_spec = CfgSectionSpec(
         fields={"width": ScalarSpec(label="Width", type=float)},
