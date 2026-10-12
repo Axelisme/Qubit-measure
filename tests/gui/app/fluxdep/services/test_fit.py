@@ -129,15 +129,14 @@ def test_selected_pointcloud_applies_mask():
     np.testing.assert_allclose(freqs, [5.0, 5.1])
 
 
-def test_selected_pointcloud_stale_mask_raises():
+def test_selected_pointcloud_includes_new_spectrum_without_changing_filter():
     st = _state_with_points()
-    # selection set, then a point added → mask length now disagrees
     st.set_selection(np.array([True, False, True, False]))
     st.put_spectrum(_aligned_entry_with_points("s2", [0.4], [5.2]))
     before = st.version.snapshot()
-    with pytest.raises(FailedPreconditionError) as caught:
-        FitService(st).selected_pointcloud()
-    assert caught.value.reason_code == "selection_stale"
+    fluxs, freqs = FitService(st).selected_pointcloud()
+    np.testing.assert_allclose(fluxs, [0.0, 0.2, 0.4])
+    np.testing.assert_allclose(freqs, [5.0, 5.1, 5.2])
     assert st.version.snapshot() == before
 
 
@@ -150,25 +149,20 @@ def test_selected_pointcloud_stale_mask_raises():
 _WIDE = ((0.1, 50.0), (0.01, 10.0), (0.01, 10.0))
 
 
-@pytest.mark.parametrize("capture_search", [False, True])
-def test_removed_last_spectrum_leaves_stale_selection(tiny_database, capture_search):
+def test_removed_last_spectrum_has_empty_cloud_and_no_selected_points(tiny_database):
     st = _state_with_points()
-    mask = np.array([True, False, True, False])
-    SelectionService(st).set_selection(mask)
+    SelectionService(st).set_selection(np.array([True, False, True, False]))
     svc = FitService(st)
     svc.set_params(tiny_database[0], *_WIDE, TransitionDict({}), 0.0, 0.0)
     st.remove_spectrum("s1")
     before = st.version.snapshot()
-
-    query = svc.capture_search if capture_search else svc.selected_pointcloud
+    fluxs, freqs = svc.selected_pointcloud()
+    assert fluxs.size == freqs.size == 0
     with pytest.raises(FailedPreconditionError) as caught:
-        query()
-
-    assert caught.value.category == "failed_precondition"
-    assert caught.value.reason_code == "selection_stale"
+        svc.capture_search()
+    assert caught.value.reason_code == "no_selected_points"
     assert st.version.snapshot() == before
-    assert st.spectrums == {}
-    np.testing.assert_array_equal(st.selection.selected, mask)
+    assert st.selection_mask() is None
 
 
 @pytest.mark.parametrize("publish_empty_selection", [False, True])

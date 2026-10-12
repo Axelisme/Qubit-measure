@@ -165,7 +165,7 @@ def test_selection_pipeline_emits(spectrum_hdf5):
     ctrl.set_points(name, np.array([0.0, 1.0, 2.0]), np.array([5.0, 5.1, 5.2]))
     seen = _record(ctrl, SelectionChangedPayload)
     ctrl.set_selection(np.array([True, False, True]))
-    assert ctrl.state.selection.selected is not None
+    assert ctrl.state.selection_mask() is not None
     assert len(seen) == 1
 
 
