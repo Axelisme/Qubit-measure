@@ -1,6 +1,4 @@
-"""Project observation and setup through the shipped RPC route."""
-
-from __future__ import annotations
+"""Project identity inputs and GUI-computed paths through the shipped RPC route."""
 
 import os
 
@@ -15,90 +13,45 @@ from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 def test_setup_emits_native_agent_fact_only_after_guard_admission(
     route_harness: RouteHarness,
 ) -> None:
-    first = route_harness.client()
+    client = route_harness.client()
     facts: list[EventMeta] = []
 
     def record(_payload: ProjectChangedPayload, meta: EventMeta) -> None:
         facts.append(meta)
 
-    subscription = route_harness.ctrl.bus.subscribe_with_meta(
-        ProjectChangedPayload, record
-    )
+    subscription = route_harness.ctrl.bus.subscribe_with_meta(ProjectChangedPayload, record)
     try:
-        assert facts == []
-        assert route_harness.request(first, "project.info")["ok"]
+        assert route_harness.request(client, "project.info")["ok"]
         assert facts == []
         assert route_harness.request(
-            first, "project.setup", chip_name="chip", qub_name="Q1"
+            client, "project.setup", chip_name="chip", qub_name="Q1"
         )["ok"]
         assert len(facts) == 1
         assert facts[0].origin.kind == "agent"
         assert facts[0].origin.client_id is not None
-        assert len(facts) == 1
-        assert route_harness.ctrl.state.version.get("project") == 1
     finally:
         subscription.unsubscribe()
 
 
-def test_successful_self_write_preserves_the_existing_observation(
+def test_setup_computes_paths_from_identity_and_controller_root(
     route_harness: RouteHarness,
 ) -> None:
     client = route_harness.client()
-    assert route_harness.request(client, "project.info")["ok"]
-    for name in ("first", "second"):
-        reply = route_harness.request(
-            client,
-            "project.setup",
-            chip_name=name,
-            qub_name="Q1",
-            result_dir="relative-output",
-            database_path="raw-data-root",
-        )
-        assert reply["ok"] is True
-        assert reply["result"] == {
-            "project": {
-                "chip_name": name,
-                "qub_name": "Q1",
-                "result_dir": "relative-output",
-                "database_path": "raw-data-root",
-            }
-        }
-        assert route_harness.ctrl.state.project.chip_name == name
-    assert route_harness.ctrl.state.version.get("project") == 2
-
-
-@pytest.mark.parametrize(
-    "paths",
-    [
-        {},
-        {"result_dir": None, "database_path": None},
-        {"result_dir": "", "database_path": ""},
-    ],
-)
-def test_setup_uses_native_defaults_anchored_at_the_controller_root(
-    route_harness: RouteHarness,
-    paths: dict[str, object],
-) -> None:
-    client = route_harness.client()
-    assert route_harness.request(client, "project.info")["ok"]
-    reply = route_harness.request(
-        client,
-        "project.setup",
-        chip_name="晶片",
-        qub_name="Q:1",
-        **paths,
-    )
-    assert reply["ok"] is True
     root = route_harness.ctrl.get_project_root()
-    assert reply["result"] == {
-        "project": {
-            "chip_name": "晶片",
+    for name in ("first", "晶片"):
+        reply = route_harness.request(client, "project.setup", chip_name=name, qub_name="Q:1")
+        assert reply["ok"] is True
+        project = {
+            "chip_name": name,
             "qub_name": "Q:1",
-            "result_dir": os.path.join(root, "result", "晶片", "Q:1"),
-            "database_path": os.path.join(root, "Database", "晶片", "Q:1"),
+            "result_dir": os.path.join(root, "result", name, "Q:1"),
+            "data_root": os.path.join(root, "Database", name, "Q:1"),
         }
-    }
-    assert route_harness.ctrl.state.project.root_dir == root
+        assert reply["result"] == {"project": project}
+        observed = route_harness.request(client, "project.info")
+        assert observed["ok"] is True
+        assert observed["result"] == project
+    assert route_harness.ctrl.state.version.get("project") == 2
 
 
 @pytest.mark.parametrize(
@@ -110,8 +63,8 @@ def test_setup_uses_native_defaults_anchored_at_the_controller_root(
         {"chip_name": None, "qub_name": "Q1"},
         {"chip_name": 1, "qub_name": "Q1"},
         {"chip_name": "chip", "qub_name": False},
-        {"chip_name": "chip", "qub_name": "Q1", "result_dir": []},
-        {"chip_name": "chip", "qub_name": "Q1", "database_path": 10},
+        {"chip_name": "chip", "qub_name": "Q1", "result_dir": "/override"},
+        {"chip_name": "chip", "qub_name": "Q1", "data_root": "/override"},
     ],
 )
 def test_malformed_setup_is_rejected_before_publication(
@@ -119,14 +72,9 @@ def test_malformed_setup_is_rejected_before_publication(
     params: dict[str, object],
 ) -> None:
     client = route_harness.client()
-    assert route_harness.request(client, "project.info")["ok"]
     initial = route_harness.ctrl.state.project
     with pytest.raises(RemoteError) as rejected:
         route_harness.request(client, "project.setup", **params)
     assert rejected.value.code is ErrorCode.INVALID_PARAMS
     assert route_harness.ctrl.state.project is initial
     assert route_harness.ctrl.state.version.get("project") == 0
-    # A failed invocation does not consume the valid observation.
-    assert route_harness.request(
-        client, "project.setup", chip_name="chip", qub_name="Q1"
-    )["ok"]
