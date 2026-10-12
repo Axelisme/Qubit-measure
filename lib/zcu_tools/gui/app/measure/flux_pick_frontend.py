@@ -19,8 +19,10 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
+from zcu_tools.gui.app.measure.flux_pick_plugin import FluxPickPlugin
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
@@ -29,11 +31,16 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.flux_pick_plugin import FluxPickPlugin
-
 
 class FluxPickFrontend(InteractiveFrontend):
-    """Render the latest session snapshot, or a disposable local line preview."""
+    """Render committed picker state with disposable click-follow line previews.
+
+    plugin supplies spectrum/actions; session is an open owner-loop Session;
+    env supplies frontend services. request_finish/request_cancel ask the owning
+    analysis service to settle, returning terminal success. parent is the Qt
+    widget parent. Construction subscribes to session/alignment and creates a
+    Qt canvas; use on the Qt owner thread and call teardown on retirement.
+    Preview artists never supply terminal analysis data."""
 
     def __init__(
         self,
@@ -104,6 +111,10 @@ class FluxPickFrontend(InteractiveFrontend):
         self._canvas.draw_idle()
 
     def set_read_only(self, *, read_only: bool) -> None:
+        """Set command/pointer editing permission without blocking figure viewing.
+
+        read_only=True discards preview and disables commands; False re-enables
+        only non-retired controls, retaining alignment's busy gate."""
         self._read_only = read_only
         if read_only:
             self.cancel_preview()
@@ -115,10 +126,12 @@ class FluxPickFrontend(InteractiveFrontend):
 
     @property
     def figure(self) -> Figure:
+        """Return the borrowed preview Figure, not the terminal result figure."""
         return self._figure
 
     @property
     def preview_active(self) -> bool:
+        """Report an uncommitted pointer preview on a non-retired frontend."""
         return self._preview_active and not self._retired
 
     def _repaint(self) -> None:
@@ -139,6 +152,7 @@ class FluxPickFrontend(InteractiveFrontend):
             self._show_committed(self._session.snapshot())
 
     def cancel_preview(self) -> None:
+        """Restore latest committed session state; do nothing after teardown."""
         if not self._retired:
             self._show_committed(self._session.snapshot())
 
@@ -236,6 +250,9 @@ class FluxPickFrontend(InteractiveFrontend):
             self.teardown()
 
     def teardown(self) -> None:
+        """Idempotently retire controls/subscriptions and discard pointer preview.
+
+        Does not finish/cancel the service-owned session or destroy saved figures."""
         if self._retired:
             return
         self._retired = True
@@ -253,6 +270,10 @@ class FluxPickFrontend(InteractiveFrontend):
             widget.setEnabled(False)
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        """Discard preview on canvas focus loss/Esc; delegate other Qt events.
+
+        a0 is the watched object and a1 the Qt event, either may be None. Returns
+        True only when Escape is consumed. Must run on the Qt owner thread."""
         if a0 is self._canvas and a1 is not None:
             if a1.type() == QEvent.Type.FocusOut:
                 self.cancel_preview()
@@ -264,6 +285,7 @@ class FluxPickFrontend(InteractiveFrontend):
         return super().eventFilter(a0, a1)
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
+        """Discard local preview and forward the optional Qt hide event to QWidget."""
         self.cancel_preview()
         super().hideEvent(a0)
 
@@ -277,6 +299,12 @@ def make_flux_pick_frontend(
     *,
     plots: Plots,
 ) -> InteractiveFrontend:
+    """Build the measure frontend for a FluxPickPlugin and its open session.
+
+    env supplies frontend services; request_finish/request_cancel settle the
+    owning analysis operation. plots is that operation's terminal figure owner,
+    not the preview owner. A different plugin raises TypeError. Returns the Qt
+    frontend, whose caller owns teardown; this does not open/close the session."""
     if not isinstance(plugin, FluxPickPlugin):
         raise TypeError("flux-pick adapter requires a FluxPickPlugin")
     # The preview is disposable; the plugin writes final figures into these plots.

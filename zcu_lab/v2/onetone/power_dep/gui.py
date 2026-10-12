@@ -15,6 +15,11 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import custom, path_seed
 from zcu_tools.gui.app.measure.spec_helpers import make_pulse_readout_module_spec
 from zcu_tools.gui.cfg import (
     ReferenceValue,
@@ -23,11 +28,8 @@ from zcu_tools.gui.cfg import (
     make_default_value,
 )
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import custom, path_seed, res_freq_range
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
+from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg, PowerDepExp, PowerDepResult
 
 OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
@@ -126,7 +128,9 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .field(
                 "modules.readout",
                 spec=make_pulse_readout_module_spec()

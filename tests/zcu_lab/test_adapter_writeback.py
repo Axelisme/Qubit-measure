@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SampleWriteback,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -23,7 +24,6 @@ from zcu_tools.resources.entry.ledger_models import AcceptedPayload, JsonObject
 from tests.zcu_lab._writeback_support import WritebackSession
 from tests.zcu_lab._writeback_support import writeback_registry as _registry
 from zcu_lab.recipes import RECIPES
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickResult
 from zcu_lab.v2.lookback.core import LookbackResult
 from zcu_lab.v2.lookback.gui import LookbackAnalyzeResult
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepResult

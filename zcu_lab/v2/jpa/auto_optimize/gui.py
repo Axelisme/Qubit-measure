@@ -27,13 +27,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.plotting.plots import Plots
-
-from zcu_lab.v2._support.measure.schema_builder import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
-from zcu_lab.v2._support.measure.seeds import alias_name_seed, custom
+from zcu_tools.gui.app.measure.seeds import alias_name_seed, custom
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
@@ -131,7 +132,9 @@ class JpaAutoOptimizeAdapter(
             "phase-1 flux slices; it is not a Cartesian or exact sample count."
         )
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("pi_pulse", role_id="pi_pulse")
             .readout()

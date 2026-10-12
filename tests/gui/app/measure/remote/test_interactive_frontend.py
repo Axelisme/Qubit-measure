@@ -11,6 +11,8 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -21,8 +23,6 @@ from zcu_tools.resources.entry import component_registry
 
 from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import register_all as register_components
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 
 from ._helpers import mcp_client, open_client
 from ._interactive_support import (

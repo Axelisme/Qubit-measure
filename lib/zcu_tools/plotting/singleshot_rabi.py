@@ -1,46 +1,22 @@
 from __future__ import annotations
 
-from numbers import Real
 from typing import Literal
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
-from zcu_tools.experiment import config
+from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import PulseReadoutCfg, ReadoutCfg
-
-from zcu_lab.v2._support.singleshot.util import classify_result
 
 
-def classify_rabi_iq(
-    signals: NDArray[np.complex128],
-    g_center: complex,
-    e_center: complex,
-    radius: float,
-) -> NDArray[np.float64]:
-    if signals.ndim != 2:
-        raise ValueError("Rabi raw IQ must have shape (sweep, shot)")
-    g_mask, e_mask, _ = classify_result(signals, g_center, e_center, radius)
-    return np.stack((g_mask.mean(axis=1), e_mask.mean(axis=1)), axis=1)
-
-
-def _effective_t1_us(
-    readout: ReadoutCfg | None,
-    length_ratio: float,
-) -> float | None:
-    if readout is None or not np.isfinite(length_ratio) or length_ratio <= 0.0:
+def _effective_t1_us(ro_length_us: float | None, length_ratio: float) -> float | None:
+    if ro_length_us is None or not np.isfinite(length_ratio) or length_ratio <= 0.0:
         return None
-    if isinstance(readout, PulseReadoutCfg):
-        readout_length = readout.ro_cfg.ro_length
-    else:
-        readout_length = readout.ro_length
-    if not isinstance(readout_length, Real):
-        return None
-    value = float(readout_length) / length_ratio
+    value = ro_length_us / length_ratio
     return value if np.isfinite(value) and value > 0.0 else None
 
 
@@ -160,13 +136,26 @@ def plot_rabi_joint(
     xs: NDArray[np.float64],
     signals: NDArray[np.complex128],
     fit: RabiJointFitResult,
-    readout: ReadoutCfg | None,
+    ro_length_us: float | None,
     *,
     sweep: Literal["length", "gain"],
     plots: Plots,
+    figsize: tuple[float, float],
 ) -> None:
+    """Adopt a joint Rabi population/histogram/confusion chart as plots["fit"].
+
+    xs is the sweep axis matching fit populations; signals is raw complex IQ
+    (sweep, shot). fit is the numerical RabiJointFitResult. ro_length_us is the
+    readout duration in microseconds, or None to omit effective-T1 annotation.
+    Nonpositive/nonfinite duration or length ratio also omits that annotation.
+    sweep selects length (microseconds) or gain coordinates/labels. figsize
+    is the caller's base (width, height) in inches; the chart uses 1.6 times
+    that height. plots owns the adopted figure, not this function. Invalid fit
+    states retain measured counts and show invalid-fit annotations. Shape,
+    classification, figure-name conflicts and Matplotlib failures propagate.
+    No cfg, program or experiment defaults are read."""
     omega_unit = "rad/μs" if sweep == "length" else "rad/gain"
-    width, height = config.figsize
+    width, height = figsize
     fig = Figure(figsize=(width, height * 1.6), layout="constrained")
     plots.adopt("fit", fig)
     grid = fig.add_gridspec(
@@ -211,7 +200,7 @@ def plot_rabi_joint(
     ax.legend(loc=4)
     ax.grid(True)
     effective_t1_us = (
-        _effective_t1_us(readout, fit.length_ratio) if fit.backend.valid else None
+        _effective_t1_us(ro_length_us, fit.length_ratio) if fit.backend.valid else None
     )
     classified_distribution = None
     if fit.backend.valid:

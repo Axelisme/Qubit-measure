@@ -10,6 +10,7 @@ from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from typing_extensions import TypeVar
+
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickAnalysis,
@@ -18,18 +19,21 @@ from zcu_tools.analysis.fluxdep.line_state import (
     analyze_flux_pick,
     fold_initial_lines,
 )
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
 from zcu_tools.plotting.plots import PlotHost, Plots
 
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepResult
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxResult
-
 
 @dataclass(frozen=True)
 class FluxDepPickerOptions:
-    """Initial picker positions and display settings, not terminal options."""
+    """Initial device-axis positions and display settings, not terminal options.
+
+    flux_half and flux_int are finite device-axis positions; None selects the
+    line kernel's initial defaults. conjugate couples movement of both lines.
+    magnitude_only projects complex signals to magnitude for display/alignment.
+    These settings seed the preview; Done records its actual terminal state."""
 
     flux_half: float | None = None
     flux_int: float | None = None
@@ -37,26 +41,36 @@ class FluxDepPickerOptions:
     magnitude_only: bool = False
 
 
-CfgT = TypeVar("CfgT", bound=FluxDepCfg | FreqFluxCfg, default=FluxDepCfg)
-ResultT = TypeVar(
-    "ResultT", bound=FluxDepResult | FreqFluxResult, default=FluxDepResult
-)
+CfgT = TypeVar("CfgT", bound=ExpCfgModel, default=ExpCfgModel)
+ResultT = TypeVar("ResultT", default=object)
 
 FluxDepAnalysisRecord = AnalysisRecord[CfgT, ResultT, FluxPickState, FluxPickAnalysis]
 
 
 class FluxDepInteraction(Generic[CfgT, ResultT]):
-    """Preview an explicit source; publish only after Done finishes successfully."""
+    """Preview caller-supplied inputs and publish only after successful Done.
+
+    source is an opaque RunRecord retained by identity, never read for spectra.
+    inputs contains the independent complex spectrum and device/frequency axes;
+    options seeds positions/display. host owns figure presentation; publish
+    receives the new AnalysisRecord and Plots only after cleanup succeeds.
+    Construction displays widgets and preview; presentation errors propagate
+    with cleanup causes. Use on the Notebook owner thread.
+
+    figure/picker are the disposable preview, widget and the named buttons,
+    checkboxes/status are live controls. is_finished marks retired controls.
+    record and plots are None until Done succeeds, then hold the committed
+    native figure and its presentation handle. Caller releases successful Plots;
+    Cancel retires only this preview and never changes a previous analysis."""
 
     def __init__(
         self,
         source: RunRecord[CfgT, ResultT],
+        inputs: FluxPickInputs,
         options: FluxDepPickerOptions,
         host: PlotHost,
         publish: Callable[[FluxDepAnalysisRecord[CfgT, ResultT], Plots], None],
     ) -> None:
-        data = source.result
-        inputs = FluxPickInputs(data.signals, data.values, data.freqs)
         half, integer = fold_initial_lines(
             inputs.dev_values, options.flux_half, options.flux_int
         )
@@ -139,10 +153,14 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
         self.figure.canvas.mpl_connect("button_release_event", self._on_release)
 
     def positions(self) -> tuple[float, float]:
-        """Read current positions without auto-completing the interaction."""
+        """Return current (half, integer) device-axis positions without finishing."""
         return self.picker.positions()
 
     def set_positions(self, half: float, integer: float) -> None:
+        """Set preview half/integer in device-axis units and refresh the display.
+
+        Non-finite positions raise ValueError; a finished interaction raises
+        RuntimeError. This updates preview only, not the analyzer's saved record."""
         if self.is_finished:
             raise RuntimeError("Flux interaction has finished")
         self.picker.apply_positions(half, integer)
@@ -206,6 +224,10 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
         return record
 
     def cancel(self) -> None:
+        """Retire this preview and close controls without publishing a record.
+
+        Finished interactions raise RuntimeError. Presentation cleanup errors
+        propagate; controls still close and is_finished becomes True."""
         if self.is_finished:
             raise RuntimeError("Flux interaction has finished")
         self._retire_preview()
@@ -293,12 +315,13 @@ class FluxDepInteraction(Generic[CfgT, ResultT]):
 
 
 class FluxDepAnalyzer(Generic[CfgT, ResultT]):
-    """Analyze explicit run records independently of acquisition and persistence.
+    """Analyze explicit records independently of acquisition and persistence.
 
-    Start captures one source. Later adapter run/load calls cannot replace it or
-    clear this tool's successful analysis. Native figures and their presentation
-    handles are published together only after all operation cleanup succeeds.
-    """
+    host is the caller's owner-thread PlotHost; None creates NotebookPlotHost.
+    analysis and analysis_plots start as None and hold the latest successful
+    AnalysisRecord and presentation handle. Failed/cancelled previews do not
+    replace them. The caller releases retained Plots; run/load elsewhere never
+    changes this tool. No concrete experiment cfg/result is interpreted."""
 
     def __init__(self, host: PlotHost | None = None) -> None:
         self._host = NotebookPlotHost() if host is None else host
@@ -308,10 +331,19 @@ class FluxDepAnalyzer(Generic[CfgT, ResultT]):
     def start(
         self,
         source: RunRecord[CfgT, ResultT],
+        inputs: FluxPickInputs,
         options: FluxDepPickerOptions | None = None,
     ) -> FluxDepInteraction[CfgT, ResultT]:
+        """Display a preview for opaque source using the caller's separate inputs.
+
+        options supplies initial positions/display or None for kernel defaults.
+        Returns an editable FluxDepInteraction. Spectral/position or presentation
+        failures propagate without replacing analysis/analysis_plots. The caller
+        finishes or cancels each preview; successful Done publishes this source by
+        identity, terminal state, numeric pick result and a named native pick figure."""
         return FluxDepInteraction(
             source,
+            inputs,
             FluxDepPickerOptions() if options is None else options,
             self._host,
             self._publish,

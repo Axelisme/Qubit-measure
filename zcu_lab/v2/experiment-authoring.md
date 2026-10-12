@@ -30,7 +30,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_q
 
 `fake.signal.core.FakeExp` 使用 explicit context 產生純 freqs／signals。Acquisition controls 在 typed FakeCfg，measurement 與 abs fit 圖歸本次 Plots。Analyze 接 None options、回傳 None，接受 cfg=None。Save／load 使用 Frequency／Hz 與 complex data 的 canonical record，不再於 load 偽造資料。
 
-一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具由 [`singleshot/ge/notebook.py`](singleshot/ge/notebook.py) 擁有。FluxDep 的獨立選線工具由 [`_support/notebook/flux_dep.py`](_support/notebook/flux_dep.py) 擁有。FluxDepAnalyzer 明確接收 RunRecord，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
+一般 T1、GE、OneTone 與 Fake 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具由 [`singleshot/ge/notebook.py`](singleshot/ge/notebook.py) 擁有。FluxDep 的獨立選線工具由 [`zcu_tools.notebook.flux_dep`](../../lib/zcu_tools/notebook/flux_dep.py) 擁有。FluxDepAnalyzer 明確接收 RunRecord 與 caller 填入的 FluxPickInputs，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
 
 T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
 
@@ -127,8 +127,8 @@ run使用resolved cfg snapshot中的GE centers/radius作live分類，analysis不
 
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，允許 cfg=None，不保存跨次成功狀態。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
-Amp與Len Rabi共同使用`zcu_lab.v2._support.singleshot.rabi_fit`的raw-IQ joint likelihood與
-`zcu_lab.v2._support.singleshot.rabi_analysis`的population、histogram及confusion matrix診斷圖。
+Amp與Len Rabi共同使用`zcu_tools.analysis.fitting.singleshot_rabi`的raw-IQ joint likelihood與
+`zcu_tools.plotting.singleshot_rabi`的population、histogram及confusion matrix診斷圖。
 Amp固定無衰減／零相位，Initial State描述zero-gain前的主要狀態，支援signed gain。
 Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留原有scalar summary。
 兩者的GUI校準writeback共用backend validity及finite校準值檢查。

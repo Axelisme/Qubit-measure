@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
-    FluxPickState,
-    fold_initial_lines,
 )
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -23,25 +21,29 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.interactive import PluginDefinition, Session
-
-from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
-from zcu_lab.v2._support.measure.flux_pick_frontend import make_flux_pick_frontend
-from zcu_lab.v2._support.measure.flux_pick_plugin import (
+from zcu_tools.gui.app.measure.flux_pick_frontend import make_flux_pick_frontend
+from zcu_tools.gui.app.measure.flux_pick_plugin import (
     FluxPickPlugin,
+    make_flux_pick_plugin,
     render_flux_pick,
 )
-from zcu_lab.v2._support.measure.interactive_flux_pick import (
+from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_lab.v2._support.measure.schema_builder import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import (
+from zcu_tools.gui.app.measure.seeds import (
     alias_name_seed,
+)
+from zcu_tools.gui.interactive import PluginDefinition, Session
+
+from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
+from zcu_lab.v2._support.measure.seeds import (
     flux_range,
     qub_freq_range,
 )
@@ -139,7 +141,9 @@ class FluxDepAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse(
                 "qub_pulse",
@@ -200,13 +204,11 @@ class FluxDepAdapter(
             if parameters is None
             else optional_parameter_float(parameters, "$qubit.flux_int")
         )
-        half, integer = fold_initial_lines(inputs.dev_values, flux_half, flux_int)
-        # Two-tone spectra may carry useful phase information.
-        return FluxPickPlugin(
+        return make_flux_pick_plugin(
             inputs,
-            FluxPickState(
-                flux_half=half, flux_int=integer, conjugate=False, magnitude_only=False
-            ),
+            flux_half=flux_half,
+            flux_int=flux_int,
+            force_magnitude=False,
             plots=plots,
             result_builder=render_flux_pick,
         )

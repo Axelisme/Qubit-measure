@@ -36,6 +36,10 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.interactive_flux_pick import (
+    FluxPickParams,
+    FluxPickResult,
+)
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -64,10 +68,6 @@ from tests.gui.app.measure._native_save_support import (
 )
 from tests.gui.session.ui._parameter_fakes import make_parameters
 from zcu_lab.components import QubitSchema
-from zcu_lab.v2._support.measure.interactive_flux_pick import (
-    FluxPickParams,
-    FluxPickResult,
-)
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
@@ -530,7 +530,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
         raise RuntimeError("frontend analysis failed")
 
     monkeypatch.setattr(
-        "zcu_lab.v2._support.measure.flux_pick_plugin.analyze_flux_pick",
+        "zcu_tools.gui.app.measure.flux_pick_plugin.analyze_flux_pick",
         fail_kernel,
     )
     handles = OperationHandles()

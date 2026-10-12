@@ -6,8 +6,7 @@ import base64
 from dataclasses import replace
 
 import pytest
-
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
 
 from ._helpers import make_ctx, open_client
 from ._interactive_support import (

@@ -1,6 +1,6 @@
 """Shared repetition declarations for the plain and scan ZigZag adapters."""
 
-from zcu_lab.v2._support.measure import MeasureCfgBuilder
+from zcu_tools.gui.app.measure.schema_builder import MeasureCfgBuilder
 
 _REPEAT_ON_CHOICES = ("X180_pulse", "X90_pulse")
 

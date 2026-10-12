@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -18,15 +17,14 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
     QStackedWidget,
     QWidget,
 )
-from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
-from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
-
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
-from zcu_lab.v2._support.measure.flux_pick_plugin import (
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.flux_pick_plugin import (
     make_flux_pick_plugin,
     render_flux_pick,
 )
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 class _DeferredEnv:
@@ -47,14 +45,10 @@ def _frontend(qapp):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
-    req = AnalyzeRequest(
-        run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
-        analyze_params=object(),
-        parameters=None,
-    )
+    inputs = FluxPickInputs(np.asarray(signals, dtype=np.complex128), devs, freqs)
     plots = Plots(NonPresentingHost())
     plugin = make_flux_pick_plugin(
-        req, force_magnitude=True, plots=plots, result_builder=render_flux_pick
+        inputs, force_magnitude=True, plots=plots, result_builder=render_flux_pick
     )
     session = plugin.open(ManualOwnerScheduler())
     env = _DeferredEnv()

@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Self
 
+from zcu_tools.gui.app.measure.role_factories import RoleFactorySpec
+from zcu_tools.gui.app.measure.seeds import (
+    Seed,
+    SweepDefault,
+    custom,
+    literal,
+    value_source,
+)
 from zcu_tools.gui.app.measure.spec_helpers import (
     make_bath_reset_module_spec,
     make_pulse_module_spec,
@@ -38,15 +46,6 @@ from zcu_tools.gui.cfg import (
     resolve_spec_path,
 )
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import (
-    Seed,
-    SweepDefault,
-    custom,
-    literal,
-    value_source,
-)
-
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
@@ -54,7 +53,11 @@ ModuleOverrideInput = ScalarLeafInput | Seed[ScalarLeafInput]
 
 
 class ModuleInit(Enum):
-    """How a role-backed reference is initialized for a fresh cfg."""
+    """Initialization for a role-backed reference in a fresh cfg.
+
+    SMART uses the injected library-aware ref factory, or blank if required and
+    no ref factory exists. INLINE always uses blank. DISABLED produces None
+    and requires optional=True."""
 
     SMART = "smart"
     INLINE = "inline"
@@ -81,7 +84,7 @@ _Declaration = _SectionDeclaration | _FieldDeclaration
 class _ModuleDefaults:
     """Prepare role-backed defaults without resolving context-dependent seeds.
 
-    ``role_id`` selects ROLE_FACTORIES; ``init`` controls reference initialization.
+    ``role_id`` selects the injected role_factories; ``init`` controls reference initialization.
     ``blank_overrides`` applies only to custom references, ``overrides`` always
     applies, and ``locked`` fixes scalar spec paths. Mappings use relative paths.
     Validation happens in ``prepare``, not construction, so the builder retains
@@ -89,6 +92,7 @@ class _ModuleDefaults:
     """
 
     role_id: str
+    role_factories: Mapping[str, RoleFactorySpec]
     init: ModuleInit
     blank_overrides: Mapping[str, ModuleOverrideInput] | None
     overrides: Mapping[str, ModuleOverrideInput] | None
@@ -102,11 +106,11 @@ class _ModuleDefaults:
             raise TypeError(
                 f"module init must be a ModuleInit, got {type(self.init).__name__}"
             )
-        role = ROLE_FACTORIES.get(self.role_id)
+        role = self.role_factories.get(self.role_id)
         if role is None:
             raise ValueError(
                 f"unknown role_id {self.role_id!r} "
-                f"(available: {', '.join(sorted(ROLE_FACTORIES))})"
+                f"(available: {', '.join(sorted(self.role_factories))})"
             )
         if role.kind != spec.kind:
             raise TypeError(
@@ -165,7 +169,7 @@ class _ModuleDefaults:
         blank_overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
         overrides: tuple[tuple[str, Seed[ScalarLeafInput]], ...],
     ) -> ReferenceValue | None:
-        role = ROLE_FACTORIES[self.role_id]
+        role = self.role_factories[self.role_id]
         if self.init is ModuleInit.DISABLED:
             node = None
         elif self.init is ModuleInit.INLINE:
@@ -214,7 +218,11 @@ class _ModuleDefaults:
 
 @dataclass(frozen=True)
 class MeasureCfgDefinition:
-    """Immutable static shape plus deferred defaults for one measure cfg."""
+    """Immutable static shape and deferred defaults for one measure cfg.
+
+    _label titles the root, _declarations retains ordered sections and leaves,
+    and _spec is the static section contract. Construct via MeasureCfgBuilder;
+    use spec for an isolated shape and instantiate for a fresh value tree."""
 
     _label: str
     _declarations: tuple[_Declaration, ...]
@@ -227,7 +235,11 @@ class MeasureCfgDefinition:
         return deepcopy(self._spec)
 
     def instantiate(self, ctx: SessionEnv) -> CfgSchema:
-        """Materialize defaults against ``ctx`` without changing the shape."""
+        """Resolve defaults against the supplied fixed SessionEnv without changing shape.
+
+        Returns a fresh CfgSchema. Context/resolver/materialization failures propagate
+        with cfg-path/seed notes; shape drift raises AssertionError. Neither context
+        nor this definition is mutated."""
 
         assembler = CfgSchemaAssembler(
             label=self._label,
@@ -262,9 +274,31 @@ class MeasureCfgDefinition:
 
 
 class MeasureCfgBuilder:
-    """One-shot domain builder that produces a context-free definition."""
+    """Declare a context-free measure cfg once, then instantiate fresh defaults.
 
-    def __init__(self, *, label: str = "") -> None:
+    role_factories maps authored role IDs to RoleFactorySpec; the caller owns
+    role names and policies. label titles the root. Methods return this builder
+    for chaining. build consumes it; any later declaration/build raises RuntimeError.
+    Paths are dot-separated cfg leaf paths; module/device/sweep names must be
+    one nonempty segment. Duplicates and incompatible parent/leaf paths fail.
+
+    Module verbs use role_id (default name) from the injected table. label is
+    the section title; optional allows None. init selects ModuleInit policy.
+    blank_overrides applies scalar relative-path seeds to custom refs only;
+    overrides applies to custom and adopted refs. locked fixes relative leaves
+    in the static spec and cannot overlap overrides. Unknown/incompatible roles,
+    invalid scalar paths, or disabled required refs fail at declaration.
+
+    Scalar default inputs are snapshotted or deferred Seed values. required
+    controls admission; optional permits None. tooltip is help text, decimals
+    sets displayed precision. Deferred resolver failures propagate at instantiate
+    with cfg path and seed notes. No device I/O occurs in this builder."""
+
+    def __init__(
+        self, *, role_factories: Mapping[str, RoleFactorySpec], label: str = ""
+    ) -> None:
+        """Capture the caller role table and root label; do not resolve defaults."""
+        self._role_factories = role_factories
         self._label = label
         self._assembler = CfgSchemaAssembler(
             label=label,
@@ -286,11 +320,13 @@ class MeasureCfgBuilder:
         overrides: Mapping[str, ModuleOverrideInput] | None = None,
         locked: Mapping[str, object] | None = None,
     ) -> Self:
+        """Declare modules.name as a pulse ref using the common module policy."""
         return self._module(
             name,
             spec=make_pulse_module_spec(label=label, optional=optional),
             defaults=_ModuleDefaults(
                 role_id=role_id or name,
+                role_factories=self._role_factories,
                 init=init,
                 blank_overrides=blank_overrides,
                 overrides=overrides,
@@ -311,6 +347,10 @@ class MeasureCfgBuilder:
         overrides: Mapping[str, ModuleOverrideInput] | None = None,
         locked: Mapping[str, object] | None = None,
     ) -> Self:
+        """Declare modules.name as a readout ref using the common module policy.
+
+        pulse_only restricts allowed shapes to pulse readout; otherwise direct and
+        pulse readout are available."""
         spec = (
             make_pulse_readout_module_spec(label=label, optional=optional)
             if pulse_only
@@ -321,6 +361,7 @@ class MeasureCfgBuilder:
             spec=spec,
             defaults=_ModuleDefaults(
                 role_id=role_id or name,
+                role_factories=self._role_factories,
                 init=init,
                 blank_overrides=blank_overrides,
                 overrides=overrides,
@@ -341,6 +382,10 @@ class MeasureCfgBuilder:
         overrides: Mapping[str, ModuleOverrideInput] | None = None,
         locked: Mapping[str, object] | None = None,
     ) -> Self:
+        """Declare modules.name as a reset ref using the common module policy.
+
+        shape selects all reset families or only pulse, two_pulse, or bath; an
+        unknown selector raises KeyError."""
         factories = {
             "all": make_reset_module_spec,
             "pulse": make_pulse_reset_module_spec,
@@ -353,6 +398,7 @@ class MeasureCfgBuilder:
             spec=spec,
             defaults=_ModuleDefaults(
                 role_id=role_id or name,
+                role_factories=self._role_factories,
                 init=init,
                 blank_overrides=blank_overrides,
                 overrides=overrides,
@@ -366,6 +412,7 @@ class MeasureCfgBuilder:
         *,
         decimals: int = 3,
     ) -> Self:
+        """Declare relax_delay in microseconds with a scalar/seed default and precision."""
         return self.float(
             "relax_delay",
             label="Relax delay (us)",
@@ -383,6 +430,11 @@ class MeasureCfgBuilder:
         section_label: str = "Sweep",
         tooltip: str = "",
     ) -> Self:
+        """Declare sweep.name with device/pulse-axis bounds supplied by default.
+
+        label titles the field, section_label titles the sweep section, decimals
+        sets precision, and tooltip is help text. SweepDefault defers either bound;
+        SweepValue is snapshotted. Invalid names/paths fail at declaration."""
         _validate_local_name(name, verb="sweep")
         self._ensure_section("sweep", section_label)
         if isinstance(default, SweepDefault):
@@ -399,12 +451,14 @@ class MeasureCfgBuilder:
         )
 
     def reps(self, default: int, *, locked: bool = False) -> Self:
+        """Declare reps with the supplied integer default; locked fixes it as a literal."""
         spec: CfgNodeSpec = (
             LiteralSpec(value=default) if locked else IntSpec(label="Reps")
         )
         return self.field("reps", spec=spec, default=default)
 
     def rounds(self, default: int, *, locked: bool = False) -> Self:
+        """Declare rounds with the supplied integer default; locked fixes it as a literal."""
         spec: CfgNodeSpec = (
             LiteralSpec(value=default) if locked else IntSpec(label="Rounds")
         )
@@ -419,6 +473,10 @@ class MeasureCfgBuilder:
         choices_source: str = "devices",
         required: bool = True,
     ) -> Self:
+        """Declare dev.name as a device-name scalar or deferred seed.
+
+        label titles the field; choices_source names the session choice list;
+        required controls admission. This declares a field, not device setup."""
         _validate_local_name(name, verb="device")
         self._ensure_section("dev", "Device")
         return self.field(
@@ -441,6 +499,11 @@ class MeasureCfgBuilder:
         fallback: str,
         type_name: str | None = None,
     ) -> Self:
+        """Declare dev.name from a registered session string value.
+
+        source_key identifies the lookup, type_name optionally constrains its type
+        label, and fallback is used only for missing/unavailable sources. label
+        titles the device field. The source is read at fresh instantiation."""
         return self.device(
             name,
             label=label,
@@ -462,6 +525,7 @@ class MeasureCfgBuilder:
         optional: bool = False,
         tooltip: str = "",
     ) -> Self:
+        """Declare an integer at path with the common scalar label/default policy."""
         return self.field(
             path,
             spec=IntSpec(
@@ -484,6 +548,7 @@ class MeasureCfgBuilder:
         optional: bool = False,
         tooltip: str = "",
     ) -> Self:
+        """Declare a float at path with the common scalar label/default/precision policy."""
         return self.field(
             path,
             spec=FloatSpec(
@@ -504,6 +569,7 @@ class MeasureCfgBuilder:
         default: bool | Seed[ScalarLeafInput],
         tooltip: str = "",
     ) -> Self:
+        """Declare a boolean at path; label/tooltip describe its scalar/seed default."""
         return self.field(
             path,
             spec=ScalarSpec(label=label, type=bool, tooltip=tooltip),
@@ -519,6 +585,10 @@ class MeasureCfgBuilder:
         default: str | Seed[ScalarLeafInput],
         tooltip: str = "",
     ) -> Self:
+        """Declare a string choice at path with label, tooltip and scalar/seed default.
+
+        choices supplies the displayed allowed strings; assembler admission checks
+        alignment with the declared default when instantiated."""
         return self.field(
             path,
             spec=ScalarSpec(
@@ -537,6 +607,10 @@ class MeasureCfgBuilder:
         spec: CfgNodeSpec,
         default: object | Seed[object],
     ) -> Self:
+        """Declare a dot-path leaf with an isolated spec and deferred/snapshotted default.
+
+        Duplicate paths or parent conflicts fail now; resolution and default
+        compatibility checks happen at instantiate. Returns this mutable builder."""
         self._check_mutable()
         declaration = _FieldDeclaration(
             path=path,
@@ -548,6 +622,10 @@ class MeasureCfgBuilder:
         return self
 
     def build(self) -> MeasureCfgDefinition:
+        """Consume the builder and return an isolated static definition.
+
+        A second build or later declaration raises RuntimeError. No defaults are
+        resolved; instantiate supplies the SessionEnv later."""
         self._check_mutable()
         schema = self._assembler.build()
         self._built = True

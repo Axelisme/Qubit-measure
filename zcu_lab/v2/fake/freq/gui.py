@@ -28,15 +28,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import EvalValue, SweepValue
-from zcu_tools.plotting.plots import Plots
-
-from zcu_lab.v2._support.measure.schema_builder import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom
+from zcu_tools.gui.app.measure.seeds import custom
+from zcu_tools.gui.cfg import EvalValue, SweepValue
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.fake.freq.core import (
     FakeFreqCfg,
     FakeFreqExp,
@@ -160,7 +161,9 @@ class FakeFreqAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .readout(
                 init=ModuleInit.INLINE,
                 locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},

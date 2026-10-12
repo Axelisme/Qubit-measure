@@ -22,17 +22,18 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import path_seed
 from zcu_tools.gui.cfg import (
     CfgSchema,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import path_seed
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
@@ -107,7 +108,9 @@ class DualTonePowerAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("init_pulse", role_id="pi_pulse", optional=True)
             .reset(

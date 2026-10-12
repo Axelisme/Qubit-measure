@@ -26,6 +26,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
 from zcu_tools.gui.app.measure.spec_helpers import (
     make_pulse_module_spec,
     make_pulse_readout_module_spec,
@@ -38,16 +48,7 @@ from zcu_tools.gui.cfg import (
 )
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -206,7 +207,9 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
         roles remain cfg Invalid; source/materialization faults propagate.
         """
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .field(
                 "modules.reset",
                 spec=make_reset_module_spec(optional=True),

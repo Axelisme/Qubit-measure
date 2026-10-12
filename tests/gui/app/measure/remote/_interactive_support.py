@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import socket
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -12,10 +11,16 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
+from zcu_tools.gui.app.measure.flux_pick_plugin import (
+    make_flux_pick_plugin,
+    render_flux_pick,
+)
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -25,12 +30,6 @@ from zcu_tools.program.v2.sweep import SweepCfg
 from tests.zcu_lab.v2.onetone.flux_dep.flux_dep_support import (
     make_cfg as make_onetone_cfg,
 )
-from zcu_lab.v2._support.measure.flux_pick_frontend import FluxPickFrontend
-from zcu_lab.v2._support.measure.flux_pick_plugin import (
-    make_flux_pick_plugin,
-    render_flux_pick,
-)
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepExp, FluxDepResult
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
@@ -149,11 +148,7 @@ def start_interactive(fx, *, background=None):
     plots = Plots(NonPresentingHost())
     analyze_params = FluxPickParams()
     plugin = make_flux_pick_plugin(
-        AnalyzeRequest(
-            run_result=SimpleNamespace(signals=signals, values=devs, freqs=freqs),
-            analyze_params=analyze_params,
-            parameters=None,
-        ),
+        FluxPickInputs(np.asarray(signals, dtype=np.complex128), devs, freqs),
         force_magnitude=True,
         plots=plots,
         result_builder=render_flux_pick,

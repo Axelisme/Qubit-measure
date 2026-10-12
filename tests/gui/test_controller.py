@@ -27,6 +27,7 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import (
     ConnectionPreferences,
@@ -61,7 +62,6 @@ from tests.gui._completion_helpers import (
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure.remote._helpers import _context_root
 from zcu_lab.definitions import ALIAS_PRESET, register_all
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 

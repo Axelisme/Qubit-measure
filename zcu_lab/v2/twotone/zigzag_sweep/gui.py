@@ -19,17 +19,15 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import Seed, SweepDefault, custom, scaled_path_seed
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    Seed,
-    SweepDefault,
-    custom,
-    scaled_path_seed,
-)
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.zigzag import (
     EXPECTS_ML,
     add_gate_modules,
@@ -89,7 +87,11 @@ class _ZigZagScanBase(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         builder = (
-            add_gate_modules(MeasureCfgBuilder())
+            add_gate_modules(
+                MeasureCfgBuilder(
+                    role_factories=ROLE_FACTORIES,
+                )
+            )
             .relax_delay(
                 scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.5)
             )

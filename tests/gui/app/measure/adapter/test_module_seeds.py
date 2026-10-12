@@ -16,6 +16,13 @@ from zcu_tools.gui.app.measure.cfg_binding import (
     MeasureCfgBindingHost,
     MeasureCfgBindings,
 )
+from zcu_tools.gui.app.measure.schema_builder import MeasureCfgBuilder
+from zcu_tools.gui.app.measure.seeds import (
+    literal,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
 from zcu_tools.gui.app.measure.spec_helpers import (
     make_pulse_module_spec,
     make_readout_module_spec,
@@ -50,14 +57,6 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry import ComponentSchema, RoleSpec, component_registry
 from zcu_tools.resources.entry.schema import PointDocument
-
-from zcu_lab.v2._support.measure.schema_builder import MeasureCfgBuilder
-from zcu_lab.v2._support.measure.seeds import (
-    literal,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
 
 
 class ModuleOwner(ComponentSchema):
@@ -151,7 +150,11 @@ def test_scalar_seed_lowers_calibration_or_rejects_missing_value(
         if scaled
         else path_seed("$qubit.calibration", fallback=8.0)
     )
-    definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
+    definition = (
+        MeasureCfgBuilder(role_factories={})
+        .float("value", label="Value", default=seed)
+        .build()
+    )
     schema = definition.instantiate(env)
     assert env.parameters is not None
     expression = "2.0 * $qubit.calibration" if scaled else "$qubit.calibration"
@@ -183,7 +186,11 @@ def test_optional_scalar_seed_does_not_hide_non_null_invalid_calibration(
         if scaled
         else path_seed("$qubit.calibration", fallback=8.0)
     )
-    definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
+    definition = (
+        MeasureCfgBuilder(role_factories={})
+        .float("value", label="Value", default=seed)
+        .build()
+    )
     schema = definition.instantiate(env)
     assert env.parameters is not None
     with pytest.raises(RuntimeError) as caught:
@@ -212,7 +219,11 @@ def test_optional_scalar_seed_does_not_hide_unavailable_source(
         if scaled
         else path_seed("$qubit.calibration", fallback=8.0)
     )
-    definition = MeasureCfgBuilder().float("value", label="Value", default=seed).build()
+    definition = (
+        MeasureCfgBuilder(role_factories={})
+        .float("value", label="Value", default=seed)
+        .build()
+    )
     schema = definition.instantiate(env)
     with pytest.raises(RuntimeError, match="point: gone") as caught:
         schema_to_raw_dict(schema, env.parameters)
@@ -234,7 +245,7 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
     )
     expression = "2.0 * $qubit.calibration" if scaled else "$qubit.calibration"
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .float("value", label="Value", default=seed)
         .float("neighbor", label="Neighbor", default=3.0)
         .build()
@@ -299,7 +310,7 @@ def test_unbound_scalar_defaults_publish_invalid_then_refresh_or_reset(
 def test_unbound_pulse_default_preserves_empty_link_and_refreshes_calibration() -> None:
     environment = _environment(bound=False)
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .field(
             "modules.drive",
             spec=make_pulse_module_spec(),
@@ -397,7 +408,7 @@ def test_unbound_readout_default_takes_catalog_shape_after_binding(pulse: bool) 
     )
     environment = _readout_environment(readout, bound=False)
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .field(
             "modules.readout",
             spec=make_readout_module_spec(),
@@ -448,7 +459,7 @@ def test_unbound_readout_default_takes_catalog_shape_after_binding(pulse: bool) 
 def test_unbound_optional_module_is_invalid_until_explicitly_disabled() -> None:
     environment = _environment(bound=False)
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .field(
             "modules.drive",
             spec=make_pulse_module_spec(optional=True),
@@ -488,7 +499,7 @@ def test_unbound_module_keeps_missing_link_until_reset_uses_bound_fallback(
 ) -> None:
     environment = _environment(bound=False)
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .field(
             "modules.drive",
             spec=make_pulse_module_spec(),
@@ -536,7 +547,7 @@ def _fallback() -> ReferenceValue:
 def test_module_seed_mounts_fixed_capture_and_lowers_calibration(path: str) -> None:
     environment = _environment()
     definition = (
-        MeasureCfgBuilder()
+        MeasureCfgBuilder(role_factories={})
         .field(
             "modules.drive",
             spec=make_pulse_module_spec(),
