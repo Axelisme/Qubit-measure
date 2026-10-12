@@ -146,6 +146,8 @@ def test_finish_and_image_override_return_native_evidence(
             ),
         ]
     )
+    if command == "move_line":
+        client.transport.replies.insert(1, GuiResponse(result=native()))
     result = invoke(client, command=command, image=image)
     assert result.data["pending"] is (command != "finish")
     assert result.data["stage"] == ("aligned" if command == "finish" else "align")
