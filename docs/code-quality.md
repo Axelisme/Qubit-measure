@@ -68,7 +68,11 @@ Interface 有下列限制時，在其文件集中說明，不要求每個函式�
 
 ### 測試證明行為，而非陪伴實作
 
-在模組接縫與對外契約驗證可觀察行為。Notebook 和實驗專用邏輯只要已抽離為有介面的 helper，就可以測其契約；不以 caller 數量或目錄層級判定可測性。保留介面後方的內部實作自由，不直接測私有函式。Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜態資料以直接審閱處理，不為定位或內容新增測試，也不在測試內啟獨立程序。舊測試不自動構成較寬鬆的先例。
+在模組接縫與對外契約驗證框架的可觀察行為。Notebook helper 與共用分析工具可測其公開契約，不以 caller 數量或目錄層級判定可測性。保留介面後方的內部實作自由，不直接測私有函式。
+
+`zcu_lab` 的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。框架測試使用最小合成 workflow／adapter，不 import `zcu_lab`，也不用其 fake 實驗。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow。若測試只因實驗定義改動而失敗，刪除該測試，不固定實驗預設值來修它。
+
+Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜態資料以直接審閱處理，不為定位或內容新增測試，也不在測試內啟獨立程序。舊測試不自動構成較寬鬆的先例。
 
 依 [AGENTS.md](../AGENTS.md) 的測試契約選驗證方式；新增或搬遷案例時依
 [tests/README.md](../tests/README.md) 找 owner、fixture 與搬遷驗收。Review 額外回答：
@@ -80,7 +84,7 @@ interface 驗證結果。只有呼叫順序本身屬於契約時，才把順序�
 例如，驗證量測取消應檢查約定的終止狀態與資源釋放，而不是固定私有 helper 的呼叫次數。
 測試行數、mock 數量、coverage 或有無 `assert` 都不能單獨證明測試有效。
 
-使用者實驗套件的 registry 契約測試與共用工具規則，見 [使用者實驗的測試](../zcu_lab/v2/experiment-authoring.md#使用者實驗的測試)。
+宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/draft/module-boundaries.md#分層)。
 
 ### 讓變更可以獨立審查
 

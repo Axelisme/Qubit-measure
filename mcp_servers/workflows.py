@@ -7,7 +7,12 @@ from zcu_tools.gui.app.workflows.remote.methods import WIRE_VERSION
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig
 from zcu_tools.mcp.workflows.server import run_workflow_mcp
 
-if __name__ == "__main__":
+def main() -> None:
+    """Delegate workflow stdio tools with the repository GUI launch configuration.
+
+    Explicit lifecycle tools launch or connect. The GUI launcher injects lab
+    registrations and its source loader; EOF only disconnects the attachment.
+    """
     repo_root = Path(__file__).resolve().parents[1]
     config = MCPBridgeConfig(
         tool_prefix="workflows_",
@@ -32,3 +37,7 @@ if __name__ == "__main__":
         run_script_name="run_workflows_gui.py",
     )
     run_workflow_mcp(config, repo_root)
+
+
+if __name__ == "__main__":
+    main()
