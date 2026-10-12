@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-12，fit input validation 與共用 Show rendering
+**Last updated:** 2026-10-13，fit input validation 與共用 Show rendering
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 

@@ -74,8 +74,12 @@ def transition_requires_levels(transitions: TransitionDict) -> bool:
         if name in base:
             needs_levels = needs_levels or bool(value)
             continue
-        prefix = "transitions" if name.startswith("transitions") else "mirror"
-        suffix = name.removeprefix(prefix)
+        if name.startswith("transitions"):
+            suffix = name.removeprefix("transitions")
+        elif name.startswith("mirror"):
+            suffix = name.removeprefix("mirror")
+        else:
+            raise ValueError(f"unknown transition category: {name!r}")
         if (
             not suffix.isascii()
             or not suffix.isdecimal()
@@ -140,7 +144,8 @@ def compile_transitions(
     where (i, j) = pairs[k].
 
     M = energies.shape[1] — needed to know which `transitions{n}` / `mirror{n}`
-    keys to consume.
+    keys to consume. Unsupported categories, out-of-range indices and missing
+    required frequencies raise ValueError before numerical compilation.
     """
     validate_transition_levels(transitions, M)
     validate_transition_frequencies(transitions)

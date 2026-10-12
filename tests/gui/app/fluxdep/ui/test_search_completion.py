@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests.gui.app.fluxdep._search_result import perfect_fit_result
-
 from io import BytesIO
 
 import numpy as np
@@ -28,6 +26,8 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 
 @pytest.fixture
@@ -112,9 +112,7 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         "calculate_energy_vs_flux",
         lambda *args, **kwargs: (None, np.zeros((1000, 15))),
     )
-    monkeypatch.setattr(
-        viz, "render_fit_figure", lambda *args, **kwargs: None
-    )
+    monkeypatch.setattr(viz, "render_fit_figure", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         QMessageBox,
         "warning",

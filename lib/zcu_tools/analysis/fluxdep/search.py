@@ -64,6 +64,7 @@ def database_info(path: str) -> DatabaseInfo:
             or params.ndim != 2
             or params.shape[1] != 3
             or params.shape[0] == 0
+            or shape is None
             or len(shape) != 3
             or shape[:2] != (params.shape[0], fluxs.size)
             or shape[2] < 1

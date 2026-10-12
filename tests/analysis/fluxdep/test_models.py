@@ -17,7 +17,9 @@ from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
 
 def test_required_levels_expand_high_order_frequencies_and_labels():
     transitions: AnalysisTransitionDict = {
-        "transitions17": [(0, 1)], "mirror17": [(0, 1)], "sample_f": 10.0,
+        "transitions17": [(0, 1)],
+        "mirror17": [(0, 1)],
+        "sample_f": 10.0,
     }
     levels = count_max_evals(transitions)
     energies = np.zeros((1, levels))
@@ -29,7 +31,8 @@ def test_required_levels_expand_high_order_frequencies_and_labels():
 
 def test_required_levels_preserve_basic_and_ignore_empty_dynamic_choices():
     transitions: AnalysisTransitionDict = {
-        "transitions": [(0, 2)], "mirror17": [],
+        "transitions": [(0, 2)],
+        "mirror17": [],
     }
     assert count_max_evals(transitions) == 3
 

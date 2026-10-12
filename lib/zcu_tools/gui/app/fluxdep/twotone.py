@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 
 from zcu_tools.analysis.fluxdep.stroke import BrushStroke, BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
+    GAUSSIAN_SIGMA_MIN,
     SIGMA_MAX,
     SIGMA_MIN,
     THRESHOLD_MAX,
@@ -77,7 +78,10 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
                 required=False,
                 minimum=SIGMA_MIN,
                 maximum=SIGMA_MAX,
-                description="Wavelet sigma [0,5]; Gaussian sigma [0.001,5].",
+                description=(
+                    f"Wavelet sigma [{SIGMA_MIN:g},{SIGMA_MAX:g}]; "
+                    f"Gaussian sigma [{GAUSSIAN_SIGMA_MIN:g},{SIGMA_MAX:g}]."
+                ),
             ),
             ParamSpec(
                 "smooth_method",

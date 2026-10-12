@@ -7,8 +7,6 @@ spin boxes, and Search being blocked when the database path is empty / missing.
 
 from __future__ import annotations
 
-from tests.gui.app.fluxdep._search_result import perfect_fit_result
-
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -23,6 +21,8 @@ from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
     AnalyzePanelWidget,
 )
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 
 @pytest.fixture

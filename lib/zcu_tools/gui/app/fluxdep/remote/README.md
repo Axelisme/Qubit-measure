@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-12，native fit render and database metadata
+**Last updated:** 2026-10-13，native fit render and database metadata
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method

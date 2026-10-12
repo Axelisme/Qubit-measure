@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests.gui.app.fluxdep._search_result import perfect_fit_result
-
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -27,6 +25,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 from tests.gui.app.fluxdep.remote._search_harness import PumpedRouteHarness
 
@@ -173,7 +172,8 @@ def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
 
 
 def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
-    search_case: SearchCase, search_database_hdf5: str,
+    search_case: SearchCase,
+    search_database_hdf5: str,
 ) -> None:
     h = search_case.harness
     client = h.client()

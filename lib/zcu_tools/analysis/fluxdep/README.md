@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-12 — transition validation and database metadata
+**Last updated:** 2026-10-13 — transition validation and database metadata
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter

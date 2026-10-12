@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-12，domain numeric range schema projection
+**Last updated:** 2026-10-13，domain numeric range schema projection
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers

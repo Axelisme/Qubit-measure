@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests.gui.app.fluxdep._search_result import perfect_fit_result
-
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,6 +25,8 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 
 class ControlledBackground:
