@@ -207,9 +207,10 @@ def _input_line_height(font: QFont) -> int:
 class InputLineLabelDelegate(QStyledItemDelegate):
     """Paint each row label centred on its editor's first line.
 
-    An editor may grow below its input line, for example an expression preview;
-    the label belongs to the input line, not to the whole cell. Rows no taller
-    than one input line paint exactly as the default delegate does.
+    Install it for the tree's label column only. An editor may grow below its
+    input line, for example an expression preview; the label belongs to the
+    input line, not to the whole cell. Rows no taller than one input line
+    paint exactly as the default delegate does.
     """
 
     def __init__(self, tree: QTreeWidget) -> None:
@@ -224,7 +225,7 @@ class InputLineLabelDelegate(QStyledItemDelegate):
         index: QModelIndex,
     ) -> None:
         rect = option.rect
-        if index.column() == 0 and rect.height() > self._line_height:
+        if rect.height() > self._line_height:
             line_option = QStyleOptionViewItem(option)
             line_option.rect = QRect(
                 rect.left(), rect.top(), rect.width(), self._line_height

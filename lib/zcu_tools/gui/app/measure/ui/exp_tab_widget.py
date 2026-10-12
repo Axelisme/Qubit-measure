@@ -761,44 +761,28 @@ class ExpTabWidget(QWidget):
         """Show the primary analysis writeback preview for items.
 
         A preview failure inside its contract (expected, validation, or I/O
-        error) shows its reason in place; any other failure propagates.
+        error) shows its reason in place, above any unavailable reasons; any
+        other failure propagates.
         """
         self._require_analysis()
-        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
-        reasons = (
-            snapshot.analysis.unavailable_reasons
-            if snapshot.analysis is not None
-            else ()
-        )
-        self._refresh_writeback(
-            "analysis", items, reasons, self.writeback_widget, self.writeback_section
-        )
+        self._refresh_writeback("analysis", items)
 
     def update_post_writeback_items(self, items: list[WritebackItem]) -> None:
         """Show the post-analysis writeback preview, as update_writeback_items."""
         self._require_post()
-        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
-        reasons = (
-            snapshot.post_analysis.unavailable_reasons
-            if snapshot.post_analysis is not None
-            else ()
-        )
-        self._refresh_writeback(
-            "post_analysis",
-            items,
-            reasons,
-            self.post_writeback_widget,
-            self.post_writeback_section,
-        )
+        self._refresh_writeback("post_analysis", items)
 
     def _refresh_writeback(
-        self,
-        pane: WritebackPane,
-        items: list[WritebackItem],
-        reasons: tuple[str, ...],
-        widget: WritebackWidget,
-        section: _LedgerSection,
+        self, pane: WritebackPane, items: list[WritebackItem]
     ) -> None:
+        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
+        if pane == "analysis":
+            widget, section = self.writeback_widget, self.writeback_section
+            facts = snapshot.analysis
+        else:
+            widget, section = self.post_writeback_widget, self.post_writeback_section
+            facts = snapshot.post_analysis
+        reasons = facts.unavailable_reasons if facts is not None else ()
         section.setVisible(bool(items or reasons))
         if not items:
             widget.populate(items, {}, unavailable_reasons=reasons)
@@ -810,7 +794,7 @@ class ExpTabWidget(QWidget):
         except (ExpectedError, ValueError, OSError) as error:
             # Isolate the preview: the pane stays usable and names the failure.
             logger.exception("Writeback preview failed for %s %s", self.tab_id, pane)
-            widget.show_preview_unavailable(str(error))
+            widget.show_preview_unavailable(str(error), unavailable_reasons=reasons)
             return
         widget.populate(items, values, unavailable_reasons=reasons)
 
