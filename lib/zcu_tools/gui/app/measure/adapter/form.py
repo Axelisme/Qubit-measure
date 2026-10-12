@@ -146,7 +146,11 @@ class _Section:
         ) -> Mapping[tuple[str | int, ...], tuple[JsonValue, ...]]:
             del cls
             return {
-                (name,): tuple(env.devices)
+                (name,): (
+                    (None, *env.devices)
+                    if type(None) in _members(section.core.model_fields[name].annotation)
+                    else tuple(env.devices)
+                )
                 for name, node in section.tree.items()
                 if isinstance(node, AliasName) and node.choices_source == "devices"
             }
