@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 
 import numpy as np
 import pytest
+from matplotlib.collections import PathCollection
 from matplotlib.figure import Figure
 from PIL import Image
 from zcu_tools.analysis.fluxdep.cross_selection import project_cross_selection
@@ -933,3 +934,18 @@ def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteH
         assert image.width > 100 and image.height > 100
     assert joint_route.ctrl.interactive.inspect("selection") is None
     assert joint_route.ctrl.state.version.snapshot() == before
+
+
+def test_published_filter_figure_marks_masks_without_reading_live_draft(joint_route: RouteHarness):
+    joint_route.ctrl.set_selection(np.array([True, False, True, False]), 0.025)
+    link = joint_route.client()
+    context = _context(joint_route.request(link, "selection.interactive.open"))
+    # A fresh Filter starts all-selected; rendering must still use publication.
+    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.0, 4.0]], width=0.03, mode="erase")["ok"]
+    figure = Figure()
+    joint_route.ctrl.render_selection(figure)
+    scatter = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
+    np.testing.assert_allclose(scatter[0].get_offsets(), [[0.5, 4.5]])
+    np.testing.assert_allclose(scatter[1].get_offsets(), [[0.0, 4.0], [1.0, 5.0]])
+    np.testing.assert_allclose(scatter[-2].get_offsets(), [[0.5, 4.5]])
+    assert joint_route.ctrl.interactive.inspect("selection") is not None

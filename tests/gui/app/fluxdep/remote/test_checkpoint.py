@@ -38,3 +38,20 @@ def test_restore_rejects_all_conflicting_names_without_publication(
     assert "existing-a" in reply["error"]["message"]
     assert "existing-b" in reply["error"]["message"]
     assert route_harness.request(client, "spectrum.list")["result"] == before
+
+
+def test_export_restore_preserves_all_sampled_points_without_filter_masks(
+    route_harness: RouteHarness, cross_controller: Controller, tmp_path: Path
+) -> None:
+    cross_controller.set_selection(np.array([True, False, True, False]), 0.025)
+    filepath = cross_controller.export_spectrums(str(tmp_path / "checkpoint.hdf5"))
+    client = route_harness.client()
+    restored = route_harness.request(client, "spectrum.load_processed", filepath=filepath)
+    assert restored["ok"] is True, restored
+    assert set(restored["result"]["names"]) == {"a", "empty", "b"}
+    for name, count in [("a", 3), ("empty", 0), ("b", 1)]:
+        entry = route_harness.ctrl.state.get_spectrum(name)
+        assert entry.points_completed and entry.aligned
+        assert entry.point_count == count
+        assert entry.filter_mask is None
+    assert route_harness.ctrl.state.selection.min_distance == 0.0
