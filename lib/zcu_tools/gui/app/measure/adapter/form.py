@@ -223,6 +223,28 @@ class _Section:
                 data[name] = child.default_data(env)
         return data
 
+    def cfg_data(self, cfg: BaseModel) -> dict[str, JsonValue]:
+        raw: dict[str, JsonValue] = cfg.model_dump(mode="json")
+        for name in cfg.__class__.model_fields:
+            if name not in self.model.model_fields:
+                raw.pop(name, None)
+                continue
+            item: object = getattr(cfg, name)
+            if name in self.children and isinstance(item, BaseModel):
+                raw[name] = self.children[name].cfg_data(item)
+            elif name in self.modules and isinstance(item, ConfigBase):
+                raw[name] = self.modules[name].cfg_input(item)
+            elif isinstance(item, SweepCfg):
+                raw[name] = {
+                    "kind": "linrange",
+                    "start": item.start,
+                    "stop": item.stop,
+                    "n": item.expts,
+                }
+            elif isinstance(item, complex):
+                raw[name] = _seed_json(item)
+        return raw
+
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         for field in self.modules.values():
             try:
@@ -350,6 +372,19 @@ class Form[C: ConfigBase]:
         them against this same env.
         """
         return self.model.default_input(env)
+
+    def cfg_input(self, cfg: C) -> FormInput[FormModel]:
+        """Project a native core cfg into detached direct editable input.
+
+        cfg must belong to core_cfg; a different cfg type raises TypeError.
+        Native modules become inline persistent Specs, and SweepCfg becomes
+        LinRange. Hidden core fields are omitted. This does not execute authored
+        defaults, retain expressions, read sources or mutate cfg. Malformed or
+        unsupported module payloads raise ValueError from Spec validation.
+        """
+        if not issubclass(type(cfg), self.core_cfg):
+            raise TypeError("cfg_input requires this form's core cfg type")
+        return FormInput(self.model, self._section.cfg_data(cfg))
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.
