@@ -81,6 +81,7 @@ class BathFreqGainAdapter(
         BathFreqGainAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = FreqGainExp.persistence_tag()
     exp_cls = FreqGainExp
     ExpCfg_cls: ClassVar[Any] = FreqGainCfg
 

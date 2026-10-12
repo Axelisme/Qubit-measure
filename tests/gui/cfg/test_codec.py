@@ -33,7 +33,7 @@ from zcu_tools.gui.cfg import (
 
 
 def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> None:
-    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
 
     value = DirectValue(None, raw="1e", error="Invalid number")
     schema = CfgSchema(
@@ -44,7 +44,7 @@ def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> No
 
     assert restored.value.fields["mixer"] == value
     with pytest.raises(RuntimeError, match="mixer.*Invalid number"):
-        validate_finished_cfg(restored, resolve_reference=None)
+        lower_finished_cfg(restored, resolve_expression=None, resolve_reference=None)
 
 
 @pytest.mark.parametrize(

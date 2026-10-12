@@ -67,6 +67,7 @@ class JpaFreqAnalyzeResult(AnalyzeResultBase):
 class JpaFreqAdapter(
     BaseAdapter[FreqCfg, JpaFreqRunResult, JpaFreqAnalyzeResult, NoAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 

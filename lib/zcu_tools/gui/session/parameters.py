@@ -35,6 +35,15 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.schema import PointDocument
 
 
+class ModuleSlotError(AttributeError):
+    """A point module slot is unset or references a missing library entry.
+
+    The message names the requested slot path and whether it is unset or dangling.
+    This retains AttributeError ancestry for parameter readers, but lets expression
+    and cfg consumers distinguish invalid input from unexpected source failures.
+    """
+
+
 @dataclass(frozen=True)
 class RoleBinding:
     """Fixed role inference inputs and resolved aliases for one capture.
@@ -362,7 +371,8 @@ class ParameterContext:
         """Resolve a three-segment library root or a point module slot.
 
         Direct roots need not exist. Slots must contain a valid string root;
-        absent/null or dangling slots raise AttributeError. Bad syntax,
+        absent/null or dangling slots raise ModuleSlotError naming the slot path.
+        Unexpected source failures propagate unchanged. Bad syntax,
         nonstring references, and role/collision errors remain explicit.
         No materialization or file read occurs.
         """
@@ -372,7 +382,7 @@ class ParameterContext:
         if is_slot:
             reference = self._point_value(resolved)
             if not reference.present or reference.value is None:
-                raise AttributeError(f"Unset module slot: {path!r}")
+                raise ModuleSlotError(f"Unset module slot: {path!r}")
             if not isinstance(reference.value, str):
                 raise ValueError(f"Module slot must hold a library key: {path!r}")
             resolved = self.resolve_path(reference.value)
@@ -388,7 +398,7 @@ class ParameterContext:
             self._library.entry_value(resolved, kind=kind)
         except KeyError as cause:
             if is_slot:
-                raise AttributeError(f"Dangling module slot: {path!r}") from cause
+                raise ModuleSlotError(f"Dangling module slot: {path!r}") from cause
             # Direct roots are valid keys even before an entry is created.
         return resolved
 
@@ -408,7 +418,8 @@ class ParameterContext:
 
         $alias returns a name string without catalog validation. Field paths use
         their point/library owner. Missing data returns present=False; syntax,
-        namespace, source, dangling slot and materialization errors propagate.
+        namespace, source and materialization errors propagate. Unset/dangling
+        module slots raise ModuleSlotError naming the slot path.
         """
         resolved = self.resolve_path(path)
         if path.startswith("$") and "." not in path:

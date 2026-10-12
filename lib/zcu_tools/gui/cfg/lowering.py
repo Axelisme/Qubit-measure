@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Collection
+from dataclasses import replace
 from typing import Protocol, TypeAlias
 
 from .model import (
@@ -104,9 +105,11 @@ def validate_finished_cfg(
     Linked, non-overridden references with empty sections may await catalog
     shape without resolving their keys. Custom, populated and overridden
     references still require a valid shape and payload. Raise RuntimeError for
-    invalid input; reference resolver failures propagate. This static check
-    does not certify executability: lower_finished_cfg resolves every enabled
-    reference and rejects missing shapes or incomplete payloads.
+    invalid structure, types, finite values or choices; reference resolver failures
+    propagate. Direct input errors may await editing and remain Invalid. This
+    static check does not certify executability: lower_finished_cfg rejects input
+    errors and resolves every enabled reference, rejecting missing shapes or
+    incomplete payloads.
     """
     _validate_static_section(
         schema.spec,
@@ -479,6 +482,7 @@ def _lower_section(
             case ScalarSpec():
                 assert isinstance(node_value, (DirectValue, EvalValue))
                 if isinstance(node_value, DirectValue):
+                    _validate_scalar(node_spec, node_value, full_path)
                     if node_value.value is None:
                         if node_spec.optional:
                             continue
@@ -695,7 +699,8 @@ def _validate_scalar_node(spec: ScalarSpec, node_value: object, full_path: str) 
             f"Config field '{full_path}' must be a DirectValue/EvalValue, "
             f"got {type(node_value).__name__}"
         )
-    _validate_scalar(spec, node_value, full_path)
+    # Static admission retains editing errors; runtime checks the original input.
+    _validate_scalar(spec, replace(node_value, error=None), full_path)
 
 
 def _ensure_scalar_finite(value: object, spec: ScalarSpec, path: str) -> None:
@@ -788,6 +793,7 @@ def _validate_dynamic_node(
 
     if isinstance(spec, ScalarSpec):
         if isinstance(node_value, DirectValue):
+            _validate_scalar(spec, node_value, full_path)
             if node_value.value is None:
                 if spec.optional:
                     return

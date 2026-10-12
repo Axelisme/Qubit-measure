@@ -83,6 +83,7 @@ class CKPAnalyzeResult(AnalyzeResultBase):
 
 
 class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
+    experiment_tag: ClassVar[str | None] = CKP_Exp.persistence_tag()
     exp_cls = CKP_Exp
     ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 
