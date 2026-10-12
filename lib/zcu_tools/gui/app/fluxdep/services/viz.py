@@ -20,6 +20,7 @@ render_fit_figure also accepts precomputed energies for numerical callers.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -285,6 +286,18 @@ def _add_dev_value_axis(
     _ = num_ticks  # secondary_xaxis auto-ticks; kept for signature parity
 
 
+def format_stale_reasons(reasons: Sequence[str]) -> str:
+    """One outdated-fit line, "Outdated: a; b", shared by the Show title and GUI.
+
+    reasons are State's root-change descriptions in graph order; an empty
+    sequence means the stored fit is fresh and returns an empty string. The
+    text stays ASCII because the figure's default font has no CJK glyphs.
+    """
+    if not reasons:
+        return ""
+    return "Outdated: " + "; ".join(reasons)
+
+
 @dataclass(frozen=True)
 class FitDisplay:
     """Show overlay presentation, independent of the search inputs.
@@ -364,7 +377,7 @@ def render_fit_result(
         f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, {fit.params[2]:.2f})"
     )
     if display.stale_reasons:
-        title += "\n過期: " + "; ".join(display.stale_reasons)
+        title += "\n" + format_stale_reasons(display.stale_reasons)
     aligned = next((entry for entry in spectrums.values() if entry.aligned), None)
     render_fit_figure(
         figure,
@@ -500,3 +513,5 @@ def render_fit_figure(
 
     if flux_half is not None and flux_period:
         _add_dev_value_axis(ax, flux_half, flux_period)
+    # Keep a two-line outdated title and the device-value axis inside the figure.
+    figure.tight_layout()

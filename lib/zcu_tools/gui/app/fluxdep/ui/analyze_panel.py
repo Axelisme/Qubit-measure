@@ -21,7 +21,6 @@ import logging
 import os
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import replace
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -48,15 +47,24 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     FitChangedPayload,
     InteractiveChangedPayload,
     SearchChangedPayload,
+    SelectionChangedPayload,
+    SpectrumAddedPayload,
+    SpectrumChangedPayload,
+    SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
-from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits
+from zcu_tools.gui.app.fluxdep.services.viz import (
+    derive_auto_limits,
+    format_stale_reasons,
+)
+from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY, FitState
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -72,6 +80,9 @@ logger = logging.getLogger(__name__)
 
 AnalyzeTab = Literal["filter", "search", "show"]
 _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
+
+# Fit version, stale reasons and x/y axis limits that identify one Show drawing.
+_ShowKey = tuple[int, tuple[str, ...], float, float, float, float]
 
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
@@ -117,6 +128,42 @@ def _set_freq(edit: QLineEdit, value: float | None) -> None:
     edit.setText("" if value is None else f"{value:g}")
 
 
+def _message_label(accessible_name: str) -> QLabel:
+    """A wrapping message label that never widens the form (Ignored horizontal)."""
+    label = QLabel("")
+    label.setAccessibleName(accessible_name)
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    label.setWordWrap(True)
+    return label
+
+
+def _published_inputs(
+    fit: FitState,
+) -> tuple[
+    str,
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+    TransitionDict,
+    float | None,
+    float | None,
+]:
+    """The search inputs the forms display, detached from results and captures.
+
+    Result publication changes params, quality, the recorded cloud and the
+    captured graph, none of which is an input the user edits here.
+    """
+    return (
+        fit.search_db,
+        fit.EJb,
+        fit.ECb,
+        fit.ELb,
+        deepcopy(fit.transitions),
+        fit.r_f,
+        fit.sample_f,
+    )
+
+
 class AnalyzePanelWidget(QWidget):
     """Filter / Search / Show tabs over the selected joint point cloud."""
 
@@ -128,6 +175,7 @@ class AnalyzePanelWidget(QWidget):
         self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
         self._filter_context_id: int | None = None
+        self._shown_fit: _ShowKey | None = None
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
@@ -140,6 +188,14 @@ class AnalyzePanelWidget(QWidget):
         self._bus_subs.subscribe(
             ctrl.bus, InteractiveChangedPayload, self._on_interactive_changed
         )
+        # Every fit upstream: spectrum collection, alignment/points, Filter masks.
+        for upstream in (
+            SpectrumAddedPayload,
+            SpectrumRemovedPayload,
+            SpectrumChangedPayload,
+            SelectionChangedPayload,
+        ):
+            self._bus_subs.subscribe(ctrl.bus, upstream, self._on_upstream_changed)
         progress = ctrl.search.progress_control
         self._progress_dispose = (
             progress.attach_progress(SEARCH_OWNER_ID, self._refresh_progress)
@@ -147,6 +203,9 @@ class AnalyzePanelWidget(QWidget):
             else None
         )
         self._refresh_search()
+        if self._ctrl.state.fit.has_result:
+            self._apply_auto_limits()
+        self._refresh_show()
         self.set_writable(writable=self._writable)
         # MainWindow explicitly activates this singleton on every Analyze click.
 
@@ -286,12 +345,11 @@ class AnalyzePanelWidget(QWidget):
         self._export_btn.setEnabled(False)
         form.addRow(self._export_btn)
 
-        self._status = QLabel("")
-        self._status.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        self._status.setWordWrap(True)
+        self._status = _message_label("Status")
         form.addRow(self._status)
+        # Outdated-fit line with its root-change reasons; blank while fresh.
+        self._freshness = _message_label("Freshness")
+        form.addRow(self._freshness)
 
         return form_box
 
@@ -371,15 +429,20 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_show.set_transitions(fit.transitions)
         self._export_btn.setEnabled(fit.has_result)
         # Compare published inputs, not results, to preserve local display edits.
-        self._loaded_fit_inputs = replace(
-            fit, transitions=deepcopy(fit.transitions), params=None
-        )
+        self._loaded_fit_inputs = _published_inputs(fit)
 
     def _on_fit_changed(self, payload: FitChangedPayload) -> None:
         del payload
-        if replace(self._ctrl.state.fit, params=None) != self._loaded_fit_inputs:
+        if _published_inputs(self._ctrl.state.fit) != self._loaded_fit_inputs:
             self._load_from_state()
         self._refresh_search()
+        self._refresh_show()
+
+    def _on_upstream_changed(self, payload: object) -> None:
+        """Re-read freshness after any publication the recorded fit depends on."""
+        del payload
+        self._refresh_search()
+        self._refresh_show()
 
     @property
     def current_tab(self) -> AnalyzeTab:
@@ -588,7 +651,12 @@ class AnalyzePanelWidget(QWidget):
         self._search_btn.setEnabled(not pending)
         self._cancel_btn.setEnabled(pending)
         self._progress.setVisible(pending)
-        self._export_btn.setEnabled(self._ctrl.state.fit.has_result and not pending)
+        stale_reasons = self._stale_reasons()
+        self._freshness.setText(format_stale_reasons(stale_reasons))
+        # Stale params are refused by export; the reasons above say why.
+        self._export_btn.setEnabled(
+            self._ctrl.state.fit.has_result and not pending and not stale_reasons
+        )
         if pending:
             self._status.setText("Searching…")
             self._refresh_progress()
@@ -630,7 +698,7 @@ class AnalyzePanelWidget(QWidget):
                 f"Search result retained; export is available.\n{exc}",
             )
         self._apply_auto_limits()
-        self._redraw_show()
+        self._refresh_show()
         # The Show tab is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
@@ -686,6 +754,30 @@ class AnalyzePanelWidget(QWidget):
         self._y_lo.setValue(y_lo)
         self._y_hi.setValue(y_hi)
 
+    def _stale_reasons(self) -> tuple[str, ...]:
+        """State's root-change reasons for the stored result; empty while fresh."""
+        return tuple(self._ctrl.state.fit_stale_reasons)
+
+    def _show_key(self) -> _ShowKey:
+        return (
+            self._ctrl.state.version.get(FIT_VERSION_KEY),
+            self._stale_reasons(),
+            self._x_lo.value(),
+            self._x_hi.value(),
+            self._y_lo.value(),
+            self._y_hi.value(),
+        )
+
+    def _refresh_show(self) -> None:
+        """Redraw Show only when the result, its freshness or the limits changed.
+
+        Display edits (transition subset, reference lines) wait for Apply.
+        """
+        if self._ctrl.state.fit.params is None:
+            return
+        if self._show_key() != self._shown_fit:
+            self._redraw_show()
+
     def _redraw_show(self) -> None:
         """Render the fit visualisation with the current display tools."""
         fit = self._ctrl.state.fit
@@ -711,4 +803,5 @@ class AnalyzePanelWidget(QWidget):
             logger.exception("render_fit_figure failed")
             self._status.setText(f"Could not draw: {exc}")
             return
+        self._shown_fit = self._show_key()
         self._fit_canvas.draw_idle()
