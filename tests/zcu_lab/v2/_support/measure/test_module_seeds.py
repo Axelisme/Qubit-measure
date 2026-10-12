@@ -37,6 +37,7 @@ from zcu_tools.gui.session.context_types import (
     SavedPoint,
 )
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
+from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding, SessionEnv
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -628,12 +629,18 @@ def test_scaled_module_calibration_absence_fails_at_resolution(
     assert isinstance(value, EvalValue)
     assert value.expr == "4.0 * $qubit.module.x180.waveform.length"
     message = "Unset" if slot is None else "Dangling"
-    with pytest.raises(AttributeError) as caught:
+    with pytest.raises(ExpressionError) as caught:
         evaluate_scalar_expr(value.expr, environment.parameters)
-    assert str(caught.value) == f"{message} module slot: 'Q1.module.x180'"
+    assert str(caught.value) == (
+        "Invalid parameter path '$qubit.module.x180.waveform.length': "
+        f"{message} module slot: 'Q1.module.x180'"
+    )
+    slot_error = caught.value.__cause__
+    assert isinstance(slot_error, ModuleSlotError)
+    assert str(slot_error) == f"{message} module slot: 'Q1.module.x180'"
     if slot is not None:
-        assert isinstance(caught.value.__cause__, KeyError)
-        assert caught.value.__cause__.args == ("missing",)
+        assert isinstance(slot_error.__cause__, KeyError)
+        assert slot_error.__cause__.args == ("missing",)
 
 
 def test_scaled_module_calibration_preserves_capture_expression() -> None:
