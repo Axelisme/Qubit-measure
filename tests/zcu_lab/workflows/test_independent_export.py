@@ -137,7 +137,9 @@ def test_all_missing_records_names_every_iteration_before_any_write(
         path.unlink()
     result, database = tmp_path / "result", tmp_path / "Database"
     if workflow == "coherence_fluxdep":
-        with pytest.raises(ValueError) as failure:
+        with pytest.raises(
+            ValueError, match="No (usable committed|iteration records)"
+        ) as failure:
             export_coherence(
                 run.paths.metadata_root,
                 outputs=("merged", "labber", "samples"),
@@ -145,7 +147,9 @@ def test_all_missing_records_names_every_iteration_before_any_write(
                 database=database,
             )
     else:
-        with pytest.raises(ValueError) as failure:
+        with pytest.raises(
+            ValueError, match="No (usable committed|iteration records)"
+        ) as failure:
             export_mist(
                 run.paths.metadata_root,
                 outputs=("merged", "labber"),
