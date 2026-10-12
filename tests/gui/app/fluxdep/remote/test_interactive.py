@@ -373,7 +373,7 @@ def test_selection_stroke_duplicate_identities_apply_and_undo(
     applied = _context(_joint_command(joint_route, link, context, "apply"))
     assert applied["closed"] is False and applied["can_undo"] is True
     np.testing.assert_array_equal(
-        joint_route.ctrl.state.selection.selected, after.selected
+        joint_route.ctrl.state.selection_mask(), after.selected
     )
     assert joint_route.ctrl.interactive.current_cross_selection() is native
     undo = _joint_command(joint_route, link, context, "undo")
@@ -381,7 +381,7 @@ def test_selection_stroke_duplicate_identities_apply_and_undo(
     assert _state(_context(undo))["selected"] == before.selected.tolist()
     assert _joint_command(joint_route, link, context, "apply")["ok"]
     np.testing.assert_array_equal(
-        joint_route.ctrl.state.selection.selected, before.selected
+        joint_route.ctrl.state.selection_mask(), before.selected
     )
     closed = _context(_joint_command(joint_route, link, context, "cancel"))
     assert closed["closed"] and closed["commands"] == []
@@ -742,7 +742,7 @@ def test_joint_png_read_does_not_refresh_other_clients_and_apply_self_write(
     assert _joint_command(joint_route, link, context, "apply")["ok"]
     assert _joint_command(joint_route, link, context, "undo")["ok"]
     assert _joint_command(joint_route, link, context, "apply")["ok"]
-    assert np.all(joint_route.ctrl.state.selection.selected)
+    assert np.all(joint_route.ctrl.state.selection_mask())
 
 
 def test_detector_setting_reports_actual_point_changes(two_route: RouteHarness):

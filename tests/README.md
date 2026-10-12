@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-13，GUI cache 隔離生命週期
+**Last updated:** 2026-10-13，slow 選集與 GUI cache 隔離生命週期
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -47,10 +47,32 @@ import 時的 invalid-escape `SyntaxWarning`）。本 repo 的 production warnin
 若 integration test 允許某個 fit fallback warning，使用 test-local `filterwarnings` marker
 標註該測試的預期退化。
 
-`-n auto` 啟動 pytest-xdist 多進程平行化。`tests/conftest.py` 在每個 worker 進程啟動時
-（偵測到 `PYTEST_XDIST_WORKER`）把 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS`
-設為 `"1"`，避免 worker 與多執行緒 BLAS 相互過訂。Serial 跑法不設這些變數，適合 debug。
+pytest 預設排除 `slow`。ticket 內只跑受影響選集，不跑 slow，最多使用兩個 worker：
+
+```bash
+uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
+```
+
+task 進 land review 前才跑整套驗證。CLI 的 `-m ""` 取代預設 marker 過濾，包含 slow 與非 slow。
+完整測試固定使用四個 worker。重檢查經過全機資源限制，同 task 用 lock 串行：
+
+```bash
+flock <task-scratch>/heavy-task.lock <repo>/.agent_state/tools/heavy.sh \
+  uv run --directory <worktree> --no-sync -- \
+  pytest -n 4 --dist=worksteal -m "" --durations=25
+```
+
+`-m slow` 只驗證 slow 選集，不是整套驗證。`requires_loopback` 等能力 marker 只宣告資源需求，
+不用來跳過慢測試。slow 門檻依整套實測決定，數據與理由記在 task receipt。
+fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用 slow 隱藏成本。
+只為需要保留的昂貴驗證加 slow，不做全域逐 node skip。
+
+`tests/conftest.py` 在每個 xdist worker 啟動時，把
+`OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS` 預設設為 `"1"`，
+避免 worker 與 BLAS 執行緒超額競爭。Serial 跑法不設這些變數，適合 debug。
 Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive`。
+
+### GUI cache 隔離
 
 GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接報錯。
 `tests/conftest.py` 在子目錄 conftest 與產品模組 import 前設定 `XDG_CACHE_HOME`，

@@ -102,10 +102,9 @@ class FitService:
         """The *selected* subset of the joint (flux, freq) cloud — the search input.
 
         Concatenates every spectrum's selected points (insertion order), then
-        applies the cross-spectrum selection mask. With no mask set, every point
-        is included (the selector defaults to all-selected). Fast-fails if a
-        stored mask disagrees with the current cloud size, raising
-        FailedPreconditionError (selection_stale) without mutation.
+        applies the per-spectrum Filter masks projected in the same order.
+        With no mask set, every point is included. Republished points are
+        all-selected without changing any other spectrum's exclusions.
         """
         flux_parts: list[NDArray[np.float64]] = []
         freq_parts: list[NDArray[np.float64]] = []
@@ -119,15 +118,9 @@ class FitService:
             fluxs = np.empty(0, dtype=np.float64)
             freqs = np.empty(0, dtype=np.float64)
 
-        mask = self._state.selection.selected
+        mask = self._state.selection_mask()
         if mask is None:
             return fluxs, freqs
-        if mask.shape[0] != fluxs.shape[0]:
-            raise FailedPreconditionError(
-                f"selection mask length {mask.shape[0]} != joint point cloud "
-                f"size {fluxs.shape[0]} (re-run the cross-spectrum filter)",
-                reason_code="selection_stale",
-            )
         return fluxs[mask], freqs[mask]
 
     # --- search ----------------------------------------------------------
@@ -135,11 +128,11 @@ class FitService:
     def capture_search(self) -> SearchInput:
         """Capture detached inputs on the State owner.
 
-        Rejects foreign threads, missing database path, empty selected cloud
-        and a selection mask inconsistent with the cloud. Kernel validation of
-        bounds, transitions and database contents happens during compute_search.
-        FailedPreconditionError reasons are no_database_path, no_selected_points
-        or selection_stale. Foreign threads raise RuntimeError.
+        Rejects foreign threads, missing database path and empty selected cloud.
+        Kernel validation of bounds, transitions and database contents happens
+        during compute_search.
+        FailedPreconditionError reasons are no_database_path or no_selected_points.
+        Foreign threads raise RuntimeError.
         """
         self._state.assert_owner_thread()
         fit = self._state.fit

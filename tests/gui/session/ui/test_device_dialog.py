@@ -192,6 +192,35 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
     ctrl.forget_device.assert_called_once_with("remembered")
 
 
+def test_memory_device_reconnect_uses_selected_name_without_setup(qapp):
+    from qtpy.QtWidgets import QListWidget, QPushButton
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("remembered", connected=False)]
+    ctrl.is_memory_device.return_value = True
+    ctrl.get_device_snapshot.return_value = DeviceSnapshot(
+        name="remembered",
+        type_name="FakeDevice",
+        address="addr",
+        status=DeviceStatus.MEMORY_ONLY,
+    )
+    dialog = _make_dialog(ctrl)
+    device_list = dialog.findChild(QListWidget)
+    assert device_list is not None
+    device_list.setCurrentRow(0)
+    reconnect = next(
+        button
+        for button in dialog.findChildren(QPushButton)
+        if button.text() == "Reconnect"
+    )
+    reconnect.click()
+    ctrl.start_reconnect_device.assert_called_once_with("remembered")
+    ctrl.start_setup_device.assert_not_called()
+    dialog.close()
+    dialog.deleteLater()
+    qapp.processEvents()
+
+
 def test_device_dialog_refresh_reloads_selected_device_info(qapp):
     from zcu_tools.device.fake import FakeDeviceInfo
 

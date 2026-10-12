@@ -74,13 +74,7 @@ class SelectionService:
         (a stale mask from before a spectrum was added/removed). ``min_distance``
         is the downsample threshold, remembered for the next selector session.
         """
-        fluxs, _ = self.derive_pointcloud()
-        if selected.shape[0] != fluxs.shape[0]:
-            raise ValueError(
-                f"selection mask length {selected.shape[0]} != joint point cloud "
-                f"size {fluxs.shape[0]}"
-            )
-        self._state.set_selection(np.asarray(selected, dtype=np.bool_), min_distance)
+        self._state.set_selection(selected, min_distance)
         logger.debug(
             "set_selection: n_selected=%d/%d", int(selected.sum()), selected.size
         )

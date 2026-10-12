@@ -20,6 +20,7 @@ module only turns them into transition lines via ``energy2transition``.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -31,6 +32,16 @@ from zcu_tools.gui.app.fluxdep.state import SpectrumEntry, transitions_with_freq
 from zcu_tools.simulate import flux2value
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _Background:
+    """Spectrum and nonempty axes/signals after dropping all-NaN rows/columns."""
+
+    entry: SpectrumEntry
+    fluxs: NDArray[np.float64]
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
 def derive_auto_limits(
@@ -60,16 +71,13 @@ def derive_auto_limits(
         ys_lo, ys_hi = min(ys_lo, lo), max(ys_hi, hi)
 
     for entry in spectrums.values():
-        spect = entry.raw
-        signals = spect["signals"]
-        flux_mask = np.any(~np.isnan(signals), axis=1)
-        freq_mask = np.any(~np.isnan(signals), axis=0)
-        if not flux_mask.any() or not freq_mask.any():
+        usable = _usable_background(entry)
+        if usable is None:
             continue
-        fluxs = np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask]
-        freqs = np.asarray(spect["freqs"], dtype=np.float64)[freq_mask]
-        _acc_x(float(fluxs.min()), float(fluxs.max()))
-        _acc_y(float(freqs.min()), float(freqs.max()))
+        # Signals are unused here; the shared filtering keeps limits consistent
+        # with the rendered background.
+        _acc_x(float(usable.fluxs.min()), float(usable.fluxs.max()))
+        _acc_y(float(usable.freqs.min()), float(usable.freqs.max()))
 
     if s_fluxs.size:
         _acc_x(float(np.min(s_fluxs)), float(np.max(s_fluxs)))
@@ -100,22 +108,54 @@ def _constant_freqs(
     return lines
 
 
+def _axis_resolution(axis: NDArray[np.float64]) -> float:
+    """Points per unit along one axis, (points - 1) / range; 0 without a range."""
+    span = float(np.max(axis) - np.min(axis))
+    return (axis.size - 1) / span if span > 0 else 0.0
+
+
+def _usable_background(entry: SpectrumEntry) -> _Background | None:
+    """Return background without all-NaN rows/columns, or None if empty."""
+    spect = entry.raw
+    signals = spect["signals"]
+    flux_mask = np.any(~np.isnan(signals), axis=1)
+    freq_mask = np.any(~np.isnan(signals), axis=0)
+    if not flux_mask.any() or not freq_mask.any():
+        return None
+    return _Background(
+        entry,
+        np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask],
+        np.asarray(spect["freqs"], dtype=np.float64)[freq_mask],
+        signals[flux_mask, :][:, freq_mask],
+    )
+
+
 def _plot_background(ax, spectrums: dict[str, SpectrumEntry]) -> None:
-    """Draw each spectrum's normalised amplitude as a gray_r heatmap."""
+    """Draw each spectrum's normalised amplitude as a gray_r heatmap.
+
+    Spectra paint from low to high resolution, so a fine scan stays visible
+    where it overlaps a coarse one. Resolution is the geometric mean of both
+    axes' (points - 1) / range after dropping all-NaN rows; an axis with a
+    single point or no range counts as 0. Equal resolutions keep insertion
+    order. All backgrounds stay below the simulation lines and points.
+    """
+    backgrounds = []
     for entry in spectrums.values():
-        spect = entry.raw
-        signals = spect["signals"]
-        flux_mask = np.any(~np.isnan(signals), axis=1)
-        freq_mask = np.any(~np.isnan(signals), axis=0)
-        if not flux_mask.any() or not freq_mask.any():
-            continue
-        signals = signals[flux_mask, :][:, freq_mask]
-        fluxs = np.asarray(spect["fluxs"], dtype=np.float64)[flux_mask]
-        freqs = np.asarray(spect["freqs"], dtype=np.float64)[freq_mask]
-        real = cast2real_and_norm(signals, use_phase=entry.spec_type != "OneTone")
+        usable = _usable_background(entry)
+        if usable is not None:
+            backgrounds.append(usable)
+    backgrounds.sort(
+        key=lambda background: np.sqrt(
+            _axis_resolution(background.fluxs) * _axis_resolution(background.freqs)
+        )
+    )
+    for background in backgrounds:
+        real = cast2real_and_norm(
+            background.signals, use_phase=background.entry.spec_type != "OneTone"
+        )
         ax.pcolormesh(
-            fluxs,
-            freqs,
+            background.fluxs,
+            background.freqs,
             real.T,
             cmap="gray_r",
             shading="auto",

@@ -40,7 +40,7 @@ Source owner 發布本地來源及版本。Measure 在 cfg refresh／reset 讀�
 
 解析使用固定 `CfgResolution`，不輪詢硬體或做外部 I/O。Device lookup 使用已發布 cache。Source 更新先準備並安裝所有受影響 cfg 的 publication，再通知；某個 cfg 解析故障不撤銷其他資源或 source 的更新。
 
-實驗 cfg 的 `dev` 只保存角色到 device 名稱的對應，不保存 DeviceInfo、設定 patch 或 snapshot。Adapter 不將 label lower 成裝置設定。使用 flux 的 cfg 必填 `flux_unit`，值為 A、V 或 native，core 與 Notebook 不提供隱含 default。呼叫者負責單位換算。GUI 表單提供 A／V／native 三選一，初始值為 A，使用者可改，不從 device cache 推測。`zcu_lab.recipes.helpers.use_flux_device(tab, name, unit=...)` 讀 `RecipeTab.read_device` 的 cached snapshot，明填 unit 必須完全相符，包括 native。成功後才寫 dev.flux_dev 與獨立 cfg.flux_unit，不換算、不連線或 setup，不改 recipe policy 或 alias capture。
+實驗 cfg 的 `dev` 只保存角色到 device 名稱的對應，不保存 DeviceInfo、設定 patch 或 snapshot。本段與下一段的 `dev` 對應將由 [measure-form draft](draft/measure-form-derivation.md) 的具名裝置欄位取代，measure-form task 完成前仍是現行格式。Adapter 不將 label lower 成裝置設定。使用 flux 的 cfg 必填 `flux_unit`，值為 A、V 或 native，core 與 Notebook 不提供隱含 default。呼叫者負責單位換算。GUI 表單提供 A／V／native 三選一，初始值為 A，使用者可改，不從 device cache 推測。`zcu_lab.recipes.helpers.use_flux_device(tab, name, unit=...)` 讀 `RecipeTab.read_device` 的 cached snapshot，明填 unit 必須完全相符，包括 native。成功後才寫 dev.flux_dev 與獨立 cfg.flux_unit，不換算、不連線或 setup，不改 recipe policy 或 alias capture。
 
 Run 不預查 cfg.dev 名稱是否存在，cfg 格式與必填 unit 的驗證仍保留。Core 實際以 `context.devices[cfg.dev[role]]` 取 driver 時，缺名即報錯並指名 device。取得 driver 後由實驗層 helper 操作。RunContext 不提供 setters；操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。
 
