@@ -4,9 +4,11 @@ import base64
 from contextlib import closing
 from copy import deepcopy
 from dataclasses import asdict
+from threading import Event
 
 import pytest
-from zcu_tools.mcp.core.reply import PngImage
+from zcu_tools.mcp.core.reply import PngImage, ToolReply
+from zcu_tools.mcp.measure import tools_recipes
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeRun, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -18,7 +20,7 @@ from ._analyze_support import (
 )
 from ._recipe_execution_support import definition
 from ._recipe_support import LookbackGui, recipe_client
-from ._support import make_client
+from ._support import full_execution_reply, make_client
 
 
 @pytest.mark.parametrize(
@@ -355,3 +357,169 @@ def test_recipe_raw_step_is_null_without_report(tmp_path, scenario):
         assert full["raw_save"] is None
         assert (full["run_op"] is None) == (scenario == "before_run")
         assert client.transport.sent == before
+
+
+def _preview_recipe(session: RecipeSession) -> RecipeGenerator:
+    run, status = yield session.open_tab("lookback").run()
+    assert isinstance(run, RecipeRun) and status == "completed"
+    run.save_raw()
+    run.preview()
+
+
+@pytest.mark.parametrize("failure", ["source", "base64", "png"])
+def test_run_preview_failure_retains_the_saved_raw_and_true_run(tmp_path, failure):
+    gui = LookbackGui()
+    client = make_client(tmp_path, gui, recipes=(definition(_preview_recipe),))
+    client.transport.replies["tab.get_figure"] = {
+        "ok": True,
+        "result": {"png_b64": base64.b64encode(PNG).decode()},
+    }
+    with closing(client.context.session):
+        if failure == "source":
+            client.transport.replies["tab.get_figure"] = {
+                "ok": False,
+                "error": {
+                    "code": "precondition_failed",
+                    "reason": "result_superseded",
+                    "message": "The source was replaced",
+                },
+            }
+        elif failure in ("base64", "png"):
+            client.transport.replies["tab.get_figure"] = {
+                "ok": True,
+                "result": {
+                    "png_b64": "invalid!"
+                    if failure == "base64"
+                    else base64.b64encode(b"not-png").decode()
+                },
+            }
+        reply = full_execution_reply(
+            client,
+            client.call("sample", {}),
+        )
+        assert isinstance(reply, ToolReply)
+        assert reply.is_error
+        assert reply.data["status"] == "failed"
+        error = reply.data["error"]
+        assert error["reason"] == (
+            "result_superseded" if failure == "source" else "recipe_failed"
+        )
+        if failure == "source":
+            assert error["code"] == "precondition_failed"
+            assert "The source was replaced" in error["message"]
+        else:
+            assert ("base64" if failure == "base64" else "PNG") in error["message"]
+        assert reply.data["raw_save"] == {
+            "run_id": "run-a",
+            "artifacts": {
+                "raw": {
+                    "data": {
+                        "status": "Saved",
+                        "members": {
+                            "data": [
+                                {
+                                    "format": "data_h5",
+                                    "path": "/runs/run-a/data.h5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                                {
+                                    "format": "labber",
+                                    "path": "/labber/raw.hdf5",
+                                    "status": "saved",
+                                    "error": None,
+                                },
+                            ]
+                        },
+                    }
+                }
+            },
+        }
+        assert reply.data["run_outcome"]["status"] == "finished"
+        assert reply.data["analysis"] is None
+        assert reply.data["writeback"] is None
+        assert not reply.images
+        methods = [method for method, _ in client.transport.sent]
+        assert methods.count("tab.run_start") == methods.count("tab.save_data") == 1
+        assert methods.count("tab.get_figure") == 1
+        assert methods.index("tab.save_data") < methods.index("tab.get_figure")
+
+
+@pytest.mark.parametrize(
+    "phase, fail", [("raw_save", False), ("preview", False), ("preview", True)]
+)
+def test_cancel_does_not_suppress_sync_save_or_run_preview(
+    tmp_path, monkeypatch, phase, fail
+):
+    monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
+    entered, release = Event(), Event()
+    gui = LookbackGui()
+
+    def respond(method, params):
+        should_block = (phase == "raw_save" and method == "tab.save_data") or (
+            phase == "preview" and method == "tab.get_figure"
+        )
+        if should_block:
+            entered.set()
+            assert release.wait(3)
+        if phase == "preview" and method == "tab.get_figure" and fail:
+            return {"png_b64": "bad-png"}
+        if method == "tab.get_figure":
+            return {"png_b64": base64.b64encode(PNG).decode()}
+        return gui(method, params)
+
+    client = make_client(tmp_path, respond, recipes=(definition(_preview_recipe),))
+    with closing(client.context.session):
+        try:
+            initial = full_execution_reply(
+                client,
+                client.call(
+                    "sample",
+                    {},
+                ),
+            )
+            assert entered.wait(2)
+            execution = initial.data["execution"]
+            client.call("cancel", {"execution": execution})
+            release.set()
+            terminal = full_execution_reply(
+                client, client.call("wait", {"execution": execution, "timeout": 2})
+            )
+            data = terminal.data
+            assert data["status"] == ("failed" if fail else "finished")
+            assert data["cancel_requested"]
+            assert data["raw_save"] == {
+                "run_id": "run-a",
+                "artifacts": {
+                    "raw": {
+                        "data": {
+                            "status": "Saved",
+                            "members": {
+                                "data": [
+                                    {
+                                        "format": "data_h5",
+                                        "path": "/runs/run-a/data.h5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                    {
+                                        "format": "labber",
+                                        "path": "/labber/raw.hdf5",
+                                        "status": "saved",
+                                        "error": None,
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                },
+            }
+            assert [img.data for img in terminal.images] == ([] if fail else [PNG])
+            if fail:
+                assert data["error"]["reason"] == "recipe_failed"
+                assert "base64" in data["error"]["message"]
+            methods = [method for method, _ in client.transport.sent]
+            assert "tab.get_figure" in methods
+            assert "tab.analyze" not in methods
+        finally:
+            release.set()

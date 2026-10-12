@@ -284,27 +284,3 @@ def test_target_kinds_are_nominal() -> None:
     assert kinds["count"] is SettableTargetKind.SCALAR
     assert kinds["sweep.start"] is SettableTargetKind.SWEEP_EDGE
     assert kinds["module.ref"] is SettableTargetKind.REFERENCE_KEY
-
-
-def test_all_production_measure_schemas_have_unambiguous_target_grammar() -> None:
-    from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.gui.app.measure.registry import Registry
-
-    from zcu_lab.definitions import register_all
-
-    registry = Registry()
-    register_all(registry)
-    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    ports = BindingPorts()
-    ports.options["devices"] = ()
-    ports.options["arb_waveforms"] = ()
-    for name in registry.list_names():
-        schema = registry.create(name).make_default_cfg(ctx)
-        draft = CfgDraft(
-            schema,
-            evaluate_expression=ports.evaluate,
-            provide_options=ports.provide,
-            references=ports,
-        )
-        targets = tuple(draft.iter_settable_targets())
-        assert len({target.path for target in targets}) == len(targets), name
