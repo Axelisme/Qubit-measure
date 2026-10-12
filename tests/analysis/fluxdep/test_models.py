@@ -104,3 +104,32 @@ def test_nb_empty_transitions_k_zero():
 
 def test_transition_dict_has_single_runtime_owner():
     assert TransitionDict is AnalysisTransitionDict
+
+
+def _linearform(transitions, energies):
+    return energy2linearform(energies, transitions)
+
+
+def _compiled(transitions, energies):
+    return compile_transitions(transitions, energies.shape[1])
+
+
+@pytest.mark.parametrize("build", [_linearform, _compiled])
+def test_sample_f_is_not_required_without_mirror_transitions(build):
+    energies = np.zeros((4, 4), dtype=np.float64)
+    # An unselected category may still be present as an empty list.
+    transitions: AnalysisTransitionDict = {
+        "transitions": [(0, 1)],
+        "mirror": [],
+        "mirror blue": [],
+        "mirror red": [],
+    }
+    build(transitions, energies)
+
+
+@pytest.mark.parametrize("build", [_linearform, _compiled])
+def test_mirror_transition_without_sample_f_raises_even_with_r_f(build):
+    energies = np.zeros((4, 4), dtype=np.float64)
+    transitions: AnalysisTransitionDict = {"mirror blue": [(0, 1)], "r_f": 7.0}
+    with pytest.raises(ValueError, match="sample_f"):
+        build(transitions, energies)
