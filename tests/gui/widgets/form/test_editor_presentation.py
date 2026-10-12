@@ -6,7 +6,14 @@ from typing import Literal
 import pytest
 from pydantic import Field
 from qtpy.QtCore import QPoint, QRect
-from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QWidget,
+)
 from zcu_tools.gui.form import FormEnv, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -52,6 +59,17 @@ ROWS = (
 )
 LEAVES = tuple(path for path in ROWS if path != "inner")
 LABELS = {"amount": "Amount", "unit": "Unit", "inner.gain": "Gain", "after": "After"}
+# Leaf labels of each model level; the top level also holds the inner group row.
+TOP_LEAVES = {
+    "amount": "Amount",
+    "count": "Count",
+    "unit": "Unit",
+    "nqz": "Nqz",
+    "enabled": "Enabled",
+    "samples": "Samples",
+    "after": "After",
+}
+INNER_LEAVES = {"inner.gain": "Gain", "inner.phase": "Phase"}
 
 
 def alias_env() -> FormEnv:
@@ -111,6 +129,16 @@ def label_rect(view: QWidget, text: str) -> QRect:
     """Geometry of the unique row label showing text."""
     (label,) = [w for w in view.findChildren(QLabel) if w.text() == text]
     return rect(view, label)
+
+
+def beside_label(view: QWidget, path: str) -> QRect:
+    """Geometry of a leaf row's first control: a shown mode combo, else input."""
+    shown = [
+        mode
+        for mode in view.findChildren(QComboBox, f"form.mode.{path}")
+        if not mode.isHidden()
+    ]
+    return rect(view, shown[0] if shown else child(view, QWidget, f"form.input.{path}"))
 
 
 def lay_out(view: QWidget, qapp: QApplication, extra_height: int = 0) -> None:
@@ -264,8 +292,7 @@ def test_rows_and_groups_are_dense_and_do_not_overlap(
     assert gaps["inner.phase", "after"] < line, gaps
     for path, text in LABELS.items():
         label = label_rect(view, text)
-        mode = child(view, QComboBox, f"form.mode.{path}")
-        beside = inputs[path] if mode.isHidden() else rect(view, mode)
+        beside = beside_label(view, path)
         assert not label.intersects(beside), path
         assert not label.intersects(inputs[path]), path
         assert beside.left() - (label.left() + label.width()) < line, path
@@ -281,6 +308,35 @@ def test_rows_and_groups_are_dense_and_do_not_overlap(
     lay_out(view, qapp, extra_height=300)
     for path in LEAVES:
         assert rect(view, child(view, QWidget, f"form.input.{path}")) == inputs[path]
+
+
+def test_each_model_level_aligns_its_controls_on_one_label_column(
+    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
+    qapp: QApplication,
+) -> None:
+    view, _state = editor
+    lay_out(view, qapp)
+    line = child(view, QLineEdit, "form.input.amount").height()
+    (fold,) = [b for b in view.findChildren(QPushButton) if b.text() == "Collapse"]
+    for leaves, group_row in ((TOP_LEAVES, rect(view, fold)), (INNER_LEAVES, None)):
+        lefts = {path: beside_label(view, path).left() for path in leaves}
+        if group_row is not None:
+            lefts["inner"] = group_row.left()
+        assert len(set(lefts.values())) == 1, lefts
+        labels = [label_rect(view, text) for text in leaves.values()]
+        # Labels stay left-aligned in the column.
+        assert len({label.left() for label in labels}) == 1, labels
+        widest = max(
+            w.sizeHint().width()
+            for w in view.findChildren(QLabel)
+            if w.text() in leaves.values()
+        )
+        column = next(iter(lefts.values())) - labels[0].left()
+        assert widest <= column <= widest + line / 2, (column, widest)
+    # A nested level has its own column, indented inside its group.
+    assert (
+        beside_label(view, "inner.gain").left() != beside_label(view, "amount").left()
+    )
 
 
 def test_field_error_appears_below_its_input_without_overlapping_the_next_row(
