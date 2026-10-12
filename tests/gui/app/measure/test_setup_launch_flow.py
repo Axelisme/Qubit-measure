@@ -65,6 +65,7 @@ def test_restored_settings_prefill_one_setup_that_survives_screenshot_and_toolba
     qapp: QApplication, tmp_path: Path
 ) -> None:
     with launched_measure_app(qapp, tmp_path, restore=_SAVED) as app:
+        app.invoke("rpc_call", {"method": "control.release", "params": {}})
         (dialog,) = visible_setup_dialogs(app.window)
         assert {"chipR", "10.1.2.3"} <= _field_texts(dialog)
         assert 4321 in _port_values(dialog)
