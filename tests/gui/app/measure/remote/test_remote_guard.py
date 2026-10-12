@@ -27,6 +27,7 @@ from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui.app.measure._load_support import historical_metadata
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.recipes import RECIPES
 from zcu_lab.v2.fake.stub.gui import FakeAdapter
@@ -652,7 +653,9 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
         assert initial["post_analysis_state"]["available"] is False
         # A non-serializable result stays in State; the operational projection
         # identifies replacements without requiring its payload on the wire.
-        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
+        fx.state.update_tab_loaded_result(
+            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+        )
         observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert observed["result_state"] == {
             "revision": 1,
@@ -660,7 +663,9 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             "source_path": "loaded.h5",
             "source_operation_id": None,
         }
-        fx.state.update_tab_loaded_result(tab_id, object(), "loaded.h5")
+        fx.state.update_tab_loaded_result(
+            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+        )
         replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert replacement["result_state"]["revision"] == 2
         assert replacement["result_state"]["source_path"] == "loaded.h5"
