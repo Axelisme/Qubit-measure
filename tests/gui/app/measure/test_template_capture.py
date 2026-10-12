@@ -24,9 +24,9 @@ from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
+from tests.gui.app.measure._components import register_all
+from tests.gui.app.measure._templates import register_all_templates
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import register_all
-from zcu_lab.templates import register_all_templates
 
 
 class TemplateController(Controller):

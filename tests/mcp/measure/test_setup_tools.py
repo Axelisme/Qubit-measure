@@ -111,7 +111,7 @@ def setup_client(
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
         ),
-        ("recipe_guide", {"recipe": "t1"}),
+        ("recipe_guide", {"recipe": "pipeline"}),
     ],
 )
 def test_setup_requires_existing_connection_without_attaching_replacement_gui(
@@ -121,7 +121,9 @@ def test_setup_requires_existing_connection_without_attaching_replacement_gui(
     client = make_client(tmp_path, gui, port_is_open=lambda port: True)
     clients.append(client)
     if prior_connection:
-        assert client.call("recipe_guide", {"recipe": "t1"})["recipe"] == "t1"
+        assert (
+            client.call("recipe_guide", {"recipe": "pipeline"})["recipe"] == "pipeline"
+        )
     client.context.bridge.disconnect()
     replacement = WireTransport(gui)
     replacement.replies["rpc.catalog"] = deepcopy(
@@ -698,8 +700,7 @@ def test_value_quantization_is_observed_not_invented_as_a_failure(setup_client):
 @pytest.mark.parametrize(
     "recipe,adapter",
     [
-        ("time_rabi", "twotone/rabi/len_rabi"),
-        ("amplitude_rabi", "twotone/rabi/amp_rabi"),
+        ("pipeline", "lookback"),
     ],
 )
 def test_recipe_guide_queries_authoritative_adapter_and_returns_native_object(
@@ -740,7 +741,7 @@ def test_recipe_guide_retains_native_query_errors(setup_client, code, reason):
         "error": {"code": code, "reason": reason, "message": "query failure"},
     }
     with pytest.raises(RuntimeError) as error:
-        client.call("recipe_guide", {"recipe": "time_rabi"})
+        client.call("recipe_guide", {"recipe": "pipeline"})
     assert getattr(error.value, "code", None) == code
     assert getattr(error.value, "reason", None) == (
         "gui_handler_timeout" if code == "timeout" else reason

@@ -1,4 +1,4 @@
-"""Tests for the pbar_host ProgressFactory/ProgressBar + FakeFreqAdapter pbar integration."""
+"""Tests for the pbar_host ProgressFactory/ProgressBar + context-local factory integration."""
 
 from __future__ import annotations
 
@@ -259,83 +259,45 @@ def test_progress_stack_skips_unchanged_bar_properties(qapp):
 
 
 # ---------------------------------------------------------------------------
-# FakeFreqAdapter pbar integration — use_pbar_factory with ProgressFactory
+# Caller progress integration — context-local factory with nested bars
 # ---------------------------------------------------------------------------
 
 
-def test_fake_freq_adapter_run_with_qt_pbar(qapp):
-    """FakeFreqAdapter.run() completes; leave=True outer bar stays, reset_all clears."""
-    from qtpy.QtWidgets import QApplication  # type: ignore[attr-defined]
-    from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
-    from zcu_tools.progress_bar.interface import use_pbar_factory
-
-    from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
+def test_context_local_factory_routes_nested_progress(qapp):
+    """A synthetic nested acquisition leaves only its retained outer bar."""
+    from zcu_tools.gui.session.ui.progress_bar import LightweightProgressBar
+    from zcu_tools.progress_bar.interface import make_pbar, use_pbar_factory
 
     stack = _make_stack(qapp)
     factory = _make_factory(stack)
-
-    from zcu_tools.gui.session.aliases import AliasRow
-
-    from tests.gui.app.measure._cfg_fakes import parameter_capture
-    from zcu_lab.components import ResonatorSchema, WiringSchema
-
-    parameters = parameter_capture(
-        {
-            "R1": ResonatorSchema(
-                kind="resonator",
-                freq=6000.0,
-                kappa=1.0,
-                wiring=WiringSchema(ch=0, ro_ch=0),
-                ext={"time_of_fly": 0.5},
+    try:
+        with use_pbar_factory(factory):
+            outer = make_pbar(total=2, leave=True)
+            try:
+                for _ in range(2):
+                    inner = make_pbar(total=5, leave=False)
+                    try:
+                        for _ in range(5):
+                            inner.update()
+                        assert inner.n == 5
+                    finally:
+                        inner.close()
+                    outer.update()
+                assert outer.n == 2
+            finally:
+                outer.close()
+            qapp.processEvents()
+        assert (
+            sum(
+                not bar.isHidden() for bar in stack.findChildren(LightweightProgressBar)
             )
-        }
-    )
-    parameters = parameters.bind_aliases((AliasRow("resonator", "R1"),), {})
-    ctx = SessionEnv(parameters=parameters, soc=None, soccfg=None)
-    adapter = FakeFreqAdapter(fast_mode=True)
-    schema = adapter.make_default_cfg(ctx)
-
-    # Override to small values so the test is fast
-    from zcu_tools.gui.cfg import (
-        DirectValue,
-        SweepValue,
-    )
-
-    schema.value.fields["rounds"] = DirectValue(2)
-    from zcu_tools.gui.cfg import CfgSectionValue
-
-    schema.value.fields["sweep"] = CfgSectionValue(
-        fields={"freq": SweepValue(start=5800.0, stop=5808.0, expts=5)}
-    )
-
-    from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-    from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-
-    raw_cfg: dict[str, ExperimentCfgValue] = dict(
-        schema_to_raw_dict(schema, ctx.parameters)
-    )
-    from zcu_tools.experiment.context import RunContext
-    from zcu_tools.experiment.stop_signal import StopSignal
-    from zcu_tools.plotting.plots import NonPresentingHost, Plots
-
-    plots = Plots(NonPresentingHost())
-    with use_pbar_factory(factory):
-        run_result = adapter.run(
-            RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
-            raw_cfg,
-            context=RunContext(
-                ctx.soc, ctx.soccfg, plots, devices={}, cancel_signal=StopSignal()
-            ),
+            == 1
         )
-        QApplication.processEvents()
-    plots.finish()
-    plots.release()
-
-    assert len(run_result.result.freqs) == 5
-    assert len(run_result.result.signals) == 5
-    # Top-level experiment progress can leave bars behind; reset_all clears them.
-    stack.reset_all()
-    assert len(stack._active) == 0
+        stack.reset_all()
+        assert all(bar.isHidden() for bar in stack.findChildren(LightweightProgressBar))
+    finally:
+        stack.close()
+        stack.deleteLater()
 
 
 # ---------------------------------------------------------------------------

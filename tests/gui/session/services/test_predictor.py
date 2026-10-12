@@ -31,7 +31,7 @@ from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitPar
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium import predict
 
-import zcu_lab.components as components
+import tests.gui._component_fakes as components
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def context(tmp_path: Path) -> Generator[ContextService]:
     before = component_registry.kinds()
     added = "qubit/fluxonium" not in before
     if added:
-        component_registry.register("qubit/fluxonium", components.QubitSchema)
+        component_registry.register("qubit/fluxonium", components.Qubit)
     installed = component_registry.kinds()
     try:
         entry = ResultEntry.create(
