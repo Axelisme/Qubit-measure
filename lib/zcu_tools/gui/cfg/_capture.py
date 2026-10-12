@@ -17,18 +17,39 @@ from .resource import (
 
 
 class ExpressionCapture:
-    """Use one command's source view and memoize repeated capture references."""
+    """Replace numeric @{dotted.key} tokens from one caller-fixed source view.
+
+    One instance belongs to one write command. Repeated keys, including keys
+    in different prepare calls, are read once and reuse the same literal. The
+    caller supplies numeric lookup and grammar validation; no source refresh or
+    arithmetic evaluator is retained. Ordinary expressions remain authored text.
+    """
 
     def __init__(
         self,
         read: Callable[[str], object],
         validate: Callable[[str], None],
     ) -> None:
+        """Borrow read and validate for one command without reading any values.
+
+        read receives a dotted capture key and returns int/float/complex or the
+        shared complex tag. KeyError means unavailable; other provider failures
+        propagate. validate receives expression text and raises InvalidInputError
+        for grammar failures. Both must use the same captured source, without I/O.
+        """
         self._read = read
         self._validate = validate
         self._literals: dict[str, str] = {}
 
     def prepare(self, expression: str) -> str:
+        """Return text with capture tokens replaced by parenthesized literals.
+
+        No-token text, including unfinished expressions, is unchanged. Malformed
+        capture syntax raises CfgInputError(CAPTURE_SYNTAX); nonnumeric, boolean,
+        nonfinite, invalid complex or invalid prepared input raises INVALID_VALUE.
+        Missing read keys raise CfgPreconditionError(CAPTURE_UNAVAILABLE). Caller
+        mutations must wait until every expression in their batch is prepared.
+        """
         spans = _capture_spans(expression)
         if not spans:
             return expression

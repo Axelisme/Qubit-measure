@@ -1,5 +1,6 @@
 """Pure, app-independent GUI configuration model, inheritance, and codec."""
 
+from ._capture import ExpressionCapture
 from .codec import (
     SessionCodecError,
     decode_eval_wire,
@@ -78,6 +79,7 @@ __all__ = [
     "ChoiceSectionSpec",
     "DirectValue",
     "EvalValue",
+    "ExpressionCapture",
     "ExpressionResolver",
     "FloatSpec",
     "IntSpec",

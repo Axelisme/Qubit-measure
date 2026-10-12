@@ -9,6 +9,7 @@ from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.gui.app.measure.adapter import Form
+from zcu_tools.gui.cfg import ExpressionCapture
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -23,6 +24,9 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
+from zcu_tools.gui.session.expression import validate_scalar_expr
+from zcu_tools.gui.session.parameters import ModuleSlotError
+from zcu_tools.resources.entry import RoleResolutionError
 
 
 @dataclass(frozen=True)
@@ -152,10 +156,18 @@ class TabFormResource:
 
         FormState's structural/source errors propagate without a partial batch.
         Ordinary invalid values remain editable and make result return errors.
-        Busy, revoked or notification-reentrant calls raise CfgPreconditionError.
+        Expression @{key} tokens are fixed numeric literals before any input is
+        installed. Token grammar/value failures raise CfgInputError; missing
+        captured keys raise CfgPreconditionError(CAPTURE_UNAVAILABLE), without
+        changing input. Busy, revoked or notification-reentrant calls raise
+        CfgPreconditionError.
         """
         self.require_mutation_allowed()
-        self._state.write(batch, self._sources.env)
+        capture = ExpressionCapture(self._read_capture, validate_scalar_expr)
+        prepared = {
+            path: _capture_input(value, capture) for path, value in batch.items()
+        }
+        self._state.write(prepared, self._sources.env)
         self._notify()
 
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
@@ -203,6 +215,19 @@ class TabFormResource:
         self._open = False
         self._callbacks.clear()
 
+    def _read_capture(self, key: str) -> object:
+        if key in self._sources.captures:
+            return self._sources.captures[key]
+        parameters = self._sources.env.parameters
+        if parameters is not None:
+            try:
+                item = parameters.lookup(key)
+            except (RoleResolutionError, ModuleSlotError) as exc:
+                raise KeyError(key) from exc
+            if item.present:
+                return item.value
+        raise KeyError(key)
+
     def _require_open(self) -> None:
         if not self._open:
             raise CfgPreconditionError(
@@ -228,3 +253,13 @@ class TabFormResource:
                 callback()
         finally:
             self._notifying = False
+
+
+def _capture_input(value: JsonValue, capture: ExpressionCapture) -> JsonValue:
+    if isinstance(value, dict):
+        if set(value) == {"expr"} and isinstance(expression := value["expr"], str):
+            return {"expr": capture.prepare(expression)}
+        return {key: _capture_input(item, capture) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_capture_input(item, capture) for item in value]
+    return value
