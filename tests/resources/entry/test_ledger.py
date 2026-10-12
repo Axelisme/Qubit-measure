@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import IO, Literal
 from uuid import uuid4
 
+import numpy as np
 import pytest
 from filelock import FileLock, Timeout
 from zcu_tools.resources.entry import (
@@ -96,6 +97,86 @@ def test_accepted_complex_rejects_nonfinite_and_nested_values(value: object) -> 
 def test_accepted_string_remains_json_string() -> None:
     write = AcceptedWrite.model_validate({"path": "Q1.ext.center", "value": "(1+2j)"})
     assert write.value == "(1+2j)"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        pytest.param(np.float16(-0.125), -0.125, id="float16"),
+        pytest.param(np.float32(0.93), 0.9300000071525574, id="float32"),
+        pytest.param(np.float64(1.2345678901234567), 1.2345678901234567, id="float64"),
+        pytest.param(np.longdouble("1.0000000000000000001"), 1.0, id="longdouble"),
+        pytest.param(np.int8(-128), -128, id="int8"),
+        pytest.param(np.int16(-32768), -32768, id="int16"),
+        pytest.param(np.int32(-2147483648), -2147483648, id="int32"),
+        pytest.param(np.int64(-9223372036854775808), -9223372036854775808, id="int64"),
+        pytest.param(np.uint8(255), 255, id="uint8"),
+        pytest.param(np.uint16(65535), 65535, id="uint16"),
+        pytest.param(np.uint32(4294967295), 4294967295, id="uint32"),
+        pytest.param(
+            np.uint64(18446744073709551615), 18446744073709551615, id="uint64"
+        ),
+    ],
+)
+def test_accepted_numpy_scalar_normalizes_and_serializes(
+    value: object, expected: int | float
+) -> None:
+    try:
+        write = AcceptedWrite.model_validate({"path": "Q1.ext.value", "value": value})
+    except ValueError as error:
+        raise AssertionError(
+            "AcceptedWrite must accept finite numpy scalars"
+        ) from error
+    assert type(write.value) is type(expected)
+    assert write.value == expected
+    serialized = write.model_dump_json()
+    stored = json.loads(serialized)["value"]
+    assert type(stored) is type(expected)
+    assert stored == expected
+    assert AcceptedWrite.model_validate_json(serialized) == write
+
+
+@pytest.mark.parametrize(
+    "scalar_type", [np.float16, np.float32, np.float64, np.longdouble]
+)
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_accepted_numpy_scalar_rejects_nonfinite(
+    scalar_type: type[np.floating], value: str
+) -> None:
+    with pytest.raises(ValueError, match="strict JSON"):
+        AcceptedWrite.model_validate(
+            {"path": "Q1.ext.value", "value": scalar_type(value)}
+        )
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).max <= np.finfo(np.float64).max,
+    reason="longdouble has no extended range on this platform",
+)
+def test_accepted_numpy_scalar_rejects_finite_float_overflow() -> None:
+    value = np.longdouble(np.finfo(np.longdouble).max)
+    assert np.isfinite(value)
+    with pytest.raises(ValueError, match="strict JSON"):
+        AcceptedWrite.model_validate({"path": "Q1.ext.value", "value": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(np.array(1.25), id="zero-dimensional-array"),
+        pytest.param(np.array([1.25]), id="array"),
+        pytest.param(np.bool_(True), id="numpy-bool"),
+        pytest.param([np.float32(1.25)], id="nested-float"),
+        pytest.param({"count": np.int64(2)}, id="nested-integer"),
+        pytest.param((1, 2), id="tuple"),
+        pytest.param(b"bytes", id="bytes"),
+        pytest.param({1: "value"}, id="non-string-key"),
+        pytest.param(object(), id="object"),
+    ],
+)
+def test_accepted_numpy_scalar_does_not_relax_strict_json(value: object) -> None:
+    with pytest.raises(ValueError, match="strict JSON"):
+        AcceptedWrite.model_validate({"path": "Q1.ext.value", "value": value})
 
 
 def test_empty_entry_and_independent_handles_observe_first_append(
