@@ -36,12 +36,6 @@ from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    dispose_control_watches as dispose_owned_control_watches,
-)
-from zcu_tools.gui.widgets.remote_edit_gate import (
-    watch_control,
-)
 from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -178,9 +172,7 @@ class MainWindow(QMainWindow):
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
         self._status_bar.addPermanentWidget(self._control_indicator)
-        self._dispose_control = watch_control(
-            self, self._ctrl.control_identity, self._refresh_control
-        )
+        self._dispose_control = self._ctrl.control_identity.watch(self._refresh_control)
         self._shutdown_application: QApplication | None = None
         self._control_disposed = False
 
@@ -206,10 +198,6 @@ class MainWindow(QMainWindow):
         if self._control_disposed:
             return
         self._control_disposed = True
-        dispose_owned_control_watches(self)
-        for tab in self._tab_widgets.values():
-            tab.dispose_control_watches()
-        self._control_indicator.dispose_control_watch()
         self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
@@ -223,12 +211,17 @@ class MainWindow(QMainWindow):
         super().deleteLater()
 
     def _refresh_control(self, status: ControlStatus) -> None:
-        writable = status.holder == "gui"
+        self._control_indicator.set_status(status)
+        self.set_writable(writable=status.holder == "gui")
+
+    def set_writable(self, *, writable: bool) -> None:
+        """Project Local write availability to this window and all mounted views."""
+        self._writable = writable
         self._toolbar.set_writable(writable=writable)
         self._tabs.setTabsClosable(writable)
         self._tabs.setMovable(writable)
-        for tab_id in self._tab_widgets:
-            self.refresh_tab_interaction(tab_id)
+        for tab in self._tab_widgets.values():
+            tab.set_writable(writable=writable)
 
     def _build_context_bar(self) -> QHBoxLayout:
         """Assemble the persistent entry/point controls."""
@@ -271,6 +264,9 @@ class MainWindow(QMainWindow):
 
         # Reuse the snapshot already fetched for capabilities (avoid second fetch).
         self._toolbar.set_new_tab_enabled(True)
+        tab_w.set_writable(
+            writable=self._ctrl.control_identity.status().holder == "gui"
+        )
         tab_w.attach(snapshot, self._tab_actions)
         # A tab can be added while another tab is running. Project the current
         # State-owned running identity immediately instead of waiting for a new
@@ -538,11 +534,10 @@ class MainWindow(QMainWindow):
         widget = frontend_factory(self._ctrl)
         if not isinstance(widget, InteractiveFrontend):
             raise TypeError("interactive frontend must be an InteractiveFrontend")
-        widget.bind_control(self._ctrl.control_identity)
+        widget.set_read_only(read_only=not self._writable)
         try:
             tab_w.mount_interactive_widget(widget)
         except Exception:
-            widget.dispose_control_watch()
             widget.teardown()
             widget.deleteLater()
             raise
@@ -573,7 +568,6 @@ class MainWindow(QMainWindow):
         if tab_w is None:
             return
         for widget in tab_w.findChildren(InteractiveFrontend):
-            widget.dispose_control_watch()
             widget.teardown()
         tab_w.unmount_interactive_widgets(InteractiveFrontend)
         if restore_result:
@@ -657,12 +651,7 @@ class MainWindow(QMainWindow):
 
         def on_decision(confirmed: bool) -> None:
             self._reload_prompt_open = False
-            if (
-                not confirmed
-                or self._shutdown_requested
-                or self._closing
-                or self._ctrl.control_identity.status().holder != "gui"
-            ):
+            if not confirmed or self._shutdown_requested or self._closing:
                 return
             try:
                 self._present_reload_report(self._ctrl.reload_experiments(preview))
@@ -742,12 +731,7 @@ class MainWindow(QMainWindow):
 
         def _on_decision(confirmed: bool) -> None:
             self._pending_tab_closes.discard(tab_id)
-            if (
-                not confirmed
-                or self._shutdown_requested
-                or self._closing
-                or self._ctrl.control_identity.status().holder != "gui"
-            ):
+            if not confirmed or self._shutdown_requested or self._closing:
                 return
             if self._tab_widgets.get(tab_id) is tab_w and self._ctrl.has_tab(tab_id):
                 logger.info("_on_tab_close_requested confirmed: tab_id=%r", tab_id)
@@ -831,7 +815,10 @@ class MainWindow(QMainWindow):
 
     def load_tab_data_dialog(self, tab_id: str) -> None:
         logger.info("load_tab_data_dialog: tab_id=%r", tab_id)
-        if self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None:
+        if (
+            not self._writable
+            or self._resolve_tab_widget(tab_id, "load_tab_data_dialog") is None
+        ):
             return
         try:
             runs = self._ctrl.save_control.list_saved_runs()
@@ -844,7 +831,6 @@ class MainWindow(QMainWindow):
             initial_point=self._ctrl.get_session_env().active_label,
             start_directory=self._load_data_dialog_start_dir(),
             parent=self,
-            control_identity=self._ctrl.control_identity,
         )
         try:
             if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -852,8 +838,6 @@ class MainWindow(QMainWindow):
             path = dialog.selected_path()
         finally:
             dialog.deleteLater()
-        if self._ctrl.control_identity.status().holder != "gui":
-            return
         if path is None:
             raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:
@@ -967,12 +951,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def open_dialog(self, name: DialogName) -> None:
-        """Open the named dialog non-modally, or raise it if already open.
+        """Open the named modal dialog, or raise it if already open.
 
         Idempotent: a second ``open_dialog(name)`` while the dialog exists
         raises it if visible, or shows a hidden persistent instance.
         """
-        self._dialog_registry.open(name)
+        if not self._writable and name not in (DialogName.INSPECT, DialogName.DEVICE):
+            return
+        self._dialog_registry.open(name, writable=self._writable)
 
     def close_dialog(self, name: DialogName) -> None:
         """Close or hide the named dialog if it is currently open."""
@@ -1212,7 +1198,7 @@ class MainWindow(QMainWindow):
         self._closing = True
         self.dispose_control_watches()
         # A nested Load exec/chooser may still be running during RPC shutdown.
-        # Finish it and retire its watches before deleting the window's children.
+        # Finish its input interaction before deleting the window's children.
         for dialog in self.findChildren(RunLoadDialog):
             dialog.reject()
         self._cleanup_bus_subscriptions()

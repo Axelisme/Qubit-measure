@@ -70,6 +70,14 @@ GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Q
 
 Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 owner scheduler 更新 live artists。兩者都不依賴 ambient pyplot routing。Mathtext parsing 保留 lock／prewarm；這不保證任意 Matplotlib 計算 thread-safe。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。各 app 仍決定資料的讀寫時機與所有權，具體 presentation 契約見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
 
+## Source catalog reload
+
+`gui.catalog_loader.SourceCatalogLoader[CatalogT]` 擁有 bounded source inventory、prepare/load、fixed-source restart，以及共用 SourcePackage、PreparedCatalogReload 和 CatalogReloadError。App 提供 typed catalog builder，負責宣告 validation、active admission、發布和 recovery；shared loader 不依賴 measure Registry 或具體 workflow。Measure 保留原 loader 簽名的 registration adapter與原 recovery/UI。
+
+Workflows 的 app-owned catalog 配對目前 native step、plan／knobs form models、converters 和 seed，並由附件建立 panels。Registry 僅驗宣告與名字，不新增 lookup。Owner-thread reload 在 pending/running/paused 時拒絕，不進入 prepare/import。成功保留 compatible parsed drafts、替換附件，不重建 session/services/controller/hardware。失敗保留 RAM draft 與舊 panels，但 Start 必須等成功 retry。Fixed source 改變要求重啟。Bounded import 可能已有 Python 副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。
+
+新 Start 使用目前附件，在固定 capture 中轉換 forms，建立 detached native plan、tunables、seed 與 exact run roots，再提交給同一 Controller。Controller 持有該 run 的 tunables binding 與固定 Start capture，reload 不從新 catalog 或目前 draft 重建它。Saved run 的轉換依 [[0062]] 由獨立工具讀取 manifest 和 iteration records，GUI／Controller 不保留 export binding。這些接線不新增 RPC listing、wire schema 或 Registry lookup。
+
 ## 取捨與相鄰文件
 
 不維護 service tier 表，也不把所有呼叫塞進 Controller。前者無法說明單條邊的用途，後者會放大依賴及模糊寫入 owner。Frontend 可以有不同 presentation，卻不能擁有另一份可提交的業務真相。

@@ -1,6 +1,6 @@
-"""Run the complete native T1 fluxdep workflow without hardware or a GUI.
+"""Run the complete native Coherence fluxdep workflow without hardware or a GUI.
 
---plan, --tunables, --seed and --sim read current T1Plan, T1Tunables,
+--plan, --tunables, --seed and --sim read current CoherencePlan, CoherenceTunables,
 Calibrated and SimParams JSON. --result-path and --database-path are distinct
 isolated entry directories, not existing measurement data. The entry owner
 calculates workflow roots; Engine writes journal/manifest, acquisitions and
@@ -38,7 +38,11 @@ from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import new_run_id, workflow_roots
 
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_fluxdep
+from zcu_lab.workflows.coherence import (
+    CoherencePlan,
+    CoherenceTunables,
+    coherence_fluxdep,
+)
 
 
 class _Devices:
@@ -93,7 +97,7 @@ def _arguments(argv: Sequence[str] | None) -> _Arguments:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run the shipped T1 declaration with explicit offline inputs and paths.
+    """Run the shipped Coherence declaration with explicit offline inputs and paths.
 
     None selects process arguments. JSON inputs use current public models,
     including host-resolved qub_pulse/readout module cfgs and a historical
@@ -110,8 +114,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     read-only Git commands; it never requests live instrument information.
     """
     args = _arguments(argv)
-    plan = T1Plan.model_validate_json(args.plan.read_text(encoding="utf-8"))
-    tunables = T1Tunables.model_validate_json(args.tunables.read_text(encoding="utf-8"))
+    plan = CoherencePlan.model_validate_json(args.plan.read_text(encoding="utf-8"))
+    tunables = CoherenceTunables.model_validate_json(
+        args.tunables.read_text(encoding="utf-8")
+    )
     seed = TypeAdapter(Calibrated).validate_json(args.seed.read_text(encoding="utf-8"))
     sim = SimParams.model_validate_json(args.sim.read_text(encoding="utf-8"))
     run_id = args.run_id if args.run_id is not None else new_run_id()
@@ -138,7 +144,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         )
         engine.start(
-            t1_fluxdep,
+            coherence_fluxdep,
             plan=plan,
             tunables=tunables,
             paths=RunPaths(roots.result, roots.database),

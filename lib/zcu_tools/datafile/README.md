@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-11，離線 legacy reader 移至 migrations
+**Last updated:** 2026-10-12，固定 Run snapshot、workflow Labber 匯出、離線 legacy reader 與 analysis summary 的 numpy scalar 轉換
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -10,7 +10,9 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
-- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要，僅接受有限的 strict JSON 值。`encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
+- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
+  Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
+  `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
@@ -32,7 +34,14 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
   Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
 
 - `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical
-  common-grid grouped Labber，包括單成員 grouped。它只寫 caller 的 exact path，
+  common-grid grouped Labber，包括單成員 grouped。預設 `grouped_layout='common'`
+  保留這個單一 Experiment Result 契約。明填 `grouped_layout='independent'`
+  時只接受 grouped、各自 1D/2D 的 workflow variables，重用既有 marker-qualified
+  heterogeneous streaming v1 layout，完整寫入並標 finalized，不新增 schema 或 fallback。
+  每個 variable 的軸、數值與 per-inner-trace epoch timestamps 各自保存。
+  `load_grouped_labber_data` 讀回各自的 rank/grid；這不是 Labber Log Browser 驗收。
+  非法選項、representation 或 unsupported rank 在建立目的檔前拒絕。
+  它只寫 caller 的 exact path，
   不加副檔名、不覆寫、不呼叫 native writer。兩個格式的失敗隔離由 caller 編排，
   batch-level 保存流程不在 datafile。Labber 至少需要一個 step axis，coordinates
   必須可表示成 real；scalar 在建立目的檔前拒絕，不影響 native 的 scalar 契約。

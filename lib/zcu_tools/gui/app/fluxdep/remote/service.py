@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from qtpy.QtWidgets import QApplication
+
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
@@ -34,6 +36,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     ``start()``. fluxdep's EventBus is reached via the base default
     (``ctrl.bus``) and its serializers are keyed by payload ``type``.
     """
+
+    def _local_modal_open(self) -> bool:
+        return QApplication.activeModalWidget() is not None
 
     ctrl: Controller
 

@@ -157,7 +157,7 @@ def test_remote_save_completion_refreshes_state_owned_status(
         )
     )
     assert not tab.has_unsaved_data()
-    paths = [edit.text() for edit in center.findChildren(QLineEdit)]
+    paths = [edit.toolTip() for edit in center.findChildren(QLineEdit)]
     assert paths == [str(output.output.path) for output in report.outputs]
 
 
@@ -205,7 +205,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
         ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
         is SaveStatus.UNSAVED_CHANGES
     )
-    assert [edit.text() for edit in center.findChildren(QLineEdit)] == [
+    assert [edit.toolTip() for edit in center.findChildren(QLineEdit)] == [
         str(output.output.path) for output in report.outputs
     ]
     ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)

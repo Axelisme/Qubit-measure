@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from re import fullmatch
 from typing import Protocol
 
 from ...device import BaseDeviceInfo
@@ -26,9 +24,9 @@ class EffectExecutor(Protocol):
         self,
         request: RunEffect[Cfg, Result],
     ) -> Completed[Cfg, Result] | Failed:
-        """Execute request and save before returning its typed outcome.
+        """Execute request without saving and return its typed outcome.
 
-        request contains validated name, experiment, cfg, saver and optional
+        request contains the callback name, experiment, cfg and optional
         live. Failures and cancellation never produce Completed.
         """
         ...
@@ -44,27 +42,22 @@ class EffectExecutor(Protocol):
 
 @dataclass
 class RunEffect[Cfg, Result](Effect):
-    """Internal request; experiment/cfg/save/live match env.run.
+    """Internal request; experiment/cfg/live match env.run.
 
-    name is the validated ASCII function-name stem used for run files.
+    name identifies the callback in failure diagnostics.
     outcome is absent until successful dispatch, then Completed or Failed.
     The generator retains this exact request to retrieve its typed response.
     """
 
     experiment: Callable[[Run[Cfg]], Result]
     cfg: Cfg
-    save: Callable[[Completed[Cfg, Result], Path], None]
     live: LiveUpdate | None
     name: str = field(init=False)
     outcome: Completed[Cfg, Result] | Failed | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         name = getattr(self.experiment, "__name__", None)
-        if not isinstance(name, str) or fullmatch(r"[A-Za-z0-9_]+", name) is None:
-            raise ValueError(
-                "Experiment must have an ASCII function name; no anonymous callables"
-            )
-        self.name = name
+        self.name = name if isinstance(name, str) else type(self.experiment).__name__
 
     def execute(self, executor: EffectExecutor) -> None:
         """Execute this request once; propagate cancellation and operation errors."""

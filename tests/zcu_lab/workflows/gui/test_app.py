@@ -51,10 +51,12 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
 from zcu_lab.components import QubitSchema, ResonatorSchema
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.plan import T1PlanForm
+from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
-from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
+
+from ._coherence_input import t1_input
 
 
 @pytest.fixture(scope="session")
@@ -185,10 +187,12 @@ def test_empty_assembly_uses_one_native_owner_without_source(
     assert app.window.tunables_panel.env == FormEnv()
     assert (
         app.window.plan_panel.state.input.data
-        == T1PlanForm.default_input(FormEnv()).data
+        == CoherencePlanForm.default_input(FormEnv()).data
     )
     assert isinstance(app.window.plan_panel.state.result(FormEnv()), FormErrors)
-    assert isinstance(app.window.tunables_panel.state.result(FormEnv()), T1TunablesForm)
+    assert isinstance(
+        app.window.tunables_panel.state.result(FormEnv()), CoherenceTunablesForm
+    )
     with pytest.raises(FailedPreconditionError):
         app.window.start("not-ready")
     assert app.window.controller.operation_id is None
@@ -220,7 +224,7 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     context = app.services.context
     target = context.read_context().target
     context.set_parameter(target, "general.ext.guess_us", 31.0)
-    window.tunables_panel.state.write({("guess_us",): 7.0}, FormEnv())
+    window.tunables_panel.state.write({("t1", "guess_us"): 7.0}, FormEnv())
     # Source selection itself has not replaced input/capture.
     assert window.plan_panel is old and window.plan_panel.env.parameters is None
     button(window, "workflow.source.use").click()
@@ -228,19 +232,22 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     assert window.plan_panel is not old and env.parameters is not None
     assert window.plan_panel.env is env
     assert (
-        window.tunables_panel.state.input.data == T1TunablesForm.default_input(env).data
+        window.tunables_panel.state.input.data
+        == CoherenceTunablesForm.default_input(env).data
     )
     assert (
         window.tunables_panel.state.base.data == window.tunables_panel.state.input.data
     )
-    assert window.plan_panel.state.base.data == T1PlanForm.default_input(env).data
+    assert (
+        window.plan_panel.state.base.data == CoherencePlanForm.default_input(env).data
+    )
     knobs = window.tunables_panel.state.result(env)
-    assert isinstance(knobs, T1TunablesForm) and knobs.guess_us == 31.0
+    assert isinstance(knobs, CoherenceTunablesForm) and knobs.t1.guess_us == 31.0
     context.set_parameter(target, "general.ext.guess_us", 45.0)
     knobs = window.tunables_panel.state.result(env)
-    assert isinstance(knobs, T1TunablesForm) and knobs.guess_us == 31.0
-    window.tunables_panel.state.write({("guess_us",): 8.0}, env)
-    edit = window.tunables_panel.findChild(QLineEdit, "form.input.guess_us")
+    assert isinstance(knobs, CoherenceTunablesForm) and knobs.t1.guess_us == 31.0
+    window.tunables_panel.state.write({("t1", "guess_us"): 8.0}, env)
+    edit = window.tunables_panel.findChild(QLineEdit, "form.input.t1.guess_us")
     assert edit is not None
     edit.setText("1+")
     edit.editingFinished.emit()
@@ -248,7 +255,7 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
     window.prepare_forms()
     assert window.tunables_panel.editor.local_parse_errors() is None
     knobs = window.tunables_panel.state.result(window.tunables_panel.env)
-    assert isinstance(knobs, T1TunablesForm) and knobs.guess_us == 45.0
+    assert isinstance(knobs, CoherenceTunablesForm) and knobs.t1.guess_us == 45.0
     assert (
         window.tunables_panel.state.base.data == window.tunables_panel.state.input.data
     )
@@ -286,8 +293,8 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
     assert env.parameters is not None
     assert env.parameters.resolve_path("$qubit.kind") == "Q1.kind"
     plan.state.write({("points",): 9}, env)
-    knobs.state.write({("guess_us",): 17.0}, env)
-    edit = knobs.findChild(QLineEdit, "form.input.guess_us")
+    knobs.state.write({("t1", "guess_us"): 17.0}, env)
+    edit = knobs.findChild(QLineEdit, "form.input.t1.guess_us")
     assert edit is not None
     edit.setText("1+")
     edit.editingFinished.emit()
@@ -329,8 +336,8 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
         assert window.plan_panel is not plan and window.tunables_panel is not knobs
         assert window.tunables_panel.env is new_env
         for panel, form in (
-            (window.plan_panel, T1PlanForm),
-            (window.tunables_panel, T1TunablesForm),
+            (window.plan_panel, CoherencePlanForm),
+            (window.tunables_panel, CoherenceTunablesForm),
         ):
             assert panel.state.input.data == form.default_input(new_env).data
             assert panel.state.base.data == panel.state.input.data
@@ -344,8 +351,8 @@ def test_capture_failure_preserves_both_panels_and_local_input(
     open_point(app, tmp_path, qapp)
     app.window.prepare_forms()
     plan, knobs = app.window.plan_panel, app.window.tunables_panel
-    knobs.state.write({("guess_us",): 17.0}, knobs.env)
-    edit = knobs.findChild(QLineEdit, "form.input.guess_us")
+    knobs.state.write({("t1", "guess_us"): 17.0}, knobs.env)
+    edit = knobs.findChild(QLineEdit, "form.input.t1.guess_us")
     assert edit is not None
     edit.setText("1+")
     edit.editingFinished.emit()
@@ -373,7 +380,7 @@ def test_prepare_missing_or_unbound_qubit_names_alias_and_preserves_panels(
     window = app.window
     window.prepare_forms()
     plan, knobs = window.plan_panel, window.tunables_panel
-    knobs.state.write({("guess_us",): 17.0}, knobs.env)
+    knobs.state.write({("t1", "guess_us"): 17.0}, knobs.env)
     before = knobs.state.input.data
     app.services.context_control.set_alias_rows(rows)
     with pytest.raises(RoleResolutionError, match="qubit"):
@@ -441,7 +448,7 @@ def test_composition_rpc_reads_same_draft_without_socket(
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
     assert isinstance(adapter, T1RemoteControlAdapter)
-    app.window.tunables_panel.state.write({("guess_us",): 73.0}, FormEnv())
+    app.window.tunables_panel.state.write({("t1", "guess_us"): 73.0}, FormEnv())
     link = ClientLink("app-contract", token_required=False)
     adapter.on_client_open(link)
     try:
@@ -456,7 +463,7 @@ def test_composition_rpc_reads_same_draft_without_socket(
                 qapp.processEvents()
             future.result(timeout=1)
             reply = json.loads(link.outbound.get(timeout=1))
-            assert reply["result"]["input"]["guess_us"] == 73.0
+            assert t1_input(reply["result"]["input"])["guess_us"] == 73.0
     finally:
         adapter.on_client_close(link, on_owner_thread=True)
 

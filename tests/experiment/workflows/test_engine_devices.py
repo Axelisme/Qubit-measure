@@ -14,7 +14,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 
-from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
+from ._engine_fakes import Cfg, Plan, Rig, State, Tunables
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def test_each_env_run_captures_all_drivers_before_callback_and_keeps_fixed_data(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
         for _ in range(2):
-            yield from env.run(acquire, Cfg(dev={"flux": "flux"}), save=save_integer)
+            yield from env.run(acquire, Cfg(dev={"flux": "flux"}))
         return Done()
 
     rig.start(step)
@@ -86,7 +86,7 @@ def test_snapshot_read_failure_fails_run_before_callback_and_save(rig: Rig) -> N
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg(), save=save_integer)
+        yield from env.run(acquire, Cfg())
         return Done()
 
     rig.start(step)
@@ -123,7 +123,7 @@ def test_env_run_distinguishes_missing_devices_from_explicit_empty_port(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg(), save=save_integer)
+        yield from env.run(acquire, Cfg())
         return Done()
 
     rig.start(step)

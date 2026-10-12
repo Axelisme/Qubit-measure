@@ -52,6 +52,7 @@ class BathPhaseAdapter(
         NoAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
     ExpCfg_cls: ClassVar[Any] = PhaseCfg
 

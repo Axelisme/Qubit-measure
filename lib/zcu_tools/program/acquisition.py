@@ -227,12 +227,10 @@ class EarlyStopMixin(TypedAcquireMixin):
             self.rounds_pbar.update()
         self.acquire_params["rounds_remaining"] -= 1
         done = self.acquire_params["rounds_remaining"] <= 0
-        if done:
-            self._close_rounds_pbar()
-        elif cancel_flag.is_set():
+        if done or cancel_flag.is_set():
             self._close_rounds_pbar()
             return False
-        return not done
+        return True
 
     def _finish_stopped_partial_accumulated_round(
         self, soc, *, stats_start: int

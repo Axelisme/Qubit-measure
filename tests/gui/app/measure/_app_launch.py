@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.persistence_types import AppPersistedState
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -54,7 +55,7 @@ def launched_measure_app(
     *,
     restore: AppPersistedState | None = None,
 ) -> Generator[LaunchedMeasureApp]:
-    """Run the app lifecycle: assemble, restore, show, after_show, then attach MCP.
+    """Run launch and attach readonly MCP without taking the open Setup modal.
 
     ``restore`` stands in for the saved settings the persistence caretaker would
     load in ``before_show``; it goes through the Controller's memento restore.
@@ -94,7 +95,7 @@ def launched_measure_app(
         behavior.after_show(assembly)
         qapp.processEvents()
         bridge, invoke = mcp_client(port, tmp_path)
-        invoke("connect", {"port": port})
+        invoke("connect", {"port": port, "mode": "readonly"})
         yield LaunchedMeasureApp(controller, window, remote, invoke)
     finally:
         if bridge is not None:
@@ -103,6 +104,7 @@ def launched_measure_app(
             remote.stop()
         background.quiesce()
         if window is not None:
+            window.close_dialog(DialogName.SETUP)
             window.deleteLater()
         sys.excepthook = previous_hook
         qapp.processEvents()

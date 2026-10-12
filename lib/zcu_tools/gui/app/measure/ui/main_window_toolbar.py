@@ -62,6 +62,7 @@ class MainWindowToolbar:
         self._host = host
         self._parent = parent
         self._writable = True
+        self._new_tab_menus: tuple[QMenu, ...] = ()
         self._layout = QHBoxLayout()
         self._new_tab_btn = QPushButton("New Tab ▾")
         self._new_tab_btn.clicked.connect(self.show_new_tab_menu)
@@ -100,6 +101,11 @@ class MainWindowToolbar:
         self.set_new_tab_enabled(True)
         self._reload_btn.setEnabled(writable)
         self._retry_tabs_btn.setEnabled(writable)
+        if not writable:
+            for menu in reversed(self._new_tab_menus):
+                for action in menu.actions():
+                    action.setEnabled(False)
+                menu.close()
 
     def set_reload_recovery(self, *, retry_catalog: bool, skipped_count: int) -> None:
         self._reload_btn.setText(
@@ -140,10 +146,15 @@ class MainWindowToolbar:
                 raise RuntimeError(f"Failed to create adapter action: {item.label}")
             action.setData(item.adapter_name)
 
-        action = menu.exec(
-            self._new_tab_btn.mapToGlobal(self._new_tab_btn.rect().bottomLeft())
-        )
-        if action is None:
+        self._new_tab_menus = (menu, *submenus.values())
+        try:
+            action = menu.exec(
+                self._new_tab_btn.mapToGlobal(self._new_tab_btn.rect().bottomLeft())
+            )
+        finally:
+            self._new_tab_menus = ()
+            menu.deleteLater()
+        if action is None or not action.isEnabled():
             return
         adapter_name = action.data()
         if not adapter_name:

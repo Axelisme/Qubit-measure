@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
-from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtCore import QEventLoop, QMetaObject, Qt, QTimer
 from qtpy.QtWidgets import QFileDialog, QLineEdit, QPushButton, QTabWidget
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -35,6 +35,7 @@ from tests.gui.app.measure.remote._helpers import (
     mcp_client,
     open_client,
 )
+from tests.gui.app.measure.ui._qt_interactions import modal_action
 
 
 class RuntimeCfg(ExpCfgModel):
@@ -54,7 +55,7 @@ class LoadAdapter(OldAdapter):
     def load(
         self, req: LoadDataRequest
     ) -> tuple[RunRecord[RuntimeCfg, Result], RunMetadata]:
-        cfg = None if req.data_path == "missing.hdf5" else RuntimeCfg()
+        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg()
         return RunRecord(cfg=cfg, result=Result(req.data_path)), historical_metadata()
 
 
@@ -257,12 +258,12 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     ],
 )
 def test_qt_load_status_reports_one_overall_disposition(
-    app, monkeypatch, path, expected
+    app, qapp, tmp_path, path, expected
 ):
     _, window, _, _ = app
-    messages: list[str] = []
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: (path, ""))
-    monkeypatch.setattr(window, "show_status_message", messages.append)
+    selected = tmp_path / path
+    selected.touch()
+    expected = expected.replace(path, str(selected))
     tab = window.findChild(ExpTabWidget)
     assert tab is not None
     load_button = next(
@@ -272,18 +273,23 @@ def test_qt_load_status_reports_one_overall_disposition(
     )
     assert load_button.isEnabled()
 
-    def choose_file():
-        from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
+    from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 
-        dialog = window.findChild(RunLoadDialog)
-        assert dialog is not None
+    def open_file(dialog: RunLoadDialog) -> None:
         file_button = dialog.findChild(QPushButton, "load_file")
         assert file_button is not None
         file_button.click()
 
-    QTimer.singleShot(0, choose_file)
-    load_button.click()
-    assert messages == [expected]
+    def choose_file(dialog: QFileDialog) -> None:
+        dialog.selectFile(str(selected))
+        QMetaObject.invokeMethod(dialog, "accept", Qt.ConnectionType.DirectConnection)
+
+    modal_action(
+        qapp,
+        load_button.click,
+        [(RunLoadDialog, open_file), (QFileDialog, choose_file)],
+    )
+    assert window.statusBar().currentMessage() == expected
 
 
 def test_reload_captures_backfilled_config_not_retired_editor(app):

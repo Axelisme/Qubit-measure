@@ -22,14 +22,13 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import EvalValue
 
 from zcu_lab.v2._support.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
     ModuleInit,
 )
-from zcu_lab.v2._support.measure.seeds import custom, literal, res_freq_range
+from zcu_lab.v2._support.measure.seeds import alias_name_seed, custom, res_freq_range
 from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
 from zcu_lab.v2.jpa.flux_onetone.core import (
     OneToneFluxCfg,
@@ -47,6 +46,7 @@ _JPA_FLUX_ONETONE_FREQ_EXPTS = 101
 
 
 class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]):
+    experiment_tag: ClassVar[str | None] = OneToneFluxExp.persistence_tag()
     exp_cls = OneToneFluxExp
     ExpCfg_cls: ClassVar[Any] = OneToneFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
@@ -113,7 +113,7 @@ class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]
             .device(
                 "jpa_flux_dev",
                 label="JPA flux device",
-                default=literal(EvalValue("$flux_dev")),
+                default=alias_name_seed("flux_dev"),
                 required=False,
             )
             .choice(

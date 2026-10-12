@@ -132,3 +132,13 @@ Agent plans 與 worktree 工作檔放在 gitignored `.agent_state/`。若舊 `ta
 #### 使用者決策的引用
 
 `.agent_state/` 的決策編號（`Dnn`、`decisions/NNNN`）只在該 task 內有效，各 task 各自編號。Tracked 檔案（程式碼、註解、測試、repo 文件）直接寫出理由；屬於架構規則的引用 `ADR-NNNN`。使用者對元件定位、職責或跨模組邊界的裁決寫進 ADR 的決策段，附裁決日期與「」原話。
+
+#### 討論紀錄
+
+`docs/discussions/` 保存值得留下的討論快照：外部方案評估、選項比較、被否決的方案與理由，以及推導過程。討論產生上述內容時，agent 提議記錄，使用者同意後才寫；使用者明確要求時直接寫。
+
+- 每個討論濃縮成一篇 `YYYY-MM-DD-slug.md`，並在 `INDEX.md` 依主題加一行：日期、標題連結、一句結論。
+- 快照不擁有決策。決策寫進 ADR，討論只連結；討論中的事實由程式碼、ADR 或 README 擁有時，附路徑而不複製。
+- Frontmatter 記 `date`、`status`（`active`／`superseded`）、`superseded_by`、`related`，以及 `basis`：當時依據的本 repo commit 與外部來源版本。
+- 正文依序寫結論、問題、考慮過的選項與比較、被否決的選項與理由、留下的問題、依據。保留使用者的判斷與修正；省略工具輸出、對話往返與可從程式碼讀到的事實。
+- 寫完後不改寫成現在式。發現錯誤時在文末加「後記」；被新討論或 ADR 取代時改 `status` 並填 `superseded_by`。

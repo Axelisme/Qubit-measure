@@ -89,7 +89,9 @@ def start_effect(
     ) -> Step[State, int]:
         if state.index:
             return Done()
-        outcome = yield from env.run(experiment, Cfg(), save=saver)
+        outcome = yield from env.run(experiment, Cfg())
+        if isinstance(outcome, Completed):
+            saver(outcome, env.iteration_dir / "measurement.h5")
         observed.append(outcome)
         state.index += 1
         return Next(outcome.result if isinstance(outcome, Completed) else 0, state)
@@ -103,7 +105,7 @@ class ModelCfg(BaseModel):
 
 
 @pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "pydantic"])
-def test_cfg_at_experiment_return_is_saved_before_typed_response(
+def test_cfg_at_experiment_return_is_detached_and_workflow_can_save_response(
     rig: Rig, make_cfg: Callable[..., Cfg | ModelCfg]
 ) -> None:
     original = make_cfg()
@@ -129,10 +131,12 @@ def test_cfg_at_experiment_return_is_saved_before_typed_response(
     ) -> Step[State, int]:
         if state.index:
             return Done()
-        outcome = yield from env.run(acquire, original, save=save)
+        outcome = yield from env.run(acquire, original)
+        assert isinstance(outcome, Completed)
+        save(outcome, env.iteration_dir / "measurement.h5")
         observed.append(outcome)
         assert len(saved) == 1
-        assert tuple(env.iter_dir.parent.glob("runs/*.h5"))
+        assert (env.iteration_dir / "measurement.h5").is_file()
         state.index = 1
         return Next(1, state)
 
@@ -142,8 +146,7 @@ def test_cfg_at_experiment_return_is_saved_before_typed_response(
     assert observed[0].cfg == make_cfg(value=30)
     assert saved[0] is observed[0]
     assert original == make_cfg()
-    assert rig.engine.records("run")[0].run_files == ("runs/01-acquire.h5",)
-    final = rig.paths.data_root / "iter/000001/runs/01-acquire.h5"
+    final = rig.paths.data_root / "iter/000001/measurement.h5"
     assert final.read_text(encoding="utf-8") == "30:9"
 
 
@@ -178,8 +181,8 @@ def test_schedule_failure_remains_recoverable_and_next_effect_has_fresh_signal(
     ) -> Step[State, int]:
         if state.index:
             return Done()
-        observed.append((yield from env.run(fail, Cfg(), save=save_integer)))
-        observed.append((yield from env.run(recover, Cfg(), save=save_integer)))
+        observed.append((yield from env.run(fail, Cfg())))
+        observed.append((yield from env.run(recover, Cfg())))
         state.index = 1
         return Next(7, state)
 
@@ -189,7 +192,6 @@ def test_schedule_failure_remains_recoverable_and_next_effect_has_fresh_signal(
     assert isinstance(observed[0], Failed)
     assert isinstance(observed[1], Completed)
     assert signals[0] is not signals[1]
-    assert rig.engine.records("run")[0].run_files == ("runs/02-recover.h5",)
     failed = next(
         event for event in rig.events() if event["kind"] == "experiment_failed"
     )
@@ -258,7 +260,7 @@ def test_keyboard_interrupt_is_stop_not_failed(rig: Rig, source: str) -> None:
     assert rig.kinds().count("step_discarded") == 1
     assert "step_failed" not in rig.kinds()
     assert "experiment_failed" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
+    assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
 
 
 @pytest.mark.parametrize("control", ["pause", "stop"])
@@ -278,7 +280,7 @@ def test_cancel_during_experiment_never_saves_partial_or_returns_failed(
     assert status.lifecycle == ("paused" if control == "pause" else "stopped")
     assert observed == []
     assert rig.engine.records("run") == ()
-    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
+    assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
 
 
 def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
@@ -291,7 +293,9 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
     ) -> Step[State, int]:
         if state.index:
             return Done()
-        yield from env.run(run_value, Cfg(), save=save_integer)
+        outcome = yield from env.run(run_value, Cfg())
+        assert isinstance(outcome, Completed)
+        save_integer(outcome, env.iteration_dir / "measurement.h5")
         observed.append(1)
         yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.2))
         state.index = 1
@@ -300,16 +304,13 @@ def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
     rig.start(step)
     rig.devices.on_set = lambda _signal: rig.engine.pause("run")
     assert rig.engine.execute("run").lifecycle == "paused"
-    discarded = next(
-        event for event in rig.events() if event["kind"] == "step_discarded"
-    )
-    assert discarded["run_files"] == ["runs/01-run_value.h5"]
+    assert "step_discarded" in rig.kinds()
     assert rig.engine.records("run") == ()
     rig.devices.on_set = None
     rig.engine.resume("run")
     assert rig.engine.execute("run").lifecycle == "done"
     assert observed == [1, 1]
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))) == 2
+    assert len(tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))) == 2
     assert rig.engine.records("run")[0].call_seq == 2
 
 
@@ -325,29 +326,9 @@ def test_saver_failure_after_pause_keeps_true_failure_cause(rig: Rig) -> None:
     assert "writer failed" in str(status.reason)
     assert observed == []
     assert "step_discarded" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/.*.tmp.h5"))) == 1
-
-
-def test_unlink_failure_keeps_final_but_does_not_deliver_completed(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    original = Path.unlink
-
-    def denied(path: Path, *, missing_ok: bool = False) -> None:
-        if path.name.endswith(".tmp.h5"):
-            raise OSError("unlink denied")
-        original(path, missing_ok=missing_ok)
-
-    observed = start_effect(rig, run_value)
-    monkeypatch.setattr(Path, "unlink", denied)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert observed == []
-    failed = next(event for event in rig.events() if event["kind"] == "step_failed")
-    assert failed["run_files"] == ["runs/01-run_value.h5"]
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/.*.tmp.h5"))) == 1
+    assert (rig.paths.data_root / "iter/000001/measurement.h5").read_text(
+        encoding="utf-8"
+    ) == "incomplete"
 
 
 @pytest.mark.parametrize("use_device", [False, True])
@@ -386,7 +367,7 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
     ) -> Step[State, int]:
         if state.index:
             return Done()
-        observed.append((yield from env.run(acquire, original, save=save_integer)))
+        observed.append((yield from env.run(acquire, original)))
         state.index = 1
         return Next(1, state)
 
@@ -398,14 +379,11 @@ def test_run_resolves_role_names_only_when_experiment_uses_device(
         assert rig.devices.values == [("missing", 0.5)]
         assert observed == []
         assert rig.engine.records("run") == ()
-        assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
+        assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
     else:
         assert status.lifecycle == "done"
         assert rig.devices.values == []
         assert observed == [Completed(Cfg(value=9, dev=original.dev), 11)]
-        assert rig.engine.records("run")[0].run_files == ("runs/01-acquire.h5",)
-        final = rig.paths.data_root / "iter/000001/runs/01-acquire.h5"
-        assert final.read_text(encoding="utf-8") == "9:11"
     assert entered == [True]
     assert original == Cfg(
         value=7, dev={"selected": "missing", "unused": "disconnected"}
@@ -438,9 +416,7 @@ def test_live_callback_caught_by_schedule_is_still_run_failure(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
-        observed.append(
-            (yield from env.run(acquire, Cfg(), save=save_integer, live=projection))
-        )
+        observed.append((yield from env.run(acquire, Cfg(), live=projection)))
         return Next(1, state)
 
     rig.start(step)
@@ -468,7 +444,7 @@ def test_workflow_can_abort_after_a_recoverable_failed_effect(rig: Rig) -> None:
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        outcome = yield from env.run(failed, Cfg(), save=save_integer)
+        outcome = yield from env.run(failed, Cfg())
         assert isinstance(outcome, Failed)
         return Aborted("calibration unavailable")
 
@@ -636,25 +612,6 @@ def test_program_cancel_protocol_never_returns_failed(
     assert not tuple(rig.paths.data_root.rglob("*.h5"))
 
 
-def test_pause_during_successful_saver_retains_final_without_delivering_completed(
-    rig: Rig,
-) -> None:
-    def save(source: Completed[Cfg, int], path: Path) -> None:
-        save_integer(source, path)
-        rig.engine.pause("run")
-
-    observed = start_effect(rig, run_value, saver=save)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "paused"
-    assert observed == []
-    assert rig.engine.records("run") == ()
-    discarded = next(
-        event for event in rig.events() if event["kind"] == "step_discarded"
-    )
-    assert discarded["run_files"] == ["runs/01-run_value.h5"]
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
-
-
 def test_data_driven_early_stop_with_nan_slots_remains_completed(rig: Rig) -> None:
     def acquire(run: Run[Cfg]) -> int:
         buffer = run.buffer((3,), axes=(np.array([0.0, 1.0, 2.0]),))
@@ -669,7 +626,6 @@ def test_data_driven_early_stop_with_nan_slots_remains_completed(rig: Rig) -> No
     assert rig.engine.execute("run").lifecycle == "done"
     assert isinstance(observed[0], Completed)
     assert observed[0].result == 7
-    assert len(rig.engine.records("run")[0].run_files) == 1
 
 
 def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
@@ -678,8 +634,9 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     def step(
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
     ) -> Step[State, int]:
-        outcome = yield from env.run(run_value, Cfg(), save=save_integer)
+        outcome = yield from env.run(run_value, Cfg())
         assert isinstance(outcome, Completed)
+        save_integer(outcome, env.iteration_dir / "measurement.h5")
         raise ValueError("analysis failed")
 
     rig.start(step)
@@ -688,11 +645,10 @@ def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
     assert "analysis failed" in str(status.reason)
     assert rig.engine.records("run") == ()
     failed = next(event for event in rig.events() if event["kind"] == "step_failed")
-    assert failed["run_files"] == ["runs/01-run_value.h5"]
     assert isinstance(failed["error"], dict)
     assert failed["error"]["type"] == "builtins.ValueError"
     assert "raise ValueError" in str(failed["error"]["traceback"])
-    assert len(tuple(rig.paths.data_root.glob("iter/*/runs/[0-9]*.h5"))) == 1
+    assert len(tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))) == 1
 
 
 def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
@@ -710,7 +666,7 @@ def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) ->
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
         yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
-        yield from env.run(acquire, Cfg(), save=save_integer)
+        yield from env.run(acquire, Cfg())
         return Next(1, state)
 
     rig.devices.on_set = operate
@@ -758,7 +714,7 @@ def test_cancelled_generator_cleanup_failure_is_real_run_failure(rig: Rig) -> No
         env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
     ) -> Step[State, int]:
         try:
-            yield from env.run(acquire, Cfg(), save=save_integer)
+            yield from env.run(acquire, Cfg())
         finally:
             raise OSError("workflow cleanup failed")
         return Next(1, state)

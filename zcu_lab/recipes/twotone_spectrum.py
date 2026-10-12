@@ -101,7 +101,7 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
 
     # Preserve the complete missing-source list rather than failing on its first item.
     missing: list[MissingParameter] = []
-    try:
+    missing.extend(
         set_frequency_sweep(
             tab,
             "sweep.freq",
@@ -110,17 +110,16 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
             span_mhz=span_mhz,
             expts=points,
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
-    try:
-        set_frequency(
+    )
+    if (
+        parameter := set_frequency(
             tab,
             "modules.readout",
             calibration="$resonator.freq",
             required="readout_ref",
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    ) is not None:
+        missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
