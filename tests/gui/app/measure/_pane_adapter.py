@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,7 +18,10 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.adapter.types import PostAnalyzeResultBase
+from zcu_tools.gui.app.measure.adapter.types import (
+    PostAnalyzeResultBase,
+    T_PostAnalyzeResult,
+)
 from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -102,13 +105,17 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
         ]
 
     def get_post_writeback_items(
-        self, req: PostWritebackRequest[SavingRun, PaneResult, Any]
+        self, req: PostWritebackRequest[SavingRun, PaneResult, T_PostAnalyzeResult]
     ) -> Sequence[ParameterWriteback]:
+        """Build pane proposals from PostResult; reject other payloads with TypeError."""
+        result = req.post_analyze_result
+        if not isinstance(result, PostResult):
+            raise TypeError("PaneAdapter post writeback requires PostResult")
         return [
             ParameterWriteback("$qubit.ext.readout_cal.radius", "Radius", 0.5),
             ParameterWriteback(
                 "$qubit.ext.readout_cal.confusion_matrix",
                 "Matrix",
-                req.post_analyze_result.confusion.tolist(),
+                result.confusion.tolist(),
             ),
         ]

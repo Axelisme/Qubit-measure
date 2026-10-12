@@ -2,12 +2,12 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
+from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -109,7 +109,7 @@ class SpectrumAdapter(
         req: AnalyzeRequest[RunRecord[SpectrumCfg, SpectrumResult], FluxPickParams],
         *,
         plots: Plots,
-    ):
+    ) -> PluginDefinition[FluxPickState, FluxPickResult]:
         result = req.run_result.result
         half, integer = None, None
         if req.parameters is not None:
@@ -130,8 +130,8 @@ class SpectrumAdapter(
 
     def make_interactive_frontend(
         self,
-        plugin: PluginDefinition[Any, Any],
-        session: Session[Any],
+        plugin: PluginDefinition[FluxPickState, FluxPickResult],
+        session: Session[FluxPickState],
         env: InteractiveFrontendEnv,
         request_finish: Callable[[], bool],
         request_cancel: Callable[[], bool],
