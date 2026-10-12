@@ -207,4 +207,5 @@ def test_point_names_native_gain_trace(inputs: Inputs, tmp_path: Path) -> None:
         assert metadata.snapshot == make_snapshot()
         assert metadata.device_snapshot is not None
     finally:
+        plots.finish()
         plots.release()

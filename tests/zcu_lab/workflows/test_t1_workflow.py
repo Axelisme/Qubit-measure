@@ -536,4 +536,5 @@ def test_point_names_native_decay_and_each_calibration_stage(inputs: Inputs, tmp
         summary = json.loads((root / "record.json").read_text(encoding="utf-8"))
         assert summary["result"]["encoded_record"]["value"] == point
     finally:
+        plots.finish()
         plots.release()
