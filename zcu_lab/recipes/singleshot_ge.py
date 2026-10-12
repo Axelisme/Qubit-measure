@@ -78,19 +78,19 @@ def singleshot_ge(  # noqa: PLR0913 - Typed keywords preserve the public tool in
 
     # Report both absent calibrations before any Run, as the existing tool does.
     missing: list[MissingParameter] = []
-    try:
-        set_frequency(
+    if (
+        parameter := set_frequency(
             tab,
             "modules.readout",
             calibration="$resonator.freq",
             required="readout_ref",
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
-    try:
-        tab.use_library("modules.probe_pulse", pi_ref, required="pi_ref")
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    ) is not None:
+        missing.append(parameter)
+    if (
+        parameter := tab.use_library("modules.probe_pulse", pi_ref, required="pi_ref")
+    ) is not None:
+        missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
     tab.set("shots", shots, source="explicit")

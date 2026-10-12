@@ -8,7 +8,6 @@ from zcu_tools.mcp.measure.recipe import (
     MissingParameter,
     RecipeExpression,
     RecipeFieldEdit,
-    RecipeNeedsParameters,
     RecipeTab,
 )
 from zcu_tools.mcp.measure.recipe_capture import SweepSources
@@ -71,7 +70,7 @@ def set_frequency(
     calibration: str,
     prefer_library: bool = True,
     required: str,
-) -> None:
+) -> MissingParameter | None:
     """Select explicit, usable library, or calibrated frequency in MHz.
 
     tab is opened; field is a dotted scalar frequency or readout reference root.
@@ -82,9 +81,10 @@ def set_frequency(
     valid library leaf selection, followed by finite calibration. Supplied values
     carry explicit provenance; library:<root> and calibration labels persist.
     Validate all leaves before one batch edit; retained library leaves cause no
-    edit. Invalid explicit values raise ValueError; absent sources raise
-    RecipeNeedsParameters with no edit. Invalid cfg and source/connection errors
-    propagate without fallback or retry. Calibration uses a GUI expression.
+    edit. Return None on success; absent sources return MissingParameter(required,
+    reason) with no edit. Invalid explicit values raise ValueError. Invalid cfg
+    and source/connection errors propagate without fallback or retry. Calibration
+    uses a GUI expression.
     """
     if frequency_mhz is not None and not _finite(frequency_mhz):
         raise ValueError("frequency_mhz must be finite and not boolean")
@@ -110,13 +110,9 @@ def set_frequency(
                 RecipeFieldEdit(path, RecipeExpression(__expr=calibration), calibration)
             )
         else:
-            raise RecipeNeedsParameters(
-                (
-                    MissingParameter(
-                        required,
-                        f"Provide an explicit frequency, valid library, or calibrated {calibration}",
-                    ),
-                )
+            return MissingParameter(
+                required,
+                f"Provide an explicit frequency, valid library, or calibrated {calibration}",
             )
     tab.set_fields(edits)
     for path in paths:
@@ -124,6 +120,7 @@ def set_frequency(
             raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
     for path, label in retained.items():
         tab.retain_source(path, label)
+    return None
 
 
 @dataclass(frozen=True)
@@ -142,17 +139,65 @@ class FrequencySweepCalibration:
     span_linewidths: float
 
 
-def _calibrated_endpoints(
-    tab: RecipeTab,
+def _validate_frequency_sweep_inputs(
     calibration: FrequencySweepCalibration,
     center_mhz: float | None,
     span_mhz: float | None,
-) -> tuple[float, float]:
-    """Read omitted calibration values and compute finite increasing MHz edges.
+    expts: int | None,
+) -> None:
+    """Reject invalid explicit values or calibration policy before any GUI read."""
+    _points(expts)
+    if not calibration.frequency_path.strip() or not calibration.linewidth_path.strip():
+        raise ValueError("calibration paths must be non-empty logical scalar paths")
+    if not _finite(calibration.span_linewidths) or calibration.span_linewidths <= 0:
+        raise ValueError("span_linewidths must be finite and positive")
+    if center_mhz is not None and not _finite(center_mhz):
+        raise ValueError("center_mhz must be finite and not boolean")
+    if span_mhz is not None and (not _finite(span_mhz) or span_mhz <= 0):
+        raise ValueError("span_mhz must be finite and positive")
 
-    Explicit values and policy have passed preflight. Report missing center/span
-    together without edits; reject invalid computed edges before returning.
+
+def _frequency_endpoints(center: object, span: object) -> tuple[float, float]:
+    """Compute finite increasing MHz edges from finite center and positive span."""
+    if not _finite(center) or not _finite(span):
+        raise ValueError("center and span must be finite")
+    start, stop = center - span / 2, center + span / 2
+    if (
+        not _finite(start)
+        or not _finite(stop)
+        or stop <= start
+        or not _finite(stop - start)
+    ):
+        raise ValueError("frequency range must be finite and increasing")
+    return float(start), float(stop)
+
+
+def set_frequency_sweep(
+    tab: RecipeTab,
+    field: str,
+    *,
+    calibration: FrequencySweepCalibration,
+    center_mhz: float | None = None,
+    span_mhz: float | None = None,
+    expts: int | None = None,
+) -> tuple[MissingParameter, ...]:
+    """Write numeric MHz endpoints using explicit values or current calibration.
+
+    tab is an opened recipe tab; field names its dotted sweep path. calibration
+    is the caller-owned path/full-width policy described by FrequencySweepCalibration.
+    Missing center/span reads these paths now, then computes center +/- span/2.
+    expts must be an integer >=2; None retains the GUI count. Explicit values
+    carry explicit provenance; derived edges retain calibration/linewidth labels.
+    Missing/nonfinite center or nonpositive/nonfinite/bool linewidth reports all
+    missing center_mhz/span_mhz as a tuple of MissingParameter without sweep edits.
+    Return an empty tuple after a successful sweep edit.
+    Invalid explicit inputs raise ValueError before reads/edits. Source errors
+    propagate without fallback/retry. Native cfg failures propagate from tab.
     """
+    _validate_frequency_sweep_inputs(calibration, center_mhz, span_mhz, expts)
+    state = tab.read_field(field)
+    if state.kind != "sweep":
+        raise ValueError(f"Not a sweep cfg field: {field}")
     missing: list[MissingParameter] = []
     center = (
         tab.read_value(calibration.frequency_path) if center_mhz is None else center_mhz
@@ -176,54 +221,8 @@ def _calibrated_endpoints(
                 )
             )
     if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    if not _finite(center) or not _finite(span):
-        raise ValueError("center and span must be finite")
-    start, stop = center - span / 2, center + span / 2
-    if (
-        not _finite(start)
-        or not _finite(stop)
-        or stop <= start
-        or not _finite(stop - start)
-    ):
-        raise ValueError("frequency range must be finite and increasing")
-    return float(start), float(stop)
-
-
-def set_frequency_sweep(
-    tab: RecipeTab,
-    field: str,
-    *,
-    calibration: FrequencySweepCalibration,
-    center_mhz: float | None = None,
-    span_mhz: float | None = None,
-    expts: int | None = None,
-) -> None:
-    """Write numeric MHz endpoints using explicit values or current calibration.
-
-    tab is an opened recipe tab; field names its dotted sweep path. calibration
-    is the caller-owned path/full-width policy described by FrequencySweepCalibration.
-    Missing center/span reads these paths now, then computes center +/- span/2.
-    expts must be an integer >=2; None retains the GUI count. Explicit values
-    carry explicit provenance; derived edges retain calibration/linewidth labels.
-    Missing/nonfinite center or nonpositive/nonfinite/bool linewidth reports all
-    missing center_mhz/span_mhz via RecipeNeedsParameters without sweep edits.
-    Invalid explicit inputs raise ValueError before reads/edits. Source errors
-    propagate without fallback/retry. Native cfg failures propagate from tab.
-    """
-    _points(expts)
-    if not calibration.frequency_path.strip() or not calibration.linewidth_path.strip():
-        raise ValueError("calibration paths must be non-empty logical scalar paths")
-    if not _finite(calibration.span_linewidths) or calibration.span_linewidths <= 0:
-        raise ValueError("span_linewidths must be finite and positive")
-    if center_mhz is not None and not _finite(center_mhz):
-        raise ValueError("center_mhz must be finite and not boolean")
-    if span_mhz is not None and (not _finite(span_mhz) or span_mhz <= 0):
-        raise ValueError("span_mhz must be finite and positive")
-    state = tab.read_field(field)
-    if state.kind != "sweep":
-        raise ValueError(f"Not a sweep cfg field: {field}")
-    start, stop = _calibrated_endpoints(tab, calibration, center_mhz, span_mhz)
+        return tuple(missing)
+    start, stop = _frequency_endpoints(center, span)
     edge_source = (
         "explicit"
         if center_mhz is not None and span_mhz is not None
@@ -239,6 +238,7 @@ def set_frequency_sweep(
         "expts": "explicit",
     }
     tab.set_sweep(field, start=start, stop=stop, expts=expts, sources=sources)
+    return ()
 
 
 def set_flux_sweep(

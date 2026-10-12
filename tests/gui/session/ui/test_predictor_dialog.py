@@ -959,6 +959,29 @@ def test_predictor_dialog_spinbox_change_updates_all_markers(qapp):
     mat_phi_mock.assert_called_with(0.3)
 
 
+def test_transition_value_columns_refit_after_values_update(qapp):
+    from qtpy.QtWidgets import QTableWidget
+
+    ctrl = _make_ctrl(has_predictor=True, path="/p.json")
+    dialog = PredictorDialog(ctrl)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        table = dialog.findChild(QTableWidget)
+        assert table is not None and table.rowCount() > 0
+        # Reopening the dialog recomputes the values at the current marker.
+        dialog.hide()
+        ctrl.predict_freq.return_value = 123456789.5
+        dialog.show()
+        qapp.processEvents()
+        item = table.item(0, _COL_FREQ)
+        assert item is not None and item.text() == "123456789.5000"
+        needed = table.fontMetrics().horizontalAdvance(item.text())
+        assert table.columnWidth(_COL_FREQ) >= needed
+    finally:
+        dialog.close()
+
+
 def test_predictor_dialog_value_columns_updated_after_debounce(qapp):
     """After _update_value_columns, each row's f / |n| / |phi| cells are filled."""
     ctrl = _make_ctrl(has_predictor=True, path="/p.json")
@@ -1149,5 +1172,30 @@ def test_predictor_params_row_keeps_full_control_height(qapp):
         assert len(row) == 4
         for widget in row:
             assert widget.height() >= widget.sizeHint().height()
+    finally:
+        dialog.close()
+
+
+def test_transition_value_columns_fit_their_text(qapp):
+    from qtpy.QtWidgets import QTableWidget
+
+    dialog = PredictorDialog(_make_ctrl(has_predictor=True, path="/p.json"))
+    dialog.show()
+    qapp.processEvents()
+    try:
+        table = dialog.findChild(QTableWidget)
+        assert table is not None and table.rowCount() > 0
+        metrics = table.fontMetrics()
+        for column in range(table.columnCount() - 1):
+            needed = max(
+                metrics.horizontalAdvance(item.text())
+                for row in range(table.rowCount())
+                if (item := table.item(row, column)) is not None
+            )
+            assert table.columnWidth(column) >= needed, column
+        viewport = table.viewport()
+        assert viewport is not None
+        used = sum(table.columnWidth(c) for c in range(table.columnCount()))
+        assert used >= viewport.width() - 1
     finally:
         dialog.close()

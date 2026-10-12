@@ -31,10 +31,7 @@ def _decode(
     errors: dict[FormPath, str],
     tags: dict[FormPath, str],
 ) -> FormValue:
-    types = tuple(
-        item for item in alternatives(info.annotation) if item is not type(None)
-    )
-    annotation = unwrap(types[0]) if len(types) == 1 else unwrap(info.annotation)
+    annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
     if child is not None and isinstance(value, dict):
         tag_key = discriminator(info)
@@ -47,8 +44,7 @@ def _decode(
         if tag_key is not None and tag_key in value:
             ordinary[tag_key] = _ordinary(value[tag_key])
         return ordinary
-    types = alternatives(annotation)
-    numeric = any(item is int or item is float or item is complex for item in types)
+    numeric = _numeric_annotation(annotation)
     if isinstance(value, dict) and (
         (accepts_expression(annotation) and "expr" in value) or numeric
     ):
@@ -61,29 +57,55 @@ def _decode(
             for key, item in value.items()
         }
     if get_origin(annotation) in (list, tuple) and isinstance(value, list):
-        args = get_args(annotation)
-        decoded: list[FormValue] = []
-        for index, item in enumerate(value):
-            fixed = (
-                get_origin(annotation) is tuple and args and args[-1] is not Ellipsis
-            )
-            item_type = (
-                args[index]
-                if fixed and index < len(args)
-                else (args[0] if args and not fixed else object)
-            )
-            decoded.append(
-                _decode(
-                    FieldInfo.from_annotation(item_type),
-                    item,
-                    env,
-                    (*path, index),
-                    errors,
-                    tags,
-                )
-            )
-        return decoded
+        return _decode_sequence(annotation, value, env, path, errors, tags)
     return _ordinary(value)
+
+
+def _non_null_annotation(annotation: object) -> object:
+    """Unwrap a nullable single type, retaining genuine unions for scalar dispatch."""
+    types = tuple(item for item in alternatives(annotation) if item is not type(None))
+    return unwrap(types[0]) if len(types) == 1 else unwrap(annotation)
+
+
+def _numeric_annotation(annotation: object) -> bool:
+    """Whether a scalar accepts numeric expressions or complex wire values."""
+    return any(
+        item is int or item is float or item is complex
+        for item in alternatives(annotation)
+    )
+
+
+def _decode_sequence(
+    annotation: object,
+    value: list[JsonValue],
+    env: FormEnv,
+    path: FormPath,
+    errors: dict[FormPath, str],
+    tags: dict[FormPath, str],
+) -> list[FormValue]:
+    """Evaluate sequence items by annotation; Pydantic checks shape afterwards."""
+    args = get_args(annotation)
+    fixed = get_origin(annotation) is tuple and args and args[-1] is not Ellipsis
+    decoded: list[FormValue] = []
+    for index, item in enumerate(value):
+        item_type = (
+            args[index]
+            if fixed and index < len(args)
+            else (args[0] if args and not fixed else object)
+        )
+        # Items can nest sequences, mappings, or tagged models; re-enter the full
+        # decoder to preserve expression evaluation, tag collection, and error paths.
+        decoded.append(
+            _decode(
+                FieldInfo.from_annotation(item_type),
+                item,
+                env,
+                (*path, index),
+                errors,
+                tags,
+            )
+        )
+    return decoded
 
 
 def _scalar(
