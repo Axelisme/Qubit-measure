@@ -181,3 +181,37 @@ def test_extras_lower_receives_validated_named_models() -> None:
     cfg = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
     assert isinstance(cfg, ScalarCfg)
     assert cfg.amount == 4
+
+
+def test_loaded_cfg_with_extras_must_roundtrip_before_accepting_input() -> None:
+    form = adapter_api.Form(
+        ScalarCfg,
+        {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
+        extras=Extras,
+        lower=lower_extras,
+    )
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+    current = require_result(state, env)
+    native = form.to_cfg(current, env)
+    if isinstance(native, FormErrors):
+        pytest.fail(str(native.messages))
+    before = state.input.data
+    assert hasattr(adapter_api, "CfgInputRejected"), "Missing directed Load rejection"
+    rejected = form.cfg_input(native, current=current, env=env)
+    assert isinstance(rejected, adapter_api.CfgInputRejected)
+    assert rejected.differences[0].path == ("amount",)
+    assert rejected.differences[0].loaded == 4.0
+    assert rejected.differences[0].would_run == 8.0
+    assert state.input.data == before
+    state.write({("extras", "multiplier"): 1}, env)
+    current = require_result(state, env)
+    native = form.to_cfg(current, env)
+    if isinstance(native, FormErrors):
+        pytest.fail(str(native.messages))
+    restored = form.cfg_input(native, current=current, env=env)
+    if isinstance(restored, adapter_api.CfgInputRejected):
+        pytest.fail(str(restored.errors.messages))
+    restored_state = FormState(restored)
+    assert restored.data["extras"] == {"multiplier": 1}
+    assert form.to_cfg(require_result(restored_state, env), env) == native
