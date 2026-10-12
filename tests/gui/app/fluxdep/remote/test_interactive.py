@@ -769,10 +769,12 @@ def test_sample_intent_uses_native_prerequisites(
     _error(
         reply,
         "invalid_params" if condition == "absent" else "precondition_failed",
-        None,
+        "unknown_spectrum" if condition == "absent" else None,
     )
     assert (
-        "unknown spectrum" if condition == "absent" else "requires an aligned spectrum"
+        "no spectrum named 'absent'"
+        if condition == "absent"
+        else "requires an aligned spectrum"
     ) in reply["error"]["message"]
     assert one_route.ctrl.state.active_spectrum == active
     assert one_route.ctrl.state.version.snapshot() == versions
