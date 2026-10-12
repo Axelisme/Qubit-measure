@@ -17,10 +17,10 @@ def spectrum(route_harness: RouteHarness) -> SpectrumEntry:
         name="two",
         spec_type="TwoTone",
         raw={
-            "dev_values": np.linspace(-1.0, 1.0, 3),
-            "fluxs": np.linspace(0.0, 1.0, 3),
-            "freqs": np.linspace(4.0, 5.0, 4),
-            "signals": np.ones((3, 4), dtype=np.complex128),
+            "dev_values": np.linspace(-1.0, 1.0, 5),
+            "fluxs": np.linspace(0.0, 1.0, 5),
+            "freqs": np.linspace(4.0, 5.0, 5),
+            "signals": np.ones((5, 5), dtype=np.complex128),
         },
         points={
             "dev_values": np.array([-0.5, 0.5]),
