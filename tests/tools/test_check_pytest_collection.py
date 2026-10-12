@@ -69,8 +69,7 @@ def test_parse_collection_accepts_filtered_summary(
             "duplicate test node ids",
         ),
         (
-            "tests/a/test_x.py::test_x\n"
-            "2/3 tests collected (1 deselected) in 0.01s\n",
+            "tests/a/test_x.py::test_x\n2/3 tests collected (1 deselected) in 0.01s\n",
             "summary count does not match",
         ),
         (
@@ -90,7 +89,7 @@ def test_parse_collection_rejects_filtered_evidence(stdout: str, match: str) -> 
 
 @pytest.mark.parametrize("entrypoint", ["module", "console"])
 def test_collection_commands_use_the_same_venv_entrypoint(
-    entrypoint: str,
+    entrypoint: oracle.PytestEntrypoint,
 ) -> None:
     root = Path("/repo")
 
