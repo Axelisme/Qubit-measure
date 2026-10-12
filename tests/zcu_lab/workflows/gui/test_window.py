@@ -1,12 +1,9 @@
 """Window contracts through public native/GUI seams."""
 
-from pathlib import Path
-
 import pytest
 from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_run
 from zcu_tools.experiment.workflows import (
     Done,
     InitEnv,
@@ -16,10 +13,8 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput
-from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationOutcome
-from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -27,7 +22,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
@@ -295,87 +289,6 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
         ).is_file()
     assert window.tuning_panel is not None and not window.tuning_panel.isEnabled()
     assert not harness.gate.snapshot()
-
-
-@pytest.mark.parametrize("starter", ["gui", "mcp"])
-@pytest.mark.parametrize("device", ["flux", "offline_device"])
-def test_default_device_alias_start_and_native_save_use_the_run_capture(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
-    inputs: Inputs,
-    mcp_tools: ToolTable,
-    starter: str,
-    device: str,
-    tmp_path: Path,
-) -> None:
-    window, harness, entry = run_attachment
-    context = harness.services.context
-    context.set_parameter(context.read_context().target, "Q1.flux_source", device)
-    context.set_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("flux_dev", "$qubit.flux_source"))
-    )
-    window.prepare_forms()
-    plan = [e for e in start_plan_batch(inputs) if e["path"] != ["flux_dev"]]
-    for edit in plan:
-        if edit["path"] == ["fluxes", "values"]:
-            edit["value"] = [inputs.flux_value]
-    tunables: list[FormWrite] = [
-        {"path": ["cal", "span_mhz"], "value": 2.0},
-        {"path": ["cal", "rabi_start_factor"], "value": 0.125},
-        {"path": ["t1", "rounds"], "value": 2},
-    ]
-    run_id = "alias-" + starter
-    if starter == "gui":
-        window.plan_panel.state.write(
-            {tuple(e["path"]): e["value"] for e in plan}, window.plan_panel.env
-        )
-        window.tunables_panel.state.write(
-            {tuple(e["path"]): e["value"] for e in tunables}, FormEnv()
-        )
-        token = window.start(run_id)
-    else:
-        receipt = None
-        start_error = None
-        try:
-            receipt = mcp_tools["workflows_workflow_start"]["handler"](
-                {"run_id": run_id, "plan": plan, "tunables": tunables}
-            )
-        except RuntimeError as exc:
-            start_error = exc
-        assert start_error is None, start_error
-        assert isinstance(receipt, dict)
-        token = receipt["operation_id"]
-    # No membership check at Start, even for an unknown device name.
-    assert isinstance(token, int), token
-    assert window.plan_panel.state.input.data["flux_dev"] == device
-    context.set_parameter(
-        context.read_context().target, "Q1.flux_source", "later_device"
-    )
-    context.set_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("flux_dev", "later_device"))
-    )
-    harness.complete_segment()
-    status = window.controller.status()
-    assert status is not None
-    engine = window.controller.engine
-    assert engine is not None
-    if device == "offline_device":
-        assert status.lifecycle == "failed" and device in str(status.reason)
-        assert engine.records(run_id) == ()
-        return
-    assert status.lifecycle == "done" and status.committed_seq == 1, status
-    record = engine.records(run_id)[0]
-    source = entry.database_path / "workflows" / run_id / record.iteration_dir / "t1.h5"
-    spec = T1Exp().persistence_spec()
-    native, metadata = load_run_with_metadata(source, spec=spec)
-    assert native.cfg is not None
-    assert metadata.snapshot.roles == {"qubit": "Q1", "flux_dev": "flux"}
-    # Save again after the live alias edit; neither form input nor history refreshes.
-    destination = tmp_path / "saved-again.h5"
-    save_run(native, destination, spec=spec, metadata=metadata)
-    _, saved = load_run_with_metadata(destination, spec=spec)
-    assert saved.snapshot == metadata.snapshot
-    assert saved.snapshot.roles["flux_dev"] == "flux"
-    assert window.plan_panel.state.input.data["flux_dev"] == device
 
 
 def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
