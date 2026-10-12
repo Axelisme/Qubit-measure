@@ -15,6 +15,7 @@ from zcu_tools.mcp.core.stdio_server import (
 
 from .align_tools import build_align_tools
 from .fit_tools import build_fit_tools
+from .filter_tools import build_filter_tools
 from .lifecycle import build_control_lifecycle_tools
 from .spectrum_tools import build_spectrum_tools
 
@@ -86,6 +87,7 @@ def build_fluxdep_server(
         build_spectrum_tools(bridge)
         | build_align_tools(bridge)
         | build_fit_tools(bridge)
+        | build_filter_tools(bridge)
         | _control_tools(bridge),
         lifecycle,
         names,
