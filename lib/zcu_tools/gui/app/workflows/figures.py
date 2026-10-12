@@ -6,6 +6,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.plotting.plots import Plots
 
+from .figure_area import WorkflowFigureArea
+
 
 class WorkflowFigureViews:
     """Own the attached native presentation without interpreting workflow data.
@@ -19,22 +21,26 @@ class WorkflowFigureViews:
     Window.
     """
 
-    def __init__(self) -> None:
-        """Create empty presentation state without acquiring any resources.
+    def __init__(self, area: WorkflowFigureArea) -> None:
+        """Create empty presentation state for the Window's figure area.
 
-        Caller keeps this owner through producer drain and releases on close.
+        area is the PlotHost every installed Plots presents through. Caller
+        keeps this owner through producer drain and releases on close.
         No controls, callbacks or native operation authority are acquired.
         """
+        self._area = area
         self.native: Plots | None = None
 
     def install_native(self, plots: Plots) -> None:
         """Install new active Plots before native admission listeners reenter.
 
-        Window has admitted replacement. Release the previous native presentation
-        before replacing it.
+        Window has admitted replacement. Release the previous native presentation,
+        then let the area name plots' figures and check Follow latest again.
+        plots must present through this owner's area.
         """
         if self.native is not None:
             self.native.release()
+        self._area.begin_run(plots)
         self.native = plots
 
     def start_failed(self) -> None:
