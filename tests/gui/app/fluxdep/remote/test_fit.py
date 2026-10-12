@@ -2,12 +2,40 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import h5py
+import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
+
+
+@pytest.fixture
+def search_db(tmp_path: Path) -> str:
+    path = tmp_path / "search.h5"
+    with h5py.File(path, "w") as database:
+        database.create_dataset("fluxs", data=[0.0, 0.5, 1.0])
+        database.create_dataset("params", data=[[3.0, 0.2, 0.1], [9.5, 2.0, 1.5]])
+        database.create_dataset("energies", data=np.zeros((2, 3, 4)))
+    return str(path)
+
+
+def test_database_info_reports_native_ranges_without_changing_fit(
+    route_harness: RouteHarness, search_db: str,
+) -> None:
+    initial = route_harness.ctrl.state.fit
+    reply = route_harness.request(route_harness.client(), "fit.database_info", path=search_db)
+    assert reply["ok"]
+    assert "result" in reply
+    assert reply["result"] == {
+        "path": search_db, "entries": 2, "levels": 4,
+        "EJ": [3.0, 9.5], "EC": [0.2, 2.0], "EL": [0.1, 1.5], "flux": [0.0, 1.0],
+    }
+    assert route_harness.ctrl.state.fit is initial
 
 
 def _inputs(**overrides: object) -> dict[str, object]:
