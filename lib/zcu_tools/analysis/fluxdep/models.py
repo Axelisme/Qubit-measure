@@ -29,6 +29,33 @@ class SpectrumResult(TypedDict):
     points: PointsData
 
 
+def validate_transition_frequencies(transitions: TransitionDict) -> None:
+    """Raise ValueError when a non-empty category lacks its frequency.
+
+    Side-band categories (blue side, red side, mirror blue, mirror red) need
+    r_f. Every mirror category (mirror, mirror blue, mirror red, mirror{n})
+    needs sample_f. Empty categories need nothing.
+    """
+    if (
+        any(
+            transitions.get(name, [])
+            for name in ("blue side", "red side", "mirror blue", "mirror red")
+        )
+        and "r_f" not in transitions
+    ):
+        raise ValueError(
+            "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
+        )
+    if (
+        any(
+            "mirror" in name and isinstance(pairs, list) and pairs
+            for name, pairs in transitions.items()
+        )
+        and "sample_f" not in transitions
+    ):
+        raise ValueError("sample_f is required for mirror transitions")
+
+
 def energy2linearform(
     energies: NDArray[np.float64], transitions: TransitionDict
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -49,26 +76,8 @@ def energy2linearform(
     Bs = np.empty((N, K))
     Cs = np.empty((N, K))
 
-    if (
-        any(
-            map(
-                lambda name: transitions.get(name, []),
-                ["blue side", "red side", "mirror blue", "mirror red"],
-            )
-        )
-        and "r_f" not in transitions
-    ):
-        raise ValueError(
-            "r_f is required for blue side, red side, mirror blue, and mirror red transitions"
-        )
+    validate_transition_frequencies(transitions)
     r_f = transitions.get("r_f", 0.0)
-
-    if (
-        any("mirror" in name for name in transitions)
-        and "r_f" not in transitions
-        and "sample_f" not in transitions
-    ):
-        raise ValueError("sample_f is required for mirror transitions")
     sample_f = transitions.get("sample_f", 0.0)
 
     idx = 0
