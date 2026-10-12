@@ -613,16 +613,42 @@ def _input_line_center_y(form: CfgFormWidget, path: str) -> float:
     return top + line.height() / 2
 
 
+def _branch_stub_y(form: CfgFormWidget, path: str) -> int:
+    """Row of the connector stub painted just left of a tree row's label."""
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    assert viewport is not None
+    rect = tree.visualItemRect(tree_item(form, path))
+    image = viewport.grab().toImage()
+    background = image.pixelColor(rect.left() - 2, rect.top())
+    stub_rows = [
+        y
+        for y in range(rect.top(), rect.bottom() + 1)
+        if image.pixelColor(rect.left() - 2, y) != background
+    ]
+    assert len(stub_rows) == 1, (path, stub_rows)
+    return stub_rows[0]
+
+
 def test_tree_label_sits_on_the_input_line_above_an_expression_preview(qapp, ctrl):
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={
-                "reps": ScalarSpec(label="Reps", type=int),
-                "count": ScalarSpec(label="Count", type=int),
+                "pulse": CfgSectionSpec(
+                    label="Pulse",
+                    fields={
+                        "reps": ScalarSpec(label="Reps", type=int),
+                        "count": ScalarSpec(label="Count", type=int),
+                    },
+                )
             }
         ),
         value=CfgSectionValue(
-            fields={"reps": DirectValue(10), "count": EvalValue("1 + 1")}
+            fields={
+                "pulse": CfgSectionValue(
+                    fields={"reps": DirectValue(10), "count": EvalValue("1 + 1")}
+                )
+            }
         ),
     )
     with _attached_form(schema, ctrl) as (form, _draft):
@@ -630,11 +656,13 @@ def test_tree_label_sits_on_the_input_line_above_an_expression_preview(qapp, ctr
         form.show()
         qapp.processEvents()
         tree = tree_widget(form)
-        preview_row = tree.visualItemRect(tree_item(form, "count"))
-        plain_row = tree.visualItemRect(tree_item(form, "reps"))
+        preview_row = tree.visualItemRect(tree_item(form, "pulse.count"))
+        plain_row = tree.visualItemRect(tree_item(form, "pulse.reps"))
         # The preview makes the expression row taller than a plain row.
         assert preview_row.height() > plain_row.height()
-        for path in ("reps", "count"):
+        for path in ("pulse.reps", "pulse.count"):
             label = _label_text_center_y(form, path)
             line = _input_line_center_y(form, path)
             assert abs(label - line) <= 3, (path, label, line)
+            # The connector stub points at the label, not at the cell centre.
+            assert abs(_branch_stub_y(form, path) - line) <= 2, path
