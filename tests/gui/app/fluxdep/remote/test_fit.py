@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
+from typing import Literal
 
 import h5py
 import numpy as np
@@ -80,7 +81,7 @@ def _source(name: str) -> SpectrumEntry:
 def test_upstream_publication_retains_fit_marks_stale_and_refuses_export(
     route_harness: RouteHarness,
     tmp_path: Path,
-    change: str,
+    change: Literal["align", "points", "filter", "add", "remove", "replace"],
     reason: str,
 ) -> None:
     state = route_harness.ctrl.state
@@ -113,12 +114,15 @@ def test_upstream_publication_retains_fit_marks_stale_and_refuses_export(
     reply = route_harness.request(client, "fit.result")
     assert reply["ok"] and "result" in reply
     assert reply["result"].get("stale") is True
-    assert reason in reply["result"].get("stale_reasons", [])
+    reasons = reply["result"].get("stale_reasons")
+    if not isinstance(reasons, list):
+        pytest.fail("fit.result must return a list of stale reasons")
+    assert reason in reasons
     assert reply["result"]["params"] == {"EJ": 3.0, "EC": 0.8, "EL": 0.5}
     path = tmp_path / "stale.json"
     export = route_harness.request(client, "fit.export_params", savepath=str(path))
     assert not export["ok"] and "error" in export
-    assert export["error"]["reason"] == "fit_stale"
+    assert export["error"].get("reason") == "fit_stale"
     assert reason in export["error"]["message"]
     assert not path.exists()
 
@@ -293,6 +297,9 @@ def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_searc
         assert "result" in reply
         assert reply["result"] == {
             "fit": {
+                "quality": None,
+                "stale": False,
+                "stale_reasons": [],
                 "has_result": False,
                 "params": None,
                 **inputs,
@@ -320,6 +327,9 @@ def test_fit_replacement_clears_result_emits_agent_fact_and_does_not_start_searc
         assert reply["ok"]
         assert "result" in reply
         assert reply["result"]["fit"] == {
+            "quality": None,
+            "stale": False,
+            "stale_reasons": [],
             "has_result": False,
             "params": None,
             **_inputs(search_db, transitions={}),
