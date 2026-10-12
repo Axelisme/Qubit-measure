@@ -578,3 +578,63 @@ def test_tree_outer_reenable_preserves_decoration_disabled_containers(qapp, ctrl
             assert _enabled_states(form, tuple(enabled)) == expected
             assert form.decoration_for_path("outer.inner_section").enabled is False
             assert form.decoration_for_path("outer.inner_ref").enabled is False
+
+
+def _label_text_center_y(form: CfgFormWidget, path: str) -> float:
+    """Vertical centre of the painted label pixels of one tree row."""
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    assert viewport is not None
+    rect = tree.visualItemRect(tree_item(form, path))
+    image = viewport.grab().toImage()
+    dark_rows = [
+        y
+        for y in range(rect.top(), rect.bottom() + 1)
+        if any(
+            image.pixelColor(x, y).lightness() < 128
+            for x in range(rect.left() + 2, tree.columnWidth(0))
+        )
+    ]
+    assert dark_rows, path
+    return (dark_rows[0] + dark_rows[-1]) / 2
+
+
+def _input_line_center_y(form: CfgFormWidget, path: str) -> float:
+    from qtpy.QtCore import QPoint
+    from qtpy.QtWidgets import QLineEdit
+
+    tree = tree_widget(form)
+    viewport = tree.viewport()
+    editor = tree.itemWidget(tree_item(form, path), 1)
+    assert viewport is not None and editor is not None
+    line = editor.findChild(QLineEdit)
+    assert line is not None
+    top = line.mapTo(viewport, QPoint(0, 0)).y()
+    return top + line.height() / 2
+
+
+def test_tree_label_sits_on_the_input_line_above_an_expression_preview(qapp, ctrl):
+    schema = CfgSchema(
+        spec=CfgSectionSpec(
+            fields={
+                "reps": ScalarSpec(label="Reps", type=int),
+                "count": ScalarSpec(label="Count", type=int),
+            }
+        ),
+        value=CfgSectionValue(
+            fields={"reps": DirectValue(10), "count": EvalValue("1 + 1")}
+        ),
+    )
+    with _attached_form(schema, ctrl) as (form, _draft):
+        form.resize(600, 400)
+        form.show()
+        qapp.processEvents()
+        tree = tree_widget(form)
+        preview_row = tree.visualItemRect(tree_item(form, "count"))
+        plain_row = tree.visualItemRect(tree_item(form, "reps"))
+        # The preview makes the expression row taller than a plain row.
+        assert preview_row.height() > plain_row.height()
+        for path in ("reps", "count"):
+            label = _label_text_center_y(form, path)
+            line = _input_line_center_y(form, path)
+            assert abs(label - line) <= 3, (path, label, line)
