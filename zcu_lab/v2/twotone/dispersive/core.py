@@ -83,6 +83,45 @@ class DispersiveAnalysis:
     avg_fwhm: float
 
 
+def _plot_circle_fit(
+    ax: Axes,
+    freqs: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    params_dict: dict[str, Any],
+    color: str,
+    label: str,
+) -> None:
+    """Plot the background-corrected normalized IQ trace and fitted circle."""
+    corrected = remove_background(
+        freqs,
+        signals,
+        freq=params_dict["freq"],
+        edelay=params_dict["edelay"],
+        bg_amp_slope=params_dict["bg_amp_slope"],
+    )
+    norm_signals, norm_circle_params = normalize_signal(
+        corrected, params_dict["circle_params"], params_dict["a0"]
+    )
+    norm_xc, norm_yc, norm_r0 = norm_circle_params
+
+    ax.plot(
+        norm_signals.real,
+        norm_signals.imag,
+        color=color,
+        marker=".",
+        markersize=1,
+        label=label,
+    )
+    ax.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color=color))
+    ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
+    ax.axhline(0, color="k", linestyle="--")
+    ax.set_aspect("equal")
+    ax.grid(True)
+    ax.set_ylabel(r"$Im[S_{21}]$", fontsize=14)
+    ax.yaxis.set_label_position("right")
+    ax.legend()
+
+
 class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
     Options: ClassVar[type[DispersiveAnalyzeOptions]] = DispersiveAnalyzeOptions
 
@@ -145,7 +184,7 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
 
         return DispersiveResult(freqs=freqs, signals=signals_buffer.array)
 
-    def analyze(  # noqa: PLR0915 - joint ground/excited fit and three diagnostic panels
+    def analyze(
         self,
         source: RunRecord[DispersiveCfg, DispersiveResult],
         options: DispersiveAnalyzeOptions,
@@ -217,45 +256,9 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         ax_main.legend(loc="upper right")
         ax_main.grid(True)
 
-        def _plot_circle_fit(
-            ax: Axes,
-            signals: NDArray[np.complex128],
-            params_dict: dict[str, Any],
-            color: str,
-            label: str,
-        ) -> None:
-            corrected = remove_background(
-                freqs,
-                signals,
-                freq=params_dict["freq"],
-                edelay=params_dict["edelay"],
-                bg_amp_slope=params_dict["bg_amp_slope"],
-            )
-            norm_signals, norm_circle_params = normalize_signal(
-                corrected, params_dict["circle_params"], params_dict["a0"]
-            )
-            norm_xc, norm_yc, norm_r0 = norm_circle_params
-
-            ax.plot(
-                norm_signals.real,
-                norm_signals.imag,
-                color=color,
-                marker=".",
-                markersize=1,
-                label=label,
-            )
-            ax.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color=color))
-            ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
-            ax.axhline(0, color="k", linestyle="--")
-            ax.set_aspect("equal")
-            ax.grid(True)
-            ax.set_ylabel(r"$Im[S_{21}]$", fontsize=14)
-            ax.yaxis.set_label_position("right")
-            ax.legend()
-
         # Plot individual circle fit
-        _plot_circle_fit(ax_g, g_signals, dict(g_params), "b", "Ground")
-        _plot_circle_fit(ax_e, e_signals, dict(e_params), "r", "Excited")
+        _plot_circle_fit(ax_g, freqs, g_signals, dict(g_params), "b", "Ground")
+        _plot_circle_fit(ax_e, freqs, e_signals, dict(e_params), "r", "Excited")
         ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
 
         return DispersiveAnalysis(chi, avg_fwhm)
