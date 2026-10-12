@@ -239,14 +239,8 @@ class ArbWaveformDialog(QDialog):
         self.setMinimumSize(980, 720)
 
         root = QVBoxLayout(self)
-        header = QHBoxLayout()
-        header.addStretch()
-        self._close_btn = QPushButton("Close")
-        header.addWidget(self._close_btn)
-        root.addLayout(header)
-
         splitter = QSplitter(Qt.Orientation.Vertical)
-        root.addWidget(splitter)
+        root.addWidget(splitter, stretch=1)
 
         top = QWidget()
         top_layout = QHBoxLayout(top)
@@ -263,6 +257,11 @@ class ArbWaveformDialog(QDialog):
         splitter.addWidget(preview_group)
         splitter.setSizes([360, 360])
 
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self._close_btn = QPushButton("Close")
+        footer.addWidget(self._close_btn)
+        root.addLayout(footer)
         self._close_btn.clicked.connect(self.reject)
         self.refresh()
         self._reset_draft()
@@ -284,6 +283,7 @@ class ArbWaveformDialog(QDialog):
         selected = self._current_data_key
         infos = self._assets.list_infos()
         self._asset_table.setRowCount(0)
+        self._empty_assets_hint.setVisible(not infos)
         for row, info in enumerate(infos):
             self._asset_table.insertRow(row)
             values = (
@@ -322,6 +322,9 @@ class ArbWaveformDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self._asset_table.itemSelectionChanged.connect(self._on_asset_selection_changed)
         layout.addWidget(self._asset_table)
+        self._empty_assets_hint = QLabel("No waveforms saved yet")
+        self._empty_assets_hint.setStyleSheet("color: gray;")
+        layout.addWidget(self._empty_assets_hint)
 
         btns = QHBoxLayout()
         refresh_btn = QPushButton("Refresh")

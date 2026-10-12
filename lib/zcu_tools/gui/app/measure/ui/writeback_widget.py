@@ -124,6 +124,64 @@ def _make_matrix_table(matrix: Sequence[Sequence[Any]]) -> QTableWidget:
     return table
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float, complex)) and not isinstance(value, bool)
+
+
+def _compact_value(value: Any) -> str:
+    """Six significant digits for numbers; bounded summaries for other values."""
+    if _is_number(value):
+        text = format(value, ".6g")
+        # Keep the existing float spelling for small whole-valued previews.
+        if isinstance(value, float) and text.lstrip("-").isdigit():
+            text += ".0"
+        return text
+    return _bounded_summary(value)
+
+
+def _full_value(value: Any) -> str:
+    """Exact text for numbers (tooltips); bounded summaries for other values."""
+    return repr(value) if _is_number(value) else _bounded_summary(value)
+
+
+class _MiddleElidedLabel(QLabel):
+    """Retain both ends of a preview as its available width changes.
+
+    setText stores the full preview and shows it elided in the middle; the
+    caller owns the tooltip.
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.setText(text)
+
+    def setText(self, a0: str | None) -> None:
+        self._preview_text = a0 or ""
+        self._update_text()
+
+    def _update_text(self) -> None:
+        super().setText(
+            self.fontMetrics().elidedText(
+                self._preview_text,
+                Qt.TextElideMode.ElideMiddle,
+                self.contentsRect().width(),
+            )
+        )
+
+    def resizeEvent(self, a0: Any) -> None:
+        super().resizeEvent(a0)
+        self._update_text()
+
+
+def _value_label(item: WritebackItem, text: str) -> QLabel:
+    """Return a middle-elided label for a scalar parameter, else a plain one."""
+    if isinstance(item, ParameterWriteback) and _is_scalar_md_value(
+        item.proposed_value
+    ):
+        return _MiddleElidedLabel(text)
+    return QLabel(text)
+
+
 # ---------------------------------------------------------------------------
 # Private row helper — owns responsive arrangement for one item
 # ---------------------------------------------------------------------------
@@ -305,6 +363,26 @@ class WritebackWidget(QWidget):
         self.dispose_control_watches()
         super().deleteLater()
 
+    def show_preview_unavailable(
+        self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
+    ) -> None:
+        """Replace every row with one failure line naming why preview failed.
+
+        reason is the owner's failure text, shown verbatim and wrapped, first.
+        unavailable_reasons follow as populate shows them. The view keeps no
+        items, so the selection hint and Apply are hidden until the next
+        populate shows them again.
+        """
+        self.populate([], {}, unavailable_reasons=unavailable_reasons)
+        self._hint.setVisible(False)
+        self._apply_btn.setVisible(False)
+        label = QLabel(f"Writeback preview unavailable: {reason}")
+        label.setObjectName("writebackPreviewUnavailable")
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setStyleSheet("color: #b00020;")
+        label.setWordWrap(True)
+        self._rows_layout.insertWidget(0, label)
+
     def populate(
         self,
         items: Sequence[WritebackItem],
@@ -333,6 +411,8 @@ class WritebackWidget(QWidget):
         for item in items:
             values[item.session_id]
         self._values = values
+        self._hint.setVisible(True)
+        self._apply_btn.setVisible(True)
         # Clear old rows
         while self._rows_layout.count():
             child = self._rows_layout.takeAt(0)
@@ -357,7 +437,8 @@ class WritebackWidget(QWidget):
             self._rows.append(row)
 
         for reason in unavailable_reasons:
-            label = QLabel(reason)
+            label = QLabel(f"⚠ {reason}")
+            label.setStyleSheet("color: #b7791f;")
             label.setObjectName("writebackUnavailableReason")
             label.setWordWrap(True)
             self._rows_layout.addWidget(label)
@@ -373,7 +454,8 @@ class WritebackWidget(QWidget):
         cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
         self._checks[item.session_id] = cb
 
-        current_label = QLabel(self._display_current(item))
+        current_label = _value_label(item, self._display_current(item, compact=True))
+        current_label.setToolTip(self._display_current(item, compact=False))
         current_label.setObjectName("writebackCurrent")
         current_label.setStyleSheet("color: #5e6b7d;")
         current_label.setSizePolicy(
@@ -405,7 +487,8 @@ class WritebackWidget(QWidget):
     def _make_proposed_view(
         self, item: WritebackItem, fact: WritebackValues
     ) -> tuple[QLabel, QTableWidget | None]:
-        proposed_label = QLabel(self._display_proposed(item))
+        proposed_label = _value_label(item, self._display_proposed(item, compact=True))
+        proposed_label.setToolTip(self._display_proposed(item, compact=False))
         is_matrix = isinstance(item, ParameterWriteback) and _is_matrix_value(
             fact.proposed
         )
@@ -527,20 +610,29 @@ class WritebackWidget(QWidget):
         self._applied_states = self._get_applied_states()
         self._update_applied_presentation(item, checkbox)
 
-    def _display_current(self, item: WritebackItem) -> str:
+    def _display_current(self, item: WritebackItem, *, compact: bool) -> str:
+        """Current value text: compact for the label, full for its tooltip."""
         values = self._values[item.session_id]
         if values.current is None:
             return "\u2014"
-        current = _bounded_summary(values.current)
+        current = (
+            _compact_value(values.current) if compact else _full_value(values.current)
+        )
         if values.unit is not None:
             current += f" {values.unit}"
         return current
 
-    def _display_proposed(self, item: WritebackItem) -> str:
+    def _display_proposed(self, item: WritebackItem, *, compact: bool) -> str:
+        """Proposed value (± stderr) text: compact for the label, full for its tooltip."""
         values = self._values[item.session_id]
-        proposed = _bounded_summary(values.proposed)
+        proposed = (
+            _compact_value(values.proposed) if compact else _full_value(values.proposed)
+        )
         if item.stderr is not None:
-            proposed += f" ± {item.stderr}"
+            stderr = (
+                _compact_value(item.stderr) if compact else _full_value(item.stderr)
+            )
+            proposed += f" ± {stderr}"
         if values.unit is not None:
             proposed += f" {values.unit}"
         return proposed
@@ -556,8 +648,10 @@ class WritebackWidget(QWidget):
         current_label, proposed_label, actual_path, checkbox = self._row_widgets[
             item.session_id
         ]
-        current_label.setText(self._display_current(item))
-        proposed_label.setText(self._display_proposed(item))
+        current_label.setText(self._display_current(item, compact=True))
+        current_label.setToolTip(self._display_current(item, compact=False))
+        proposed_label.setText(self._display_proposed(item, compact=True))
+        proposed_label.setToolTip(self._display_proposed(item, compact=False))
         actual_path.setText(fact.actual_path)
         self._refresh_item_applied_presentation(item, checkbox)
 
@@ -589,7 +683,7 @@ class WritebackWidget(QWidget):
 
         form = QFormLayout()
         # Current is read-only (S2); target and proposed are editable.
-        current_label = QLabel(self._display_current(item))
+        current_label = QLabel(self._display_current(item, compact=False))
         current_label.setObjectName("writebackCurrentReadonly")
         current_label.setStyleSheet("color: #6b7688;")
         form.addRow("Current:", current_label)

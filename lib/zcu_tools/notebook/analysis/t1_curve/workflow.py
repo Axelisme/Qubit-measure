@@ -515,18 +515,8 @@ def estimate_purcell_Temp_upper_bound(
     A lower bound is not inferred from Purcell; ``Temp_range[0]`` is only the search
     floor used to verify that a feasible point exists.
     """
+    _validate_temperature_search(Temp_range, tolerance, max_iter)
     lower, upper = Temp_range
-    if (
-        not np.isfinite(lower)
-        or not np.isfinite(upper)
-        or lower <= 0.0
-        or upper <= lower
-    ):
-        raise ValueError("Temp_range must be positive finite (lower, upper)")
-    if tolerance <= 0.0 or not np.isfinite(tolerance):
-        raise ValueError("tolerance must be positive and finite")
-    if max_iter < 1:
-        raise ValueError("max_iter must be at least 1")
 
     fluxs = np.asarray(data.fit.fluxs, dtype=np.float64)
     observed_T1s = np.asarray(data.fit.T1_ns, dtype=np.float64)
@@ -2486,3 +2476,21 @@ __all__ = [
     "t1_parameter_text",
     "write_t1_curve_fit",
 ]
+
+
+def _validate_temperature_search(
+    Temp_range: tuple[float, float], tolerance: float, max_iter: int
+) -> None:
+    """Require a positive temperature bracket, finite tolerance and iteration budget."""
+    lower, upper = Temp_range
+    if (
+        not np.isfinite(lower)
+        or not np.isfinite(upper)
+        or lower <= 0.0
+        or upper <= lower
+    ):
+        raise ValueError("Temp_range must be positive finite (lower, upper)")
+    if tolerance <= 0.0 or not np.isfinite(tolerance):
+        raise ValueError("tolerance must be positive and finite")
+    if max_iter < 1:
+        raise ValueError("max_iter must be at least 1")

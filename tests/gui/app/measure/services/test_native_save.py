@@ -280,17 +280,12 @@ def test_controller_projects_native_save_completion_to_diagnostic_sinks(
         controller.remove_diagnostic_sink(sink)
 
     diagnostics = [call.args for call in sink.notify_diagnostic.call_args_list]
-    if batch and output_failure:
-        expected_severities = ["error"]
-    elif output_failure:
-        expected_severities = ["info", "error"]
-    else:
-        expected_severities = ["info"]
+    # Every completion gives one summary line; failures add the full detail.
+    expected_severities = ["info", "error"] if output_failure else ["info"]
     assert [item[0] for item in diagnostics] == expected_severities
-    messages = "\n".join(item[2] for item in diagnostics)
-    for item in report.outputs:
-        assert str(item.output.path) in messages
-        assert item.status in messages
+    summary = diagnostics[0][2]
+    assert report.run_id in summary
+    assert f"{len(report.outputs)} files" in summary
     if output_failure:
         assert payload.error is not None
         errors = [item[2] for item in diagnostics if item[0] == "error"]

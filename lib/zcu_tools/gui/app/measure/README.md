@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata、SavedPoint writeback 與獨立 predictor
+**Last updated:** 2026-10-12，Inspect Add authority／input retirement、EMPTY entry metadata、SavedPoint writeback、獨立 predictor 與 Post-Analysis／Analysis 一致的呈現
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -144,11 +144,14 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   backgrounds, whole-row folding, reference shape elision, viewport follows
   available panel height with scrolling only when content exceeds viewport);
   Run action row is status-free with Reset 20% / Run 80% of available width；
-  idle Reset與Run同高，Reset為green secondary、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
+  idle Reset與Run同高，Reset為一般按鈕、Run為blue primary，running時隱藏Reset並讓red Stop佔滿整列，
   settled後恢復20/80（A5）； Analysis uses an app-local single-column 13 px ledger with
   whole-header folding for `Analysis parameters` and `Writeback preview` and a
   full-width `Analyze` immediately after parameters and before Writeback preview
-  (A6). Presentation
+  (A6). Post-Analysis uses the same ledger, form font, full-width primary button
+  (`Run Post-Analysis`, below its gate hint) and `Writeback preview` section, so
+  both analysis steps present alike; a known parameter type without fields shows
+  the form's no-parameters hint in either pane. Presentation
   Modules do not invoke operation services directly. Each `WritebackWidget`
   is pane-bound (analysis vs post_analysis) and edits/applies its own opaque
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while

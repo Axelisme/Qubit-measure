@@ -3,7 +3,8 @@
 Single source for choice visibility, literal hiding, label decoration, and
 full decoration application. Both structural adapters import from here so the
 decoration contract in ``lib/zcu_tools/gui/README.md#Shared Qt Cfg Widgets``
-is implemented once.
+is implemented once. The dense tree's label delegate also lives here, so every
+tree paints labels on the input line the same way.
 """
 
 from __future__ import annotations
@@ -11,9 +12,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from qtpy.QtGui import QBrush, QColor
+from qtpy.QtCore import QModelIndex, QRect
+from qtpy.QtGui import QBrush, QColor, QFont, QPainter
 from qtpy.QtWidgets import (
+    QComboBox,
     QLabel,
+    QLineEdit,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTreeWidget,
     QTreeWidgetItem,
     QWidget,
 )
@@ -185,3 +192,47 @@ def apply_tree_item_decoration(
         # Fallback: if style is non-empty but tone not in map, still apply via foreground
         # (should not happen as style derived from same tone)
         pass
+
+
+def input_line_height(font: QFont) -> int:
+    """Height of one single-line editor (line edit or combo box) in font."""
+    heights = []
+    for editor in (QLineEdit(), QComboBox()):
+        editor.setFont(font)
+        heights.append(editor.sizeHint().height())
+        editor.deleteLater()
+    return max(heights)
+
+
+class InputLineLabelDelegate(QStyledItemDelegate):
+    """Paint each row label centred on its editor's first line.
+
+    Install it for the tree's label column only. An editor may grow below its
+    input line, for example an expression preview; the label belongs to the
+    input line, not to the whole cell. Rows no taller than one input line
+    paint exactly as the default delegate does.
+    """
+
+    def __init__(self, line_height: int, tree: QTreeWidget) -> None:
+        """Paint labels within line_height pixels; tree owns the delegate.
+
+        line_height is input_line_height of the tree's font, shared with the
+        tree's branch style so connector stubs point at the same line.
+        """
+        super().__init__(tree)
+        self._line_height = line_height
+
+    def paint(
+        self,
+        painter: QPainter | None,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        rect = option.rect
+        if rect.height() > self._line_height:
+            line_option = QStyleOptionViewItem(option)
+            line_option.rect = QRect(
+                rect.left(), rect.top(), rect.width(), self._line_height
+            )
+            option = line_option
+        super().paint(painter, option, index)
