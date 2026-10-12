@@ -1,6 +1,7 @@
 """Input evaluation and Pydantic error translation at the form boundary."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import get_args, get_origin
 
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -16,11 +17,24 @@ from ._structure import (
     accepts_expression,
     alternatives,
     discriminator,
+    key_or_inline,
     leaves,
     selected,
     unwrap,
 )
 from .model import FormEnv, FormErrors, FormModel, FormPath, FormPreview, FormValue
+
+
+@dataclass
+class _Selections:
+    """Input-selected structure recorded by one decode, for error paths.
+
+    tags maps a tagged model path to its selected string tag. inline holds the
+    paths of str-or-model fields whose input is an object (the inline model).
+    """
+
+    tags: dict[FormPath, str] = field(default_factory=dict)
+    inline: set[FormPath] = field(default_factory=set)
 
 
 def _decode(
@@ -29,18 +43,20 @@ def _decode(
     env: FormEnv,
     path: FormPath,
     errors: dict[FormPath, str],
-    tags: dict[FormPath, str],
+    selections: _Selections,
 ) -> FormValue:
     annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
+    if isinstance(value, dict) and key_or_inline(info.annotation):
+        selections.inline.add(path)
     if child is not None and isinstance(value, dict):
         tag_key = discriminator(info)
         tag = value.get(tag_key) if tag_key is not None else None
         if isinstance(tag, str):
-            tags[path] = tag
+            selections.tags[path] = tag
         # Selectors determine shape before any value-leaf evaluation.
         fields = {key: item for key, item in value.items() if key != tag_key}
-        ordinary = _decode_model(child, fields, env, path, errors, tags)
+        ordinary = _decode_model(child, fields, env, path, errors, selections)
         if tag_key is not None and tag_key in value:
             ordinary[tag_key] = _ordinary(value[tag_key])
         return ordinary
@@ -53,11 +69,11 @@ def _decode(
         args = get_args(annotation)
         item_info = FieldInfo.from_annotation(args[1])
         return {
-            key: _decode(item_info, item, env, (*path, key), errors, tags)
+            key: _decode(item_info, item, env, (*path, key), errors, selections)
             for key, item in value.items()
         }
     if get_origin(annotation) in (list, tuple) and isinstance(value, list):
-        return _decode_sequence(annotation, value, env, path, errors, tags)
+        return _decode_sequence(annotation, value, env, path, errors, selections)
     return _ordinary(value)
 
 
@@ -81,7 +97,7 @@ def _decode_sequence(
     env: FormEnv,
     path: FormPath,
     errors: dict[FormPath, str],
-    tags: dict[FormPath, str],
+    selections: _Selections,
 ) -> list[FormValue]:
     """Evaluate sequence items by annotation; Pydantic checks shape afterwards."""
     args = get_args(annotation)
@@ -102,7 +118,7 @@ def _decode_sequence(
                 env,
                 (*path, index),
                 errors,
-                tags,
+                selections,
             )
         )
     return decoded
@@ -144,10 +160,10 @@ def _decode_model(
     env: FormEnv,
     path: FormPath,
     errors: dict[FormPath, str],
-    tags: dict[FormPath, str],
+    selections: _Selections,
 ) -> dict[str, FormValue]:
     return {
-        key: _decode(info, value, env, (*path, key), errors, tags)
+        key: _decode(info, value, env, (*path, key), errors, selections)
         if (info := model.model_fields.get(key)) is not None
         else _ordinary(value)
         for key, value in data.items()
@@ -196,11 +212,21 @@ def _model_value(value: object) -> FormValue:
     raise ValueError(f"Unsupported form value: {type(value).__name__}")
 
 
-def _canonical(path: FormPath, tags: Mapping[FormPath, str]) -> FormPath:
+def _canonical(path: FormPath, selections: _Selections) -> FormPath:
+    """Drop Pydantic's union labels from an error location.
+
+    An inline str-or-model value is one member of a smart union, so its loc
+    names that member once ('PulseSpec', 'tagged-union[...]'); a tagged
+    model's loc names its tag once. Neither is a model-field path part.
+    """
     result: FormPath = ()
+    labelled: set[FormPath] = set()
     stripped: set[FormPath] = set()
     for part in path:
-        if result not in stripped and tags.get(result) == part:
+        if result in selections.inline and result not in labelled:
+            labelled.add(result)
+            continue
+        if result not in stripped and selections.tags.get(result) == part:
             stripped.add(result)
             continue
         result = (*result, part)
@@ -234,9 +260,9 @@ def result[F: FormModel](
 ) -> F | FormErrors:
     """Evaluate one detached input and return its model or canonical errors."""
     errors: dict[FormPath, str] = {}
-    tags: dict[FormPath, str] = {}
-    ordinary = _decode_model(model, data, env, (), errors, tags)
-    return _validate(model, data, ordinary, env, errors, tags)
+    selections = _Selections()
+    ordinary = _decode_model(model, data, env, (), errors, selections)
+    return _validate(model, data, ordinary, env, errors, selections)
 
 
 def preview(
@@ -244,10 +270,10 @@ def preview(
 ) -> FormPreview:
     """Share decoding/validation while retaining non-failing leaves for display."""
     errors: dict[FormPath, str] = {}
-    tags: dict[FormPath, str] = {}
-    ordinary = _decode_model(model, data, env, (), errors, tags)
+    selections = _Selections()
+    ordinary = _decode_model(model, data, env, (), errors, selections)
     failed_decoding = tuple(errors)
-    validated = _validate(model, data, ordinary, env, errors, tags)
+    validated = _validate(model, data, ordinary, env, errors, selections)
     if not isinstance(validated, FormErrors):
         complete = {
             key: default_json(getattr(validated, key)) for key in model.model_fields
@@ -269,7 +295,7 @@ def _validate[F: FormModel](
     ordinary: dict[str, FormValue],
     env: FormEnv,
     errors: dict[FormPath, str],
-    tags: dict[FormPath, str],
+    selections: _Selections,
 ) -> F | FormErrors:
     try:
         options = check_sources(model, data, env, validate_paths=True)
@@ -282,7 +308,11 @@ def _validate[F: FormModel](
         validated = model.model_validate(ordinary)
     except ValidationError as exc:
         for error in exc.errors():
-            path = _canonical(error["loc"], tags)
+            path = _canonical(error["loc"], selections)
+            if path in selections.inline and error["type"] == "string_type":
+                # The key alternative rejects every inline object; the inline
+                # model's own errors already describe the failure.
+                continue
             if error["type"] == "form_field":
                 context = error.get("ctx") or {}
                 directed = context.get("path", ())

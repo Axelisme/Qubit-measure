@@ -97,8 +97,9 @@ def test_unbound_alias_never_falls_back_to_a_same_named_component(
     with pytest.raises(RoleResolutionError) as caught:
         table.resolve("resonator", point)
     assert caught.value.role == "resonator"
-    with pytest.raises(RoleResolutionError, match="Unknown alias"):
+    with pytest.raises(RoleResolutionError) as unknown:
         table.resolve("missing", point)
+    assert unknown.value.reason == "Unknown alias"
 
 
 @pytest.mark.parametrize("partner", [None, 7, "missing"])
@@ -122,12 +123,54 @@ def test_missing_link_field_and_wrong_kind_report_the_requested_alias(
     table = AliasTable(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.absent"))
     )
-    with pytest.raises(RoleResolutionError, match="resonator.*Unreadable link"):
+    with pytest.raises(RoleResolutionError) as unreadable:
         table.resolve("resonator", point)
+    assert unreadable.value.role == "resonator"
+    assert "Unreadable link" in unreadable.value.reason
     with pytest.raises(RoleResolutionError) as caught:
         table.resolve("qubit", point, kind="resonator")
     assert caught.value.role == "qubit"
     assert caught.value.required_kind == "resonator"
+
+
+def test_linked_unbound_alias_names_the_empty_row_to_bind(
+    point: PointDocument,
+) -> None:
+    table = AliasTable((AliasRow("qubit", ""), AliasRow("resonator", "$qubit.partner")))
+    with pytest.raises(RoleResolutionError) as caught:
+        table.resolve("resonator", point)
+    message = str(caught.value)
+    assert caught.value.reason == "Alias is not bound"
+    assert "$resonator" in message and "$qubit" in message
+    assert "bind" in message and "Aliases" in message
+    assert "None" not in message and "focus=" not in message
+
+
+@pytest.mark.parametrize(
+    ("partner", "kind", "named"),
+    [
+        (None, None, "Q1.absent"),
+        (7, None, "Q1.partner"),
+        ("R1", "amplifier", "R1"),
+    ],
+    ids=["missing-field", "non-name-target", "wrong-kind"],
+)
+def test_link_and_kind_failures_name_the_alias_and_keep_their_reason(
+    point: PointDocument, partner: int | str | None, kind: str | None, named: str
+) -> None:
+    link = "$qubit.absent" if partner is None else "$qubit.partner"
+    point.components["Q1"] = LinkedComponent(
+        kind="qubit/test", frequency=4.0, partner=partner
+    )
+    table = AliasTable((AliasRow("qubit", "Q1"), AliasRow("resonator", link)))
+    with pytest.raises(RoleResolutionError) as caught:
+        table.resolve("resonator", point, kind=kind)
+    message = str(caught.value)
+    assert caught.value.role == "resonator"
+    assert "$resonator" in message and named in message
+    if kind is not None:
+        assert kind in message
+    assert "None" not in message and "focus=" not in message
 
 
 def test_one_use_override_rebinds_dependent_rows_without_mutating_the_table(

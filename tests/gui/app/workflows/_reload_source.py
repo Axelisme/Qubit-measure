@@ -8,16 +8,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
+from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 
+from ._synthetic import (
+    Context,
+    Plan,
+    PlanForm,
+    Tunables,
+    TunablesForm,
+    build_registry,
+    context_seed,
+)
+
 if TYPE_CHECKING:
     from zcu_tools.experiment.workflows.declaration import WorkflowStep
-    from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
-
-    from ._synthetic import Context, Plan, Tunables
 
 
 class ReloadSource:
@@ -115,36 +124,58 @@ def build():
         importlib.invalidate_caches()
 
 
-class InjectedCatalog:
-    """Public constructor/loader injection for declared Window scenario collaborators.
+class SourceNamespace[C]:
+    """Own one importable source package whose loader publishes ``catalog``.
 
-    The fixture owns a tiny isolated source namespace and current app catalog.
-    Scenario installation reloads the real Window through its configured public
-    SourceCatalogLoader; it never patches production callables or Controller.
+    package names the empty package created under root; root goes on sys.path.
+    catalog is what the next load or Window reload publishes, so a test may
+    replace it before calling the Window's public reload. close retires the
+    package's modules and the sys.path entry; call it after every Window over
+    loader has closed.
     """
 
-    def __init__(self, root: Path) -> None:
-        from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
-
-        from ._synthetic import build_registry
-
-        self.root = root / "injected_workflow_source"
+    def __init__(self, root: Path, package: str, catalog: WorkflowCatalog[C]) -> None:
+        self.root = root / package
         self.root.mkdir()
         (self.root / "__init__.py").write_text("")
+        self.package = package
         self.path = str(root)
         sys.path.insert(0, self.path)
-        self.catalog = WorkflowCatalog(build_registry())
+        self.catalog = catalog
         self.loader = SourceCatalogLoader(
-            sources=(SourcePackage("injected_workflow_source", self.root),),
-            reload_modules=("injected_workflow_source",),
+            sources=(SourcePackage(package, self.root),),
+            reload_modules=(package,),
             preserved_modules=(),
-            catalog_module="injected_workflow_source",
+            catalog_module=package,
             catalog_builder=self.build,
         )
 
-    def build(self) -> WorkflowCatalog[Context]:
+    def build(self) -> WorkflowCatalog[C]:
         """Return the supplied typed pairing; native declarations remain real."""
         return self.catalog
+
+    def close(self) -> None:
+        """Retire only owned source modules/path after the Window has drained."""
+        sys.path.remove(self.path)
+        for name in tuple(sys.modules):
+            if name == self.package or name.startswith(f"{self.package}."):
+                del sys.modules[name]
+        importlib.invalidate_caches()
+
+
+class InjectedCatalog(SourceNamespace[Context]):
+    """Public constructor/loader injection for declared Window scenario collaborators.
+
+    The fixture owns a tiny isolated source namespace whose catalog starts as
+    the synthetic sample registry. Scenario installation reloads the real Window
+    through its configured public SourceCatalogLoader; it never patches
+    production callables or Controller.
+    """
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(
+            root, "injected_workflow_source", WorkflowCatalog(build_registry())
+        )
 
     def install[S, R](
         self,
@@ -152,15 +183,6 @@ class InjectedCatalog:
         window: WorkflowWindow[Context],
     ) -> None:
         """Select a real declared scenario via public current-catalog reload."""
-        from zcu_tools.gui.app.workflows.attachment import WorkflowAttachment
-        from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
-
-        from tests.gui.app.workflows._synthetic import (
-            PlanForm,
-            TunablesForm,
-            context_seed,
-        )
-
         self.catalog = WorkflowCatalog(
             (
                 WorkflowAttachment(
@@ -174,13 +196,3 @@ class InjectedCatalog:
             )
         )
         window.reload_source()
-
-    def close(self) -> None:
-        """Retire only owned source modules/path after the Window has drained."""
-        sys.path.remove(self.path)
-        for name in tuple(sys.modules):
-            if name == "injected_workflow_source" or name.startswith(
-                "injected_workflow_source."
-            ):
-                del sys.modules[name]
-        importlib.invalidate_caches()

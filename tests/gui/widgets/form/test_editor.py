@@ -634,7 +634,9 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
         for path in ("literal", "text", "number"):
             control = editor.findChild(QComboBox, f"form.input.{path}")
             assert isinstance(control, QComboBox)
-            assert control.count() == count
+            # Current choices, then the entry that switches to Expression mode.
+            assert control.count() == count + 1
+            assert control.itemText(count) == "Expression…"
             if count == 0:
                 assert control.currentIndex() == -1
         assert state.input.data == before
