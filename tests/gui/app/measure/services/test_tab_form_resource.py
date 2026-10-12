@@ -73,3 +73,28 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
         resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
+
+
+def test_capture_tokens_are_fixed_before_atomic_input_write() -> None:
+    latest = 2.0
+
+    def capture(_aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        return resource_api.TabFormSources(
+            env=captured_env(latest), captures={"device.flux.value": latest}
+        )
+
+    resource = resource_api.TabFormResource(
+        Form(ScalarCore, {}), capture=capture, mutation_allowed=lambda: True
+    )
+    latest = 5.0
+    resource.write({("amount",): {"expr": "2 * @{device.flux.value}"}})
+    assert resource.result() == ScalarCore(amount=4.0)
+    assert resource.input.data["amount"] == {"expr": "2 * (2.0)"}
+    before = resource.input.data
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.write({("amount",): {"expr": "@{missing.value}"}})
+    assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
+    assert resource.input.data == before
+    resource.reset()
+    resource.write({("amount",): {"expr": "2 * @{device.flux.value}"}})
+    assert resource.result() == ScalarCore(amount=10.0)
