@@ -1,8 +1,9 @@
-"""T1 workflow MCP attachment over the existing GUI RPC owners."""
+"""Workflow MCP attachment over the existing GUI RPC owners."""
 
 import base64
 from pathlib import Path
 
+from zcu_tools.gui.app.workflows.remote.methods import METHOD_SPECS
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.lifecycle import build_lifecycle_tools
@@ -15,8 +16,6 @@ from zcu_tools.mcp.core.stdio_server import (
     generate_tools,
     run_stdio_loop,
 )
-
-from zcu_lab.workflows.gui.remote_methods import METHOD_SPECS
 
 
 def build_workflow_tools(

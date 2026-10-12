@@ -17,6 +17,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormEnv, FormErrors, FormWritePath
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -27,7 +28,6 @@ from zcu_tools.resources.entry import (
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
 from ._reload_source import InjectedCatalog
@@ -35,7 +35,7 @@ from ._window_support import RpcRequest
 
 
 def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_capture(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
 ) -> None:
@@ -118,7 +118,7 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
 
 @pytest.mark.parametrize("editor", ["gui", "rpc"])
 def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
     editor: str,
@@ -183,7 +183,7 @@ def test_paused_tunables_apply_then_resume_repeats_uncommitted_step(
 
 @pytest.mark.parametrize("value", [-1.0, {"expr": "missing_source * 2"}])
 def test_rpc_tunables_invalid_input_retains_draft_without_publishing(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
     value: JsonValue,
@@ -240,7 +240,7 @@ def test_rpc_tunables_invalid_input_retains_draft_without_publishing(
     ],
 )
 def test_rpc_tunables_rejects_wire_and_structural_batches_before_draft_write(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
     batch: object,
@@ -297,7 +297,7 @@ def test_rpc_tunables_requires_explicit_target_and_batch(
 
 
 def test_rpc_tunables_absent_and_pending_target_cannot_edit_start_draft(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
     window, harness, entry = attachment
@@ -334,7 +334,7 @@ def test_rpc_tunables_absent_and_pending_target_cannot_edit_start_draft(
 
 
 def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
 ) -> None:
@@ -384,7 +384,7 @@ def test_rpc_tunables_old_target_preserves_accepted_panel_and_native_run(
 
 @pytest.mark.parametrize("failure", ["terminal", "journal"])
 def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
     failure: str,
@@ -440,18 +440,18 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
     start_button = window.findChild(QPushButton, "workflow.run.start")
     assert start_button is not None and start_button.isEnabled()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
     # A failed idle update must not leave unfinished presentation behind.
     assert isinstance(window.start("after-failure"), int)
     harness.complete_segment()
     assert harness.background.error is None
     window.close()
     window.close()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
 
 
 def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     escaped_qt_errors: list[BaseException],
     settlements: list[int],
@@ -491,7 +491,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert outcome.error is not None and str(journal) in outcome.error
     assert str(journal) in message.text() and str(journal) in caplog.text
     assert any(
-        record.name == "zcu_lab.workflows.gui.tuning_panel"
+        record.name == "zcu_tools.gui.app.workflows.tuning_panel"
         and record.exc_info is not None
         and isinstance(record.exc_info[1], IsADirectoryError)
         and record.exc_info[1].filename == str(journal)
@@ -504,7 +504,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert control.text() == before_click_text
     assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
     assert window.plan_panel.isEnabled() and not controller.has_pending_segment
     window.stop("tuning")
     assert window.close() and window.close()
@@ -512,7 +512,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
 
 
 def test_window_tunables_journal_failure_reraises_the_original_cause(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -552,7 +552,7 @@ def test_window_tunables_journal_failure_reraises_the_original_cause(
     assert window.controller is not None
     status = window.controller.status()
     assert status is not None and status.lifecycle == "failed"
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
     window.stop("tuning")
     window.close()
     window.close()

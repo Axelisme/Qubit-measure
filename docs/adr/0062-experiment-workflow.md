@@ -36,6 +36,8 @@ Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callba
 
 ## 獨立 workflow 轉換工具
 
+使用者在 2026-10-12 裁定：「我希望B，現有實作邏輯能直接轉成匯出工具嗎？」及「A還有這個export_run應該是綁在每個不同的workflow下的小工具，因為每種workflow的輸出格式可以不同」。各 workflow 的輸出格式不同，因此轉換工具由各 workflow 擁有，不交給 live GUI run 或通用 dispatcher。
+
 轉換 saved run 不需要 live GUI run。各 workflow 提供自己的小工具，GUI／RPC／MCP 不再提供匯出入口。Coherence 工具支援 merged、Labber、samples；MIST 工具支援 merged、Labber 並拒絕 samples。Overnight 沒有本次要求的輸出，不新增空工具。每個工具提供可 import 的函式與 humble main(argv)，不建立通用 export_run dispatcher。
 
 工具在 zcu_lab 讀固定 manifest 與每輪 record.json，只消費結構完整的 committed point，再讀 point 的具名 native reference。缺摘要列出每輪路徑，malformed／identity mismatch／缺檔指名 source。工具不讀 journal、不從檔名掃描或 leftover 檔建立提交點。這不是 crash resume，也不新增 framework reader 或保存保證。Shared typed envelope/native writer helpers 集中 Coherence 與 MIST 兩個使用者的輸入與失敗隔離，不做 registry 或 live Engine adapter。
@@ -68,9 +70,13 @@ Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份
 
 ## Overnight live 趨勢與保存責任
 
-Live 趨勢圖只用 Engine.records 的 committed evidence。具體 scalar 投影與繪圖在 zcu_lab.workflows.trend，不在框架重 fit。GUI presentation owner 在 zcu_lab.workflows.gui.figures，與 Window 固定。它只持有 native Plots 和繪圖 cursor，沒有 Engine、run target 或 operation。Window 沿既有約 50ms poll 更新 live 圖，最後提交刷新後才 finish。Pause 保留 Plots，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
+Framework 只提供 `env.plots` live plot 工具，不知道趨勢圖、具體 context 型別或 workflow 名稱。Workflow 自己決定圖的資料、畫法與更新時機。Overnight 的 scalar 投影與繪圖是科學程式，留在使用者 workflow；宿主不輪詢 committed records 來呼叫它，也不在註冊項目加入呈現 callback。框架不保證趨勢只使用 journal 已提交的紀錄。
 
-使用者在 2026-10-12 裁定：「趨勢圖也不用，後來用戶自己從數據重畫最自由，但可以workflow實作者存每個iter希望存的圖」與「讓workflow實作者自己在內部存，框架保持簡單」。本裁定取消趨勢圖保存與重開能力，保留現有 live 顯示。框架不提供 committed journal reader，不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure 或 Engine 提交通知。使用者可自行從 record.json 或 native 資料重畫；workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。
+使用者在 2026-10-12 更正：「1workflow框架不可以有calibrated認知或是overnight判斷，沒不用畫趨勢圖」與「我說的趨勢圖是workflow不知道趨勢圖，他只是準備可以liveplot的工具，讓workflow決定要畫什麼以及什麼時候更新」。這不是取消趨勢圖，而是將 live 繪圖的資料與更新責任交給 workflow。
+
+GUI presentation owner 在 `zcu_tools.gui.app.workflows.figures`，與 Window 固定。它只管理 native Plots 的生命週期與 PNG 呈現，不讀 records 或持有繪圖 cursor。Pause 保留 Plots，producer 返回與 terminal delivery 後才 finish，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
+
+框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
 
 Journal writer 與 Engine 提交順序不變。Iteration 檔案保存依上節由 workflow 擁有。現有具名圖 RPC、PNG renderer 與 Plots 工具也不變。依賴方向由 C18 與 trend-science-no-frontends contract 保護，科學投影不依賴 frontend admission。
 

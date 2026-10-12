@@ -15,22 +15,22 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows import figures as figures_module
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.form import FormModel
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui import figures as figures_module
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest
 
 
 def install_admission_observer(
-    window: T1WorkflowWindow, catalog_source: InjectedCatalog
+    window: WorkflowWindow[Calibrated], catalog_source: InjectedCatalog
 ) -> list[str]:
     """Record init/step so cancellation before native acceptance proves neither ran."""
     calls: list[str] = []
@@ -57,7 +57,7 @@ def install_admission_observer(
 
 
 def admission_canceller(
-    window: T1WorkflowWindow,
+    window: WorkflowWindow[Calibrated],
     action: str,
     old: TunablesHost[FormModel, Calibrated] | None,
     fixed: WorkflowController[FormModel, Calibrated],
@@ -97,7 +97,7 @@ def admission_canceller(
 
 
 def install_pause_plot_workflow(
-    window: T1WorkflowWindow, catalog_source: InjectedCatalog
+    window: WorkflowWindow[Calibrated], catalog_source: InjectedCatalog
 ) -> tuple[list[float], list[int]]:
     """Pause after drawing; record fixed inputs and figure identity across Resume."""
     attempts: list[float] = []
@@ -137,7 +137,7 @@ def install_pause_plot_workflow(
 
 
 def install_reader_plot_workflow(
-    window: T1WorkflowWindow, catalog_source: InjectedCatalog
+    window: WorkflowWindow[Calibrated], catalog_source: InjectedCatalog
 ) -> None:
     """Commit red then pause with blue so reads must expose the latest native plots."""
     attempts: list[int] = []
@@ -170,7 +170,7 @@ def install_reader_plot_workflow(
 
 
 def install_rpc_pause_workflow(
-    window: T1WorkflowWindow,
+    window: WorkflowWindow[Calibrated],
     harness: StartHarness,
     rpc: RpcRequest,
     catalog_source: InjectedCatalog,
@@ -203,7 +203,7 @@ def install_rpc_pause_workflow(
 
 
 def install_close_fault_workflow(
-    window: T1WorkflowWindow, catalog_source: InjectedCatalog
+    window: WorkflowWindow[Calibrated], catalog_source: InjectedCatalog
 ) -> None:
     """Leave a paused native run with live plots for close/Stop journal fault checks."""
 
@@ -244,7 +244,7 @@ def assert_failed_stop_settled(
     assert outcome.error is not None and str(journal) in outcome.error
     assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
-    assert not harness.progress.bars_for_owner("t1-workflow")
+    assert not harness.progress.bars_for_owner("workflow")
 
 
 def assert_failed_close_diagnostic(
@@ -258,7 +258,7 @@ def assert_failed_close_diagnostic(
     assert status is not None and status.lifecycle == "failed"
     assert str(journal) in message.text() and str(journal) in caplog.text
     assert any(
-        record.name == "zcu_lab.workflows.gui.window"
+        record.name == "zcu_tools.gui.app.workflows.window"
         and record.exc_info is not None
         and isinstance(record.exc_info[1], IsADirectoryError)
         and record.exc_info[1].filename == str(journal)
@@ -267,7 +267,7 @@ def assert_failed_close_diagnostic(
 
 
 def assert_figure_render_failure(
-    window: T1WorkflowWindow, rpc: RpcRequest, monkeypatch: pytest.MonkeyPatch
+    window: WorkflowWindow[Calibrated], rpc: RpcRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify RPC projects renderer failure while direct Window reads re-raise it."""
 

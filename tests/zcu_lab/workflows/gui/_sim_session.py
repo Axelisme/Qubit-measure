@@ -8,16 +8,17 @@ from pathlib import Path
 from time import monotonic
 
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
+from zcu_tools.mcp.workflows.server import build_workflow_tools
 from zcu_tools.resources.entry import ResultEntry
 
-from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
-from zcu_lab.workflows.mcp import build_workflow_tools
+from zcu_lab.workflows.calibration import Calibrated
 
 from ._recording_transport import WindowTransport
 
@@ -34,7 +35,7 @@ def wait_owner(qapp: QApplication, predicate: Callable[[], bool]) -> None:
 class SimSession:
     """One real app and entry, with native MCP tools over an in-process transport."""
 
-    app: WorkflowsGuiBehavior
+    app: WorkflowsGuiBehavior[Calibrated]
     entry: ResultEntry
     tools: ToolTable
     transport: WindowTransport
@@ -55,7 +56,7 @@ class SimSession:
 
 
 def connect_tools(
-    adapter: T1RemoteControlAdapter,
+    adapter: WorkflowRemoteControlAdapter[Calibrated],
     qapp: QApplication,
     root: Path,
     io: ThreadPoolExecutor,

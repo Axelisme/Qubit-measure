@@ -23,6 +23,9 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.device import FakeDevice
 from zcu_tools.device.manager import DeviceManager
+from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.remote import WorkflowRemoteControlAdapter
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.remote.control_service import ControlOptions
@@ -49,12 +52,12 @@ from zcu_tools.resources.entry import (
 from tests.gui._completion_helpers import on_device_connected
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.resources.entry.fakes import registry_state, restore_registry
+from zcu_lab import ALIAS_PRESET
 from zcu_lab.components import QubitSchema, ResonatorSchema
-from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
+from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 from zcu_lab.workflows.gui.plan import CoherencePlanForm
-from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab.workflows.registry import build_registry
 
 from ._coherence_input import t1_input
 
@@ -66,7 +69,9 @@ def qapp() -> QApplication:
 
 
 @pytest.fixture
-def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
+def app(
+    qapp: QApplication, tmp_path: Path
+) -> Iterator[WorkflowsGuiBehavior[Calibrated]]:
     before = registry_state()
     try:
         component_registry.register("qubit/workflow-app-test", QubitSchema)
@@ -76,7 +81,11 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
         except ValueError:
             role_registry.register("qubit", RoleSpec("qubit/*"))
         installed = registry_state()
-        behavior = WorkflowsGuiBehavior(project_root=str(tmp_path))
+        behavior = WorkflowsGuiBehavior(
+            registrations=build_registry(),
+            alias_rows=ALIAS_PRESET,
+            project_root=str(tmp_path),
+        )
         try:
             yield behavior
         finally:
@@ -92,20 +101,20 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior]:
         restore_registry(before)
 
 
-def button(window: T1WorkflowWindow, name: str) -> QPushButton:
+def button(window: WorkflowWindow[Calibrated], name: str) -> QPushButton:
     found = window.findChild(QPushButton, name)
     assert found is not None
     return found
 
 
-def setup_button(window: T1WorkflowWindow, text: str) -> QPushButton:
+def setup_button(window: WorkflowWindow[Calibrated], text: str) -> QPushButton:
     return next(
         b for b in window.setup_dialog.findChildren(QPushButton) if b.text() == text
     )
 
 
 def open_point(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], tmp_path: Path, qapp: QApplication
 ) -> ResultEntry:
     entry = ResultEntry.create(
         "sample", result_root=tmp_path / "result", database_root=tmp_path / "Database"
@@ -145,10 +154,11 @@ def test_window_parent_and_close_callback_retry(
         if len(attempts) == 1:
             raise RuntimeError("session close refused")
 
-    window = T1WorkflowWindow(
+    window = WorkflowWindow(
         harness.state,
         harness.services,
         harness.owner,
+        registrations=build_registry(),
         parent=parent,
         on_close=on_close,
     )
@@ -175,7 +185,7 @@ def test_window_parent_and_close_callback_retry(
 
 
 def test_empty_assembly_uses_one_native_owner_without_source(
-    app: WorkflowsGuiBehavior,
+    app: WorkflowsGuiBehavior[Calibrated],
 ) -> None:
     assembly = app.assemble(None)
     assert assembly.window is app.window
@@ -199,7 +209,7 @@ def test_empty_assembly_uses_one_native_owner_without_source(
 
 
 def test_after_show_reuses_nonmodal_setup_without_selecting_entry(
-    app: WorkflowsGuiBehavior,
+    app: WorkflowsGuiBehavior[Calibrated],
 ) -> None:
     assembly = app.assemble(None)
     app.window.show()
@@ -215,7 +225,7 @@ def test_after_show_reuses_nonmodal_setup_without_selecting_entry(
 
 
 def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], tmp_path: Path, qapp: QApplication
 ) -> None:
     app.assemble(None)
     window = app.window
@@ -262,7 +272,7 @@ def test_setup_alias_and_explicit_capture_replace_drafts_not_live_link(
 
 
 def edit_alias_entry(
-    window: T1WorkflowWindow, value_text: str
+    window: WorkflowWindow[Calibrated], value_text: str
 ) -> tuple[AliasDialog, QDialogButtonBox, QTableWidgetItem]:
     entry = window.findChild(QPushButton, "workflow.source.aliases")
     assert entry is not None, "Window must expose the shared alias editor entry"
@@ -280,7 +290,10 @@ def edit_alias_entry(
 
 @pytest.mark.parametrize("outcome", ["apply", "cancel", "invalid"])
 def test_alias_entry_edits_same_session_without_replacing_captured_forms(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication, outcome: str
+    app: WorkflowsGuiBehavior[Calibrated],
+    tmp_path: Path,
+    qapp: QApplication,
+    outcome: str,
 ) -> None:
     app.assemble(None)
     open_point(app, tmp_path, qapp)
@@ -345,7 +358,7 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
 
 
 def test_capture_failure_preserves_both_panels_and_local_input(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], tmp_path: Path, qapp: QApplication
 ) -> None:
     app.assemble(None)
     open_point(app, tmp_path, qapp)
@@ -370,7 +383,7 @@ def test_capture_failure_preserves_both_panels_and_local_input(
 
 @pytest.mark.parametrize("rows", [(), (AliasRow("qubit", ""),)])
 def test_prepare_missing_or_unbound_qubit_names_alias_and_preserves_panels(
-    app: WorkflowsGuiBehavior,
+    app: WorkflowsGuiBehavior[Calibrated],
     tmp_path: Path,
     qapp: QApplication,
     rows: tuple[AliasRow, ...],
@@ -390,7 +403,7 @@ def test_prepare_missing_or_unbound_qubit_names_alias_and_preserves_panels(
 
 
 def test_prepare_accepts_other_component_kind_and_reports_consuming_field_error(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], tmp_path: Path, qapp: QApplication
 ) -> None:
     app.assemble(None)
     open_point(app, tmp_path, qapp)
@@ -412,7 +425,7 @@ def test_prepare_accepts_other_component_kind_and_reports_consuming_field_error(
 
 
 def test_prepare_captures_all_alias_rows_without_live_rebinding(
-    app: WorkflowsGuiBehavior, tmp_path: Path, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], tmp_path: Path, qapp: QApplication
 ) -> None:
     app.assemble(None)
     open_point(app, tmp_path, qapp)
@@ -443,11 +456,11 @@ def test_prepare_captures_all_alias_rows_without_live_rebinding(
 
 
 def test_composition_rpc_reads_same_draft_without_socket(
-    app: WorkflowsGuiBehavior, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], qapp: QApplication
 ) -> None:
     assembly = app.assemble(ControlOptions(port=0))
     adapter = assembly.control_adapter
-    assert isinstance(adapter, T1RemoteControlAdapter)
+    assert isinstance(adapter, WorkflowRemoteControlAdapter)
     app.window.tunables_panel.state.write({("t1", "guess_us"): 73.0}, FormEnv())
     link = ClientLink("app-contract", token_required=False)
     adapter.on_client_open(link)
@@ -469,7 +482,7 @@ def test_composition_rpc_reads_same_draft_without_socket(
 
 
 def test_window_close_drains_and_closes_its_session_registry(
-    app: WorkflowsGuiBehavior, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], qapp: QApplication
 ) -> None:
     app.assemble(None)
     token = app.services.device.start_connect_device(
@@ -485,7 +498,7 @@ def test_window_close_drains_and_closes_its_session_registry(
 
 
 def test_shutdown_failure_rejects_close_and_keeps_forms(
-    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch
+    app: WorkflowsGuiBehavior[Calibrated], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.assemble(None)
     window = app.window
@@ -500,7 +513,7 @@ def test_shutdown_failure_rejects_close_and_keeps_forms(
 
 
 def test_registry_close_failure_rejects_window_close(
-    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch
+    app: WorkflowsGuiBehavior[Calibrated], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.assemble(None)
 
@@ -516,7 +529,7 @@ def test_registry_close_failure_rejects_window_close(
 
 
 def test_window_close_rejects_queued_connect_before_driver_registration(
-    app: WorkflowsGuiBehavior, qapp: QApplication
+    app: WorkflowsGuiBehavior[Calibrated], qapp: QApplication
 ) -> None:
     app.assemble(None)
     rejections: list[Exception] = []
@@ -545,7 +558,7 @@ def test_window_close_rejects_queued_connect_before_driver_registration(
 
 
 def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
-    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch
+    app: WorkflowsGuiBehavior[Calibrated], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.assemble(None)
     started = Event()
@@ -592,7 +605,7 @@ def test_window_close_drains_accepted_connect_and_delivery_before_driver_close(
 
 @pytest.mark.parametrize("failure", ["drain", "driver"])
 def test_failed_window_close_keeps_terminal_admission_closed_and_can_retry(
-    app: WorkflowsGuiBehavior, monkeypatch: pytest.MonkeyPatch, failure: str
+    app: WorkflowsGuiBehavior[Calibrated], monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     app.assemble(None)
     original_panel = app.window.plan_panel

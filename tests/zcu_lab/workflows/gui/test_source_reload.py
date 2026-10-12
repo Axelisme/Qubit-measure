@@ -11,6 +11,8 @@ import pytest
 from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel
 from zcu_tools.experiment.workflows import InvalidRunState
+from zcu_tools.gui.app.workflows.app import WorkflowsGuiBehavior
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.catalog_loader import CatalogReloadError
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors, FormInput
@@ -21,8 +23,9 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab import ALIAS_PRESET
+from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.registry import build_registry
 
 from ._coherence_input import t1_input
 from ._plan_inputs import inline_input
@@ -48,7 +51,7 @@ def source(tmp_path: Path, qapp: QApplication) -> Iterator[ReloadSource]:
 def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     source: ReloadSource,
 ) -> None:
-    assert callable(getattr(T1WorkflowWindow, "reload_source", None)), (
+    assert callable(getattr(WorkflowWindow, "reload_source", None)), (
         "Window must reload typed source declarations without replacing session owners"
     )
     harness = StartHarness()
@@ -159,7 +162,7 @@ def test_failed_import_retains_draft_blocks_start_and_recovers_after_retry(
 
 def test_current_start_and_tuning_use_new_catalog(
     source: ReloadSource,
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
 ) -> None:
     _old, harness, _entry = attachment
@@ -197,7 +200,7 @@ def test_current_start_and_tuning_use_new_catalog(
 @pytest.mark.uses_wall_clock
 def test_active_reload_rejects_before_preflight_in_pending_running_and_paused(
     source: ReloadSource,
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
 ) -> None:
     _old, harness, _entry = attachment
@@ -301,7 +304,34 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
         for name, module in sys.modules.items()
         if name == "zcu_lab.workflows" or name.startswith("zcu_lab.workflows.")
     }
-    app = WorkflowsGuiBehavior(clean=True, cache_dir=tmp_path)
+    import zcu_tools
+    from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
+    from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
+
+    import zcu_lab
+
+    def current_catalog() -> WorkflowCatalog[Calibrated]:
+        from zcu_lab.workflows.registry import build_registry
+
+        return WorkflowCatalog(build_registry())
+
+    loader = SourceCatalogLoader(
+        sources=(
+            SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
+            SourcePackage("zcu_lab", Path(zcu_lab.__file__).parent),
+        ),
+        reload_modules=("zcu_lab.workflows",),
+        preserved_modules=(),
+        catalog_module="zcu_lab.workflows.registry",
+        catalog_builder=current_catalog,
+    )
+    app = WorkflowsGuiBehavior(
+        registrations=build_registry(),
+        alias_rows=ALIAS_PRESET,
+        loader=loader,
+        clean=True,
+        cache_dir=tmp_path,
+    )
     app.assemble(None)
     state, services, controller = app.state, app.services, app.window.controller
     try:

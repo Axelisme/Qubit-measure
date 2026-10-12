@@ -17,9 +17,9 @@ from zcu_tools.mcp.core.bridge import (
     MCPBridgeConfig,
 )
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.workflows.server import build_workflow_tools, run_workflow_mcp
 
 from tests.mcp.fluxdep._support import GuiError, GuiResponse, RecordingTransport
-from zcu_lab.workflows.mcp import build_workflow_tools, run_workflow_mcp
 
 
 class TextContent(TypedDict):

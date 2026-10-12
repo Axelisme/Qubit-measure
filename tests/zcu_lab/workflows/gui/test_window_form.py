@@ -3,20 +3,21 @@
 import pytest
 from pydantic import JsonValue
 from qtpy.QtWidgets import QLineEdit
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
+from zcu_lab.workflows.calibration import Calibrated
 
 from ._coherence_input import t1_input
 from ._window_support import RpcRequest
 
 
 def test_form_inspection_rpc_reads_constructor_drafts(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
     window, _harness, _entry = attachment
@@ -42,7 +43,7 @@ def test_form_inspection_rpc_reads_constructor_drafts(
     "value", [{"expr": "2 * 7"}, {"expr": "missing_knob"}, {"expr": "1e308 * 1e308"}]
 )
 def test_form_inspection_rpc_candidate_does_not_write_start_draft(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     value: JsonValue,
 ) -> None:
@@ -86,7 +87,7 @@ def test_form_inspection_rpc_preserves_complex_tag_on_invalid_numeric_candidate(
 
 
 def test_form_inspection_rpc_plan_branch_batch_does_not_change_gui(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
     window, _harness, _entry = attachment
@@ -115,7 +116,7 @@ def test_form_inspection_rpc_plan_branch_batch_does_not_change_gui(
 
 
 def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
 ) -> None:
@@ -196,7 +197,7 @@ def test_form_inspection_rpc_uses_accepted_host_and_preserves_local_text(
     ],
 )
 def test_form_inspection_rpc_rejects_bad_form_or_batch_without_writes(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
     params: dict[str, object],
 ) -> None:
@@ -218,7 +219,7 @@ def test_form_inspection_rpc_rejects_unknown_form_at_parameter_seam(
 
 
 def test_form_inspection_rpc_requires_accepted_explicit_target(
-    run_attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    run_attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     rpc: RpcRequest,
 ) -> None:
     window, harness, _entry = run_attachment

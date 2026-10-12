@@ -1,17 +1,23 @@
-"""Concrete T1 GUI composition behind the shared process runtime."""
+"""Generic workflow GUI composition behind the shared process runtime."""
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
-import zcu_tools
 from zcu_tools.device.manager import DeviceManager
-from zcu_tools.gui.catalog_loader import SourceCatalogLoader, SourcePackage
+from zcu_tools.gui.app.workflows.persistence import (
+    WorkflowInputCodec,
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
+from zcu_tools.gui.catalog_loader import SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.runtime import GuiAssembly, GuiRuntimeBehavior, GuiRuntimeSpec
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -22,22 +28,16 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from zcu_lab import ALIAS_PRESET
-
-from .catalog import build_catalog
-from .persistence import (
-    WorkflowInputCodec,
-    WorkflowInputRestoreReport,
-    WorkflowInputSnapshot,
-)
-from .window import T1WorkflowWindow
+from .attachment import Attachment
+from .catalog import WorkflowCatalog
+from .window import WorkflowWindow
 
 
-class WorkflowsGuiBehavior(GuiRuntimeBehavior):
+class WorkflowsGuiBehavior[C](GuiRuntimeBehavior):
     """Compose a fresh EMPTY session with one Window and native Controller.
 
     state and services are the shared session owners created by assemble.
-    window is its sole T1WorkflowWindow, also used by the optional RPC adapter.
+    window is its sole WorkflowWindow, also used by the optional RPC adapter.
     Keep this behavior alive through Qt shutdown. Parsed plan/knobs input is
     restored before display and flushed on close. Construction never connects
     instruments or restores native runs, session sources or hardware.
@@ -47,20 +47,31 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         app_name="workflows",
         app_slug="workflows",
         default_control_port=0,
-        logging_extra_namespaces=("zcu_lab",),
     )
     state: SessionState
     services: SessionServices
-    window: T1WorkflowWindow
+    window: WorkflowWindow[C]
 
     def __init__(
         self,
         *,
+        registrations: Sequence[Attachment[C]],
+        loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
+        alias_rows: tuple[AliasRow, ...] = (),
         project_root: str = "",
         clean: bool = False,
         cache_dir: Path | None = None,
     ) -> None:
         """Configure roots and input restoration without I/O or Qt construction.
+
+        registrations is a nonempty ordered collection of coherent workflow/form
+        attachments sharing opaque context C. The first is default; empty or
+        duplicate names raise ValueError before assembly. loader optionally loads
+        replacement WorkflowCatalog[C] instances through the same registry;
+        None disables source reload. Caller configures bounded/fixed namespaces
+        and a builder that imports current registrations on every load.
+        alias_rows is the ordered shared-session fallback preset; () means no
+        aliases. It never declares workflow roles or chooses connected devices.
 
         Empty project_root means the launch cwd. clean skips reading the previous
         input file, but successful close still flushes current input. cache_dir
@@ -68,6 +79,10 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
         Component definitions must be registered before Setup opens an entry.
         An existing QApplication is required for assemble, not for this call.
         """
+        self._registrations = tuple(registrations)
+        WorkflowCatalog(self._registrations)
+        self._loader = loader
+        self._alias_rows = alias_rows
         self._project_root = project_root
         self._clean = clean
         self._cache_dir = cache_dir
@@ -110,40 +125,14 @@ class WorkflowsGuiBehavior(GuiRuntimeBehavior):
             bind_assets=ArbWaveformDatabase.info_at,
             project_root=self._project_root,
             device_registry=self._devices,
-            alias_rows=ALIAS_PRESET,
+            alias_rows=self._alias_rows,
         )
-        loader = SourceCatalogLoader(
-            sources=(
-                SourcePackage("zcu_tools", Path(zcu_tools.__file__).parent),
-                SourcePackage("zcu_lab", Path(__file__).resolve().parents[2]),
-            ),
-            reload_modules=("zcu_lab.workflows",),
-            preserved_modules=tuple(
-                f"zcu_lab.workflows.gui.{name}"
-                for name in (
-                    "app",
-                    "window",
-                    "figures",
-                    "layout",
-                    "remote",
-                    "remote_methods",
-                    "catalog",
-                    "attachment",
-                    "forms",
-                    "persistence",
-                    "tuning_panel",
-                    "_form_io",
-                )
-            ),
-            catalog_module="zcu_lab.workflows.gui.plan",
-            catalog_builder=build_catalog,
-        )
-        self.window = T1WorkflowWindow(
+        self.window = WorkflowWindow(
             self.state,
             self.services,
             self._owner,
-            catalog=build_catalog(),
-            loader=loader,
+            registrations=self._registrations,
+            loader=self._loader,
             on_close=self._close,
         )
         self._caretaker = SingleFileCaretaker(

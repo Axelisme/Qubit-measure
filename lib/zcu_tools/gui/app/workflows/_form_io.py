@@ -12,6 +12,7 @@ from math import isfinite
 
 from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
+
 from zcu_tools.gui.cfg.codec import encode_complex
 from zcu_tools.gui.form import (
     FormEnv,

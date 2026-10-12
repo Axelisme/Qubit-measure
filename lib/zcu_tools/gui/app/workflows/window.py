@@ -1,9 +1,9 @@
-"""Concrete T1 form, captured startup and Qt plotting composition."""
+"""Generic workflow form, captured startup and Qt plotting composition."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from threading import get_ident
 from typing import TYPE_CHECKING, Literal
 
@@ -12,6 +12,7 @@ from qick import QickConfig
 from qtpy.QtCore import QSignalBlocker, QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QWidget
+
 from zcu_tools.datafile import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.acquisition import capture_software_provenance
@@ -27,8 +28,19 @@ from zcu_tools.experiment.workflows import (
     TunablesSnapshot,
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
+from zcu_tools.gui.app.workflows._form_io import inspect_form_input, prepare_start_form
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.layout import build_workflow_layout
+from zcu_tools.gui.app.workflows.persistence import (
+    WorkflowInputRestoreReport,
+    WorkflowInputSnapshot,
+)
+from zcu_tools.gui.app.workflows.remote import (
+    FormInspectionReply,
+    WorkflowRemoteControlAdapter,
+)
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -56,23 +68,19 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
-from ._form_io import inspect_form_input, prepare_start_form
-from .catalog import WorkflowCatalog, build_catalog
+from .attachment import Attachment
+from .catalog import WorkflowCatalog
 from .figures import WorkflowFigureViews
 from .forms import WorkflowForms
-from .layout import build_workflow_layout
-from .persistence import WorkflowInputRestoreReport, WorkflowInputSnapshot
-from .remote import FormInspectionReply, T1RemoteControlAdapter
-from .tuning_panel import T1TuningPanel
 
 if TYPE_CHECKING:
-    from ..calibration import Calibrated
-    from .panel import WorkflowFormPanel, WorkflowPlanPanel
+    from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
+
 
 logger = logging.getLogger(__name__)
 
 
-class T1WorkflowWindow(QWidget):
+class WorkflowWindow[C](QWidget):
     """Compose one workflow selector, captured Start and tuning on the Qt owner.
 
     plan_panel/tunables_panel expose selected independent parsed drafts.
@@ -90,8 +98,8 @@ class T1WorkflowWindow(QWidget):
         services: SessionServices,
         owner: OwnerScheduler,
         *,
-        catalog: WorkflowCatalog | None = None,
-        loader: SourceCatalogLoader[WorkflowCatalog] | None = None,
+        registrations: Sequence[Attachment[C]],
+        loader: SourceCatalogLoader[WorkflowCatalog[C]] | None = None,
         on_close: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -99,8 +107,11 @@ class T1WorkflowWindow(QWidget):
 
         state belongs to services; owner marshals plot commands. parent=None is
         top-level; otherwise embedded. EMPTY builds partial source-free drafts.
-        catalog=None builds Coherence/MIST/overnight, Coherence first.
-        loader=None is unmonitored.
+        registrations is nonempty, ordered and has unique declaration names;
+        its first item is the default. Invalid catalogs raise ValueError.
+        loader supplies current WorkflowCatalog[C] instances on source reload;
+        caller owns its bounded namespaces and fresh-registration builder.
+        loader=None is unmonitored and disables Reload.
         Reload keeps session/Controller and the retained run binding. Prepare
         captures context/global qubit alias; source errors propagate without I/O.
         Caller retains this Window/parent through shutdown. Close requests Stop,
@@ -108,7 +119,7 @@ class T1WorkflowWindow(QWidget):
         Callback errors reject close, display diagnostics and retain retry resources.
         """
         super().__init__(parent)
-        current = catalog if catalog is not None else build_catalog()
+        current = WorkflowCatalog(tuple(registrations))
         self._loader = loader
         self._thread = get_ident()
         self._forms_for_run = False
@@ -119,10 +130,10 @@ class T1WorkflowWindow(QWidget):
         self._owner = owner
         self._progress = services.progress
         self._on_close = on_close
-        self.controller: WorkflowController[FormModel, Calibrated] = WorkflowController(
-            services.runner, "t1-workflow", on_finished=self._finished
+        self.controller: WorkflowController[FormModel, C] = WorkflowController(
+            services.runner, "workflow", on_finished=self._finished
         )
-        self.tuning_panel: T1TuningPanel[FormModel, Calibrated] | None = None
+        self.tuning_panel: WorkflowTuningPanel[FormModel, C] | None = None
 
         env = (
             self._capture_env(self._services.device.capture_native_device_info())
@@ -177,7 +188,7 @@ class T1WorkflowWindow(QWidget):
         try:
             dialog = AliasDialog(self._services.context_control, self)
         except Exception as error:
-            logger.exception("T1 workflow alias editor could not open")
+            logger.exception("Workflow alias editor could not open")
             self._controls.message.setText(str(error))
             return
         dialog.finished.connect(self._sync_source_status)
@@ -200,7 +211,7 @@ class T1WorkflowWindow(QWidget):
         try:
             self.prepare_forms()
         except Exception as error:
-            logger.exception("T1 workflow source capture failed")
+            logger.exception("Workflow source capture failed")
             self._controls.message.setText(str(error))
 
     def prepare_forms(self) -> None:
@@ -464,7 +475,7 @@ class T1WorkflowWindow(QWidget):
         Cached native device info is used for forms; no driver live read occurs.
         Missing storage/hardware, source/provenance and native failures propagate,
         without retry/fallback. Pending/active/paused ownership rejects replacement.
-        T1 uses validated pi estimate/module scalars; overnight context is None.
+        The selected registration supplies its opaque workflow context seed.
         The token is pending submission, not native acceptance.
         """
         self._ensure_can_start()
@@ -509,7 +520,9 @@ class T1WorkflowWindow(QWidget):
             return prepared
         session = self._state.session_env
         if session.soc is None or not isinstance(session.soccfg, QickConfig):
-            raise ValueError("T1 Start requires connected SoC and native QickConfig")
+            raise ValueError(
+                "Workflow Start requires connected SoC and native QickConfig"
+            )
         roots = workflow_roots(
             result_path=storage.result_path,
             database_path=storage.database_path,
@@ -553,8 +566,8 @@ class T1WorkflowWindow(QWidget):
         soc: object,
         soccfg: QickConfig,
         plots: Plots,
-        seed: Calibrated | None,
-    ) -> tuple[EnginePorts[Calibrated], SoftwareProvenance]:
+        seed: C | None,
+    ) -> tuple[EnginePorts[C], SoftwareProvenance]:
         # Native handles were validated before roots/Plots allocation in Start.
         devices = self._services.device.get_connected_devices()
         context = RunContext(soc, soccfg, plots, devices, StopSignal())
@@ -572,7 +585,7 @@ class T1WorkflowWindow(QWidget):
 
     def create_remote_service(
         self, opts: ControlOptions, bus: BaseEventBus
-    ) -> T1RemoteControlAdapter:
+    ) -> WorkflowRemoteControlAdapter[C]:
         """Create an inert RPC adapter of these controls on this Window's owner.
 
         opts configures shared transport; bus must be this Window's session bus.
@@ -581,7 +594,9 @@ class T1WorkflowWindow(QWidget):
         new inputs or touch hardware. Remote Stop requires explicit run_id;
         stopping the transport does not cancel a native run.
         """
-        return T1RemoteControlAdapter(self, opts, bus=bus, owner_scheduler=self._owner)
+        return WorkflowRemoteControlAdapter(
+            self, opts, bus=bus, owner_scheduler=self._owner
+        )
 
     def inspect_form(
         self,
@@ -742,13 +757,6 @@ class T1WorkflowWindow(QWidget):
         if status is None:
             return
         self._controls.message.setText(status.lifecycle)
-        engine = controller.engine
-        if status.workflow == "overnight" and engine is not None:
-            try:
-                self._figure_views.refresh_native(engine.records(status.run_id))
-            except Exception as error:
-                logger.exception("Committed overnight trend rendering failed")
-                self._controls.message.setText(str(error))
         self._controls.pause.setEnabled(
             controller.operation_id is not None and status.lifecycle == "running"
         )
@@ -762,7 +770,7 @@ class T1WorkflowWindow(QWidget):
             and binding is not None
             and binding.engine is not None
         ):
-            self.tuning_panel = T1TuningPanel(
+            self.tuning_panel = WorkflowTuningPanel(
                 controller, self, panel_factory=self._forms.attachment.knobs_panel
             )
             self._controls.layout.addWidget(self.tuning_panel)
@@ -804,7 +812,7 @@ class T1WorkflowWindow(QWidget):
         try:
             self.pause(run_id)
         except Exception as error:
-            logger.exception("T1 workflow Pause failed")
+            logger.exception("Workflow Pause failed")
             self._controls.message.setText(str(error))
 
     def _resume_clicked(self) -> None:
@@ -814,7 +822,7 @@ class T1WorkflowWindow(QWidget):
         try:
             self.resume(run_id)
         except Exception as error:
-            logger.exception("T1 workflow Resume failed")
+            logger.exception("Workflow Resume failed")
             self._controls.message.setText(str(error))
 
     def _stop_clicked(self) -> None:
@@ -825,14 +833,14 @@ class T1WorkflowWindow(QWidget):
         try:
             self.stop(run_id)
         except Exception as error:
-            logger.exception("T1 workflow Stop failed")
+            logger.exception("Workflow Stop failed")
             self._controls.message.setText(str(error))
 
     def _start_clicked(self) -> None:
         try:
             result = self.start(new_run_id())
         except Exception as error:
-            logger.exception("T1 workflow Start failed")
+            logger.exception("Workflow Start failed")
             self._controls.message.setText(str(error))
             return
         if isinstance(result, FormErrors):
@@ -844,7 +852,7 @@ class T1WorkflowWindow(QWidget):
             if self._on_close is not None:
                 self._on_close()
         except Exception as error:
-            logger.exception("T1 workflow session shutdown failed")
+            logger.exception("Workflow session shutdown failed")
             self._controls.message.setText(str(error))
             if event is not None:
                 event.ignore()
@@ -852,14 +860,23 @@ class T1WorkflowWindow(QWidget):
         return True
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        """Keep producer/canvas alive during Stop; release only after terminal."""
+        """Handle Qt close on the owner thread, retaining an active producer/canvas.
+
+        a0 is Qt's close event, or None for binding-compatible direct dispatch.
+        Pending work requests Stop and ignores the event until owner delivery;
+        paused runs stop before shutdown. Control/cleanup failures are logged and
+        shown and reject close, without releasing retry resources. After terminal
+        delivery and successful on_close, close Setup/forms and release plots.
+        Borrowed services remain caller-owned; this never disconnects hardware
+        independently of on_close. No event-loop wait or retry occurs here.
+        """
         run_id = self.controller.run_id
         if self.controller.has_pending_segment:
             if run_id is not None:
                 try:
                     self.stop(run_id)
                 except Exception as error:
-                    logger.exception("T1 workflow Stop on close failed")
+                    logger.exception("Workflow Stop on close failed")
                     self._controls.message.setText(str(error))
                     if a0 is not None:
                         a0.ignore()
@@ -872,7 +889,7 @@ class T1WorkflowWindow(QWidget):
             try:
                 self.stop(run_id)
             except Exception as error:
-                logger.exception("T1 workflow Stop on close failed")
+                logger.exception("Workflow Stop on close failed")
                 self._controls.message.setText(str(error))
                 if a0 is not None:
                     a0.ignore()

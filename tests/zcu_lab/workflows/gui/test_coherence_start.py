@@ -3,9 +3,9 @@
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load_run_data
+from zcu_tools.gui.app.workflows.remote import FormWrite
 
 from tests.zcu_lab.workflows._sim_inputs import Inputs
-from zcu_lab.workflows.gui.remote import FormWrite
 
 from ._sim_session import SimSession, wait_owner
 from ._window_support import start_plan_batch

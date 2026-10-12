@@ -1,9 +1,9 @@
 # `zcu_lab.workflows` 使用者 workflow
 
-**Last updated:** 2026-10-12，獨立 run conversion 與部分校準結果
+**Last updated:** 2026-10-12，使用者 registry 與框架宿主分離
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。
-Engine 擁有迭代、輸入副本、取消、revision 與提交。宿主建立 catalog，再注入框架；import 不啟動量測。
+Engine 擁有迭代、輸入副本、取消、revision 與提交。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
 GUI／MCP 只支援 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。不提供舊 standalone 名稱的 alias。
 
 ## Coherence
@@ -58,7 +58,8 @@ Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 reque
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
 下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
 Pause 丟棄未提交 pair，Resume 重做；Stop 保留既有 commits。
-`trend.project_overnight_trend` 與 `draw_overnight_trend` 從 committed scalar records 畫 live 趨勢，缺值維持 gaps，不重 fit。
+`trend.project_overnight_trend` 與 `draw_overnight_trend` 提供 scalar records 的趨勢投影與繪圖，缺值維持 gaps，不重 fit。
+宿主不輪詢 committed records 來呼叫它們。Workflow 透過 `env.plots` 決定資料與更新時機，framework 不保證只畫 journal 已提交的紀錄。
 沒有自動保存或從 run 目錄重開趨勢圖。保存責任見 ADR-0062。
 
 ## Native、裝置與前端邊界

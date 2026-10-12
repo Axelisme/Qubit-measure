@@ -12,6 +12,7 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.mcp.core.reply import ToolReply
@@ -25,7 +26,6 @@ from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.calibration import Calibrated
 from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
-from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
 from ._coherence_input import t1_input
 from ._recording_transport import WindowTransport
@@ -35,7 +35,7 @@ from ._window_support import start_plan_batch
 
 @pytest.fixture
 def mcp_paused_controls(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     mcp_tools: ToolTable,
     catalog_source: InjectedCatalog,
@@ -101,7 +101,7 @@ def mcp_paused_controls(
 
 
 def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     mcp_tools: ToolTable,
     mcp_transport: WindowTransport,
@@ -212,7 +212,7 @@ def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
 
 
 def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     mcp_tools: ToolTable,
     mcp_transport: WindowTransport,
     mcp_paused_controls: tuple[
@@ -313,7 +313,7 @@ def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
 
 @pytest.mark.usefixtures("mcp_paused_controls")
 def test_mcp_native_stale_edit_preserves_current_owner_without_retry(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     mcp_tools: ToolTable,
     mcp_transport: WindowTransport,
 ) -> None:
@@ -351,7 +351,7 @@ def test_mcp_native_stale_edit_preserves_current_owner_without_retry(
 
 @pytest.mark.parametrize("method", ["pause", "resume", "records", "form", "tunables"])
 def test_mcp_native_pending_error_is_not_retried_or_claimed_as_acceptance(
-    attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
+    attachment: tuple[WorkflowWindow[Calibrated], StartHarness, ResultEntry],
     inputs: Inputs,
     mcp_tools: ToolTable,
     mcp_transport: WindowTransport,

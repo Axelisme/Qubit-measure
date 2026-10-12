@@ -1,10 +1,11 @@
-"""Concrete T1 tunables view for embedding in the workflow host."""
+"""Generic plan and tunables views for an injected workflow registration."""
 
 from collections.abc import Callable
 
 from pydantic import BaseModel
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QVBoxLayout, QWidget
+
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
@@ -16,7 +17,7 @@ class WorkflowFormPanel[F: FormModel](QWidget):
     state is the supplied parsed input/base, not a copy. env is its fixed capture;
     editor owns local unparsed text only. No defaults, native submission, capture
     or lifecycle policy occurs. Closing detaches subscriptions, not the draft.
-    T1 and overnight use this same view with independent model declarations.
+    All workflows use this view with their independent model declarations.
     """
 
     def __init__(
