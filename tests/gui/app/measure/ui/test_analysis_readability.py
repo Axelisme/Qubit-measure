@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QLabel,
     QLineEdit,
@@ -188,4 +189,105 @@ def test_parameter_hint_stays_hidden_before_parameters_are_known(qapp):
     finally:
         form.close()
         form.deleteLater()
+        qapp.processEvents()
+
+
+def _rejected_write_error() -> Exception:
+    """The real AcceptedWrite rejection of a non-finite proposed value."""
+    from zcu_tools.resources.entry.ledger_models import AcceptedWrite
+
+    try:
+        AcceptedWrite.model_validate({"path": "Q1.t1", "value": float("nan")})
+    except ValueError as error:
+        return error
+    raise AssertionError("AcceptedWrite accepted a non-finite value")
+
+
+def _post_tab(qapp):
+    from zcu_tools.gui.app.measure.adapter import AnalysisMode
+
+    ctrl = MagicMock()
+    ctrl.get_left_panel_width.return_value = 500
+    ctrl.progress_control.attach_progress.return_value = lambda: None
+    ctrl.progress_control.progress_bars.return_value = []
+    ctrl.get_adapter_guide.return_value = {}
+    tab = ExpTabWidget(
+        "t",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    tab.resize(800, 600)
+    tab.show()
+    qapp.processEvents()
+    return tab, ctrl
+
+
+def _show_pane(tab, title: str, qapp) -> None:
+    tabs = next(
+        t
+        for t in tab.findChildren(QTabWidget)
+        if any(t.tabText(i) == title for i in range(t.count()))
+    )
+    tabs.setCurrentIndex(
+        next(i for i in range(tabs.count()) if tabs.tabText(i) == title)
+    )
+    qapp.processEvents()
+
+
+def _proposal() -> ParameterWriteback:
+    item = ParameterWriteback("Q1.t1", "Lifetime", proposed_value=float("nan"))
+    item.session_id = "lifetime"
+    return item
+
+
+@pytest.mark.parametrize("pane", ["Analysis", "Post-Analysis"])
+def test_writeback_preview_failure_shows_reason_in_place(qapp, pane):
+    tab, ctrl = _post_tab(qapp)
+    error = _rejected_write_error()
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = error
+    update, widget = (
+        (tab.update_writeback_items, tab.writeback_widget)
+        if pane == "Analysis"
+        else (tab.update_post_writeback_items, tab.post_writeback_widget)
+    )
+    try:
+        _show_pane(tab, pane, qapp)
+        update([_proposal()])
+        qapp.processEvents()
+        message = widget.findChild(QLabel, "writebackPreviewUnavailable")
+        assert message is not None and message.isVisible()
+        assert message.text() == f"Writeback preview unavailable: {error}"
+        assert widget.findChildren(QCheckBox) == []
+        apply = widget.findChild(QPushButton, "writebackApply")
+        assert apply is not None and not apply.isEnabled()
+
+        item = _proposal()
+        item.proposed_value = 1.5
+        ctrl.writeback_control.get_writeback_values_for_pane.side_effect = None
+        ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+            item.session_id: WritebackValues(
+                actual_path="Q1.t1", current=None, proposed=1.5, unit=None
+            )
+        }
+        update([item])
+        qapp.processEvents()
+        assert widget.findChild(QLabel, "writebackPreviewUnavailable") is None
+        assert len(widget.findChildren(QCheckBox)) == 1
+    finally:
+        tab.close()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_writeback_preview_failure_outside_the_contract_propagates(qapp):
+    tab, ctrl = _post_tab(qapp)
+    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = TypeError(
+        "programming error"
+    )
+    try:
+        with pytest.raises(TypeError, match="programming error"):
+            tab.update_writeback_items([_proposal()])
+    finally:
+        tab.close()
+        tab.deleteLater()
         qapp.processEvents()
