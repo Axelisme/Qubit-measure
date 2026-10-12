@@ -9,7 +9,11 @@ from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
 )
-from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, FluxDepState, spectrum_version_key
+from zcu_tools.gui.app.fluxdep.state import (
+    AlignmentPublication,
+    FluxDepState,
+    spectrum_version_key,
+)
 from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 
 
