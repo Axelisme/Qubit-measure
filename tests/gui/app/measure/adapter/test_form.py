@@ -29,7 +29,9 @@ class ScalarCfg(ConfigBase):
     """A synthetic cfg exercises section, omission and locked scalar rules."""
 
     sweep: SweepSection
-    count: Annotated[int, Field(ge=1), FieldMeta(label="Repeats", description="Repeat count.")] = 3
+    count: Annotated[
+        int, Field(ge=1), FieldMeta(label="Repeats", description="Repeat count.")
+    ] = 3
     amount: float = 2.0
     hidden: float = 4.0
     optional: str | None = None
@@ -71,14 +73,22 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
     )
     env = FormEnv()
     base = form.default_input(env)
-    assert list(form.model.model_fields) == ["sweep", "count", "amount", "optional", "text"]
+    assert list(form.model.model_fields) == [
+        "sweep",
+        "count",
+        "amount",
+        "optional",
+        "text",
+    ]
     assert "optional" not in base.data
     assert base.data["amount"] == {"expr": "2 * 3"}
     state = FormState(base)
     cfg = form.to_cfg(require_result(state, env), env)
     assert cfg == ScalarCfg(
         sweep=SweepSection(freq=SweepCfg(start=8, stop=12, expts=5, step=1)),
-        count=7, amount=6, text="$literal",
+        count=7,
+        amount=6,
+        text="$literal",
     )
     schema = form.model.input_schema(env)
     properties = schema["properties"]
@@ -93,7 +103,9 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
 
 def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> None:
     assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
-    form = adapter_api.Form(ScalarCfg, {"sweep": {"freq": nodes.Range.between(1, 2, expts=1)}})
+    form = adapter_api.Form(
+        ScalarCfg, {"sweep": {"freq": nodes.Range.between(1, 2, expts=1)}}
+    )
     env = FormEnv()
     result = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
     assert isinstance(result, FormErrors)
@@ -103,18 +115,28 @@ def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> Non
 @pytest.mark.parametrize("scenario", ["unknown", "hidden_required"])
 def test_invalid_authored_tree_fails_at_construction(scenario: str) -> None:
     assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
-    tree: dict[str, nodes.FormNode] = {"unknown": 1} if scenario == "unknown" else {"sweep": nodes.Hidden()}
+    tree: dict[str, nodes.FormNode] = (
+        {"unknown": 1} if scenario == "unknown" else {"sweep": nodes.Hidden()}
+    )
     with pytest.raises(ValueError, match="unknown|sweep"):
         adapter_api.Form(ScalarCfg, tree)
 
 
 def alias_env() -> FormEnv:
     """Capture aliases without connected drivers, point I/O or hardware."""
-    library = LibrarySnapshot(ModuleLibraryDocument(format="zcu.module-library", format_version="1.0"))
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+    )
     parameters = ParameterContext(
-        point=PointDocument(format="zcu.parameter-container", format_version="1.0", general=PointGeneral(created_at="2026-10-13T00:00:00Z")),
+        point=PointDocument(
+            format="zcu.parameter-container",
+            format_version="1.0",
+            general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
+        ),
         library=library,
-        target=SavedPoint(entry_id="synthetic", point="synthetic"), roles=None, storage=None,
+        target=SavedPoint(entry_id="synthetic", point="synthetic"),
+        roles=None,
+        storage=None,
     ).bind_aliases((AliasRow("flux_dev", "yoko"), AliasRow("missing", "")), {})
     return FormEnv(parameters=parameters, library=library)
 
@@ -122,10 +144,20 @@ def alias_env() -> FormEnv:
 def test_alias_name_resolves_direct_name_and_missing_required_is_invalid() -> None:
     assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
     env = alias_env()
-    form = adapter_api.Form(DeviceCfg, {"flux_dev": nodes.AliasName("flux_dev", choices_source=None), "optional_dev": nodes.AliasName("missing", choices_source=None)})
+    form = adapter_api.Form(
+        DeviceCfg,
+        {
+            "flux_dev": nodes.AliasName("flux_dev", choices_source=None),
+            "optional_dev": nodes.AliasName("missing", choices_source=None),
+        },
+    )
     assert form.default_input(env).data == {"flux_dev": "yoko"}
-    assert form.to_cfg(require_result(FormState(form.default_input(env)), env), env) == DeviceCfg(flux_dev="yoko")
-    missing = adapter_api.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing", choices_source=None)})
+    assert form.to_cfg(
+        require_result(FormState(form.default_input(env)), env), env
+    ) == DeviceCfg(flux_dev="yoko")
+    missing = adapter_api.Form(
+        DeviceCfg, {"flux_dev": nodes.AliasName("missing", choices_source=None)}
+    )
     state = FormState(missing.default_input(env))
     result = state.result(env)
     assert isinstance(result, FormErrors)
@@ -140,8 +172,10 @@ def lower_extras(extras: Extras, cfg: ScalarCfg) -> ScalarCfg:
 def test_extras_lower_receives_validated_named_models() -> None:
     assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
     form = adapter_api.Form(
-        ScalarCfg, {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
-        extras=Extras, lower=lower_extras,
+        ScalarCfg,
+        {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
+        extras=Extras,
+        lower=lower_extras,
     )
     env = FormEnv()
     cfg = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
