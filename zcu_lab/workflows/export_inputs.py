@@ -149,6 +149,31 @@ def read_manifest(run: Path, workflow: str) -> SavedManifest:
     return manifest
 
 
+def _read_iteration(manifest: SavedManifest, source: Path) -> SavedIteration:
+    """Read a summary and validate its manifest and invocation references.
+
+    Validate every result classification, not just commits. I/O and validation
+    errors propagate for read_points to retain the source path and cause.
+    """
+    saved = SavedIteration.model_validate_json(source.read_text(encoding="utf-8"))
+    result = saved.result
+    if (
+        saved.identity != manifest.identity
+        or saved.workflow != manifest.workflow
+        or saved.plan != manifest.plan
+    ):
+        raise ValueError("Iteration identity/workflow/plan differs from manifest")
+    directory_name = source.parent.name
+    if (
+        saved.started.call_seq != int(directory_name)
+        or result.call_seq != saved.started.call_seq
+        or result.revision != saved.started.revision
+        or result.iteration_dir != f"iter/{directory_name}"
+    ):
+        raise ValueError("Iteration invocation identity/reference mismatch")
+    return saved
+
+
 def read_points[P](
     manifest: SavedManifest, adapter: TypeAdapter[P]
 ) -> tuple[tuple[SavedPoint[P], ...], tuple[Path, ...]]:
@@ -179,25 +204,8 @@ def read_points[P](
             continue
         has_record = True
         try:
-            saved = SavedIteration.model_validate_json(
-                source.read_text(encoding="utf-8")
-            )
+            saved = _read_iteration(manifest, source)
             result = saved.result
-            if (
-                saved.identity != manifest.identity
-                or saved.workflow != manifest.workflow
-                or saved.plan != manifest.plan
-            ):
-                raise ValueError(
-                    "Iteration identity/workflow/plan differs from manifest"
-                )
-            if (
-                saved.started.call_seq != int(directory.name)
-                or result.call_seq != saved.started.call_seq
-                or result.revision != saved.started.revision
-                or result.iteration_dir != f"iter/{directory.name}"
-            ):
-                raise ValueError("Iteration invocation identity/reference mismatch")
             if not isinstance(result, SavedCommit):
                 continue
             if (

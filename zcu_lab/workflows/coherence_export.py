@@ -17,7 +17,7 @@ from zcu_tools.datafile import (
 from zcu_tools.resources.entry.storage import bind_sample_table
 
 from .coherence import CoherencePlan, CoherencePoint
-from .coherence_measurements import LifetimeKind
+from .coherence_measurements import LifetimeKind, LifetimeResult
 from .export import (
     FluxdepExportOutput,
     PreparedFluxdepExport,
@@ -41,6 +41,28 @@ class CoherenceExportReport:
     outputs: tuple[FluxdepExportOutput, ...]
     samples: SampleExportReport | None
     missing_records: tuple[Path, ...]
+
+
+def _validate_lifetime_evidence(item: LifetimeResult) -> None:
+    """Reject inconsistent completion files or accepted lifetime/error scalars."""
+    if (item.status in {"accepted", "rejected"}) != (item.file is not None):
+        raise ValueError(
+            "Completed lifetime requires file; failed/skipped cannot name one"
+        )
+    if item.status == "accepted":
+        if (
+            item.lifetime_us is None
+            or not np.isfinite(item.lifetime_us)
+            or item.lifetime_us <= 0
+            or item.error_us is None
+            or not np.isfinite(item.error_us)
+            or item.error_us < 0
+        ):
+            raise ValueError(
+                "Accepted lifetime/error must be positive/nonnegative finite"
+            )
+    elif item.lifetime_us is not None or item.error_us is not None:
+        raise ValueError("Nonaccepted lifetime cannot carry accepted scalars")
 
 
 def _points(
@@ -75,26 +97,7 @@ def _points(
                     "Point lifetime order/selection differs from fixed plan"
                 )
             for item in point.measurements:
-                if (item.status in {"accepted", "rejected"}) != (item.file is not None):
-                    raise ValueError(
-                        "Completed lifetime requires file; failed/skipped cannot name one"
-                    )
-                if item.status == "accepted":
-                    if (
-                        item.lifetime_us is None
-                        or not np.isfinite(item.lifetime_us)
-                        or item.lifetime_us <= 0
-                        or item.error_us is None
-                        or not np.isfinite(item.error_us)
-                        or item.error_us < 0
-                    ):
-                        raise ValueError(
-                            "Accepted lifetime/error must be positive/nonnegative finite"
-                        )
-                elif item.lifetime_us is not None or item.error_us is not None:
-                    raise ValueError(
-                        "Nonaccepted lifetime cannot carry accepted scalars"
-                    )
+                _validate_lifetime_evidence(item)
         except ValueError as error:
             raise ValueError(f"{saved.record_path}: {error}") from error
     return points, missing
