@@ -57,6 +57,14 @@ def _joint_command(
     )
 
 
+def test_filter_finish_invalidated_is_native_fit_dependency(joint_route: RouteHarness) -> None:
+    link = joint_route.client()
+    context = _context(joint_route.request(link, "selection.interactive.open"))
+    finished = _joint_command(joint_route, link, context, "finish")
+    assert finished["ok"] and "result" in finished
+    assert finished["result"].get("invalidated") == ["fit"]
+
+
 def test_filter_finish_publishes_closes_and_reports_each_spectrum(
     joint_route: RouteHarness,
 ):
