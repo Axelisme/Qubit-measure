@@ -12,7 +12,8 @@ from zcu_tools.program.v2.sweep import SweepCfg
 
 from zcu_lab.workflows.acquire import run_t1
 from zcu_lab.workflows.analysis import analyze_t1
-from zcu_lab.workflows.t1 import T1Tunables, init_t1, t1_cfg
+from zcu_lab.workflows.coherence import CoherencePlan, init_coherence
+from zcu_lab.workflows.t1 import T1Tunables, t1_cfg
 
 from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 
@@ -20,21 +21,19 @@ from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 def test_init_t1_detaches_remaining_setpoints_and_each_runs_history(
     inputs: Inputs,
 ) -> None:
-    plan = make_plan(inputs)
+    plan = CoherencePlan(**make_plan(inputs).model_dump(mode="python"))
     seed = seed_from_inputs(inputs)
     env = InitEnv(datetime.now(UTC), seed)
-    first = init_t1(env, plan)
+    first = init_coherence(env, plan)
     first.remaining.pop(0)
     first.cal.f01_by_flux.append((1.0, seed.f01_mhz))
-    first.cal.n_calibrated += 1
     first.t1_by_flux.append((1.0, 18.0))
 
-    second = init_t1(env, plan)
+    second = init_coherence(env, plan)
     assert second.remaining == list(plan.fluxes)
     assert second.cal.seed == seed
     assert second.cal.last is None
     assert second.cal.f01_by_flux == []
-    assert second.cal.n_calibrated == 0
     assert second.t1_by_flux == []
     assert first.remaining == [1.1]
 

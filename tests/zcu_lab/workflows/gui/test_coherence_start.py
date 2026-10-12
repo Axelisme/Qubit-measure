@@ -18,13 +18,26 @@ def test_coherence_flags_start_through_same_controller_and_native_records(
 ) -> None:
     window = sim_session.app.window
     controller = window.controller
-    plan = start_plan_batch(inputs) + [
+    plan: list[FormWrite] = [
+        item
+        for item in start_plan_batch(inputs)
+        if item["path"] not in (["fluxes", "values"], ["pi_length_us"])
+    ] + [
         {"path": ["measure_t1"], "value": False},
         {"path": ["measure_t2ramsey"], "value": False},
         {"path": ["measure_t2echo"], "value": True},
     ]
+    plan.extend(
+        [
+            {
+                "path": ["fluxes", "values"],
+                "value": [inputs.flux_value, inputs.flux_value + 0.01],
+            },
+            {"path": ["pi_length_us"], "value": 0.4},
+        ]
+    )
     knobs: list[FormWrite] = [
-        {"path": ["cal", "span_mhz"], "value": 2.0},
+        {"path": ["cal", "span_mhz"], "value": 10.0},
         {"path": ["cal", "rabi_start_factor"], "value": 0.125},
         {"path": ["cal", "min_readout_snr"], "value": 1e12},
         {"path": ["t1", "guess_us"], "value": 50.0},

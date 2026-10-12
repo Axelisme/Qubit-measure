@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.workflows.declaration import WorkflowStep
 
     from zcu_lab.workflows.calibration import Calibrated
+    from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
     from zcu_lab.workflows.gui.catalog import WorkflowCatalog
-    from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 
 class ReloadSource:
@@ -57,19 +57,19 @@ class ReloadSource:
         (self.root / "declaration.py").write_text(
             f"""from datetime import timedelta
 from zcu_tools.experiment.workflows import Done, workflow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables, init_t1
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables, init_coherence
 from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
 from zcu_lab.workflows.gui.attachment import WorkflowAttachment
-from zcu_lab.workflows.gui.plan import T1PlanForm
-from zcu_lab.workflows.gui.tunables import T1TunablesForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
+from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
 
-class Plan(T1PlanForm):
+class Plan(CoherencePlanForm):
     {fields}
 
-class Knobs(T1TunablesForm):
+class Knobs(CoherenceTunablesForm):
     {knobs}
 
-@workflow("reload-v{version}", plan=T1Plan, tunables=T1Tunables, init=init_t1)
+@workflow("reload-v{version}", plan=CoherencePlan, tunables=CoherenceTunables, init=init_coherence)
 def step(env, plan, tun, state):
     {wait_step}
     return Done()
@@ -149,24 +149,24 @@ class InjectedCatalog:
 
     def install[S, R](
         self,
-        step: WorkflowStep[T1Plan, T1Tunables, S, R, Calibrated],
+        step: WorkflowStep[CoherencePlan, CoherenceTunables, S, R, Calibrated],
         window: T1WorkflowWindow,
     ) -> None:
         """Select a real declared scenario via public current-catalog reload."""
         from zcu_lab.workflows.export import prepare_t1_fluxdep_export
         from zcu_lab.workflows.gui.attachment import WorkflowAttachment
         from zcu_lab.workflows.gui.catalog import WorkflowCatalog, calibrated_seed
-        from zcu_lab.workflows.gui.plan import T1PlanForm
-        from zcu_lab.workflows.gui.tunables import T1TunablesForm
+        from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
+        from zcu_lab.workflows.gui.plan import CoherencePlanForm
 
         self.catalog = WorkflowCatalog(
             (
                 WorkflowAttachment(
                     step=step,
-                    plan_model=T1PlanForm,
-                    knobs_model=T1TunablesForm,
-                    plan_to_cfg=T1PlanForm.to_cfg,
-                    knobs_to_cfg=T1TunablesForm.to_cfg,
+                    plan_model=CoherencePlanForm,
+                    knobs_model=CoherenceTunablesForm,
+                    plan_to_cfg=CoherencePlanForm.to_cfg,
+                    knobs_to_cfg=CoherenceTunablesForm.to_cfg,
                     seed=calibrated_seed,
                     prepare_export=prepare_t1_fluxdep_export,
                 ),

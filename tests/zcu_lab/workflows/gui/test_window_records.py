@@ -21,9 +21,9 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui import figures as figures_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._reload_source import InjectedCatalog
 from ._window_scenarios import (
@@ -115,7 +115,10 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
     assert (
         rpc(
             "workflow.tunables",
-            {"run_id": "tuning", "batch": [{"path": ["guess_us"], "value": 41.0}]},
+            {
+                "run_id": "tuning",
+                "batch": [{"path": ["t1", "guess_us"], "value": 41.0}],
+            },
         )["ok"]
         is True
     )
@@ -144,12 +147,15 @@ def test_rpc_records_running_empty_and_committed_native_summary(
     window, harness, _entry = attachment
     observations: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("read-running", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("read-running", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, dict[str, float]]:
         del env, plan, tun
         observations.append(rpc("workflow.records", {"run_id": "reader"}))

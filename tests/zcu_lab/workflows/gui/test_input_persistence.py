@@ -11,9 +11,11 @@ from zcu_tools.gui.session.persistence import SingleFileCaretaker
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
-from zcu_lab.workflows.gui.plan import T1PlanForm
-from zcu_lab.workflows.gui.tunables import T1TunablesForm
+from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
+
+from ._coherence_input import t1_input
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ def test_original_expressions_roundtrip_and_restore_base(
         {("pi_length_us",): {"expr": "0.1 + 0.2"}}, window.plan_panel.env
     )
     window.tunables_panel.state.write(
-        {("guess_us",): {"expr": "7 * 3"}}, window.tunables_panel.env
+        {("t1", "guess_us"): {"expr": "7 * 3"}}, window.tunables_panel.env
     )
     saved = window.capture_persisted_state()
     from zcu_lab.workflows.gui.persistence import WorkflowInputCodec
@@ -46,10 +48,12 @@ def test_original_expressions_roundtrip_and_restore_base(
     caretaker.flush()
     raw = json.loads(caretaker.state_path.read_text())
     assert raw["plan"]["pi_length_us"] == {"expr": "0.1 + 0.2"}
-    assert raw["knobs"]["guess_us"] == {"expr": "7 * 3"}
-    window.plan_panel.state.reset(T1PlanForm.default_input(window.plan_panel.env))
+    assert t1_input(raw["knobs"])["guess_us"] == {"expr": "7 * 3"}
+    window.plan_panel.state.reset(
+        CoherencePlanForm.default_input(window.plan_panel.env)
+    )
     window.tunables_panel.state.reset(
-        T1TunablesForm.default_input(window.tunables_panel.env)
+        CoherenceTunablesForm.default_input(window.tunables_panel.env)
     )
     outcome = caretaker.restore_all()
     assert outcome.load_error is None
@@ -67,14 +71,14 @@ def test_incompatible_fields_drop_without_losing_other_input(
     report = window.restore_persisted_state(
         WorkflowInputSnapshot(
             plan={"pi_length_us": ["wrong shape"], "removed": 4},
-            knobs={"guess_us": {"expr": "8 * 4"}, "removed_knob": True},
+            knobs={"t1": {"guess_us": {"expr": "8 * 4"}}, "removed_knob": True},
         )
     )
     assert set(report.plan_dropped) == {("pi_length_us",), ("removed",)}
     assert report.knobs_dropped == (("removed_knob",),)
     restored = window.capture_persisted_state()
     assert restored.plan == defaults.plan
-    assert restored.knobs["guess_us"] == {"expr": "8 * 4"}
+    assert t1_input(restored.knobs)["guess_us"] == {"expr": "8 * 4"}
 
 
 def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> None:
@@ -84,7 +88,7 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
             {
                 "version": 1,
                 "plan": {"pi_length_us": {"expr": "1 / 4"}},
-                "knobs": {"guess_us": 35.0},
+                "knobs": {"t1": {"guess_us": 35.0}},
             }
         )
     )
@@ -94,13 +98,13 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
         assert app.window.capture_persisted_state().plan["pi_length_us"] == {
             "expr": "1 / 4"
         }
-        assert app.window.capture_persisted_state().knobs["guess_us"] == 35.0
+        assert t1_input(app.window.capture_persisted_state().knobs)["guess_us"] == 35.0
         app.window.tunables_panel.state.write(
-            {("guess_us",): {"expr": "9 * 5"}}, app.window.tunables_panel.env
+            {("t1", "guess_us"): {"expr": "9 * 5"}}, app.window.tunables_panel.env
         )
         assert app.window.close()
         raw = json.loads(path.read_text())
-        assert raw["knobs"]["guess_us"] == {"expr": "9 * 5"}
+        assert t1_input(raw["knobs"])["guess_us"] == {"expr": "9 * 5"}
         assert raw["plan"]["pi_length_us"] == {"expr": "1 / 4"}
     finally:
         app.shutdown()
@@ -125,11 +129,11 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
     try:
         assert (
             app.window.plan_panel.state.input.data
-            == T1PlanForm.default_input(app.window.plan_panel.env).data
+            == CoherencePlanForm.default_input(app.window.plan_panel.env).data
         )
         assert (
             app.window.tunables_panel.state.input.data
-            == T1TunablesForm.default_input(app.window.tunables_panel.env).data
+            == CoherenceTunablesForm.default_input(app.window.tunables_panel.env).data
         )
         assert any(
             "Failed to read GUI state" in label.text()
@@ -157,10 +161,10 @@ def test_clean_skips_read_but_close_replaces_snapshot(
         )
         assert (
             app.window.tunables_panel.state.input.data
-            == T1TunablesForm.default_input(app.window.tunables_panel.env).data
+            == CoherenceTunablesForm.default_input(app.window.tunables_panel.env).data
         )
         app.window.plan_panel.state.reset(
-            FormInput(T1PlanForm, {"pi_length_us": {"expr": "3 / 8"}})
+            FormInput(CoherencePlanForm, {"pi_length_us": {"expr": "3 / 8"}})
         )
         assert app.window.close()
         raw = json.loads(path.read_text())

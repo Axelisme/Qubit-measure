@@ -42,11 +42,11 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.components import QubitSchema
 from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.remote import T1RemoteControlAdapter
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 from zcu_lab.workflows.mcp import build_workflow_tools
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._plan_inputs import inline_input, library_env
 from ._recording_transport import WindowTransport, WireRoute
@@ -378,21 +378,26 @@ def paused_tuning(
     window, harness, _entry = run_attachment
     attempts: list[tuple[int, float, int]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("tuning-paused", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "tuning-paused", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, float]:
         del plan
         if state == 2:
             return Done()
-        attempts.append((state, tun.guess_us, tun.reps))
+        attempts.append((state, tun.t1.guess_us, tun.t1.reps))
         if state == 1 and len(attempts) == 2:
             window.pause("tuning")
             yield from env.wait_until(env.started_at)
-        return Next(tun.guess_us, state + 1)
+        return Next(tun.t1.guess_us, state + 1)
 
     catalog_source.install(step, window)
     token = window.start("tuning")

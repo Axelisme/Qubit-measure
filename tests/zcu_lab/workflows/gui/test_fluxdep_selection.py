@@ -13,14 +13,14 @@ from ._sim_session import SimSession, wait_owner
 
 
 @pytest.mark.uses_wall_clock
-@pytest.mark.parametrize("name", ["T2echo_fluxdep", "T2ramsey_fluxdep", "MIST_fluxdep"])
+@pytest.mark.parametrize("name", ["mist_fluxdep"])
 @pytest.mark.parametrize("starter", ["gui", "mcp"])
 def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(
     sim_session: SimSession, qapp: QApplication, inputs: Inputs, name: str, starter: str
 ) -> None:
     window = sim_session.app.window
     controller = window.controller
-    if name == "MIST_fluxdep":
+    if name == "mist_fluxdep":
         context = sim_session.app.services.context
         target = context.read_context().target
         context.set_module(
@@ -56,7 +56,7 @@ def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(
         {"path": ["cal", "rabi_start_factor"], "value": 0.125},
         {"path": ["rounds"], "value": 10},
     ]
-    if name == "MIST_fluxdep":
+    if name == "mist_fluxdep":
         plan.extend(
             [
                 {"path": ["gain_start"], "value": 0.0},
@@ -67,10 +67,6 @@ def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(
                 {"path": ["mist_pulse", "name"], "value": "Q1.pulses.mist"},
             ]
         )
-    else:
-        plan.append({"path": ["points"], "value": 101})
-        if name == "T2ramsey_fluxdep":
-            tunables.append({"path": ["detune_ratio"], "value": 0.25})
     run_id = "20261006T010000Z-a1b2c3"
     if starter == "gui":
         window.plan_panel.state.write(
@@ -102,8 +98,4 @@ def test_selected_fluxdep_gui_and_mcp_run_on_the_fixed_controller(
     assert merged.metadata.experiment == name
     assert merged.metadata.snapshot.point == "source"
     assert engine.records(run_id) == canonical
-    assert tuple(merged.payload.variables) == (
-        ("signal", "success")
-        if name == "MIST_fluxdep"
-        else ("signal", "time", name.split("_")[0].lower())
-    )
+    assert tuple(merged.payload.variables) == ("signal", "success")

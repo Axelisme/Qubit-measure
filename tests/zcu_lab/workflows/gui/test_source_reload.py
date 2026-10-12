@@ -24,6 +24,7 @@ from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.gui.app import WorkflowsGuiBehavior
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
 
+from ._coherence_input import t1_input
 from ._plan_inputs import inline_input
 from ._reload_source import ReloadSource
 
@@ -60,7 +61,7 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
         window.plan_panel.env,
     )
     window.tunables_panel.state.write(
-        {("guess_us",): {"expr": "8 * 4"}, ("legacy_knob",): 7},
+        {("t1", "guess_us"): {"expr": "8 * 4"}, ("legacy_knob",): 7},
         window.tunables_panel.env,
     )
     source.write(2)
@@ -71,7 +72,7 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     assert window.plan_panel is not old_plan and window.tunables_panel is not old_knobs
     saved = window.capture_persisted_state()
     assert saved.plan["pi_length_us"] == {"expr": "1 / 4"}
-    assert saved.knobs["guess_us"] == {"expr": "8 * 4"}
+    assert t1_input(saved.knobs)["guess_us"] == {"expr": "8 * 4"}
     assert saved.plan["new_field"] == 9 and saved.knobs["new_knob"] == 10
     assert window.plan_panel.state.base.data == saved.plan
     assert window.tunables_panel.state.base.data == saved.knobs
@@ -85,7 +86,7 @@ def test_reload_replaces_declarations_and_preserves_compatible_drafts(
     knobs = window.inspect_form("tunables")
     assert not isinstance(knobs, FormErrors)
     assert any(
-        item == {"path": ["guess_us"], "value": 32.0} for item in knobs["values"]
+        item == {"path": ["t1", "guess_us"], "value": 32.0} for item in knobs["values"]
     )
 
 
@@ -311,7 +312,7 @@ def test_app_injects_bounded_loader_and_reloads_without_rebuilding_session(
         app.window.reload_source()
         assert app.state is state and app.services is services
         assert app.window.controller is controller
-        assert app.window.capture_persisted_state().knobs["guess_us"] == 20.0
+        assert t1_input(app.window.capture_persisted_state().knobs)["guess_us"] == 20.0
     finally:
         app.window.close()
         app.shutdown()

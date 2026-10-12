@@ -36,7 +36,7 @@ from ._sim_inputs import Inputs, make_plan, seed_from_inputs
 class StagePlan(BaseModel):
     """Test invocation count; real module inputs remain in the closure."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
     count: int = 2
 
 
@@ -56,7 +56,7 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
     rabi_stage = calibration.calibrate_rabi
     readout_stage = calibration.calibrate_readout
     seed = seed_from_inputs(inputs)
-    plan = make_plan(inputs)
+    modules = make_plan(inputs)
     tun = calibration.CalibrationTunables(
         span_mhz=2.0, rabi_start_factor=0.125, min_readout_snr=1e12
     )
@@ -72,7 +72,7 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
     )
     def stages(
         env: WorkflowEnv[calibration.Calibrated],
-        _plan: StagePlan,
+        plan: StagePlan,
         tun: calibration.CalibrationTunables,
         state: StageState,
     ) -> Step[
@@ -84,15 +84,17 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
             calibration.Calibrated,
         ],
     ]:
-        if state.index == 2:
+        if state.index == plan.count:
             return Done()
-        captured = calibration.CalibrationInputs(plan.qub_pulse, plan.readout, tun)
+        captured = calibration.CalibrationInputs(
+            modules.qub_pulse, modules.readout, tun
+        )
         frequency = yield from frequency_stage(
             env,
             inputs=captured,
             flux=float(state.index),
             carry=state.carry,
-            save=partial(save_frequency, snapshot=plan.snapshot),
+            save=partial(save_frequency, snapshot=modules.snapshot),
         )
         rabi = yield from rabi_stage(
             env,
@@ -100,17 +102,21 @@ def test_public_frequency_rabi_readout_results_preserve_own_carry_after_rejectio
             frequency=frequency,
             carry=state.carry,
             t1_estimate_us=50.0,
-            save=partial(save_rabi, snapshot=plan.snapshot),
+            save=partial(save_rabi, snapshot=modules.snapshot),
         )
-        readout = yield from readout_stage(
-            env,
-            inputs=captured,
-            rabi=rabi,
-            point_index=state.index,
-            carry=state.carry,
-            t1_estimate_us=50.0,
-            save=partial(save_readout, snapshot=plan.snapshot),
-        )
+        if rabi.status != "accepted" or calibration.readout_due(state.index, tun):
+            readout = yield from readout_stage(
+                env,
+                inputs=captured,
+                rabi=rabi,
+                carry=state.carry,
+                t1_estimate_us=50.0,
+                save=partial(save_readout, snapshot=modules.snapshot),
+            )
+        else:
+            readout = calibration.ReadoutResult(
+                "skipped", "Readout flux-point cadence", None, None, None
+            )
         assert len(state.carry.f01_by_flux) == state.index + 1
         assert state.carry.last is not None
         state.index += 1

@@ -121,7 +121,7 @@ def test_switching_workflows_preserves_separate_parsed_drafts(
     window.tunables_panel.state.write(
         {("t2_guess_us",): {"expr": "3 * 4"}}, window.tunables_panel.env
     )
-    window.select_workflow("T1_fluxdep")
+    window.select_workflow("coherence_fluxdep")
     assert window.capture_persisted_state().plan["pi_length_us"] == {"expr": "1 / 3"}
     window.select_workflow("overnight")
     saved = window.capture_persisted_state()

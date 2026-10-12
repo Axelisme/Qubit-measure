@@ -21,9 +21,9 @@ from zcu_tools.gui.form import FormModel
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui import figures as figures_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
 from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest
@@ -35,12 +35,17 @@ def install_admission_observer(
     """Record init/step so cancellation before native acceptance proves neither ran."""
     calls: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         calls.append("init")
 
-    @workflow("admission-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "admission-observer", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def observe(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del env, plan, tun, state
         calls.append("step")
@@ -79,7 +84,7 @@ def admission_canceller(
         )
         try:
             window.apply_tunables(
-                "notification", {("guess_us",): 55.0}, actor=Actor("agent", "rpc")
+                "notification", {("t1", "guess_us"): 55.0}, actor=Actor("agent", "rpc")
             )
         except RuntimeError as error:
             errors.append(str(error))
@@ -98,12 +103,15 @@ def install_pause_plot_workflow(
     attempts: list[float] = []
     figures: list[int] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("pause-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("pause-window", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         attempts.append(env.context.pi_length_us)
@@ -134,12 +142,15 @@ def install_reader_plot_workflow(
     """Commit red then pause with blue so reads must expose the latest native plots."""
     attempts: list[int] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("read-plots", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("read-plots", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, int]:
         del plan, tun
         attempts.append(state)
@@ -168,14 +179,14 @@ def install_rpc_pause_workflow(
     attempts: list[float] = []
     receipts: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("rpc-pause", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("rpc-pause", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
         env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state
@@ -197,10 +208,16 @@ def install_close_fault_workflow(
     """Leave a paused native run with live plots for close/Stop journal fault checks."""
 
     @workflow(
-        "close-fault", plan=T1Plan, tunables=T1Tunables, init=lambda _env, _plan: None
+        "close-fault",
+        plan=CoherencePlan,
+        tunables=CoherenceTunables,
+        init=lambda _env, _plan: None,
     )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         env.plots.subplots("live")

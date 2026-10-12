@@ -29,12 +29,13 @@ from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui.plan import T1PlanForm
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
+from zcu_lab.workflows.gui.coherence import CoherenceTunablesForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.gui.remote import FormWrite
-from zcu_lab.workflows.gui.tunables import T1TunablesForm
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._coherence_input import t1_input
 from ._plan_inputs import inline_input
 from ._reload_source import InjectedCatalog
 from ._window_support import RpcRequest, start_plan_batch
@@ -59,12 +60,17 @@ def test_window_services_run_and_progress_share_session(
     )
     window.plan_panel.state.reset(inline_input(inputs))
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("session-progress", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "session-progress", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         bar = env.pbar("session work", 4)
@@ -143,22 +149,27 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     window.plan_panel.state.write({("pi_length_us",): {"expr": "0.06 * 2"}}, FormEnv())
     observed: list[tuple[Calibrated, RunSnapshot, float]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("capture-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "capture-observer", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def observe(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del state
-        observed.append((env.context, plan.snapshot, tun.guess_us))
+        observed.append((env.context, plan.snapshot, tun.t1.guess_us))
         yield from ()
         return Done()
 
     catalog_source.install(observe, window)
 
     def edit_on_progress_notification() -> None:
-        window.tunables_panel.state.write({("guess_us",): 77.0}, FormEnv())
+        window.tunables_panel.state.write({("t1", "guess_us"): 77.0}, FormEnv())
 
     detach = harness.progress.attach_by_owner(
         "t1-workflow", edit_on_progress_notification
@@ -167,7 +178,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
         token = window.start("captured")
     finally:
         detach()
-    assert window.tunables_panel.state.input.data["guess_us"] == {
+    assert t1_input(window.tunables_panel.state.input.data)["guess_us"] == {
         "expr": "general.ext.guess_us"
     }
     assert isinstance(token, int)
@@ -194,7 +205,7 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     assert (entry.result_path / "workflows/captured").is_dir()
     assert (entry.result_path / "workflows/captured/manifest.json").is_file()
     assert window.tuning_panel is not None
-    assert window.tuning_panel.host.accepted_input.data["guess_us"] == {
+    assert t1_input(window.tuning_panel.host.accepted_input.data)["guess_us"] == {
         "expr": "general.ext.guess_us"
     }
 
@@ -221,10 +232,10 @@ def test_real_t1_gui_caller_runs_native_offline_acquisitions(
     )
     window.tunables_panel.state.reset(
         FormInput(
-            T1TunablesForm,
+            CoherenceTunablesForm,
             {
                 "cal": {"span_mhz": 2.0, "rabi_start_factor": 0.125},
-                "rounds": 2,
+                "t1": {"rounds": 2},
             },
         )
     )
@@ -273,7 +284,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
     tunables: list[FormWrite] = [
         {"path": ["cal", "span_mhz"], "value": 2.0},
         {"path": ["cal", "rabi_start_factor"], "value": 0.125},
-        {"path": ["rounds"], "value": 2},
+        {"path": ["t1", "rounds"], "value": 2},
     ]
     run_id = "alias-" + starter
     if starter == "gui":
@@ -316,13 +327,7 @@ def test_default_device_alias_start_and_native_save_use_the_run_capture(
         return
     assert status.lifecycle == "done" and status.committed_seq == 1, status
     record = engine.records(run_id)[0]
-    source = (
-        entry.database_path
-        / "workflows"
-        / run_id
-        / record.iteration_dir
-        / point_files(record)[-1]
-    )
+    source = entry.database_path / "workflows" / run_id / record.iteration_dir / "t1.h5"
     spec = T1Exp().persistence_spec()
     native, metadata = load_run_with_metadata(source, spec=spec)
     assert native.cfg is not None
@@ -345,15 +350,20 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     window, harness, entry = attachment
     context = harness.services.context
     context.set_parameter(context.read_context().target, "general.ext.guess_us", 31.0)
-    window.tunables_panel.state.write({("guess_us",): 999.0}, FormEnv())
-    observed: list[tuple[Calibrated, T1Plan, T1Tunables]] = []
+    window.tunables_panel.state.write({("t1", "guess_us"): 999.0}, FormEnv())
+    observed: list[tuple[Calibrated, CoherencePlan, CoherenceTunables]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("rpc-start-observer", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "rpc-start-observer", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def observe(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del state
         observed.append((env.context, plan, tun))
@@ -366,7 +376,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
         {
             "run_id": "partial-rpc",
             "plan": start_plan_batch(inputs),
-            "tunables": [{"path": ["reps"], "value": 9}],
+            "tunables": [{"path": ["t1", "reps"], "value": 9}],
         },
     )
     assert reply["ok"] is True
@@ -383,18 +393,18 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
         assert panel.state.base.data == panel.state.input.data
         assert not panel.isEnabled()
     assert window.plan_panel.state.input.data["pi_length_us"] == {"expr": "0.06 * 2"}
-    assert window.tunables_panel.state.input.data["guess_us"] == {
+    assert t1_input(window.tunables_panel.state.input.data)["guess_us"] == {
         "expr": "general.ext.guess_us"
     }
-    shown = window.tunables_panel.editor.findChild(QLabel, "form.value.guess_us")
+    shown = window.tunables_panel.editor.findChild(QLabel, "form.value.t1.guess_us")
     assert isinstance(shown, QLabel) and float(shown.text()) == 31.0
     context.set_parameter(context.read_context().target, "general.ext.guess_us", 88.0)
     assert float(shown.text()) == 31.0
     harness.background.execute()
     assert len(observed) == 1
     seed, plan, tun = observed[0]
-    assert seed.pi_length_us == 0.12 and tun.guess_us == 31.0 and tun.reps == 9
-    assert plan.points == T1PlanForm.default_input(FormEnv()).data["points"]
+    assert seed.pi_length_us == 0.12 and tun.t1.guess_us == 31.0 and tun.t1.reps == 9
+    assert plan.points == CoherencePlanForm.default_input(FormEnv()).data["points"]
     assert plan.fluxes == (1.0, 1.1) and plan.snapshot.point == "source"
     assert harness.gate.snapshot()
     harness.background.deliver()
@@ -424,7 +434,7 @@ def test_rpc_start_model_errors_leave_both_panel_drafts_and_bases_untouched(
     ]
     plan = start_plan_batch(inputs)
     tunables: list[FormWrite] = []
-    path = ["pi_length_us"] if form == "plan" else ["reps"]
+    path = ["pi_length_us"] if form == "plan" else ["t1", "reps"]
     if form == "plan":
         for edit in plan:
             if edit["path"] == path:
@@ -527,14 +537,14 @@ def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
 ) -> None:
     window, _harness, _entry = attachment
-    window.tunables_panel.state.write({("guess_us",): -1.0}, FormEnv())
+    window.tunables_panel.state.write({("t1", "guess_us"): -1.0}, FormEnv())
     gui = window.start("invalid-tunables")
-    assert isinstance(gui, FormErrors) and ("guess_us",) in gui.messages
+    assert isinstance(gui, FormErrors) and ("t1", "guess_us") in gui.messages
     original_plan = window.plan_panel.state.input.data
     token = window.start("default-tunables", tunables_batch={})
     assert isinstance(token, int)
     assert window.plan_panel.state.base.data == original_plan
-    assert window.tunables_panel.state.base.data["guess_us"] == {
+    assert t1_input(window.tunables_panel.state.base.data)["guess_us"] == {
         "expr": "general.ext.guess_us"
     }
 

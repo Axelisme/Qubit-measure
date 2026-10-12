@@ -23,9 +23,10 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._coherence_input import t1_input
 from ._reload_source import InjectedCatalog
 from ._window_scenarios import (
     assert_failed_close_diagnostic,
@@ -103,12 +104,17 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     window, harness, _entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("register-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "register-window", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         attempts.append("step")
@@ -165,12 +171,17 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     window, harness, _entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("reject-window", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "reject-window", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         attempts.append("step")
@@ -217,12 +228,15 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
 ) -> None:
     window, harness, entry = run_attachment
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("paused-close", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("paused-close", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         env.pbar("work", 2).refresh()
@@ -270,12 +284,15 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     native_errors: list[IsADirectoryError] = []
     observed: list[tuple[bool, bool]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("failed-read", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("failed-read", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         env.pbar("retained", 2).refresh()
@@ -298,7 +315,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     def during_submit() -> None:
         try:
             window.apply_tunables(
-                "failed-read", {("guess_us",): 45.0}, actor=Actor("agent", "rpc")
+                "failed-read", {("t1", "guess_us"): 45.0}, actor=Actor("agent", "rpc")
             )
         except IsADirectoryError as error:
             native_errors.append(error)
@@ -317,7 +334,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     failed = controller.status()
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
-    assert panel.panel.state.input.data["guess_us"] == 45.0
+    assert t1_input(panel.panel.state.input.data)["guess_us"] == 45.0
     assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
     assert controller.operation_id is None and not controller.has_pending_segment
     assert harness.handles.known_outcome(token) == OperationOutcome(
@@ -334,12 +351,17 @@ def test_prepare_forms_rejects_pending_and_paused_run(
 ) -> None:
     window, harness, _entry = run_attachment
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("prepare-guard", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "prepare-guard", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: None
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: None,
     ) -> Step[None, int]:
         del plan, tun, state
         window.pause("prepare-guard")
@@ -393,14 +415,16 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     window, harness, entry = run_attachment
     attempts: list[str] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> None:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> None:
         return None
 
-    @workflow("replacement-target", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow(
+        "replacement-target", plan=CoherencePlan, tunables=CoherenceTunables, init=init
+    )
     def step(
         env: WorkflowEnv[Calibrated],
-        plan: T1Plan,
-        tun: T1Tunables,
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
         state: None,
     ) -> Step[None, int]:
         del plan, tun, state

@@ -24,9 +24,10 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from tests.zcu_lab.workflows._point_files import point_files
 from tests.zcu_lab.workflows._sim_inputs import Inputs
 from zcu_lab.workflows.calibration import Calibrated
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._coherence_input import t1_input
 from ._recording_transport import WindowTransport
 from ._reload_source import InjectedCatalog
 from ._window_support import start_plan_batch
@@ -49,15 +50,18 @@ def mcp_paused_controls(
     pause_receipts: list[dict[str, object]] = []
     stop_receipts: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("mcp-controls", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("mcp-controls", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, float]:
         attempts.append(
-            (state, tun.guess_us, env.context.pi_length_us, plan.snapshot.point)
+            (state, tun.t1.guess_us, env.context.pi_length_us, plan.snapshot.point)
         )
         if state == 1 and len(attempts) == 2:
             pause_receipts.append(
@@ -74,7 +78,7 @@ def mcp_paused_controls(
             )
             yield from env.wait_until(env.started_at)
             return Done()
-        return Next(tun.guess_us, state + 1)
+        return Next(tun.t1.guess_us, state + 1)
 
     catalog_source.install(step, window)
     pending = mcp_tools["workflows_workflow_start"]["handler"](
@@ -119,7 +123,7 @@ def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
                 "run_id": "mcp-native",
                 "plan": plan,
                 "tunables": [
-                    {"path": ["reps"], "value": 0},
+                    {"path": ["t1", "reps"], "value": 0},
                 ],
             }
         )
@@ -139,7 +143,7 @@ def test_mcp_native_start_acquires_and_reads_committed_records_and_png(
             "tunables": [
                 {"path": ["cal", "span_mhz"], "value": 2.0},
                 {"path": ["cal", "rabi_start_factor"], "value": 0.125},
-                {"path": ["rounds"], "value": 2},
+                {"path": ["t1", "rounds"], "value": 2},
             ],
         }
     )
@@ -235,13 +239,16 @@ def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
         {"form": "tunables", "run_id": "mcp-controls"}
     )
     assert inspected["revision"] == 0
-    assert inspected["input"]["guess_us"] == {"expr": "general.ext.guess_us"}
-    assert {"path": ["guess_us"], "value": 20.0} in inspected["values"]
+    assert t1_input(inspected["input"])["guess_us"] == {"expr": "general.ext.guess_us"}
+    assert {"path": ["t1", "guess_us"], "value": 20.0} in inspected["values"]
     applied = mcp_tools["workflows_workflow_tunables"]["handler"](
         {
             "run_id": "mcp-controls",
             "batch": [
-                {"path": ["guess_us"], "value": {"expr": "general.ext.guess_us * 2"}},
+                {
+                    "path": ["t1", "guess_us"],
+                    "value": {"expr": "general.ext.guess_us * 2"},
+                },
             ],
         }
     )
@@ -249,14 +256,14 @@ def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
     assert engine.records("mcp-controls") == (first,)
     panel = window.tuning_panel
     assert panel is not None
-    assert panel.host.accepted_input.data["guess_us"] == {
+    assert t1_input(panel.host.accepted_input.data)["guess_us"] == {
         "expr": "general.ext.guess_us * 2"
     }
     observed = mcp_tools["workflows_workflow_form"]["handler"](
         {"form": "tunables", "run_id": "mcp-controls"}
     )
     assert observed["revision"] == 1
-    assert {"path": ["guess_us"], "value": 40.0} in observed["values"]
+    assert {"path": ["t1", "guess_us"], "value": 40.0} in observed["values"]
     resumed = mcp_tools["workflows_workflow_resume"]["handler"](
         {"run_id": "mcp-controls"}
     )
@@ -325,7 +332,7 @@ def test_mcp_native_stale_edit_preserves_current_owner_without_retry(
         mcp_tools["workflows_workflow_tunables"]["handler"](
             {
                 "run_id": "old-mcp",
-                "batch": [{"path": ["guess_us"], "value": 500.0}],
+                "batch": [{"path": ["t1", "guess_us"], "value": 500.0}],
             }
         )
     assert len(mcp_transport.requests) == count + 1

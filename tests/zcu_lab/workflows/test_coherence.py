@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from zcu_tools.datafile import JsonObject, SoftwareProvenance, load_run_data
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
-from zcu_tools.experiment.workflows import Engine, EnginePorts, RunIdentity, RunPaths
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.workflows import (
+    Engine,
+    EnginePorts,
+    Run,
+    RunIdentity,
+    RunPaths,
+)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 import zcu_lab.workflows as workflows
 from tests.experiment.workflows._engine_fakes import (
@@ -22,8 +31,9 @@ from tests.experiment.workflows._engine_fakes import (
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyExp
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyExp
+from zcu_lab.workflows.acquire import run_t2echo, run_t2ramsey
 from zcu_lab.workflows.calibration import Calibrated
 
 from ._sim_inputs import Inputs, make_plan, seed_from_inputs
@@ -49,7 +59,7 @@ def scan(
     root: Path,
     plan: workflows.CoherencePlan,
     tun: workflows.CoherenceTunables,
-) -> Iterator[Engine[Calibrated]]:
+) -> Generator[Engine[Calibrated]]:
     """Own one real simulator Engine and release plots after the producer stops."""
     plots = Plots(NonPresentingHost())
     engine = Engine(
@@ -91,8 +101,8 @@ def scan(
 
 def plan_for(inputs: Inputs, **flags: bool) -> workflows.CoherencePlan:
     """Use the native module inputs at two flux points, with resolved plan flags."""
-    return workflows.CoherencePlan(
-        **make_plan(inputs).model_dump(mode="python"), **flags
+    return workflows.CoherencePlan.model_validate(
+        make_plan(inputs).model_dump(mode="python") | flags
     )
 
 
@@ -110,6 +120,65 @@ def knobs() -> workflows.CoherenceTunables:
             "t2ramsey": {"rounds": 10, "guess_us": 10.0, "detune_ratio": 0.25},
             "t2echo": {"rounds": 2, "guess_us": 15.0},
         }
+    )
+
+
+def accepted_lifetime(measurement: JsonValue) -> float:
+    """Narrow an accepted public JSON lifetime without changing the expected number."""
+    assert isinstance(measurement, dict)
+    value = measurement["lifetime_us"]
+    assert isinstance(value, (float, int))
+    return float(value)
+
+
+def actual_detunes(inputs: Inputs, ramsey: T2RamseyCfg, echo: T2EchoCfg) -> None:
+    """Read actual detunes from public acquisition results, not native optional fields."""
+    ramsey_run = Run(
+        ramsey, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
+    echo_run = Run(
+        echo, StopSignal(), soc=inputs.soc, soccfg=inputs.soccfg, device_snapshot={}
+    )
+    ramsey_result = run_t2ramsey(ramsey_run)
+    echo_result = run_t2echo(echo_run)
+    assert ramsey_run.outcome.status == echo_run.outcome.status == "completed"
+    assert (
+        ramsey_result.true_activate_detune != 0
+        and echo_result.true_activate_detune == 0
+    )
+
+
+def fitted_durations(
+    plan: workflows.CoherencePlan,
+    ramsey: T2RamseyCfg,
+    echo: T2EchoCfg,
+    rabi_result: JsonValue,
+) -> None:
+    """Check fitted pi/pi2 native durations with the fixed gain/waveform selections."""
+    assert isinstance(ramsey.modules.pi2_pulse.waveform, ConstWaveformCfg)
+    assert isinstance(echo.modules.pi_pulse.waveform, ConstWaveformCfg)
+    assert isinstance(echo.modules.pi2_pulse.waveform, ConstWaveformCfg)
+    assert isinstance(rabi_result, dict)
+    assert ramsey.modules.pi2_pulse.waveform.length == pytest.approx(
+        rabi_result["pi2_length_us"]
+    )
+    assert echo.modules.pi_pulse.waveform.length == pytest.approx(
+        rabi_result["pi_length_us"]
+    )
+    assert echo.modules.pi2_pulse.waveform.length == pytest.approx(
+        rabi_result["pi2_length_us"]
+    )
+    assert (
+        echo.modules.pi_pulse.waveform.style
+        == echo.modules.pi2_pulse.waveform.style
+        == ramsey.modules.pi2_pulse.waveform.style
+        == plan.qub_pulse.waveform.style
+    )
+    assert (
+        echo.modules.pi_pulse.gain
+        == echo.modules.pi2_pulse.gain
+        == ramsey.modules.pi2_pulse.gain
+        == plan.qub_pulse.gain
     )
 
 
@@ -162,6 +231,9 @@ def test_three_enabled_lifetimes_keep_order_native_values_and_independent_timing
             assert (
                 t1.cfg is not None and ramsey.cfg is not None and echo.cfg is not None
             )
+            assert isinstance(t1.cfg.sweep.length, SweepCfg)
+            assert isinstance(ramsey.cfg.sweep.length, SweepCfg)
+            assert isinstance(echo.cfg.sweep.length, SweepCfg)
             assert t1.cfg.sweep.length.stop == pytest.approx(
                 250.0 if accepted_t1 is None else 5 * (25.0 + 0.5 * accepted_t1)
             )
@@ -175,22 +247,9 @@ def test_three_enabled_lifetimes_keep_order_native_values_and_independent_timing
             assert ramsey.cfg.detune == pytest.approx(
                 0.25 / ramsey.cfg.sweep.length.step
             )
-            assert (
-                ramsey.result.true_activate_detune != 0
-                and echo.result.true_activate_detune == 0
-            )
+            actual_detunes(inputs, ramsey.cfg, echo.cfg)
             assert echo.cfg.detune == 0
-            rabi_result = point["rabi"]
-            assert isinstance(rabi_result, dict)
-            assert ramsey.cfg.modules.pi2_pulse.get_param("length") == pytest.approx(
-                rabi_result["pi2_length_us"]
-            )
-            assert echo.cfg.modules.pi_pulse.get_param("length") == pytest.approx(
-                rabi_result["pi_length_us"]
-            )
-            assert echo.cfg.modules.pi2_pulse.get_param("length") == pytest.approx(
-                rabi_result["pi2_length_us"]
-            )
+            fitted_durations(plan, ramsey.cfg, echo.cfg, point["rabi"])
             files = (
                 ["frequency-01.h5", "rabi.h5"]
                 + (["readout.h5"] if point["index"] == 0 else [])
@@ -208,9 +267,9 @@ def test_three_enabled_lifetimes_keep_order_native_values_and_independent_timing
                 != ramsey_meta.device_snapshot
                 != echo_meta.device_snapshot
             )
-            accepted_t1 = measurements[0]["lifetime_us"]
-            accepted_ramsey = measurements[1]["lifetime_us"]
-            accepted_echo = measurements[2]["lifetime_us"]
+            accepted_t1 = accepted_lifetime(measurements[0])
+            accepted_ramsey = accepted_lifetime(measurements[1])
+            accepted_echo = accepted_lifetime(measurements[2])
 
 
 @pytest.mark.parametrize("enabled", ["t1", "t2ramsey", "t2echo"])
@@ -291,7 +350,8 @@ def test_rejected_t1_keeps_native_and_does_not_change_t2_or_shared_estimate(
                 root / "t1.h5", spec=T1Exp().persistence_spec()
             )
             assert rabi.cfg is not None and rabi.cfg.relax_delay == 250.0
-            assert t1.cfg is not None and t1.cfg.sweep.length.stop == 250.0
+            assert t1.cfg is not None and isinstance(t1.cfg.sweep.length, SweepCfg)
+            assert t1.cfg.sweep.length.stop == 250.0
 
 
 def test_rabi_failure_keeps_frequency_and_marks_enabled_dependents_skipped(
@@ -348,7 +408,9 @@ def test_rejected_frequency_keeps_all_completed_attempts_and_no_prior_dependency
                 and rabi["status"] == "skipped"
                 and rabi["file"] is None
             )
-            for filename in frequency["files"]:
+            filenames = frequency["files"]
+            assert isinstance(filenames, list)
+            for filename in filenames:
                 assert isinstance(filename, str)
                 saved = load_run_data(
                     tmp_path / "data" / record.iteration_dir / filename
