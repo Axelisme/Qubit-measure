@@ -10,6 +10,12 @@ import h5py
 import numpy as np
 import pytest
 from PIL import Image
+from zcu_tools.analysis.fluxdep.search import (
+    DatabaseSearchResult,
+    ParamBounds,
+    SearchQuality,
+    TransitionResidual,
+)
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -34,6 +40,56 @@ def _png_data(figure: object) -> bytes:
     data = base64.b64decode(encoded, validate=True)
     assert figure["bytes"] == len(data)
     return data
+
+
+def test_fit_result_projects_recorded_quality_without_rounding_or_merging(
+    route_harness: RouteHarness,
+) -> None:
+    ctrl = route_harness.ctrl
+    client = route_harness.client()
+    initial = route_harness.request(client, "fit.result")
+    assert initial["ok"] and "result" in initial
+    assert initial["result"].get("quality", "missing") is None
+    quality = SearchQuality(
+        mean=0.123456789,
+        outliers=1,
+        outlier_threshold=0.370370367,
+        per_transition=(
+            TransitionResidual("transitions 0-1", 2, 0.123456789, 0.4),
+            TransitionResidual("transitions 0-1", 1, 0.025678912, 0.025678912),
+            TransitionResidual("mirror 0-2", 0, None, None),
+        ),
+    )
+    ctrl.record_search_result(
+        DatabaseSearchResult(
+            params=(3.0, 0.8, 0.5),
+            best_distance=quality.mean,
+            best_scale=1.0,
+            best_index=0,
+            entry_results=np.array([[quality.mean, 1.0]]),
+            entry_params=np.array([[3.0, 0.8, 0.5]]),
+            fluxs=np.array([0.1, 0.2, 0.3]),
+            freqs=np.array([4.0, 4.1, 4.2]),
+            predicted_freqs=np.array([4.0, 4.1, 4.2]),
+            bounds=ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
+            transition_indices=np.array([0, 0, 1], dtype=np.int64),
+            residuals=np.array([0.1, 0.4, 0.025678912]),
+            outlier_mask=np.array([False, True, False]),
+            quality=quality,
+        )
+    )
+    reply = route_harness.request(client, "fit.result")
+    assert reply["ok"] and "result" in reply
+    assert reply["result"].get("quality") == {
+        "mean": 0.123456789,
+        "outliers": 1,
+        "outlier_threshold": 0.370370367,
+        "per_transition": [
+            {"transition": "transitions 0-1", "points": 2, "mean": 0.123456789, "max": 0.4},
+            {"transition": "transitions 0-1", "points": 1, "mean": 0.025678912, "max": 0.025678912},
+            {"transition": "mirror 0-2", "points": 0, "mean": None, "max": None},
+        ],
+    }
 
 
 def test_fit_render_returns_png_at_shared_geometry(
