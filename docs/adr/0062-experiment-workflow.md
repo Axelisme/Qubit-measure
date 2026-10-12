@@ -36,6 +36,8 @@ Device 實際值只由每次 env.run 在同一 RUN lease 下、experiment callba
 
 ## 獨立 workflow 轉換工具
 
+使用者在 2026-10-12 裁定：「我希望B，現有實作邏輯能直接轉成匯出工具嗎？」及「A還有這個export_run應該是綁在每個不同的workflow下的小工具，因為每種workflow的輸出格式可以不同」。各 workflow 的輸出格式不同，因此轉換工具由各 workflow 擁有，不交給 live GUI run 或通用 dispatcher。
+
 轉換 saved run 不需要 live GUI run。各 workflow 提供自己的小工具，GUI／RPC／MCP 不再提供匯出入口。Coherence 工具支援 merged、Labber、samples；MIST 工具支援 merged、Labber 並拒絕 samples。Overnight 沒有本次要求的輸出，不新增空工具。每個工具提供可 import 的函式與 humble main(argv)，不建立通用 export_run dispatcher。
 
 工具在 zcu_lab 讀固定 manifest 與每輪 record.json，只消費結構完整的 committed point，再讀 point 的具名 native reference。缺摘要列出每輪路徑，malformed／identity mismatch／缺檔指名 source。工具不讀 journal、不從檔名掃描或 leftover 檔建立提交點。這不是 crash resume，也不新增 framework reader 或保存保證。Shared typed envelope/native writer helpers 集中 Coherence 與 MIST 兩個使用者的輸入與失敗隔離，不做 registry 或 live Engine adapter。

@@ -68,6 +68,8 @@ Status 與 records 讀 Engine facts，不從 artists 反推數值。圖名來自
 
 Storage owner 提供 exact workflow roots。Manifest／journal 在條目 Result 的 `workflows/<run_id>/`，native acquisition 與圖在條目 Database 的 `workflows/<run_id>/iter/`。MCP 不決定保存路徑或補寫資料。Window 關閉先 Stop pending／paused run 到 terminal，再關 executor 提交入口、cancel、drain workers 與 owner delivery、關 drivers、停 remote。關閉失敗拒絕關窗且入口保持關閉，可重試關閉，不自動恢復工作。
 
+使用者在 2026-10-12 裁定：「flux device我傾向用direct mode，而不是eval mode」。此裁定只用於 workflow 的 fixed-capture／direct defaults：新 Coherence flux_dev defaults 在建立時解析 alias，讓預設值指向當次 capture 的具體裝置，不隨後續 alias 修改變動。它不是所有表單的通則，也不取消 eval mode。
+
 共用 alias preset 與 Window 的 SessionServices 組裝已接入。FormState 透過共用 evaluator 解碼所有非 discriminator 的字串 expression。Coherence 新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal。缺 capture 或 unbound alias 保留 expression error input，公開 form 在該欄位指名 Invalid，不阻斷 panel。其他 forms 與合法 saved input 不改，eval 仍可用。flux_unit 必填，不預驗 device membership。RunSnapshot 與 native 保存使用當次 capture，alias 修改或 Save 不重新解析。泛型宿主擁有 source reload admission 與 input 保存還原；組合根注入每次重新 import 註冊清單的 loader builder。GUI/RPC/MCP 不提供 export commands，saved run 的轉換由各 workflow 獨立工具負責，見 [[0062]]。這些功能不授權硬體或真實資料。
 
 ## 事件與錯誤
