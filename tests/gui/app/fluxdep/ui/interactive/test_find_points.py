@@ -49,6 +49,11 @@ class PreviewQueue:
         self.requests.append(PreviewRequest(compute, on_done, on_error))
 
 
+def select_all(context) -> None:
+    """Seed the empty GUI mask with every cell before exercising preview delivery."""
+    context.plugin.perform_on_all.execute(context.session, None)
+
+
 def wait_for_requests(queue: PreviewQueue, count: int) -> None:
     deadline = time.monotonic() + 2.0
     while len(queue.requests) < count and time.monotonic() < deadline:
@@ -297,14 +302,15 @@ def test_latest_failure_is_not_an_empty_success_and_finish_recomputes(
     widget, queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
+    select_all(context)
     wait_for_requests(queue, 1)
     request = queue.requests[0]
     request.on_error(ValueError("latest preview failed"))
     assert widget.preview_view() is None
     assert widget.get_result()[0].size > 0
     expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
-    result = ctrl.interactive.finish_twotone_pick()
-    np.testing.assert_array_equal(result.dev_values, expected.dev_values)
+    receipt = ctrl.interactive.finish_twotone_pick()
+    np.testing.assert_array_equal(receipt.result.dev_values, expected.dev_values)
     request.on_done(request.compute())
     assert widget.preview_view() is None
 
@@ -315,6 +321,7 @@ def test_undo_invalidates_pending_preview_and_closed_widget_cannot_finish(
     widget, queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
+    select_all(context)
     wait_for_requests(queue, 1)
     context.plugin.clear.execute(context.session, None)
     wait_for_requests(queue, 2)
@@ -345,6 +352,7 @@ def test_teardown_and_remount_preserve_domain_and_discard_late_delivery(
     widget, queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
+    select_all(context)
     wait_for_requests(queue, 1)
     pending = queue.requests[0]
     context.plugin.clear.execute(context.session, None)
@@ -370,6 +378,7 @@ def test_finish_pending_preview_publishes_committed_selection(presented) -> None
     widget, queue, ctrl = presented
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
+    select_all(context)
     wait_for_requests(queue, 1)
     pending = queue.requests[0]
     stale_preview = pending.compute()

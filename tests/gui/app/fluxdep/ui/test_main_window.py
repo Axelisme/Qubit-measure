@@ -105,13 +105,16 @@ def test_selecting_list_item_sets_active(window, spectrum_hdf5):
 # --- editing-area stage switching ------------------------------------------
 
 
-def test_active_unaligned_shows_line_picker(window, spectrum_hdf5):
+def test_picking_unaligned_from_list_opens_line_picker(window, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
+    # A human list pick is the Local write intention that opens the stage picker.
+    window._list.setCurrentRow(0)
+    assert window._ctrl.state.active_spectrum == name
     assert isinstance(window._current_editor, LinePickerWidget)
+    assert window._ctrl.interactive.current_line_pick() is not None
 
 
 def test_aligned_onetone_shows_onetone_widget(window, spectrum_hdf5):

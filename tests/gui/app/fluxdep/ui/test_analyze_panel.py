@@ -22,7 +22,10 @@ from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
 )
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
 
-from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._search_result import (
+    perfect_fit_result,
+    synthetic_search_input,
+)
 
 
 @pytest.fixture
@@ -125,8 +128,10 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
         search_form.set_transitions(TransitionDict({"mirror": [(0, 1)]}))
     display_before_result = show_form.get_transitions()
     bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = np.array([0.0, 0.1]), np.array([1.0, 1.0])
     ctrl.record_search_result(
-        perfect_fit_result(np.array([0.0, 0.1]), np.array([1.0, 1.0]), bounds)
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
     )
     assert show_form.get_transitions() == display_before_result
     monkeypatch.setattr(
@@ -155,6 +160,85 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     np.testing.assert_allclose(lines[0].get_ydata(), expected_frequency)
     assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
     assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
+
+
+def _show_title(widget: AnalyzePanelWidget) -> str:
+    return widget.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+
+
+def _freshness(widget: AnalyzePanelWidget) -> QLabel:
+    return next(
+        label
+        for label in widget.findChildren(QLabel)
+        if label.accessibleName() == "Freshness"
+    )
+
+
+def _export_button(widget: AnalyzePanelWidget) -> QPushButton:
+    return next(
+        button
+        for button in widget.findChildren(QPushButton)
+        if button.text() == "Export params.json"
+    )
+
+
+def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    ctrl.set_fit_params(
+        search_database_hdf5,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        fluxs, freqs = ctrl.selected_pointcloud()
+        ctrl.record_search_result(
+            perfect_fit_result(fluxs, freqs, bounds),
+            synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+        )
+        widget.show_tab("show")
+        assert _freshness(widget).text() == ""
+        assert "Outdated" not in _show_title(widget)
+        assert _export_button(widget).isEnabled()
+
+        ctrl.set_selection(np.array([True, False, True, True]))
+        assert ctrl.state.fit_stale_reasons == ["filter changed"]
+        assert _freshness(widget).text() == "Outdated: filter changed"
+        assert "Outdated: filter changed" in _show_title(widget)
+        assert not _export_button(widget).isEnabled()
+        # Show keeps the recorded search cloud, not the newer Filter selection.
+        scatter = next(
+            artist
+            for artist in widget.findChildren(FigureCanvasQTAgg)[0]
+            .figure.axes[0]
+            .collections
+            if artist.get_label() == "_points"
+        )
+        np.testing.assert_allclose(
+            np.asarray(scatter.get_offsets(), dtype=np.float64),
+            np.column_stack([fluxs, freqs]),
+        )
+
+        fluxs, freqs = ctrl.selected_pointcloud()
+        ctrl.record_search_result(
+            perfect_fit_result(fluxs, freqs, bounds),
+            synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+        )
+        assert ctrl.state.fit_stale_reasons == []
+        assert _freshness(widget).text() == ""
+        assert "Outdated" not in _show_title(widget)
+        assert _export_button(widget).isEnabled()
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
 
 
 def test_three_tabs_filter_search_show(panel):

@@ -158,7 +158,11 @@ def test_production_background_delivery_and_gui_finish_publish_same_session(
 ):
     ctrl, window = composition
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="OneTone")
-    ctrl.set_active_spectrum(name)
+    spectra = window.findChild(QListWidget)
+    assert spectra is not None
+    # A human list pick opens the line picker; an active change alone only displays.
+    spectra.setCurrentRow(0)
+    assert ctrl.state.active_spectrum == name
     context = ctrl.interactive.current_line_pick()
     assert context is not None
     context.plugin.start_alignment(context.session)
