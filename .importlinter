@@ -317,6 +317,27 @@ source_modules =
 forbidden_modules =
     zcu_tools.gui
 
+# ADR-0062: concrete calibration and lifetime policies stay below frontend driving adapters.
+[importlinter:contract:workflow-science-no-frontends]
+name = Workflow calibration and coherence science do not depend on frontend owners
+type = forbidden
+source_modules =
+    zcu_lab.workflows.calibration
+    zcu_lab.workflows.coherence
+    zcu_lab.workflows.coherence_measurements
+    zcu_lab.workflows.mist
+    zcu_lab.workflows.t1
+    zcu_lab.workflows.t2
+forbidden_modules =
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    qtpy
+    PyQt5
+    PyQt6
+    PySide2
+    PySide6
+
 # Committed scalar projection and drawing stay independent of frontend admission.
 [importlinter:contract:trend-science-no-frontends]
 name = Overnight trend science does not depend on frontend owners

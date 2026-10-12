@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-08，移除舊入口，保留 native workflow simulator
+**Last updated:** 2026-10-12，Coherence native workflow simulator
 
 這裡是使用者入口；repo 品質檢查在 [tools/README.md](../tools/README.md)。
 工作站腳本請使用該 worktree 的 interpreter，例如
@@ -26,7 +26,7 @@
 ## 離線 workflow
 
 - `run_workflow_sim.py`：以現行 native cfg／SimParams JSON 跑單次 acquisition，不保存，也不代替完整 workflow。
-- `run_t1_fluxdep_sim.py`：以現行 T1Plan／T1Tunables／Calibrated／SimParams JSON 跑完整 T1 fluxdep。入口只建立一個 FakeDevice，其 native 值逐 acquisition 驅動模擬板。使用者明確指定隔離的 Result／Database entry paths；entry owner 計算 workflow roots，Engine 保存 journal、原生 acquisitions 與摘要 PNG。已存在的 run roots 拒絕覆寫，不連接硬體。
+- `run_coherence_fluxdep_sim.py`：以現行 CoherencePlan／CoherenceTunables／Calibrated／SimParams JSON 跑選定 lifetime 的完整 fluxdep。入口只建立一個 FakeDevice，其 native 值逐 acquisition 驅動模擬板。使用者明確指定隔離的 Result／Database entry paths；entry owner 計算 workflow roots，Engine 保存 journal；workflow 保存各 stage／enabled lifetime 的 native acquisitions 與摘要 PNG。已存在的 run roots 拒絕覆寫，不連接硬體。
 
 ## 模擬資料庫產生
 

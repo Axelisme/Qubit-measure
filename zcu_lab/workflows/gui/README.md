@@ -1,57 +1,89 @@
-# workflows/gui — Workflow form attachments
+# `workflows.gui` Workflow form attachments
 
-**Last updated:** 2026-10-12, live-only overnight trend presentation
+**Last updated:** 2026-10-12，Coherence forms 與三個 catalog 名稱
 
-這個 package 擁有具體 workflow 的表單、明寫的 to_cfg 與 Qt panel attachment，不實作通用 editor 或 Engine。Native workflow definitions 不依賴這些 GUI attachments。
+這個 package 擁有具體 workflow 的表單、to_cfg 與 Qt attachment，不實作通用 editor 或 Engine。
+Native science 不依賴 GUI。Window、Controller、operation、session 與 fixed-source presentation 分工不因合併而改變。
 
-T1PlanForm 編輯 absolute flux range/list、必填 flux_unit、delay points 與共用 drive/readout ModuleInput。Fake caller 明填 native，YOKO caller 明填 A 或 V；表單不推導單位或提供 default。to_cfg 以 captured library 的公開 factory 解析 ref/inline，轉成 native modules，展開 setpoints，接 host 的歷史 RunSnapshot。缺 root、錯 family 或 materialization 失敗回報 consuming-field error。Native ModuleCfgFactory.from_core 接同一 materialization context，arb 與 flat_top arb ramp 的播放路徑固定在 captured asset directory，不讀 global repository。T1 drive 若是純 arb，在 qub_pulse 回 consuming-field error，因為 Length-Rabi 需要改 length 而 arb duration 固定。Flat_top 的 arb ramp、direct arb readout 與 flat_top arb readout ramp 繼續支援；不加入 gain-Rabi 或 time-scaling。非 arb flat_top 的 length 沿 native 總長語意原值直傳。Plan 不含完整 cfg、template 或 acquisition grid。T1PlanPanel preview 先阻擋 local parse errors，再產生 native T1Plan，不 Start 或捕捉來源。
+## Catalog 與 Coherence forms
 
-初始 pi_length_us 是必填的 Rabi-range estimate。Window 用 `read_context()` 固定當次完整 alias 表與來源，不宣告角色或檢查元件 kind。Prepare 要求可讀的 global qubit alias，缺列或未綁定時原樣傳播指名 alias 的錯誤。EMPTY 可建立 app，但 Prepare／Start 依 base 契約拒絕；來源狀態顯示隔離這些失敗。Defaults 在同一 capture 解析 `$qubit.module.x180.waveform.length`，用具體元件路徑預填可改的 expression，缺值或不可讀就留空，不使用 simulator 常數或其他模組。
+`WorkflowCatalog` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`，Coherence 是預設。
+每個 `WorkflowAttachment` 保留 native step、plan/knobs model、converter 與 scalar seed 的同一版本配對。
+Builder 在 bounded reload 中 import current declarations；WorkflowRegistry 只驗 declaration，不提供 lookup。
+GUI Start 用選定附件。RPC／MCP workflow.start 的 name 省略時選預設，未知名稱明確拒絕，不猜舊名或提供 alias。
 
-T1WorkflowWindow 的 Start 從當次固定 capture 驗證輸入，以 validated pi_length_us 與 native module scalars 建 Calibrated seed。Native T1Plan 不新增此欄位。Window 將固定 context/storage、表單用 cached native device mapping 與 software provenance 交 WorkflowController，在 worker 持 lease 啟動 native run；pending token 不代表 Engine 已接受。Stop 與關閉視窗使用同一 pending controller，producer 返回後才完成 plots。Window 使用固定 Controller，每次 Start 將 ports 與 pending Host 交給它，不另存 run form capture 或 accepted input。
+`CoherencePlanForm` 編輯 absolute flux range/list、必填 flux_unit、delay points、初始 pi_length_us 與共用 drive/readout ModuleInput。
+`measure_t1`、`measure_t2ramsey`、`measure_t2echo` 是固定 plan bool，預設 true，至少開啟一項。
+All false 回 consuming-field error，不提交 acquisition。Disabled lifetime 不量、不保存、不產生 record 元素。
+Plan 透過通用 WorkflowPlanPanel preview；local parse errors 先阻擋 preview，再呼附件 converter。
 
-Pause/Resume 的公開 controls 與按鈕使用同一 native run。Pause 保留 operation、RUN lease、plan/input capture 與 Plots lifetime，Resume 不讀裝置，以同 token 提交 worker；Start 表單直接使用公開 typed cached native mapping，不做 live read。Device 實際值只由每次 env.run 在 worker 捕捉，SessionDevices 已接 live typed cfg、完整 selected-model setup 與 native capture helper。每次 env.run 在保留的 RUN lease 下、callback 前讀取，Save 使用固定 evidence。整個 run 終止才解除 plan/input 鎖定。
+`CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 paused tunables。
+`T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
+Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
+T1 guess 初次輸入保留 captured general.ext.guess_us expression，位於 t1.guess_us；沒有 capture／leaf 時用 native ordinary default。
+Null 或 invalid referenced value 產生欄位錯誤，不 fallback。Expression 留在 FormInput，Engine journal 只存普通值。
 
-T1WorkflowWindow.create_remote_service以同一Window、session bus與owner組裝T1RemoteControlAdapter。RPC提供partial-input Start、native status及明填run_id的Pause／Resume／Stop，不另存run或重做target核對。Start的plan／tunables各送path-array／value batch，只送與defaults不同的欄位，空batch用當次capture的defaults。Host用既有FormState.write一次套用，不寫GUI draft或做tree overlay。Invalid回既有FormErrors path/message且不改panels；成功用既有reset(base)顯示實際提交input。GUI不傳batch時仍讀自己的panels及local parse errors。Pending token不代表worker接受，transport stop不取消native run。
+`MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
+Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
+三個附件共用通用 WorkflowFormPanel、WorkflowPlanPanel 與既有 tuning view，不建立第二個 Window 或 Controller。
+Coherence 沒有臨時 export/sample callback；現有 conversion adapter 不會收到 CoherencePoint。
 
-`T1WorkflowWindow.export_fluxdep(run_id, origin='gui')` 與 `Export merged/Labber` 動作呼同一 Controller public entry。動作的 objectName 為 workflow.run.export_fluxdep，只在 done、stopped、failed、aborted enable；nonterminal/pending/stale target 由共同 admission 拒絕。Start 固定 native plan、identity/provenance、entry storage 與 ledger，terminal delivery 不自動匯出。每次匯出建立新的 SaveLayout，native 原子覆寫 workflow data_root/merged.h5，Labber 新增日期樹檔案。訊息列每個輸出的 path/status/error，未分配的 Labber 顯示 unallocated，ledger_error 另列。GUI 只提供功能動作，位置與呈現另由 UIUX 持有。
+## 固定來源與 modules
 
-RPC `workflow.export_fluxdep` 必填 run_id，回 native/Labber outputs 與 ledger_error，未分配 path 投影為 null。MCP `workflows_workflow_export_fluxdep` 只送一次 RPC，不預讀、不重試，origin 為 mcp。GUI, wire and MCP versions are 4，沒有舊版本 fallback。Native public reader 與 Labber public grouped reader 已驗證 Signal/Time 2D 及 T1 Flux 1D；這不代表實際 Labber Log Browser 能開此版面，仍需另外驗收。
+Prepare/Start 用 read_context() 固定完整 alias 表與 sources，不宣告角色或檢查 kind。
+Global qubit alias 必須可讀；EMPTY 可建 app，但來源依 base 契約拒 Prepare/Start。
+Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，保留具體路徑 expression，缺值或不可讀就留 pi_length_us 未填。
+它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
-`T1WorkflowWindow.export_samples(run_id)`、GUI Export samples 與 RPC `workflow.export_samples` 使用同一 retained Controller binding。MCP `workflows_workflow_export_samples` 只轉送一次。T1、T2echo 與 T2ramsey 支持成功 flux 點；MIST 與 overnight 停用動作並以 tooltip 說明原因，RPC/MCP 回 unsupported。後續 selection、entry point 或 source reload 不替換既有 run 的 table、component、point 或 science callback。Native 已 terminal 但 host 尚未 delivery 時，samples 動作仍停用。RPC 的部分 I/O 失敗提供 written_count、cause 與 cause_type；MCP 沿原 call_gui 文字錯誤保留原因與行數。`sample_action` 只呈現 eligibility、receipt 與 click failure，signal wiring 留在 Window。它與 layout／figures 一樣是 fixed source，修改需 restart。
+`calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
+它經 captured core/native factories materialize ref/inline modules與 assets。
+Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
+這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 
-Overnight 只提供 live 趨勢圖，圖名是 `overnight_trend`。Live poll 與 terminal delivery 使用 Engine.records，最後提交在 finish 前更新。缺值與 reason 沿 scalar 投影保留，不重 fit。Canvas 保持至少 640×480。GUI 不提供從 run 目錄重開或自動保存趨勢圖的動作，也不新增存圖 interface。使用者可自行從 record.json 或 native 資料重畫，保存責任見 ADR-0062。
+Flux_dev 目前保留 captured $flux_dev expression default。Missing/unbound alias 在該欄位指名 Invalid；普通字串是 literal。
+Fake caller 明填 native；YOKO 明填 A 或 V。表單不推測單位、不轉換值、不預驗 device membership。
+Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不重解析既有 run。
 
-`gui.layout.build_workflow_layout` 一次建立既有控制項與原 vertical layout，回傳具名 `WorkflowControls`。Carrier 只保留 Window 消費的 Qt controls，不存 domain state，也不接 callback。全部 signal wiring 與 admission policy 留在 Window。Layout 與 Window 都是 fixed source，修改需 restart。
+## 單一 run 與 remote
 
-`gui.figures` 的 app-private presentation owner 只持有 native Plots 與 committed cursor。Pause 保留 native 圖，terminal refresh 後才 finish；replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figure。這個 owner 與 Window 都是 fixed source，修改需 restart；繪圖時解析目前可 reload 的 science 函式，不把舊 callable 當永久權威。
+Window 將 fixed context/storage、typed cached device mapping、software provenance 與 native plan 交給唯一 Controller。
+Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 native env effects acquisition。
+Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 用同 token、新 tunables revision 重做未提交點，不在 Resume 讀硬體。
+Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 evidence。
+Stop/close 等 producer 返回與最後 committed live refresh 後才 finish，replacement Start/close 再 release presentation。
 
-Records／具名圖 RPC 讀同一 Window 的 native run。Records 直接投影 Engine 已提交的 records，保留 commit cursor 與 captured revision，不從圖反推數值。圖名與 PNG 由 Window 持有的 Plots 提供，PNG 沿 shared renderer 在 Qt owner 產生；status-only 不渲染。Pending acceptance 明確失敗，terminal 圖保留至新 Start 或 close；close 成功釋放後不再提供舊圖。MCP forwarding 已接同一 GUI RPC。
+GUI、RPC、MCP 呼同一 Window/Controller，不另存 run 或重做 target 核對。
+Partial Start 的 plan/tunables 都是 path-array/value batch。空 batch 用當次 capture defaults，不用 GUI draft。
+Host 用 FormState.write 一次套用 call-local input，invalid 留原 panels/base，成功才 reset 至實際提交 input。
+GUI 無 batch 時仍讀自身 panels/local text。Transport stop 不代表 native cancellation。
 
-獨立 GUI app 已接線，B4 12 的共用 alias preset 已接入。App 直接重用 `zcu_lab.ALIAS_PRESET`，交給 shared `build_session_services(alias_rows=...)`。Preset 保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列，不複製 workflow-local preset。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。App 開窗透過 SingleFileCaretaker 還原 plan／knobs 的原始 FormInput，保留 expression；不相容欄位由 FormState 丟棄並顯示 path。讀檔失敗提示並回到目前 defaults。正常關窗在 terminal delivery 後 flush；--clean 只略過開窗讀檔，關窗仍保存。已附 run 的 knobs 取 Controller binding 的唯一 draft，不保存 renderer-local 尚未 parse 文字、journal 或硬體狀態。Source reload 共用 framework loader，僅替換目前 catalog 與表單附件。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。
+workflow.form 讀同一 schema、input、ordinary leaves、path errors 與 revision。
+Run 附上後需明填 run_id，讀 retained Controller binding 的唯一 knobs state/env；pending acceptance 拒絕。
+Optional batch 只做 call-local preview，不提交或改 draft/base/accepted input/local text/Engine。
+Complex tag 與 whole tuple 的 JSON array 規則沿共用 codec。
 
-App 組裝一份 SessionServices，Window constructor 為 `(state, services, owner, *, catalog=None, loader=None, on_close=None, parent=None)`。catalog 省略時建立目前五個 typed attachments；loader 省略時不監控 source。Window 的 runner 與 progress 取自 services，GUI 與 MCP 操作同一 Window／Controller。parent=None 建立 top-level Window，指定 QWidget 時嵌入該 Qt parent。關窗先等待 run 終止，再呼叫 on_close；callback 失敗拒絕關窗，保留資源供重試。這個介面遷移不代表 CP-B 驗收。
+Tuning view 直接呈現 Host 的唯一 FormState，GUI Apply 與 JSON edit 共用 Controller.apply_tunables。
+兩者整批提交當下普通值，不保存另一個 draft revision guard。
+只有成功才更新 accepted input/base 並清 local text；invalid input 留在 shared draft，RPC 保留 field path/message。
+Paused Apply 後 Resume 保留 commits，新 revision 只用於重做未提交點。
 
-workflow.form 讀同一 Window 的 plan／knobs schema、input、普通求值 leaves、path errors 與 native revision。未 Start 讀 constructor captures；已附 run 必須明填 run_id，改用 Controller binding 的固定 env 與唯一 knobs state，pending acceptance 明確拒絕。Optional batch 只在 call-local FormState 套用目前 parsed input 加修改，不提交、不改 GUI draft/base、accepted input、local text 或 Engine。Read 包含 local parse errors；batch 預覽不把尚未 parse 的文字當成候選。Complex 沿既有 codec tag，whole tuple 在 JSON 為 array；values 不代表可提交。Panel 的 env 是固定 capture；source reload 保留此 capture，不重新選取 session 來源。
+Records RPC 直接投影 Engine committed records；point 現在含獨立 stage 與 enabled measurements。
+Live/summary 只建立 enabled lifetime 圖。具名圖/PNG 沿 retained Plots 與 owner-thread renderer，status-only 不渲染。
+Overnight live 趨勢從 committed scalar records 投影，缺值維持 gaps，不重 fit，不自動保存或重開 run 圖。
 
-`WorkflowCatalog` contains ordered `WorkflowAttachment` pairings for T1, overnight, T2echo_fluxdep, T2ramsey_fluxdep and MIST_fluxdep. Each attachment keeps its native step, independent form models/converters, seed and optional science exporter together. The fixed builder imports current declarations within bounded reload and uses WorkflowRegistry only to validate declarations, not for lookup. Window has one selector and one fixed `WorkflowController[FormModel, Calibrated]`. T1, T2 and MIST keep the original four-scalar calibration seed; overnight is context-parametric and receives actual `None`, without fabricated calibration. GUI Start uses the current selection. RPC/MCP `workflow.start` accepts optional `name`; omission selects the catalog default (shipped T1), and explicit unknown names raise.
+## Input 保存與 source reload
 
-`T2PlanForm` 編輯明確 flux unit／setpoints、delay samples、pi estimate 與固定 calibration modules。Echo／Ramsey 各有 typed knobs converter，Ramsey detune_ratio 必填，不加可省略的共用 fields。`MISTPlanForm` 另要求固定 gain start／stop／points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。這些附件沿既有通用 panels、唯一 selector 與固定 Controller，不新增 Window 或 wire。
+App 用 SingleFileCaretaker 保存 parsed FormInput 原文，包括 expression，不保存 local unparsed text、journal 或硬體狀態。
+開窗 restore，terminal close 後 flush；--clean 只略過開窗讀檔，關窗仍保存。
+FormState.write_compatible 丟棄不相容 path，不做 saved schema migration 或舊 workflow 名稱對映。
+已附 run 的 knobs 取 Controller retained binding，不另複製 input。
 
-`calibration_modules.resolve_calibration_modules` 是 T1／T2／MIST 共用的 module resolution owner。它從固定 env 的 core／native factories 取得具名 `CalibrationModules`，集中 Length-Rabi drive 與 pulse-backed readout 規則。Pure arb drive 不能改 length，回 consuming-field error；flat_top arb ramp 與 arb readout 保留。共享 defaults 只保留 captured flux alias／x180 pi estimate expression，不讀 live source 或補猜模組。MIST 的 reset／disturbance pulse 也沿原 factories。
+WorkflowForms 保留各名稱的 RAM parsed drafts。切換先建好兩個新 panels，再發布 selection。
+Prepare 用新 capture 建 defaults；source reload 保留 current capture，替換 current declarations/forms，不重建 session/services/controller/hardware。
+Reload 只允許 idle/terminal；pending/running/paused 在 preflight 前拒絕。
+Compatible input 保留；removed/renamed selection 改選新 catalog 第一個附件，並顯示原名與新名。
+Import/panel replacement 失敗保留舊 panels/RAM，但阻擋 Start 直到 retry；fixed source 改動要求 restart，沒有舊 callable fallback。
 
-`WorkflowForms` owns selected Start panels and inactive per-name RAM parsed drafts. Selection stores the outgoing draft and builds both incoming panels in the fixed capture before switching attachments. Prepare replaces selected defaults in a new capture. MCP partial Start still uses call-local defaults plus its batch, not GUI draft. Controller remains the sole owner of run input, tunables revision and accepted Host binding. New Start/preview/form RPC use the current attachment. Start binds its detached native plan/root to its current exporter; existing run export bindings never follow selection or reload. Overnight has no fluxdep exporter.
-
-App 使用 `SourceCatalogLoader` 監控 zcu_tools/zcu_lab。Reload scope 是 zcu_lab.workflows；app/window/figures/layout/sample_action/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 接縫固定，其餘 framework、components 與實驗 source 固定。`reload_source()` 僅在 owner thread 呼叫；pending/running/paused 在 prepare/import 前拒絕。Successful reload builds both replacement panels before publication, retains compatible parsed drafts, resets bases and reports dropped paths. A still-declared selection stays selected. A removed or renamed selection changes to the new catalog's first/default attachment, synchronizes the single selector and shows both old and new names in the run message. Explicit unknown Start/select still raises; there is no rename guessing or old callable fallback. Reload never rebuilds session/services/controller/hardware or reads the journal.未標 tag 的 inline union 由 shared FormState 唯一結構相容規則還原，不由 Window 補資料。
-
-Import 或 panel replacement 失敗保留原 panels 與 RAM parsed draft，但 Start 不可用，直到 retry 成功。Fixed source 改變要求重啟。Bounded import 可能已有副作用，不宣稱 rollback，也不以舊 catalog fallback 啟動。Reload source 動作只提供功能，不處理 UIUX 美化。
-
-Start 同步提交失敗時沒有 producer。Window 先結束本次 Plots operation，再釋放呈現並清除 reference，保留原提交錯誤與固定 Controller。GUI 與 RPC 使用相同清理路徑，失敗後視窗仍可關閉。
-
-T1TunablesForm 與 nested CalibrationTunablesForm 定義使用者可編輯的普通值、Field 約束與呈現 metadata。Defaults 只讀 host 捕捉的 ParameterContext。general.ext.guess_us 存在時保留 expression 輸入，沒有 capture 或缺 leaf 時使用 native 暫定預設。明確 null 與無效引用值產生欄位錯誤，不以 fallback 蓋掉。
-
-T1TunablesPanel 只呈現必填的 host-owned FormState 與固定 env，嵌入通用 FormEditor，並公開同一 state 與 editor。Window 建立 Start draft，Tuning 使用 TunablesHost 的 state；panel 不建立 defaults 或複製 draft。Host 提交前檢查 editor.local_parse_errors。Panel 不提供 native preview、Apply／Discard／Start 或 live source capture。
-
-FormState 處理 draft、驗證與 input 差異。to_cfg 只把合法普通值轉成 native T1Tunables。Expression 留在 FormInput，Engine journal 只記普通值。Host 決定何時提交；表單不更新 owner revision，也不操作設備。
-
-T1TuningPanel 接收已有 native acceptance 的 Controller，直接呈現其 Host 的唯一 FormState，不重建 draft 或 form capture。GUI Apply 與外部 JSON edit 都呼 Controller.apply_tunables。Host 保存已接受的 expression input 並提供 Apply／Discard。GUI與外部edit提交當下完整普通值，不持GUI draft revision守衛。Engine保存數值revision，過渡期不檢查holder。Window.apply_tunables 先用 Controller.require_run_id 核對明填的 native target，再交同一 T1TuningPanel.apply_external。Pending startup 尚未接受時明確失敗，不碰 draft。workflow.tunables RPC 接 run_id 與 path/value batch，actor 固定為 agent/rpc。空 batch 提交當前完整 parsed input，不採 Start 的 defaults-only 語意。Model-invalid input 留在 shared draft，RPC 保留 FormErrors 的 path/message。只有成功才更新 accepted input/base 並清 local text。Engine 拒絕 lifecycle 或 journal failure 時不重試，也不假回成功。Paused Apply 後 Resume 保留已提交 records，未提交步驟用新 revision 重做。這個 caller 不 Start、capture、安排 worker 或保存 input 檔案。
+App/window/figures/layout/sample_action/remote/remote_methods/catalog/persistence/tuning_panel 與私有 form I/O 是 fixed source。
+其餘 zcu_lab.workflows 是 bounded reload scope；framework、components 與 native experiment sources 固定。
+Window 的同 run、capture、取消與保存邊界見 ADR-0062、ADR-0063、ADR-0067、ADR-0068。

@@ -1,4 +1,4 @@
-"""Three-stage native calibration, with acceptance owned by the workflow.
+"""Independent native calibration stages, with acceptance owned by the workflow.
 
 The Engine owns execution and cancellation. Calibration owns its filenames. Callers supply the
 three exact-path savers explicitly; this module never selects a storage format.
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Generator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -22,6 +22,7 @@ from zcu_tools.experiment.workflows import (
     Failed,
     WorkflowEnv,
 )
+from zcu_tools.plotting.plots import LinePlot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
@@ -44,15 +45,20 @@ from zcu_lab.workflows.acquire import (
     run_qubit_freq,
     run_ro_landscape,
 )
-from zcu_lab.workflows.analysis import analyze_len_rabi, analyze_qubit_freq
+from zcu_lab.workflows.analysis import (
+    FrequencyFit,
+    RabiFit,
+    analyze_len_rabi,
+    analyze_qubit_freq,
+)
 
 
 class CalibrationTunables(BaseModel):
-    """Generation and acceptance knobs captured once per calibration call.
+    """Generation and acceptance knobs captured once per flux-point invocation.
 
     qf_widen specifies the finite sequence of spectroscopy spans, not retries
     after adapter errors. Error and residual upper bounds are strict; readout
-    SNR uses an inclusive lower bound. ro_every counts successful calibrations.
+    SNR uses an inclusive lower bound. ro_every counts flux points.
     Acceptance/cadence/range defaults are provisional simulator settings, not
     hardware-validated physics defaults; users confirm them at CP-B/CP-C.
     """
@@ -86,7 +92,7 @@ class CalibrationTunables(BaseModel):
         default=5.0, gt=0, description="Inclusive minimum readout SNR"
     )
     ro_every: int = Field(
-        default=5, ge=1, description="Successful readout scan cadence"
+        default=5, ge=1, description="Flux-point readout scan cadence"
     )
     rabi_start_factor: float = Field(
         default=0.1, gt=0, description="Sweep start divided by prior pi duration"
@@ -137,7 +143,7 @@ class CalibratedPi2(Calibrated):
     The original four Calibrated scalars retain their meanings and validation.
     pi2_length_us is a positive finite, phase-aware Length-Rabi fit duration in
     microseconds at the selected template's gain and waveform. It is neither
-    half pi_length_us nor an initial seed; callers obtain it from calibrate.
+    half pi_length_us nor an initial seed; callers obtain it from accepted Rabi.
     Invalid original scalars or pi2 duration raise ValueError at construction.
     """
 
@@ -161,22 +167,6 @@ class CalibrationFailed:
     reason: str
 
 
-@dataclass
-class CalCarry:
-    """Committed calibration history, changed only after all stages succeed.
-
-    seed is the initial scalar calibration. last is the latest accepted value
-    or None. f01_by_flux holds ordered (native flux setpoint, MHz) pairs.
-    n_calibrated counts successes for readout cadence. The Engine copies this
-    state per step; cancellation discards the in-flight copy.
-    """
-
-    seed: Calibrated
-    last: Calibrated | None = None
-    f01_by_flux: list[tuple[float, float]] = field(default_factory=list)
-    n_calibrated: int = 0
-
-
 @dataclass(frozen=True)
 class CalibrationFiles:
     """Native filenames returned only after a complete accepted calibration.
@@ -192,45 +182,98 @@ class CalibrationFiles:
     readout: str | None
 
 
-@dataclass(frozen=True)
-class CalibrationSuccess:
-    """Accepted calibration scalars paired with this invocation's saved files.
+@dataclass
+class CalCarry:
+    """Step-local calibration state, published only by the Engine's Next commit.
 
-    calibration contains fitted pi/pi2 and accepted frequency/readout scalars,
-    with CalibratedPi2's units and validation. files names completed native
-    acquisitions. CalibrationFailed carries only stage/reason, not partial file
-    evidence; exceptional acquisition/fit/writer/plot failures propagate instead.
+    seed is the legal host scalar seed; last contains the latest accepted
+    scalar parts or None initially. Frequency, Rabi and readout update only
+    their own fields. f01_by_flux contains accepted (device setpoint, MHz)
+    frequency history even when a later stage fails. Cancellation discards the
+    Engine-owned step copy; there are no stage checkpoints.
     """
 
-    calibration: CalibratedPi2
-    files: CalibrationFiles
+    seed: Calibrated
+    last: Calibrated | None = None
+    f01_by_flux: list[tuple[float, float]] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class _FrequencyCalibration:
-    """Accepted center in MHz and completed spectroscopy filenames."""
-
-    frequency_mhz: float
-    files: tuple[str, ...]
-
-
+type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
 type FrequencySaver = Callable[[Completed[FreqCfg, FrequencyAcquisition], Path], None]
 type RabiSaver = Callable[[Completed[LenRabiCfg, RabiAcquisition], Path], None]
 type ReadoutSaver = Callable[[Completed[FreqGainCfg, ReadoutAcquisition], Path], None]
 
 
 @dataclass(frozen=True)
-class CalibrationSavers:
-    """Three exact-path writers, grouped to keep calibration's inputs named.
+class CalibrationInputs:
+    """Fixed native routing and captured policy shared by the three experiments.
 
-    frequency/rabi/readout each write and close the path for their concrete
-    Completed cfg/result pair. The writers choose their own format and retain
-    acquisition evidence. No dispatch, fallback or storage state is added.
+    qub_pulse/readout are resolved shared drive/pulse-backed readout modules.
+    tun is this invocation's ordinary generation/acceptance/cadence policy.
+    The wrapper is frozen; nested modules are copied before applying scalars.
+    Both Coherence and MIST pass the same captured inputs to all three stages.
     """
 
-    frequency: FrequencySaver
-    rabi: RabiSaver
-    readout: ReadoutSaver
+    qub_pulse: PulseCfg
+    readout: PulseReadoutCfg
+    tun: CalibrationTunables
+
+
+@dataclass(frozen=True)
+class FrequencyResult:
+    """One point's spectroscopy outcome and immutable relative native references.
+
+    status is accepted, rejected (completed fits), or failed (Schedule).
+    reason is None on acceptance, otherwise the diagnostic. frequency_mhz is
+    this point's positive fitted MHz only on acceptance, never a prior seed.
+    files lists every Completed widening attempt in acquisition order, including
+    rejected fits; failed attempts have no filename. References do not guarantee
+    later existence. Writer/adapter/fit/plot exceptions propagate instead.
+    """
+
+    status: StageStatus
+    reason: str | None
+    frequency_mhz: float | None
+    files: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RabiResult:
+    """One point's Length-Rabi outcome, not a substitute for prior calibration.
+
+    status is accepted/rejected/failed/skipped; reason is None only on acceptance.
+    frequency_mhz is the accepted frequency used at this point (MHz), or None
+    when frequency was not accepted and Rabi is skipped. It never carries a
+    previous point's frequency. Accepted implies a current accepted frequency.
+    pi_length_us/pi2_length_us are positive fitted durations only on acceptance;
+    pi2 comes from the phase-aware fit, not pi/2. file is the relative native
+    filename after Completed, including fit rejection, otherwise None.
+    """
+
+    status: StageStatus
+    reason: str | None
+    frequency_mhz: float | None
+    pi_length_us: float | None
+    pi2_length_us: float | None
+    file: str | None
+
+
+@dataclass(frozen=True)
+class ReadoutResult:
+    """Readout scan outcome and immutable relative native reference.
+
+    status is accepted/rejected/failed/skipped (dependency or flux cadence).
+    reason is None only on acceptance. frequency_mhz/gain are this point's
+    accepted readout MHz/native gain only; nonaccepted results have no values.
+    file names the Completed landscape, including rejection, otherwise None.
+    Nonacceptance leaves the legal seed/prior readout carry unchanged.
+    """
+
+    status: StageStatus
+    reason: str | None
+    frequency_mhz: float | None
+    gain: float | None
+    file: str | None
 
 
 def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
@@ -344,206 +387,280 @@ def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
         raise ValueError("Calibration flux must be finite")
 
 
-def _calibrate_frequency(
+def calibrate_frequency(
     env: WorkflowEnv[Calibrated],
-    qub_pulse: PulseCfg,
-    readout: PulseReadoutCfg,
-    tun: CalibrationTunables,
+    *,
+    inputs: CalibrationInputs,
+    flux: float,
     carry: CalCarry,
     save: FrequencySaver,
-) -> Generator[Effect, None, _FrequencyCalibration | None]:
-    """Acquire the widening sequence and return the accepted frequency in MHz.
+) -> Generator[Effect, None, FrequencyResult]:
+    """Run spectroscopy independently and update frequency carry on acceptance.
 
-    Use carry's prior calibration and EWMA history as the center. Each attempt
-    saves through the supplied writer and redraws its own live plot. Schedule rejection or
-    exhausted fit gates returns None; fitting, callback and saver errors propagate.
-    Do not change carry. Calibrate validates flux and timing before this stage.
+    Use yield from in a workflow. flux is a finite device setpoint. carry is
+    the Engine's step copy; only frequency/history change. inputs supplies the
+    resolved modules and this invocation's policy. save writes the exact relative
+    path after each Completed attempt, before fitting. The widening sequence,
+    EWMA(alpha=.5) center, 1 us relax timing and acceptance gates are unchanged.
+    Failed schedules/rejected fits return their status and all Completed refs.
+    Invalid flux raises before acquisition; all unexpected errors propagate.
     """
+    if not math.isfinite(flux):
+        raise ValueError("Calibration flux must be finite")
     prior = carry.seed if carry.last is None else carry.last
     hint = prior.f01_mhz
     for _, frequency in carry.f01_by_flux:
         hint = 0.5 * frequency + 0.5 * hint
     filenames: list[str] = []
-    for attempt, widen in enumerate(tun.qf_widen, start=1):
-        name = "calibration/qubit_freq"
-        if name not in env.plots:
-            env.plots.subplots(name)
-
-        def rebuild(figure: Figure) -> None:
-            figure.clear()
-            ax = figure.subplots()
-            ax.axvline(hint, linestyle="--", label="expected")
-            ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
-
-        env.plots.draw(name, rebuild)
-        frequency_plot = env.plots.liveplot_1d(
-            name,
-            "Frequency (MHz)",
-            "Signal",
-            num_lines=2,
-            axes=env.plots[name].axes[0],
-        )
+    status: StageStatus = "rejected"
+    reason = "No accepted frequency fit"
+    for attempt, widen in enumerate(inputs.tun.qf_widen, start=1):
+        plot = _frequency_plot(env, hint, prior.f01_mhz)
         outcome = yield from env.run(
             run_qubit_freq,
-            _frequency_cfg(qub_pulse, readout, tun, prior, widen, hint),
-            live=lambda axes, samples, plot=frequency_plot: plot.update(
+            _frequency_cfg(
+                inputs.qub_pulse, inputs.readout, inputs.tun, prior, widen, hint
+            ),
+            live=lambda axes, samples, plot=plot: plot.update(
                 axes[0], np.stack((np.abs(samples), np.full_like(samples.real, np.nan)))
             ),
         )
         if isinstance(outcome, Failed):
+            status, reason = "failed", outcome.reason
             continue
         filename = f"frequency-{attempt:02d}.h5"
         save(outcome, env.iteration_dir / filename)
         filenames.append(filename)
         fit = analyze_qubit_freq(outcome.result)
         residual = fit.quality.normalized_residual_rms
-        if (
-            math.isfinite(fit.frequency_mhz)
-            and fit.frequency_mhz > 0
-            and math.isfinite(fit.width_mhz)
-            and fit.width_mhz > 0
-            and math.isfinite(fit.error_mhz)
-            and fit.error_mhz >= 0
-            and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
-            and residual is not None
-            and residual < tun.max_fit_residual
-        ):
-            frequency_plot.update(
-                outcome.result.freqs, np.stack((fit.observed, fit.fitted))
+        if _accept_frequency(fit, inputs.tun, residual):
+            plot.update(outcome.result.freqs, np.stack((fit.observed, fit.fitted)))
+            carry.last = replace(prior, f01_mhz=fit.frequency_mhz)
+            carry.f01_by_flux.append((flux, fit.frequency_mhz))
+            return FrequencyResult(
+                "accepted", None, fit.frequency_mhz, tuple(filenames)
             )
-            return _FrequencyCalibration(fit.frequency_mhz, tuple(filenames))
-    return None
+        status, reason = "rejected", "No accepted frequency fit"
+    return FrequencyResult(status, reason, None, tuple(filenames))
 
 
-def calibrate(
-    env: WorkflowEnv[Calibrated],
-    *,
-    qub_pulse: PulseCfg,
-    readout: PulseReadoutCfg,
-    tun: CalibrationTunables,
-    flux: float,
-    carry: CalCarry,
-    t1_estimate_us: float,
-    savers: CalibrationSavers,
-) -> Generator[Effect, None, CalibrationSuccess | CalibrationFailed]:
-    """Acquire native calibration stages and update carry only on full success.
+def _frequency_plot(
+    env: WorkflowEnv[Calibrated], hint: float, prior: float
+) -> LinePlot:
+    name = "calibration/qubit_freq"
+    if name not in env.plots:
+        env.plots.subplots(name)
 
-    Use yield from inside a workflow step, passing env positionally and all
-    other inputs by keyword. env supplies SoC through Engine ports.
-    qub_pulse is the shared host-resolved drive; readout is the shared
-    pulse-backed module. Routing/waveform/gain come from these fixed selections.
-    tun controls grids, averaging and acceptance. flux must be finite and labels accepted frequency history.
-    carry is the current step's mutable copy, seeded with a valid Calibrated.
-    t1_estimate_us is the workflow's positive finite T1 estimate in µs;
-    invalid estimates raise ValueError before any acquisition.
-    savers groups three explicit writers, avoiding callable context/registry;
-    each writer
-    writes/closes its calibration-selected path after Completed is returned.
-    CalibrationSuccess returns accepted scalars and completed filenames for
-    the caller's point record. CalibrationFailed has no partial file receipt.
-
-    Each stage builds its native cfg from the selected modules and this call's
-    tunables/history. Frequency relax_delay is 1 µs; Rabi/readout relax_delay
-    is 5 * t1_estimate_us. initial_delay and dev use native cfg defaults;
-    the caller sets flux through the workflow set_flux tool, not cfg.dev. Frequency/Rabi
-    resolutions are fixed at 101/51; readout scans a fixed 10 MHz/51-point
-    frequency window around the current accepted center.
-
-    Frequency uses EWMA(alpha=0.5) history and the declared widening sequence.
-    Reject nonpositive/nonfinite center/FWHM, negative/nonfinite error, excessive
-    error/FWHM or normalized residual RMS. Rabi scales prior pi length using
-    rabi_start_factor/rabi_stop_factor and uses the same residual gate, with
-    error/pi replacing error/FWHM. Readout scans
-    on first success and then at n_calibrated % ro_every == 0; its finite maximum
-    SNR must meet min_readout_snr. Other calls retain prior readout values.
-    Successful calibration returns CalibrationSuccess, whose CalibratedPi2 retains the fitted pi/2
-    duration at the same selected drive waveform/gain; the four-field seed is
-    unchanged. Invalid fitted pi/2 durations raise, without inventing a seed or
-    changing fit acceptance. Schedule failures and rejection return CalibrationFailed without modifying
-    carry. Adapter, fitting, saver and plot errors propagate. Cancel never
-    returns a value; Engine discards the generator and its step state.
-    Completed acquisition files remain even if a later stage fails.
-    """
-    _validate_calibration_inputs(flux, t1_estimate_us)
-    prior = carry.seed if carry.last is None else carry.last
-    stages = env.pbar("calibration", total=3)
-    stages.set_progress(0)
-    frequency = yield from _calibrate_frequency(
-        env, qub_pulse, readout, tun, carry, savers.frequency
-    )
-    if frequency is None:
-        return CalibrationFailed("frequency", "No accepted frequency fit")
-    f01 = frequency.frequency_mhz
-
-    stages.set_progress(1)
-    rabi = yield from env.run(
-        run_len_rabi,
-        _rabi_cfg(qub_pulse, readout, tun, prior, f01, t1_estimate_us),
-    )
-    if isinstance(rabi, Failed):
-        return CalibrationFailed("rabi", rabi.reason)
-    savers.rabi(rabi, env.iteration_dir / "rabi.h5")
-    rabi_fit = analyze_len_rabi(rabi.result)
-    residual = rabi_fit.quality.normalized_residual_rms
-    if not (
-        math.isfinite(rabi_fit.pi_length_us)
-        and rabi_fit.pi_length_us > 0
-        and math.isfinite(rabi_fit.error_us)
-        and rabi_fit.error_us >= 0
-        and rabi_fit.error_us / rabi_fit.pi_length_us < tun.max_rabi_rel_err
-        and residual is not None
-        and residual < tun.max_fit_residual
-    ):
-        return CalibrationFailed("rabi", "Rabi fit rejected")
-    rabi_name = "calibration/len_rabi"
-    if rabi_name not in env.plots:
-        env.plots.subplots(rabi_name)
-
-    def draw_rabi(figure: Figure) -> None:
+    def rebuild(figure: Figure) -> None:
         figure.clear()
         ax = figure.subplots()
-        ax.plot(rabi.result.lengths, rabi_fit.observed, label="observed")
-        ax.plot(rabi.result.lengths, rabi_fit.fitted, label="fit")
+        ax.axvline(hint, linestyle="--", label="expected")
+        ax.axvline(prior, linestyle=":", label="previous")
 
-    env.plots.draw(rabi_name, draw_rabi)
-
-    stages.set_progress(2)
-    ro_freq, ro_gain = prior.readout_freq_mhz, prior.readout_gain
-    readout_file = None
-    if carry.last is None or carry.n_calibrated % tun.ro_every == 0:
-        ro_result = yield from env.run(
-            run_ro_landscape,
-            _readout_cfg(
-                rabi.cfg.modules.qub_pulse,
-                readout,
-                tun,
-                prior,
-                rabi_fit.pi_length_us,
-                t1_estimate_us,
-            ),
-        )
-        if isinstance(ro_result, Failed):
-            return CalibrationFailed("readout", ro_result.reason)
-        savers.readout(ro_result, env.iteration_dir / "readout.h5")
-        readout_file = "readout.h5"
-        signals = ro_result.result.signals
-        accepted = np.isfinite(signals) & (signals >= tun.min_readout_snr)
-        if not np.any(accepted):
-            return CalibrationFailed("readout", "No readout SNR meets threshold")
-        # Invalid cells cannot win; this is selection policy, not repaired data.
-        row, column = np.unravel_index(
-            np.argmax(np.where(accepted, signals, -np.inf)), signals.shape
-        )
-        ro_freq = float(ro_result.result.freqs[row])
-        ro_gain = float(ro_result.result.gains[column])
-
-    cal = CalibratedPi2(
-        f01, rabi_fit.pi_length_us, ro_freq, ro_gain, rabi_fit.pi2_length_us
+    env.plots.draw(name, rebuild)
+    return env.plots.liveplot_1d(
+        name, "Frequency (MHz)", "Signal", num_lines=2, axes=env.plots[name].axes[0]
     )
-    carry.last = cal
-    carry.f01_by_flux.append((flux, f01))
-    carry.n_calibrated += 1
-    stages.set_progress(3)
-    return CalibrationSuccess(
-        cal, CalibrationFiles(frequency.files, "rabi.h5", readout_file)
+
+
+def _accept_frequency(
+    fit: FrequencyFit, tun: CalibrationTunables, residual: float | None
+) -> bool:
+    return (
+        math.isfinite(fit.frequency_mhz)
+        and fit.frequency_mhz > 0
+        and math.isfinite(fit.width_mhz)
+        and fit.width_mhz > 0
+        and math.isfinite(fit.error_mhz)
+        and fit.error_mhz >= 0
+        and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
+        and residual is not None
+        and residual < tun.max_fit_residual
+    )
+
+
+def calibrate_rabi(
+    env: WorkflowEnv[Calibrated],
+    *,
+    inputs: CalibrationInputs,
+    frequency: FrequencyResult,
+    carry: CalCarry,
+    t1_estimate_us: float,
+    save: RabiSaver,
+) -> Generator[Effect, None, RabiResult]:
+    """Run Length-Rabi only on this point's accepted frequency, updating pi carry.
+
+    frequency must be the current point's result, never a prior frequency.
+    Missing acceptance returns a named skipped result. t1_estimate_us is positive
+    finite us; relax_delay remains five times it. inputs supplies captured
+    modules/policy. carry retains readout and frequency; only fitted pi/pi2 change
+    on acceptance. save writes rabi.h5 after Completed, including rejected fits.
+    Schedule failures are named failed; unexpected errors propagate. Invalid
+    timing raises before any acquisition. Use yield from in a workflow step.
+    """
+    _validate_calibration_inputs(0.0, t1_estimate_us)
+    if frequency.status != "accepted":
+        return RabiResult(
+            "skipped",
+            "Requires this point's accepted frequency",
+            None,
+            None,
+            None,
+            None,
+        )
+    if frequency.frequency_mhz is None:
+        raise ValueError("Accepted frequency result requires MHz")
+    f01 = frequency.frequency_mhz
+    prior = carry.seed if carry.last is None else carry.last
+    outcome = yield from env.run(
+        run_len_rabi,
+        _rabi_cfg(
+            inputs.qub_pulse, inputs.readout, inputs.tun, prior, f01, t1_estimate_us
+        ),
+    )
+    if isinstance(outcome, Failed):
+        return RabiResult("failed", outcome.reason, f01, None, None, None)
+    save(outcome, env.iteration_dir / "rabi.h5")
+    fit = analyze_len_rabi(outcome.result)
+    if not _accept_rabi(fit, inputs.tun):
+        return RabiResult("rejected", "Rabi fit rejected", f01, None, None, "rabi.h5")
+    carry.last = CalibratedPi2(
+        prior.f01_mhz,
+        fit.pi_length_us,
+        prior.readout_freq_mhz,
+        prior.readout_gain,
+        fit.pi2_length_us,
+    )
+    _draw_rabi(env, outcome.result, fit)
+    return RabiResult(
+        "accepted", None, f01, fit.pi_length_us, fit.pi2_length_us, "rabi.h5"
+    )
+
+
+def _accept_rabi(fit: RabiFit, tun: CalibrationTunables) -> bool:
+    residual = fit.quality.normalized_residual_rms
+    return (
+        math.isfinite(fit.pi_length_us)
+        and fit.pi_length_us > 0
+        and math.isfinite(fit.error_us)
+        and fit.error_us >= 0
+        and fit.error_us / fit.pi_length_us < tun.max_rabi_rel_err
+        and residual is not None
+        and residual < tun.max_fit_residual
+    )
+
+
+def _draw_rabi(
+    env: WorkflowEnv[Calibrated], acquisition: RabiAcquisition, fit: RabiFit
+) -> None:
+    name = "calibration/len_rabi"
+    if name not in env.plots:
+        env.plots.subplots(name)
+
+    def draw(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        ax.plot(acquisition.lengths, fit.observed, label="observed")
+        ax.plot(acquisition.lengths, fit.fitted, label="fit")
+
+    env.plots.draw(name, draw)
+
+
+def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
+    """Return whether this zero-based flux point scans readout.
+
+    The rule is point_index % tun.ro_every == 0; index zero naturally scans.
+    Failed/rejected prior scans do not change the cadence or cause extra scans.
+    The caller retains legal seed/prior readout on cadence skips and checks this
+    point's Rabi dependency separately. Negative indexes raise ValueError.
+    """
+    if point_index < 0:
+        raise ValueError("Readout point index must be nonnegative")
+    return point_index % tun.ro_every == 0
+
+
+def calibrate_readout(
+    env: WorkflowEnv[Calibrated],
+    *,
+    inputs: CalibrationInputs,
+    rabi: RabiResult,
+    carry: CalCarry,
+    t1_estimate_us: float,
+    save: ReadoutSaver,
+) -> Generator[Effect, None, ReadoutResult]:
+    """Run a due readout scan after this point's accepted Rabi.
+
+    An accepted rabi implies a current accepted frequency; its frequency_mhz
+    is the MHz used here, never a prior frequency. Nonaccepted Rabi returns a
+    named dependency skip. Caller uses readout_due to decide flux cadence;
+    an accepted Rabi causes a scan whenever this stage is called. Timing is
+    positive finite us, with relax_delay five times it. carry's readout changes
+    only on accepted finite SNR. Failure/rejection retains legal prior
+    readout, without returning fabricated accepted values. save writes readout.h5
+    after Completed including rejection. Invalid input/unexpected errors raise.
+    Use yield from in a workflow step; cancellation remains Engine-owned.
+    """
+    _validate_calibration_inputs(0.0, t1_estimate_us)
+    if rabi.status != "accepted":
+        return ReadoutResult(
+            "skipped",
+            "Requires this point's accepted frequency and Rabi",
+            None,
+            None,
+            None,
+        )
+    if rabi.frequency_mhz is None or rabi.pi_length_us is None:
+        raise ValueError("Accepted Rabi requires current frequency and pi duration")
+    prior = carry.seed if carry.last is None else carry.last
+    drive = inputs.qub_pulse.model_copy(deep=True)
+    drive.set_param("freq", rabi.frequency_mhz)
+    outcome = yield from env.run(
+        run_ro_landscape,
+        _readout_cfg(
+            drive, inputs.readout, inputs.tun, prior, rabi.pi_length_us, t1_estimate_us
+        ),
+    )
+    if isinstance(outcome, Failed):
+        return ReadoutResult("failed", outcome.reason, None, None, None)
+    save(outcome, env.iteration_dir / "readout.h5")
+    signals = outcome.result.signals
+    accepted = np.isfinite(signals) & (signals >= inputs.tun.min_readout_snr)
+    if not np.any(accepted):
+        return ReadoutResult(
+            "rejected", "No readout SNR meets threshold", None, None, "readout.h5"
+        )
+    row, column = np.unravel_index(
+        np.argmax(np.where(accepted, signals, -np.inf)), signals.shape
+    )
+    frequency = float(outcome.result.freqs[row])
+    gain = float(outcome.result.gains[column])
+    carry.last = replace(prior, readout_freq_mhz=frequency, readout_gain=gain)
+    return ReadoutResult("accepted", None, frequency, gain, "readout.h5")
+
+
+def current_point_calibration(
+    rabi: RabiResult, carry: CalCarry
+) -> CalibratedPi2 | None:
+    """Combine current accepted Rabi with retained legal readout for acquisition.
+
+    Return None for failed/rejected/skipped Rabi, never borrowing prior pi or
+    frequency. Accepted Rabi must contain positive fitted pi/pi2 and current
+    MHz; invalid accepted records raise. Readout comes from accepted carry or
+    the legal host seed. No I/O or carry mutation occurs.
+    """
+    if rabi.status != "accepted":
+        return None
+    if (
+        rabi.frequency_mhz is None
+        or rabi.pi_length_us is None
+        or rabi.pi2_length_us is None
+    ):
+        raise ValueError("Accepted Rabi requires current frequency, pi and pi2")
+    prior = carry.seed if carry.last is None else carry.last
+    return CalibratedPi2(
+        rabi.frequency_mhz,
+        rabi.pi_length_us,
+        prior.readout_freq_mhz,
+        prior.readout_gain,
+        rabi.pi2_length_us,
     )

@@ -12,8 +12,8 @@ from .attachment import Attachment, WorkflowAttachment
 
 if TYPE_CHECKING:
     from ..calibration import Calibrated
-    from ..t1 import T1Plan
-    from .plan import T1PlanForm
+    from ..coherence import CoherencePlan
+    from .plan import CoherencePlanForm
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class WorkflowCatalog:
     """Current coherent attachments in selector order, without run/draft state.
 
     attachments pairs native science with independent current forms. The first
-    attachment is the default for Start without name (shipped T1_fluxdep).
+    attachment is the default for Start without name (shipped coherence_fluxdep).
     Names must be unique and at least one attachment must exist. The app selector
     and optional Start name consume this same pairing; Registry has no lookup.
     New Starts use current callables; Controller's existing export binding stays
@@ -55,8 +55,8 @@ class WorkflowCatalog:
         )
 
 
-def calibrated_seed(plan: T1Plan, form: T1PlanForm) -> Calibrated:
-    """Build T1 scalar context from fixed modules and required form pi estimate.
+def calibrated_seed(plan: CoherencePlan, form: CoherencePlanForm) -> Calibrated:
+    """Build Coherence scalar context from fixed modules and required form pi estimate.
 
     No calibration or live source read occurs. Non-scalar module frequency/gain
     raises ValueError; pi estimate is in microseconds and already form-validated.
@@ -67,84 +67,36 @@ def calibrated_seed(plan: T1Plan, form: T1PlanForm) -> Calibrated:
 
 
 def build_catalog() -> WorkflowCatalog:
-    """Import current native/form declarations and their coherent typed attachments.
+    """Pair current native workflows/forms without constructing live resources.
 
-    Use on the app owner, inside bounded source reload. Fresh Registry validates
-    both declarations without publishing global state or adding lookup. T1 is
-    first/default; overnight is context-independent and has no fluxdep exporter.
-    Import/declaration errors propagate; no session, Engine or device is built.
+    Coherence is first/default; MIST is a gain scan; overnight is fixed-pair
+    monitoring without feedback. Registry validates the declarations locally.
+    Source reload uses this builder; current run bindings remain unchanged.
+    Coherence has no temporary export bridge; independent tools own conversion.
     """
-    from ..export import (
-        prepare_mist_fluxdep_export,
-        prepare_t1_fluxdep_export,
-        prepare_t2echo_fluxdep_export,
-        prepare_t2ramsey_fluxdep_export,
-    )
+    from ..coherence import coherence_fluxdep
+    from ..export import prepare_mist_fluxdep_export
     from ..mist import mist_fluxdep
     from ..overnight import overnight
-    from ..samples import (
-        export_t1_samples,
-        export_t2echo_samples,
-        export_t2ramsey_samples,
-    )
-    from ..t1 import t1_fluxdep
-    from ..t2 import t2echo_fluxdep, t2ramsey_fluxdep
     from .calibration_modules import calibration_seed
+    from .coherence import CoherenceTunablesForm
     from .mist import MISTPlanForm, MISTTunablesForm
     from .overnight import OvernightPlanForm, OvernightTunablesForm
-    from .plan import T1PlanForm
-    from .t2 import T2EchoTunablesForm, T2PlanForm, T2RamseyTunablesForm
-    from .tunables import T1TunablesForm
+    from .plan import CoherencePlanForm
 
     registry = WorkflowRegistry()
-    registry.add(t1_fluxdep)
-    registry.add(overnight)
-    registry.add(t2echo_fluxdep)
-    registry.add(t2ramsey_fluxdep)
+    registry.add(coherence_fluxdep)
     registry.add(mist_fluxdep)
-    t1 = WorkflowAttachment(
-        step=t1_fluxdep,
-        plan_model=T1PlanForm,
-        knobs_model=T1TunablesForm,
-        plan_to_cfg=T1PlanForm.to_cfg,
-        knobs_to_cfg=T1TunablesForm.to_cfg,
+    registry.add(overnight)
+    coherence = WorkflowAttachment(
+        step=coherence_fluxdep,
+        plan_model=CoherencePlanForm,
+        knobs_model=CoherenceTunablesForm,
+        plan_to_cfg=CoherencePlanForm.to_cfg,
+        knobs_to_cfg=CoherenceTunablesForm.to_cfg,
         seed=calibrated_seed,
-        prepare_export=prepare_t1_fluxdep_export,
-        prepare_samples=export_t1_samples,
-    )
-    monitoring = WorkflowAttachment(
-        step=overnight,
-        plan_model=OvernightPlanForm,
-        knobs_model=OvernightTunablesForm,
-        plan_to_cfg=OvernightPlanForm.to_cfg,
-        knobs_to_cfg=OvernightTunablesForm.to_cfg,
-        seed=lambda _plan, _form: None,
         prepare_export=None,
-        samples_reason="Overnight monitors fixed-flux rounds, not a flux scan",
-    )
-    echo = WorkflowAttachment(
-        step=t2echo_fluxdep,
-        plan_model=T2PlanForm,
-        knobs_model=T2EchoTunablesForm,
-        plan_to_cfg=T2PlanForm.to_cfg,
-        knobs_to_cfg=T2EchoTunablesForm.to_cfg,
-        seed=lambda plan, form: calibration_seed(
-            plan.qub_pulse, plan.readout, form.pi_length_us
-        ),
-        prepare_export=prepare_t2echo_fluxdep_export,
-        prepare_samples=export_t2echo_samples,
-    )
-    ramsey = WorkflowAttachment(
-        step=t2ramsey_fluxdep,
-        plan_model=T2PlanForm,
-        knobs_model=T2RamseyTunablesForm,
-        plan_to_cfg=T2PlanForm.to_cfg,
-        knobs_to_cfg=T2RamseyTunablesForm.to_cfg,
-        seed=lambda plan, form: calibration_seed(
-            plan.qub_pulse, plan.readout, form.pi_length_us
-        ),
-        prepare_export=prepare_t2ramsey_fluxdep_export,
-        prepare_samples=export_t2ramsey_samples,
+        samples_reason="Coherence conversion is provided by independent run tools",
     )
     mist = WorkflowAttachment(
         step=mist_fluxdep,
@@ -156,6 +108,16 @@ def build_catalog() -> WorkflowCatalog:
             plan.qub_pulse, plan.readout, form.pi_length_us
         ),
         prepare_export=prepare_mist_fluxdep_export,
-        samples_reason="MIST has calibrated frequency/success, but no sample science fields",
+        samples_reason="MIST has no lifetime sample science fields",
     )
-    return WorkflowCatalog((t1, monitoring, echo, ramsey, mist))
+    monitoring = WorkflowAttachment(
+        step=overnight,
+        plan_model=OvernightPlanForm,
+        knobs_model=OvernightTunablesForm,
+        plan_to_cfg=OvernightPlanForm.to_cfg,
+        knobs_to_cfg=OvernightTunablesForm.to_cfg,
+        seed=lambda _plan, _form: None,
+        prepare_export=None,
+        samples_reason="Overnight monitors fixed-flux rounds, not a flux scan",
+    )
+    return WorkflowCatalog((coherence, mist, monitoring))

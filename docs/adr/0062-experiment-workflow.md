@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-12，iteration 目錄與 workflow 保存責任
+**Last updated:** 2026-10-12，獨立校準結果與 Coherence 提交
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -46,11 +46,19 @@ Native 原子覆寫 workflow data_root/merged.h5。Labber 使用相同 payload �
 
 Engine 在每次 invocation 開始前建立 `data_root/iter/<至少六位 call_seq>/`。唯讀 `env.iteration_dir` 指向當輪已存在的 absolute 根目錄。屬性不可重綁，不限制 workflow 自行寫檔。Resume 重做未提交步驟時分配新的 call_seq 與目錄。
 
-`env.run` 只負責量測，保留 cfg deepcopy、device capture、Schedule、live callback、StopSignal 與失敗來源。`Completed` 只表示量測成功。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。校準保存仍由既有 native writer 處理。成功校準以具名結果回傳 scalars 與實際寫出的檔名，caller 將檔名放進 point record。CalibrationFailed 保留原本的 Schedule 失敗與 fit 拒絕分類，不提供部分檔案收據。框架不提供檔案清單，不預建量測或圖形子目錄，不追蹤、掃描或保證 workflow 檔案。
+`env.run` 只負責量測，保留 cfg deepcopy、device capture、Schedule、live callback、StopSignal 與失敗來源。`Completed` 只表示量測成功。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。校準保存仍由既有 native writer 處理。Frequency、Rabi、readout 各自回傳 frozen 具名結果，包含自己的 status、reason、accepted scalars 與 immutable 檔名引用。Frequency widening 保留全部 Completed attempts，fit 拒絕也保留 raw 檔名；Schedule Failed／skipped 不捏造檔名。Caller 將各 stage 結果放進 point record，不用整體校準成功收據丟掉前面已接受的值。框架不提供檔案清單，不預建量測或圖形子目錄，不追蹤、掃描或保證 workflow 檔案。
 
 Workflow saver 例外停止 run，不改標為量測 `Failed`。Pause、Stop 或程序中斷可能留下未提交或寫一半的檔案，框架不清理、不承諾 rollback。Point record 的檔名也不保證檔案存在或完整，由讀取者處理缺資料。
 
 Engine 仍擁有 manifest、journal 與 best-effort `record.json`。結果 journal append 與 flush 成功後，Engine 才用同目錄 temporary 加 replace 保存摘要。摘要 I/O 失敗只記 log，不影響提交或下一步。Manifest 的 atomic replace 也保留。這兩種框架文件的替換，不代表 workflow 量測檔案有發布保證。依賴方向仍由 C18 與 framework-no-user contract 保護。
+
+## Coherence 與部分校準結果
+
+具體 workflow 的 stage 隔離不改 Engine 的 whole-step 提交。Frequency 接受即更新自己的 history；Rabi 需要本點 frequency，readout 與 enabled lifetime 需要本點 frequency/Rabi。Readout 非接受時沿合法 seed／prior accepted 設定繼續量 lifetime，不用 prior frequency 或 pi 取代缺少的本點依賴。Carry 只在 step 副本中更新，由 Next 發布，Pause／Stop 仍丟棄整點，不增加 stage checkpoint。
+
+Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份 lifetime history 獨立，只有各自接受的值更新 delay grid。Point 的 measurements tuple 只含 enabled 結果；disabled 不用 null placeholder。各個 completed raw 都有明示用途的 relative native reference，讓轉換工具取得部分證據，而不從 acquisition 次序或目錄猜資料。
+
+校準與具體 lifetime policy 留在 zcu_lab.workflows。共用 CalibrationInputs 服務 Coherence 與 MIST 的三個 native stage，readout_due 讓兩個 caller 共用零基 flux index cadence。這些 module 不依賴 frontend，方向由 workflow-science-no-frontends 與 C16 保護。GUI forms/capture、單一 Controller 與 operation 邊界不改；不增加通用 pipeline、registry、export bridge 或 saved input migration。
 
 ## Overnight live 趨勢與保存責任
 

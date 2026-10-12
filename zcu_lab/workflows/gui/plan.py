@@ -1,9 +1,11 @@
-"""User-facing T1 choices; the workflow constructs each acquisition cfg."""
+"""Coherence plan choices; the workflow constructs each acquisition cfg."""
+
+from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, model_validator
 from zcu_tools.datafile.native_models import RunSnapshot
 from zcu_tools.gui.form import (
     FormEnv,
@@ -12,9 +14,10 @@ from zcu_tools.gui.form import (
     FormPath,
     ModuleInput,
     RangeInput,
+    field_error,
 )
 
-from zcu_lab.workflows.t1 import T1Plan
+from zcu_lab.workflows.coherence import CoherencePlan
 
 from .calibration_modules import (
     calibration_choices,
@@ -24,7 +27,7 @@ from .calibration_modules import (
 )
 
 
-class T1PlanForm(FormModel):
+class CoherencePlanForm(FormModel):
     """Start-time setpoints and two shared module reference/inline selections.
 
     flux_dev is the resolved host device name; its input defaults to $flux_dev
@@ -51,6 +54,20 @@ class T1PlanForm(FormModel):
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
     qub_pulse: ModuleInput = Field(description="Shared spectroscopy/Rabi/pi drive")
     readout: ModuleInput = Field(description="Shared pulse-backed readout")
+
+    measure_t1: bool = Field(default=True, description="Measure T1 at each flux point")
+    measure_t2ramsey: bool = Field(
+        default=True, description="Measure Ramsey at each flux point"
+    )
+    measure_t2echo: bool = Field(
+        default=True, description="Measure Echo at each flux point"
+    )
+
+    @model_validator(mode="after")
+    def _enabled(self) -> CoherencePlanForm:
+        if not (self.measure_t1 or self.measure_t2ramsey or self.measure_t2echo):
+            raise field_error(("measure_t1",), "At least one lifetime must be enabled")
+        return self
 
     @classmethod
     def defaults(
@@ -80,7 +97,7 @@ class T1PlanForm(FormModel):
         """
         return calibration_choices(env)
 
-    def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> T1Plan | FormErrors:
+    def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> CoherencePlan | FormErrors:
         """Resolve selections and expand setpoints into a static native plan.
 
         env supplies the captured library and validation/assets context; pure
@@ -101,7 +118,10 @@ class T1PlanForm(FormModel):
         )
         if isinstance(modules, FormErrors):
             return modules
-        return T1Plan(
+        return CoherencePlan(
+            measure_t1=self.measure_t1,
+            measure_t2ramsey=self.measure_t2ramsey,
+            measure_t2echo=self.measure_t2echo,
             flux_dev=self.flux_dev,
             flux_unit=self.flux_unit,
             fluxes=expand_fluxes(self.fluxes),

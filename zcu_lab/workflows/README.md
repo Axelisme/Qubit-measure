@@ -1,42 +1,82 @@
-# `zcu_lab.workflows` — 使用者 workflow
+# `zcu_lab.workflows` 使用者 workflow
 
-**Last updated:** 2026-10-12, live-only overnight trend
+**Last updated:** 2026-10-12，Coherence 與獨立校準 stage
 
-本 package 擁有具體 workflow 的校準、cfg 組裝、分析、record 與 state。通用迭代、取消、提交與保存路徑由 `zcu_tools.experiment.workflows` 負責。宿主建立 catalog，再明確注入框架；import 不啟動 run。宣告只列 name、plan、tunables、init。T1 在步驟開頭檢查 soc／devices／context，缺少時明確失敗。這是定義者的選擇，不是框架的 admission 保證；硬體操作仍經 effect。
+本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、state 與 point record。
+Engine 擁有迭代、輸入副本、取消、revision 與提交。宿主建立 catalog，再注入框架；import 不啟動量測。
+GUI／MCP 只支援 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。不提供舊 standalone 名稱的 alias。
 
-`T1Plan`、`T2Plan`、`MISTPlan` 與 `OvernightPlan` 要求 caller 明填 `flux_unit`（A、V 或 native），交給 workflow 的 set_flux 工具。Fake 輸入明填 native，YOKO 由使用者明填 A 或 V。Plan 不讀硬體、不推測單位、不提供預設或換算；`devices.set_flux` 同步讀取 live cfg，使用已交付的 experiment.utils.check_flux_unit，再以 model_copy 只改 value 並 yield from 完整 setup。工具不重做 mode／Fake／unit default 規則，也不換算值。完整 cfg 保留 output、rampstep 與 value_unit。GUI／MCP plan 表單要求明填 flux_unit，不提供預設。
+## Coherence
 
-原 v0 T1／Echo fluxdep 與 overnight 示範都由 native workflow 取代。示範專用的假校準、trace、JSON saver 與測試已一起退役，不保留第二條執行路徑。
+`CoherencePlan` 固定 flux setpoints、明填的 flux_unit、resolved drive/readout modules、delay points 與 historical RunSnapshot。
+`measure_t1`、`measure_t2ramsey`、`measure_t2echo` 預設 true，至少開啟一項。全關在 acquisition 前拒絕。
+每點先設 flux，再依 frequency、Rabi、readout、T1、Ramsey、Echo 順序執行。
+關閉的 lifetime 不量、不保存、不產生 result 元素。
 
-`acquire.run_t2echo` 提供原生 uniform、零 detune 的 Hahn-echo acquisition，直接使用 Run／Schedule 與 native cfg／Result。它保留半延遲的原生 rounding、取消後的部分資料與 acquisition evidence，不捕捉 context，也不連儀器。`t2` 的 calibrated Echo workflow 使用此 callback；Ramsey 使用 `acquire.run_t2ramsey`，保存沿 native persistence declaration。`scripts/run_workflow_sim.py` 可選 `t2echo`，只讀 current native cfg 與 simulator 設定。
+`CoherenceTunables` 分為共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`。
+三份 lifetime history 只收各自接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
+T1 的 relax delay 沿它的 delay guess。T2 的 relax delay 仍是 relax_factor × 自己的初始 guess，不用本點 T1 改寫。
+Rabi／readout 的 relax delay 是最近 accepted T1 的五倍；尚無 accepted T1 或 T1 關閉時，用合法 T1 guess。
+例如 T1 關閉且 guess=50 µs，兩個校準 stage 等待 250 µs，不補量 T1。
 
-`analysis` 提供純資料的 frequency、length-Rabi、T1 與零 detune T2echo fits。Echo 沿 native analysis 排除首點，要求明確零 activated detune 與 finite retained trace；simulator CLI 只在 echo 完整 acquisition 後報告 lifetime／uncertainty。它重用 native signal projections 與 fitting helpers，保留原生單位、estimate、uncertainty 與 residual 診斷，不操作硬體、不畫圖、不保存或決定 calibration 接受度。Fit residual 不是 readout SNR，兩者由 workflow policy 分開判斷。Length-Rabi 使用既有 native free-phase/no-decay 路線，`RabiFit` 保存 pi 與 phase-aware pi2 duration 及各自 error。pi2 不是 pi duration 除以二。`analyze_t2echo_fluxdep` 與 `analyze_t2ramsey` 使用完整 trace 的舊 fluxdep normalized projection，分別呼 decay／fringe fit，不改 CLI／overnight Echo 排首點的契約。
+Ramsey 的 detune_ratio 是有限 fringes/step 值，無論 plan 開關都驗證，預設 0.05。
+Requested detune 為 ratio/length_step；公開 acquisition result 保留原生量化後的 actual detune。
+Echo detune 為零。兩者使用原有 fringe／whole-trace decay fit，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
+T1 保留原有 relative error 與 normalized residual RMS 門檻。
+Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除以二；waveform 與 gain 保留選定值。
+`t1`、`t2` 提供 native cfg 科學 helper。其純資料 plan/point carrier 仍有既有 conversion caller，不代表 standalone workflow 入口。
 
-`calibration` 從固定的 qub_pulse／readout modules 組裝 native cfg，執行 frequency、length-Rabi 與按 cadence 的 readout landscape。它擁有接受度與純資料 carry，全部成功才更新校準歷史。Caller 明確傳入正 finite 的 T1 estimate（µs）。Frequency relax_delay 為1µs，Rabi／readout為5倍estimate；initial_delay／dev沿native cfg預設，不依賴Measure adapters或host timing capture。Context seed 保留四個校準 scalar。成功回傳 `CalibratedPi2`，追加同 waveform／gain 的 fitted pi2 duration，供 Echo 與 Ramsey 使用。Mutable modules 留在 Engine 會複製的 plan。三個 saver 以具名參數物件明確注入，不放進 context 或建立 registry。接受度、cadence 與 Rabi range 的預設值是暫定 tunables，待使用者在 CP-B／CP-C 確認，不是已驗證的物理預設。
+## 獨立校準與 point
 
-`t1` 宣告 `T1_fluxdep`，逐 setpoint 執行完整 calibration 與 native T1。Plan 持有固定 setpoints、兩個選定的modules與caller捕捉的歷史RunSnapshot，context只含scalar seed。Pi drive 使用量出 pi duration 的 Rabi waveform／gain。T1的delay grid與relax delay由lifetime history的EWMA guess生成。Calibration使用首點guess_us，後續使用最新accepted lifetime；拒絕fit不加入history。校準失敗與 fit 不接受提交具名 reason，只有接受的 lifetime 加入 history。Pause／stop 由 Engine 丟棄當前步驟，已發布的 acquisition 保留。
+`calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 yield from 呼叫。
+`CalibrationInputs` 固定共用的 drive、pulse-backed readout 與 captured policy。
+三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
+Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。
+Readout 只在本點 Rabi 接受後執行。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
+Index 0 自然先掃。失敗／拒絕不增加掃描，也不改下一個 due index。
+Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
+任何 dependent acquisition 都不能借 prior frequency 或 pi pulse 取代本點依賴。
 
-`t2` 宣告 `T2echo_fluxdep` 與 `T2ramsey_fluxdep`。每個 flux 先校準，再用相同 waveform／gain 的 fitted pi 與 pi2 組 native cfg。Echo detune 為零，Ramsey 的必填 detune_ratio 除以 length_step 得到 native MHz detune。Lifetime 大於兩倍最大 delay，或 mean absolute fit error 大於 0.1 倍 fit peak-to-peak 時，提交缺值與原因，保留 raw acquisition。Calibration 與 relax timing 沿既有 guess，不加一次 T1 量測。
+`CoherencePoint` 保存 frequency、rabi、readout 與 enabled `measurements` tuple。
+Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
+Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
+Failed／skipped stage 沒有偽造檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
+這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
-`mist` 宣告 `MIST_fluxdep`，依 reset、校準後的 pi preparation、MIST disturbance pulse 與 readout 掃 gain。Gain start／stop／points 固定在 plan，run 中不改。Native `PowerDepCfg` 的 init_pulse／probe_pulse 分別承接 pi／MIST pulse，不省略 preparation。Record 只存 calibration、success 與 reason，raw IQ 留 native `mist/gain` 檔。Live trace 與 flux-gain map 用舊 centred magnitude／spread projection，不推 threshold。Map 的 sample centres 是 native 實際 gain 與有單位的 flux setpoints，不以 requested gain extent 或 flux index 代替。
-# workflows — Concrete science and artifact producers
+Carry 在 Engine 的 step 副本中更新，只有 Next 提交。Pause／Stop 丟棄未提交點；Resume 用新 revision 重做該點。
+沒有 stage checkpoint、framework reader、檔案追蹤或 rollback 保證。
+Schedule Failed 與 fit 拒絕隔離為各項具名結果。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 
-**Last updated:** 2026-10-12，live 趨勢與既有 science artifacts
+## MIST 與 overnight
 
-`export.export_t1_samples(run)`、`export_t2echo_samples(run)` 與 `export_t2ramsey_samples(run)` 只讀固定 SampleRun 的 committed scalar records 和該點最後 native acquisition 的 device snapshot。它們先驗證完整 batch，每個成功 flux 點產生一行，保留頻率、lifetime/error 的 MHz／us 與原 device value/unit。失敗點略過，沒有 fit、bias 或 flux 座標換算。Host 使用 `<run_id>/<index>` key 與 `workflow:<run_id>` source 追加。MIST 沒有相應 sample 科學量，overnight 不是 flux 掃描，兩者明確 unsupported。
+`mist_fluxdep` 使用相同獨立校準 stage 與本點依賴。Plan 固定 reset、pi preparation、MIST disturbance pulse 與 gain grid。
+`MISTPoint` 保留三份 stage 結果、success、reason 與 gain_file；raw IQ 留 native `mist/gain`。
+Live trace/map 保留 centred magnitude／spread projection，不推 threshold。
+Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 requested extent 或 flux index 替代。
 
-`overnight` declares a finite sequence of fixed-flux T1 then Hahn-echo pairs. Its independent `OvernightPlan` requires explicit flux/unit, outer_rounds >= 1, start_interval_s > 0, points >= 5, fixed calibrated drive/readout and historical snapshot. `OvernightTunables.reps/rounds` control acquisition averaging, not outer monitoring rounds. Guesses and sweep/relax factors fix timing; fit thresholds affect scalar acceptance only, with no calibration or feedback. The workflow does not read or produce context; any context value, including None, is valid.
+`overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
+它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
+下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
+Pause 丟棄未提交 pair，Resume 重做；Stop 保留既有 commits。
+`trend.project_overnight_trend` 與 `draw_overnight_trend` 從 committed scalar records 畫 live 趨勢，缺值維持 gaps，不重 fit。
+沒有自動保存或從 run 目錄重開趨勢圖。保存責任見 ADR-0062。
 
-Each complete pair returns one Next and commits one progress round. Native T1/Echo files share the iteration directory. Records contain zero-based round_index, aware UTC scheduled/actual start, flux, lifetimes, uncertainties and failure reasons. The next pair starts at max(now, previous actual start + interval), not an original-start grid, so overruns never trigger catch-up bursts. Pause discards an uncommitted pair, does not freeze wall time, and Resume repeats that pair. Stop retains prior commits; Engine owns cancellation, leases, device snapshots and journal publication. Native Failed outcomes contribute member reasons; unexpected errors stop the run. The v0 overnight demonstration is retired. `trend.project_overnight_trend(records)` decodes committed scalar summaries to detached OvernightPoint values. `draw_overnight_trend(plots, records)` uses this projection for live views, plotting actual UTC start against microsecond lifetimes. Missing and rejected values remain gaps; diagnostics appear in axes coordinates, not as invented lifetime values. Neither function refits native files or consults current tunables, GUI drafts or hardware. The public package reexports these two functions. Overnight has no automatic trend saving or interactive reopening. Users can redraw from record.json or native data; workflow authors handle any per-iteration figure saving in their own workflow code, without a new framework interface. See ADR-0062.
+## Native、裝置與前端邊界
 
-Workflow 透過 `env.plots` 的 typed handles 更新 live trace，buffer 回呼只送座標與複數資料。校準參考線、靜態圖與 fit 疊圖經 draw 在 host owner 執行；每點 decay／最終 summary 經 save 保存。跨 retry 清除並重建具名圖的 axes，再接新模板，不把 handles 存進 state。核心不再持 Live artist 宣告。
+每輪 step 開始前已有唯讀 absolute `env.iteration_dir`。
+Workflow 在 env.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
+Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
+Writer 沿各 experiment 的 cfg、persistence declaration、AcquisitionEvidence、RunSnapshot 與 device snapshot，不改 native 格式。
+Framework 只保存 manifest、journal 與 best-effort record.json。
+Coherence 沒有臨時 export bridge；既有 conversion adapter 的輸入仍由其各自的純資料 carrier 定義。
 
-每輪 step 開始前已有唯讀 absolute `env.iteration_dir`。Workflow 在 `env.run` 返回 `Completed` 後呼 native writer，不由 Engine 保存。T1Point／T2Point 的 `decay_file`、MISTPoint 的 `gain_file`、OvernightPoint 的 `t1_file`／`t2_file` 都是相對當輪根目錄的 native 檔名，未取得資料時為 None。Fit 拒絕仍保存 raw trace。校準成功回 `CalibrationSuccess`，包含 `CalibratedPi2` scalars 與 `CalibrationFiles`。T1／T2／MIST 從成功結果取 `calibration_files`，其中 `frequency` 保存 spectroscopy widening 已完成 attempts，`rabi` 保存 Length-Rabi，`readout` 保存 landscape 檔名，cadence 略過 readout 時為 None。Schedule 失敗或 fit 拒絕仍回 `CalibrationFailed`，point 的 `calibration_files` 為 None，不提供部分檔案收據。原本會 raise 的例外仍 raise，已寫檔案可留在 iteration，不回傳收據。工具按用途欄位定位，不靠量測次序或掃描目錄。既有 decay／gain／summary 圖也保存於 iteration 根目錄；overnight 不保存趨勢圖。
+`devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，yield from 完整 setup。
+Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
+每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 evidence，不因 Resume、alias 修改或 Save 刷新 snapshot。
 
-`saving` 的具體 writer 使用各 experiment 的既有 persistence declaration 與 native `save_run`。Writer 接 workflow 選定的 exact path，不決定 entry layout，也不捕捉 live context。Acquisition evidence 提供 run_id、時間、completion 與 software provenance；caller 的 RunSnapshot 提供當時的 entry／point／roles。保存不以 workflow run_id 或保存時間覆寫 acquisition facts。Saver 原樣將已提供的 `AcquisitionEvidence.device_snapshot` 交給 native metadata；`{}` 表示無 device，`None` 保留舊資料未記錄的語意。Sweep 與再次 Save 不刷新這份資料。每次 `env.run` 在 callback 前捕捉 connected drivers，Native callbacks 將 Run 的固定 snapshot 交給 acquisition evidence。直接建 Run 的 caller 明填已捕捉的 snapshot，確知無 device 時填 `{}`。GUI host 在 worker 重用 native capture helper，Resume 本身不讀 device；下一次 env.run 再捕捉。這些接線不代表完整 CP-B 或 04 全綠。Window 已從同一份 SessionServices 取 runner／progress，保留 optional Qt parent，獨立 app 已接線。
+核心只透過 env.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
+Live 與 summary 只建立 enabled lifetime 的圖。圖形副作用不放進 carry。
+GUI forms、單一 Controller、固定 capture、U7 與 S4 分工見 [GUI README](gui/README.md)。
+`scripts/run_coherence_fluxdep_sim.py` 使用現行 Coherence JSON inputs 與一個 flux-bound FakeDevice，不連硬體；single-experiment simulator 的科學契約不變。
 
-GUI app 直接從 zcu_lab 取得 ALIAS_PRESET，交給 shared build_session_services 的 generic alias_rows 參數。它不複製 preset，也不提前載入 adapter catalog。Session 的可編輯表與 preset 分開，qubit 保留首次唯一候選初始化，resonator 保留 $qubit.resonator 軟連結，flux_dev 初值留空。Prepare forms 透過 read_context() 固定當次 alias 快照，不宣告角色或檢查 kind。FormState 已透過共用 evaluator 解碼所有非 discriminator 的字串 expression。T1 flux_dev 預設為 `{"expr":"$flux_dev"}`，Preview 顯示固定 capture 的解析名稱，missing／unbound alias 在該欄位指名 Invalid。普通字串仍是 literal，flux_unit 仍必填。表單不預驗 device membership，未知名稱留到實際使用時失敗。RunSnapshot 與 native 保存沿當次 capture，後續 alias 修改或 Save 不重新解析。Base 09 終驗、land review 前完整 integration gates 與使用者 CP-B 驗收仍待完成。GUI app 保存／還原 parsed plan/knobs input 原文；source reload 用 shared bounded loader 與 app-owned typed catalog 保留 compatible drafts。新 Start 固定目前 science preparer，舊 run 的 export binding 不因 reload 改變。詳細 admission、失敗 recovery 與附件責任見 gui/README.md。
-
-`export.prepare_t1_fluxdep_export(*, plan, data_root, records)` 是純科學 payload adapter。Caller 傳固定 T1Plan、exact data root 與 Engine.records 的 committed tuple。Adapter 只讀最後的 T1 raw decay，不合併校準或未 committed 檔案。Time Index 與 Flux 是 inner-first 軸，Signal/Time 是 flux × index，Time 保存每點實際秒數，不 union、rounding 或插值。T1 是沿 Flux 的秒數向量，fit 拒絕為 NaN，raw trace 保留。Missing slots/短 trace 補 NaN；Flux 用 record 的實際 setpoint 與 plan.flux_unit。Adapter 回 `experiment.workflows.PreparedFluxdepExport`，供 native 與明確 independent Labber writer 共用。沒有 usable committed acquisition 明確拒絕。固定 plan JSON、identity 與 provenance 由各自 owner 保留，adapter 不讀 GUI draft、ledger 或硬體。`prepare_t2echo_fluxdep_export`／`prepare_t2ramsey_fluxdep_export` 使用相同 keyword seam，各自讀 final native tag，提供 Signal／Time 2D 與 T2echo／T2ramsey Flux-only 秒數。`prepare_mist_fluxdep_export` 提供 Flux × Readout Gain 的 Signal，以及 Flux-only Success，成功為 1.0，缺點為 NaN。MIST 使用實際 gain 軸；任一 native grid 與固定 plan 不同就報錯，不 round、union 或插值。這些 adapter 不查 journal／record.json、不 refit，也不擴 host 保存或 wire。
-
-`tests/experiment/workflows/` 驗證通用 Engine 契約。`tests/zcu_lab/workflows/` 由具體 callback、calibration 與 native T1 的 Engine seam，驗證真實 simulator、typed native load、完整與拒絕路徑、pause 新 revision 重做及 stop 保留 prior commit。不測宿主腳本或文件內容。
+`tests/experiment/workflows` 驗通用 Engine。`tests/zcu_lab/workflows` 在公開 Engine、獨立 stage、native reader 與 GUI／MCP 接縫驗真實 simulator、部分結果、獨立 history、取消與 revision。

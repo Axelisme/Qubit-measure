@@ -1,5 +1,13 @@
 """Science policies for named workflows; importing starts no experiment."""
 
+from .coherence import (
+    CoherencePlan,
+    CoherencePoint,
+    CoherenceState,
+    CoherenceTunables,
+    coherence_fluxdep,
+)
+from .coherence_measurements import LifetimeResult
 from .export import (
     prepare_mist_fluxdep_export,
     prepare_t1_fluxdep_export,
@@ -14,13 +22,5 @@ from .overnight import (
     OvernightTunables,
     overnight,
 )
-from .t2 import (
-    T2EchoTunables,
-    T2Plan,
-    T2Point,
-    T2RamseyTunables,
-    T2State,
-    t2echo_fluxdep,
-    t2ramsey_fluxdep,
-)
+from .t2 import T2EchoTunables, T2Plan, T2Point, T2RamseyTunables
 from .trend import draw_overnight_trend, project_overnight_trend

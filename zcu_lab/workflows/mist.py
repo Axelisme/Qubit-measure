@@ -35,12 +35,17 @@ from .calibration import (
     CalCarry,
     Calibrated,
     CalibratedPi2,
-    CalibrationFailed,
-    CalibrationFiles,
-    CalibrationSavers,
+    CalibrationInputs,
     CalibrationTunables,
+    FrequencyResult,
+    RabiResult,
+    ReadoutResult,
     apply_readout_calibration,
-    calibrate,
+    calibrate_frequency,
+    calibrate_rabi,
+    calibrate_readout,
+    current_point_calibration,
+    readout_due,
 )
 from .devices import set_flux
 from .saving import save_frequency, save_mist, save_rabi, save_readout
@@ -100,8 +105,8 @@ class MISTTunables(BaseModel):
 class MISTState:
     """Committed MIST progress and scalar calibration carry.
 
-    remaining is the unattempted absolute flux sequence; cal retains only
-    all-success native calibrations. traces is the raw IQ map, one row per
+    remaining is the unattempted absolute flux sequence; cal retains accepted
+    scalar parts independently, even after another stage fails. traces is the raw IQ map, one row per
     attempted flux, with NaN rows for calibration/acquisition failures.
     gains is the display coordinate: requested grid before any acquisition,
     then the actual native rounded gain grid for the committed traces.
@@ -118,20 +123,21 @@ class MISTPoint:
     """Committed scalar summary, without raw IQ or a fitted threshold.
 
     index is zero-based in plan.fluxes; flux is the actual device setpoint.
-    calibration is the accepted pi/readout result or stage/reason failure.
+    frequency/rabi/readout are independent named stage results, including their
+    accepted scalar parts, reasons and immutable native references.
     success is True only after native acquisition completes, otherwise False.
-    reason is None on success or a calibration/Schedule diagnostic on failure.
-    calibration_files names completed stages relative to this iteration on
-    calibration success, or is None on calibration failure. gain_file names the
+    reason is None on success or a dependency/Schedule diagnostic on failure.
+    gain_file names the
     final native trace, or is None on failed calibration/acquisition.
     """
 
     index: int
     flux: float
-    calibration: CalibratedPi2 | CalibrationFailed
+    frequency: FrequencyResult
+    rabi: RabiResult
+    readout: ReadoutResult
     success: bool
     reason: str | None
-    calibration_files: CalibrationFiles | None
     gain_file: str | None
 
 
@@ -199,14 +205,16 @@ def _draw_map(env: WorkflowEnv[Calibrated], plan: MISTPlan, state: MISTState) ->
     env.plots.draw(name, draw)
 
 
-@workflow("MIST_fluxdep", plan=MISTPlan, tunables=MISTTunables, init=init_mist)
+@workflow("mist_fluxdep", plan=MISTPlan, tunables=MISTTunables, init=init_mist)
 def mist_fluxdep(
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: MISTTunables, state: MISTState
 ) -> Step[MISTState, MISTPoint]:
     """Calibrate and acquire the fixed gain trace at each absolute flux setpoint.
 
     Check soc/devices/context before effects. Calibration follows the existing
-    T1 guess/timing/cadence policy. Successful MIST uses old magnitude/spread
+    T1 guess/timing policy and zero-based flux-point readout cadence.
+    Readout rejection/failure retains legal seed/prior settings and does not
+    block MIST; missing current frequency/Rabi skips it without borrowing prior pi. Successful MIST uses old magnitude/spread
     projection for display, saves raw IQ and returns success without fitting or
     deriving a threshold. Normal native/calibration failures commit a reason and
     keep a NaN map row. Engine owns cancellation/discard/commit. Unexpected
@@ -223,26 +231,41 @@ def mist_fluxdep(
         return Done()
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    calibration = yield from calibrate(
+    captured = CalibrationInputs(plan.qub_pulse, plan.readout, tun.cal)
+    frequency = yield from calibrate_frequency(
         env,
-        qub_pulse=plan.qub_pulse,
-        readout=plan.readout,
-        tun=tun.cal,
+        inputs=captured,
         flux=flux,
         carry=state.cal,
-        t1_estimate_us=tun.guess_us,
-        savers=CalibrationSavers(
-            partial(save_frequency, snapshot=plan.snapshot),
-            partial(save_rabi, snapshot=plan.snapshot),
-            partial(save_readout, snapshot=plan.snapshot),
-        ),
+        save=partial(save_frequency, snapshot=plan.snapshot),
     )
-    if isinstance(calibration, CalibrationFailed):
+    rabi = yield from calibrate_rabi(
+        env,
+        inputs=captured,
+        frequency=frequency,
+        carry=state.cal,
+        t1_estimate_us=tun.guess_us,
+        save=partial(save_rabi, snapshot=plan.snapshot),
+    )
+    if rabi.status != "accepted" or readout_due(index, tun.cal):
+        readout = yield from calibrate_readout(
+            env,
+            inputs=captured,
+            rabi=rabi,
+            carry=state.cal,
+            t1_estimate_us=tun.guess_us,
+            save=partial(save_readout, snapshot=plan.snapshot),
+        )
+    else:
+        readout = ReadoutResult(
+            "skipped", "Readout flux-point cadence", None, None, None
+        )
+    cal = current_point_calibration(rabi, state.cal)
+    if cal is None:
         return Next(
-            MISTPoint(index, flux, calibration, False, calibration.reason, None, None),
+            MISTPoint(index, flux, frequency, rabi, readout, False, rabi.reason, None),
             state,
         )
-    cal, files = calibration.calibration, calibration.files
     name = "mist/gain"
     axes = None
     if name in env.plots:
@@ -261,10 +284,15 @@ def mist_fluxdep(
     )
     if isinstance(outcome, Failed):
         return Next(
-            MISTPoint(index, flux, cal, False, outcome.reason, files, None), state
+            MISTPoint(
+                index, flux, frequency, rabi, readout, False, outcome.reason, None
+            ),
+            state,
         )
     save_mist(outcome, env.iteration_dir / "mist.h5", snapshot=plan.snapshot)
     state.traces[index] = outcome.result.signals
     state.gains = outcome.result.gains.copy()
     env.plots.save(name, env.iteration_dir / "gain.png")
-    return Next(MISTPoint(index, flux, cal, True, None, files, "mist.h5"), state)
+    return Next(
+        MISTPoint(index, flux, frequency, rabi, readout, True, None, "mist.h5"), state
+    )
