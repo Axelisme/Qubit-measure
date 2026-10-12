@@ -76,7 +76,7 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     tab.use_library("modules.readout", readout_ref)
     # Report independent missing sources together before admitting a Run.
     missing: list[MissingParameter] = []
-    try:
+    missing.extend(
         set_frequency_sweep(
             tab,
             "sweep.freq",
@@ -87,19 +87,15 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
             span_mhz=span_mhz,
             expts=freq_points,
         )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    )
     use_flux_device(tab, flux_device, unit=flux_unit)
-    try:
-        set_flux_sweep(
-            tab,
-            "sweep.flux",
-            start=flux_range[0],
-            stop=flux_range[1],
-            expts=flux_points,
-        )
-    except RecipeNeedsParameters as error:
-        missing.extend(error.missing)
+    set_flux_sweep(
+        tab,
+        "sweep.flux",
+        start=flux_range[0],
+        stop=flux_range[1],
+        expts=flux_points,
+    )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
     tab.set("modules.readout.pulse_cfg.gain", gain)

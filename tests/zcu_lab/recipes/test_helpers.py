@@ -8,6 +8,7 @@ from typing import Literal
 import pytest
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import (
+    MissingParameter,
     RecipeGenerator,
     RecipeNeedsParameters,
     RecipeSession,
@@ -43,13 +44,14 @@ def test_author_frequency_hides_both_readout_shapes(tmp_path, single, frequency)
         readout["children"] = {"ro_freq": scalar(5000.0)}
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        set_frequency(
+        missing = set_frequency(
             tab,
             "modules.readout",
             frequency,
             calibration="$resonator.freq",
             required="frequency_mhz",
         )
+        assert missing is None
     expected = frequency if frequency is not None else 6100.0
     if single:
         assert readout["children"]["ro_freq"]["input"]["resolved"] == expected
@@ -92,14 +94,19 @@ def test_author_frequency_missing_calibration_does_not_partially_edit(tmp_path):
     before = deepcopy(gui.publication)
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(RecipeNeedsParameters) as error:
-            set_frequency(
+        try:
+            missing = set_frequency(
                 tab,
                 "modules.readout",
                 calibration="$resonator.freq",
                 required="frequency_mhz",
             )
-        assert [item.parameter for item in error.value.missing] == ["frequency_mhz"]
+        except RecipeNeedsParameters:
+            pytest.fail("set_frequency must return the missing parameter, not raise")
+        assert missing == MissingParameter(
+            "frequency_mhz",
+            "Provide an explicit frequency, valid library, or calibrated $resonator.freq",
+        )
     assert gui.publication == before
 
 
@@ -157,7 +164,7 @@ def test_author_frequency_sweep_retains_gui_width_and_omitted_count(
     gui = _SweepGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        set_frequency_sweep(
+        missing = set_frequency_sweep(
             tab,
             "sweep.freq",
             calibration=FrequencySweepCalibration(
@@ -167,6 +174,7 @@ def test_author_frequency_sweep_retains_gui_width_and_omitted_count(
             span_mhz=span,
             expts=expts,
         )
+        assert missing == ()
     inputs = gui.publication["tree"]["children"]["sweep"]["children"]["freq"]["inputs"]
     expected_center = 6100.0 if center is None else center
     expected_span = 20.0 if span is None else span
@@ -182,18 +190,22 @@ def test_author_frequency_sweep_reports_all_missing_inputs_before_edit(tmp_path)
     gui.md.clear()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        with pytest.raises(RecipeNeedsParameters) as error:
-            set_frequency_sweep(
+        try:
+            missing = set_frequency_sweep(
                 tab,
                 "sweep.freq",
                 calibration=FrequencySweepCalibration(
                     "$resonator.freq", "$resonator.kappa", 5.0
                 ),
             )
-        assert [item.parameter for item in error.value.missing] == [
-            "center_mhz",
-            "span_mhz",
-        ]
+        except RecipeNeedsParameters:
+            pytest.fail("set_frequency_sweep must return all missing inputs, not raise")
+        assert missing == (
+            MissingParameter("center_mhz", "No finite $resonator.freq calibration"),
+            MissingParameter(
+                "span_mhz", "No finite positive $resonator.kappa linewidth"
+            ),
+        )
     assert gui.publication["cfg_ref"]["revision"] == "2"
 
 

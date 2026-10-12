@@ -41,6 +41,43 @@ class DraftForm(FormModel):
     offsets: dict[str, float] = Field(default_factory=dict)
 
 
+class FixedSequenceForm(FormModel):
+    """Heterogeneous tuples evaluate each item according to its annotation."""
+
+    pair: tuple[int, str]
+    amplitudes: list[complex]
+
+
+def test_fixed_tuple_and_complex_list_evaluate_without_rewriting_input() -> None:
+    data: dict[str, JsonValue] = {
+        "pair": [{"expr": "2 + 3"}, "$literal"],
+        "amplitudes": [{"__complex__": [1.0, -2.0]}, {"expr": "3 + 4j"}],
+    }
+    state = FormState(FormInput(FixedSequenceForm, data))
+    result = state.result(FormEnv())
+    assert isinstance(result, FixedSequenceForm)
+    assert result.pair == (5, "$literal")
+    assert result.amplitudes == [1 - 2j, 3 + 4j]
+    assert state.preview(FormEnv()).values[("pair",)] == (5, "$literal")
+    assert state.input.data == data
+
+
+def test_fixed_tuple_expression_error_uses_index_and_omits_preview_container() -> None:
+    state = FormState(
+        FormInput(
+            FixedSequenceForm,
+            {"pair": [1, {"expr": "missing"}], "amplitudes": []},
+        )
+    )
+    result = state.result(FormEnv())
+    assert isinstance(result, FormErrors)
+    assert set(result.messages) == {("pair", 1)}
+    assert "missing" in result.messages[("pair", 1)]
+    preview = state.preview(FormEnv())
+    assert ("pair",) not in preview.values
+    assert preview.values[("amplitudes",)] == []
+
+
 class Bounds(FormModel):
     """A cross-field validator directs one error and leaves others model-wide."""
 
