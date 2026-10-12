@@ -586,8 +586,8 @@ def test_unbound_alias_publishes_invalid_cfg_with_named_diagnostic(
     assert observed.status is CfgStatus.INVALID
     assert any(
         diagnostic.path == ("gain",)
-        and "qubit" in diagnostic.message
-        and "Alias is not bound" in diagnostic.message
+        and "$qubit" in diagnostic.message
+        and "Aliases" in diagnostic.message
         for diagnostic in observed.diagnostics
     )
 

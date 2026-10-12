@@ -37,12 +37,12 @@ from zcu_tools.program.v2.sim import SimParams
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry import new_run_id, workflow_roots
 
-from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.coherence import (
+from zcu_lab.workflows.coherence_fluxdep.workflow import (
     CoherencePlan,
     CoherenceTunables,
     coherence_fluxdep,
 )
+from zcu_lab.workflows.common.calibration import Calibrated
 
 
 class _Devices:

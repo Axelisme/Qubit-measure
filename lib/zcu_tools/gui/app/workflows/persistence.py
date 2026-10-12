@@ -25,10 +25,12 @@ class WorkflowInputSnapshot(BaseModel):
 
 @dataclass(frozen=True)
 class WorkflowInputRestoreReport:
-    """Paths discarded by the current form declarations during restoration.
+    """Paths discarded during restoration by the current forms and capture.
 
     plan_dropped and knobs_dropped are model-field tuple paths in the respective
-    form; an empty tuple means every supplied field was compatible.
+    form: removed or type-incompatible fields, and restored leaves whose captured
+    source check failed (for example a module ref without a captured library).
+    An empty tuple means every supplied field was compatible.
     """
 
     plan_dropped: tuple[FormPath, ...]

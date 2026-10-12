@@ -56,6 +56,31 @@ def test_missing_or_unbound_name_reports_alias_without_concrete_fallback(
         evaluate_scalar_expr("$flux_dev", captured)
 
 
+@pytest.mark.parametrize(
+    ("rows", "reason", "remedy"),
+    [
+        ((), "Unknown alias", "add"),
+        ((AliasRow("flux_dev", ""),), "Alias is not bound", "bind"),
+    ],
+    ids=["missing", "unbound"],
+)
+def test_missing_or_unbound_name_message_names_alias_and_aliases_remedy(
+    rows: tuple[AliasRow, ...], reason: str, remedy: str
+) -> None:
+    captured = parameter_capture().bind_aliases(rows, {})
+    with pytest.raises(RoleResolutionError) as resolution:
+        captured.value("$flux_dev")
+    with pytest.raises(ExpressionError) as expression:
+        evaluate_scalar_expr("$flux_dev", captured)
+    # Consumers compare the short reason; only the user-facing text changes.
+    assert resolution.value.reason == reason
+    assert isinstance(expression.value.__cause__, RoleResolutionError)
+    for message in (str(resolution.value), str(expression.value)):
+        assert "$flux_dev" in message
+        assert remedy in message and "Aliases" in message
+        assert "None" not in message and "focus=" not in message
+
+
 def test_changed_table_and_temporary_override_leave_old_name_capture_fixed() -> None:
     table = AliasTable((AliasRow("flux_dev", "yoko1"),))
     base = parameter_capture()

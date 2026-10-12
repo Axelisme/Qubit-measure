@@ -9,7 +9,9 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormPreview, FormValue, FormWritePath
 
-type _Kind = Literal["text", "integer", "number", "complex", "boolean", "json", "model"]
+type _Kind = Literal[
+    "text", "integer", "number", "complex", "boolean", "json", "model", "key"
+]
 
 
 @dataclass(frozen=True)
@@ -20,11 +22,15 @@ class FieldView:
     label, description, unit and placeholder are display text; collapsed is
     the initial model-group fold hint. nullable permits null; active identifies
     an enabled nullable model. expression permits scalar Expr input. options
-    is current choice data, or None for free input (empty means no choices).
+    is current choice data, or None for free input (empty means no choices);
+    for kind=key it holds suggested library keys, never a restriction, or
+    None when the captured library offers none.
     raw is current JSON or a schema static default when present is False.
     value is the ordinary preview leaf when has_value is True; otherwise None
-    is only a placeholder. children are current model rows, never container
-    keys/indexes. Only kind=model can have children.
+    is only a placeholder. key_or_inline marks an untagged str-or-model
+    field: its row offers Key and Inline modes, kind is key for a string or
+    unfilled value and model for an object. children are current model rows,
+    never container keys/indexes. Only kind=model can have children.
     """
 
     path: FormWritePath
@@ -42,6 +48,7 @@ class FieldView:
     present: bool
     value: FormValue
     has_value: bool
+    key_or_inline: bool
     children: tuple[FieldView, ...] = ()
 
 
@@ -94,6 +101,32 @@ def _options(schema: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
     if isinstance(values, list):
         return tuple(values)
     return (schema["const"],) if "const" in schema else None
+
+
+def _key_and_inline(
+    variants: tuple[dict[str, JsonValue], ...],
+) -> tuple[dict[str, JsonValue], dict[str, JsonValue]] | None:
+    """Split a str-or-model field into its key and inline schema nodes.
+
+    The JSON type selects between them: a plain string node (no Expr) is the
+    library key, a model node the inline value. Other fields return None.
+    """
+    keys = [node for node in variants if node.get("type") == "string"]
+    # Expr and complex envelopes are objects too, but value alternatives.
+    models = [
+        node
+        for node in variants
+        if ("properties" in node or "discriminator" in node)
+        and not {"expr", "__complex__"} & set(_properties(node))
+    ]
+    if len(keys) == 1 and len(models) == 1:
+        return keys[0], models[0]
+    return None
+
+
+def _library_keys(key: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
+    keys = key.get("x-form-library-keys")
+    return tuple(keys) if isinstance(keys, list) and keys else None
 
 
 def _kind(variants: tuple[dict[str, JsonValue], ...]) -> _Kind:
@@ -152,13 +185,22 @@ def _field(
     preview: FormPreview,
 ) -> FieldView:
     variants = _variants(schema)
-    direct = _direct(schema)
-    metadata = {**direct, **schema}
     raw = data.get(path[-1])
-    kind = _kind(variants)
-    options = _options(direct)
-    nullable = any(node.get("type") == "null" for node in variants)
     present = path[-1] in data
+    split = _key_and_inline(variants)
+    if split is None:
+        direct = _direct(schema)
+        kind: _Kind = _kind(variants)
+        options = _options(direct)
+    else:
+        key, inline = split
+        # The JSON type is the structural selector: an object is inline.
+        inline_mode = isinstance(raw if present else key.get("default"), dict)
+        direct = inline if inline_mode else key
+        kind = "model" if inline_mode else "key"
+        options = _library_keys(key)
+    metadata = {**direct, **schema}
+    nullable = any(node.get("type") == "null" for node in variants)
     field = FieldView(
         path=path,
         kind=kind,
@@ -175,6 +217,7 @@ def _field(
         present=present,
         value=preview.values.get(path),
         has_value=path in preview.values,
+        key_or_inline=split is not None,
     )
     if kind != "model" or not field.active:
         return field

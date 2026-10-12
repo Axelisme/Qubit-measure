@@ -134,11 +134,23 @@ class AliasTable:
         requires a component matching a fnmatch pattern for component consumers.
         Unknown aliases, unbound links, unreadable fields, non-name link
         targets and wrong kinds raise RoleResolutionError naming the requested
-        alias. No same-named concrete component substitutes for an alias.
+        alias. Its message names $alias; unknown and unbound rows also say what
+        to add or bind in Aliases, naming the empty row a link chain ends at.
+        Its reason stays "Unknown alias" or "Alias is not bound" for those two
+        cases. No same-named concrete component substitutes for an alias.
         """
         name = self._resolve_name(alias, point, kind=kind)
         if name is None:
-            raise RoleResolutionError(alias, None, kind, "Alias is not bound")
+            root = self._unbound_root(alias)
+            message = (
+                f"${alias} is not bound: bind it in Aliases"
+                if root == alias
+                else f"${alias} is not bound: it links to ${root}, which is "
+                f"unbound; bind ${root} in Aliases"
+            )
+            raise RoleResolutionError(
+                alias, None, kind, "Alias is not bound", message=message
+            )
         return name
 
     def names(
@@ -167,7 +179,13 @@ class AliasTable:
     ) -> str | None:
         authored = {row.alias: row.value for row in self._rows}
         if alias not in authored:
-            raise RoleResolutionError(alias, None, None, "Unknown alias")
+            raise RoleResolutionError(
+                alias,
+                None,
+                None,
+                "Unknown alias",
+                message=f"${alias} is not defined: add it in Aliases",
+            )
         # Validated links always move to an earlier row, so no cycle machinery is needed.
         links: list[tuple[str, str]] = []
         current = alias
@@ -189,6 +207,8 @@ class AliasTable:
                     None,
                     None,
                     f"Unreadable link for {referring_alias!r}: {name}.{suffix}",
+                    message=f"${alias} cannot be resolved: {name}.{suffix} is "
+                    f"missing (link in ${referring_alias})",
                 ) from cause
             if not isinstance(target, str) or not _public_identifier(target):
                 raise RoleResolutionError(
@@ -196,6 +216,8 @@ class AliasTable:
                     None,
                     None,
                     f"Link for {referring_alias!r} must name a component or device",
+                    message=f"${alias} cannot be resolved: {name}.{suffix} must "
+                    f"name a component or device (link in ${referring_alias})",
                 )
             name = target
         component = point.components.get(name)
@@ -203,9 +225,22 @@ class AliasTable:
             component is None or not fnmatchcase(component.kind, kind)
         ):
             raise RoleResolutionError(
-                alias, None, kind, f"Alias targets wrong-kind component {name!r}"
+                alias,
+                None,
+                kind,
+                f"Alias targets wrong-kind component {name!r}",
+                message=f"${alias} resolves to {name!r}, which is not a "
+                f"component of kind {kind!r}",
             )
         return name
+
+    def _unbound_root(self, alias: str) -> str:
+        """Return the empty row that alias's $ links end at, possibly alias itself."""
+        authored = {row.alias: row.value for row in self._rows}
+        current = alias
+        while authored[current].startswith("$"):
+            current = authored[current][1:].split(".", 1)[0]
+        return current
 
 
 def _public_identifier(text: str) -> bool:

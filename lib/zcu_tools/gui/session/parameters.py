@@ -346,6 +346,7 @@ class ParameterContext:
                         None,
                         spec.kind if spec is not None else None,
                         "Alias is not bound",
+                        message=f"${alias} is not bound in this capture",
                     )
                 name = self._roles.names[alias]
             if not separator:
