@@ -157,11 +157,14 @@ def read_points[P](
     adapter is the workflow's named point type. Only structured step_committed
     results are consumed. Validate identities, plan and invocation references
     even for discarded/failed/finished results. Source-named ValueErrors reject
-    malformed/degraded input; I/O errors propagate. No native file scan occurs.
+    malformed/degraded input; I/O errors propagate. If all existing invocation
+    directories lack summaries, raise ValueError listing every missing path.
+    No native file scan occurs.
     """
     points: list[SavedPoint[P]] = []
     missing: list[Path] = []
     commits: set[int] = set()
+    has_record = False
     root = manifest.roots.data_root / "iter"
     for directory in sorted(root.iterdir()):
         if (
@@ -174,6 +177,7 @@ def read_points[P](
         if not source.exists():
             missing.append(source)
             continue
+        has_record = True
         try:
             saved = SavedIteration.model_validate_json(
                 source.read_text(encoding="utf-8")
@@ -212,6 +216,11 @@ def read_points[P](
             )
         except ValueError as error:
             raise ValueError(f"{source}: {error}") from error
+    if missing and not has_record:
+        raise ValueError(
+            "No iteration records available; missing record.json:\n"
+            + "\n".join(str(path) for path in missing)
+        )
     return tuple(points), tuple(missing)
 
 
