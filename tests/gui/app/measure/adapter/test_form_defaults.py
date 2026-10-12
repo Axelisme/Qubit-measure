@@ -1,0 +1,330 @@
+"""Templates and slots resolve captured sources into editable persistent inputs."""
+
+from inspect import signature
+
+import pytest
+from zcu_tools.cfg_model import (
+    BathResetSpec,
+    ConfigBase,
+    Expr,
+    PulseReadoutSpec,
+    PulseSpec,
+    Slot,
+    Template,
+    TemplateDef,
+)
+from zcu_tools.gui.app.measure.adapter import Form
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.form import FormEnv, FormErrors, FormState, ModuleInline
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.program.v2.modules import BathResetCfg, PulseCfg, PulseReadoutCfg
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from ._cfg_fakes import CalibrationAdapter
+
+
+class Core(ConfigBase):
+    """A required native pulse field has no GUI-specific declaration."""
+
+    probe: PulseCfg
+
+
+def templates() -> dict[str, TemplateDef]:
+    """A deliberately partial persistent template supplies a required child."""
+    return {
+        "pulse": TemplateDef(
+            PulseSpec,
+            "Pulse",
+            {
+                "ch": 2,
+                "nqz": 1,
+                "freq": Expr("100 + 20"),
+                "gain": 0.1,
+                "waveform.style": "const",
+                "waveform.length": Expr("2 * .2"),
+                "desc": "$literal",
+            },
+        )
+    }
+
+
+def environment() -> FormEnv:
+    """Capture a library plus an explicitly unbound alias, without source I/O."""
+    pulse = PulseSpec.model_validate(
+        {
+            "ch": 1,
+            "nqz": 1,
+            "freq": 100,
+            "gain": 0.3,
+            "waveform": {"style": "const", "length": 0.1},
+        }
+    )
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="1.0",
+            components={"Q": ComponentLibrary(pulses={"probe": pulse})},
+        )
+    )
+    parameters = ParameterContext(
+        point=PointDocument(
+            format="zcu.parameter-container",
+            format_version="1.0",
+            general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
+        ),
+        library=library,
+        target=SavedPoint(entry_id="synthetic", point="synthetic"),
+        roles=None,
+        storage=None,
+    ).bind_aliases((AliasRow("unbound", ""),), {})
+    return FormEnv(parameters=parameters, library=library)
+
+
+def registered(node: Slot | Template) -> Form[Core]:
+    """Bind a form explicitly through the registry, not adapter capability probes."""
+    assert "form" in signature(Registry.register).parameters, (
+        "Missing explicit form registration"
+    )
+    form = Form(Core, {"probe": node})
+    Registry(templates=templates()).register("synthetic", CalibrationAdapter, form=form)
+    return form
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "key",
+        "copy",
+        "dangling_fallback",
+        "unbound_fallback",
+        "dangling_empty",
+        "unbound_empty",
+    ],
+)
+def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
+    node = (
+        Slot("Q.pulses.probe", copy=scenario == "copy")
+        if scenario in {"key", "copy"}
+        else Slot(
+            "$unbound.module.probe"
+            if scenario.startswith("unbound")
+            else "Q.pulses.missing",
+            fallback=Template("pulse") if scenario.endswith("fallback") else None,
+        )
+    )
+    form = registered(node)
+    env = environment()
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+    if scenario.endswith("empty"):
+        assert isinstance(value, FormErrors)
+        assert ("probe",) in value.messages
+        return
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, Core), cfg
+    assert cfg.probe.ch == (2 if scenario.endswith("fallback") else 1)
+    probe = state.input.data["probe"]
+    assert isinstance(probe, dict)
+    assert probe["kind"] == ("ref" if scenario == "key" else "inline")
+    if scenario == "key":
+        assert probe["name"] == "Q.pulses.probe"
+
+
+def test_template_required_nested_defaults_omit_none_and_preserve_literal_strings() -> (
+    None
+):
+    form = registered(Template("pulse"))
+    env = environment()
+    state = FormState(form.default_input(env))
+    probe = state.input.data["probe"]
+    assert isinstance(probe, dict)
+    module = probe["module"]
+    assert isinstance(module, dict)
+    assert module["phase"] == 0
+    assert "mixer_freq" not in module
+    assert "mux_freqs" not in module
+    assert module["freq"] == {"expr": "100 + 20"}
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, Core), cfg
+    assert cfg.probe.freq == 120 and cfg.probe.waveform.length == 0.4
+    assert cfg.probe.desc == "$literal"
+
+
+def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
+    form = registered(Slot("Q.pulses.probe", copy=True, set={"gain": 0.8}))
+    env = environment()
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    initial = form.to_cfg(value, env)
+    assert isinstance(initial, Core) and initial.probe.gain == 0.8
+    state.write({("probe", "kind"): "ref", ("probe", "name"): "Q.pulses.probe"}, env)
+    state.write({("probe", "kind"): "inline"}, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    switched = form.to_cfg(value, env)
+    assert isinstance(switched, Core) and switched.probe.gain == 0.3
+
+
+def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
+    form = registered(Slot("Q.pulses.probe", set={"gain": 0.8}, lock={"freq": 0.0}))
+    env = environment()
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, Core) and cfg.probe.freq == 0 and cfg.probe.gain == 0.8
+    inline = form.model.model_fields["probe"].annotation
+    assert isinstance(inline, type) and issubclass(inline, ModuleInline)
+    defaults = inline.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
+    module = defaults["module"]
+    assert isinstance(module, dict) and module["freq"] == 0 and module["gain"] == 0.3
+    state.write({("probe", "kind"): "ref"}, env)
+    assert isinstance(state.result(env), FormErrors)
+
+
+class OptionalCore(ConfigBase):
+    """Core nullability permits a missing slot to remain intentionally disabled."""
+
+    probe: PulseCfg | None = None
+
+
+@pytest.mark.parametrize("optional", [False, True])
+def test_unbound_slot_obeys_core_required_or_optional_default(optional: bool) -> None:
+    assert "form" in signature(Registry.register).parameters, (
+        "Missing explicit form registration"
+    )
+    cfg_type = OptionalCore if optional else Core
+    form = Form(cfg_type, {"probe": Slot("$unbound.module.probe")})
+    Registry(templates=templates()).register(
+        "synthetic-optional", CalibrationAdapter, form=form
+    )
+    env = environment()
+    state = FormState(form.default_input(env))
+    assert state.input.data == {}
+    value = state.result(env)
+    if not optional:
+        assert isinstance(value, FormErrors)
+        assert ("probe",) in value.messages
+        return
+    assert not isinstance(value, FormErrors), value
+    assert form.to_cfg(value, env) == OptionalCore(probe=None)
+
+
+class ResetCore(ConfigBase):
+    """Nested references are part of the persistent reset Spec, not form modes."""
+
+    reset: BathResetCfg
+
+
+@pytest.mark.parametrize("unbound", [False, True])
+def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -> None:
+    assert "form" in signature(Registry.register).parameters, (
+        "Missing explicit form registration"
+    )
+    catalog = {
+        "reset": TemplateDef(
+            BathResetSpec,
+            "Reset",
+            {
+                "cavity_tone_cfg": Slot("Q.pulses.probe"),
+                "qubit_tone_cfg": Slot("Q.pulses.probe"),
+                "pi2_cfg": Slot(
+                    "$unbound.module.probe" if unbound else "Q.pulses.probe"
+                ),
+            },
+        )
+    }
+    form = Form(ResetCore, {"reset": Template("reset")})
+    Registry(templates=catalog).register(
+        "synthetic-reset", CalibrationAdapter, form=form
+    )
+    env = environment()
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+    if unbound:
+        assert isinstance(value, FormErrors)
+        return
+    assert not isinstance(value, FormErrors), value
+    reset = state.input.data["reset"]
+    assert isinstance(reset, dict)
+    module = reset["module"]
+    assert isinstance(module, dict) and module["pi2_cfg"] == "Q.pulses.probe"
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, ResetCore), cfg
+    assert cfg.reset.pi2_cfg.gain == 0.3
+
+
+class ReadoutCore(ConfigBase):
+    """A pulse readout derives ADC frequency/channel from omitted defaults."""
+
+    readout: PulseReadoutCfg
+
+
+def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> None:
+    assert "form" in signature(Registry.register).parameters, (
+        "Missing explicit form registration"
+    )
+    catalog = {
+        "readout": TemplateDef(
+            PulseReadoutSpec,
+            "Readout",
+            {
+                "pulse_cfg.type": "pulse",
+                "pulse_cfg.ch": 1,
+                "pulse_cfg.nqz": 1,
+                "pulse_cfg.freq": 100,
+                "pulse_cfg.gain": 0.3,
+                "pulse_cfg.waveform.style": "const",
+                "pulse_cfg.waveform.length": 0.2,
+                "ro_cfg.ro_ch": 0,
+                "ro_cfg.ro_length": 0.2,
+                "ro_cfg.trig_offset": 0,
+            },
+        )
+    }
+    form = Form(
+        ReadoutCore, {"readout": Template("readout", lock={"pulse_cfg.freq": 0.0})}
+    )
+    Registry(templates=catalog).register(
+        "synthetic-readout", CalibrationAdapter, form=form
+    )
+    env = environment()
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, ReadoutCore), cfg
+    assert cfg.readout.pulse_cfg.freq == 0
+    assert cfg.readout.ro_cfg.gen_ch == 1
+    assert cfg.readout.ro_cfg.ro_freq == 0
+
+
+@pytest.mark.parametrize("fault", ["unknown", "family", "tag"])
+def test_registration_error_names_adapter_and_field_path(fault: str) -> None:
+    assert "form" in signature(Registry.register).parameters, (
+        "Missing explicit form registration"
+    )
+    node = Template("missing") if fault == "unknown" else Template("pulse")
+    catalog = templates()
+    if fault == "family":
+        from zcu_tools.cfg_model import DirectReadoutCfg
+
+        catalog["pulse"] = TemplateDef(DirectReadoutCfg, "Wrong family", {})
+    elif fault == "tag":
+        catalog["pulse"] = TemplateDef(
+            PulseSpec, "Bad tag", {"waveform.style": "unknown"}
+        )
+    form = Form(Core, {"probe": node})
+    with pytest.raises(ValueError, match="synthetic.*probe"):
+        Registry(templates=catalog).register("synthetic", CalibrationAdapter, form=form)
