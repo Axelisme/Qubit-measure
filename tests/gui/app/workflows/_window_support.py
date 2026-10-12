@@ -1,11 +1,13 @@
 """Window RPC call types, Start batches, and synthetic Window view sessions.
 
 Nothing here imports user workflow packages. The layout forms only need enough
-fields and collapsible sections to make the old single-column layout tall.
+fields and collapsible sections to make the old single-column layout tall;
+the figures workflow only needs named figures that a test script draws.
 """
 
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -181,6 +183,73 @@ def small_registration() -> WorkflowAttachment[
     )
 
 
+@dataclass(frozen=True)
+class FigurePoint:
+    """What one "synthetic_figures" point does with its named figures.
+
+    create names are registered first and left undrawn; draw names are then
+    created if missing and drawn in this order. Each drawn figure shows one
+    line ending at point index + 1, under an axes title equal to its name.
+    """
+
+    draw: tuple[str, ...]
+    create: tuple[str, ...] = ()
+
+
+def _draw_point(name: str, index: int, figure: Figure) -> None:
+    figure.clear()
+    axes = figure.subplots()
+    axes.plot([0, 1], [0, index + 1])
+    axes.set_title(name)
+
+
+def figures_registration(
+    points: Callable[[], Sequence[FigurePoint]],
+    on_point: Callable[[int], None],
+) -> WorkflowAttachment[
+    Plan, Tunables, State, int, SmallPlanForm, SmallKnobsForm, None
+]:
+    """Declare "synthetic_figures": one point per FigurePoint, then Done.
+
+    points is read when each point runs, so a test sets the script before
+    Start. on_point receives the index after that point's figures are drawn,
+    on the worker; the following wait discards the point if it requests Pause.
+    """
+
+    def step(
+        env: WorkflowEnv[None], plan: Plan, tun: Tunables, state: State
+    ) -> Step[State, int]:
+        del plan
+        script = points()
+        if state.index >= len(script):
+            return Done()
+        point = script[state.index]
+        for name in (*point.create, *point.draw):
+            if name not in env.plots:
+                env.plots.subplots(name)
+        for name in point.draw:
+            env.plots.draw(name, partial(_draw_point, name, state.index))
+        on_point(state.index)
+        yield from env.wait_until(env.started_at)
+        return Next(tun.value, State(state.index + 1, [*state.values, tun.value]))
+
+    def plan_to_cfg(form: SmallPlanForm, env: FormEnv, snapshot: RunSnapshot) -> Plan:
+        del env, snapshot
+        return Plan(count=form.count)
+
+    declared = workflow("synthetic_figures", plan=Plan, tunables=Tunables, init=_init)(
+        step
+    )
+    return WorkflowAttachment(
+        step=declared,
+        plan_model=SmallPlanForm,
+        knobs_model=SmallKnobsForm,
+        plan_to_cfg=plan_to_cfg,
+        knobs_to_cfg=lambda form: Tunables(value=form.value),
+        seed=lambda plan, form: None,
+    )
+
+
 def bind_point(harness: StartHarness, root: Path) -> ResultEntry:
     """Open entry "sample" at point "source" with $qubit bound to Q1.
 
@@ -228,16 +297,21 @@ def expand_all(widget: QWidget, qapp: QApplication) -> None:
 class WindowSession:
     """One real Window over StartHarness owners and the synthetic catalog.
 
-    The catalog lists synthetic_wide (default) then synthetic_small; source.catalog
-    is what the next Reload publishes. pause_at is the wide workflow's point
-    index at which its own worker requests Pause; None lets it run to Done.
-    close drains pending work before closing Qt.
+    The catalog lists synthetic_wide (default), synthetic_small, then
+    synthetic_figures; source.catalog is what the next Reload publishes.
+    pause_at is the wide workflow's point index at which its own worker
+    requests Pause; None lets it run to Done. figure_points is the figures
+    workflow's script; each index in figure_pauses requests Pause once, so
+    Resume reruns that point and continues. close drains pending work before
+    closing Qt.
     """
 
     def __init__(self, root: Path) -> None:
         self.harness = StartHarness()
         self.root = root
         self.pause_at: int | None = None
+        self.figure_points: Sequence[FigurePoint] = ()
+        self.figure_pauses: set[int] = set()
         self.source = SourceNamespace(
             root, "synthetic_layout_source", self.fresh_catalog()
         )
@@ -252,12 +326,25 @@ class WindowSession:
     def fresh_catalog(self) -> WorkflowCatalog[None]:
         """Declare both synthetic workflows again, as a source reload would."""
         return WorkflowCatalog(
-            (wide_registration(self._on_point), small_registration())
+            (
+                wide_registration(self._on_point),
+                small_registration(),
+                figures_registration(lambda: self.figure_points, self._on_figure),
+            )
         )
 
     def _on_point(self, index: int) -> None:
         if index != self.pause_at:
             return
+        self._pause_run()
+
+    def _on_figure(self, index: int) -> None:
+        if index not in self.figure_pauses:
+            return
+        self.figure_pauses.discard(index)
+        self._pause_run()
+
+    def _pause_run(self) -> None:
         run_id = self.window.controller.run_id
         if run_id is None:
             raise RuntimeError("A running point requires a run identity")
