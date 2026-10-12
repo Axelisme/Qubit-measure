@@ -105,7 +105,7 @@ def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window)
     ):
         assert not button(view, text).isEnabled(), text
     spectra = view.findChild(QListWidget)
-    assert spectra is not None and not spectra.isEnabled()
+    assert spectra is not None and spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)
     assert canvas is not None and canvas.isEnabled()
     assert view.centralWidget().isEnabled()

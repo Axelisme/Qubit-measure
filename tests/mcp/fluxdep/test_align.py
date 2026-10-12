@@ -83,12 +83,32 @@ def test_move_line_composes_conjugate_and_reports_only_changed_lines(client: Cli
     assert not result.images
 
 
-@pytest.mark.parametrize("params", [{"role": "half", "position": 2.0}, {"role": "half", "position": 2.0, "conjugate": False}])
-def test_move_line_resets_conjugate_when_omitted_or_false(client: Client, params: dict[str, object]):
-    client.transport.replies.extend(GuiResponse(result=result) for result in [native(), native(), native(2.0)])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"role": "half", "position": 2.0},
+        {"role": "half", "position": 2.0, "conjugate": False},
+    ],
+)
+def test_move_line_resets_conjugate_when_omitted_or_false(
+    client: Client, params: dict[str, object]
+):
+    client.transport.replies.extend(
+        GuiResponse(result=result) for result in [native(), native(), native(2.0)]
+    )
     invoke(client, command="move_line", params=params)
-    assert client.transport.requests[1]["params"] == {"name": "one", "context_id": 12, "command": "set_conjugate", "params": {"enabled": False}}
-    assert client.transport.requests[2]["params"] == {"name": "one", "context_id": 12, "command": "move_line", "params": {"role": "half", "position": 2.0}}
+    assert client.transport.requests[1]["params"] == {
+        "name": "one",
+        "context_id": 12,
+        "command": "set_conjugate",
+        "params": {"enabled": False},
+    }
+    assert client.transport.requests[2]["params"] == {
+        "name": "one",
+        "context_id": 12,
+        "command": "move_line",
+        "params": {"role": "half", "position": 2.0},
+    }
 
 
 @pytest.mark.parametrize("error", [None, "alignment failed"])

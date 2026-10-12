@@ -26,7 +26,9 @@ def composition(qapp):
     qapp.processEvents()
 
 
-def test_agent_follows_named_draft_and_remote_user_can_switch_display(qapp, onetone_controller):
+def test_agent_follows_named_draft_and_remote_user_can_switch_display(
+    qapp, onetone_controller
+):
     ctrl = onetone_controller
     other = deepcopy(ctrl.state.get_spectrum("one"))
     other.name = "other"
@@ -37,7 +39,9 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(qapp, onet
         ctrl.control_identity.connect("agent-link", "agent", "owner")
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             second = ctrl.interactive.begin_line_pick("other")
-        assert ctrl.state.active_spectrum == "other", "GUI must follow the named agent draft"
+        assert ctrl.state.active_spectrum == "other", (
+            "GUI must follow the named agent draft"
+        )
         spectra = view.findChild(QListWidget)
         assert spectra is not None and spectra.isEnabled()
         spectra.setCurrentRow(0)
@@ -45,8 +49,14 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(qapp, onet
         first.session.ensure_input_open()
         second.session.ensure_input_open()
         stack = view.findChild(QStackedWidget)
-        assert stack is not None and isinstance(stack.currentWidget(), LinePickerWidget)
-        finish = next(button for button in stack.currentWidget().findChildren(QPushButton) if button.text() == "Finish")
+        assert stack is not None
+        displayed = stack.currentWidget()
+        assert isinstance(displayed, LinePickerWidget)
+        finish = next(
+            button
+            for button in displayed.findChildren(QPushButton)
+            if button.text() == "Finish"
+        )
         assert not finish.isEnabled()
     finally:
         ctrl.control_identity.reclaim_local()

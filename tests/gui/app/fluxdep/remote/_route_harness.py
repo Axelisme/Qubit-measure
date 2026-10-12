@@ -19,6 +19,7 @@ from zcu_tools.gui.app.fluxdep.remote.service import (
     RemoteControlAdapter,
 )
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 
@@ -94,13 +95,19 @@ class RouteHarness:
     request_id: int = 0
 
     @classmethod
-    def create(cls, project_root: str) -> RouteHarness:
+    def create(
+        cls,
+        project_root: str,
+        *,
+        interactive_background: BackgroundSubmitter | None = None,
+    ) -> RouteHarness:
         """Build an inert adapter and State rooted at project_root; open no socket."""
         scheduler = ImmediateOwnerScheduler()
         ctrl = Controller(
             FluxDepState(),
             project_root=project_root,
             interactive_owner=scheduler,
+            interactive_background=interactive_background,
         )
         service = RemoteControlAdapter(
             ctrl, ControlOptions(port=0), owner_scheduler=scheduler

@@ -11,13 +11,11 @@ import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
-    ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
     SpectrumChangedPayload,
 )
 from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
-from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
 
@@ -257,63 +255,6 @@ def test_closed_callback_context_is_not_overwritten(
         subscription.unsubscribe()
 
 
-def test_begin_preserves_reentry_from_current_query_retirement(controller: Controller):
-    second = deepcopy(controller.state.spectrums["sample"])
-    second.name = "second"
-    controller.state.put_spectrum(second)
-    controller.set_alignment("second", -1.0, 1.0)
-    owner = controller.interactive
-    old = owner.begin_line_pick("sample")
-    reentered: list[LinePickContext] = []
-    errors: list[FailedPreconditionError] = []
-    facts: list[InteractiveChangedPayload] = []
-
-    def on_fact(fact: InteractiveChangedPayload) -> None:
-        facts.append(fact)
-        if fact.phase == "closed" and not reentered:
-            reentered.append(owner.begin_line_pick("second"))
-
-    def on_active(event: ActiveSpectrumChangedPayload, _meta: EventMeta) -> None:
-        if event.name == "second":
-            try:
-                owner.begin_onetone_pick("second")
-            except FailedPreconditionError as exc:
-                errors.append(exc)
-
-    subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
-    metadata = controller.bus.subscribe_with_meta(
-        ActiveSpectrumChangedPayload, on_active
-    )
-    try:
-        controller.set_active_spectrum("second")
-        assert len(errors) == 1
-        assert len(reentered) == 1
-        active = owner.inspect()
-        assert active is not None and active.context is reentered[0]
-        assert [fact.phase for fact in facts] == ["closed", "opened"]
-        with pytest.raises(FailedPreconditionError, match="closed"):
-            old.session.ensure_input_open()
-        current = reentered[0]
-        current.plugin.actions.swap.execute(current.session, None)
-        current.session.undo()
-        assert [fact.phase for fact in facts] == [
-            "closed",
-            "opened",
-            "updated",
-            "updated",
-        ]
-        assert {fact.context_id for fact in facts[1:]} == {active.context_id}
-        owner.cancel()
-        assert owner.inspect() is None
-        assert facts[-1].phase == "closed"
-        assert facts[-1].context_id == active.context_id
-        with pytest.raises(FailedPreconditionError, match="closed"):
-            current.session.ensure_input_open()
-    finally:
-        metadata.unsubscribe()
-        subscription.unsubscribe()
-
-
 def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
     owner = controller.interactive
     old = owner.begin_line_pick("sample")
@@ -467,12 +408,10 @@ def test_equal_seed_finish_failure_keeps_context_editable(controller):
     assert controller.interactive.finish_line_pick().flux_period == 2.0
 
 
-@pytest.mark.parametrize("change", ["switch", "remove", "reload", "alignment"])
+@pytest.mark.parametrize("change", ["remove", "reload", "alignment"])
 def test_spectrum_change_closes_old_input(controller, change):
     ctx = controller.interactive.begin_line_pick("sample")
-    if change == "switch":
-        controller.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         controller.remove_spectrum("sample")
     elif change == "reload":
         controller.state.put_spectrum(replace(controller.state.spectrums["sample"]))
@@ -486,14 +425,10 @@ def test_spectrum_change_closes_old_input(controller, change):
         ctx.plugin.actions.swap.execute(ctx.session, None)
 
 
-def test_unknown_inactive_disposed_and_cancel_contract(controller):
+def test_unknown_disposed_and_cancel_contract(controller):
     owner = controller.interactive
     with pytest.raises(InvalidInputError):
         owner.begin_line_pick("missing")
-    controller.set_active_spectrum(None)
-    with pytest.raises(FailedPreconditionError):
-        owner.begin_line_pick("sample")
-    controller.set_active_spectrum("sample")
     old = owner.begin_line_pick("sample")
     owner.cancel()
     new = owner.begin_line_pick("sample")
@@ -587,9 +522,7 @@ def test_line_begin_closes_previous_twotone_input(twotone_controller):
         old.plugin.clear.execute(old.session, None)
 
 
-@pytest.mark.parametrize(
-    "condition", ["missing", "inactive", "unaligned", "type", "disposed"]
-)
+@pytest.mark.parametrize("condition", ["missing", "unaligned", "type", "disposed"])
 def test_twotone_begin_prerequisites(twotone_controller, condition):
     ctrl = twotone_controller
     name = "two"
@@ -597,8 +530,6 @@ def test_twotone_begin_prerequisites(twotone_controller, condition):
     if condition == "missing":
         name = "missing"
         error = InvalidInputError
-    elif condition == "inactive":
-        ctrl.set_active_spectrum(None)
     elif condition == "unaligned":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], aligned=False))
     elif condition == "type":
@@ -612,7 +543,7 @@ def test_twotone_begin_prerequisites(twotone_controller, condition):
 
 
 @pytest.mark.parametrize(
-    "change", ["switch", "remove", "reload", "alignment", "cancel", "dispose"]
+    "change", ["remove", "reload", "alignment", "cancel", "dispose"]
 )
 def test_twotone_invalidation_closes_input_without_points(twotone_controller, change):
     from zcu_tools.gui.app.fluxdep.event_bus import SpectrumAddedPayload
@@ -620,9 +551,7 @@ def test_twotone_invalidation_closes_input_without_points(twotone_controller, ch
     ctrl = twotone_controller
     owner = ctrl.interactive
     context = owner.begin_twotone_pick("two")
-    if change == "switch":
-        ctrl.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         ctrl.remove_spectrum("two")
     elif change == "reload":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums["two"]))
@@ -752,9 +681,7 @@ def test_line_begin_closes_previous_onetone_input(onetone_controller):
     assert not onetone_controller.state.spectrums["one"].points_completed
 
 
-@pytest.mark.parametrize(
-    "condition", ["missing", "inactive", "unaligned", "type", "disposed"]
-)
+@pytest.mark.parametrize("condition", ["missing", "unaligned", "type", "disposed"])
 def test_onetone_begin_prerequisites(onetone_controller, condition):
     ctrl = onetone_controller
     name = "one"
@@ -762,8 +689,6 @@ def test_onetone_begin_prerequisites(onetone_controller, condition):
     if condition == "missing":
         name = "missing"
         error = InvalidInputError
-    elif condition == "inactive":
-        ctrl.set_active_spectrum(None)
     elif condition == "unaligned":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums[name], aligned=False))
     elif condition == "type":
@@ -777,15 +702,13 @@ def test_onetone_begin_prerequisites(onetone_controller, condition):
 
 
 @pytest.mark.parametrize(
-    "change", ["switch", "remove", "reload", "alignment", "cancel", "dispose"]
+    "change", ["remove", "reload", "alignment", "cancel", "dispose"]
 )
 def test_onetone_invalidation_closes_input_without_points(onetone_controller, change):
     ctrl = onetone_controller
     owner = ctrl.interactive
     context = owner.begin_onetone_pick("one")
-    if change == "switch":
-        ctrl.set_active_spectrum(None)
-    elif change == "remove":
+    if change == "remove":
         ctrl.remove_spectrum("one")
     elif change == "reload":
         ctrl.state.put_spectrum(replace(ctrl.state.spectrums["one"]))
