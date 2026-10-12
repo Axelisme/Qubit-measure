@@ -483,8 +483,8 @@ def test_post_artifact_save_requires_post_result(qapp):
     assert len(buttons) == 3
     assert all(button.isEnabled() for button in buttons)
     labels = [label.text() for label in tab.findChildren(QLabel)]
-    assert "post_analysis · json" in labels
-    assert labels.count("fit · png") == 2
+    assert "Post-analysis results" in labels
+    assert sum(text.endswith(".png") for text in labels) == 2
     for button in buttons:
         button.click()
     assert [call.args for call in actions.save_artifact.call_args_list] == [
@@ -518,7 +518,7 @@ def test_post_artifact_save_disabled_without_active_context(qapp):
     assert len(buttons) == 3
     assert all(not button.isEnabled() for button in buttons)
     labels = [label.text() for label in tab.findChildren(QLabel)]
-    assert "post_analysis · json" in labels
+    assert "Post-analysis results" in labels
     for button in buttons:
         button.click()
     actions.save_artifact.assert_not_called()

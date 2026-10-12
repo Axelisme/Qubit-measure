@@ -32,7 +32,7 @@ from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 def test_sweep_widget_publishes_incomplete_edge_in_form_snapshot(qapp, ctrl):
-    from qtpy.QtWidgets import QLineEdit
+    from qtpy.QtWidgets import QLineEdit, QWidget
     from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
     schema = section_schema(
@@ -42,7 +42,9 @@ def test_sweep_widget_publishes_incomplete_edge_in_form_snapshot(qapp, ctrl):
     widget = CfgFormWidget()
     draft = attach_draft(widget, schema, ctrl)
     try:
-        entry = widget.findChild(QLineEdit)
+        start = widget.findChild(QWidget, "start")
+        assert start is not None
+        entry = start.findChild(QLineEdit)
         assert entry is not None
         entry.setText("1e")
         value = widget.read_values().fields["axis"]

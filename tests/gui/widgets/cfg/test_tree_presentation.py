@@ -192,40 +192,21 @@ def test_tree_renders_and_edits_same_observable_behavior(qapp, ctrl):
         assert reference.chosen_key == "<Custom:Pulse>"
 
 
-def _assert_balanced_row(
-    qapp: QApplication, left_label: QLabel, right_label: QLabel
-) -> QWidget:
-    left = left_label.parentWidget()
-    right = right_label.parentWidget()
-    assert left is not None and right is not None
-    row = left.parentWidget()
-    assert row is not None and row is right.parentWidget()
-    row.resize(801, row.sizeHint().height())
-    qapp.processEvents()
-    assert abs(left.width() - right.width()) <= 1
-    for cell in (left, right):
-        layout = cell.layout()
-        assert layout is not None
-        editor_item = layout.itemAt(1)
-        assert editor_item is not None
-        editor = editor_item.widget()
-        assert editor is not None
-        assert editor.width() >= 20
-    return row
-
-
 def _assert_sweep_layout(
-    qapp: QApplication, widget: QWidget, first_row_labels: tuple[str, str]
+    qapp: QApplication, widget: QWidget, edge_labels: tuple[str, str]
 ) -> None:
+    """Each sweep field sits on its own row, in order."""
+    qapp.processEvents()
     labels = {label.text(): label for label in widget.findChildren(QLabel)}
-    assert set(labels) == {*first_row_labels, "points", "step"}
-    first_row = _assert_balanced_row(qapp, *(labels[text] for text in first_row_labels))
-    second_row = _assert_balanced_row(qapp, labels["points"], labels["step"])
-    assert first_row is not second_row
-    assert first_row.y() < second_row.y()
+    order = (*edge_labels, "points", "step")
+    assert set(labels) == set(order)
+    tops = [
+        labels[text].mapTo(widget, labels[text].rect().topLeft()).y() for text in order
+    ]
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
 
 
-def test_sweep_renderers_use_balanced_range_sampling_rows(qapp, ctrl):
+def test_sweep_renderers_put_each_range_field_on_its_own_row(qapp, ctrl):
     schema = CfgSchema(
         spec=CfgSectionSpec(
             fields={

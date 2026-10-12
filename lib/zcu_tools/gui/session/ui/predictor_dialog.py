@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -344,7 +345,13 @@ class PredictorDialog(QDialog):
         self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
         header = self._table.horizontalHeader()
         if header is not None:
-            header.setStretchLastSection(True)
+            # Value columns follow their text so frequencies are never cut to
+            # "134...."; |phi| takes the remaining width.
+            for column in range(3):
+                header.setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.ResizeToContents
+                )
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
