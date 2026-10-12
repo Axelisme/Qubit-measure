@@ -159,6 +159,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "or null, search_db, EJb, ECb, ELb, transitions, r_f, sample_f}.",
         readonly=True,
     ),
+    "fit.render": MethodSpec(
+        30.0,
+        "Render the native Show overlay as PNG. Requires a fit result; "
+        "does not change display or save an artifact.",
+        readonly=True,
+    ),
     "fit.database_info": MethodSpec(
         30.0,
         "Read search DB path, entry/level counts and inclusive EJ/EC/EL GHz and "

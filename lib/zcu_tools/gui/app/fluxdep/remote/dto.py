@@ -19,6 +19,12 @@ class PngImage(TypedDict):
     bytes: int
 
 
+class FigureReply(TypedDict):
+    """figure is the native Show overlay PNG, encoded without saving a file."""
+
+    figure: PngImage
+
+
 class CommandDeclaration(TypedDict):
     """Available command: name is plugin/reserved ID; schema is its JSON input."""
 

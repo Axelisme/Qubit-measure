@@ -13,12 +13,15 @@ Adding a method:
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
@@ -40,6 +43,7 @@ from .dto import (
     ActiveSpectrumReply,
     AxisSnapshot,
     DatabaseInfoReply,
+    FigureReply,
     FitParametersReply,
     FitResultReply,
     FitUpdatedReply,
@@ -346,6 +350,15 @@ def _fit_transitions(value: object) -> TransitionDict:
     return transitions
 
 
+def _h_fit_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> FigureReply:
+    figure = Figure()
+    adapter.ctrl.render_fit(figure)
+    data = render_figure_png(figure)
+    return {"figure": {"png_b64": base64.b64encode(data).decode("ascii"), "bytes": len(data)}}
+
+
 def _h_fit_database_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> DatabaseInfoReply:
@@ -521,6 +534,7 @@ _HANDLERS: dict[str, Handler] = {
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
     "fit.database_info": _h_fit_database_info,
+    "fit.render": _h_fit_render,
     "fit.search": _h_fit_search,
     "operation.status": _h_operation_status,
     "operation.cancel": _h_operation_cancel,
