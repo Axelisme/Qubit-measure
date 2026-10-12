@@ -20,6 +20,7 @@ def test_remote_writeback_editor_keeps_exit_and_does_not_commit_pending_name(
         draft = service.create_draft(
             [ParameterWriteback("general.ext.value", "Value", proposed_value=2.0)],
             parameters=control.read_context(),
+            experiment_name="test/writeback",
         )
     else:
         draft = waveform_draft
