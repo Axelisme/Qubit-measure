@@ -28,7 +28,7 @@ from zcu_tools.gui.app.fluxdep.remote import interactive
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventMeta
-from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -719,6 +719,20 @@ def test_literal_picker_name_does_not_guard_same_prefix_neighbor(
     assert not one_route.ctrl.state.spectrums[name].points_completed
 
 
+def request_sample(harness: RouteHarness, link: ClientLink, name: str) -> RouteReply:
+    """Require valid sampling intent to reach native owner admission."""
+    try:
+        return harness.request(
+            link, "spectrum.interactive.open", name=name, kind="sample"
+        )
+    except RemoteError as error:
+        if error.code != ErrorCode.INVALID_PARAMS or "'kind' must be one of" not in str(
+            error
+        ):
+            raise
+        pytest.fail(f"valid sampling intent rejected by schema: {error.code}: {error}")
+
+
 @pytest.mark.parametrize("name", ["one", "two"])
 def test_sample_intent_opens_actual_picker_kind(
     route_harness: RouteHarness,
@@ -729,19 +743,13 @@ def test_sample_intent_opens_actual_picker_kind(
     _copy_sources(route_harness, onetone_controller)
     _copy_sources(route_harness, twotone_controller)
     link = route_harness.client()
-    opened = route_harness.request(
-        link, "spectrum.interactive.open", name=name, kind="sample"
-    )
+    opened = request_sample(route_harness, link, name)
     context = _context(opened)
     assert context["kind"] == ("onetone" if name == "one" else "twotone")
     assert context["spectrum_name"] == name
     if name == "two":
         assert _state(context)["masked_count"] == 0
-    reopened = _context(
-        route_harness.request(
-            link, "spectrum.interactive.open", name=name, kind="sample"
-        )
-    )
+    reopened = _context(request_sample(route_harness, link, name))
     assert reopened["context_id"] == context["context_id"]
 
 
@@ -757,9 +765,7 @@ def test_sample_intent_uses_native_prerequisites(
     link = one_route.client()
     versions = one_route.ctrl.state.version.snapshot()
     active = one_route.ctrl.state.active_spectrum
-    reply = one_route.request(
-        link, "spectrum.interactive.open", name=name, kind="sample"
-    )
+    reply = request_sample(one_route, link, name)
     _error(
         reply,
         "invalid_params" if condition == "absent" else "precondition_failed",
