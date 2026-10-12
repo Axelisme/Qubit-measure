@@ -1,0 +1,121 @@
+"""Handwritten fit decision tools over authoritative GUI RPCs."""
+
+from typing import NotRequired, TypedDict
+
+from zcu_tools.gui.app.fluxdep.remote.dto import TransitionWire
+from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.remote.param_spec import schema_property
+from zcu_tools.mcp.core.bridge import McpBridge
+from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
+from zcu_tools.mcp.core.stdio_server import ToolTable
+
+from .projection import search_summary, with_png
+
+
+class DatabaseArguments(TypedDict):
+    """path names a GUI-local search database to inspect, without loading a fit."""
+
+    path: str
+
+
+class FitArguments(TypedDict):
+    """Optional overrides of current GUI inputs; omitted keys retain GUI values.
+
+    search_db is the GUI-local DB file. EJb/ECb/ELb are GHz bounds.
+    transitions maps native categories to index pairs. r_f/sample_f are optional
+    GHz frequencies; explicit None clears them rather than retaining their value.
+    GUI owns all business validation.
+    """
+
+    search_db: NotRequired[str]
+    EJb: NotRequired[list[float]]
+    ECb: NotRequired[list[float]]
+    ELb: NotRequired[list[float]]
+    transitions: NotRequired[TransitionWire]
+    r_f: NotRequired[float | None]
+    sample_f: NotRequired[float | None]
+
+
+def build_fit_tools(bridge: McpBridge) -> ToolTable:
+    """Build fit/search and database tools without retaining fit state.
+
+    Fit reads current inputs, overlays provided keys, sends complete replacement,
+    starts search and waits in 30-second slices until terminal, then rereads result.
+    Finished fits return recorded quality and native PNG; failed/cancelled outcomes
+    are data, not invocation failures. GUI validates inputs and owns operations/I/O.
+    Missing quality or invocation/image errors propagate without retry or rollback.
+    """
+
+    def database_info(arguments: DatabaseArguments) -> ToolReply:
+        return call_gui(bridge, GuiRpcCall("fit.database_info", dict(arguments), 31.0))
+
+    def fit(arguments: FitArguments) -> ToolReply:
+        current = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0)).data
+        replacement = {
+            spec.name: current[spec.name]
+            for spec in METHOD_SPECS["fit.set_params"].params
+        }
+        replacement.update(arguments)
+        call_gui(bridge, GuiRpcCall("fit.set_params", replacement, 6.0))
+        started = call_gui(bridge, GuiRpcCall("fit.search", {}, 6.0)).data
+        while True:
+            waited = call_gui(
+                bridge,
+                GuiRpcCall(
+                    "operation.await", {"token": started["token"], "timeout": 30}, 35.0
+                ),
+            ).data
+            if waited["reason"] == "completed":
+                break
+        recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
+        outcome = waited["outcome"]
+        if outcome["status"] != "finished":
+            return ToolReply(dict(outcome))
+        summary = search_summary(recorded)
+        rendered = call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
+        return with_png(summary, rendered)
+
+    # Reuse native declarations, changing only the agent patch/clear interface.
+    properties: dict[str, object] = {
+        spec.name: schema_property(spec)
+        for spec in METHOD_SPECS["fit.set_params"].params
+    }
+    for spec in METHOD_SPECS["fit.set_params"].params:
+        if spec.name in ("r_f", "sample_f"):
+            properties[spec.name] = {
+                **schema_property(spec),
+                "type": ["number", "null"],
+            }
+    return {
+        bridge.config.tool_prefix + "fit": {
+            "handler": fit,
+            "description": (
+                "Fit current Filter points: read GUI inputs, overlay provided fields, "
+                "replace inputs, search and wait until terminal. Omitted fields retain "
+                "current GUI values; null clears r_f/sample_f. No local business "
+                "validation, retry or rollback. search_db is the search DB, not data_root. "
+                "EJb/ECb/ELb are finite [lower, upper] GHz bounds; inspect database_info "
+                "for available ranges and M levels. transitions maps category names "
+                "to [i,j] pairs with indices 0..M-1. For delta=E_j-E_i (GHz), "
+                "categories/formulas are: transitions=|delta|; blue side=|delta+r_f|; "
+                "red side=|r_f-delta|; mirror=|sample_f-delta|; "
+                "mirror blue=|sample_f-r_f-delta|; mirror red=|delta+sample_f-r_f|; "
+                "transitions{n}=|delta/n|; mirror{n}=|sample_f-delta/n|, "
+                "integer n=2..M-1 without leading zeroes. r_f is the GHz sideband "
+                "reference frequency; sample_f is the GHz sampling/alias frequency "
+                "used by mirror categories. Nonempty sidebands need r_f; nonempty "
+                "mirrors need sample_f, and mirror blue/red need both."
+            ),
+            "inputSchema": {"type": "object", "properties": properties},
+        },
+        bridge.config.tool_prefix + "database_info": {
+            "handler": database_info,
+            "description": "Inspect a search database's parameter/flux ranges, entry count and energy levels without running search.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    }

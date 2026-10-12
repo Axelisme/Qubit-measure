@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from zcu_tools.analysis.fluxdep.cross_selection import (
+    MIN_DISTANCE_MAX,
+    MIN_DISTANCE_MIN,
     CrossSelectionInputs,
     CrossSelectionResult,
     CrossSelectionState,
@@ -65,7 +67,14 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         seed = make_cross_selection_state(
             inputs, min_distance=min_distance, width=brush_width
         )
-        distance_params = (ParamSpec("min_distance", JsonType.NUMBER),)
+        distance_params = (
+            ParamSpec(
+                "min_distance",
+                JsonType.NUMBER,
+                minimum=MIN_DISTANCE_MIN,
+                maximum=MIN_DISTANCE_MAX,
+            ),
+        )
         distance: Action[CrossSelectionState, float] = Action(
             lambda state, value: _transition(
                 lambda: set_cross_selection_distance(inputs, state, value)

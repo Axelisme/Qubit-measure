@@ -173,7 +173,7 @@ class SelectionState:
 class FitState:
     """Database-search fit inputs and result (the v2 pipeline tail).
 
-    The inputs (``database_path`` / bounds / ``transitions`` / ``r_f`` /
+    The inputs (``search_db`` / bounds / ``transitions`` / ``r_f`` /
     ``sample_f``) parameterise ``search_database``; the result
     (``params`` = (EJ, EC, EL)) is filled by a search. All of it is a
     process-lifetime singleton on State — one fit per session — so its version
@@ -182,7 +182,7 @@ class FitState:
     ``transitions`` is a ``TransitionDict`` (TypedDict, accessed with ``[...]``).
     """
 
-    database_path: str = ""
+    search_db: str = ""
     EJb: tuple[float, float] = (2.0, 15.0)
     ECb: tuple[float, float] = (0.2, 2.0)
     ELb: tuple[float, float] = (0.1, 2.0)
@@ -451,7 +451,7 @@ class FluxDepState:
 
     def set_fit_params(
         self,
-        database_path: str,
+        search_db: str,
         EJb: tuple[float, float],
         ECb: tuple[float, float],
         ELb: tuple[float, float],
@@ -467,7 +467,7 @@ class FluxDepState:
         """
         self._assert_owner()
         self.fit = FitState(
-            database_path=database_path,
+            search_db=search_db,
             EJb=EJb,
             ECb=ECb,
             ELb=ELb,

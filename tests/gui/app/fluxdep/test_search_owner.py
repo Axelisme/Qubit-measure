@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
-    DatabaseSearchResult,
     ParamBounds,
     SearchCancelled,
 )
@@ -26,6 +25,8 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 
 class ControlledBackground:
@@ -78,7 +79,7 @@ class QueuedProgress:
 
 
 @pytest.fixture
-def search_case(cross_controller, monkeypatch, tmp_path):
+def search_case(cross_controller, monkeypatch, search_database_hdf5):
     from zcu_tools.gui.app.fluxdep.services import fit
 
     owner = ManualOwnerScheduler()
@@ -89,11 +90,9 @@ def search_case(cross_controller, monkeypatch, tmp_path):
         interactive_owner=owner,
         search_runtime=FluxDepSearchRuntime(background, progress),
     )
-    path = tmp_path / "db.h5"
-    path.touch()
     bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
     ctrl.set_fit_params(
-        str(path),
+        search_database_hdf5,
         bounds.EJ,
         bounds.EC,
         bounds.EL,
@@ -101,18 +100,7 @@ def search_case(cross_controller, monkeypatch, tmp_path):
         None,
         None,
     )
-    result = DatabaseSearchResult(
-        params=(5, 1, 0.5),
-        best_distance=0.1,
-        best_scale=1,
-        best_index=0,
-        entry_results=np.array([[0.1, 1.0]]),
-        entry_params=np.array([[5.0, 1.0, 0.5]]),
-        fluxs=np.array([0.0]),
-        freqs=np.array([4.0]),
-        predicted_freqs=np.array([4.0]),
-        bounds=bounds,
-    )
+    result = perfect_fit_result(np.array([0.0]), np.array([4.0]), bounds)
     captured = []
 
     def compute(fluxs, freqs, path, transitions, bounds, *, execution):
@@ -158,7 +146,7 @@ def test_changed_input_rejects_success(search_case, mutation):
     elif mutation == "fit":
         fit = ctrl.state.fit
         ctrl.set_fit_params(
-            fit.database_path, fit.EJb, fit.ECb, fit.ELb, fit.transitions, None, None
+            fit.search_db, fit.EJb, fit.ECb, fit.ELb, fit.transitions, None, None
         )
     elif mutation == "project":
         ctrl.setup_project(ctrl.state.project)

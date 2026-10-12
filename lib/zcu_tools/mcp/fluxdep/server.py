@@ -31,7 +31,7 @@ from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
-MCP_VERSION = 3
+MCP_VERSION = 3  # handwritten decision tools, including composed fit search
 
 _SERVER_INSTRUCTIONS = """\
 Control the Fluxdep analysis pipeline in the same GUI the user can drive.

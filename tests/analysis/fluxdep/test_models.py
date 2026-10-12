@@ -5,12 +5,36 @@ from zcu_tools.analysis.fluxdep.models import (
 )
 from zcu_tools.analysis.fluxdep.models import (
     energy2linearform,
+    energy2transition,
 )
 from zcu_tools.analysis.fluxdep.search_models import (
     TransitionDict,
     compile_transitions,
+    count_max_evals,
 )
 from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
+
+
+def test_required_levels_expand_high_order_frequencies_and_labels():
+    transitions: AnalysisTransitionDict = {
+        "transitions17": [(0, 1)],
+        "mirror17": [(0, 1)],
+        "sample_f": 10.0,
+    }
+    levels = count_max_evals(transitions)
+    energies = np.zeros((1, levels))
+    energies[:, 1] = 34.0
+    frequencies, labels = energy2transition(energies, transitions)
+    assert labels == ["17 0 -> 1", "17 0 -> 1 mirror"]
+    np.testing.assert_allclose(frequencies, [[2.0, 8.0]])
+
+
+def test_required_levels_preserve_basic_and_ignore_empty_dynamic_choices():
+    transitions: AnalysisTransitionDict = {
+        "transitions": [(0, 2)],
+        "mirror17": [],
+    }
+    assert count_max_evals(transitions) == 3
 
 
 def _check_matches(transitions, energies):

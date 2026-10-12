@@ -30,10 +30,15 @@ from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
     SearchExecution,
+    database_info,
     search_database,
 )
+from zcu_tools.analysis.fluxdep.search_models import (
+    transition_requires_levels,
+    validate_transition_levels,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, transitions_with_freqs
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.qubit_params import (
     FluxDepFit,
@@ -60,13 +65,13 @@ def default_params_path(result_dir: str) -> str:
 class SearchInput:
     """Detached numeric input, captured on the State owner before worker use.
 
-    database_path is the HDF5 database filename. fluxs is a copied 1-D cloud
+    search_db is the HDF5 database filename. fluxs is a copied 1-D cloud
     in Φ/Φ0; freqs is its copied GHz cloud. transitions is a deep copy with
     optional r_f/sample_f GHz values injected. bounds holds EJ/EC/EL GHz limits.
     The arrays and transition lists belong to this snapshot, never live State.
     """
 
-    database_path: str
+    search_db: str
     fluxs: NDArray[np.float64]
     freqs: NDArray[np.float64]
     transitions: TransitionDict
@@ -83,7 +88,7 @@ class FitService:
 
     def set_params(
         self,
-        database_path: str,
+        search_db: str,
         EJb: tuple[float, float],
         ECb: tuple[float, float],
         ELb: tuple[float, float],
@@ -91,10 +96,24 @@ class FitService:
         r_f: float | None,
         sample_f: float | None,
     ) -> None:
-        """Record the search inputs (clears any stale result)."""
-        self._state.set_fit_params(
-            database_path, EJb, ECb, ELb, transitions, r_f, sample_f
-        )
+        """Validate transition choices, then replace inputs and clear results.
+
+        Unknown categories raise InvalidInputError before I/O. Nonempty pairs
+        and dynamic categories (even empty) read DB metadata to validate levels;
+        basic empty categories do not require a file. I/O errors propagate.
+        Missing transition frequencies remain search-time validation.
+        """
+        try:
+            needs_levels = transition_requires_levels(transitions)
+        except ValueError as exc:
+            raise InvalidInputError(str(exc)) from exc
+        if needs_levels:
+            levels = database_info(search_db).levels
+            try:
+                validate_transition_levels(transitions, levels)
+            except ValueError as exc:
+                raise InvalidInputError(str(exc)) from exc
+        self._state.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
 
     # --- derived ---------------------------------------------------------
 
@@ -131,15 +150,15 @@ class FitService:
         Rejects foreign threads, missing database path and empty selected cloud.
         Kernel validation of bounds, transitions and database contents happens
         during compute_search.
-        FailedPreconditionError reasons are no_database_path or no_selected_points.
+        FailedPreconditionError reasons are no_search_db or no_selected_points.
         Foreign threads raise RuntimeError.
         """
         self._state.assert_owner_thread()
         fit = self._state.fit
-        if not fit.database_path:
+        if not fit.search_db:
             raise FailedPreconditionError(
                 "no database path set (call set_params first)",
-                reason_code="no_database_path",
+                reason_code="no_search_db",
             )
         fluxs, freqs = self.selected_pointcloud()
         if fluxs.size == 0:
@@ -148,7 +167,7 @@ class FitService:
                 reason_code="no_selected_points",
             )
         return SearchInput(
-            database_path=fit.database_path,
+            search_db=fit.search_db,
             fluxs=fluxs.copy(),
             freqs=freqs.copy(),
             transitions=deepcopy(
@@ -178,7 +197,7 @@ class FitService:
             return search_database(
                 inputs.fluxs,
                 inputs.freqs,
-                inputs.database_path,
+                inputs.search_db,
                 inputs.transitions,
                 inputs.bounds,
                 execution=SearchExecution(cancel_requested=cancel_requested),

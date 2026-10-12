@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
-import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (
@@ -57,7 +56,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SearchChangedPayload,
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
-from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -65,7 +64,6 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
 from .transitions_form import TransitionsForm
@@ -75,7 +73,6 @@ logger = logging.getLogger(__name__)
 AnalyzeTab = Literal["filter", "search", "show"]
 _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
-_N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
 _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
@@ -357,7 +354,7 @@ class AnalyzePanelWidget(QWidget):
         # Seed the database path: the prior fit's path, else a bundled default so
         # the user usually doesn't have to browse at all.
         self._db_edit.setText(
-            fit.database_path
+            fit.search_db
             or default_database_file(
                 self._ctrl.state.project, self._ctrl.get_project_root()
             )
@@ -500,7 +497,7 @@ class AnalyzePanelWidget(QWidget):
         r_f = _parse_freq(self._r_f)
         sample_f = _parse_freq(self._sample_f)
         self._ctrl.set_fit_params(
-            database_path=self._db_edit.text().strip(),
+            search_db=self._db_edit.text().strip(),
             EJb=(self._ej_lo.value(), self._ej_hi.value()),
             ECb=(self._ec_lo.value(), self._ec_hi.value()),
             ELb=(self._el_lo.value(), self._el_hi.value()),
@@ -694,15 +691,6 @@ class AnalyzePanelWidget(QWidget):
         fit = self._ctrl.state.fit
         if fit.params is None:
             return
-        spectrums = self._ctrl.state.spectrums
-        s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
-        x_lo, x_hi = self._x_lo.value(), self._x_hi.value()
-        flux_lo, flux_hi = (x_lo, x_hi) if x_hi > x_lo else (0.0, 1.0)
-        t_fluxs = np.linspace(flux_lo, flux_hi, _N_SIM_FLUX)
-        _, energies = calculate_energy_vs_flux(
-            fit.params, t_fluxs, cutoff=40, evals_count=15
-        )
-
         # The show-transitions subset may need an r_f/sample_f that's unset;
         # check before drawing so it surfaces a friendly message, not a crash.
         show_transitions = self._transitions_show.get_transitions()
@@ -711,24 +699,9 @@ class AnalyzePanelWidget(QWidget):
             self._status.setText("Show: " + missing.split(".")[0] + ".")
             show_transitions = fit.transitions
 
-        aligned = next((e for e in spectrums.values() if e.aligned), None)
         try:
-            render_fit_figure(
+            self._ctrl.render_fit(
                 self._fit_figure,
-                spectrums,
-                t_fluxs,
-                energies,
-                fit.transitions,
-                s_fluxs,
-                s_freqs,
-                r_f=fit.r_f,
-                sample_f=fit.sample_f,
-                flux_half=aligned.flux_half if aligned else None,
-                flux_period=aligned.flux_period if aligned else None,
-                title=(
-                    f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, "
-                    f"{fit.params[2]:.2f})"
-                ),
                 xlim=(self._x_lo.value(), self._x_hi.value()),
                 ylim=(self._y_lo.value(), self._y_hi.value()),
                 show_const_freq=self._show_const_freq.isChecked(),

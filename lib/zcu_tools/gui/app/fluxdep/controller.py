@@ -16,6 +16,7 @@ import logging
 from collections.abc import Callable
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
@@ -40,9 +41,11 @@ from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
+from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, render_fit_result
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.controller_base import BaseController
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -230,7 +233,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_fit_params(
         self,
-        database_path: str,
+        search_db: str,
         EJb: tuple[float, float],
         ECb: tuple[float, float],
         ELb: tuple[float, float],
@@ -240,21 +243,57 @@ class Controller(BaseController[FluxDepState, EventBus]):
     ) -> None:
         """Replace search inputs and clear any result; emit FitChanged once.
 
-        Owner-thread command. database_path is the search database file, not
+        Owner-thread command. search_db is the search database file, not
         the project's raw-data directory. EJb/ECb/ELb are lower/upper bounds
         in GHz. transitions holds native integer level-pair categories and
         optional r_f/sample_f values in GHz; separate frequencies are injected
         by the search kernel according to transitions_with_freqs. None clears
-        a separate frequency. Domain validation happens when searching.
-        This command neither checks the database nor starts a search.
+        a separate frequency. Unknown categories fail before I/O; nonempty
+        pairs or dynamic categories read DB metadata to check level indices.
+        Empty basic choices need no file. Invalid choices raise InvalidInputError;
+        I/O errors propagate before publication. Frequency/bounds validation
+        remains search-owned. This command does not start a search.
         """
-        self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
+        self._fit.set_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
         self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
 
     def selected_pointcloud(
         self,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._fit.selected_pointcloud()
+
+    def render_fit(
+        self,
+        figure: Figure,
+        *,
+        xlim: tuple[float, float] | None = None,
+        ylim: tuple[float, float] | None = None,
+        show_const_freq: bool = True,
+        plot_transitions: TransitionDict | None = None,
+    ) -> None:
+        """Draw the native Show overlay into caller-owned figure on owner thread.
+
+        Uses current result, spectra and selected points without publishing state.
+        Limits are normalized flux and GHz; None derives native auto limits.
+        plot_transitions overrides the displayed lines only; None uses fit choices.
+        show_const_freq toggles reference lines. Figure contents are replaced.
+        Missing result raises FailedPreconditionError(no_fit_result); simulation
+        and render errors propagate. GUI and RPC use this same rendering path.
+        """
+        self.state.assert_owner_thread()
+        fit = self.state.fit
+        if fit.params is None:
+            raise FailedPreconditionError(
+                "no fit result to render", reason_code="no_fit_result"
+            )
+        fluxs, freqs = self.selected_pointcloud()
+        display = FitDisplay(
+            xlim=xlim,
+            ylim=ylim,
+            show_const_freq=show_const_freq,
+            plot_transitions=plot_transitions,
+        )
+        render_fit_result(figure, fit, self.state.spectrums, fluxs, freqs, display)
 
     def capture_search(self) -> SearchInput:
         """Capture detached search inputs on State's owner; invalid inputs raise."""

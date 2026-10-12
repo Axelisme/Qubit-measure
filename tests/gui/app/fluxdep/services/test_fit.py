@@ -263,7 +263,7 @@ def test_capture_search_fast_fails_without_database():
     before = st.version.snapshot()
     with pytest.raises(FailedPreconditionError) as caught:
         FitService(st).capture_search()
-    assert caught.value.reason_code == "no_database_path"
+    assert caught.value.reason_code == "no_search_db"
     assert st.version.snapshot() == before
 
 

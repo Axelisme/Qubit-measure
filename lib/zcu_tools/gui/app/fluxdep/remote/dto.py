@@ -18,6 +18,12 @@ class PngImage(TypedDict):
     bytes: int
 
 
+class FigureReply(TypedDict):
+    """figure is the native Show overlay PNG, encoded without saving a file."""
+
+    figure: PngImage
+
+
 class EmptyPluginInfo(TypedDict):
     """No plugin-specific operation status is currently exposed."""
 
@@ -219,6 +225,21 @@ class PointcloudReply(TypedDict):
     freqs: list[float]
 
 
+class DatabaseInfoReply(TypedDict):
+    """Search DB path, candidate/level counts and inclusive parameter ranges.
+
+    EJ/EC/EL ranges are GHz; flux is normalized Phi_0. Every range is [min, max].
+    """
+
+    path: str
+    entries: int
+    levels: int
+    EJ: list[float]
+    EC: list[float]
+    EL: list[float]
+    flux: list[float]
+
+
 class FitParametersReply(TypedDict):
     """EJ, EC and EL are the accepted fit's energy parameters in GHz."""
 
@@ -243,14 +264,14 @@ class FitResultReply(TypedDict):
     """Complete editable fit snapshot and current result availability.
 
     has_result marks a stored successful result. params is its EJ/EC/EL or None.
-    database_path is the search database file, not the project's raw root.
+    search_db is the search database file, not the project's raw root.
     EJb/ECb/ELb are [lower, upper] GHz bounds. transitions contains native choices.
     r_f/sample_f are separate optional GHz inputs, None when unset.
     """
 
     has_result: bool
     params: FitParametersReply | None
-    database_path: str
+    search_db: str
     EJb: list[float]
     ECb: list[float]
     ELb: list[float]

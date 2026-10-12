@@ -27,6 +27,32 @@ class FitSummary(TypedDict):
     stale_reasons: NotRequired[list[str]]
 
 
+class TransitionQuality(TypedDict):
+    """One native compiled line; duplicate labels remain separate entries.
+
+    points is the attributed count. mean/max are GHz residuals, None for zero
+    points. transition is the native category and level-pair label.
+    """
+
+    transition: str
+    points: int
+    mean: float | None
+    max: float | None
+
+
+class FitQuality(TypedDict):
+    """Recorded native search quality, in GHz, without per-point arrays.
+
+    mean is the average absolute residual; outliers counts points above the
+    native outlier_threshold. per_transition follows native compilation order.
+    """
+
+    mean: float
+    outliers: int
+    outlier_threshold: float
+    per_transition: list[TransitionQuality]
+
+
 class AxisSummary(TypedDict):
     """Axis length, three-decimal extents (None when empty) and native unit."""
 
@@ -116,6 +142,48 @@ def spectrum_summary(reply: ToolReply) -> ToolReply:
                 "flux_range": _range(data["points"]["fluxs"]),
                 "freq_range": _range(data["points"]["freqs"]),
             },
+        }
+    )
+
+
+def search_summary(reply: ToolReply) -> ToolReply:
+    """Summarize a successful recorded fit with three-decimal GHz residuals.
+
+    Uses recorded quality, including duplicate/unused transitions; counts sum
+    that quality's attributed points, not the current selection. Inputs/params
+    come from the final GUI read, never the caller patch or a local cache.
+    Missing fields fail directly. Explicitly unrecorded quality raises
+    RuntimeError rather than inventing statistics for a successful operation.
+    """
+    data = reply.data
+    if data["quality"] is None:
+        raise RuntimeError("Finished fit has no recorded quality")
+    quality: FitQuality = data["quality"]
+    inputs = {
+        name: data[name]
+        for name in ("search_db", "EJb", "ECb", "ELb", "r_f", "sample_f")
+    }
+    inputs["points"] = sum(row["points"] for row in quality["per_transition"])
+    return ToolReply(
+        {
+            "status": "finished",
+            "params": data["params"],
+            "inputs": inputs,
+            "residual": {
+                "mean": _rounded(quality["mean"]),
+                "unit": "GHz",
+                "outliers": quality["outliers"],
+                "outlier_threshold": _rounded(quality["outlier_threshold"]),
+            },
+            "per_transition": [
+                {
+                    "transition": row["transition"],
+                    "points": row["points"],
+                    "mean": _rounded(row["mean"]),
+                    "max": _rounded(row["max"]),
+                }
+                for row in quality["per_transition"]
+            ],
         }
     )
 

@@ -20,14 +20,24 @@ from zcu_tools.analysis.fluxdep.models import (
 
 
 def count_max_evals(transitions: TransitionDict) -> int:
-    max_lvl = 0
-    for lvls in transitions.values():
-        if not isinstance(lvls, list) or len(lvls) == 0:
-            continue
-        max_lvl = max(max_lvl, *[max(lvl_from, lvl_to) for lvl_from, lvl_to in lvls])
-    max_lvl += 1
+    """Return minimum simulated levels to expand all nonempty choices.
 
-    return max_lvl
+    Counts pair maximum index +1 and dynamic category order +1, since expansion
+    consumes orders below the energy level count. Empty categories do not grow
+    the simulation; an empty mapping returns 1. Unknown categories raise
+    ValueError. Does not validate required frequencies or mutate inputs.
+    """
+    transition_requires_levels(transitions)
+    base = {name for name, _, _ in _transition_groups(transitions, 2)}
+    levels = 1
+    for name, pairs in transitions.items():
+        if not isinstance(pairs, list) or not pairs:
+            continue
+        levels = max(levels, 1 + max(max(i, j) for i, j in pairs))
+        if name not in base:
+            order = int(name.removeprefix("transitions").removeprefix("mirror"))
+            levels = max(levels, order + 1)
+    return levels
 
 
 def _transition_groups(
@@ -45,6 +55,68 @@ def _transition_groups(
     for n in range(2, levels):
         yield f"transitions{n}", 1.0 / n, 0.0
         yield f"mirror{n}", -1.0 / n, sample_f
+
+
+def transition_requires_levels(transitions: TransitionDict) -> bool:
+    """Check category syntax and report whether validation needs DB levels.
+
+    Base categories are transitions, blue side, red side, mirror, mirror blue,
+    mirror red. Multiphoton categories are transitions{n}/mirror{n}, n >= 2
+    without leading zeroes; they need levels even for empty lists. Nonempty
+    pairs also need levels. r_f/sample_f are reserved GHz fields. Unknown
+    categories raise ValueError before any database I/O.
+    """
+    base = {name for name, _, _ in _transition_groups(transitions, 2)}
+    needs_levels = False
+    for name, value in transitions.items():
+        if name in ("r_f", "sample_f"):
+            continue
+        if name in base:
+            needs_levels = needs_levels or bool(value)
+            continue
+        if name.startswith("transitions"):
+            suffix = name.removeprefix("transitions")
+        elif name.startswith("mirror"):
+            suffix = name.removeprefix("mirror")
+        else:
+            raise ValueError(f"unknown transition category: {name!r}")
+        if (
+            not suffix.isascii()
+            or not suffix.isdecimal()
+            or int(suffix) < 2
+            or str(int(suffix)) != suffix
+        ):
+            raise ValueError(f"unknown transition category: {name!r}")
+        needs_levels = True
+    return needs_levels
+
+
+def validate_transition_levels(transitions: TransitionDict, levels: int) -> None:
+    """Reject unknown categories and level pairs outside [0, levels-1].
+
+    levels is the positive DB energy-level count. Dynamic category orders must
+    be in [2, levels-1], including empty lists. r_f/sample_f are legal reserved
+    fields; missing sideband/mirror frequencies remain search-time validation.
+    Raises ValueError without mutating transitions.
+    """
+    if levels < 1:
+        raise ValueError("database levels must be positive")
+    transition_requires_levels(transitions)
+    allowed = {name for name, _, _ in _transition_groups(transitions, levels)}
+    for name, pairs in transitions.items():
+        if name in ("r_f", "sample_f"):
+            continue
+        if name not in allowed:
+            raise ValueError(
+                f"transition category {name!r} exceeds database levels {levels}"
+            )
+        if not isinstance(pairs, list):
+            raise ValueError(f"transition category {name!r} must contain level pairs")
+        for i, j in pairs:
+            if not 0 <= i < levels or not 0 <= j < levels:
+                raise ValueError(
+                    f"transition {name!r} pair {(i, j)} must use levels 0..{levels - 1}"
+                )
 
 
 def transition_labels(transitions: TransitionDict, levels: int) -> tuple[str, ...]:
@@ -72,8 +144,10 @@ def compile_transitions(
     where (i, j) = pairs[k].
 
     M = energies.shape[1] — needed to know which `transitions{n}` / `mirror{n}`
-    keys to consume.
+    keys to consume. Unsupported categories, out-of-range indices and missing
+    required frequencies raise ValueError before numerical compilation.
     """
+    validate_transition_levels(transitions, M)
     validate_transition_frequencies(transitions)
 
     pairs: list[tuple[int, int]] = []

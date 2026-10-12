@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-12 — search attribution and residual quality
+**Last updated:** 2026-10-13 — transition validation and database metadata
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -18,6 +18,15 @@
 - `onetone.py`：one-tone 最大色散頻率、切面平滑、peak detection 與點位輸出。`OneToneInputs` 保存 captured spectrum 與唯讀預處理；`OneTonePickState` 保存完整 threshold／indices。`analyze_onetone_pick` 驗證 indices 並輸出未校準 device／GHz 點位，空選集有效；排序與 flux calibration 留在 app。
 - `line_state.py`：Qt-free `FluxPickState` 與唯讀輸入、初值折疊、移線／交換、mirror-loss 與 auto-align 候選計算。`analyze_flux_pick` 驗證終態最小間距，回傳 device-axis 單位的 FluxPickAnalysis，period 是兩線距離的兩倍。計算不改輸入；狀態不保存選線、preview 或 Figure。
 - `line_picker.py`：既有 notebook Matplotlib picker；measure Qt frontend 只用它維護本地 artists/timer，並以 `show_state()` 將 committed state 重投影到畫面。
+
+## 輸入與能階契約
+
+`search.database_info(path)` 讀 HDF5 的參數範圍與能階維度，不 materialize energies。
+`search_models.transition_requires_levels` 先驗類別語法，指出是否需 DB 能階數。
+非空 pairs 與動態類別（含空列表）需要 M；基本空列表與空 mapping 不需要。
+`validate_transition_levels` 與 compilation 共用類別順序，拒絕未知類別、動態 order 不在 2..M-1 與索引不在 0..M-1。
+`count_max_evals` 為 simulation 回最少能階數，包含非空 pair 最大索引 +1 與動態 order +1；空類別不增加計算量。GUI overlay 與 Notebook least-squares 都引用這個契約。
+OneTone／TwoTone detector、brush radius 與跨譜 distance 的有效範圍由各 domain 模組常數提供，驗證與 GUI command schema 引用同一來源。
 
 ## 邊界
 

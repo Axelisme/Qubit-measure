@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，named contexts、readonly display 與 alignment decisions
+**Last updated:** 2026-10-13，named contexts、readonly display 與 fit contracts
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -195,8 +195,8 @@ signal matrix。Selection snapshot 提供 published mask 與 normalized min_dist
 不讀 live Session。Remove、reset 與 active selection 共用 Controller owners。
 Raw load／processed restore 保留 basename replacement、inheritance／transpose 與 completion
 契約，publication 失敗保留已發布前綴，不 rollback。
-Fit replacement 清掉舊結果，不啟動搜尋。JSON parser 驗 type／shape／finite，
-bounds 與 transition 語意留在 search kernel。
+Fit replacement 使用 `search_db`，與專案 raw-data root 區分。JSON parser 驗 type／shape／finite；kernel 在發布前驗 transition 類別與能階索引，只有需要能階數才讀 DB metadata，不載入 energies。拒絕或 I/O 失敗不改舊 inputs／result，成功則清掉舊結果，不啟動搜尋。Bounds 與缺少頻率仍在 search 時驗證。
+GUI Show 與 `fit.render` 共用 Controller 的 native overlay 入口。顯示範圍、reference lines 與 transition 子集只改 presentation，不改 search inputs。`fit.database_info` 只讀 DB counts 與參數範圍。
 
 Spectrum export 預設 create-only，明示 overwrite 才替換。Params export 沿原生 merge，
 保留 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。

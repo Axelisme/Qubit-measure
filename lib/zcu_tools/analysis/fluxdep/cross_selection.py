@@ -14,12 +14,18 @@ from numpy.typing import NDArray
 
 from .processing import downsample_points
 from .stroke import (
+    BRUSH_WIDTH_MAX,
+    BRUSH_WIDTH_MIN,
     BrushMode,
     BrushPoint,
     BrushStroke,
     BrushTool,
     points_in_normalized_stroke,
 )
+
+# Inclusive normalized downsampling-distance limits.
+MIN_DISTANCE_MIN = 0.0
+MIN_DISTANCE_MAX = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +176,7 @@ def make_cross_selection_state(
 
     Reject bool numbers and modes other than select/erase with ValueError.
     """
-    _number(min_distance, "min_distance")
+    _number(min_distance, "min_distance", MIN_DISTANCE_MIN, MIN_DISTANCE_MAX)
     _number(width, "width")
     _validate_mode(mode)
     return CrossSelectionState(
@@ -186,7 +192,7 @@ def set_cross_selection_distance(
     Reject bool numbers and invalid state with ValueError without mutation.
     """
     _validate_state(inputs, state)
-    _number(min_distance, "min_distance")
+    _number(min_distance, "min_distance", MIN_DISTANCE_MIN, MIN_DISTANCE_MAX)
     return replace(
         state,
         selected=state.selected.copy(),
@@ -381,10 +387,15 @@ def _validate_boolean(value: object, name: str) -> None:
         raise ValueError(f"{name} must be bool")
 
 
-def _number(value: float, name: str) -> None:
+def _number(
+    value: float,
+    name: str,
+    lower: float = BRUSH_WIDTH_MIN,
+    upper: float = BRUSH_WIDTH_MAX,
+) -> None:
     _finite_number(value, name)
-    if not 0 <= value <= 0.1:
-        raise ValueError(f"{name} must be in [0,0.1]")
+    if not lower <= value <= upper:
+        raise ValueError(f"{name} must be in [{lower:g},{upper:g}]")
 
 
 def _validate_mode(mode: BrushMode) -> None:
@@ -407,13 +418,13 @@ def _validate_mask(mask: NDArray[np.bool_], size: int) -> None:
 
 def _validate_state(inputs: CrossSelectionInputs, state: CrossSelectionState) -> None:
     _validate_mask(state.selected, inputs.fluxs.size)
-    _number(state.min_distance, "min_distance")
+    _number(state.min_distance, "min_distance", MIN_DISTANCE_MIN, MIN_DISTANCE_MAX)
     _number(state.width, "width")
     _validate_mode(state.mode)
     change = state.last_change
     if change is not None:
         _validate_mask(change.selected, inputs.fluxs.size)
-        _number(change.min_distance, "min_distance")
+        _number(change.min_distance, "min_distance", MIN_DISTANCE_MIN, MIN_DISTANCE_MAX)
         _number(change.width, "stroke width")
         if change.vertices:
             _validate_vertices(change.vertices)

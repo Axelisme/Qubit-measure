@@ -170,18 +170,31 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "fit.result": MethodSpec(
         5.0,
         "Read the current fit inputs and result: {has_result, params:{EJ,EC,EL} "
-        "or null, database_path, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        "or null, search_db, EJb, ECb, ELb, transitions, r_f, sample_f}.",
+        readonly=True,
+    ),
+    "fit.render": MethodSpec(
+        30.0,
+        "Render the native Show overlay as PNG. Requires a fit result; "
+        "does not change display or save an artifact.",
+        readonly=True,
+    ),
+    "fit.database_info": MethodSpec(
+        30.0,
+        "Read search DB path, entry/level counts and inclusive EJ/EC/EL GHz and "
+        "normalized flux ranges without loading energy values.",
+        params=(ParamSpec("path", JsonType.STRING),),
         readonly=True,
     ),
     "fit.set_params": MethodSpec(
         5.0,
         "Replace all fit inputs; clear the old result "
-        "without starting a search. database_path is the search database file. "
+        "without starting a search. search_db is the search database file. "
         "EJb, ECb and ELb are finite [lower, upper] bounds in GHz. transitions "
         "maps category names to integer pairs; reserved r_f/sample_f are finite "
         "numbers. Optional separate r_f/sample_f default to null.",
         params=(
-            ParamSpec("database_path", JsonType.STRING),
+            ParamSpec("search_db", JsonType.STRING),
             ParamSpec("EJb", JsonType.ARRAY, array_item_type="number"),
             ParamSpec("ECb", JsonType.ARRAY, array_item_type="number"),
             ParamSpec("ELb", JsonType.ARRAY, array_item_type="number"),

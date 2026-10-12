@@ -25,6 +25,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 from tests.gui.app.fluxdep.remote._search_harness import PumpedRouteHarness
 
@@ -76,27 +77,19 @@ class SearchCase:
             and execution.cancel_requested()
         ):
             raise SearchCancelled("requested")
-        return DatabaseSearchResult(
-            params=(5.0, 1.0, 0.5),
-            best_distance=0.1,
-            best_scale=1.0,
-            best_index=0,
-            entry_results=np.array([[0.1, 1.0]]),
-            entry_params=np.array([[5.0, 1.0, 0.5]]),
-            fluxs=fluxs,
-            freqs=freqs,
-            predicted_freqs=freqs.copy(),
-            bounds=bounds,
-        )
+        return perfect_fit_result(fluxs, freqs, bounds)
 
 
 @pytest.fixture
 def search_case(
-    cross_controller: Controller, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    cross_controller: Controller,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    search_database_hdf5: str,
 ) -> Iterator[SearchCase]:
     harness = PumpedRouteHarness.create(str(tmp_path), cross_controller.state)
     harness.ctrl.set_fit_params(
-        "search-db.h5",
+        search_database_hdf5,
         (2, 15),
         (0.2, 2),
         (0.1, 2),
@@ -180,6 +173,7 @@ def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
 
 def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
     search_case: SearchCase,
+    search_database_hdf5: str,
 ) -> None:
     h = search_case.harness
     client = h.client()
@@ -231,7 +225,7 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
         assert all(meta.origin.kind == "agent" for _, meta in facts)
         assert len({meta.origin.client_id for _, meta in facts}) == 1
         np.testing.assert_array_equal(search_case.captured[0][0], [0, 0.5, 1, 0.5])
-        assert search_case.captured[0][2] == "search-db.h5"
+        assert search_case.captured[0][2] == search_database_hdf5
         assert search_case.captured[0][3] == {"transitions": [(0, 1)], "r_f": 6.0}
         assert search_case.captured[0][4] == ParamBounds(
             EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)
@@ -399,13 +393,13 @@ def test_wait_json_admission_is_shared(
 
 @pytest.mark.parametrize(
     "reason",
-    ["no_database_path", "no_selected_points", "search_closing"],
+    ["no_search_db", "no_selected_points", "search_closing"],
 )
 def test_native_search_admission_errors_do_not_open_handles(
     search_case: SearchCase, reason: str
 ) -> None:
     h = search_case.harness
-    if reason == "no_database_path":
+    if reason == "no_search_db":
         h.ctrl.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
     elif reason == "no_selected_points":
         h.ctrl.set_selection(np.zeros(4, dtype=np.bool_))

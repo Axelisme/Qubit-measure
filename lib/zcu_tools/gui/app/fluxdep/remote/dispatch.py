@@ -20,7 +20,10 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -28,7 +31,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.gui.plotting.figure_export import render_figure_png
+from zcu_tools.analysis.fluxdep.search import database_info
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
@@ -41,6 +44,8 @@ from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 from .dto import (
     ActiveSpectrumReply,
     AxisSnapshot,
+    DatabaseInfoReply,
+    FigureReply,
     FitParametersReply,
     FitResultReply,
     FitUpdatedReply,
@@ -295,7 +300,7 @@ def _h_fit_result(
     return {
         "has_result": fit.has_result,
         "params": params_payload,
-        "database_path": fit.database_path,
+        "search_db": fit.search_db,
         "EJb": list(fit.EJb),
         "ECb": list(fit.ECb),
         "ELb": list(fit.ELb),
@@ -368,11 +373,44 @@ def _fit_transitions(value: object) -> TransitionDict:
     return transitions
 
 
+def _h_fit_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> FigureReply:
+    del params
+    figure = Figure()
+    adapter.ctrl.render_fit(figure)
+    data = render_figure_png(figure)
+    return {
+        "figure": {
+            "png_b64": base64.b64encode(data).decode("ascii"),
+            "bytes": len(data),
+        }
+    }
+
+
+def _h_fit_database_info(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> DatabaseInfoReply:
+    del adapter
+    path = params["path"]
+    assert isinstance(path, str)
+    info = database_info(path)
+    return {
+        "path": info.path,
+        "entries": info.entries,
+        "levels": info.levels,
+        "EJ": list(info.EJ),
+        "EC": list(info.EC),
+        "EL": list(info.EL),
+        "flux": list(info.flux),
+    }
+
+
 def _h_fit_set_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> FitUpdatedReply:
-    database_path = params["database_path"]
-    assert isinstance(database_path, str)  # ParamSpec validated the nonempty path.
+    search_db = params["search_db"]
+    assert isinstance(search_db, str)  # ParamSpec validated the nonempty path.
     # Parse the complete request before publishing. Domain interpretation of
     # bounds/categories and separate frequency precedence stays in the kernel.
     EJb = _fit_bounds(params["EJb"], "EJb")
@@ -385,9 +423,7 @@ def _h_fit_set_params(
         if params["sample_f"] is not None
         else None
     )
-    adapter.ctrl.set_fit_params(
-        database_path, EJb, ECb, ELb, transitions, r_f, sample_f
-    )
+    adapter.ctrl.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
     return {"fit": _h_fit_result(adapter, {})}
 
 
@@ -533,6 +569,8 @@ _HANDLERS: dict[str, Handler] = {
     "selection.interactive.command": h_selection_interactive_command,
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
+    "fit.database_info": _h_fit_database_info,
+    "fit.render": _h_fit_render,
     "fit.search": _h_fit_search,
     "operation.status": _h_operation_status,
     "operation.cancel": _h_operation_cancel,
