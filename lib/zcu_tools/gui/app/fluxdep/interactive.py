@@ -499,6 +499,20 @@ class FluxDepInteractiveOwner:
         )
         return result
 
+    def begin_sample_pick(self, name: str) -> OneTonePickContext | TwoTonePickContext:
+        """Open/reuse sampling for the named spectrum, using its published type.
+
+        Unknown names raise InvalidInputError. The native picker rejects
+        unaligned sources or a disposed owner with FailedPreconditionError.
+        Return its actual OneTone/TwoTone context, retaining the same lifetime,
+        replacement and owner-thread rules as the explicit picker entry points.
+        """
+        self._require_owner()
+        entry = self._state.get_spectrum(name)
+        if entry.spec_type == "OneTone":
+            return self.begin_onetone_pick(name)
+        return self.begin_twotone_pick(name)
+
     def begin_onetone_pick(self, name: str) -> OneTonePickContext:
         """Reuse a named context or open picking for an aligned OneTone.
 

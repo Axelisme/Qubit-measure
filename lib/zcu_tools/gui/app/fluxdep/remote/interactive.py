@@ -310,7 +310,9 @@ def h_spectrum_interactive_open(
     """Open/reuse adapter's picker on the owner loop.
 
     params is ParamSpec-validated name (nonempty literal) and kind
-    (line/onetone/twotone). Return identity/state with null effect; discarded reports
+    (line/sample/onetone/twotone). sample delegates type selection to the owner;
+    the reply reports the actual native kind. Return identity/state with null
+    effect; discarded reports
     a replaced unfinished align/sample draft.
     Native owner rejects unknown/unaligned/wrong-type sources. A
     synchronous reaction retiring this input raises interactive_context_changed.
@@ -322,6 +324,8 @@ def h_spectrum_interactive_open(
     previous = owner.inspect(name)
     if kind == "line":
         context = owner.begin_line_pick(name)
+    elif kind == "sample":
+        context = owner.begin_sample_pick(name)
     elif kind == "onetone":
         context = owner.begin_onetone_pick(name)
     else:

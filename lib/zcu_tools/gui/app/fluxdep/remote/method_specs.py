@@ -132,11 +132,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "spectrum.interactive.open": MethodSpec(
         30.0,
         "Open/reuse a picker by literal spectrum name. "
-        "kind is line, onetone or twotone. Returns the "
-        "owner identity and committed state.",
+        "kind is line, sample, onetone or twotone. sample uses the published "
+        "spectrum type; native admission rejects unknown or unaligned sources. "
+        "Returns owner identity, actual native kind and committed state.",
         params=(
             ParamSpec("name", JsonType.STRING),
-            ParamSpec("kind", JsonType.STRING, enum=("line", "onetone", "twotone")),
+            ParamSpec(
+                "kind", JsonType.STRING, enum=("line", "sample", "onetone", "twotone")
+            ),
         ),
     ),
     "spectrum.interactive.command": MethodSpec(
