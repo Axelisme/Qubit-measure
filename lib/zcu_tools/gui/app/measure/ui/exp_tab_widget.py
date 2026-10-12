@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 import logging
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from qtpy.QtCore import Qt, QTimer  # type: ignore[attr-defined]
 from qtpy.QtGui import (  # type: ignore[attr-defined]
@@ -37,7 +36,6 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFronten
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
 from zcu_tools.gui.widgets import DialogPresenter, QtDialogPresenter
-from zcu_tools.gui.widgets.cfg.fields.containers import CollapsibleSection
 from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
 from .analyze_form import AnalyzeFormWidget
@@ -234,6 +232,44 @@ class _LedgerSection(QWidget):
         return self._collapsed
 
 
+def _ledger_column() -> tuple[QWidget, QVBoxLayout]:
+    """Return an analysis-pane container and the scrolled column to fill."""
+    container = QWidget()
+    outer = QVBoxLayout(container)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    inner = QWidget()
+    layout = QVBoxLayout(inner)
+    layout.setContentsMargins(4, 4, 4, 4)
+    layout.setSpacing(4)
+    layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+    scroll.setWidget(inner)
+    outer.addWidget(scroll, stretch=1)
+    return container, layout
+
+
+def _ledger_form() -> AnalyzeFormWidget:
+    """Return an analysis parameter form in the 13 px ledger font."""
+    form = AnalyzeFormWidget()
+    font = form.font()
+    font.setPixelSize(13)
+    form.setFont(font)
+    return form
+
+
+def _primary_action_button(text: str) -> QPushButton:
+    """Return a full-width blue primary button at the analysis action height."""
+    button = QPushButton(text)
+    button.setObjectName("primaryButton")
+    button.setFixedHeight(30)
+    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    button.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+    return button
+
+
 class ExpTabWidget(QWidget):
     """A single experiment tab with capability-driven subtabs and independent figure panes."""
 
@@ -361,40 +397,19 @@ class ExpTabWidget(QWidget):
         if self._has_analysis:
             # Single-column 13 px ledger with whole-header folding; Analyze sits
             # immediately after params and before Writeback preview (A4).
-            analysis_container = QWidget()
-            analysis_outer = QVBoxLayout(analysis_container)
-            analysis_outer.setContentsMargins(0, 0, 0, 0)
-            analysis_outer.setSpacing(0)
-
-            analysis_scroll = QScrollArea()
-            analysis_scroll.setWidgetResizable(True)
-            analysis_scroll.setFrameShape(QFrame.Shape.NoFrame)  # type: ignore[attr-defined]
-            analysis_inner = QWidget()
-            analysis_layout = QVBoxLayout(analysis_inner)
-            analysis_layout.setContentsMargins(4, 4, 4, 4)
-            analysis_layout.setSpacing(4)
-            analysis_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+            analysis_container, analysis_layout = _ledger_column()
 
             self._analyze_section = _LedgerSection(
                 "Analysis parameters", collapsed=False
             )
-            self.analyze_form = AnalyzeFormWidget()
-            font = self.analyze_form.font()
-            font.setPixelSize(13)
-            self.analyze_form.setFont(font)
+            self.analyze_form = _ledger_form()
             self._analyze_section.body_layout.addWidget(self.analyze_form)
             analysis_layout.addWidget(self._analyze_section)
 
             # Analyze immediately below params and before Writeback preview,
             # occupying 100% of available content width (A6). Stays enabled
             # per availability/busy and retains blue primary when idle.
-            self.analyze_btn = QPushButton("Analyze")
-            self.analyze_btn.setObjectName("primaryButton")
-            self.analyze_btn.setFixedHeight(30)
-            self.analyze_btn.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-            )  # type: ignore[attr-defined]
-            self.analyze_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
+            self.analyze_btn = _primary_action_button("Analyze")
             analysis_layout.addWidget(self.analyze_btn)
 
             self.writeback_section = _LedgerSection(
@@ -406,10 +421,7 @@ class ExpTabWidget(QWidget):
             self.writeback_section.body_layout.addWidget(self.writeback_widget)
             self.writeback_section.setVisible(False)
             analysis_layout.addWidget(self.writeback_section)
-
             analysis_layout.addStretch()
-            analysis_scroll.setWidget(analysis_inner)
-            analysis_outer.addWidget(analysis_scroll, stretch=1)
 
             self._analysis_panel = analysis_container
             self._analysis_tab_index = self._left_tabs.addTab(
@@ -418,17 +430,14 @@ class ExpTabWidget(QWidget):
 
     def _build_post_analysis_panel(self) -> None:
         # ── Tab: Post-Analysis (only when post capability true) ────
+        # Same ledger, form, button, and writeback presentation as Analysis.
         if self._has_post:
-            post_scroll = QScrollArea()
-            post_scroll.setWidgetResizable(True)
-            post_inner = QWidget()
-            post_layout = QVBoxLayout(post_inner)
-            post_layout.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
+            post_container, post_layout = _ledger_column()
 
-            self._post_analyze_section = CollapsibleSection(
-                "Post-Analysis", collapsible=True, collapsed=False
+            self._post_analyze_section = _LedgerSection(
+                "Post-analysis parameters", collapsed=False
             )
-            self.post_analyze_form = AnalyzeFormWidget()
+            self.post_analyze_form = _ledger_form()
             self._post_analyze_section.body_layout.addWidget(self.post_analyze_form)
             post_layout.addWidget(self._post_analyze_section)
 
@@ -438,12 +447,11 @@ class ExpTabWidget(QWidget):
             self._post_gate_label.setStyleSheet("color: gray;")
             post_layout.addWidget(self._post_gate_label)
 
-            self.post_analyze_btn = QPushButton("Run Post-Analysis")
+            self.post_analyze_btn = _primary_action_button("Run Post-Analysis")
             post_layout.addWidget(self.post_analyze_btn)
 
-            # Post writeback
-            self.post_writeback_section = CollapsibleSection(
-                "Writeback", collapsible=True, collapsed=False
+            self.post_writeback_section = _LedgerSection(
+                "Writeback preview", collapsed=False
             )
             self.post_writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="post_analysis"
@@ -453,11 +461,12 @@ class ExpTabWidget(QWidget):
             )
             self.post_writeback_section.setVisible(False)
             post_layout.addWidget(self.post_writeback_section)
-
             post_layout.addStretch()
-            post_scroll.setWidget(post_inner)
-            self._post_panel = post_scroll
-            self._post_tab_index = self._left_tabs.addTab(post_scroll, "Post-Analysis")
+
+            self._post_panel = post_container
+            self._post_tab_index = self._left_tabs.addTab(
+                post_container, "Post-Analysis"
+            )
 
     def _build_data_panel(self) -> None:
         # ── Tab: Data (always) — save center ──────────────────────
@@ -736,10 +745,6 @@ class ExpTabWidget(QWidget):
     def sync_post_analyze_params(self, instance: object | None) -> None:
         self._require_post()
         self.post_analyze_form.sync(instance)
-        has_fields = instance is not None and bool(
-            dataclasses.fields(cast(Any, instance))
-        )
-        self._post_analyze_section.setVisible(has_fields)
 
     def read_post_analyze_params(self) -> object:
         self._require_post()
