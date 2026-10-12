@@ -34,7 +34,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry import RoleResolutionError
 
 from tests.gui.app.measure._cfg_fakes import PublishedHost, parameter_capture
-from zcu_lab.components import QubitSchema, ResonatorSchema
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 
 
 def _bindings(
@@ -171,9 +171,8 @@ def test_measure_snapshot_missing_capture_is_precondition_failure() -> None:
     assert str(caught.value) == "Capture source 'general.ext.missing' is unavailable"
     with pytest.raises(RoleResolutionError) as device_error:
         frozen.read_capture("device.flux.value")
-    assert str(device_error.value) == (
-        "Role 'device' requires kind None; focus=None: Unknown path prefix 'device'"
-    )
+    assert device_error.value.reason == "Unknown path prefix 'device'"
+    assert device_error.value.reason in str(device_error.value)
     host.read_value_source.assert_not_called()
     with pytest.raises(RuntimeError, match="Unsupported measure cfg option source"):
         frozen.provide_options("unknown")

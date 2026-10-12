@@ -42,9 +42,10 @@ from zcu_tools.gui.widgets.cfg import (
 )
 from zcu_tools.gui.widgets.cfg.fields import CenteredSweepWidget, SweepWidget
 
+from tests.gui._component_fakes import Qubit as QubitSchema
+from tests.gui._component_fakes import Resonator as ResonatorSchema
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._tree_support import click_row, tree_item, tree_widget
-from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 @pytest.fixture()

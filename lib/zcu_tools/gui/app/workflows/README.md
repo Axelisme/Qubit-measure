@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-12，泛型宿主與 caller 註冊注入
+**Last updated:** 2026-10-13，Window 改成 session 列加左右兩欄
 
 ## 註冊與組裝
 
@@ -9,6 +9,12 @@
 `WorkflowsGuiBehavior(registrations=..., loader=..., alias_rows=...)` 建立一份 EMPTY session。`WorkflowWindow` 也可接收既有 state/services/owner 與註冊清單，嵌入 caller 的 Qt parent。清單必須非空且名稱唯一，第一項是預設。GUI、RPC 與 MCP 使用同一 Window 與 Controller。公開參數、欄位、錯誤與 lifetime 契約見各型別 docstring。
 
 `scripts/run_workflows_gui.py` 是組合根。它讀 `zcu_lab.workflows.registry`，注入註冊清單、alias preset 與 `SourceCatalogLoader`。Builder 每次重新 import 當前清單。Framework 和 component sources 固定，workflow/form/registry sources 一起 bounded reload。Framework 不 import 使用者套件，依賴方向由 C16 保護。
+
+## Window 版面
+
+`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session chips。最上面一列是 chips（Entry／Point、`$qubit` 解析出的元件與 kind、已連線裝置、ZCU 狀態）與 Setup…、Aliases…、Prepare forms、Reload source。Chips 只讀 services，收到 context、alias、point 內容、SoC、裝置事件時刷新，Setup／Aliases 關閉與 Prepare forms 後也刷新；過長的診斷截斷，完整文字放在 tooltip，不撐寬視窗。
+
+下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。Accepted run 的 tuning panel 放在 Tunables 分頁、Start knobs 的下方。右欄是 run 訊息列與 FigureContainer 的圖區。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
 
 ## Run 與表單
 
@@ -20,7 +26,7 @@ Pause 保留 operation、RUN lease、progress、plan、input capture 與 Plots�
 
 ## Input 與 reload
 
-`WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。`--clean` 只略過啟動讀取，正常 close 仍保存。
+`WorkflowForms` 保留各名稱的 parsed RAM drafts，建好候選 panels 後才發布。Prepare 用新 capture 重建 defaults。`SingleFileCaretaker` 保存 parsed FormInput，包括 expression，不保存 renderer-local 未解析文字、native run 或硬體。`--clean` 只略過啟動讀取，正常 close 仍保存。啟動時 session 是 EMPTY、沒有 captured library，所以存檔裡的 module ref 名稱會被丟棄，其他相容欄位照常還原，訊息列逐一顯示 `Discarded plan: …` 或 `Discarded knobs: …`。
 
 Reload 只允許 idle/terminal，保留 session/services/controller、run binding 與既有 captures。相容 input 保留，removed selection 改選清單第一項。Import/panel 失敗保留舊 panels/drafts，但阻擋 Start 直到 retry 成功；fixed-source 改動要求 restart。
 

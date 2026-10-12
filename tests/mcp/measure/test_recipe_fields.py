@@ -244,3 +244,40 @@ def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> No
         assert [method for method, _ in client.transport.sent[before:]] == [
             "tab.edit_cfg"
         ]
+
+
+def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None:
+    gui = FieldGui()
+
+    def run(session: RecipeSession) -> RecipeGenerator:
+        tab = session.open_tab("lookback")
+        tab.set_sweep("range", start=10.0, stop=20.0)
+        yield tab.run()
+
+    sample = replace(
+        definition(run),
+        summary_parameters=(SummaryParameter("range", "range", "native"),),
+    )
+    client = make_client(tmp_path, gui, recipes=(sample,))
+    with closing(client.context.session):
+        initial = client.call("sample", {})
+        assert initial.data["status"] == "finished"
+        expected = {
+            "value": {"start": 10.0, "stop": 20.0, "expts": 11},
+            "source": {"start": "explicit", "stop": "explicit", "expts": "gui_default"},
+            "unit": "native",
+        }
+        assert initial.data["actual"]["range"] == expected
+        before = list(client.transport.sent)
+        gui.publication["tree"]["children"]["range"]["inputs"]["start"] = scalar(99.0)[
+            "input"
+        ]
+        key = initial.data["execution"]
+        for detail in ("summary", "full"):
+            assert (
+                client.call("status", {"execution": key, "detail": detail})["actual"][
+                    "range"
+                ]
+                == expected
+            )
+        assert client.transport.sent == before

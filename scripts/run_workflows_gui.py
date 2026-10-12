@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.workflows.catalog import WorkflowCatalog
     from zcu_tools.gui.catalog_loader import SourceCatalogLoader
 
-    from zcu_lab.workflows.calibration import Calibrated
+    from zcu_lab.workflows.common.calibration import Calibrated
 
 from zcu_tools.gui.launcher import add_runtime_cli_options, runtime_options_from_args
 

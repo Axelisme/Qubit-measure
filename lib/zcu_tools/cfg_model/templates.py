@@ -1,28 +1,15 @@
 """Persistent template data and placeholder expansion, without GUI dependencies."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from string import Formatter
 from types import MappingProxyType
 from typing import get_args
 
 from .base import ConfigBase
 from .module import ModuleSpec
+from .template_nodes import Expr, Slot, TemplateSeed
 from .waveform import WaveformSpec
-
-
-@dataclass(frozen=True, slots=True)
-class Expr:
-    """Authored expression text; unlike a plain string, consumers evaluate it.
-
-    ``text`` is the expression body, without a wire wrapper. Template expansion
-    substitutes component placeholders but does not parse or evaluate the body.
-    """
-
-    text: str
-
-
-type TemplateSeed = str | int | float | bool | complex | None | Expr
 
 
 def expand_path(
@@ -63,9 +50,11 @@ class TemplateDef:
     ``module`` must be a concrete member of persistent ModuleSpec or
     WaveformSpec, not a composite runtime Cfg. ``label`` is dropdown text.
     ``seeds`` maps dotted paths relative to that Spec's root to literal scalars
-    or Expr bodies. Both strings and Expr bodies can contain component
-    placeholders; expansion preserves their distinct types. ``default_name``
-    suggests a library entry name; empty means no suggestion, including blanks.
+    or Expr bodies or Slot nodes. Strings, Expr bodies and Slot paths can contain
+    component placeholders; expansion preserves their distinct types. Slot's
+    Form-only options are retained without expansion or source resolution.
+    ``default_name`` suggests a library entry name; empty means no suggestion,
+    including blanks.
 
     Construction copies seeds, rejects invalid module types with TypeError and
     invalid placeholder syntax with ValueError. Paths and seed compatibility
@@ -93,13 +82,18 @@ class TemplateDef:
 
         Defaults use primary aliases; pass authored paths to bind another pair
         of components. Ordinary strings remain literal, Expr remains Expr and
-        other scalars remain unchanged. Expansion does not resolve values or
-        mutate this definition. Invalid placeholders raise ValueError.
+        Slot remains Slot with only its path expanded, and other scalars remain
+        unchanged. Expansion does not resolve values or mutate this definition.
+        Invalid placeholders raise ValueError.
         """
         expanded: dict[str, TemplateSeed] = {}
         for path, seed in self.seeds.items():
             if isinstance(seed, Expr):
                 seed = Expr(expand_path(seed.text, qubit=qubit, resonator=resonator))
+            elif isinstance(seed, Slot):
+                seed = replace(
+                    seed, path=expand_path(seed.path, qubit=qubit, resonator=resonator)
+                )
             elif isinstance(seed, str):
                 seed = expand_path(seed, qubit=qubit, resonator=resonator)
             expanded[path] = seed

@@ -22,15 +22,13 @@ from zcu_tools.gui.cfg.resource import (
     CfgPreconditionReason,
 )
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
-from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
-from zcu_lab.components import QubitSchema, ResonatorSchema
-from zcu_lab.recipes import RECIPES
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter
 
 from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs
@@ -71,15 +69,6 @@ pytestmark = pytest.mark.uses_wall_clock
 def _prepare_guarded_context(fx: _Fixture) -> None:
     fx.state.set_context(replace(fx.state.session_env, soccfg=make_mock_soccfg()))
     fx.state.version.bump("soc")
-
-
-def _prepare_recipe_context(fx: _Fixture) -> None:
-    _prepare_guarded_context(fx)
-    fx.ctrl.context_control.add_component("Q1", "qubit/transmon", {"resonator": "R1"})
-    fx.ctrl.context_control.add_component("R1", "resonator", {})
-    fx.ctrl.context_control.set_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("resonator", "R1"))
-    )
 
 
 def _await_completed_run(
@@ -202,107 +191,6 @@ def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> 
         )["handle"]
         assert handle > 0
         _await_completed_run(call, handle)
-    finally:
-        bridge.disconnect()
-
-
-@pytest.mark.parametrize("reuse", [False, True])
-@pytest.mark.parametrize(
-    ("recipe", "adapter", "disabled_slots"),
-    [
-        ("lookback", "lookback", ("reset", "init_pulse")),
-        ("twotone_spectrum", "twotone/freq", ("reset",)),
-        ("t1", "twotone/t1", ("reset",)),
-        ("t2ramsey", "twotone/t2ramsey", ("reset",)),
-        ("t2echo", "twotone/t2echo", ("reset",)),
-        ("singleshot_ge", "singleshot/ge", ("reset", "init_pulse")),
-    ],
-)
-def test_recipe_optional_modules_reach_missing_calibration_on_real_gui(
-    fx, tmp_path, request, recipe, adapter, disabled_slots, reuse
-):
-    _prepare_recipe_context(fx)
-    bridge, call = _mcp_client(
-        fx.service.port, tmp_path, request=request, recipes=RECIPES
-    )
-    try:
-        call("connect", {"port": fx.service.port})
-        arguments: dict[str, object] = (
-            {"center_mhz": 6100.0, "span_mhz": 20.0, "points": 31}
-            if recipe == "twotone_spectrum"
-            else {}
-        )
-        if reuse:
-            arguments["reuse_tab_id"] = call(
-                "rpc_call", {"method": "tab.new", "params": {"adapter_name": adapter}}
-            )["tab_id"]
-        result = call(recipe, arguments)
-        assert result["status"] == "needs_parameters", result
-        assert result["missing"]
-        assert result["run_op"] is None
-        tab = result["tab"]
-        if reuse:
-            assert tab == arguments["reuse_tab_id"]
-        cfg = call("rpc_call", {"method": "tab.get_cfg", "params": {"tab_id": tab}})
-        modules = cfg["tree"]["children"]["modules"]["children"]
-        for slot in disabled_slots:
-            assert modules[slot]["ref"] is None
-            assert modules[slot]["valid"]
-        snapshot = call(
-            "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
-        )["tabs"][0]
-        assert not snapshot["interaction"]["has_run_result"]
-    finally:
-        bridge.disconnect()
-
-
-@pytest.mark.parametrize(
-    ("frequency", "length", "offset"),
-    [(6000, 2, 0), (6000.25, 2.5, 0.05)],
-)
-def test_lookback_numbers_prepare_real_cfg_without_connected_soc(
-    fx, tmp_path, request, frequency, length, offset
-):
-    _prepare_recipe_context(fx)
-    fx.state.set_context(replace(fx.state.session_env, soc=None))
-    bridge, call = _mcp_client(
-        fx.service.port, tmp_path, request=request, recipes=RECIPES
-    )
-    try:
-        call("connect", {"port": fx.service.port})
-        result = call(
-            "lookback",
-            {
-                "frequency_mhz": frequency,
-                "readout_length_us": length,
-                "trigger_offset_us": offset,
-                "rounds": 1,
-            },
-        )
-        (tab_id,) = fx.ctrl.list_tab_ids()
-        tree = call(
-            "rpc_call",
-            {"method": "tab.get_cfg", "params": {"tab_id": tab_id}},
-        )["tree"]
-
-        def resolved(*path):
-            node = tree
-            for step in path:
-                node = node["children"][step]
-            return node["input"]["resolved"]
-
-        for path, expected in (
-            (("modules", "readout", "pulse_cfg", "freq"), frequency),
-            (("modules", "readout", "ro_cfg", "ro_freq"), frequency),
-            (("modules", "readout", "ro_cfg", "ro_length"), length),
-            (("modules", "readout", "ro_cfg", "trig_offset"), offset),
-        ):
-            assert resolved(*path) == expected
-            assert type(resolved(*path)) is float
-        assert resolved("rounds") == 1
-        assert type(resolved("rounds")) is int
-        assert result["status"] == "failed"
-        assert result["run_op"] is None
     finally:
         bridge.disconnect()
 
@@ -464,7 +352,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
     tab_id = fx.ctrl.new_tab("fake")
     entered = threading.Event()
     release = threading.Event()
-    original_run = FakeAdapter.run
+    original_run = SampleAdapter.run
 
     def held_run(self, request, schema, *, context):
         result = original_run(self, request, schema, context=context)
@@ -473,7 +361,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
             raise TimeoutError("fake run release was not signalled")
         return result
 
-    monkeypatch.setattr(FakeAdapter, "run", held_run)
+    monkeypatch.setattr(SampleAdapter, "run", held_run)
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})

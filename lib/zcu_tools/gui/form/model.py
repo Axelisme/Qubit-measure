@@ -167,7 +167,7 @@ class FormModel(BaseModel):
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
         """
-        from ._structure import static_defaults
+        from .defaults import static_defaults
 
         del env, previous
         return static_defaults(cls)
@@ -201,7 +201,15 @@ class FormModel(BaseModel):
         choices enums. Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. This
+        tags as ordinary JSON values, independent of current choices. Each
+        branch reachable through model fields is one concrete model; a named
+        nested union tagged on the same key expands into its members. An
+        untagged str-or-model field (str | Model, Model possibly a tagged
+        union) uses the JSON type as its structural selector: its string branch
+        is a plain library key without Expr, and its object branch is the
+        inline model. With a captured library, that string branch's
+        x-form-library-keys lists the library keys whose Spec is one of the
+        field's models; they are suggestions, not choices. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """
@@ -296,6 +304,11 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
+        A str-or-model field takes a string key as an ordinary leaf. Writing {}
+        there switches a key or unfilled value to the inline model's defaults
+        (a tagged inline union starts at its first branch and tag) and leaves
+        an inline object unchanged; the old key is never converted. Other
+        whole objects are model replacement and raise ValueError.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
@@ -425,17 +438,24 @@ class FormState[F: FormModel]:
         without a discriminator overlays the current selected branch, retaining
         its tag and unsaved defaults; an empty object makes no change. If neither
         saved nor current input selects a branch, drop that object instead of
-        replacing the model section. Source failures retain their consuming
-        path; a changed restoration notifies once.
+        replacing the model section. A restored leaf whose captured source check
+        fails, such as a ref name absent from env.library or any ref without a
+        captured library, keeps the current input at that leaf (or stays unfilled
+        when current has none) and its leaf path is returned with the other
+        dropped paths. Source failures that no restored leaf causes, such as a
+        used static default or a model-wide error, raise PydanticCustomError
+        without installing. A changed restoration notifies once.
         """
         from ._json import copy_object
-        from ._sources import check_sources
+        from ._sources import drop_unmatched_sources
         from ._structure import restore
 
-        candidate, dropped = restore(self._model, self._data, copy_object(saved), env)
-        check_sources(self._model, candidate, env)
+        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
+        candidate, unmatched = drop_unmatched_sources(
+            self._model, restored, self._data, env
+        )
         self._install(candidate)
-        return dropped
+        return (*dropped, *unmatched)
 
 
 class LinRange(FormModel):
@@ -501,7 +521,7 @@ class ModuleInline(FormModel):
         it never supplies a dummy Spec. Static defaults apply without a prior ref.
         """
         from ._json import copy_object
-        from ._structure import static_defaults
+        from .defaults import static_defaults
 
         data = static_defaults(cls)
         if previous.get("kind") == "ref" and isinstance(

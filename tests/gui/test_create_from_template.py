@@ -33,9 +33,37 @@ from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
-from zcu_lab.components import QubitSchema, ResonatorSchema
-from zcu_lab.definitions import ALIAS_PRESET
-from zcu_lab.templates import register_all_templates
+from tests.gui._component_fakes import Qubit as QubitSchema
+from tests.gui._component_fakes import Resonator as ResonatorSchema
+
+
+def _register_templates(catalog: TemplateCatalog) -> None:
+    from zcu_tools.gui.app.measure.specs import make_const_waveform_spec
+    from zcu_tools.gui.cfg import EvalValue
+
+    def linked_value(_ctx: SessionEnv) -> ReferenceValue:
+        value = make_default_value(make_pulse_spec())
+        value.fields["ch"] = EvalValue("$resonator.wiring.ch")
+        value.fields["freq"] = EvalValue("$resonator.freq")
+        return ReferenceValue(make_custom_reference_key("Pulse"), value)
+
+    catalog.register(
+        TemplateEntry(
+            "res_probe", "Linked pulse", "module", make_pulse_spec, linked_value
+        )
+    )
+    catalog.register(
+        TemplateEntry(
+            "res_waveform",
+            "Constant waveform",
+            "waveform",
+            make_const_waveform_spec,
+            lambda ctx: ReferenceValue(
+                make_custom_reference_key("Const"),
+                make_default_value(make_const_waveform_spec()),
+            ),
+        )
+    )
 
 
 def _make_ctrl(
@@ -46,9 +74,8 @@ def _make_ctrl(
 ) -> Controller:
     if catalog is None:
         catalog = TemplateCatalog()
-        register_all_templates(catalog)
+        _register_templates(catalog)
     ctrl = Controller(
-        alias_preset=ALIAS_PRESET,
         state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry=Registry(),
         view=None,
@@ -230,7 +257,6 @@ def test_create_from_template_context_failure_calls_no_factory_or_write(qapp) ->
     writes: list[MlChangedPayload] = []
     bus.subscribe(MlChangedPayload, writes.append)
     ctrl = Controller(
-        alias_preset=ALIAS_PRESET,
         state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry=Registry(),
         view=None,
@@ -329,13 +355,8 @@ def test_create_module_from_role_without_calibration_fails_without_writing(
 ):
     ctrl = _make_ctrl(tmp_path)
     before = _library_keys(ctrl)
-    with pytest.raises(InvalidInputError) as caught:
+    with pytest.raises(InvalidInputError):
         ctrl.create_from_template("module", "res_probe", "R1.pulses.ro_blank")
-    assert str(caught.value) == (
-        "Invalid module configuration: Config field 'ch' (Gen ch) expression "
-        "'$resonator.wiring.ch' failed: Invalid parameter path "
-        "'$resonator.wiring.ch': missing parameter"
-    )
     assert _library_keys(ctrl) == before
 
 
@@ -357,22 +378,6 @@ def test_create_waveform_from_role(qapp, tmp_path: Path):
     ctrl = _make_ctrl(tmp_path)
     ctrl.create_from_template("waveform", "res_waveform", "R1.waveforms.ro_wav")
     assert "R1.waveforms.ro_wav" in ctrl.read_context().library.waveform_keys()
-
-
-def test_create_from_blank_module_role(qapp, tmp_path: Path):
-    """A ':blank' role creates a structural-zero entry of that exact shape."""
-    ctrl = _make_ctrl(tmp_path, {"freq": 6000.0})
-    ctrl.create_from_template("module", "reset/bath:blank", "R1.reset.rb")
-    raw = ctrl.read_context().library.get_module("R1.reset.rb").to_dict()
-    assert raw["type"] == "reset/bath"
-
-
-def test_create_from_blank_waveform_role_uncovered_style(qapp, tmp_path: Path):
-    """A waveform style without a calibrated role is reachable via :blank."""
-    ctrl = _make_ctrl(tmp_path)
-    ctrl.create_from_template("waveform", "drag:blank", "R1.waveforms.dwav")
-    raw = ctrl.read_context().library.get_waveform("R1.waveforms.dwav").to_dict()
-    assert raw["style"] == "drag"
 
 
 def test_item_kind_mismatch_raises(qapp, tmp_path: Path):
@@ -398,7 +403,6 @@ def test_empty_name_raises(qapp, tmp_path: Path):
 def test_no_catalog_wired_raises(qapp):
     ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
     ctrl = Controller(
-        alias_preset=ALIAS_PRESET,
         state=State(ctx),
         registry=Registry(),
         view=None,

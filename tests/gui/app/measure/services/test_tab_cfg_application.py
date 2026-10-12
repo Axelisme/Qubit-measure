@@ -56,12 +56,11 @@ from zcu_tools.resources.entry import (
     component_registry,
 )
 
+from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter
 from tests.gui.app.measure.remote._helpers import Fixture
-from zcu_lab.definitions import ALIAS_PRESET
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
 
-class SchemaAdapter(FakeAdapter):
+class SchemaAdapter(SampleAdapter):
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
         return CfgSchema(
             CfgSectionSpec(fields={"gain": ScalarSpec("Gain", float)}),
@@ -284,7 +283,7 @@ class SourceDrive(ComponentSchema):
     module: dict[str, str | None] = Field(default_factory=dict)
 
 
-class GlobalSourceAdapter(FakeAdapter):
+class GlobalSourceAdapter(SampleAdapter):
     experiment_tag: ClassVar[str | None] = "fake.stub"
 
     def run(
@@ -587,8 +586,8 @@ def test_unbound_alias_publishes_invalid_cfg_with_named_diagnostic(
     assert observed.status is CfgStatus.INVALID
     assert any(
         diagnostic.path == ("gain",)
-        and "qubit" in diagnostic.message
-        and "Alias is not bound" in diagnostic.message
+        and "$qubit" in diagnostic.message
+        and "Aliases" in diagnostic.message
         for diagnostic in observed.diagnostics
     )
 

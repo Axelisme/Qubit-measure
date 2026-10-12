@@ -40,7 +40,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from zcu_lab.components import QubitSchema, ResonatorSchema, WiringSchema
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema, WiringSchema
 
 # ---------------------------------------------------------------------------
 # Helpers

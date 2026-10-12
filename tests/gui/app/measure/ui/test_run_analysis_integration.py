@@ -42,8 +42,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_capture
+from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
-from zcu_lab.components import ResonatorSchema
 
 
 def _parameters():

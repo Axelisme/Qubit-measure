@@ -31,18 +31,18 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry.registry import component_registry
 
-from tests.gui.app.measure.remote._helpers import FixtureController
-from zcu_lab.components import ResonatorSchema
-from zcu_lab.templates import register_all_templates
-from zcu_lab.v2.fake.freq.gui import (
-    FakeFreqAdapter,
-    FakeFreqAnalyzeResult,
-    FakeFreqRunResult,
+from tests.gui.app.measure._components import ResonatorSchema
+from tests.gui.app.measure._synthetic import (
+    PairAdapter,
+    SampleAnalysis,
+    SampleRun,
 )
+from tests.gui.app.measure._templates import register_all_templates
+from tests.gui.app.measure.remote._helpers import FixtureController
 
 
-class LedgerAdapter(FakeFreqAdapter):
-    """Keep the real experiment; supply the fixture's fixed native proposal."""
+class LedgerAdapter(PairAdapter):
+    """Supply a fixed native proposal over deterministic sample acquisition."""
 
     def run(
         self,
@@ -50,11 +50,11 @@ class LedgerAdapter(FakeFreqAdapter):
         raw_cfg: Mapping[str, ExperimentCfgValue],
         *,
         context: RunContext,
-    ) -> FakeFreqRunResult:
+    ) -> SampleRun:
         return super().run(req, dict(raw_cfg), context=context)
 
     def get_writeback_items(
-        self, req: WritebackRequest[FakeFreqRunResult, FakeFreqAnalyzeResult]
+        self, req: WritebackRequest[SampleRun, SampleAnalysis]
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(

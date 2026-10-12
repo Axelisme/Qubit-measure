@@ -40,6 +40,7 @@ from zcu_tools.gui.app.workflows.remote import (
     WorkflowRemoteControlAdapter,
 )
 from zcu_tools.gui.app.workflows.runtime import SessionDevices
+from zcu_tools.gui.app.workflows.session_strip import WorkflowSessionStrip
 from zcu_tools.gui.app.workflows.tuning_panel import WorkflowTuningPanel
 from zcu_tools.gui.catalog_loader import CatalogReloadError, SourceCatalogLoader
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -53,7 +54,6 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.remote.control_service import ControlOptions
-from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
@@ -62,10 +62,7 @@ from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
-from zcu_tools.resources.entry import (
-    RoleResolutionError,
-    new_run_id,
-)
+from zcu_tools.resources.entry import new_run_id
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
 from .attachment import Attachment
@@ -141,8 +138,9 @@ class WorkflowWindow[C](QWidget):
             else FormEnv()
         )
         self._forms = WorkflowForms(current, env, self)
+        self._session = WorkflowSessionStrip(services, self)
         self._controls = build_workflow_layout(
-            self, self.plan_panel, self.tunables_panel
+            self, self._session, self.plan_panel, self.tunables_panel
         )
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
@@ -164,8 +162,7 @@ class WorkflowWindow[C](QWidget):
         )
         self._figure_views = WorkflowFigureViews()
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
-        self.setup_dialog.finished.connect(self._sync_source_status)
-        self._sync_source_status()
+        self.setup_dialog.finished.connect(self._session.refresh)
         self._poll = QTimer(self)
         self._poll.setInterval(50)
         self._poll.timeout.connect(self._refresh_run)
@@ -191,21 +188,9 @@ class WorkflowWindow[C](QWidget):
             logger.exception("Workflow alias editor could not open")
             self._controls.message.setText(str(error))
             return
-        dialog.finished.connect(self._sync_source_status)
+        dialog.finished.connect(self._session.refresh)
         dialog.finished.connect(dialog.deleteLater)
         dialog.show()
-
-    def _sync_source_status(self, *_args: object) -> None:
-        try:
-            parameters = self._services.context.read_context()
-            source = parameters.resolve_path("$qubit.kind")
-        except FailedPreconditionError:
-            # EMPTY is expected at fresh app startup; status must not block it.
-            self._controls.source_status.setText("Qubit: no context")
-        except (RoleResolutionError, ContextSourceUnavailableError) as error:
-            self._controls.source_status.setText(f"Qubit unavailable: {error}")
-        else:
-            self._controls.source_status.setText(f"Qubit: {source}")
 
     def _use_source_clicked(self) -> None:
         try:
@@ -226,6 +211,7 @@ class WorkflowWindow[C](QWidget):
         base RoleResolutionError naming that alias. No component kind is checked.
         Source/editor failures propagate without replacing the existing panels.
         Pending, running or paused operations raise InvalidRunState before capture.
+        Success also refreshes the session chips from current services.
         """
         self._ensure_can_start()
         env = self._capture_env(self._services.device.capture_native_device_info())
@@ -235,6 +221,7 @@ class WorkflowWindow[C](QWidget):
         old = self.plan_panel, self.tunables_panel
         self._forms.prepare(env, self)
         self._publish_panels(*old)
+        self._session.refresh()
 
     @property
     def plan_panel(self) -> WorkflowPlanPanel:
@@ -291,8 +278,8 @@ class WorkflowWindow[C](QWidget):
     def _publish_panels(
         self, old_plan: WorkflowPlanPanel, old_tunables: WorkflowFormPanel[FormModel]
     ) -> None:
-        self._controls.layout.replaceWidget(old_plan, self.plan_panel)
-        self._controls.layout.replaceWidget(old_tunables, self.tunables_panel)
+        self._controls.plan_page.replaceWidget(old_plan, self.plan_panel)
+        self._controls.tunables_page.replaceWidget(old_tunables, self.tunables_panel)
         for panel in (old_plan, old_tunables):
             panel.close()
             panel.deleteLater()
@@ -391,9 +378,10 @@ class WorkflowWindow[C](QWidget):
 
         Call on the owner thread after construction, before starting a run.
         Pending/running/paused ownership raises InvalidRunState before edits.
-        FormState owns compatibility and returns discarded model-field paths;
-        expressions remain input even when their result is invalid. Defaults or
-        source failures propagate without publishing either candidate. Successful
+        FormState owns compatibility and returns discarded model-field paths,
+        including saved leaves whose captured source check fails; expressions
+        remain input even when their result is invalid. Defaults and other source
+        failures propagate without publishing either candidate. Successful
         restoration refreshes both editors and clears renderer-local text.
         """
         self._ensure_can_start()
@@ -773,7 +761,8 @@ class WorkflowWindow[C](QWidget):
             self.tuning_panel = WorkflowTuningPanel(
                 controller, self, panel_factory=self._forms.attachment.knobs_panel
             )
-            self._controls.layout.addWidget(self.tuning_panel)
+            page = self._controls.tunables_page
+            page.insertWidget(page.indexOf(self.tunables_panel) + 1, self.tuning_panel)
         if self.tuning_panel is not None:
             self.tuning_panel.setEnabled(
                 status.lifecycle in {"running", "pausing", "paused"}
@@ -897,6 +886,7 @@ class WorkflowWindow[C](QWidget):
         if not self._shutdown_on_close(a0):
             return
         self.setup_dialog.close()
+        self._session.detach()
         self._poll.stop()
         self._figure_views.release()
         self.plan_panel.editor.detach()

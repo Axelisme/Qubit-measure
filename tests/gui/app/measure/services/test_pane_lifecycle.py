@@ -41,6 +41,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey, JsonObject
 
+from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import (
     cfg_resolution,
@@ -48,19 +49,18 @@ from tests.gui.app.measure._cfg_fakes import (
     make_cfg,
     parameter_capture,
 )
+from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneSummary,
     PostSummary,
     native_save_session,
 )
-from zcu_lab.components import QubitSchema
-from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp, GE_Result
-from zcu_lab.v2.singleshot.ge.gui import (
-    GEAdapter,
-    GEAnalyzeParams,
-    GEAnalyzeResult,
-    GEPostAnalyzeResult,
+from tests.gui.app.measure._pane_adapter import (
+    PaneAdapter,
+    PaneParams,
+    PaneResult,
+    PostResult,
 )
 
 
@@ -421,21 +421,13 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     assert old_post_draft in writeback.torn_down
 
 
-def _ge_source_with_excited_initial_state() -> RunRecord[GE_Cfg, GE_Result]:
-    rng = np.random.default_rng(83)
-    excited = rng.random((2, 6000)) < np.array([0.1, 0.9])[:, None]
-    signals = np.asarray(
-        np.where(excited, 1 + 0.4j, -1 - 0.4j)
-        + 0.2 * (rng.normal(size=excited.shape) + 1j * rng.normal(size=excited.shape)),
-        dtype=np.complex128,
-    )
-    # Probe-off/on rows are reversed for a predominantly excited initial state.
-    return RunRecord[GE_Cfg, GE_Result](
-        None, GE_Result(signals[::-1].copy(), np.arange(6000), np.array([0, 1]))
+def _pane_source_with_excited_initial_state() -> RunRecord[SavingCfg, SavingResult]:
+    return RunRecord(
+        None, SavingResult(np.array([1.0, 2.0]), np.array([1 + 0j, 2 + 0j]))
     )
 
 
-def _ge_capture(original: ParameterContext | None) -> ParameterContext:
+def _pane_capture(original: ParameterContext | None) -> ParameterContext:
     if original is None:
         raise RuntimeError("Native fixture must retain its Run parameter capture")
     return ParameterContext(
@@ -450,8 +442,8 @@ def _ge_capture(original: ParameterContext | None) -> ParameterContext:
 
 
 @dataclass
-class _GEAnalysisPanes:
-    """Real adopted GE panes and their replacement operation seam.
+class _AnalysisPanes:
+    """Adopted synthetic panes and their replacement operation seam.
 
     state/tab_id locate the live tab. writeback previews and retires pane drafts.
     primary_service/primary_bg admit and complete replacement fits.
@@ -468,29 +460,29 @@ class _GEAnalysisPanes:
 
 
 @pytest.fixture
-def ge_analysis_panes(native_session: NativeSaveSession):
+def analysis_panes(native_session: NativeSaveSession):
     state, tab_id, ctx = native_session.state, "tab", native_session.state.session_env
-    adapter = GEAdapter()
+    adapter = PaneAdapter()
     state.get_tab(tab_id).adapter = adapter
     state.update_tab_result(
         tab_id,
-        _ge_source_with_excited_initial_state(),
+        _pane_source_with_excited_initial_state(),
         metadata=replace(
-            native_session.metadata, experiment=GE_Exp().persistence_spec().tag
+            native_session.metadata, experiment=SavingCore().persistence_spec().tag
         ),
-        parameters=_ge_capture(state.get_tab(tab_id).run.parameters),
+        parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
     writeback = WritebackService(MagicMock(), MagicMock())
     primary_service, primary_bg = _analyze_service(state, writeback, bus)
-    params = GEAnalyzeParams(initial_state="excited", length_ratio=0.01)
+    params = PaneParams(initial_state="excited", length_ratio=0.01)
     fit_plots = Plots(NonPresentingHost())
     primary_service.start_analyze(tab_id, params, plots=fit_plots)
     primary_bg.on_done(primary_bg.work())
 
     tab = state.get_tab(tab_id)
     primary = tab.analysis.result
-    assert isinstance(primary, GEAnalyzeResult)
+    assert isinstance(primary, PaneResult)
     # The post operation must use the adopted primary, not the later form edit.
     params.initial_state = "ground"
     post_params = adapter.get_post_analyze_params(primary, ctx)
@@ -509,7 +501,7 @@ def ge_analysis_panes(native_session: NativeSaveSession):
     post_bg.on_done(post_bg.work())
 
     try:
-        yield _GEAnalysisPanes(
+        yield _AnalysisPanes(
             state, tab_id, writeback, primary_service, primary_bg, fit_plots, post_plots
         )
     finally:
@@ -520,13 +512,13 @@ def ge_analysis_panes(native_session: NativeSaveSession):
             writeback.teardown_draft(current_draft)
 
 
-def test_ge_primary_publishes_excited_fit_and_calibration_writeback(
-    ge_analysis_panes: _GEAnalysisPanes,
+def test_pane_primary_publishes_excited_fit_and_calibration_writeback(
+    analysis_panes: _AnalysisPanes,
 ) -> None:
-    panes = ge_analysis_panes
+    panes = analysis_panes
     tab = panes.state.get_tab(panes.tab_id)
     primary = tab.analysis.result
-    assert isinstance(primary, GEAnalyzeResult)
+    assert isinstance(primary, PaneResult)
     assert primary.initial_state == "excited"
     assert tab.analysis.plots is panes.fit_plots
     assert tuple(panes.fit_plots) == ("fit",)
@@ -542,13 +534,13 @@ def test_ge_primary_publishes_excited_fit_and_calibration_writeback(
     }
 
 
-def test_ge_post_uses_adopted_fit_and_projects_separate_artifacts_and_writeback(
-    ge_analysis_panes: _GEAnalysisPanes,
+def test_pane_post_uses_adopted_fit_and_projects_separate_artifacts_and_writeback(
+    analysis_panes: _AnalysisPanes,
 ) -> None:
-    panes = ge_analysis_panes
+    panes = analysis_panes
     tab = panes.state.get_tab(panes.tab_id)
     post = tab.post_analysis.result
-    assert isinstance(post, GEPostAnalyzeResult)
+    assert isinstance(post, PostResult)
     np.testing.assert_allclose(post.confusion, np.eye(3), atol=0.06)
     assert tab.post_analysis.plots is panes.post_plots
     assert tuple(panes.post_plots) == ("post",)
@@ -582,15 +574,15 @@ def test_ge_post_uses_adopted_fit_and_projects_separate_artifacts_and_writeback(
     }
 
 
-def test_ge_primary_replacement_clears_post_but_retained_plots_still_export(
-    ge_analysis_panes: _GEAnalysisPanes,
+def test_pane_primary_replacement_clears_post_but_retained_plots_still_export(
+    analysis_panes: _AnalysisPanes,
 ) -> None:
-    panes = ge_analysis_panes
+    panes = analysis_panes
     tab = panes.state.get_tab(panes.tab_id)
     new_fit = Plots(NonPresentingHost())
     try:
         panes.primary_service.start_analyze(
-            panes.tab_id, GEAnalyzeParams(initial_state="excited"), plots=new_fit
+            panes.tab_id, PaneParams(initial_state="excited"), plots=new_fit
         )
         panes.primary_bg.on_done(panes.primary_bg.work())
         assert tab.post_analysis.result is None

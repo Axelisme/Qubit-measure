@@ -1429,8 +1429,8 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
         ReferenceValue,
     )
 
+    from tests.gui.app.measure._synthetic import SampleAdapter
     from tests.gui.app.measure.remote._helpers import Fixture
-    from zcu_lab.v2.fake.stub.gui import FakeAdapter
 
     fx = Fixture(headless=True)
     fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
@@ -1455,7 +1455,7 @@ def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
         CfgSectionValue({"drive": ReferenceValue("Q1.pulses.drive", value)}),
     )
 
-    class LibraryAdapter(FakeAdapter):
+    class LibraryAdapter(SampleAdapter):
         def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
             return schema
 
