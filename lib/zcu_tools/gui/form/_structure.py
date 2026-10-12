@@ -412,28 +412,8 @@ def _restore_field(
         if tag is not None and isinstance(saved.get(tag), dict):
             dropped.append((*path, tag))
             saved = {name: value for name, value in saved.items() if name != tag}
-        prior = current if isinstance(current, dict) else {}
-        if tag is not None and tag in saved and saved[tag] != prior.get(tag):
-            try:
-                seed = _branch_defaults(child, env, prior)
-            except PydanticCustomError as exc:
-                from ._sources import prefix_error
-
-                raise prefix_error(exc, path) from exc
-            seed.update(
-                {
-                    name: prior[name]
-                    for name in child.model_fields
-                    if name != tag and name in prior
-                }
-            )
-            seed[tag] = saved[tag]
-        else:
-            seed = (
-                copy_object(prior)
-                if isinstance(current, dict)
-                else static_defaults(child)
-            )
+        seed = _restore_branch_seed(child, current, saved, tag, env, path)
+        # Descend only into the selected model so dropped paths stay branch-local.
         return _restore_model(child, seed, saved, env, path, dropped)
     if isinstance(saved, dict) and model_types(info.annotation):
         dropped.append(path)
@@ -442,6 +422,35 @@ def _restore_field(
         return copy_json(saved)
     dropped.append(path)
     return current
+
+
+def _restore_branch_seed(
+    model: type[BaseModel],
+    current: JsonValue,
+    saved: Mapping[str, JsonValue],
+    tag: str | None,
+    env: FormEnv,
+    path: FormPath,
+) -> dict[str, JsonValue]:
+    """Seed a switched branch from defaults, carrying only its same-name prior fields."""
+    prior = current if isinstance(current, dict) else {}
+    if tag is not None and tag in saved and saved[tag] != prior.get(tag):
+        try:
+            seed = _branch_defaults(model, env, prior)
+        except PydanticCustomError as exc:
+            from ._sources import prefix_error
+
+            raise prefix_error(exc, path) from exc
+        seed.update(
+            {
+                name: prior[name]
+                for name in model.model_fields
+                if name != tag and name in prior
+            }
+        )
+        seed[tag] = saved[tag]
+        return seed
+    return copy_object(prior) if isinstance(current, dict) else static_defaults(model)
 
 
 def _restore_model(

@@ -10,6 +10,8 @@ from typing import Protocol, TypeAlias
 from .model import (
     CenteredSweepSpec,
     CenteredSweepValue,
+    CfgNodeSpec,
+    CfgNodeValue,
     CfgSchema,
     CfgSectionSpec,
     CfgSectionValue,
@@ -474,89 +476,125 @@ def _lower_section(
             if isinstance(node_spec, ReferenceSpec) and node_spec.optional:
                 continue
             raise RuntimeError(f"Config field '{full_path}' ({label}) is missing")
-
-        match node_spec:
-            case ScalarSpec():
-                assert isinstance(node_value, (DirectValue, EvalValue))
-                if isinstance(node_value, DirectValue):
-                    if node_value.value is None:
-                        if node_spec.optional:
-                            continue
-                        raise RuntimeError(
-                            f"Config field '{full_path}' ({label}) is unset"
-                        )
-                    result[key] = _lower_data(node_value.value, path=full_path)
-                else:
-                    result[key] = _resolve_eval(
-                        node_value,
-                        resolve_expression,
-                        path=full_path,
-                        label=label,
-                        type_=node_spec.type,
-                    )
-            case LiteralSpec():
-                result[key] = _lower_data(node_spec.value, path=full_path)
-            case SweepSpec():
-                assert isinstance(node_value, SweepValue)
-                start = _resolve_sweep_edge(
-                    node_value.start,
-                    resolve_expression,
-                    path=".".join([*path, key, "start"]),
-                    label="Sweep start",
-                )
-                stop = _resolve_sweep_edge(
-                    node_value.stop,
-                    resolve_expression,
-                    path=".".join([*path, key, "stop"]),
-                    label="Sweep stop",
-                )
-                points = _resolve_range_input(
-                    node_value.expts,
-                    int,
-                    path=".".join([*path, key, "expts"]),
-                    label="Sweep points",
-                )
-                result[key] = _lower_range(start, stop, expts=points)
-            case CenteredSweepSpec():
-                assert isinstance(node_value, CenteredSweepValue)
-                result[key] = _lower_centered_sweep(
-                    node_spec,
-                    node_value,
-                    full_path=".".join([*path, key]),
-                    resolve_expression=resolve_expression,
-                )
-            case ReferenceSpec():
-                assert isinstance(node_value, ReferenceValue)
-                chosen_spec = _select_reference_spec(
-                    node_spec, node_value, resolve_reference
-                )
-                # Pending input admission must not fill execution payload gaps.
-                _validate_static_section(
-                    chosen_spec,
-                    node_value.value,
-                    resolve_reference=resolve_reference,
-                    path=[*path, key],
-                )
-                result[key] = _lower_section(
-                    chosen_spec,
-                    node_value.value,
-                    resolve_expression=resolve_expression,
-                    resolve_reference=resolve_reference,
-                    path=[*path, key],
-                )
-            case CfgSectionSpec():
-                assert isinstance(node_value, CfgSectionValue)
-                result[key] = _lower_section(
-                    node_spec,
-                    node_value,
-                    resolve_expression=resolve_expression,
-                    resolve_reference=resolve_reference,
-                    path=[*path, key],
-                )
-            case _:
-                raise TypeError(f"Unknown CfgNodeSpec type: {type(node_spec)}")
-
+        if (
+            isinstance(node_spec, ScalarSpec)
+            and isinstance(node_value, DirectValue)
+            and node_value.value is None
+            and node_spec.optional
+        ):
+            continue
+        result[key] = _lower_node(
+            node_spec,
+            node_value,
+            resolve_expression=resolve_expression,
+            resolve_reference=resolve_reference,
+            path=[*path, key],
+        )
     return result
+
+
+def _lower_node(
+    spec: CfgNodeSpec,
+    value: CfgNodeValue,
+    *,
+    resolve_expression: ExpressionResolver | None,
+    resolve_reference: ReferenceResolver | None,
+    path: list[str],
+) -> LoweredData:
+    """Lower one present node; the section walker omits disabled optional fields."""
+    full_path = ".".join(path)
+    match spec:
+        case ScalarSpec():
+            assert isinstance(value, (DirectValue, EvalValue))
+            return _lower_scalar(
+                spec,
+                value,
+                resolve_expression,
+                full_path,
+                label=spec.label or path[-1],
+            )
+        case LiteralSpec():
+            return _lower_data(spec.value, path=full_path)
+        case SweepSpec():
+            assert isinstance(value, SweepValue)
+            start = _resolve_sweep_edge(
+                value.start,
+                resolve_expression,
+                path=f"{full_path}.start",
+                label="Sweep start",
+            )
+            stop = _resolve_sweep_edge(
+                value.stop,
+                resolve_expression,
+                path=f"{full_path}.stop",
+                label="Sweep stop",
+            )
+            points = _resolve_range_input(
+                value.expts,
+                int,
+                path=f"{full_path}.expts",
+                label="Sweep points",
+            )
+            return _lower_range(start, stop, expts=points)
+        case CenteredSweepSpec():
+            assert isinstance(value, CenteredSweepValue)
+            return _lower_centered_sweep(
+                spec,
+                value,
+                full_path=full_path,
+                resolve_expression=resolve_expression,
+            )
+        case ReferenceSpec():
+            assert isinstance(value, ReferenceValue)
+            chosen_spec = _select_reference_spec(spec, value, resolve_reference)
+            # Pending input admission must not fill gaps in the execution payload.
+            _validate_static_section(
+                chosen_spec,
+                value.value,
+                resolve_reference=resolve_reference,
+                path=path,
+            )
+            # Follow the selected shape recursively, preserving authored field order.
+            return _lower_section(
+                chosen_spec,
+                value.value,
+                resolve_expression=resolve_expression,
+                resolve_reference=resolve_reference,
+                path=path,
+            )
+        case CfgSectionSpec():
+            assert isinstance(value, CfgSectionValue)
+            return _lower_section(
+                spec,
+                value,
+                resolve_expression=resolve_expression,
+                resolve_reference=resolve_reference,
+                path=path,
+            )
+        case _:
+            raise TypeError(f"Unknown CfgNodeSpec type: {type(spec)}")
+
+
+def _lower_scalar(
+    spec: ScalarSpec,
+    value: DirectValue | EvalValue,
+    resolve_expression: ExpressionResolver | None,
+    full_path: str,
+    *,
+    label: str,
+) -> LoweredData:
+    """Lower a present scalar, retaining the section's field label in failures."""
+    if isinstance(value, DirectValue):
+        if value.value is None:
+            raise RuntimeError(f"Config field '{full_path}' ({label}) is unset")
+        return _lower_data(value.value, path=full_path)
+    return _resolve_eval(
+        value,
+        resolve_expression,
+        path=full_path,
+        label=label,
+        type_=spec.type,
+    )
 
 
 def _validate_static_section(
@@ -610,22 +648,8 @@ def _validate_static_node(
         _validate_scalar_node(spec, node_value, full_path)
         return
 
-    if isinstance(spec, SweepSpec):
-        if not isinstance(node_value, SweepValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be a SweepValue, "
-                f"got {type(node_value).__name__}"
-            )
-        _validate_sweep_direct_edges(node_value, full_path)
-        return
-
-    if isinstance(spec, CenteredSweepSpec):
-        if not isinstance(node_value, CenteredSweepValue):
-            raise RuntimeError(
-                f"Config field '{full_path}' must be a CenteredSweepValue, "
-                f"got {type(node_value).__name__}"
-            )
-        _validate_centered_sweep_contract(spec, node_value, full_path)
+    if isinstance(spec, (SweepSpec, CenteredSweepSpec)):
+        _validate_static_range(spec, node_value, full_path)
         return
 
     if isinstance(spec, ReferenceSpec):
@@ -651,6 +675,26 @@ def _validate_static_node(
     raise RuntimeError(
         f"Config field '{full_path}': unknown spec {type(spec).__name__}"
     )
+
+
+def _validate_static_range(
+    spec: SweepSpec | CenteredSweepSpec, value: object, full_path: str
+) -> None:
+    """Validate the carrier and direct controls for either range grammar."""
+    if isinstance(spec, SweepSpec):
+        if not isinstance(value, SweepValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a SweepValue, "
+                f"got {type(value).__name__}"
+            )
+        _validate_sweep_direct_edges(value, full_path)
+    else:
+        if not isinstance(value, CenteredSweepValue):
+            raise RuntimeError(
+                f"Config field '{full_path}' must be a CenteredSweepValue, "
+                f"got {type(value).__name__}"
+            )
+        _validate_centered_sweep_contract(spec, value, full_path)
 
 
 def _validate_static_reference(
@@ -780,94 +824,30 @@ def _validate_dynamic_node(
     resolve_reference: ReferenceResolver | None,
     full_path: str,
 ) -> None:
+    """Check expressions for the active node after static validation has succeeded."""
     if node_value is None:
         return
 
-    if isinstance(spec, LiteralSpec):
-        return
-
-    if isinstance(spec, ScalarSpec):
-        if isinstance(node_value, DirectValue):
-            if node_value.value is None:
-                if spec.optional:
-                    return
-                label = spec.label or full_path.rsplit(".", 1)[-1]
-                raise RuntimeError(
-                    f"Config field '{full_path}' ({label}) is unset (no value to lower)"
-                )
-            return
-        if isinstance(node_value, EvalValue):
-            label = spec.label or full_path.rsplit(".", 1)[-1]
-            _validate_eval(
-                node_value,
-                resolve_expression,
-                spec.type,
-                full_path,
-                label,
+    match (spec, node_value):
+        case (ScalarSpec(), _):
+            _validate_dynamic_scalar(spec, node_value, resolve_expression, full_path)
+        case (SweepSpec(), SweepValue()):
+            _validate_dynamic_sweep(node_value, resolve_expression, full_path)
+        case (CenteredSweepSpec(), CenteredSweepValue()):
+            _validate_dynamic_centered_sweep(
+                spec, node_value, resolve_expression, full_path
             )
-        return
-
-    if isinstance(spec, SweepSpec):
-        if isinstance(node_value, SweepValue):
-            if isinstance(node_value.start, EvalValue):
-                _validate_eval(
-                    node_value.start,
-                    resolve_expression,
-                    float,
-                    f"{full_path}.start",
-                    "Sweep start",
-                )
-            if isinstance(node_value.stop, EvalValue):
-                _validate_eval(
-                    node_value.stop,
-                    resolve_expression,
-                    float,
-                    f"{full_path}.stop",
-                    "Sweep stop",
-                )
-        return
-
-    if isinstance(spec, CenteredSweepSpec):
-        if isinstance(node_value, CenteredSweepValue):
-            _validate_centered_sweep_contract(spec, node_value, full_path)
-            if isinstance(node_value.center, EvalValue):
-                _validate_eval(
-                    node_value.center,
-                    resolve_expression,
-                    float,
-                    f"{full_path}.center",
-                    "Sweep center",
-                )
-            if spec.locked_center is not None:
-                center = _resolve_sweep_edge(
-                    node_value.center,
-                    resolve_expression,
-                    path=f"{full_path}.center",
-                    label="Sweep center",
-                )
-                _validate_centered_sweep_contract(
-                    spec, node_value, full_path, center=center
-                )
-        return
-
-    if isinstance(spec, ReferenceSpec):
-        if isinstance(node_value, ReferenceValue):
-            match node_value.value:
-                case CfgSectionValue():
-                    chosen_spec = _select_reference_spec(
-                        spec, node_value, resolve_reference
-                    )
-                    _validate_dynamic_section(
-                        chosen_spec,
-                        node_value.value,
-                        resolve_expression=resolve_expression,
-                        resolve_reference=resolve_reference,
-                        path=[full_path],
-                    )
-        return
-
-    if isinstance(spec, CfgSectionSpec):
-        if isinstance(node_value, CfgSectionValue):
+        case (ReferenceSpec(), ReferenceValue(value=CfgSectionValue())):
+            chosen_spec = _select_reference_spec(spec, node_value, resolve_reference)
+            # Recurse into the selected reference payload, not all allowed shapes.
+            _validate_dynamic_section(
+                chosen_spec,
+                node_value.value,
+                resolve_expression=resolve_expression,
+                resolve_reference=resolve_reference,
+                path=[full_path],
+            )
+        case (CfgSectionSpec(), CfgSectionValue()):
             _validate_dynamic_section(
                 spec,
                 node_value,
@@ -875,6 +855,67 @@ def _validate_dynamic_node(
                 resolve_reference=resolve_reference,
                 path=[full_path],
             )
+        case _:
+            pass
+
+
+def _validate_dynamic_scalar(
+    spec: ScalarSpec,
+    value: object,
+    resolve_expression: ExpressionResolver,
+    full_path: str,
+) -> None:
+    """Reject unset required scalars and validate expressions using their declared type."""
+    label = spec.label or full_path.rsplit(".", 1)[-1]
+    if isinstance(value, DirectValue):
+        if value.value is None and not spec.optional:
+            raise RuntimeError(
+                f"Config field '{full_path}' ({label}) is unset (no value to lower)"
+            )
+    elif isinstance(value, EvalValue):
+        _validate_eval(value, resolve_expression, spec.type, full_path, label)
+
+
+def _validate_dynamic_sweep(
+    value: SweepValue,
+    resolve_expression: ExpressionResolver,
+    full_path: str,
+) -> None:
+    """Validate authored start then stop expressions without changing cached values."""
+    for name, edge, label in (
+        ("start", value.start, "Sweep start"),
+        ("stop", value.stop, "Sweep stop"),
+    ):
+        if isinstance(edge, EvalValue):
+            _validate_eval(
+                edge, resolve_expression, float, f"{full_path}.{name}", label
+            )
+
+
+def _validate_dynamic_centered_sweep(
+    spec: CenteredSweepSpec,
+    value: CenteredSweepValue,
+    resolve_expression: ExpressionResolver,
+    full_path: str,
+) -> None:
+    """Validate controls, then the center expression, then the resolved center lock."""
+    _validate_centered_sweep_contract(spec, value, full_path)
+    if isinstance(value.center, EvalValue):
+        _validate_eval(
+            value.center,
+            resolve_expression,
+            float,
+            f"{full_path}.center",
+            "Sweep center",
+        )
+    if spec.locked_center is not None:
+        center = _resolve_sweep_edge(
+            value.center,
+            resolve_expression,
+            path=f"{full_path}.center",
+            label="Sweep center",
+        )
+        _validate_centered_sweep_contract(spec, value, full_path, center=center)
 
 
 def _validate_eval(
