@@ -5,11 +5,28 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import DataVariable, load_grouped_labber_data, load_run_data
+from zcu_tools.datafile import (
+    DataVariable,
+    LabberPayload,
+    load_grouped_labber_data,
+    load_run_data,
+)
 from zcu_tools.resources.entry.storage import bind_sample_table
 
 from ._independent_inputs import RUN_ID, coherence_run, mist_run
 from ._sim_inputs import Inputs
+
+
+def assert_channel_roundtrip(expected: LabberPayload, actual: LabberPayload) -> None:
+    """Compare public-reader data, units and every inner-first axis exactly."""
+    np.testing.assert_array_equal(actual.z, expected.z)
+    assert (
+        actual.data.name == expected.data.name
+        and actual.data.unit == expected.data.unit
+    )
+    for got_axis, want_axis in zip(actual.axes, expected.axes, strict=True):
+        assert got_axis.name == want_axis.name and got_axis.unit == want_axis.unit
+        np.testing.assert_array_equal(got_axis.values, want_axis.values)
 
 
 def test_combined_coherence_outputs_roundtrip_and_latest_wins(
@@ -33,7 +50,7 @@ def test_combined_coherence_outputs_roundtrip_and_latest_wins(
     native = load_run_data(run.paths.data_root / "merged.h5")
     labber_path = report.outputs[1].path
     assert labber_path is not None
-    labber = load_grouped_labber_data(labber_path)
+    labber = load_grouped_labber_data(str(labber_path))
     assert native.metadata.run_id == RUN_ID
     assert native.metadata.experiment == "coherence_fluxdep"
     assert native.metadata.snapshot == run.plan.snapshot
@@ -66,16 +83,7 @@ def test_combined_coherence_outputs_roundtrip_and_latest_wins(
         for key in (kind + "_signal", kind + "_time", kind):
             expected = native.payload.variables[DataVariable(key)]
             actual = labber.variables[DataVariable(key)]
-            np.testing.assert_array_equal(actual.z, expected.z)
-            assert (
-                actual.data.name == expected.data.name
-                and actual.data.unit == expected.data.unit
-            )
-            for got_axis, want_axis in zip(actual.axes, expected.axes, strict=True):
-                assert (
-                    got_axis.name == want_axis.name and got_axis.unit == want_axis.unit
-                )
-                np.testing.assert_array_equal(got_axis.values, want_axis.values)
+            assert_channel_roundtrip(expected, actual)
     rows = bind_sample_table(result, "Q1")
     latest = rows.latest(RUN_ID + "/1")
     assert (
@@ -251,7 +259,7 @@ def test_mist_tool_actual_gain_and_rejects_samples(
     )
     labber_path = report.outputs[1].path
     assert labber_path is not None
-    labber = load_grouped_labber_data(labber_path)
+    labber = load_grouped_labber_data(str(labber_path))
     for key, expected in native.payload.variables.items():
         actual = labber.variables[key]
         assert (

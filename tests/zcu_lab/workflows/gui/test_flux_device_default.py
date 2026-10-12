@@ -1,7 +1,5 @@
 """Coherence direct device defaults are captured once, with explicit invalid aliases."""
 
-from dataclasses import replace
-
 import pytest
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormInput, FormState

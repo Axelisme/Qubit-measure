@@ -165,11 +165,12 @@ def coherence_run(
             rabi = RabiResult("accepted", None, 5000.0 + state, 0.4, 0.2, "rabi.h5")
         readout = ReadoutResult("skipped", "cadence", None, None, None)
         measurements: list[LifetimeResult] = []
-        for kind, enabled, count, coordinate in (
+        selection: tuple[tuple[LifetimeKind, bool, int, int], ...] = (
             ("t1", t1, 3, 40),
             ("t2ramsey", ramsey, 5, 50),
             ("t2echo", echo, 2, 60),
-        ):
+        )
+        for kind, enabled, count, coordinate in selection:
             if not enabled:
                 continue
             typed_kind: LifetimeKind = kind
