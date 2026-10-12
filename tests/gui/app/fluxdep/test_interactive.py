@@ -14,7 +14,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     InteractiveChangedPayload,
     SpectrumChangedPayload,
 )
-from zcu_tools.gui.app.fluxdep.interactive import LinePickContext
+from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext, LinePickContext
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
@@ -205,9 +205,9 @@ def test_inspect_tracks_kind_switch_and_terminal_facts(twotone_controller):
         subscription.unsubscribe()
 
 
-@pytest.mark.parametrize("kind", ["line", "onetone", "twotone", "selection"])
+@pytest.mark.parametrize("kind", ["line", "onetone", "twotone"])
 def test_closed_callback_context_is_not_overwritten(
-    controller: Controller, kind: Literal["line", "onetone", "twotone", "selection"]
+    controller: Controller, kind: Literal["line", "onetone", "twotone"]
 ):
     if kind == "twotone":
         controller.state.spectrums["sample"].spec_type = "TwoTone"
@@ -215,9 +215,9 @@ def test_closed_callback_context_is_not_overwritten(
     controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
     old = (
-        owner.begin_line_pick("sample")
-        if kind == "selection"
-        else owner.begin_cross_selection()
+        owner.begin_onetone_pick("sample")
+        if kind == "line"
+        else owner.begin_line_pick("sample")
     )
     reentered: list[LinePickContext] = []
     facts: list[InteractiveChangedPayload] = []
@@ -231,7 +231,6 @@ def test_closed_callback_context_is_not_overwritten(
         "line": lambda: owner.begin_line_pick("sample"),
         "onetone": lambda: owner.begin_onetone_pick("sample"),
         "twotone": lambda: owner.begin_twotone_pick("sample"),
-        "selection": owner.begin_cross_selection,
     }[kind]
     subscription = controller.bus.subscribe(InteractiveChangedPayload, on_fact)
     try:
@@ -253,6 +252,56 @@ def test_closed_callback_context_is_not_overwritten(
             current.plugin.actions.swap.execute(current.session, None)
     finally:
         subscription.unsubscribe()
+
+
+def test_selection_and_spectrum_contexts_coexist(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
+    owner = controller.interactive
+    line = owner.begin_line_pick("sample")
+    selection = owner.begin_cross_selection()
+    line_active = owner.inspect("sample")
+    selection_active = owner.inspect("selection")
+    assert line_active is not None and line_active.context is line
+    assert selection_active is not None and selection_active.context is selection
+    assert line_active.context_id != selection_active.context_id
+    line.session.ensure_input_open()
+    selection.session.ensure_input_open()
+    line.plugin.actions.swap.execute(line.session, None)
+    selection.session.ensure_input_open()
+
+
+def test_selection_cancel_callback_keeps_editable_successor(controller: Controller):
+    controller.set_alignment("sample", -1.0, 1.0)
+    controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
+    owner = controller.interactive
+    old = owner.begin_cross_selection()
+    old_active = owner.inspect("selection")
+    successors: list[CrossSelectionContext] = []
+
+    def reopen(fact: InteractiveChangedPayload) -> None:
+        if fact.kind == "selection" and fact.phase == "closed" and not successors:
+            successors.append(owner.begin_cross_selection())
+
+    subscription = controller.bus.subscribe(InteractiveChangedPayload, reopen)
+    try:
+        owner.cancel("selection")
+        active = owner.inspect("selection")
+        assert active is not None and active.context is successors[0]
+        assert old_active is not None and active.context_id != old_active.context_id
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            old.session.ensure_input_open()
+        current = successors[0]
+        current.plugin.execute_command(
+            current.session, "set_min_distance", {"min_distance": 0.01}
+        )
+        assert current.session.snapshot().min_distance == 0.01
+    finally:
+        subscription.unsubscribe()
+    owner.cancel("selection")
+    assert owner.inspect("selection") is None
+    with pytest.raises(FailedPreconditionError, match="closed"):
+        current.session.ensure_input_open()
 
 
 def test_dispose_rejects_begin_from_closed_callback(controller: Controller):
@@ -470,6 +519,11 @@ def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
     assert owner.begin_twotone_pick("two") is context
     with pytest.raises(FailedPreconditionError):
         line.session.undo()
+    context.plugin.execute_command(
+        context.session,
+        "stroke",
+        {"vertices": [[-1.0, 4.5], [1.0, 5.1]], "width": 0.04, "mode": "select"},
+    )
     expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
     assert expected.dev_values.size > 0
     changes: list[str] = []
