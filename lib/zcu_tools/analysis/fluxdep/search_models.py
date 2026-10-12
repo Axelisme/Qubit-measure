@@ -20,14 +20,24 @@ from zcu_tools.analysis.fluxdep.models import (
 
 
 def count_max_evals(transitions: TransitionDict) -> int:
-    max_lvl = 0
-    for lvls in transitions.values():
-        if not isinstance(lvls, list) or len(lvls) == 0:
-            continue
-        max_lvl = max(max_lvl, *[max(lvl_from, lvl_to) for lvl_from, lvl_to in lvls])
-    max_lvl += 1
+    """Return minimum simulated levels to expand all nonempty choices.
 
-    return max_lvl
+    Counts pair maximum index +1 and dynamic category order +1, since expansion
+    consumes orders below the energy level count. Empty categories do not grow
+    the simulation; an empty mapping returns 1. Unknown categories raise
+    ValueError. Does not validate required frequencies or mutate inputs.
+    """
+    transition_requires_levels(transitions)
+    base = {name for name, _, _ in _transition_groups(transitions, 2)}
+    levels = 1
+    for name, pairs in transitions.items():
+        if not isinstance(pairs, list) or not pairs:
+            continue
+        levels = max(levels, 1 + max(max(i, j) for i, j in pairs))
+        if name not in base:
+            order = int(name.removeprefix("transitions").removeprefix("mirror"))
+            levels = max(levels, order + 1)
+    return levels
 
 
 def _transition_groups(
@@ -85,6 +95,8 @@ def validate_transition_levels(transitions: TransitionDict, levels: int) -> None
     fields; missing sideband/mirror frequencies remain search-time validation.
     Raises ValueError without mutating transitions.
     """
+    if levels < 1:
+        raise ValueError("database levels must be positive")
     transition_requires_levels(transitions)
     allowed = {name for name, _, _ in _transition_groups(transitions, levels)}
     for name, pairs in transitions.items():

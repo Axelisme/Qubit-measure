@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-12，domain numeric range schema projection
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
 owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
@@ -21,6 +21,11 @@ inject writable control authority.
 Response failure or timeout can follow a committed command. Transport neither
 rolls back domain effects nor retries requests. Event subscriptions keep their
 connection-local lifecycle and lazy serialization/backpressure behavior.
+
+`ParamSpec.minimum` / `maximum` project inclusive numeric JSON-schema limits.
+These declarations do not add generic range admission: domain owners validate
+ranges and provide the same constants to schemas, including dependent limits
+in descriptions. Optional omission/null and undeclared-field behavior stay unchanged.
 
 Wire details live in the [measure remote README](../app/measure/remote/README.md).
 App composition and error boundaries are in

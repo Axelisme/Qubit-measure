@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-12，native fit render and database metadata
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -16,6 +16,16 @@ Interactive context IDs bind commands to the owning session and target. Replies
 use one committed capture for state and Agg PNG; replacement, retirement and
 terminal receipts remain app-owned. Search outcomes, publication failures and
 partial output do not imply rollback. Timeout does not cancel accepted work.
+
+Fit inputs use `search_db`, distinct from the project's raw-data root.
+`fit.set_params` remains complete replacement; omitted separate frequencies clear
+those fields. The kernel rejects unknown categories before I/O and reads DB
+metadata only when pairs or dynamic categories need the level count. Rejection
+or I/O failure leaves the current fit untouched.
+`fit.database_info(path)` returns candidate/level counts and inclusive parameter
+ranges without loading energy values. `fit.render()` uses the same native Show
+overlay as Qt, returns PNG without saving an artifact, and requires a fit result.
+Both queries are readonly.
 
 GUI editing gates, modal Cancel/Close, pure viewing and shutdown remain frontend
 responsibilities. Fluxdep has no hardware Stop exception; the user reclaims from
