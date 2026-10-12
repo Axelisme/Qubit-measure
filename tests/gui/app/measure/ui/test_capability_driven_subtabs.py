@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -594,6 +594,57 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
     assert tab.get_current_figure_for_pane("analysis") is fig_a
     assert tab.get_current_figure_for_pane("post_analysis") is fig_p
     tab.detach()
+
+
+@pytest.mark.parametrize(
+    ("changes", "text", "enabled", "tooltip"),
+    [
+        ({}, "Run", True, ""),
+        ({"is_running": True}, "Stop", True, "Running"),
+        (
+            {"is_analyzing": True, "global_run_active": True},
+            "Run",
+            False,
+            "Tab is busy",
+        ),
+        (
+            {"global_run_active": True, "has_active_context": False},
+            "Run",
+            False,
+            "Another tab is running",
+        ),
+        (
+            {"has_active_context": False, "has_soc": False},
+            "Run",
+            False,
+            "Select or create a working point first",
+        ),
+        ({"has_soc": False}, "Run", False, "No SoC connection"),
+    ],
+)
+def test_run_action_projects_status_and_reason_priority(
+    qapp, exp_tab_widget, make_ctrl, changes, text, enabled, tooltip
+):
+    snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True)
+    assert snapshot.interaction is not None
+    assert snapshot.capabilities is not None
+    tab = exp_tab_widget("tab-1", make_ctrl(), snapshot.capabilities)
+    tab.attach(snapshot, MagicMock())
+    try:
+        changed = replace(
+            snapshot, interaction=replace(snapshot.interaction, **changes)
+        )
+        tab.update_interaction_state(changed)
+        assert tab.run_btn.text() == text
+        assert tab.run_btn.isEnabled() is enabled
+        assert tab.run_btn.toolTip() == tooltip
+        assert tab.reset_btn.isHidden() is bool(changes.get("is_running", False))
+        tab.update_interaction_state(snapshot)
+        assert tab.run_btn.text() == "Run"
+        assert tab.run_btn.isEnabled()
+        assert tab.run_btn.toolTip() == ""
+    finally:
+        tab.detach()
 
 
 def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget, make_ctrl):
