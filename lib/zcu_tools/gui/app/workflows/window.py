@@ -391,9 +391,10 @@ class WorkflowWindow[C](QWidget):
 
         Call on the owner thread after construction, before starting a run.
         Pending/running/paused ownership raises InvalidRunState before edits.
-        FormState owns compatibility and returns discarded model-field paths;
-        expressions remain input even when their result is invalid. Defaults or
-        source failures propagate without publishing either candidate. Successful
+        FormState owns compatibility and returns discarded model-field paths,
+        including saved leaves whose captured source check fails; expressions
+        remain input even when their result is invalid. Defaults and other source
+        failures propagate without publishing either candidate. Successful
         restoration refreshes both editors and clears renderer-local text.
         """
         self._ensure_can_start()

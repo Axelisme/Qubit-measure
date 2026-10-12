@@ -425,17 +425,24 @@ class FormState[F: FormModel]:
         without a discriminator overlays the current selected branch, retaining
         its tag and unsaved defaults; an empty object makes no change. If neither
         saved nor current input selects a branch, drop that object instead of
-        replacing the model section. Source failures retain their consuming
-        path; a changed restoration notifies once.
+        replacing the model section. A restored leaf whose captured source check
+        fails, such as a ref name absent from env.library or any ref without a
+        captured library, keeps the current input at that leaf (or stays unfilled
+        when current has none) and its leaf path is returned with the other
+        dropped paths. Source failures that no restored leaf causes, such as a
+        used static default or a model-wide error, raise PydanticCustomError
+        without installing. A changed restoration notifies once.
         """
         from ._json import copy_object
-        from ._sources import check_sources
+        from ._sources import drop_unmatched_sources
         from ._structure import restore
 
-        candidate, dropped = restore(self._model, self._data, copy_object(saved), env)
-        check_sources(self._model, candidate, env)
+        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
+        candidate, unmatched = drop_unmatched_sources(
+            self._model, restored, self._data, env
+        )
         self._install(candidate)
-        return dropped
+        return (*dropped, *unmatched)
 
 
 class LinRange(FormModel):

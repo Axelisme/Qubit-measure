@@ -485,3 +485,46 @@ def restore(
     dropped: list[FormPath] = []
     result = _restore_model(model, copy_object(data), saved, env, (), dropped)
     return result, tuple(dropped)
+
+
+def _object_at(
+    data: dict[str, JsonValue], names: list[str]
+) -> dict[str, JsonValue] | None:
+    for name in names:
+        value = data.get(name)
+        if not isinstance(value, dict):
+            return None
+        data = value
+    return data
+
+
+def revert_leaf(
+    model: type[BaseModel],
+    candidate: dict[str, JsonValue],
+    current: dict[str, JsonValue],
+    path: FormPath,
+) -> FormWritePath | None:
+    """Give the active candidate leaf containing path its current input value.
+
+    path may point inside a whole sequence/mapping leaf; that whole leaf reverts.
+    current is the input before restoration and is not edited. Its value at the
+    same leaf path is copied into candidate in place; when current has none, the
+    leaf key is removed. Return the reverted leaf, or None when no active leaf of
+    candidate contains path (model-wide paths and absent default fields).
+    """
+    leaf = next(
+        (key for key in leaves(model, candidate) if path[: len(key)] == key), None
+    )
+    if leaf is None:
+        return None
+    *parents, name = leaf
+    target = _object_at(candidate, parents)
+    # leaves() descends only through objects; None would mean a traversal bug.
+    if target is None:
+        raise ValueError(f"Active leaf {leaf!r} is not inside input objects")
+    source = _object_at(current, parents)
+    if source is not None and name in source:
+        target[name] = copy_json(source[name])
+    else:
+        del target[name]
+    return leaf
