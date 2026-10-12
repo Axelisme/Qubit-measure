@@ -379,7 +379,7 @@ def test_begin_reuses_session_and_finish_publishes_alignment(controller: Control
     subscription = controller.bus.subscribe(
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
-    result = owner.finish_line_pick()
+    result = owner.finish_line_pick().result
     subscription.unsubscribe()
     assert result.flux_period == 3.0
     entry = controller.state.spectrums["sample"]
@@ -405,7 +405,7 @@ def test_equal_seed_finish_failure_keeps_context_editable(controller):
     assert controller.interactive.current_line_pick() is ctx
     assert not controller.state.spectrums["sample"].aligned
     ctx.plugin.actions.move.execute(ctx.session, ("half", 1.0))
-    assert controller.interactive.finish_line_pick().flux_period == 2.0
+    assert controller.interactive.finish_line_pick().result.flux_period == 2.0
 
 
 @pytest.mark.parametrize("change", ["remove", "reload", "alignment"])
@@ -477,7 +477,7 @@ def test_twotone_reuse_kind_switch_and_terminal_publication(twotone_controller):
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
     try:
-        result = owner.finish_twotone_pick()
+        result = owner.finish_twotone_pick().result
     finally:
         subscription.unsubscribe()
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
@@ -509,7 +509,7 @@ def test_invalid_twotone_finish_keeps_context_editable(twotone_controller):
     assert not twotone_controller.state.spectrums["two"].points_completed
     context.session.undo()
     context.plugin.clear.execute(context.session, None)
-    assert owner.finish_twotone_pick().dev_values.size == 0
+    assert owner.finish_twotone_pick().result.dev_values.size == 0
 
 
 def test_line_begin_closes_previous_twotone_input(twotone_controller):
@@ -626,7 +626,7 @@ def test_onetone_reuse_kind_switch_and_terminal_publication(onetone_controller):
         SpectrumChangedPayload, lambda event: changes.append(event.name)
     )
     try:
-        result = owner.finish_onetone_pick()
+        result = owner.finish_onetone_pick().result
     finally:
         subscription.unsubscribe()
     np.testing.assert_array_equal(result.dev_values, expected.dev_values)
@@ -667,7 +667,7 @@ def test_invalid_onetone_finish_keeps_context_editable(onetone_controller):
     assert owner.current_onetone_pick() is context
     assert not onetone_controller.state.spectrums["one"].points_completed
     context.plugin.set_threshold.execute(context.session, 0.1)
-    assert owner.finish_onetone_pick().dev_values.size == 2
+    assert owner.finish_onetone_pick().result.dev_values.size == 2
 
 
 def test_line_begin_closes_previous_onetone_input(onetone_controller):
