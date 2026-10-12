@@ -143,11 +143,11 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
 
         return ctrl
 
-
     try:
         yield create_ctrl
     finally:
         owned_authorities.clear()
+
 
 def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=False):
     from zcu_tools.gui.app.measure.services.ports import (
@@ -445,7 +445,9 @@ def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
     tab.detach()
 
 
-def test_exp_data_activation_refreshes_and_lifecycle_sync(qapp, exp_tab_widget, make_ctrl):
+def test_exp_data_activation_refreshes_and_lifecycle_sync(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     # Use fake renderer so we can assert raster not empty after show
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
@@ -546,7 +548,9 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
     tab.detach()
 
 
-def test_exp_production_reachability_data_gallery_is_active_right_widget(qapp, exp_tab_widget, make_ctrl):
+def test_exp_production_reachability_data_gallery_is_active_right_widget(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
     tab = exp_tab_widget("reach", ctrl, caps)
@@ -576,7 +580,9 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(qapp, e
     tab.detach()
 
 
-def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(qapp, exp_tab_widget, make_ctrl):
+def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
+    qapp, exp_tab_widget, make_ctrl
+):
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)  # type: ignore[call-arg]
     fig_run = Figure()
@@ -699,7 +705,9 @@ def test_gallery_aspect_fit_regression_640x480_in_narrow_viewport(qapp):
     g.hide()
 
 
-def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(qapp, exp_tab_widget, make_ctrl):
+def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
+    qapp, exp_tab_widget, make_ctrl
+):
     """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
     ctrl = make_ctrl()
     caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)  # type: ignore[call-arg]
@@ -862,7 +870,9 @@ def test_gallery_wide_single_full_width(qapp):
     g_w.hide()
 
 
-def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(qapp, exp_tab_widget, make_ctrl):
+def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
+    qapp, exp_tab_widget, make_ctrl
+):
     """Geometry via shipped ExpTabWidget Data path for each capability combination (A1).
 
     Verifies automatic viewport-driven reflow (gallery viewport, not test-driven
