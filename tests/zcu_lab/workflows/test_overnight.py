@@ -284,3 +284,19 @@ def test_pause_discards_incomplete_pair_and_resume_redoes_then_stop_keeps_commit
     assert any(
         p.name == "overnight rounds" and p.completed == 2 for p in stopped.progress
     )
+
+
+@pytest.mark.uses_wall_clock
+def test_point_names_each_native_pair_member(inputs: Inputs, tmp_path: Path) -> None:
+    engine = start_overnight(inputs, tmp_path, RecordingDevices(), interval=0.001)
+    status = engine.execute("overnight")
+    assert status.lifecycle == "done", status.reason
+    record = engine.records("overnight")[0]
+    point = record.encoded_record.value
+    assert isinstance(point, dict)
+    assert (point["t1_file"], point["t2_file"]) == ("t1.h5", "t2echo.h5")
+    for filename, experiment in (("t1.h5", T1Exp()), ("t2echo.h5", T2EchoExp())):
+        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / filename, spec=experiment.persistence_spec())
+        assert native.cfg is not None
+        assert metadata.snapshot == make_snapshot()
+        assert metadata.device_snapshot is not None

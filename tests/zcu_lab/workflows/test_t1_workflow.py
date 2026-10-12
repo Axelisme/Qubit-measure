@@ -512,3 +512,28 @@ def test_flux_unit_mismatch_fails_before_setup_or_acquisition(
     assert devices.values == []
     assert engine.records("workflow") == ()
     assert not tuple((tmp_path / "data").glob("iter/*/runs/*"))
+
+
+def test_point_names_native_decay_and_each_calibration_stage(inputs: Inputs, tmp_path: Path) -> None:
+    plots = Plots(NonPresentingHost())
+    engine = start_t1(inputs, tmp_path, T1Tunables(cal=CalibrationTunables(span_mhz=2.0, rabi_start_factor=0.125)), RecordingDevices(), plots)
+    try:
+        status = engine.execute("workflow")
+        assert status.lifecycle == "done", status.reason
+        record = engine.records("workflow")[0]
+        point = record.encoded_record.value
+        assert isinstance(point, dict)
+        assert point["decay_file"] == "t1.h5"
+        files = point["calibration_files"]
+        assert isinstance(files, dict)
+        assert files == {"frequency": ["frequency-01.h5"], "rabi": "rabi.h5", "readout": "readout.h5"}
+        root = tmp_path / "data" / record.iteration_dir
+        for filename, experiment in (("t1.h5", T1Exp()), ("frequency-01.h5", FreqExp()), ("rabi.h5", LenRabiExp()), ("readout.h5", FreqGainExp())):
+            native, metadata = load_run_with_metadata(root / filename, spec=experiment.persistence_spec())
+            assert native.cfg is not None
+            assert metadata.snapshot == make_snapshot()
+            assert metadata.device_snapshot is not None
+        summary = json.loads((root / "record.json").read_text(encoding="utf-8"))
+        assert summary["result"]["encoded_record"]["value"] == point
+    finally:
+        plots.release()

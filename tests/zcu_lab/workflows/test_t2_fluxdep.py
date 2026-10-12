@@ -178,3 +178,22 @@ def test_t2_fluxdep_rejects_overlong_fit_but_preserves_native_trace(
         assert stored.metadata.experiment == f"twotone/ge/t2{kind}"
         trace = next(iter(stored.payload.variables.values()))
         assert np.isfinite(trace.z).all() and trace.z.shape == (21,)
+
+
+@pytest.mark.parametrize("kind", ["echo", "ramsey"])
+def test_point_names_native_t2_decay(inputs: Inputs, tmp_path: Path, kind: Literal["echo", "ramsey"]) -> None:
+    engine, _, plots = start_t2(inputs, tmp_path, kind)
+    try:
+        status = engine.execute("workflow")
+        assert status.lifecycle == "done", status.reason
+        record = engine.records("workflow")[0]
+        point = record.encoded_record.value
+        assert isinstance(point, dict)
+        assert point["decay_file"] == f"t2{kind}.h5"
+        spec = T2EchoExp().persistence_spec() if kind == "echo" else T2RamseyExp().persistence_spec()
+        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / f"t2{kind}.h5", spec=spec)
+        assert native.cfg is not None
+        assert metadata.snapshot == make_snapshot()
+        assert metadata.device_snapshot is not None
+    finally:
+        plots.release()

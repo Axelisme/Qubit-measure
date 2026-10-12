@@ -191,3 +191,20 @@ def test_mist_map_uses_actual_native_gain_and_flux_coordinates(
     finally:
         plots.finish()
         plots.release()
+
+
+def test_point_names_native_gain_trace(inputs: Inputs, tmp_path: Path) -> None:
+    engine, _, plots = start_mist(inputs, tmp_path)
+    try:
+        status = engine.execute("workflow")
+        assert status.lifecycle == "done", status.reason
+        record = engine.records("workflow")[0]
+        point = record.encoded_record.value
+        assert isinstance(point, dict)
+        assert point["gain_file"] == "mist.h5"
+        native, metadata = load_run_with_metadata(tmp_path / "data" / record.iteration_dir / "mist.h5", spec=PowerDepExp().persistence_spec())
+        assert native.cfg is not None
+        assert metadata.snapshot == make_snapshot()
+        assert metadata.device_snapshot is not None
+    finally:
+        plots.release()
