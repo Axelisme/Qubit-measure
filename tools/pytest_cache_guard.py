@@ -66,6 +66,9 @@ class GuiCacheGuard:
     this checkout. Construct before importing test modules, register with
     pytest, and let unconfigure restore both environment variables. Each worker
     gets its own temporary cache, but all protect the original user directory.
+    ``process_lifetime=True`` retains isolation through pytest cleanup until
+    process exit or explicit ``close()``; False restores on unconfigure for
+    nested sessions. Caller-provided cache roots are never deleted.
 
     Changes in existence, metadata or file contents fail collection/test
     reports with the responsible node and phase. Changes outside those reports
@@ -77,7 +80,11 @@ class GuiCacheGuard:
     """
 
     def __init__(
-        self, *, real_cache: Path | None = None, cache_root: Path | None = None
+        self,
+        *,
+        real_cache: Path | None = None,
+        cache_root: Path | None = None,
+        process_lifetime: bool = False,
     ) -> None:
         if sys.platform != "linux":
             raise pytest.UsageError(
@@ -162,6 +169,15 @@ class GuiCacheGuard:
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
             for message in self._pollutions:
                 session.config.get_terminal_writer().line(message)
+
+    def close(self) -> None:
+        """Release this guard's cache and restore its previous environment.
+
+        Idempotent; never release an outer guard or alter protected user data.
+        Process owners may call this explicitly instead of waiting for exit.
+        Filesystem cleanup errors propagate.
+        """
+        self.pytest_unconfigure()
 
     def pytest_unconfigure(self) -> None:
         """Restore the environment and remove owned temporary cache files."""

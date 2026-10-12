@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from types import ModuleType
 from uuid import uuid4
 
 import pytest
@@ -217,3 +218,124 @@ def test_polluter():
     if phase != "collection":
         assert "test_polluter" in output
     assert os.environ.get("XDG_CACHE_HOME") == previous_cache
+
+
+def test_session_start_pollution_is_attributed_to_startup(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    real_cache = tmp_path / "synthetic-user-cache" / "gui"
+    hook_ran = tmp_path / "sessionstart-ran"
+    (tmp_path / "conftest.py").write_text(
+        f"from pathlib import Path\n"
+        f"def pytest_sessionstart():\n"
+        f"    cache = Path({str(real_cache)!r})\n"
+        f"    cache.mkdir(parents=True)\n"
+        f'    (cache / "state.json").write_text("startup pollution")\n'
+        f'    Path({str(hook_ran)!r}).write_text("executed")\n'
+    )
+    result = run_session(
+        tmp_path,
+        "def test_clean_client(): pass\n",
+        GuiCacheGuard(real_cache=real_cache, cache_root=tmp_path / "session-cache"),
+    )
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert hook_ran.read_text() == "executed"
+    assert result != pytest.ExitCode.OK
+    assert "GUI cache pollution" in output
+    assert "startup" in output
+    assert "(collection)" not in output
+
+
+def test_unreadable_cache_subdirectory_fails_before_isolation(tmp_path: Path) -> None:
+    real_cache = tmp_path / "synthetic-user-cache" / "gui"
+    unreadable = real_cache / "unreadable"
+    unreadable.mkdir(parents=True)
+    (unreadable / "state.json").write_text("protected state")
+    previous_environment = dict(os.environ)
+    unreadable.chmod(0)
+    plugin: GuiCacheGuard | None = None
+    try:
+        with pytest.raises(PermissionError):
+            plugin = GuiCacheGuard(real_cache=real_cache)
+    finally:
+        unreadable.chmod(0o700)
+        if plugin is not None:
+            plugin.close()
+    assert dict(os.environ) == previous_environment
+
+
+@pytest.mark.parametrize("previously_present", [False, True])
+def test_synthetic_conftest_restores_module_registry(
+    tmp_path: Path, previously_present: bool
+) -> None:
+    outer_conftest = sys.modules.get("conftest")
+    previous_conftest = ModuleType("conftest") if previously_present else None
+    if previous_conftest is None:
+        sys.modules.pop("conftest", None)
+    else:
+        sys.modules["conftest"] = previous_conftest
+    hook_ran = tmp_path / "configure-ran"
+    test_ran = tmp_path / "test-ran"
+    (tmp_path / "conftest.py").write_text(
+        f"from pathlib import Path\n"
+        f"def pytest_configure():\n"
+        f'    Path({str(hook_ran)!r}).write_text("executed")\n'
+    )
+    try:
+        result = run_session(
+            tmp_path,
+            f"from pathlib import Path\n"
+            f"def test_client():\n"
+            f'    Path({str(test_ran)!r}).write_text("executed")\n',
+            GuiCacheGuard(real_cache=tmp_path / "synthetic-user-cache" / "gui"),
+        )
+        assert result == pytest.ExitCode.OK
+        assert hook_ran.read_text() == "executed"
+        assert test_ran.read_text() == "executed"
+        assert sys.modules.get("conftest") is previous_conftest
+        assert ("conftest" in sys.modules) == previously_present
+    finally:
+        if outer_conftest is None:
+            sys.modules.pop("conftest", None)
+        else:
+            sys.modules["conftest"] = outer_conftest
+
+
+def test_process_owner_keeps_cache_isolated_after_pytest_returns(tmp_path: Path) -> None:
+    previous_environment = dict(os.environ)
+    real_cache = tmp_path / "synthetic-user-cache" / "gui"
+    cleanup_cache = tmp_path / "cleanup-cache.txt"
+    test_ran = tmp_path / "test-ran"
+    (tmp_path / "conftest.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "def pytest_configure(config):\n"
+        "    def cleanup():\n"
+        "        root = Path(os.environ['XDG_CACHE_HOME'])\n"
+        "        assert root.is_dir()\n"
+        "        (root / 'cleanup-state').write_text('cleanup')\n"
+        f"        Path({str(cleanup_cache)!r}).write_text(str(root))\n"
+        "    config.add_cleanup(cleanup)\n"
+    )
+    plugin = GuiCacheGuard(real_cache=real_cache, process_lifetime=True)
+    owned_root = Path(os.environ["XDG_CACHE_HOME"])
+    try:
+        result = run_session(
+            tmp_path,
+            f"from pathlib import Path\n"
+            f"def test_client():\n"
+            f'    Path({str(test_ran)!r}).write_text("executed")\n',
+            plugin,
+        )
+        assert result == pytest.ExitCode.OK
+        assert test_ran.read_text() == "executed"
+        assert os.environ["XDG_CACHE_HOME"] == str(owned_root)
+        assert cleanup_cache.read_text() == str(owned_root)
+        assert (owned_root / "cleanup-state").read_text() == "cleanup"
+        assert owned_root.is_dir()
+        assert not real_cache.exists()
+    finally:
+        plugin.close()
+        plugin.close()
+    assert dict(os.environ) == previous_environment
+    assert not owned_root.exists()
