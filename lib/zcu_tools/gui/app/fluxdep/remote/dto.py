@@ -210,6 +210,8 @@ class SpectrumListItem(TypedDict):
     aligned: bool
     points_completed: bool
     point_count: int
+    # Unfinished alignment or sampling draft, otherwise None.
+    pending: Literal["align", "sample"] | None
 
 
 class SpectrumListReply(TypedDict):
@@ -356,6 +358,8 @@ class SelectionSnapshotReply(TypedDict):
 
     selected: list[bool] | None
     min_distance: float
+    # True when an unfinished joint Filter draft exists.
+    pending: bool
 
 
 class ProjectSetupReply(TypedDict):

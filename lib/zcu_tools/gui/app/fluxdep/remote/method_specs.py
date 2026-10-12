@@ -44,7 +44,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Spectrum collection
     "spectrum.list": MethodSpec(
         5.0,
-        "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
+        "List spectra: each {name, spec_type, aligned, points_completed, point_count, pending}. "
         "Completion includes zero points; point_count reports available data.",
         readonly=True,
     ),
@@ -52,6 +52,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the complete editable spectrum projection for a literal name. "
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
+        params=(ParamSpec("name", JsonType.STRING),),
+        readonly=True,
+    ),
+    "spectrum.render": MethodSpec(
+        30.0,
+        "Render published raw spectrum, committed alignment lines and sampled points "
+        "as {png_b64, bytes}. Does not open input or change display.",
         params=(ParamSpec("name", JsonType.STRING),),
         readonly=True,
     ),
@@ -99,7 +106,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "selection.snapshot": MethodSpec(
         5.0,
         "Read the complete published joint-cloud selection mask and native "
-        "normalized min_distance. Null mask means all points, not a live Session.",
+        "normalized min_distance, plus pending for an unfinished Filter draft. "
+        "Null mask means all points, not a live Session.",
         readonly=True,
     ),
     "selection.pointcloud": MethodSpec(

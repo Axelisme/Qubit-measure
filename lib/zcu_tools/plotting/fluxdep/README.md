@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-06 — cross-spectrum Qt/native projection
+**Last updated:** 2026-10-12 — published spectrum evidence
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -36,6 +36,12 @@ Qt and `make_cross_selection_figure`. Background cells follow sample centers,
 including descending/nonuniform axes. Kept/dropped points, optional index-based
 changes and normalized-radius stroke outlines use the captured joint bounds.
 Native output owns a separate Agg canvas; rendering preserves the supplied canvas.
+
+`spectrum.make_spectrum_figure` renders a published raw spectrum in native
+device/GHz axes, with optional committed half/integer lines and sampled points.
+It returns an independent Agg Figure without opening an interactive session.
+The GUI RPC owner captures the published data and encodes the PNG; MCP decides
+when to request this evidence.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

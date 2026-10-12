@@ -13,6 +13,7 @@ Adding a method:
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
 from collections.abc import Callable, Mapping
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
@@ -34,6 +36,7 @@ from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
     h_resources_versions,
 )
+from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
 from .dto import (
     ActiveSpectrumReply,
@@ -49,6 +52,7 @@ from .dto import (
     OperationStartedReply,
     OperationStatusReply,
     ParamsExportedReply,
+    PngImage,
     PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
@@ -111,6 +115,7 @@ def _h_spectrum_list(
 ) -> SpectrumListReply:
     del params
     spectrums = adapter.ctrl.state.spectrums
+    active = adapter.ctrl.interactive.inspect()
     return {
         "spectrums": [
             SpectrumListItem(
@@ -119,6 +124,9 @@ def _h_spectrum_list(
                 aligned=entry.aligned,
                 points_completed=entry.points_completed,
                 point_count=entry.point_count,
+                pending=("align" if active.kind == "line" else "sample")
+                if active is not None and active.spectrum_name == entry.name
+                else None,
             )
             for entry in spectrums.values()
         ]
@@ -166,6 +174,21 @@ def _h_spectrum_snapshot(
             "freqs": entry.points["freqs"].tolist(),
         },
     }
+
+
+def _h_spectrum_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validates literal names.
+    entry = adapter.ctrl.state.get_spectrum(name)
+    figure = make_spectrum_figure(
+        entry.raw,
+        entry.points,
+        alignment=(entry.flux_half, entry.flux_int) if entry.aligned else None,
+    )
+    png = render_figure_png(figure)
+    return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
 
 
 def _h_spectrum_load(
@@ -238,6 +261,7 @@ def _h_selection_snapshot(
     return {
         "selected": mask.tolist() if mask is not None else None,
         "min_distance": selection.min_distance,
+        "pending": adapter.ctrl.interactive.current_cross_selection() is not None,
     }
 
 
@@ -492,6 +516,7 @@ _HANDLERS: dict[str, Handler] = {
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "spectrum.snapshot": _h_spectrum_snapshot,
+    "spectrum.render": _h_spectrum_render,
     "spectrum.load": _h_spectrum_load,
     "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.remove": _h_spectrum_remove,
