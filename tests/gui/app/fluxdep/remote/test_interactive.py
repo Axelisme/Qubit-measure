@@ -561,10 +561,12 @@ def test_invalid_commands_do_not_change_snapshot_undo_versions_or_facts(
     elif case == "name":
         values["name"] = "other"
         one_route.request(link, "spectrum.snapshot", name="other")
+        reason = "no_interactive_context"
     elif case == "selection_target":
         _read_sources(one_route, link)
         method = "selection.interactive.command"
         values.pop("name")
+        reason = "no_interactive_context"
     elif case == "apply":
         values["command"] = "apply"
         code, reason = "invalid_params", "invalid_interactive_command"
