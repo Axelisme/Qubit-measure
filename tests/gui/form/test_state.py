@@ -272,14 +272,14 @@ def environment(
     )
 
 
-def test_static_defaults_leave_required_keys_absent_and_keep_nullable_null() -> None:
+def test_static_defaults_leave_required_and_none_default_keys_absent() -> None:
     env = environment()
     assert PlainForm.default_input(env).data == {}
     partial = PlainForm.defaults(env, {})
     assert "section" not in partial
     nullable = NullableForm.default_input(env)
-    assert nullable.data == {"section": None}
-    assert isinstance(FormState(nullable).result(env), NullableForm)
+    assert nullable.data == {}
+    assert FormState(nullable).result(env) == NullableForm(section=None)
 
 
 def test_absent_non_nullable_nested_model_accepts_child_leaf_writes() -> None:
@@ -308,7 +308,8 @@ def test_nullable_section_activation_child_edit_and_deactivation() -> None:
     state = FormState(NullableForm.default_input(env))
     with pytest.raises(ValueError, match="section|object|null|path"):
         state.write({("section", "stop"): 5.0}, env)
-    assert state.input.data == {"section": None}
+    assert state.input.data == {}
+    assert state.result(env) == NullableForm(section=None)
     state.write({("section",): {"start": 2.0, "stop": 4.0}}, env)
     active = state.result(env)
     assert isinstance(active, NullableForm)
