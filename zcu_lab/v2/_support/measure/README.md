@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-11，reset ext seed 與 Run-tested finisher
+**Last updated:** 2026-10-12，固定 alias 名稱的 direct defaults
 
 # Measure domain support
 
@@ -13,7 +13,7 @@ Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitio
 單一 adapter 的 domain policy 留在其 authoritative file；同一小群組共用但不具全域意義的
 helper 留在群組內 `_shared.py`。
 
-`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的 scalar seed
+`schema_builder.py` 提供 adapter author可讀的 domain vocabulary。`seeds.py` 的 `alias_name_seed` 在 fresh cfg 建立時解析 bare alias，保存 direct 名稱；未綁定時保留指名 alias 的 direct Invalid input，不代用靜態名稱。既有 cfg 和 draft 不隨 alias 變更，新 cfg 才讀新的解析結果。其他 scalar seed
 保存 canonical `EvalValue`，建立 defaults 時不查校準，也不代用靜態 fallback。module seed 按明確的 module 槽或 library root 掛載校準內容，
 module 校準缺少時使用既有 fresh fallback。`path_seed` 與 `scaled_path_seed` 遇到宣告但未綁的角色，直接保存 `EvalValue`，不讀該路徑或使用 fallback。Cfg 求值時發布指名角色的 Invalid；綁定後 refresh 求值，reset 才重跑 defaults。`module_seed` 遇到未綁角色，保存 linked empty section，即使 optional/fallback=None 也啟用。Cfg 發布含 alias 路徑的 missing-reference Invalid；綁後 refresh 由 catalog 提供 shape 與內容。手動關掉 optional 後 refresh 不重掛，缺少槽的 fallback 仍由 reset 重跑 defaults 才採用。非 null 的錯誤值、來源與 materialization 故障仍報錯。
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run `ParameterContext` 讀取分類、chi/kappa 和可選分析校準。

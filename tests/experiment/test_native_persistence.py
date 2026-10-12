@@ -493,6 +493,15 @@ def test_full_metadata_load_preserves_historical_evidence(
         load_run_with_metadata(path, spec=replace(SINGLE, tag="wrong"))
 
 
+def test_persistence_tag_returns_declared_tag_without_an_instance() -> None:
+    assert SingleExperiment.persistence_tag() == "test/single"
+    assert GroupedExperiment.persistence_tag() == "test/grouped"
+
+
+def test_persistence_tag_returns_none_without_a_declaration() -> None:
+    assert PersistableExperiment[SingleResult, NativeCfg].persistence_tag() is None
+
+
 def test_public_persistence_declaration_supports_single_grouped_and_missing() -> None:
     assert SingleExperiment().persistence_spec() is SINGLE
     assert GroupedExperiment().persistence_spec() is GROUPED

@@ -19,6 +19,7 @@ from zcu_tools.gui.cfg.resource import (
     SourceRevision,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
+from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.gui.session.state import DEVICE_SET_VERSION_KEY, SessionState
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.gui.session.value_lookup import (
@@ -264,8 +265,8 @@ def _resolve_reference(
     except RoleResolutionError:
         # An unresolved alias is a missing reference, not an unavailable source.
         return None
-    except AttributeError:
-        # The path owner defines unset and dangling module slots.
+    except ModuleSlotError:
+        # Only owner-classified slot errors are missing references.
         return None
     if kind == "module":
         if root not in library.module_keys():

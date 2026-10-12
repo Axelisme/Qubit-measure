@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12，shared source catalog、SavedPoint 寫入條件與 Post-Analysis 呈現
+**Last updated:** 2026-10-12，shared source catalog、SavedPoint、Post-Analysis 與 flux device 的固定 direct 初值及 eval 解析
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -594,13 +594,20 @@ fixed ParameterContext, not the currently selected point or global aliases. `Cfg
 provides draft expression evaluation and cached validity. `ValueRef` resolves
 once through the session `ValueLookup` and stores a direct scalar input.
 
-五個有 flux device 的 Measure adapter 使用 `$flux_dev` 作為初始名稱 expression，
-包括 JPA 的 jpa_flux_dev 欄位。明確 caller 設定不被 preset 覆蓋。
-String cfg 的 `$flux_dev` 保留 authored expression。Preview、refresh 與 Run
-使用各自固定的 alias capture，顯示例如 `= "yoko1"`。未綁或缺列發布 Invalid
-並指名 alias；無 context 或來源故障不沿用舊名稱。Alias 與 preview 不查 device
-可用性，實際使用名稱時由實驗 device owner 報錯。RunMetadata 與 data.h5 保存
-當次的 `flux_dev → yoko1`；Analyze、WB 與 Save 不重新讀取目前 alias 表。
+五個有 flux device 的 Measure adapter 預設使用 direct mode，包括 JPA 的
+`jpa_flux_dev` 欄位。建立預設 cfg 時，seed 從當時固定的 parameter capture
+只解析一次 `$flux_dev`，將名稱保存為 `DirectValue`，表單顯示例如 `yoko1`。
+未綁定時 cfg 發布 Invalid 並指名 alias，不 fallback。後續 alias 變更不更新
+已建立的 direct cfg 或 draft；新預設 cfg 才使用當時 capture 的解析結果。
+明確 caller 設定不被 preset 覆蓋。
+
+使用者仍可手動切成 eval mode 並輸入 `$flux_dev`。這時 string cfg 保留
+authored expression，與固定的 direct 初值不同。Preview、refresh 與 Run
+使用各自固定的 alias capture 解析 expression，顯示例如 `= "yoko1"`。
+未綁或缺列發布 Invalid 並指名 alias；無 context 或來源故障不沿用舊名稱。
+Alias 與 preview 不查 device 可用性，實際使用名稱時由實驗 device owner 報錯。
+RunMetadata 與 data.h5 保存當次的 `flux_dev → yoko1`；Analyze、WB 與 Save
+不重新讀取目前 alias 表。
 
 generic model、spec walk、inheritance、codec、static/dynamic validation與lowering由
 `zcu_tools.gui.cfg`擁有，consumer直接從shared owner匯入。measure adapter提供固定

@@ -26,7 +26,7 @@ RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cach
 
 工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
 
-當前握手版本為 WIRE_VERSION 95、GUI_VERSION 127、MCP_VERSION 114。只有 wire 版本用於相容比對，其餘是程式版本投影；權威仍在各 owner 的版本宣告。
+當前握手版本為 WIRE_VERSION 98、GUI_VERSION 131、MCP_VERSION 116。只有 wire 版本用於相容比對，其餘是程式版本投影；權威仍在各 owner 的版本宣告。
 
 Recipe、`tab_analyze`、`wait(execution)` 與互動完成回覆使用同一 execution 摘要。MCP 在 Run 前捕捉 resolved publication，以它投影條件與來源，不以後來的 GUI 狀態代替當次事實。`status(execution, detail="full")` 讀同一已保存的 native snapshot，不新增 RPC 或 guard 觀察。摘要列出 Primary/Post 結果、全部 writeback candidates 及 destination 身分。
 
