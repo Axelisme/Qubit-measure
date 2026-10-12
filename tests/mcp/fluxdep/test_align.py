@@ -10,9 +10,31 @@ from zcu_tools.mcp.core.reply import ToolReply
 from tests.mcp.fluxdep._support import Client, GuiResponse
 
 
-def native(half: float = 1.0, integer: float = 3.0, *, busy: bool = False, closed: bool = False, error: str | None = None) -> dict[str, object]:
+def native(
+    half: float = 1.0,
+    integer: float = 3.0,
+    *,
+    busy: bool = False,
+    closed: bool = False,
+    error: str | None = None,
+) -> dict[str, object]:
     """One app-authoritative named line draft capture."""
-    return {"context": {"context_id": 12, "closed": closed, "kind": "line", "spectrum_name": "one", "state": {"flux_half": half, "flux_int": integer, "conjugate": False, "magnitude_only": True}, "info": {"alignment_busy": busy, "alignment_error": error}}, "effect": None}
+    return {
+        "context": {
+            "context_id": 12,
+            "closed": closed,
+            "kind": "line",
+            "spectrum_name": "one",
+            "state": {
+                "flux_half": half,
+                "flux_int": integer,
+                "conjugate": False,
+                "magnitude_only": True,
+            },
+            "info": {"alignment_busy": busy, "alignment_error": error},
+        },
+        "effect": None,
+    }
 
 
 def invoke(client: Client, **args: object) -> ToolReply:
@@ -21,37 +43,100 @@ def invoke(client: Client, **args: object) -> ToolReply:
 
 
 def test_move_line_composes_conjugate_and_reports_only_changed_lines(client: Client):
-    client.transport.replies.extend(GuiResponse(result=result) for result in [native(), native(), native(2.0)])
-    result = invoke(client, command="move_line", params={"role": "half", "position": 2.0, "conjugate": True})
-    assert result.data == {"name": "one", "stage": "align", "pending": True, "lines": {"half": 2.0, "integer": 3.0, "period": 2.0}, "changes": {"half": [1.0, 2.0]}}
+    client.transport.replies.extend(
+        GuiResponse(result=result) for result in [native(), native(), native(2.0)]
+    )
+    result = invoke(
+        client,
+        command="move_line",
+        params={"role": "half", "position": 2.0, "conjugate": True},
+    )
+    assert result.data == {
+        "name": "one",
+        "stage": "align",
+        "pending": True,
+        "lines": {"half": 2.0, "integer": 3.0, "period": 2.0},
+        "changes": {"half": [1.0, 2.0]},
+    }
     assert [(r["method"], r["params"]) for r in client.transport.requests] == [
         ("spectrum.interactive.open", {"name": "one", "kind": "line"}),
-        ("spectrum.interactive.command", {"name": "one", "context_id": 12, "command": "set_conjugate", "params": {"enabled": True}}),
-        ("spectrum.interactive.command", {"name": "one", "context_id": 12, "command": "move_line", "params": {"role": "half", "position": 2.0}}),
+        (
+            "spectrum.interactive.command",
+            {
+                "name": "one",
+                "context_id": 12,
+                "command": "set_conjugate",
+                "params": {"enabled": True},
+            },
+        ),
+        (
+            "spectrum.interactive.command",
+            {
+                "name": "one",
+                "context_id": 12,
+                "command": "move_line",
+                "params": {"role": "half", "position": 2.0},
+            },
+        ),
     ]
     assert not result.extra_content
 
 
 @pytest.mark.parametrize("error", [None, "alignment failed"])
 def test_auto_align_polls_named_context_to_terminal(client: Client, error: str | None):
-    client.transport.replies.extend(GuiResponse(result=result) for result in [native(), native(busy=True), native(busy=True), native(1.0, 4.0, error=error)])
+    client.transport.replies.extend(
+        GuiResponse(result=result)
+        for result in [
+            native(),
+            native(busy=True),
+            native(busy=True),
+            native(1.0, 4.0, error=error),
+        ]
+    )
     result = invoke(client, command="auto_align")
     assert result.data["lines"] == {"half": 1.0, "integer": 4.0, "period": 6.0}
     assert result.data["changes"] == {"integer": [3.0, 4.0]}
-    assert result.data["auto_align"] == {"status": "finished" if error is None else "failed", "error": error}
-    assert [r["method"] for r in client.transport.requests] == ["spectrum.interactive.open", "spectrum.interactive.command", "interactive.read", "interactive.read"]
-    assert [r["params"] for r in client.transport.requests[2:]] == [{"name": "one"}, {"name": "one"}]
+    assert result.data["auto_align"] == {
+        "status": "finished" if error is None else "failed",
+        "error": error,
+    }
+    assert [r["method"] for r in client.transport.requests] == [
+        "spectrum.interactive.open",
+        "spectrum.interactive.command",
+        "interactive.read",
+        "interactive.read",
+    ]
+    assert [r["params"] for r in client.transport.requests[2:]] == [
+        {"name": "one"},
+        {"name": "one"},
+    ]
 
 
-@pytest.mark.parametrize(("command", "image", "render_method"), [("finish", False, "spectrum.render"), ("move_line", True, "interactive.render")])
-def test_finish_and_image_override_return_native_evidence(client: Client, command: str, image: bool, render_method: str):
+@pytest.mark.parametrize(
+    ("command", "image", "render_method"),
+    [("finish", False, "spectrum.render"), ("move_line", True, "interactive.render")],
+)
+def test_finish_and_image_override_return_native_evidence(
+    client: Client, command: str, image: bool, render_method: str
+):
     buffer = BytesIO()
     with Image.new("RGB", (12, 8), "red") as png:
         png.save(buffer, format="PNG")
     data = buffer.getvalue()
     opened = native()
     opened["discarded"] = "sample"
-    client.transport.replies.extend([GuiResponse(result=opened), GuiResponse(result=native(closed=command == "finish")), GuiResponse(result={"png_b64": base64.b64encode(data).decode("ascii"), "bytes": len(data)})])
+    client.transport.replies.extend(
+        [
+            GuiResponse(result=opened),
+            GuiResponse(result=native(closed=command == "finish")),
+            GuiResponse(
+                result={
+                    "png_b64": base64.b64encode(data).decode("ascii"),
+                    "bytes": len(data),
+                }
+            ),
+        ]
+    )
     result = invoke(client, command=command, image=image)
     assert result.data["pending"] is (command != "finish")
     assert result.data["stage"] == ("aligned" if command == "finish" else "align")

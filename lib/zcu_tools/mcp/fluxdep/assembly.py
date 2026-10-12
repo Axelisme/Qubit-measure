@@ -13,6 +13,7 @@ from zcu_tools.mcp.core.stdio_server import (
     run_stdio_loop,
 )
 
+from .align_tools import build_align_tools
 from .lifecycle import build_control_lifecycle_tools
 from .spectrum_tools import build_spectrum_tools
 
@@ -81,7 +82,11 @@ def build_fluxdep_server(
     bridge = bridge if bridge is not None else McpBridge(config)
     lifecycle, names = build_control_lifecycle_tools(config, bridge, repo_root)
     tools = assemble_tools(
-        build_spectrum_tools(bridge) | _control_tools(bridge), lifecycle, names
+        build_spectrum_tools(bridge)
+        | build_align_tools(bridge)
+        | _control_tools(bridge),
+        lifecycle,
+        names,
     )
 
     def cleanup() -> None:
