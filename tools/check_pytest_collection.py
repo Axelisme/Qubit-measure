@@ -15,7 +15,9 @@ from typing import Final, Literal
 _IMPORT_MODE: Final = "--import-mode=importlib"
 _ENTRYPOINTS: Final = ("module", "console")
 _SUMMARY_PATTERN: Final = re.compile(
-    r"^(?P<count>\d+) tests? collected in (?P<duration>.+)$", re.MULTILINE
+    r"^(?P<count>\d+)(?:/\d+ tests collected \(\d+ deselected\)| tests? collected)"
+    r" in (?P<duration>.+)$",
+    re.MULTILINE,
 )
 PytestEntrypoint = Literal["module", "console"]
 
@@ -71,6 +73,15 @@ def build_command(
 def parse_collection(
     *, command: tuple[str, ...], returncode: int, stdout: str, stderr: str
 ) -> CollectionResult:
+    """Validate captured pytest collection output without running the command.
+
+    ``command`` records the invocation; ``returncode``, ``stdout`` and ``stderr``
+    are its captured result. Accept unfiltered or selected/total summaries and
+    return sorted node ids with the original summary and command. The summary
+    count must equal the emitted selected node count, not the total collected.
+    Raise CollectionOracleError for nonzero exit, missing or multiple summaries,
+    absent or duplicate node ids, or a selected-count mismatch.
+    """
     if returncode != 0:
         detail = (stderr or stdout).strip().splitlines()
         tail = detail[-1] if detail else "no pytest output"
