@@ -30,6 +30,7 @@ from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.binding import CfgField, ReferenceField, SectionField
 
 from .presentation import (
+    InputLineLabelDelegate,
     apply_tree_item_decoration,
     choice_visible_keys,
     decorated_label,
@@ -120,6 +121,7 @@ def make_dense_cfg_tree() -> tuple[QTreeWidget, QProxyStyle]:
     font = tree.font()
     font.setPixelSize(_TREE_FONT_SIZE_PX)
     tree.setFont(font)
+    tree.setItemDelegateForColumn(0, InputLineLabelDelegate(tree))
     style = _TreeBranchStyle()
     style.setParent(tree)
     tree.setStyle(style)
