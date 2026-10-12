@@ -767,7 +767,8 @@ def test_open_envelope_rejects_malformed_values_before_begin(
 
 
 @pytest.mark.parametrize(
-    "command,params", [("finish", {"extra": 1}), ("apply", {"extra": 1}), ("undo", {"extra": 1})]
+    "command,params",
+    [("finish", {"extra": 1}), ("apply", {"extra": 1}), ("undo", {"extra": 1})],
 )
 def test_joint_reserved_commands_reject_params(
     joint_route: RouteHarness, command: str, params: dict[str, object]
@@ -900,17 +901,29 @@ def test_distance_changes_kept_count_without_rewriting_input_brush_mask(
     assert count < len(before.selected)
 
 
-def test_filter_finish_publishes_closes_and_reports_each_spectrum(joint_route: RouteHarness):
+def test_filter_finish_publishes_closes_and_reports_each_spectrum(
+    joint_route: RouteHarness,
+):
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
-    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.5, 4.5]], width=0.03, mode="erase")["ok"]
+    assert _joint_command(
+        joint_route,
+        link,
+        context,
+        "stroke",
+        vertices=[[0.5, 4.5]],
+        width=0.03,
+        mode="erase",
+    )["ok"]
     finished = _joint_command(joint_route, link, context, "finish")
     assert finished["ok"] is True, finished
     result = _context(finished)
     assert result["closed"] is True
     assert result["can_undo"] is False
     assert _state(result)["per_spectrum"] == {"a": [2, 3], "empty": [0, 0], "b": [0, 1]}
-    np.testing.assert_array_equal(joint_route.ctrl.state.selection_mask(), [True, False, True, False])
+    np.testing.assert_array_equal(
+        joint_route.ctrl.state.selection_mask(), [True, False, True, False]
+    )
     assert joint_route.ctrl.interactive.inspect("selection") is None
     assert joint_route.request(link, "selection.render")["ok"]
     assert joint_route.ctrl.interactive.inspect("selection") is None
@@ -919,7 +932,15 @@ def test_filter_finish_publishes_closes_and_reports_each_spectrum(joint_route: R
 def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteHarness):
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
-    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.5, 4.5]], width=0.03, mode="erase")["ok"]
+    assert _joint_command(
+        joint_route,
+        link,
+        context,
+        "stroke",
+        vertices=[[0.5, 4.5]],
+        width=0.03,
+        mode="erase",
+    )["ok"]
     # The finish promise is covered separately; publish/cancel reaches the same
     # published input without making this render regression depend on finish.
     assert _joint_command(joint_route, link, context, "apply")["ok"]
@@ -928,7 +949,9 @@ def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteH
     before = joint_route.ctrl.state.version.snapshot()
     rendered = joint_route.request(observer, "selection.render")
     assert rendered["ok"] is True, rendered
-    png = base64.b64decode(rendered["result"]["png_b64"])
+    encoded = rendered["result"]["png_b64"]
+    assert isinstance(encoded, str)
+    png = base64.b64decode(encoded)
     with Image.open(io.BytesIO(png)) as image:
         assert image.format == "PNG"
         assert image.width > 100 and image.height > 100
@@ -936,16 +959,32 @@ def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteH
     assert joint_route.ctrl.state.version.snapshot() == before
 
 
-def test_published_filter_figure_marks_masks_without_reading_live_draft(joint_route: RouteHarness):
+def test_published_filter_figure_marks_masks_without_reading_live_draft(
+    joint_route: RouteHarness,
+):
     joint_route.ctrl.set_selection(np.array([True, False, True, False]), 0.025)
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
     # A fresh Filter starts all-selected; rendering must still use publication.
-    assert _joint_command(joint_route, link, context, "stroke", vertices=[[0.0, 4.0]], width=0.03, mode="erase")["ok"]
+    assert _joint_command(
+        joint_route,
+        link,
+        context,
+        "stroke",
+        vertices=[[0.0, 4.0]],
+        width=0.03,
+        mode="erase",
+    )["ok"]
     figure = Figure()
     joint_route.ctrl.render_selection(figure)
-    scatter = [artist for artist in figure.axes[0].collections if isinstance(artist, PathCollection)]
-    np.testing.assert_allclose(scatter[0].get_offsets(), [[0.5, 4.5]])
-    np.testing.assert_allclose(scatter[1].get_offsets(), [[0.0, 4.0], [1.0, 5.0]])
-    np.testing.assert_allclose(scatter[-2].get_offsets(), [[0.5, 4.5]])
+    scatter = [
+        artist
+        for artist in figure.axes[0].collections
+        if isinstance(artist, PathCollection)
+    ]
+    np.testing.assert_allclose(np.asarray(scatter[0].get_offsets()), [[0.5, 4.5]])
+    np.testing.assert_allclose(
+        np.asarray(scatter[1].get_offsets()), [[0.0, 4.0], [1.0, 5.0]]
+    )
+    np.testing.assert_allclose(np.asarray(scatter[-2].get_offsets()), [[0.5, 4.5]])
     assert joint_route.ctrl.interactive.inspect("selection") is not None
