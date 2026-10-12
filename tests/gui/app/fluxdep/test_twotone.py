@@ -77,9 +77,9 @@ def test_command_and_typed_stroke_share_kernel_and_single_commit(
     plugin = TwoTonePickPlugin(twotone_inputs)
     action_session = plugin.open(ManualOwnerScheduler())
     command_session = plugin.open(ManualOwnerScheduler())
-    if mode == "select":
-        plugin.clear.execute(action_session, None)
-        plugin.clear.execute(command_session, None)
+    if mode == "erase":
+        plugin.perform_on_all.execute(action_session, None)
+        plugin.perform_on_all.execute(command_session, None)
     vertices = (BrushPoint(-0.8, 4.6), BrushPoint(0.8, 5.0))
     payload = BrushStroke(vertices, 0.03, mode)
     before = action_session.snapshot()
@@ -115,6 +115,8 @@ def test_command_and_typed_stroke_share_kernel_and_single_commit(
     np.testing.assert_array_equal(result.dev_values, other.dev_values)
     np.testing.assert_array_equal(result.freqs, other.freqs)
     assert_same_state(action_session.undo(), before)
+    if mode == "erase":
+        action_session.undo()  # Undo the explicit full-selection prerequisite.
     with pytest.raises(FailedPreconditionError):
         action_session.undo()
 
@@ -153,7 +155,7 @@ def test_tools_without_history_and_pure_projection_never_create_history(
     assert view.added_points.shape == (0, 2)
     assert view.removed_points.shape == (0, 2)
     view.state.mask[:] = False
-    assert session.snapshot().mask.all()
+    assert not session.snapshot().mask.any()
 
 
 @pytest.mark.parametrize(
@@ -172,6 +174,7 @@ def test_detector_updates_use_existing_numerical_owner_and_undo(
 ) -> None:
     plugin = TwoTonePickPlugin(twotone_inputs)
     session = plugin.open(ManualOwnerScheduler())
+    plugin.perform_on_all.execute(session, None)
     before = session.snapshot()
     plugin.execute_command(session, "set_settings", command)
     state = session.snapshot()
@@ -199,6 +202,7 @@ def test_fill_clear_and_positional_changes_are_not_net_counts(
 ) -> None:
     plugin = TwoTonePickPlugin(twotone_inputs)
     session = plugin.open(ManualOwnerScheduler())
+    plugin.perform_on_all.execute(session, None)
     original = analyze_twotone_pick(twotone_inputs, session.snapshot())
     assert original.dev_values.size > 0
     plugin.clear.execute(session, None)

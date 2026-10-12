@@ -400,11 +400,32 @@ def test_onetone_threshold_counts_undo_and_empty_finish(one_route: RouteHarness)
     assert entry.points_completed and entry.point_count == 0
 
 
+def test_twotone_first_and_reopened_sampling_start_empty(two_route: RouteHarness):
+    link = two_route.client()
+    first = _open_picker(two_route, link, "two", "twotone")
+    assert _state(first)["masked_count"] == 0
+    assert _state(first)["point_count"] == 0
+    assert first["can_undo"] is False
+    selected = _context(_picker_command(two_route, link, first, "perform_on_all"))
+    assert _state(selected)["point_count"] > 0
+    assert _picker_command(two_route, link, first, "finish")["ok"]
+    assert two_route.ctrl.state.get_spectrum("two").point_count > 0
+    reopened = _open_picker(two_route, link, "two", "twotone")
+    assert _state(reopened)["masked_count"] == 0
+    assert _state(reopened)["point_count"] == 0
+    assert reopened["can_undo"] is False
+    assert reopened["context_id"] != first["context_id"]
+    assert _picker_command(two_route, link, reopened, "finish")["ok"]
+    assert two_route.ctrl.state.get_spectrum("two").point_count == 0
+    assert two_route.ctrl.state.get_spectrum("two").points_completed
+
+
 def test_twotone_brush_feedback_and_undo_inverse(
     two_route: RouteHarness,
 ):
     link = two_route.client()
     context = _open_picker(two_route, link, "two", "twotone")
+    assert _picker_command(two_route, link, context, "perform_on_all")["ok"]
     native = two_route.ctrl.interactive.current_twotone_pick()
     assert isinstance(native, TwoTonePickContext)
     before = native.session.snapshot()
@@ -849,6 +870,7 @@ def test_joint_render_does_not_refresh_other_clients_and_apply_self_write(
 def test_detector_setting_reports_actual_point_changes(two_route: RouteHarness):
     link = two_route.client()
     context = _open_picker(two_route, link, "two", "twotone")
+    assert _picker_command(two_route, link, context, "perform_on_all")["ok"]
     native = two_route.ctrl.interactive.current_twotone_pick()
     assert native is not None
     before = native.session.snapshot()
