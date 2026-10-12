@@ -85,7 +85,7 @@ def _execute(
 ) -> list[str] | None:
     kind, name = active.kind, active.spectrum_name
     if command is None:
-        return
+        return None
     if command == "undo":
         session.undo()
     elif command == "cancel":
@@ -102,6 +102,7 @@ def _execute(
         return owner.finish_twotone_pick(name).invalidated
     else:
         plugin.execute_command(session, command, params)
+    return None
 
 
 def _reply(

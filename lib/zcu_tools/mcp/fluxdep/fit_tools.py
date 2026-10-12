@@ -47,6 +47,58 @@ class FitArguments(TypedDict):
     sample_f: NotRequired[float | None]
 
 
+def _read_fit_result(bridge: McpBridge, arguments: FitResultArguments) -> ToolReply:
+    """Read native observation data and request evidence only when it permits it."""
+    recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
+    data = recorded.data
+    if not data["has_result"]:
+        return ToolReply(
+            {
+                "status": "no_result",
+                "params": data["params"],
+                "stale": data["stale"],
+                "stale_reasons": data["stale_reasons"],
+            }
+        )
+    if data["quality"] is None:
+        summary = ToolReply(
+            {
+                "status": "finished",
+                "params": data["params"],
+                "inputs": {
+                    **{
+                        name: data[name]
+                        for name in (
+                            "search_db",
+                            "EJb",
+                            "ECb",
+                            "ELb",
+                            "r_f",
+                            "sample_f",
+                        )
+                    },
+                    "points": None,
+                },
+                "residual": None,
+                "per_transition": None,
+            }
+        )
+    else:
+        summary = search_summary(recorded)
+    stale = data["stale"]
+    summary.data.update(
+        {
+            "stale": stale,
+            "stale_reasons": recorded.data["stale_reasons"],
+        }
+    )
+    if stale:
+        summary.data["note"] = "rerun fluxdep_fit to refresh"
+    if data["quality"] is not None and not stale and arguments.get("image", True):
+        return with_png(summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0)))
+    return summary
+
+
 def build_fit_tools(bridge: McpBridge) -> ToolTable:
     """Build fit/search and database tools without retaining fit state.
 
@@ -87,56 +139,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
         return with_png(summary, rendered)
 
     def fit_result(arguments: FitResultArguments) -> ToolReply:
-        recorded = call_gui(bridge, GuiRpcCall("fit.result", {}, 6.0))
-        data = recorded.data
-        if not data["has_result"]:
-            return ToolReply(
-                {
-                    "status": "no_result",
-                    "params": data["params"],
-                    "stale": data["stale"],
-                    "stale_reasons": data["stale_reasons"],
-                }
-            )
-        if data["quality"] is None:
-            summary = ToolReply(
-                {
-                    "status": "finished",
-                    "params": data["params"],
-                    "inputs": {
-                        **{
-                            name: data[name]
-                            for name in (
-                                "search_db",
-                                "EJb",
-                                "ECb",
-                                "ELb",
-                                "r_f",
-                                "sample_f",
-                            )
-                        },
-                        "points": None,
-                    },
-                    "residual": None,
-                    "per_transition": None,
-                }
-            )
-        else:
-            summary = search_summary(recorded)
-        stale = data["stale"]
-        summary.data.update(
-            {
-                "stale": stale,
-                "stale_reasons": recorded.data["stale_reasons"],
-            }
-        )
-        if stale:
-            summary.data["note"] = "rerun fluxdep_fit to refresh"
-        if data["quality"] is not None and not stale and arguments.get("image", True):
-            return with_png(
-                summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
-            )
-        return summary
+        return _read_fit_result(bridge, arguments)
 
     # Reuse native declarations, changing only the agent patch/clear interface.
     properties: dict[str, object] = {
