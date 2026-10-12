@@ -79,6 +79,22 @@ def test_compatible_restore_reports_unmatched_sources_and_keeps_other_leaves(
     assert notifications == [state.input.data]
 
 
+def test_compatible_restore_keeps_current_reference_for_unmatched_saved_name() -> None:
+    env = FormEnv(library=library())
+    state = FormState(ModuleForm.default_input(env))
+    before = state.input.data
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+
+    dropped = state.write_compatible(
+        {"drive": {"kind": "ref", "name": "Q1.pulses.removed"}}, env
+    )
+
+    assert dropped == (("drive", "name"),)
+    assert state.input.data == before
+    assert notifications == []
+
+
 class DeviceChoiceForm(FormModel):
     """Declare device membership against captured infos, without polling."""
 
