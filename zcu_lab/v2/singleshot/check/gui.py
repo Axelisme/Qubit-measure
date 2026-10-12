@@ -45,6 +45,7 @@ class CheckAnalyzeResult(AnalyzeResultBase):
 class CheckAdapter(
     BaseAdapter[CheckCfg, CheckRunResult, CheckAnalyzeResult, NoAnalyzeParams]
 ):
+    experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
     exp_cls = CheckExp
     ExpCfg_cls: ClassVar[Any] = CheckCfg
 

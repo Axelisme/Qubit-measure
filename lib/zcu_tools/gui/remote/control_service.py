@@ -351,6 +351,10 @@ class RemoteControlServiceBase:
         if not self._method_registry[method].readonly:
             self.control_identity.require_holder(ctx.client_id)
 
+    def _local_modal_open(self) -> bool:
+        """Qt adapters query modal presentation on the owner turn; headless has none."""
+        return False
+
     def _control_command(
         self, ctx: SubscriptionCtx, method: str, params: Mapping[str, object]
     ) -> dict[str, object]:
@@ -361,11 +365,13 @@ class RemoteControlServiceBase:
             if not isinstance(label, str) or mode not in ("owner", "readonly"):
                 raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid control identity")
             if mode == "owner":
-                control.connect(ctx.client_id, label, "owner")
+                control.connect(
+                    ctx.client_id, label, "owner", local_busy=self._local_modal_open()
+                )
             else:
                 control.connect(ctx.client_id, label, "readonly")
         elif method == "control.acquire":
-            control.acquire(ctx.client_id)
+            control.acquire(ctx.client_id, local_busy=self._local_modal_open())
         elif method == "control.release":
             control.release(ctx.client_id)
         status = control.status()

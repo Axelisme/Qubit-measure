@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from base64 import b64encode
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
 from zcu_tools.experiment.workflows import (
@@ -61,8 +61,8 @@ class RecordReply(TypedDict):
 
     commit_seq counts Next commits; call_seq counts invocations; revision is the
     invocation's captured tunables version. encoded_record is the native summary.
-    iteration_dir is relative to data_root; run_files are final relative paths
-    within that iteration, in effect order.
+    iteration_dir is relative to data_root. Workflow file references belong to
+    encoded_record, whose contents the framework does not interpret.
     """
 
     commit_seq: int
@@ -70,7 +70,6 @@ class RecordReply(TypedDict):
     revision: int
     encoded_record: EncodedRecordReply
     iteration_dir: str
-    run_files: list[str]
 
 
 class RecordsReply(RunTarget):
@@ -107,11 +106,14 @@ class StartParams(RunTarget):
     """Start identity and two required partial-input batches.
 
     plan/tunables contain FormWrite objects; [] uses current captured defaults.
-    Each path occurs once. They never edit the existing GUI draft before success.
+    name is an optional native workflow name; omitted/null selects catalog's T1
+    default, independently of the GUI selection. Each path occurs once. Batches
+    never edit existing draft before success; selection uses the same app owner.
     """
 
     plan: list[FormWrite]
     tunables: list[FormWrite]
+    name: NotRequired[str | None]
 
 
 class TunablesParams(RunTarget):
@@ -314,11 +316,13 @@ class T1RemoteControlAdapter(RemoteControlServiceBase):
     ) -> WorkflowReply:
         plan_batch = _parse_form_batch(params["plan"])
         tunables_batch = _parse_form_batch(params["tunables"])
+        name = params.get("name")
         try:
             result = self.ctrl.start(
                 params["run_id"],
                 plan_batch=plan_batch,
                 tunables_batch=tunables_batch,
+                name=self.ctrl.default_workflow_name if name is None else name,
             )
         except InvalidRunState as exc:
             raise _project_control_error(exc) from exc
@@ -540,7 +544,6 @@ def _project_record(record: CommittedRecord) -> RecordReply:
             "error": record.encoded_record.error,
         },
         "iteration_dir": record.iteration_dir,
-        "run_files": list(record.run_files),
     }
 
 

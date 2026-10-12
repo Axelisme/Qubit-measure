@@ -408,6 +408,24 @@ class MeasureMcpSession:
                 port=port, launch=launch, clean=clean, token=token, identity=identity
             )
 
+    def _attach_existing_gui(self, selected: int, token: str | None) -> None:
+        """Attach once and clear stale connection state on transport/authentication failure."""
+        try:
+            self.bridge.connect(selected, token=token)
+        except GuiAuthenticationError as exc:
+            self.bridge.disconnect()
+            self._clear_connection()
+            self._auth_token = None
+            reason = "unauthorized" if exc.code == "unauthorized" else "auth_disabled"
+            raise GuiRpcError(
+                f"GUI authentication failed: {exc}", reason=reason, code=exc.code
+            ) from exc
+        except RuntimeError as exc:
+            self.bridge.disconnect()
+            self._clear_connection()
+            self._auth_token = None
+            raise GuiRpcError(f"GUI attach failed: {exc}", reason="no_gui") from exc
+
     def _connect_to_gui(
         self,
         *,
@@ -464,23 +482,7 @@ class MeasureMcpSession:
                     "GUI launched but is not ready to attach", reason="no_gui"
                 )
         else:
-            try:
-                self.bridge.connect(selected, token=token)
-            except GuiAuthenticationError as exc:
-                self.bridge.disconnect()
-                self._clear_connection()
-                self._auth_token = None
-                reason = (
-                    "unauthorized" if exc.code == "unauthorized" else "auth_disabled"
-                )
-                raise GuiRpcError(
-                    f"GUI authentication failed: {exc}", reason=reason, code=exc.code
-                ) from exc
-            except RuntimeError as exc:
-                self.bridge.disconnect()
-                self._clear_connection()
-                self._auth_token = None
-                raise GuiRpcError(f"GUI attach failed: {exc}", reason="no_gui") from exc
+            self._attach_existing_gui(selected, token)
         self._control_connection = identity
         connection = self._load_catalog(
             selected, launched=launched, requested_port=port

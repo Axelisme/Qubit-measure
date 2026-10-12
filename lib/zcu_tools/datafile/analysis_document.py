@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
+
 from .native_models import JsonObject
 
 
@@ -14,7 +16,11 @@ class AnalysisDocument(BaseModel):
 
     pane identifies analysis or post_analysis. parameters captures the inputs
     used for that analysis; summary contains its JSON-safe result, not arrays,
-    figures or a typed fit object. Values must be finite JSON primitives,
+    figures or a typed fit object. Direct summary values that are numpy
+    floating/integer scalars become Python float/int with normal float rounding.
+    Non-finite results, including finite extended floats that overflow Python
+    float, raise ValueError. No conversion applies to parameters or nested
+    summary values. Otherwise values must be finite strict JSON primitives,
     string-keyed objects and lists. Construction rejects invalid values with
     ValueError and isolates the supplied containers.
     """
@@ -25,7 +31,15 @@ class AnalysisDocument(BaseModel):
     parameters: JsonObject
     summary: JsonObject
 
-    @field_validator("parameters", "summary", mode="before")
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _normalize_summary(cls, value: object) -> object:
+        if isinstance(value, dict):
+            value = {key: normalize_numpy_scalar(item) for key, item in value.items()}
+        _check_json(value)
+        return value
+
+    @field_validator("parameters", mode="before")
     @classmethod
     def _validate_json(cls, value: object) -> object:
         _check_json(value)

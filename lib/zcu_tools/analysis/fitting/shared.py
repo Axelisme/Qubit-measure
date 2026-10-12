@@ -229,21 +229,7 @@ def fit_shared(
         fit, names, parameters, covariance_scale
     )
 
-    profile_intervals = {name: (np.nan, np.nan) for name in profile}
-    if fmin.is_valid:
-        for name in profile:
-            if fit.fixed[name]:
-                continue
-            try:
-                fit.minos(name)
-            except RuntimeError:
-                profile_intervals[name] = (np.nan, np.nan)
-                continue
-            error = fit.merrors[name]
-            profile_intervals[name] = (
-                float(fit.values[name] + error.lower) if error.lower_valid else np.nan,
-                float(fit.values[name] + error.upper) if error.upper_valid else np.nan,
-            )
+    profile_intervals = _profile_intervals(fit, profile, valid=bool(fmin.is_valid))
 
     diagnostics = FitDiagnostics(
         valid=bool(fmin.is_valid),
@@ -262,3 +248,26 @@ def fit_shared(
         diagnostics=diagnostics,
         profile_intervals=profile_intervals,
     )
+
+
+def _profile_intervals(
+    fit: Minuit, profile: Sequence[str], *, valid: bool
+) -> dict[str, tuple[float, float]]:
+    """Extract MINOS intervals, retaining NaN for unavailable or invalid profiles."""
+    profile_intervals = {name: (np.nan, np.nan) for name in profile}
+    if valid:
+        for name in profile:
+            if fit.fixed[name]:
+                continue
+            try:
+                fit.minos(name)
+            except RuntimeError:
+                profile_intervals[name] = (np.nan, np.nan)
+                continue
+            error = fit.merrors[name]
+            profile_intervals[name] = (
+                float(fit.values[name] + error.lower) if error.lower_valid else np.nan,
+                float(fit.values[name] + error.upper) if error.upper_valid else np.nan,
+            )
+
+    return profile_intervals

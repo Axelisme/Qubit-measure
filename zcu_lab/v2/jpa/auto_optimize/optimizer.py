@@ -648,17 +648,14 @@ class JPAOptimizer:
                     and power_bounds[0] <= power <= power_bounds[1]
                 ):
                     # Check if this point was already sampled at this flux
-                    if current_flux in self.data.flux_data:
-                        already_sampled = any(
-                            abs(existing_freq - freq) < 1e-6
-                            and abs(existing_power - power) < 1e-6
-                            for existing_freq, existing_power, _ in self.data.flux_data[
-                                current_flux
-                            ]
+                    already_sampled = any(
+                        abs(existing_freq - freq) < 1e-6
+                        and abs(existing_power - power) < 1e-6
+                        for existing_freq, existing_power, _ in self.data.flux_data.get(
+                            current_flux, []
                         )
-                        if not already_sampled:
-                            return (current_flux, freq, power)
-                    else:
+                    )
+                    if not already_sampled:
                         return (current_flux, freq, power)
 
         # Step 3: Get next point from 2D optimizer

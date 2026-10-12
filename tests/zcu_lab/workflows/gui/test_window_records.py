@@ -21,10 +21,11 @@ from zcu_tools.resources.entry import (
 
 from tests.gui.app.workflows._start_fakes import StartHarness
 from zcu_lab.workflows.calibration import Calibrated
-from zcu_lab.workflows.gui import window as window_module
+from zcu_lab.workflows.coherence import CoherencePlan, CoherenceTunables
+from zcu_lab.workflows.gui import figures as figures_module
 from zcu_lab.workflows.gui.window import T1WorkflowWindow
-from zcu_lab.workflows.t1 import T1Plan, T1Tunables
 
+from ._reload_source import InjectedCatalog
 from ._window_scenarios import (
     assert_figure_render_failure,
     install_reader_plot_workflow,
@@ -99,7 +100,6 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
         "revision": first.revision,
         "encoded_record": asdict(first.encoded_record),
         "iteration_dir": first.iteration_dir,
-        "run_files": list(first.run_files),
     }
     assert rpc("workflow.records", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
@@ -115,7 +115,10 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
     assert (
         rpc(
             "workflow.tunables",
-            {"run_id": "tuning", "batch": [{"path": ["guess_us"], "value": 41.0}]},
+            {
+                "run_id": "tuning",
+                "batch": [{"path": ["t1", "guess_us"], "value": 41.0}],
+            },
         )["ok"]
         is True
     )
@@ -130,7 +133,6 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
         "revision": records[0].revision,
         "encoded_record": asdict(records[0].encoded_record),
         "iteration_dir": records[0].iteration_dir,
-        "run_files": list(records[0].run_files),
     }
     assert result == {"run_id": "tuning", "records": [expected]}
     assert engine.records("tuning")[0] == first
@@ -140,17 +142,20 @@ def test_rpc_records_retains_commits_and_revision_after_resume(
 def test_rpc_records_running_empty_and_committed_native_summary(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
 ) -> None:
     window, harness, _entry = attachment
     observations: list[dict[str, object]] = []
 
-    def init(_env: InitEnv[Calibrated], _plan: T1Plan) -> int:
+    def init(_env: InitEnv[Calibrated], _plan: CoherencePlan) -> int:
         return 0
 
-    @workflow("read-running", plan=T1Plan, tunables=T1Tunables, init=init)
+    @workflow("read-running", plan=CoherencePlan, tunables=CoherenceTunables, init=init)
     def step(
-        env: WorkflowEnv[Calibrated], plan: T1Plan, tun: T1Tunables, state: int
+        env: WorkflowEnv[Calibrated],
+        plan: CoherencePlan,
+        tun: CoherenceTunables,
+        state: int,
     ) -> Step[int, dict[str, float]]:
         del env, plan, tun
         observations.append(rpc("workflow.records", {"run_id": "reader"}))
@@ -159,7 +164,7 @@ def test_rpc_records_running_empty_and_committed_native_summary(
             return Next({"measurement": 2.5}, 1)
         return Done()
 
-    monkeypatch.setattr(window_module, "t1_fluxdep", step)
+    catalog_source.install(step, window)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
     assert harness.background.error is None
@@ -173,7 +178,6 @@ def test_rpc_records_running_empty_and_committed_native_summary(
         "revision": native.revision,
         "encoded_record": asdict(native.encoded_record),
         "iteration_dir": native.iteration_dir,
-        "run_files": list(native.run_files),
     }
     assert observations[1]["result"] == {"run_id": "reader", "records": [expected]}
     assert native.encoded_record.value == {"measurement": 2.5}
@@ -184,10 +188,11 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     attachment: tuple[T1WorkflowWindow, StartHarness, ResultEntry],
     rpc: RpcRequest,
     monkeypatch: pytest.MonkeyPatch,
+    catalog_source: InjectedCatalog,
     ending: str,
 ) -> None:
     window, harness, _entry = attachment
-    renderer = window_module.render_figure_png
+    renderer = figures_module.render_figure_png
     owner_id = get_ident()
     renders: list[int] = []
     figures: list[Figure] = []
@@ -198,9 +203,9 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
         figures.append(figure)
         return renderer(figure)
 
-    monkeypatch.setattr(window_module, "render_figure_png", render)
+    monkeypatch.setattr(figures_module, "render_figure_png", render)
 
-    install_reader_plot_workflow(window, monkeypatch)
+    install_reader_plot_workflow(window, catalog_source)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
     assert harness.background.error is None
@@ -227,7 +232,7 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
 
     assert_figure_render_failure(window, rpc, monkeypatch)
     assert harness.gate.snapshot()
-    monkeypatch.setattr(window_module, "render_figure_png", render)
+    monkeypatch.setattr(figures_module, "render_figure_png", render)
     assert rpc("workflow." + ending, {"run_id": "reader"})["ok"] is True
     if ending == "resume":
         harness.complete_segment()
@@ -253,7 +258,7 @@ def test_rpc_empty_figures_and_stale_run_do_not_render(
         renders.append(figure)
         raise AssertionError("Read must not render")
 
-    monkeypatch.setattr(window_module, "render_figure_png", reject_render)
+    monkeypatch.setattr(figures_module, "render_figure_png", reject_render)
     assert rpc("workflow.figures", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
         "names": [],

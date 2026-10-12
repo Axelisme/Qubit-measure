@@ -14,7 +14,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import ModularProgramV2, SweepCfg
+from zcu_tools.program.v2.modules import ArbWaveformCfg, FlatTopWaveformCfg
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import RoleSpec, component_registry
 from zcu_tools.resources.entry.schema import PointDocument
@@ -23,7 +24,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from tests.zcu_lab.workflows._sim_inputs import Inputs, make_plan, seed_from_inputs
 from zcu_lab.components import QubitSchema
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqModuleCfg
-from zcu_lab.workflows.gui.plan import T1PlanForm
+from zcu_lab.workflows.gui.plan import CoherencePlanForm
 from zcu_lab.workflows.t1 import T1Plan, T1Tunables, t1_cfg
 
 from ._plan_inputs import inline_input, library_env
@@ -73,19 +74,22 @@ def test_pi_default_uses_captured_x180_and_remains_user_editable(
     inputs: Inputs, captured_pi_env: FormEnv
 ) -> None:
     env = captured_pi_env
-    default = T1PlanForm.default_input(env)
+    default = CoherencePlanForm.default_input(env)
     assert default.data["pi_length_us"] == {"expr": "Q1.module.x180.waveform.length"}
     data = inline_input(inputs).data
     data["pi_length_us"] = default.data["pi_length_us"]
-    state = FormState(FormInput(T1PlanForm, data))
+    state = FormState(FormInput(CoherencePlanForm, data))
     result = state.result(env)
-    assert isinstance(result, T1PlanForm)
+    assert isinstance(result, CoherencePlanForm)
     assert result.pi_length_us == pytest.approx(0.12)
     state.write({("pi_length_us",): 0.25}, env)
     changed = state.result(env)
-    assert isinstance(changed, T1PlanForm)
+    assert isinstance(changed, CoherencePlanForm)
     assert changed.pi_length_us == 0.25
-    assert T1PlanForm.defaults(env, {"pi_length_us": 0.25}).get("pi_length_us") is None
+    assert (
+        CoherencePlanForm.defaults(env, {"pi_length_us": 0.25}).get("pi_length_us")
+        is None
+    )
 
 
 @pytest.mark.parametrize("slot", [None, "Q1.pulses.absent", "unbound-role"])
@@ -109,9 +113,9 @@ def test_missing_or_dangling_x180_leaves_pi_required(
     )
     data = inline_input(inputs).data
     del data["pi_length_us"]
-    data.update(T1PlanForm.default_input(env).data)
+    data.update(CoherencePlanForm.default_input(env).data)
     data["flux_dev"] = inline_input(inputs).data["flux_dev"]
-    result = FormState(FormInput(T1PlanForm, data)).result(env)
+    result = FormState(FormInput(CoherencePlanForm, data)).result(env)
     assert isinstance(result, FormErrors)
     assert ("pi_length_us",) in result.messages
 
@@ -122,7 +126,7 @@ def test_invalid_pi_input_blocks_submission(
 ) -> None:
     data = inline_input(inputs).data
     data["pi_length_us"] = value
-    result = FormState(FormInput(T1PlanForm, data)).result(FormEnv())
+    result = FormState(FormInput(CoherencePlanForm, data)).result(FormEnv())
     assert isinstance(result, FormErrors)
     assert ("pi_length_us",) in result.messages
 
@@ -151,10 +155,10 @@ def test_form_setpoints_and_modules_reach_runtime_t1_cfg(
     template = make_plan(inputs)
     data = inline_input(inputs).data
     data["fluxes"] = fluxes
-    state = FormState(FormInput(T1PlanForm, data))
+    state = FormState(FormInput(CoherencePlanForm, data))
     env = FormEnv()
     result = state.result(env)
-    assert isinstance(result, T1PlanForm)
+    assert isinstance(result, CoherencePlanForm)
     native = result.to_cfg(env, template.snapshot)
     assert isinstance(native, T1Plan)
     assert native.fluxes == pytest.approx(expected)
@@ -171,21 +175,21 @@ def test_form_setpoints_and_modules_reach_runtime_t1_cfg(
 
 def test_missing_selections_and_point_errors_remain_directed(inputs: Inputs) -> None:
     env = FormEnv()
-    missing_data = T1PlanForm.default_input(env).data
+    missing_data = CoherencePlanForm.default_input(env).data
     del missing_data["flux_dev"]
-    missing = FormState(FormInput(T1PlanForm, missing_data)).result(env)
+    missing = FormState(FormInput(CoherencePlanForm, missing_data)).result(env)
     assert isinstance(missing, FormErrors)
     assert {("flux_dev",), ("fluxes",), ("qub_pulse",), ("readout",)} <= set(
         missing.messages
     )
     data = inline_input(inputs).data
     data["points"] = 4
-    state = FormState(FormInput(T1PlanForm, data))
+    state = FormState(FormInput(CoherencePlanForm, data))
     invalid = state.result(env)
     assert isinstance(invalid, FormErrors)
     assert ("points",) in invalid.messages
     state.write({("points",): 5}, env)
-    assert isinstance(state.result(env), T1PlanForm)
+    assert isinstance(state.result(env), CoherencePlanForm)
 
 
 def test_refs_materialize_and_inline_switch_detaches_the_selected_drive(
@@ -195,9 +199,9 @@ def test_refs_materialize_and_inline_switch_detaches_the_selected_drive(
     data = inline_input(inputs).data
     data["qub_pulse"] = {"kind": "ref", "name": "Q1.pulses.pi"}
     data["readout"] = {"kind": "ref", "name": "Q1.readout.ro"}
-    state = FormState(FormInput(T1PlanForm, data))
+    state = FormState(FormInput(CoherencePlanForm, data))
     result = state.result(env)
-    assert isinstance(result, T1PlanForm)
+    assert isinstance(result, CoherencePlanForm)
     native = result.to_cfg(env, make_plan(inputs).snapshot)
     assert isinstance(native, T1Plan)
     assert native.qub_pulse == inputs.rabi.modules.qub_pulse
@@ -213,7 +217,7 @@ def test_refs_materialize_and_inline_switch_detaches_the_selected_drive(
         )
     )
     result = state.result(changed)
-    assert isinstance(result, T1PlanForm)
+    assert isinstance(result, CoherencePlanForm)
     detached = result.to_cfg(changed, make_plan(inputs).snapshot)
     assert isinstance(detached, T1Plan)
     assert detached.qub_pulse.gain == 0.5
@@ -235,8 +239,8 @@ def test_bad_module_selections_block_plan_with_consuming_paths(
         raw = inputs.rabi.modules.qub_pulse.model_dump(mode="json")
         raw["waveform"] = "Q1.waveforms.absent"
         data["qub_pulse"] = {"kind": "inline", "module": raw}
-    result = FormState(FormInput(T1PlanForm, data)).result(env)
-    if isinstance(result, T1PlanForm):
+    result = FormState(FormInput(CoherencePlanForm, data)).result(env)
+    if isinstance(result, CoherencePlanForm):
         result = result.to_cfg(env, make_plan(inputs).snapshot)
     assert isinstance(result, FormErrors)
     field = "readout" if failure == "wrong_readout_family" else "qub_pulse"
@@ -262,8 +266,8 @@ def test_pure_arb_drive_reports_length_rabi_limit_at_consuming_field(
     drive = inputs.rabi.modules.qub_pulse.model_dump(mode="json")
     drive["waveform"] = {"style": "arb", "data": "shape"}
     data["qub_pulse"] = {"kind": "inline", "module": drive}
-    form = FormState(FormInput(T1PlanForm, data)).result(env)
-    assert isinstance(form, T1PlanForm)
+    form = FormState(FormInput(CoherencePlanForm, data)).result(env)
+    assert isinstance(form, CoherencePlanForm)
     result = form.to_cfg(env, make_plan(inputs).snapshot)
     assert isinstance(result, FormErrors)
     assert set(result.messages) == {("qub_pulse",)}
@@ -272,11 +276,48 @@ def test_pure_arb_drive_reports_length_rabi_limit_at_consuming_field(
     assert "unsupported" in result.messages[("qub_pulse",)]
 
 
+@pytest.fixture
+def captured_asset_env(tmp_path: Path) -> Iterator[FormEnv]:
+    """Capture source A, switch the repository to same-key B, then restore scope."""
+    # The repository has no public reset-to-uninitialized API; restore only
+    # this mutable scope in finally, while exercising its public capture API.
+    scope_attribute = "_database_path"
+    previous_scope = vars(ArbWaveformDatabase)[scope_attribute]
+    directory = tmp_path / "captured"
+    try:
+        ArbWaveformDatabase.init(directory)
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 0.1]),
+            idata=np.array([0.3, 0.3]),
+            qdata=np.array([0.4, 0.4]),
+        )
+        env = FormEnv(
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library", format_version="1.0"
+                ),
+                assets=ArbWaveformDatabase.bound_info(),
+            )
+        )
+        # Same key and duration, different I/Q: path/length alone cannot prove
+        # the native playback consumed the selected source.
+        ArbWaveformDatabase.init(tmp_path / "other")
+        ArbWaveformDatabase.save(
+            "shape",
+            time=np.array([0.0, 0.1]),
+            idata=np.array([0.8, 0.8]),
+            qdata=np.array([0.1, 0.1]),
+        )
+        yield env
+    finally:
+        setattr(ArbWaveformDatabase, scope_attribute, previous_scope)
+
+
 @pytest.mark.parametrize("selection", ["drive_ramp", "readout", "readout_ramp"])
 def test_captured_asset_directory_reaches_native_acquisition_without_global_scope(
-    inputs: Inputs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+    inputs: Inputs, tmp_path: Path, captured_asset_env: FormEnv, selection: str
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     data = inline_input(inputs).data
     waveform = {"style": "arb", "data": "shape"}
     field = "qub_pulse" if selection.startswith("drive") else "readout"
@@ -295,58 +336,55 @@ def test_captured_asset_directory_reaches_native_acquisition_without_global_scop
     else:
         raw["pulse_cfg"]["waveform"] = shape
     data[field] = {"kind": "inline", "module": raw}
-    state = FormState(FormInput(T1PlanForm, data))
-    for name, duration in (("first", 0.05), ("second", 0.1)):
-        directory = tmp_path / name
-        directory.mkdir()
-        np.savez(
-            directory / "shape.npz",
-            time=np.array([0.0, duration / 2, duration]),
-            idata=np.array([0.0, 1.0, 0.0]),
-            qdata=np.zeros(3),
+    form = FormState(FormInput(CoherencePlanForm, data)).result(captured_asset_env)
+    assert isinstance(form, CoherencePlanForm)
+    plan = form.to_cfg(captured_asset_env, make_plan(inputs).snapshot)
+    assert isinstance(plan, T1Plan)
+    pulse = plan.qub_pulse if field == "qub_pulse" else plan.readout.pulse_cfg
+    native_waveform = pulse.waveform
+    # Public cfg serialization exposes the path consumed by native playback.
+    native = native_waveform.to_dict()
+    if selection.endswith("ramp"):
+        assert native["length"] == 1.0
+    asset = native["raise_waveform"] if selection.endswith("ramp") else native
+    assert isinstance(asset, dict)
+    assert asset["path"] == (tmp_path / "captured" / "shape.npz").resolve().as_posix()
+    cfg = FreqCfg(
+        reps=2,
+        rounds=1,
+        modules=FreqModuleCfg(qub_pulse=plan.qub_pulse, readout=plan.readout),
+        sweep=inputs.freq.sweep,
+    )
+    program = ModularProgramV2(
+        inputs.soccfg,
+        cfg,
+        modules=[plan.qub_pulse.build("drive"), plan.readout.build("readout")],
+    )
+    captured_waveform = (
+        native_waveform.raise_waveform
+        if isinstance(native_waveform, FlatTopWaveformCfg)
+        else native_waveform
+    )
+    assert isinstance(captured_waveform, ArbWaveformCfg)
+    idata, qdata = captured_waveform.build("captured").make_iqdata(
+        pulse.ch, program, even_length=selection.endswith("ramp")
+    )
+    assert idata.size > 0
+    np.testing.assert_allclose(idata / inputs.soccfg.get_maxv(pulse.ch), 0.3)
+    assert qdata is not None
+    np.testing.assert_allclose(qdata / inputs.soccfg.get_maxv(pulse.ch), 0.4)
+    plots = Plots(NonPresentingHost())
+    try:
+        result = FreqExp().run(
+            cfg,
+            context=RunContext(inputs.soc, inputs.soccfg, plots, {}, StopSignal()),
         )
-        env = FormEnv(
-            library=LibrarySnapshot(
-                ModuleLibraryDocument(
-                    format="zcu.module-library", format_version="1.0"
-                ),
-                assets=ArbWaveformDatabase.info_at(directory),
-            )
-        )
-        form = state.result(env)
-        assert isinstance(form, T1PlanForm)
-        plan = form.to_cfg(env, make_plan(inputs).snapshot)
-        assert isinstance(plan, T1Plan)
-        native_waveform = (
-            plan.qub_pulse.waveform
-            if field == "qub_pulse"
-            else plan.readout.pulse_cfg.waveform
-        )
-        # Public cfg serialization exposes the path consumed by native playback.
-        native = native_waveform.to_dict()
-        if selection.endswith("ramp"):
-            assert native["length"] == 1.0
-        asset = native["raise_waveform"] if selection.endswith("ramp") else native
-        assert isinstance(asset, dict)
-        assert asset["path"] == (directory / "shape.npz").resolve().as_posix()
-        cfg = FreqCfg(
-            reps=2,
-            rounds=1,
-            modules=FreqModuleCfg(qub_pulse=plan.qub_pulse, readout=plan.readout),
-            sweep=inputs.freq.sweep,
-        )
-        plots = Plots(NonPresentingHost())
-        try:
-            result = FreqExp().run(
-                cfg,
-                context=RunContext(inputs.soc, inputs.soccfg, plots, {}, StopSignal()),
-            )
-            assert result.signals.shape == result.freqs.shape
-            assert len(result.freqs) == inputs.freq.sweep.freq.expts
-            assert np.all(np.isfinite(result.signals))
-        finally:
-            plots.finish(present=False)
-            plots.release()
+        assert result.signals.shape == result.freqs.shape
+        assert len(result.freqs) == inputs.freq.sweep.freq.expts
+        assert np.all(np.isfinite(result.signals))
+    finally:
+        plots.finish(present=False)
+        plots.release()
 
 
 @pytest.mark.parametrize("unit", [None, "native", "A", "V"])
@@ -358,12 +396,12 @@ def test_explicit_flux_unit_is_required_and_reaches_native_plan(
     if unit is not None:
         data["flux_unit"] = unit
     env = FormEnv()
-    result = FormState(FormInput(T1PlanForm, data)).result(env)
+    result = FormState(FormInput(CoherencePlanForm, data)).result(env)
     if unit is None:
         assert isinstance(result, FormErrors)
         assert ("flux_unit",) in result.messages
     else:
-        assert isinstance(result, T1PlanForm)
+        assert isinstance(result, CoherencePlanForm)
         native = result.to_cfg(env, make_plan(inputs).snapshot)
         assert isinstance(native, T1Plan)
         assert native.flux_unit == unit

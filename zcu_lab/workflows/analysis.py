@@ -14,6 +14,7 @@ from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
     fit_decay,
+    fit_decay_fringe,
     fit_qubit_freq,
     fit_rabi,
 )
@@ -22,6 +23,10 @@ from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult, rabi_signal2real
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult, t2echo_signal2real
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
+    T2RamseyResult,
+    t2ramsey_signal2real,
+)
 
 
 @dataclass(frozen=True)
@@ -50,7 +55,10 @@ class RabiFit:
     """Nondecaying Rabi fit with native phase estimation.
 
     pi_length_us/error_us are the fitted pi-pulse duration and its propagated
-    standard error. observed/fitted are float64 vectors aligned with
+    standard error. pi2_length_us/pi2_error_us retain the phase-aware native
+    pi/2 duration and propagated error, not half the fitted pi duration.
+    Both durations use the same acquisition waveform and gain, in microseconds.
+    observed/fitted are float64 vectors aligned with
     source.lengths. quality contains residual diagnostics with no
     parameter-error entries. Native nonfinite estimates/errors are retained;
     this value does not certify calibration acceptance.
@@ -58,6 +66,8 @@ class RabiFit:
 
     pi_length_us: float
     error_us: float
+    pi2_length_us: float
+    pi2_error_us: float
     observed: NDArray[np.float64]
     fitted: NDArray[np.float64]
     quality: FitQuality
@@ -79,6 +89,22 @@ class DecayFit:
     observed: NDArray[np.float64]
     fitted: NDArray[np.float64]
     quality: FitQuality
+
+
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Project MIST IQ with the old centred-magnitude/spread policy, no fit.
+
+    signals is one complex 1-D gain trace. Return same-shaped absolute centred
+    magnitude divided by its population standard deviation. All-NaN traces
+    stay NaN; zero spread retains native division diagnostics rather than a
+    threshold, epsilon or invented success. Input is unchanged; no I/O occurs.
+    """
+    if signals.ndim != 1:
+        raise ValueError("MIST projection requires a 1-D gain trace")
+    if np.all(np.isnan(signals)):
+        return np.abs(signals)
+    magnitude = np.abs(signals - np.mean(signals))
+    return magnitude / np.std(magnitude)
 
 
 def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
@@ -115,17 +141,24 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
     1-D shape. Reuse the native real-axis rotation and phase-aware pi estimate.
     Estimating phase avoids a fixed-phase optimizer local minimum on native
     traces whose first sample is nonzero.
-    Return the pi duration, propagated uncertainty and residual curves.
+    Return pi and pi/2 durations, propagated uncertainties and residual curves.
     Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
     Native projection/fitting errors and optimizer warnings propagate.
     """
     observed = rabi_signal2real(result.signals)
-    pi_length, error, _pi2, _pi2_error, _freq, _freq_error, fitted, _optimizer = (
-        fit_rabi(result.lengths, observed, decay=False, init_phase=None)
+    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit_rabi(
+        result.lengths, observed, decay=False, init_phase=None
     )
-    # This calibration consumes pi only; the native helper also reports pi/2 and frequency.
     quality = compute_fit_quality(observed, fitted, {}, None)
-    return RabiFit(float(pi_length), float(error), observed, fitted, quality)
+    return RabiFit(
+        float(pi_length),
+        float(error),
+        float(pi2),
+        float(pi2_error),
+        observed,
+        fitted,
+        quality,
+    )
 
 
 def analyze_t1(result: T1Result) -> DecayFit:
@@ -142,6 +175,86 @@ def analyze_t1(result: T1Result) -> DecayFit:
     # Preserve the native estimate and error; residual diagnostics do not refit.
     quality = compute_fit_quality(observed, fitted, {}, None)
     return DecayFit(float(lifetime), float(error), observed, fitted, quality)
+
+
+def _fluxdep_projection(
+    signals: NDArray[np.complex128], *, echo: bool
+) -> NDArray[np.float64]:
+    real = t2echo_signal2real(signals) if echo else t2ramsey_signal2real(signals)
+    lower, upper = np.min(real), np.max(real)
+    normalized = (real - lower) / (upper - lower + 1e-12)
+    return 1.0 - normalized if real[0] < 0.5 * (upper + lower) else normalized
+
+
+def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit:
+    """Fit the complete finite zero-detune Echo trace with old fluxdep policy.
+
+    Supply matching 1-D microsecond times and complex IQ, at least five finite
+    samples, with strictly increasing times and explicit zero detune. Normalize
+    native rotated IQ to [0,1], reversing polarity when the initial signal is
+    low, then fit_decay without skipping the first sample. Return DecayFit with
+    whole-trace residual curves and microsecond estimates. Unlike the native
+    CLI/overnight analysis, this fluxdep fit keeps sample zero. Invalid input
+    raises ValueError; optimizer errors propagate. No acceptance or I/O occurs.
+    """
+    if result.true_activate_detune != 0.0:
+        raise ValueError("Echo fluxdep requires explicit zero detune")
+    _validate_fluxdep_trace(result.times, result.signals)
+    observed = _fluxdep_projection(result.signals, echo=True)
+    lifetime, error, fitted, _ = fit_decay(result.times, observed)
+    return DecayFit(
+        float(lifetime),
+        float(error),
+        observed,
+        fitted,
+        compute_fit_quality(observed, fitted, {}, None),
+    )
+
+
+def analyze_t2ramsey(result: T2RamseyResult) -> DecayFit:
+    """Fit a complete finite Ramsey fringe using the old fluxdep projection.
+
+    Supply matching 1-D microsecond delays and complex IQ, at least five finite
+    samples, with strictly increasing delays. Native rotated IQ is normalized
+    to [0,1] and initial-low polarity reversed. fit_decay_fringe estimates the
+    microsecond lifetime and marginal error. Observed/fitted retain all samples.
+    Invalid inputs raise ValueError; optimizer errors propagate. This function
+    does not reject estimates, refit calibration, acquire, plot or write files.
+    """
+    _validate_fluxdep_trace(result.times, result.signals)
+    observed = _fluxdep_projection(result.signals, echo=False)
+    lifetime, error, _detune, _error, fitted, _ = fit_decay_fringe(
+        result.times, observed
+    )
+    return DecayFit(
+        float(lifetime),
+        float(error),
+        observed,
+        fitted,
+        compute_fit_quality(observed, fitted, {}, None),
+    )
+
+
+def _validate_fluxdep_trace(
+    times: NDArray[np.float64], signals: NDArray[np.complex128]
+) -> None:
+    if (
+        times.ndim != 1
+        or signals.ndim != 1
+        or times.shape != signals.shape
+        or len(times) < 5
+    ):
+        raise ValueError(
+            "T2 fluxdep requires matching 1-D traces with at least five samples"
+        )
+    if (
+        not np.isfinite(times).all()
+        or not np.isfinite(signals).all()
+        or not np.all(np.diff(times) > 0)
+    ):
+        raise ValueError(
+            "T2 fluxdep requires finite signals and increasing finite delays"
+        )
 
 
 def analyze_t2echo(result: T2EchoResult) -> DecayFit:

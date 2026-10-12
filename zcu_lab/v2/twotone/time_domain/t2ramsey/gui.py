@@ -128,6 +128,7 @@ class T2RamseyAdapter(
         T2RamseyAnalyzeParams,
     ]
 ):
+    experiment_tag: ClassVar[str | None] = T2RamseyExp.persistence_tag()
     exp_cls = T2RamseyExp
     ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
 

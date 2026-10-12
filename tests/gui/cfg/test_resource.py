@@ -374,6 +374,8 @@ def test_one_off_acceptance_failure_keeps_inputs_and_publication(
         with pytest.raises(CfgPreconditionError) as caught:
             resource.accept(resolution=temporary)
         assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+        assert caught.value.path == ("a",)
+        assert "Unavailable alias in frequency" in str(caught.value)
     assert resource.observe() == before
     assert resource.snapshot_inputs() == inputs
     assert seen == [before]

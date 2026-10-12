@@ -1,11 +1,13 @@
 # v2 experiments
 
-**Last updated:** 2026-10-08，reset phase cycling 與移除舊 Autofluxdep
+**Last updated:** 2026-10-12，shared actual-detune owner
 
 ZigZag 的 Run 與離線編譯共用 `build_zigzag_modules`，使用 register loop。
 `reset_phase_cycle` 可在偶數 averaging sweeps 間交替最後 reset qubit pulse 的 0/180°
 相位，不新增 RF pulse 或 programmed wait。它平均初始化的橫向相干分量，不修正
 population 或 repeated-gate 誤差；支援 TwoPulse/Bath reset，需獨立驗證相位及初態投影。
+
+`twotone/time_domain/detune.actual_detune` 集中 Ramsey／Echo 的 actual MHz 計算。Native run 與 workflow callback 共用四個 caller，不各自複製 time／phase rounding 公式。Ramsey 必填 time_scaler=1.0，Echo 必填 0.5，保留兩half-delay的原量化。它使用既有 typed SweepCfg／QickConfig，零 nominal detune 回0.0，其他值保留原 quantization／NumPy failure 語意。不改 fitter、閾值、round_zcu 或 sweep2array。
 
 每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 

@@ -1,10 +1,10 @@
-"""Qt-free declarations for RPC submission and control of a T1 run."""
+"""Qt-free declarations for RPC submission and control of a native workflow run."""
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-WIRE_VERSION = 1
-GUI_VERSION = 1
+WIRE_VERSION = 2
+GUI_VERSION = 2
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -18,6 +18,16 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Submit partial Start input; native operation_id is pending, not acceptance.",
         params=(
             _RUN_ID,
+            ParamSpec(
+                "name",
+                JsonType.STRING,
+                required=False,
+                default=None,
+                description=(
+                    "Native workflow name: coherence_fluxdep, mist_fluxdep or overnight; "
+                    "omitted/null selects coherence_fluxdep, not GUI draft selection."
+                ),
+            ),
             ParamSpec(
                 "plan",
                 JsonType.JSON,

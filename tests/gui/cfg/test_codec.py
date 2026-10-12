@@ -33,7 +33,7 @@ from zcu_tools.gui.cfg import (
 
 
 def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> None:
-    from zcu_tools.gui.cfg.lowering import validate_finished_cfg
+    from zcu_tools.gui.cfg.lowering import lower_finished_cfg
 
     value = DirectValue(None, raw="1e", error="Invalid number")
     schema = CfgSchema(
@@ -44,7 +44,7 @@ def test_invalid_direct_text_round_trips_without_becoming_optional_unset() -> No
 
     assert restored.value.fields["mixer"] == value
     with pytest.raises(RuntimeError, match="mixer.*Invalid number"):
-        validate_finished_cfg(restored, resolve_reference=None)
+        lower_finished_cfg(restored, resolve_expression=None, resolve_reference=None)
 
 
 @pytest.mark.parametrize(
@@ -297,6 +297,24 @@ def test_centered_sweep_roundtrip_preserves_center_shape():
     assert sweep.center.expr == "r_f"
     assert sweep.span == pytest.approx(100.0)
     assert sweep.expts == 201
+
+
+@pytest.mark.parametrize("spec", [SweepSpec("Range"), CenteredSweepSpec("Range")])
+def test_range_restore_rejects_non_object_payload(spec: SweepSpec | CenteredSweepSpec):
+    base = _empty(CfgSectionSpec(fields={"range": spec}))
+    with pytest.raises(SessionCodecError, match="payload must be an object"):
+        raw_to_schema(base, {"range": [1, 2, 3]})
+
+
+def test_centered_range_restore_coerces_numeric_controls_and_requires_step():
+    base = _empty(CfgSectionSpec(fields={"range": CenteredSweepSpec("Range")}))
+    raw = {"center": 5, "span": "2.5", "expts": "6", "step": "0.5"}
+    restored = raw_to_schema(base, {"range": raw})
+    value = restored.value.fields["range"]
+    assert isinstance(value, CenteredSweepValue)
+    assert (value.center, value.span, value.expts, value.step) == (5.0, 2.5, 6, 0.5)
+    with pytest.raises(SessionCodecError, match="Centered sweep step is required"):
+        raw_to_schema(base, {"range": {**raw, "step": None}})
 
 
 def test_waveform_ref_roundtrip():

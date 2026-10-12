@@ -38,7 +38,6 @@ from zcu_tools.gui.project import (
     default_result_dir,
 )
 from zcu_tools.gui.result_scope import ResultScope, ResultScopeManager
-from zcu_tools.gui.widgets.remote_edit_gate import RemoteEditGate
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,6 @@ class ProjectDialog(QDialog):
         self.setWindowTitle("Project")
         self.resize(560, 220)
 
-        self._edit_gate: RemoteEditGate | None = None
         self._db_label = db_label
         self._result_scopes: tuple[ResultScope, ...] = ()
         self._syncing_scope_selection = False
@@ -141,16 +139,6 @@ class ProjectDialog(QDialog):
         buttons.addWidget(self._write_buttons)
         buttons.addWidget(cancel)
         root.addLayout(buttons)
-
-    def bind_edit_gate(self, gate: RemoteEditGate) -> None:
-        """Gate fields and OK through the view's authority owner, leaving Cancel live.
-
-        Bind once before opening. The caller retains/disposes the gate; dialog
-        destruction detaches its containers. Ungated callers behave unchanged.
-        """
-        self._edit_gate = gate
-        gate.bind(self._content)
-        gate.bind(self._write_buttons)
 
     def _dir_row(self, edit: QLineEdit, on_browse: Callable[[], None]) -> QWidget:
         row = QHBoxLayout()
@@ -288,17 +276,23 @@ class ProjectDialog(QDialog):
 
     def _browse_result(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, "Select result dir", self._result_edit.text()
+            self,
+            "Select result dir",
+            self._result_edit.text(),
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if path and (self._edit_gate is None or self._edit_gate.local_editing):
+        if path:
             self._result_overridden = True
             self._result_edit.setText(path)
 
     def _browse_database(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, f"Select {self._db_label.lower()}", self._database_edit.text()
+            self,
+            f"Select {self._db_label.lower()}",
+            self._database_edit.text(),
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
-        if path and (self._edit_gate is None or self._edit_gate.local_editing):
+        if path:
             self._database_overridden = True
             self._database_edit.setText(path)
 

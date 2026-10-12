@@ -251,38 +251,7 @@ def _preserve_future_extras(serialized: YamlValue, validated: object) -> YamlVal
 def _prepare_draft_presence(base: object, draft: object) -> None:
     """Mark in-place default mutations on an independent draft before serialization."""
     if isinstance(draft, BaseModel):
-        same_model = isinstance(base, BaseModel) and type(base) is type(draft)
-        base_fields = (
-            base.model_fields_set
-            if isinstance(base, BaseModel) and same_model
-            else set()
-        )
-        values = {name: getattr(draft, name) for name in type(draft).model_fields}
-        for name, field in type(draft).model_fields.items():
-            if same_model:
-                before = getattr(base, name)
-            elif field.is_required():
-                before = _Missing.VALUE
-            else:
-                before = field.get_default(
-                    call_default_factory=True, validated_data=values
-                )
-            after = values[name]
-            _prepare_draft_presence(before, after)
-            if (
-                name not in draft.model_fields_set
-                and name not in base_fields
-                and (
-                    isinstance(before, _Missing)
-                    or not _same_value(_projection(before), _projection(after))
-                )
-            ):
-                draft.model_fields_set.add(name)
-        base_extras = (
-            base.model_extra or {} if isinstance(base, BaseModel) and same_model else {}
-        )
-        for name, child in (draft.model_extra or {}).items():
-            _prepare_draft_presence(base_extras.get(name, _Missing.VALUE), child)
+        _prepare_model_presence(base, draft)
     elif isinstance(draft, Mapping):
         original = base if isinstance(base, Mapping) else {}
         for key, child in draft.items():
@@ -296,6 +265,39 @@ def _prepare_draft_presence(base: object, draft: object) -> None:
                 else _Missing.VALUE,
                 child,
             )
+
+
+def _prepare_model_presence(base: object, draft: BaseModel) -> None:
+    """Compare model fields against their original or default values before dumping."""
+    same_model = isinstance(base, BaseModel) and type(base) is type(draft)
+    base_fields = (
+        base.model_fields_set if isinstance(base, BaseModel) and same_model else set()
+    )
+    values = {name: getattr(draft, name) for name in type(draft).model_fields}
+    for name, field in type(draft).model_fields.items():
+        if same_model:
+            before = getattr(base, name)
+        elif field.is_required():
+            before = _Missing.VALUE
+        else:
+            before = field.get_default(call_default_factory=True, validated_data=values)
+        after = values[name]
+        # Model fields can contain containers or models, so re-enter the tree dispatcher.
+        _prepare_draft_presence(before, after)
+        if (
+            name not in draft.model_fields_set
+            and name not in base_fields
+            and (
+                isinstance(before, _Missing)
+                or not _same_value(_projection(before), _projection(after))
+            )
+        ):
+            draft.model_fields_set.add(name)
+    base_extras = (
+        base.model_extra or {} if isinstance(base, BaseModel) and same_model else {}
+    )
+    for name, child in (draft.model_extra or {}).items():
+        _prepare_draft_presence(base_extras.get(name, _Missing.VALUE), child)
 
 
 def _draft_projection(base: object, draft: BaseModel) -> YamlValue:

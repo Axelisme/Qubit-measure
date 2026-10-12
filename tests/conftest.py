@@ -21,15 +21,19 @@ import numpy as np
 
 # Configure platformdirs before descendant conftests or test modules can create
 # a caretaker. Do not use pytest's basetemp: it is cleared during the session.
-_GUI_CACHE_GUARD = GuiCacheGuard()
+_GUI_CACHE_GUARD = GuiCacheGuard(
+    process_lifetime=not GuiCacheGuard.process_isolation_active()
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    """Register the cache guard with this session's active pytest configuration."""
     config.pluginmanager.register(_GUI_CACHE_GUARD, "gui-cache-guard")
 
 
 def pytest_unconfigure() -> None:
-    # Also restore on startup errors before pytest_configure could register it.
+    """Release nested cache ownership; keep outer isolation through cleanup."""
+    # Also handle startup errors before pytest_configure could register it.
     _GUI_CACHE_GUARD.pytest_unconfigure()
 
 

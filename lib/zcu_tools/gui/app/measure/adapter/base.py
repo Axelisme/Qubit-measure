@@ -259,12 +259,17 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
                 "remove get_post_writeback_items() or set post_analysis=True",
             )
 
+        cls._validate_load_capability(enabled=caps.load_data)
+
+    @classmethod
+    def _validate_load_capability(cls, *, enabled: bool) -> None:
+        """Require a declared loader, or forbid an override when loading is disabled."""
         # Loading is a capability gate, not a runtime probe. A concrete adapter
         # may provide its own loader, or it may opt into BaseAdapter.load when the
         # experiment class can be constructed without arguments and exposes a
         # canonical callable loader. A disabled capability must not hide an
         # accidental adapter override.
-        if caps.load_data:
+        if enabled:
             if not cls._is_method_implemented("load"):
                 exp_cls = getattr(cls, "exp_cls", None)
                 has_canonical_loader = isinstance(exp_cls, type) and (

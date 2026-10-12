@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from qtpy.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
 from zcu_tools.gui.remote.control_service import RemoteControlServiceBase
 from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
@@ -66,6 +67,72 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
     assert result(h.request(link, "project.info")) == original
     for method in ("control.acquire", "control.release"):
         reason(h.request(link, method), "readonly_connection")
+
+
+@pytest.mark.parametrize("dialog_type", [QDialog, QFileDialog, QMessageBox])
+@pytest.mark.parametrize("command", ["connect", "acquire"])
+def test_local_modal_refuses_owner_until_closed(
+    control_rpc, qapp, dialog_type, command
+):
+    h = control_rpc
+    link = raw_client(h)
+    original = result(h.request(link, "project.info"))
+    if command == "acquire":
+        result(h.request(link, "control.connect", label="writer"))
+        result(h.request(link, "control.release"))
+    dialog = dialog_type()
+    if isinstance(dialog, QFileDialog):
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
+    dialog.setModal(True)
+    dialog.show()
+    try:
+        assert QApplication.activeModalWidget() is dialog
+        params = {"label": "writer"} if command == "connect" else {}
+        reply = h.request(link, f"control.{command}", **params)
+        reason(reply, "local_busy")
+        assert reply["error"]["message"] == "Local 使用中"
+        assert result(h.request(link, "control.status"))["holder"] == "gui"
+        reason(
+            h.request(link, "project.setup", chip_name="bad", qub_name="bad"),
+            "not_holder",
+        )
+        assert result(h.request(link, "project.info")) == original
+        reader = raw_client(h)
+        assert (
+            result(h.request(reader, "control.connect", mode="readonly"))["holder"]
+            == "gui"
+        )
+        reason(h.request(reader, "control.acquire"), "readonly_connection")
+    finally:
+        dialog.reject()
+    assert QApplication.activeModalWidget() is None
+    if command == "connect":
+        result(h.request(link, "control.connect", label="writer"))
+    else:
+        result(h.request(link, "control.acquire"))
+    result(h.request(link, "project.setup", chip_name="new", qub_name="q"))
+    assert result(h.request(link, "project.info"))["chip_name"] == "new"
+
+
+def test_remote_modal_allows_same_holder_reconnect_and_queries(control_rpc, qapp):
+    h = control_rpc
+    link = raw_client(h)
+    result(h.request(link, "control.connect", label="same"))
+    dialog = QDialog()
+    dialog.setModal(True)
+    dialog.show()
+    try:
+        assert result(h.request(link, "control.connect", label="same"))["me"] is True
+        reconnect = raw_client(h)
+        assert (
+            result(h.request(reconnect, "control.connect", label="same"))["me"] is True
+        )
+        assert result(h.request(reconnect, "control.acquire"))["me"] is True
+        assert (
+            result(h.request(raw_client(h), "control.status"))["holder"] == "rpc:same"
+        )
+    finally:
+        dialog.reject()
 
 
 def test_holder_writes_without_reading_business_state(control_rpc):

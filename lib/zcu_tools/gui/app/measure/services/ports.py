@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -117,9 +118,19 @@ class PostAnalysisPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class SavePaneSnapshot:
-    """Current annotation; destinations belong only to artifact outputs."""
+    """Current annotation and how the Data tab presents this tab's outputs.
+
+    comment is the annotation draft. display_bases are the directories output
+    paths are shown relative to: the parents of the Run's own result and
+    database roots (so "Database/<entry>/runs/…" and "result/<entry>/…"), or
+    () when the Run has no saved-point storage. saves_to_entry is False when
+    the adapter declares no persistence (experiment_tag is None), so the Data
+    tab can say why nothing is saveable. Destinations belong to outputs.
+    """
 
     comment: str = ""
+    display_bases: tuple[Path, ...] = ()
+    saves_to_entry: bool = True
 
 
 @dataclass(frozen=True)

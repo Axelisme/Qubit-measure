@@ -1,12 +1,18 @@
 """Entry selection admission at real application, view and wire seams."""
 
+from collections.abc import Iterator
 from typing import NoReturn
 
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.tab import TabService
+from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
+from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
+from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -21,7 +27,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 
-from ._point_application import PointApplication
+from ._point_application import PointAdapter, PointApplication
 
 
 def entry_resource(application: PointApplication) -> ResultEntry:
@@ -66,18 +72,9 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
     assert error["reason"] == "no_context"
     tab_id = application.controller.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
-        application.controller.start_run(
-            tab_id, application.controller.cfg_resources.lookup(tab_id).observe().ref
-        )
+        application.controller.start_run(tab_id)
     assert caught.value.reason_code == "no_active_context"
-    ref = application.controller.cfg_resources.lookup(tab_id).observe().ref
-    reply = application.rpc(
-        "tab.run_start",
-        {
-            "tab_id": tab_id,
-            "expected": {"cfg_id": ref.cfg_id, "revision": str(ref.revision)},
-        },
-    )
+    reply = application.rpc("tab.run_start", {"tab_id": tab_id})
     assert reply["ok"] is False
     assert isinstance(reply["error"], dict)
     assert reply["error"]["code"] == ErrorCode.PRECONDITION_FAILED
@@ -204,3 +201,131 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     finally:
         service.teardown_draft(draft)
         application.state.get_tab(tab_id).analysis.writeback_draft = None
+
+
+@pytest.fixture
+def parameter_writeback_pane(
+    application: PointApplication,
+) -> Iterator[tuple[str, ParameterContext]]:
+    application.open_entry()
+    application.result("point.new", {"label": "a"})
+    control = application.controller.context_control
+    captured = control.read_context()
+    control.set_parameter(captured.target, "general.ext.a", 1.0)
+    control.set_parameter(captured.target, "general.ext.b", 2.0)
+    bus = BaseEventBus()
+    editor = CfgEditorService(
+        application.controller,
+        application.controller,
+        application.controller,
+        application.controller,
+        bus,
+    )
+    service = WritebackService(editor, write_port=control)
+    facet = WritebackControlFacet(
+        state=application.state,
+        guard=GuardService(
+            application.state,
+            captured_parameters=lambda aliases: control.read_context(aliases=aliases),
+            cfg_resolution=unused_resolution,
+        ),
+        writeback=service,
+        resource_versions=application.state.version.snapshot,
+        bus=bus,
+    )
+    application.remote.writeback_control = facet
+    tab_id = application.controller.new_tab("pointed")
+    draft = service.create_draft(
+        [
+            ParameterWriteback("general.ext.a", "A", proposed_value=11.0),
+            ParameterWriteback("general.ext.b", "B", proposed_value=22.0),
+        ],
+        parameters=captured,
+        experiment_name="test/point-admission",
+    )
+    application.state.update_tab_analyze(tab_id, object(), None, writeback_draft=draft)
+    registry = Registry()
+    registry.register("pointed", PointAdapter)
+    tab = TabService(
+        application.state,
+        registry,
+        service,
+        TabCfgResources(
+            mutation_allowed=lambda tab_id: not application.state.is_tab_busy(tab_id)
+        ),
+        unused_resolution,
+        lambda aliases: control.read_context(aliases=aliases),
+    )
+    application.remote.tab_control = TabControlFacet(
+        state=application.state,
+        tab=tab,
+        workspace=WorkspaceService(application.state, tab, bus),
+        bus=bus,
+        load_tab_result=application.controller.run_analyze_control.load_tab_result,
+    )
+    try:
+        yield tab_id, captured
+    finally:
+        service.teardown_draft(draft)
+        application.state.get_tab(tab_id).analysis.writeback_draft = None
+
+
+@pytest.mark.parametrize(
+    "selection",
+    ["omitted", "null", "explicit", "empty", "string", "empty-id", "number", "object"],
+)
+def test_writeback_rpc_uses_gui_selection_or_explicit_ids_without_changing_selection(
+    application: PointApplication,
+    parameter_writeback_pane: tuple[str, ParameterContext],
+    selection: str,
+) -> None:
+    tab_id, captured = parameter_writeback_pane
+    pane: dict[str, object] = {"tab_id": tab_id, "subtab_id": "analysis"}
+    preview = application.result("tab.writeback_preview", pane)
+    items = preview["items"]
+    assert isinstance(items, list)
+    first_item, second_item = items
+    assert isinstance(first_item, dict)
+    assert isinstance(second_item, dict)
+    first, second = first_item["id"], second_item["id"]
+    application.result("tab.writeback_set", {**pane, "id": second, "selected": False})
+    params = dict(pane)
+    inputs = {
+        "null": None,
+        "explicit": [second],
+        "empty": [],
+        "string": first,
+        "empty-id": [""],
+        "number": [1],
+        "object": {},
+    }
+    if selection != "omitted":
+        params["ids"] = inputs[selection]
+    before = entry_resource(application).ledger.events()
+    reply = application.rpc("tab.writeback_apply", params)
+    if selection in {"omitted", "null", "explicit", "empty"}:
+        assert reply["ok"] is True, reply
+        expected_ids = [second] if selection == "explicit" else [first]
+        if selection == "empty":
+            expected_ids = []
+        result = reply["result"]
+        assert isinstance(result, dict)
+        assert result["applied_ids"] == expected_ids
+    else:
+        assert reply["ok"] is False, reply
+        error = reply["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == ErrorCode.INVALID_PARAMS
+    control = application.controller.context_control
+    assert control.read_target(captured.target).value("general.ext.a") == (
+        11.0 if selection in {"omitted", "null"} else 1.0
+    )
+    assert control.read_target(captured.target).value("general.ext.b") == (
+        22.0 if selection == "explicit" else 2.0
+    )
+    if selection not in {"omitted", "null", "explicit"}:
+        assert entry_resource(application).ledger.events() == before
+    after = application.result("tab.writeback_preview", pane)
+    after_items = after["items"]
+    assert isinstance(after_items, list)
+    assert [item["selected"] for item in after_items] == [True, False]

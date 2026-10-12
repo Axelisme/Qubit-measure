@@ -34,6 +34,7 @@ ZigZagRunResult: TypeAlias = RunRecord[ZigZagCfg, ZigZagResult]
 
 
 class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
+    experiment_tag: ClassVar[str | None] = ZigZagExp.persistence_tag()
     exp_cls = ZigZagExp
     ExpCfg_cls: ClassVar[Any] = ZigZagCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

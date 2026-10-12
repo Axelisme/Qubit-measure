@@ -93,11 +93,12 @@ def describe_error(error: BaseException) -> ErrorInfo:
 
 @dataclass(frozen=True)
 class ExperimentFailed:
-    """Recoverable Schedule failure without a Result or run file.
+    """Recoverable Schedule failure without a Result.
 
     call_seq and run_no identify the invocation and effect, each counted from 1.
-    experiment is the validated function-name stem. reason is the Schedule
-    diagnostic; error preserves the original cause.
+    run_no is diagnostic only: it does not imply saving, existence or a path.
+    experiment names the callback. reason is the Schedule diagnostic; error
+    preserves the original cause.
     """
 
     call_seq: int
@@ -120,14 +121,12 @@ class IterationResult:
     """Invocation output reference shared by non-commit outcomes.
 
     call_seq counts calls from 1; revision is the call's captured tunables
-    revision. iteration_dir is relative to data_root. run_files lists only
-    published finals relative to that iteration, ordered by run_no.
+    revision. iteration_dir is relative to data_root.
     """
 
     call_seq: int
     revision: int
     iteration_dir: str
-    run_files: tuple[str, ...]
 
 
 @dataclass(frozen=True)

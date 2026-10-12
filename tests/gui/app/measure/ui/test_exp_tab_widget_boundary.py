@@ -81,6 +81,7 @@ class _Interactive(InteractiveFrontend):
     def __init__(self) -> None:
         super().__init__()
         self.stopped = False
+        self.read_only = False
         self._preview_active = True
         self._figure = Figure()
 
@@ -91,6 +92,9 @@ class _Interactive(InteractiveFrontend):
     @property
     def preview_active(self) -> bool:
         return self._preview_active
+
+    def set_read_only(self, *, read_only: bool) -> None:
+        self.read_only = read_only
 
     def cancel_preview(self) -> None:
         self._preview_active = False

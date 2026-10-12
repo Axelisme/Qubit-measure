@@ -1,4 +1,4 @@
-"""T1 knob forms and explicit conversion to native workflow models."""
+"""Shared calibration and T1 lifetime knob forms for Coherence."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class CalibrationTunablesForm(FormModel):
         default=5.0, gt=0, description="Inclusive minimum readout SNR"
     )
     ro_every: int = Field(
-        default=5, ge=1, description="Successful readout scan cadence"
+        default=5, ge=1, description="Flux-point readout scan cadence"
     )
     rabi_start_factor: float = Field(
         default=0.1, gt=0, description="Sweep start divided by prior pi duration"
@@ -105,19 +105,13 @@ class CalibrationTunablesForm(FormModel):
 
 
 class T1TunablesForm(FormModel):
-    """User-facing T1 and calibration knobs; instances hold ordinary values only.
+    """User-facing T1 lifetime knobs; instances hold ordinary values only.
 
-    cal owns calibration knobs. Other fields control T1 generation/acceptance as
+    Fields control T1 generation/acceptance as
     described in their Fields. defaults read only captured parameters; these
     knobs need neither library nor device infos. Submission belongs to the host.
     """
 
-    cal: Annotated[
-        CalibrationTunablesForm, Display(label="Calibration", collapsed=True)
-    ] = Field(
-        default_factory=CalibrationTunablesForm,
-        description="Calibration generation and acceptance knobs",
-    )
     reps: Annotated[int, Display(label="T1 averages")] = Field(
         default=100, ge=1, description="T1 averages"
     )
@@ -174,7 +168,6 @@ class T1TunablesForm(FormModel):
         failures propagate after invalid direct edits.
         """
         return T1Tunables(
-            cal=self.cal.to_cfg(),
             reps=self.reps,
             rounds=self.rounds,
             guess_us=self.guess_us,

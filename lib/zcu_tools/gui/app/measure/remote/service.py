@@ -34,6 +34,8 @@ import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, cast
 
+from qtpy.QtWidgets import QApplication
+
 from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
@@ -114,6 +116,9 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     (screenshot / snapshot / dialog).
     ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
+
+    def _local_modal_open(self) -> bool:
+        return QApplication.activeModalWidget() is not None
 
     ctrl: Controller
     tab_control: TabControlPort
