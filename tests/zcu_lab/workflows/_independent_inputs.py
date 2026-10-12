@@ -142,10 +142,10 @@ def coherence_run(
         file = "frequency-final.h5"
         save_input(
             env.iteration_dir / file,
-            "twotone/ge/freq",
-            np.array([1.0, 2.0, 3.0]),
+            "twotone/freq",
+            np.array([4999.0, 5000.0, 5001.0]) + state,
             coordinate=10 + state,
-            axis=("Frequency", "Hz"),
+            axis=("Frequency", "MHz"),
         )
         frequency = FrequencyResult(
             "accepted" if state != 3 else "rejected",
