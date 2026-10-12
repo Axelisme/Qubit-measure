@@ -71,7 +71,7 @@ def test_compatible_restore_reports_unmatched_sources_and_keeps_other_leaves(
         "averages": 17,
         "delay": 0.0,
     }
-    expected_dropped = {("delay",), ("removed",)}
+    expected_dropped: set[FormPath] = {("delay",), ("removed",)}
     if capture != "matched":
         expected_dropped.update({("drive", "name"), ("readout", "name")})
     assert set(dropped) == expected_dropped
