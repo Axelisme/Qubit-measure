@@ -14,6 +14,7 @@ from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json
+from .defaults import static_defaults
 from .model import FormEnv, FormModel, FormPath, FormWritePath
 
 
@@ -178,15 +179,6 @@ def _choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, .
     ):
         return ()
     return (info,)
-
-
-def static_defaults(model: type[BaseModel]) -> dict[str, JsonValue]:
-    """Encode declared Pydantic defaults; required fields remain absent."""
-    return {
-        name: default_json(info.get_default(call_default_factory=True))
-        for name, info in model.model_fields.items()
-        if not info.is_required()
-    }
 
 
 def _branch_defaults(

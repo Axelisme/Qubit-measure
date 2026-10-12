@@ -167,7 +167,7 @@ class FormModel(BaseModel):
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
         """
-        from ._structure import static_defaults
+        from .defaults import static_defaults
 
         del env, previous
         return static_defaults(cls)
@@ -501,7 +501,7 @@ class ModuleInline(FormModel):
         it never supplies a dummy Spec. Static defaults apply without a prior ref.
         """
         from ._json import copy_object
-        from ._structure import static_defaults
+        from .defaults import static_defaults
 
         data = static_defaults(cls)
         if previous.get("kind") == "ref" and isinstance(
