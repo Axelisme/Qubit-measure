@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-11，離線 legacy reader 移至 migrations
+**Last updated:** 2026-10-12，analysis summary 直接值的 numpy scalar 轉換
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
@@ -10,7 +10,9 @@ facade。caller 優先從 package root import model 與 function。`data.h5` 是
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
-- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要，僅接受有限的 strict JSON 值。`encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
+- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
+  Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
+  `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。

@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -20,6 +19,7 @@ from pydantic import (
 )
 
 from zcu_tools.core.complex_codec import encode_complex
+from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 
 
 def _json_value(value: object) -> object:
@@ -126,10 +126,7 @@ class AcceptedWrite(_LedgerModel):
     @field_validator("value", mode="before")
     @classmethod
     def _normalize_scalar_value(cls, value: object) -> object:
-        if isinstance(value, np.floating):
-            return float(value)
-        if isinstance(value, np.integer):
-            return int(value)
+        value = normalize_numpy_scalar(value)
         if isinstance(value, complex):
             return encode_complex(value)
         return value
