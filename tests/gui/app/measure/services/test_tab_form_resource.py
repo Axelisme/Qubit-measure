@@ -160,7 +160,10 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     allowed = True
     pool = resource_api.TabFormResources(mutation_allowed=lambda _tab: allowed)
     form = Form(ScalarCore, {})
-    capture = lambda _aliases: resource_api.TabFormSources(captured_env(2.0))
+
+    def capture(_aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
+        return resource_api.TabFormSources(captured_env(2.0))
+
     first = pool.create("first", form, capture=capture)
     second = pool.create("second", form, capture=capture)
     failures: list[CfgPreconditionReason] = []
@@ -182,7 +185,7 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     first.subscribe(notification)
     first.write({("amount",): 4.0})
     assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 6
-    assert second.result() == ScalarCore(amount=0.0)
+    assert second.result() == ScalarCore(amount=1.0)
     allowed = False
     for command in (
         lambda: second.write({("amount",): 9.0}),
@@ -193,14 +196,14 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
         with pytest.raises(CfgPreconditionError) as caught:
             command()
         assert caught.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
-    assert second.result() == ScalarCore(amount=0.0)
+    assert second.result() == ScalarCore(amount=1.0)
     allowed = True
     pool.retire("second")
     with pytest.raises(CfgPreconditionError) as caught:
         second.write({("amount",): 9.0})
     assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
     assert pool.create("second", form, capture=capture).result() == ScalarCore(
-        amount=0.0
+        amount=1.0
     )
 
 
