@@ -500,7 +500,6 @@ def test_run_registration_and_failed_submission_allow_operation_reads(
 
         monkeypatch.setattr(BackgroundRunner, "submit", reject_submission)
     tab_id = application.ctrl.new_tab("fake")
-    application.ctrl.cfg_resources.lookup(tab_id).input
     observed: list[tuple[bool, tuple[int, ...], tuple[int, ...]]] = []
     errors: list[str] = []
 
