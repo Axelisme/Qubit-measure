@@ -106,9 +106,9 @@ def control_server(
         harness.close()
 
 
-def invoke(server: FluxdepServer, name: str, **arguments):
+def invoke(server: FluxdepServer, tool_name: str, **arguments):
     """Exercise the assembled public tool handler."""
-    return server.tools["fluxdep_" + name]["handler"](arguments)
+    return server.tools["fluxdep_" + tool_name]["handler"](arguments)
 
 
 def test_owner_connect_acquires_reports_control_and_exposes_release_acquire(
@@ -154,12 +154,12 @@ def test_readonly_connect_reads_rejects_writes_and_reconnects_with_same_identity
     reply = invoke(server, "connect", label="reader", mode="readonly")
     assert isinstance(reply, dict), reply
     assert reply["control"]["me"] is False
-    original = invoke(server, "project_info")
+    original = invoke(server, "spectrum_snapshot", name="missing")
     with pytest.raises(GuiInvocationError) as caught:
-        invoke(server, "project_setup", chip_name="changed", qub_name="q")
+        invoke(server, "spectrum_remove", name="missing")
     assert caught.value.reason == "not_holder"
     assert caught.value.data == {"holder": "gui", "locked": False, "online": True}
-    assert invoke(server, "project_info") == original
+    assert invoke(server, "spectrum_snapshot", name="missing") == original
     with pytest.raises(GuiInvocationError) as caught:
         invoke(server, "control_acquire")
     assert caught.value.reason == "readonly_connection"
@@ -228,10 +228,8 @@ def test_stdio_projects_real_control_rejections_without_losing_holder_data(
         mode = "readonly"
     invoke(server, "connect", label="reader", mode=mode)
     if reason == "not_holder":
-        method = "project_setup"
-    arguments: dict[str, object] = (
-        {"chip_name": "changed", "qub_name": "q"} if reason == "not_holder" else {}
-    )
+        method = "spectrum_remove"
+    arguments: dict[str, object] = {"name": "missing"} if reason == "not_holder" else {}
     reply = invoke_stdio(
         server.bridge.config, server.tools, "fluxdep_" + method, arguments
     )

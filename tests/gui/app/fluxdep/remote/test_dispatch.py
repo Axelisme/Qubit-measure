@@ -53,7 +53,7 @@ def test_project_info_reports_state():
     assert info["qub_name"] == "Q1"
     # ProjectInfo derives both paths from chip/qubit in __post_init__
     assert info["result_dir"] == os.path.join("result", "Q5_2D", "Q1")
-    assert info["database_path"] == os.path.join("Database", "Q5_2D", "Q1")
+    assert info["data_root"] == os.path.join("Database", "Q5_2D", "Q1")
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +159,7 @@ def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
                 "aligned": True,
                 "points_completed": True,
                 "point_count": 0,
+                "pending": None,
             }
         ]
     finally:

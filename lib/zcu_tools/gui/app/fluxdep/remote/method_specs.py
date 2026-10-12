@@ -25,26 +25,22 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, "
-        "database_path).",
+        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
         readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
-        "Apply project identity and paths. Empty or "
-        "omitted paths use the native project defaults; database_path is the raw "
-        "data root, not the fit search database file.",
+        "Apply chip/qubit identity. The GUI derives result_dir and data_root "
+        "from its project root; paths are outputs, not accepted inputs.",
         params=(
             ParamSpec("chip_name", JsonType.STRING),
             ParamSpec("qub_name", JsonType.STRING),
-            ParamSpec("result_dir", JsonType.STRING, required=False, default=""),
-            ParamSpec("database_path", JsonType.STRING, required=False, default=""),
         ),
     ),
     # Spectrum collection
     "spectrum.list": MethodSpec(
         5.0,
-        "List spectra: each {name, spec_type, aligned, points_completed, point_count}. "
+        "List spectra: each {name, spec_type, aligned, points_completed, point_count, pending}. "
         "Completion includes zero points; point_count reports available data.",
         readonly=True,
     ),
@@ -52,6 +48,13 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0,
         "Read the complete editable spectrum projection for a literal name. "
         "Absent names return {name, exists: false}; no raw complex matrix is sent.",
+        params=(ParamSpec("name", JsonType.STRING),),
+        readonly=True,
+    ),
+    "spectrum.render": MethodSpec(
+        30.0,
+        "Render published raw spectrum, committed alignment lines and sampled points "
+        "as {png_b64, bytes}. Does not open input or change display.",
         params=(ParamSpec("name", JsonType.STRING),),
         readonly=True,
     ),
@@ -99,7 +102,8 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "selection.snapshot": MethodSpec(
         5.0,
         "Read the complete published joint-cloud selection mask and native "
-        "normalized min_distance. Null mask means all points, not a live Session.",
+        "normalized min_distance, plus pending for an unfinished Filter draft. "
+        "Null mask means all points, not a live Session.",
         readonly=True,
     ),
     "selection.pointcloud": MethodSpec(

@@ -35,7 +35,7 @@ def test_nearest_existing_falls_back_to_ancestor(tmp_path):
 
 
 def test_database_dir_falls_back_to_bundled_when_unset():
-    p = ProjectInfo()  # no database_path
+    p = ProjectInfo()  # no data_root
     d = paths.database_dir(p)
     # either the bundled dir exists (→ returned) or "" when absent
     assert (
@@ -63,5 +63,5 @@ def test_default_database_file_anchors_bundled_at_injected_root(tmp_path):
 
 
 def test_existing_dirs_are_returned_as_is(tmp_path):
-    p = ProjectInfo(database_path=str(tmp_path))
+    p = ProjectInfo(data_root=str(tmp_path))
     assert paths.raw_spectrum_dir(p) == str(tmp_path)

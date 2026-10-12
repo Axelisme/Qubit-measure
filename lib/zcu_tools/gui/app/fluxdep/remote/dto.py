@@ -216,6 +216,8 @@ class SpectrumListItem(TypedDict):
     aligned: bool
     points_completed: bool
     point_count: int
+    # Unfinished alignment or sampling draft, otherwise None.
+    pending: Literal["align", "sample"] | None
 
 
 class SpectrumListReply(TypedDict):
@@ -343,6 +345,12 @@ class SpectrumAbsentReply(TypedDict):
     exists: Literal[False]
 
 
+class AlignmentSourceReply(TypedDict):
+    """Current source of published alignment, or None for direct/manual lines."""
+
+    inherited_from: str | None
+
+
 class SpectrumPresentReply(TypedDict):
     """Complete editable live spectrum snapshot.
 
@@ -359,6 +367,8 @@ class SpectrumPresentReply(TypedDict):
     aligned: bool
     points_completed: bool
     alignment_seeded: bool
+    pending: Literal["align", "sample"] | None
+    alignment: AlignmentSourceReply
     flux_half: float
     flux_int: float
     flux_period: float
@@ -377,6 +387,8 @@ class SelectionSnapshotReply(TypedDict):
 
     selected: list[bool] | None
     min_distance: float
+    # True when an unfinished joint Filter draft exists.
+    pending: bool
 
 
 class ProjectSetupReply(TypedDict):

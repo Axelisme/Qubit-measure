@@ -39,6 +39,7 @@ from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
     h_resources_versions,
 )
+from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
 from .dto import (
     ActiveSpectrumReply,
@@ -56,6 +57,7 @@ from .dto import (
     OperationStartedReply,
     OperationStatusReply,
     ParamsExportedReply,
+    PngImage,
     PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
@@ -94,19 +96,13 @@ def _h_project_setup(
 ) -> ProjectSetupReply:
     chip_name = params["chip_name"]
     qub_name = params["qub_name"]
-    result_dir = params["result_dir"]
-    database_path = params["database_path"]
-    # ParamSpec already validated these strings, including optional defaults.
+    # ParamSpec validates identity; the GUI derives paths from its own root.
     assert isinstance(chip_name, str)
     assert isinstance(qub_name, str)
-    assert isinstance(result_dir, str)
-    assert isinstance(database_path, str)
     adapter.ctrl.setup_project(
         ProjectInfo(
             chip_name=chip_name,
             qub_name=qub_name,
-            result_dir=result_dir,
-            database_path=database_path,
             root_dir=adapter.ctrl.get_project_root(),
         )
     )
@@ -118,6 +114,7 @@ def _h_spectrum_list(
 ) -> SpectrumListReply:
     del params
     spectrums = adapter.ctrl.state.spectrums
+    active = adapter.ctrl.interactive.inspect()
     return {
         "spectrums": [
             SpectrumListItem(
@@ -126,6 +123,9 @@ def _h_spectrum_list(
                 aligned=entry.aligned,
                 points_completed=entry.points_completed,
                 point_count=entry.point_count,
+                pending=("align" if active.kind == "line" else "sample")
+                if active is not None and active.spectrum_name == entry.name
+                else None,
             )
             for entry in spectrums.values()
         ]
@@ -151,6 +151,7 @@ def _h_spectrum_snapshot(
     entry = adapter.ctrl.state.spectrums.get(name)
     if entry is None:
         return {"name": name, "exists": False}
+    active = adapter.ctrl.interactive.inspect()
     return {
         "name": entry.name,
         "exists": True,
@@ -158,6 +159,10 @@ def _h_spectrum_snapshot(
         "aligned": entry.aligned,
         "points_completed": entry.points_completed,
         "alignment_seeded": entry.alignment_seeded,
+        "pending": ("align" if active.kind == "line" else "sample")
+        if active is not None and active.spectrum_name == entry.name
+        else None,
+        "alignment": {"inherited_from": entry.inherited_from},
         "flux_half": entry.flux_half,
         "flux_int": entry.flux_int,
         "flux_period": entry.flux_period,
@@ -173,6 +178,21 @@ def _h_spectrum_snapshot(
             "freqs": entry.points["freqs"].tolist(),
         },
     }
+
+
+def _h_spectrum_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validates literal names.
+    entry = adapter.ctrl.state.get_spectrum(name)
+    figure = make_spectrum_figure(
+        entry.raw,
+        entry.points,
+        alignment=(entry.flux_half, entry.flux_int) if entry.aligned else None,
+    )
+    png = render_figure_png(figure)
+    return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
 
 
 def _h_spectrum_load(
@@ -245,6 +265,7 @@ def _h_selection_snapshot(
     return {
         "selected": mask.tolist() if mask is not None else None,
         "min_distance": selection.min_distance,
+        "pending": adapter.ctrl.interactive.current_cross_selection() is not None,
     }
 
 
@@ -530,6 +551,7 @@ _HANDLERS: dict[str, Handler] = {
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "spectrum.snapshot": _h_spectrum_snapshot,
+    "spectrum.render": _h_spectrum_render,
     "spectrum.load": _h_spectrum_load,
     "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.remove": _h_spectrum_remove,

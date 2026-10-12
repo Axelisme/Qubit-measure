@@ -1,35 +1,29 @@
-"""Fluxdep control tools assembled from the GUI's wire declarations."""
+"""Handwritten Fluxdep agent tools composed over native GUI RPCs."""
 
-from __future__ import annotations
-
-import base64
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from zcu_tools.gui.app.fluxdep.remote.method_specs import METHOD_SPECS
-from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
-from zcu_tools.mcp.core.images import validated_png
-from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import (
     StdioLoopHooks,
     ToolTable,
     assemble_tools,
-    generate_tools,
     run_stdio_loop,
 )
-from zcu_tools.mcp.fluxdep.lifecycle import build_control_lifecycle_tools
+
+from .lifecycle import build_control_lifecycle_tools
+from .spectrum_tools import build_spectrum_tools
 
 
 @dataclass(frozen=True)
 class FluxdepServer:
-    """One control server's assembled owners.
+    """A bridge, explicit agent tool table and in-process stdio entry.
 
-    bridge owns its GUI connection and optional launched process. tools contains
-    the generated pipeline and explicit lifecycle callbacks. main runs the stdio
-    loop; stdin closure disconnects without shutting down or killing the GUI.
+    bridge owns its connection and optional launched process. tools composes
+    native GUI methods at agent decision points. main disconnects on stdin close
+    without shutting down or killing the GUI.
     """
 
     bridge: McpBridge
@@ -37,24 +31,34 @@ class FluxdepServer:
     main: Callable[[], None]
 
 
-def project_interactive_reply(reply: ToolReply) -> ToolReply:
-    """Deliver a successful GUI {context, effect} receipt as text plus one PNG.
+def _control_tools(bridge: McpBridge) -> ToolTable:
+    def status(_arguments: dict[str, object]):
+        return call_gui(bridge, GuiRpcCall("control.status", {}, 6.0)).data
 
-    Inactive context returns unchanged text and no images. A live/closed context
-    retains identity, state and effect; figure becomes MIME/byte metadata instead
-    of base64 text. Raise on base64/PNG decoding failure, without changing GUI
-    state, retrying the command or storing a file. The input receipt is unchanged.
-    """
-    data = dict(reply.data)
-    context = data["context"]
-    if context is None:
-        return ToolReply(data)
-    context = dict(context)
-    figure = context["figure"]
-    image = validated_png(base64.b64decode(figure["png_b64"], validate=True))
-    context["figure"] = {"mime_type": "image/png", "bytes": figure["bytes"]}
-    data["context"] = context
-    return ToolReply(data, images=(image,))
+    def acquire(_arguments: dict[str, object]):
+        return call_gui(bridge, GuiRpcCall("control.acquire", {}, 6.0)).data
+
+    def release(_arguments: dict[str, object]):
+        return call_gui(bridge, GuiRpcCall("control.release", {}, 6.0)).data
+
+    prefix = bridge.config.tool_prefix
+    return {
+        prefix + "control_status": {
+            "handler": status,
+            "description": "Read the native GUI control identity.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        prefix + "control_acquire": {
+            "handler": acquire,
+            "description": "Request GUI control for this fixed owner connection.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        prefix + "control_release": {
+            "handler": release,
+            "description": "Release GUI control to Local without stopping accepted work.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+    }
 
 
 def build_fluxdep_server(
@@ -63,46 +67,22 @@ def build_fluxdep_server(
     *,
     bridge: McpBridge | None = None,
 ) -> FluxdepServer:
-    """Assemble pipeline/lifecycle tools and the stdio entry for Fluxdep.
+    """Assemble explicit tools and lifecycle callbacks over one GUI bridge.
 
-    config supplies connection/launch settings and server instructions. repo_root
-    anchors the GUI launch script. An injected bridge must use this config; tests
-    may attach a recording Transport. GUI declarations own names, schemas and
-    budgets. Tools never preread, retry or recreate seen/session/operation state.
-    Invocation errors raise with native code/message/reason; failed operation
-    outcomes remain successful data. Stdio isolation turns raised errors into
-    tool-error content. A mismatched injected config raises ValueError before
-    assembly. Events are not subscribed or queued.
+    config supplies transport settings/instructions; repo_root anchors GUI launch.
+    An injected bridge must use this config or ValueError is raised. GUI owns
+    business validation, identity and operation state; MCP only composes calls,
+    summarizes native facts and requests evidence. Invocation/image errors
+    propagate to stdio tool-error content, without retry or rollback. No business
+    events are subscribed, and cleanup never stops the GUI.
     """
     if bridge is not None and bridge.config != config:
         raise ValueError("Injected bridge must use the supplied Fluxdep config")
     bridge = bridge if bridge is not None else McpBridge(config)
-
-    def send_gui_rpc(
-        method: str, params: dict[str, object], timeout_seconds: float = 30.0
-    ) -> dict[str, object]:
-        return call_gui(bridge, GuiRpcCall(method, params, timeout_seconds)).data
-
-    generated = generate_tools(
-        config,
-        METHOD_SPECS | CONTROL_METHOD_SPECS,
-        frozenset({"resources.versions", "control.connect"}),
-        send_gui_rpc,
-    )
-    for method in (
-        "interactive.read",
-        "spectrum.interactive.open",
-        "spectrum.interactive.command",
-        "selection.interactive.open",
-        "selection.interactive.command",
-    ):
-        name = config.tool_prefix + method.replace(".", "_")
-        forwarder = generated[name]["handler"]
-        generated[name]["handler"] = lambda arguments, forwarder=forwarder: (
-            project_interactive_reply(ToolReply(forwarder(arguments)))
-        )
     lifecycle, names = build_control_lifecycle_tools(config, bridge, repo_root)
-    tools = assemble_tools(generated, lifecycle, names)
+    tools = assemble_tools(
+        build_spectrum_tools(bridge) | _control_tools(bridge), lifecycle, names
+    )
 
     def cleanup() -> None:
         bridge.disconnect()

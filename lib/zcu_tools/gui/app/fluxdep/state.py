@@ -100,6 +100,23 @@ def spectrum_version_key(name: str) -> str:
     return f"spectrum:{name}"
 
 
+@dataclass(frozen=True)
+class AlignmentPublication:
+    """Alignment values and provenance published with both mapped axes.
+
+    flux_half and flux_int are half/integer positions in native device units.
+    flux_period is the positive native-device span of one flux quantum.
+    inherited_from is the spectrum name supplying untouched alignment, or None
+    for directly/manual/auto-aligned values. State commits this carrier with its
+    raw and point flux arrays under a single spectrum version bump.
+    """
+
+    flux_half: float
+    flux_int: float
+    flux_period: float
+    inherited_from: str | None = None
+
+
 @dataclass
 class SpectrumEntry:
     """One loaded-and-annotated spectrum (≈ analysis.fluxdep.models.SpectrumResult + edit state).
@@ -129,6 +146,8 @@ class SpectrumEntry:
     # another spectrum or already aligned), so the line-picker should seed from
     # them rather than its centre/edge defaults.
     alignment_seeded: bool = False
+    # Source of the published alignment, or None for direct/manual alignment.
+    inherited_from: str | None = None
     # None means no Filter (all selected). Otherwise, a bool array of length
     # point_count, indexed by this spectrum's points, not joint-cloud positions.
     filter_mask: NDArray[np.bool_] | None = None
@@ -268,9 +287,7 @@ class FluxDepState:
     def set_alignment(
         self,
         name: str,
-        flux_half: float,
-        flux_int: float,
-        flux_period: float,
+        alignment: AlignmentPublication,
         new_fluxs: NDArray[np.float64],
         new_point_fluxs: NDArray[np.float64],
     ) -> None:
@@ -279,7 +296,8 @@ class FluxDepState:
         On the owner thread, replace raw fluxs with the finite 1-D
         ``new_fluxs`` matching raw dev_values, and point fluxs with the finite
         1-D ``new_point_fluxs`` matching native point dev_values. Preserve native
-        points and completion. Unknown name raises KeyError; invalid mapped
+        points and completion. alignment carries scalars and current source.
+        Unknown name raises KeyError; invalid mapped
         arrays raise ValueError before any mutation.
         """
         self._assert_owner()
@@ -298,9 +316,10 @@ class FluxDepState:
         entry.raw["fluxs"] = raw_fluxs
         self.spectrums[name] = replace(
             entry,
-            flux_half=flux_half,
-            flux_int=flux_int,
-            flux_period=flux_period,
+            flux_half=alignment.flux_half,
+            flux_int=alignment.flux_int,
+            flux_period=alignment.flux_period,
+            inherited_from=alignment.inherited_from,
             aligned=True,
             alignment_seeded=True,
             points=PointsData(

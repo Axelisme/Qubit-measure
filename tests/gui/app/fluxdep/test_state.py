@@ -12,6 +12,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
     SPECTRUM_SET_VERSION_KEY,
+    AlignmentPublication,
     FluxDepState,
     SpectrumEntry,
     SpecType,
@@ -246,9 +247,7 @@ def test_set_alignment_marks_aligned_and_bumps():
     new_fluxs = st.spectrums["a"].raw["dev_values"].copy()
     st.set_alignment(
         "a",
-        flux_half=1.0,
-        flux_int=2.0,
-        flux_period=2.0,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
         new_fluxs=new_fluxs,
         new_point_fluxs=np.empty(0, dtype=np.float64),
     )
@@ -305,7 +304,12 @@ def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
     version = st.version.get(spectrum_version_key("a"))
     raw_fluxs = entry.raw["fluxs"].copy()
     with pytest.raises(ValueError, match="new_point_fluxs|finite"):
-        st.set_alignment("a", 0.0, 1.0, 2.0, np.array([0.5, 0.75, 1.0]), invalid)
+        st.set_alignment(
+            "a",
+            AlignmentPublication(0.0, 1.0, 2.0),
+            np.array([0.5, 0.75, 1.0]),
+            invalid,
+        )
     assert st.spectrums["a"] is entry
     np.testing.assert_array_equal(entry.raw["fluxs"], raw_fluxs)
     np.testing.assert_array_equal(entry.points["fluxs"], [0.5, 1.0])
@@ -336,11 +340,11 @@ def test_set_project_bumps_project():
 def test_project_info_derives_paths_from_names():
     import os
 
-    # unset result_dir / database_path are derived from chip/qubit in __post_init__
+    # unset result_dir / data_root are derived from chip/qubit in __post_init__
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1")
     assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
     # raw spectra live under Database/, not result/ (cf. measure-gui save layout)
-    assert p.database_path == os.path.join("Database", "Q5_2D", "Q1")
+    assert p.data_root == os.path.join("Database", "Q5_2D", "Q1")
 
 
 def test_project_info_default_names_derive_unknown_paths():
@@ -349,7 +353,7 @@ def test_project_info_default_names_derive_unknown_paths():
     # a bare ProjectInfo still has concrete (never empty) paths
     p = ProjectInfo()
     assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
-    assert p.database_path == os.path.join("Database", "unknown_chip", "unknown_qubit")
+    assert p.data_root == os.path.join("Database", "unknown_chip", "unknown_qubit")
 
 
 def test_project_info_explicit_paths_override_derivation():
@@ -358,10 +362,10 @@ def test_project_info_explicit_paths_override_derivation():
         chip_name="Q5_2D",
         qub_name="Q1",
         result_dir="/custom/out",
-        database_path="/custom/raw",
+        data_root="/custom/raw",
     )
     assert p.result_dir == "/custom/out"
-    assert p.database_path == "/custom/raw"
+    assert p.data_root == "/custom/raw"
 
 
 def test_project_info_root_dir_anchors_derived_defaults():
@@ -373,7 +377,7 @@ def test_project_info_root_dir_anchors_derived_defaults():
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
-    assert p.database_path == os.path.join(root, "Database", "Q5_2D", "Q1")
+    assert p.data_root == os.path.join(root, "Database", "Q5_2D", "Q1")
 
 
 def test_project_info_empty_root_dir_keeps_relative_default():

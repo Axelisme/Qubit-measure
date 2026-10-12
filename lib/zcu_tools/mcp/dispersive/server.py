@@ -79,7 +79,7 @@ Getting started:
 Read tools (all pure queries):
   - dispersive_state_check → {has_project, has_fit_inputs, has_onetone,
     has_preprocess, has_result} — how far the user has taken the pipeline.
-  - dispersive_project_info → {chip_name, qub_name, result_dir, database_path}.
+  - dispersive_project_info → {chip_name, qub_name, result_dir, data_root}.
   - dispersive_fit_inputs_info → {has_inputs, params:{EJ,EC,EL} or null, flux_half,
     flux_int, flux_period, bare_rf_seed} — the fluxdep_fit handoff.
   - dispersive_preprocess_status → {has_preprocess, n_flux, n_freq, edelay}.

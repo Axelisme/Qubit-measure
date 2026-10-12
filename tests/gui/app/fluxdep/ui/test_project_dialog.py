@@ -37,7 +37,7 @@ def test_result_project_returns_edited_values(dialog):
     assert project.chip_name == "Chip2"
     assert project.qub_name == "Q3"
     assert project.result_dir == "/r"
-    assert project.database_path == "/db"
+    assert project.data_root == "/db"
 
 
 def test_names_are_trimmed(dialog):
@@ -79,7 +79,7 @@ def test_manual_result_dir_stops_auto_derivation(qapp):
     d.deleteLater()
 
 
-def test_database_path_auto_derives_from_names(qapp):
+def test_data_root_auto_derives_from_names(qapp):
     import os
 
     d = ProjectDialog(ProjectInfo())
@@ -90,7 +90,7 @@ def test_database_path_auto_derives_from_names(qapp):
     d.deleteLater()
 
 
-def test_manual_database_path_stops_auto_derivation(qapp):
+def test_manual_data_root_stops_auto_derivation(qapp):
     d = ProjectDialog(ProjectInfo())
     d._database_edit.setText("/custom/raw")
     d._on_database_edited("/custom/raw")  # simulate textEdited
@@ -198,7 +198,7 @@ def test_scope_dropdown_preserves_previous_selection_over_result_and_names(
         chip_name="Initial",
         qub_name="Q0",
         result_dir=previous.result_dir,
-        database_path=str(tmp_path / "custom-database"),
+        data_root=str(tmp_path / "custom-database"),
         root_dir=str(tmp_path),
     )
     widget = scope_dialog(project)
@@ -214,7 +214,7 @@ def test_scope_dropdown_preserves_previous_selection_over_result_and_names(
         chip_name=names.chip_name,
         qub_name=names.qub_name,
         result_dir=result.result_dir,
-        database_path=project.database_path,
+        data_root=project.data_root,
         root_dir=project.root_dir,
     )
 
@@ -269,7 +269,7 @@ def test_scope_dropdown_fallback_keeps_unnamed_project(
         chip_name="",
         qub_name="",
         result_dir=str(tmp_path / "custom-result"),
-        database_path=str(tmp_path / "custom-database"),
+        data_root=str(tmp_path / "custom-database"),
         root_dir=str(tmp_path),
     )
     widget = scope_dialog(project)

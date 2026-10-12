@@ -162,8 +162,21 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     # --- alignment / points ---------------------------------------------
 
-    def set_alignment(self, name: str, flux_half: float, flux_int: float) -> None:
-        self._alignment.set_alignment(name, flux_half, flux_int)
+    def set_alignment(
+        self,
+        name: str,
+        flux_half: float,
+        flux_int: float,
+        inherited_from: str | None = None,
+    ) -> None:
+        """Publish native half/integer lines, clearing source for direct edits.
+
+        The picker passes inherited_from only when finishing an untouched
+        inherited draft. Other callers omit it for manually determined alignment.
+        The owner service maps raw/point flux axes and publishes provenance under
+        the same version bump. Invalid separation/mapped values fail before writes.
+        """
+        self._alignment.set_alignment(name, flux_half, flux_int, inherited_from)
         self._emit(SpectrumChangedPayload(name=name))
 
     def reset_alignment(self, name: str) -> None:

@@ -31,7 +31,7 @@ from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
-MCP_VERSION = 2
+MCP_VERSION = 3
 
 _SERVER_INSTRUCTIONS = """\
 Control the Fluxdep analysis pipeline in the same GUI the user can drive.
@@ -65,7 +65,7 @@ Pipeline:
    preserving editable input; cancel closes. Width is normalized radius. Follow each
    returned command schema. Receipts show numeric changes and the same captured PNG.
 7. Read fit_result before fit_set_params. EJb/ECb/ELb are numeric bounds in GHz.
-   Project database_path is the raw-data root; fit database_path is the search file.
+   Project data_root is the raw-data root; fit database_path is the search file.
    Read project, fit, collection, every source and selection before fit_search.
 8. fit_search returns the app token. operation_status without token finds latest GUI
    or agent activity. operation_await(token, timeout) waits at most 30 seconds and
