@@ -72,18 +72,9 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
     assert error["reason"] == "no_context"
     tab_id = application.controller.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
-        application.controller.start_run(
-            tab_id, application.controller.cfg_resources.lookup(tab_id).observe().ref
-        )
+        application.controller.start_run(tab_id)
     assert caught.value.reason_code == "no_active_context"
-    ref = application.controller.cfg_resources.lookup(tab_id).observe().ref
-    reply = application.rpc(
-        "tab.run_start",
-        {
-            "tab_id": tab_id,
-            "expected": {"cfg_id": ref.cfg_id, "revision": str(ref.revision)},
-        },
-    )
+    reply = application.rpc("tab.run_start", {"tab_id": tab_id})
     assert reply["ok"] is False
     assert isinstance(reply["error"], dict)
     assert reply["error"]["code"] == ErrorCode.PRECONDITION_FAILED
@@ -291,7 +282,12 @@ def test_writeback_rpc_uses_gui_selection_or_explicit_ids_without_changing_selec
     tab_id, captured = parameter_writeback_pane
     pane: dict[str, object] = {"tab_id": tab_id, "subtab_id": "analysis"}
     preview = application.result("tab.writeback_preview", pane)
-    first, second = [item["id"] for item in preview["items"]]
+    items = preview["items"]
+    assert isinstance(items, list)
+    first_item, second_item = items
+    assert isinstance(first_item, dict)
+    assert isinstance(second_item, dict)
+    first, second = first_item["id"], second_item["id"]
     application.result("tab.writeback_set", {**pane, "id": second, "selected": False})
     params = dict(pane)
     inputs = {
@@ -312,10 +308,14 @@ def test_writeback_rpc_uses_gui_selection_or_explicit_ids_without_changing_selec
         expected_ids = [second] if selection == "explicit" else [first]
         if selection == "empty":
             expected_ids = []
-        assert reply["result"]["applied_ids"] == expected_ids
+        result = reply["result"]
+        assert isinstance(result, dict)
+        assert result["applied_ids"] == expected_ids
     else:
         assert reply["ok"] is False, reply
-        assert reply["error"]["code"] == ErrorCode.INVALID_PARAMS
+        error = reply["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == ErrorCode.INVALID_PARAMS
     control = application.controller.context_control
     assert control.read_target(captured.target).value("general.ext.a") == (
         11.0 if selection in {"omitted", "null"} else 1.0
@@ -326,4 +326,6 @@ def test_writeback_rpc_uses_gui_selection_or_explicit_ids_without_changing_selec
     if selection not in {"omitted", "null", "explicit"}:
         assert entry_resource(application).ledger.events() == before
     after = application.result("tab.writeback_preview", pane)
-    assert [item["selected"] for item in after["items"]] == [True, False]
+    after_items = after["items"]
+    assert isinstance(after_items, list)
+    assert [item["selected"] for item in after_items] == [True, False]
