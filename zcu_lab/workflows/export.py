@@ -66,7 +66,7 @@ def prepare_t1_fluxdep_export(
     Return the same ExperimentPayload for native/independent Labber writers and
     a complete T1Plan cfg snapshot. No usable committed acquisition, degraded or
     malformed point summaries, duplicate/out-of-range indices, escaped file
-    paths, invalid native T1 data, or multiple final traces per point raise
+    paths, invalid native T1 data, or invalid point file references raise
     ValueError before export writes. Reader I/O errors propagate. Uncommitted
     files, even if published on disk, are not examined.
     """
@@ -83,7 +83,7 @@ def prepare_t1_fluxdep_export(
             raise ValueError("T1 committed index must be unique and inside the plan")
         seen.add(point.index)
         fluxes[point.index] = point.flux
-        trace = _load_final_t1(root, record)
+        trace = _load_final_t1(root, record, point.decay_file)
         if trace is not None:
             traces[point.index] = trace
         if point.index in traces and point.lifetime_us is not None:
@@ -120,48 +120,36 @@ def prepare_t1_fluxdep_export(
     )
 
 
-def _load_final_t1(root: Path, record: CommittedRecord) -> LabberPayload | None:
+def _load_final_t1(
+    root: Path, record: CommittedRecord, filename: str | None
+) -> LabberPayload | None:
     """Select only the declared final decay from this committed invocation."""
     spec = T1Exp().persistence_spec()
     if not isinstance(spec, AxesSpec):
         raise ValueError("Final T1 must declare a single-variable acquisition")
-    final: LabberPayload | None = None
-    for relative in record.run_files:
-        path = (root / record.iteration_dir / relative).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError("committed acquisition path escapes data_root")
-        stored = load_run_data(path)
-        if stored.metadata.experiment != spec.tag:
-            continue
-        validate_experiment_payload(stored.payload, schema=native_schemas(spec))
-        trace = stored.payload.variables[spec.data_variable]
-        if len(trace.z) == 0:
-            continue
-        if final is not None:
-            raise ValueError("multiple final T1 acquisitions for one committed point")
-        final = trace
-    return final
+    return _load_declared_trace(
+        root, record, filename, spec.tag, native_schemas(spec)[0]
+    )
 
 
 def _load_declared_trace(
-    root: Path, record: CommittedRecord, tag: str, schema: VariableSchema
+    root: Path,
+    record: CommittedRecord,
+    filename: str | None,
+    tag: str,
+    schema: VariableSchema,
 ) -> LabberPayload | None:
-    final = None
-    for relative in record.run_files:
-        path = (root / record.iteration_dir / relative).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError("committed acquisition path escapes data_root")
-        stored = load_run_data(path)
-        if stored.metadata.experiment != tag:
-            continue
-        validate_experiment_payload(stored.payload, schema=(schema,))
-        trace = stored.payload.variables[schema.variable]
-        if len(trace.z) == 0:
-            continue
-        if final is not None:
-            raise ValueError("multiple final acquisitions for one committed point")
-        final = trace
-    return final
+    if filename is None:
+        return None
+    path = (root / record.iteration_dir / filename).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("committed acquisition path escapes data_root")
+    stored = load_run_data(path)
+    if stored.metadata.experiment != tag:
+        return None
+    validate_experiment_payload(stored.payload, schema=(schema,))
+    trace = stored.payload.variables[schema.variable]
+    return trace if len(trace.z) else None
 
 
 def prepare_t2echo_fluxdep_export(
@@ -176,7 +164,7 @@ def prepare_t2echo_fluxdep_export(
     rejected lifetimes remain NaN. Inner-first axes are Time Index and Flux;
     delays retain actual seconds without union, rounding or interpolation.
     Return one grouped payload and full plan cfg for both writers. Malformed
-    summaries/indices, escaped paths, duplicate final traces or no usable
+    summaries/indices, escaped paths, invalid named traces or no usable
     committed trace raise ValueError before writing; reader errors propagate.
     No terminal admission, journal/file-summary read, fitting or I/O write occurs.
     """
@@ -221,7 +209,9 @@ def _prepare_t2(
             raise ValueError("T2 committed index must be unique and inside the plan")
         seen.add(point.index)
         fluxes[point.index] = point.flux
-        trace = _load_declared_trace(data_root.resolve(), record, tag, schemas[0])
+        trace = _load_declared_trace(
+            data_root.resolve(), record, point.decay_file, tag, schemas[0]
+        )
         if trace is not None:
             traces[point.index] = trace
             if point.lifetime_us is not None:
@@ -270,7 +260,7 @@ def prepare_mist_fluxdep_export(
     otherwise NaN; it is not a fitted threshold. Missing rows are NaN-filled.
     Any native gain grid unequal to the exact fixed plan grid raises ValueError,
     without rounding, tolerance repair, union or interpolation. Invalid summary,
-    index/path, duplicate trace or no usable committed acquisition also raises;
+    index/path, invalid named trace or no usable committed acquisition also raises;
     reader errors propagate. Return a shared grouped payload and full plan cfg,
     with no invented Time/lifetime channels, host admission or writes.
     """
@@ -294,7 +284,9 @@ def prepare_mist_fluxdep_export(
             raise ValueError("MIST committed index must be unique and inside the plan")
         seen.add(point.index)
         fluxes[point.index] = point.flux
-        trace = _load_declared_trace(data_root.resolve(), record, spec.tag, schemas[0])
+        trace = _load_declared_trace(
+            data_root.resolve(), record, point.gain_file, spec.tag, schemas[0]
+        )
         if trace is None:
             continue
         if not np.array_equal(trace.axes[0].values, gains):

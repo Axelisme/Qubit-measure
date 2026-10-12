@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-12，overnight live 趨勢與保存責任
+**Last updated:** 2026-10-12，iteration 目錄與 workflow 保存責任
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -40,13 +40,25 @@ Engine.records 提供 committed evidence，record.json 不作提交判定。匯�
 
 Native 原子覆寫 workflow data_root/merged.h5。Labber 使用相同 payload 與明填 independent layout，在 SaveLayout 選出的新日期樹路徑保存。Datafile 擁有既有異質 layout 與完整寫入的 finalization。Signal/Time 2D 與 T1 Flux-only 1D 保持原 rank，不 union 或 broadcast。Native/Labber 的 allocation/writer failure 分別回報，未分配 Labber path 為 None。Saved ledger 事件只含 known-path attempts，附檔保留完整報告；ledger 失敗不抹掉已成功路徑。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護，不讓 framework 反向 import 使用者 adapter。格式與批次保存分工沿 [[0063]]。
 
+## Iteration 目錄與保存責任
+
+使用者在 2026-10-12 裁定：「我以為一直都是框架一開始就給這個iter的儲存路徑，workflow內部自己決定在哪裡存什麼」與「你沒辦法阻止workflow 內部亂搞，也不該試圖保證不亂搞，這些機制都是過度工程」。本裁定將量測與保存分開，不維持舊暫存路徑及檔案發布介面。
+
+Engine 在每次 invocation 開始前建立 `data_root/iter/<至少六位 call_seq>/`。唯讀 `env.iteration_dir` 指向當輪已存在的 absolute 根目錄。屬性不可重綁，不限制 workflow 自行寫檔。Resume 重做未提交步驟時分配新的 call_seq 與目錄。
+
+`env.run` 只負責量測，保留 cfg deepcopy、device capture、Schedule、live callback、StopSignal 與失敗來源。`Completed` 只表示量測成功。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。校準保存仍由既有 native writer 處理。成功校準以具名結果回傳 scalars 與實際寫出的檔名，caller 將檔名放進 point record。CalibrationFailed 保留原本的 Schedule 失敗與 fit 拒絕分類，不提供部分檔案收據。框架不提供檔案清單，不預建量測或圖形子目錄，不追蹤、掃描或保證 workflow 檔案。
+
+Workflow saver 例外停止 run，不改標為量測 `Failed`。Pause、Stop 或程序中斷可能留下未提交或寫一半的檔案，框架不清理、不承諾 rollback。Point record 的檔名也不保證檔案存在或完整，由讀取者處理缺資料。
+
+Engine 仍擁有 manifest、journal 與 best-effort `record.json`。結果 journal append 與 flush 成功後，Engine 才用同目錄 temporary 加 replace 保存摘要。摘要 I/O 失敗只記 log，不影響提交或下一步。Manifest 的 atomic replace 也保留。這兩種框架文件的替換，不代表 workflow 量測檔案有發布保證。依賴方向仍由 C18 與 framework-no-user contract 保護。
+
 ## Overnight live 趨勢與保存責任
 
 Live 趨勢圖只用 Engine.records 的 committed evidence。具體 scalar 投影與繪圖在 zcu_lab.workflows.trend，不在框架重 fit。GUI presentation owner 在 zcu_lab.workflows.gui.figures，與 Window 固定。它只持有 native Plots 和繪圖 cursor，沒有 Engine、run target 或 operation。Window 沿既有約 50ms poll 更新 live 圖，最後提交刷新後才 finish。Pause 保留 Plots，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
 
 使用者在 2026-10-12 裁定：「趨勢圖也不用，後來用戶自己從數據重畫最自由，但可以workflow實作者存每個iter希望存的圖」與「讓workflow實作者自己在內部存，框架保持簡單」。本裁定取消趨勢圖保存與重開能力，保留現有 live 顯示。框架不提供 committed journal reader，不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure 或 Engine 提交通知。使用者可自行從 record.json 或 native 資料重畫；workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。
 
-Journal writer、Engine 提交與 iteration 保存契約不變。現有具名圖 RPC、PNG renderer 與 Plots 工具也不變。依賴方向由 C18 與 trend-science-no-frontends contract 保護，科學投影不依賴 frontend admission。
+Journal writer 與 Engine 提交順序不變。Iteration 檔案保存依上節由 workflow 擁有。現有具名圖 RPC、PNG renderer 與 Plots 工具也不變。依賴方向由 C18 與 trend-science-no-frontends contract 保護，科學投影不依賴 frontend admission。
 
 ## 取捨與 owner
 

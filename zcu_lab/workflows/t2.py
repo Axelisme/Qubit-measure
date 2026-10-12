@@ -41,6 +41,7 @@ from .calibration import (
     Calibrated,
     CalibratedPi2,
     CalibrationFailed,
+    CalibrationFiles,
     CalibrationSavers,
     CalibrationTunables,
     apply_readout_calibration,
@@ -122,6 +123,10 @@ class T2Point:
     calibration is fitted CalibratedPi2 or a stage/reason failure. lifetime_us
     and error_us are fitted microsecond values, both None after rejection or
     native failure. reason is None on acceptance, otherwise a specific diagnosis.
+    calibration_files names completed stages relative to this iteration on
+    calibration success, or is None on calibration failure. decay_file names the
+    final native trace, or is None on failed calibration/acquisition. Rejected
+    fits still retain their saved raw trace.
     """
 
     index: int
@@ -130,6 +135,8 @@ class T2Point:
     lifetime_us: float | None
     error_us: float | None
     reason: str | None
+    calibration_files: CalibrationFiles | None
+    decay_file: str | None
 
 
 def init_t2(env: InitEnv[Calibrated], plan: T2Plan) -> T2State:
@@ -235,20 +242,22 @@ def _measure(
         outcome = yield from env.run(
             run_t2ramsey,
             t2ramsey_cfg(plan, tun, cal, guess),
-            save=partial(save_t2ramsey, snapshot=plan.snapshot),
             live=lambda axes, samples: plot.update(axes[0], samples.real),
         )
         if isinstance(outcome, Failed):
             return outcome
+        save_t2ramsey(
+            outcome, env.iteration_dir / "t2ramsey.h5", snapshot=plan.snapshot
+        )
         return analyze_t2ramsey(outcome.result), outcome.result.times
     echo = yield from env.run(
         run_t2echo,
         t2echo_cfg(plan, tun, cal, guess),
-        save=partial(save_t2echo, snapshot=plan.snapshot),
         live=lambda axes, samples: plot.update(axes[0], samples.real),
     )
     if isinstance(echo, Failed):
         return echo
+    save_t2echo(echo, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)
     return analyze_t2echo_fluxdep(echo.result), echo.result.times
 
 
@@ -275,11 +284,11 @@ def _step(
 
     env.plots.draw(summary_name, summary)
     if not state.remaining:
-        env.plots.save(summary_name, env.iter_dir / "summary.png")
+        env.plots.save(summary_name, env.iteration_dir / "summary.png")
         return Done()
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    cal = yield from calibrate(
+    calibration = yield from calibrate(
         env,
         qub_pulse=plan.qub_pulse,
         readout=plan.readout,
@@ -293,19 +302,29 @@ def _step(
             partial(save_readout, snapshot=plan.snapshot),
         ),
     )
-    if isinstance(cal, CalibrationFailed):
-        return Next(T2Point(index, flux, cal, None, None, cal.reason), state)
+    if isinstance(calibration, CalibrationFailed):
+        return Next(
+            T2Point(
+                index, flux, calibration, None, None, calibration.reason, None, None
+            ),
+            state,
+        )
+    cal, files = calibration.calibration, calibration.files
     guess = tun.guess_us
     for _, lifetime in state.lifetimes:
         guess = 0.5 * lifetime + 0.5 * guess
     measured = yield from _measure(env, plan, tun, cal, guess)
     if isinstance(measured, Failed):
-        return Next(T2Point(index, flux, cal, None, None, measured.reason), state)
+        return Next(
+            T2Point(index, flux, cal, None, None, measured.reason, files, None), state
+        )
     fit, times = measured
     name = f"t2{kind}/decay"
     reason = _reject(fit, float(np.max(times)))
     if reason is not None:
-        return Next(T2Point(index, flux, cal, None, None, reason), state)
+        return Next(
+            T2Point(index, flux, cal, None, None, reason, files, f"t2{kind}.h5"), state
+        )
 
     def overlay(figure: Figure) -> None:
         ax = figure.axes[0]
@@ -313,9 +332,14 @@ def _step(
         ax.set_title(f"T2 {kind} = {fit.lifetime_us:.2f} us")
 
     env.plots.draw(name, overlay)
-    env.plots.save(name, env.iter_dir / "decay.png")
+    env.plots.save(name, env.iteration_dir / "decay.png")
     state.lifetimes.append((flux, fit.lifetime_us))
-    return Next(T2Point(index, flux, cal, fit.lifetime_us, fit.error_us, None), state)
+    return Next(
+        T2Point(
+            index, flux, cal, fit.lifetime_us, fit.error_us, None, files, f"t2{kind}.h5"
+        ),
+        state,
+    )
 
 
 @workflow("T2echo_fluxdep", plan=T2Plan, tunables=T2EchoTunables, init=init_t2)

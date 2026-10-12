@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from math import isfinite
 from typing import Literal
 
@@ -122,7 +121,9 @@ class OvernightPoint:
     errors are accepted lifetimes and marginal uncertainties in microseconds,
     or None on rejection/native failure. t1_reason/t2_reason are None on
     acceptance, otherwise the rejection or Schedule failure diagnosis. Exceptions
-    stop the run without committing this point.
+    stop the run without committing this point. t1_file/t2_file are relative
+    native filenames for each completed member, or None after native failure;
+    rejected fits retain their raw acquisition filenames.
     """
 
     round_index: int
@@ -135,6 +136,8 @@ class OvernightPoint:
     t2_us: float | None
     t2_error_us: float | None
     t2_reason: str | None
+    t1_file: str | None
+    t2_file: str | None
 
 
 def init_overnight[C](_env: InitEnv[C], _plan: OvernightPlan) -> OvernightState:
@@ -171,7 +174,7 @@ def overnight[C](
     All hardware/wait effects use Engine cancellation. A native Failed outcome
     is recorded per member; the other member is still attempted. Unexpected
     acquisition/analysis/plot/saver/device errors propagate and stop the run.
-    Pause/Stop discard uncommitted pairs while retaining published native files.
+    Pause/Stop discard uncommitted pairs while retaining workflow-written native files.
     Wait until max(now, previous committed actual start + interval). Overruns
     start immediately, without catching up to an original-start grid. Pause
     does not freeze wall time; Resume repeats the discarded pair under the same
@@ -209,9 +212,11 @@ def overnight[C](
             )
         ),
     )
-    t1 = yield from env.run(
-        run_t1, t1_cfg, save=partial(save_t1, snapshot=plan.snapshot)
-    )
+    t1 = yield from env.run(run_t1, t1_cfg)
+    t1_file = None
+    if not isinstance(t1, Failed):
+        save_t1(t1, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
+        t1_file = "t1.h5"
     t1_summary = (
         (None, None, t1.reason)
         if isinstance(t1, Failed)
@@ -236,16 +241,25 @@ def overnight[C](
             )
         ),
     )
-    t2 = yield from env.run(
-        run_t2echo, t2_cfg, save=partial(save_t2echo, snapshot=plan.snapshot)
-    )
+    t2 = yield from env.run(run_t2echo, t2_cfg)
+    t2_file = None
+    if not isinstance(t2, Failed):
+        save_t2echo(t2, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)
+        t2_file = "t2echo.h5"
     t2_summary = (
         (None, None, t2.reason)
         if isinstance(t2, Failed)
         else _summary(analyze_t2echo(t2.result), tun, "T2 Echo")
     )
     point = OvernightPoint(
-        state.round_index, scheduled, actual, plan.flux, *t1_summary, *t2_summary
+        state.round_index,
+        scheduled,
+        actual,
+        plan.flux,
+        *t1_summary,
+        *t2_summary,
+        t1_file,
+        t2_file,
     )
     state.round_index += 1
     state.last_actual_start = actual

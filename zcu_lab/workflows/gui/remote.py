@@ -113,8 +113,8 @@ class RecordReply(TypedDict):
 
     commit_seq counts Next commits; call_seq counts invocations; revision is the
     invocation's captured tunables version. encoded_record is the native summary.
-    iteration_dir is relative to data_root; run_files are final relative paths
-    within that iteration, in effect order.
+    iteration_dir is relative to data_root. Workflow file references belong to
+    encoded_record, whose contents the framework does not interpret.
     """
 
     commit_seq: int
@@ -122,7 +122,6 @@ class RecordReply(TypedDict):
     revision: int
     encoded_record: EncodedRecordReply
     iteration_dir: str
-    run_files: list[str]
 
 
 class RecordsReply(RunTarget):
@@ -653,7 +652,6 @@ def _project_record(record: CommittedRecord) -> RecordReply:
             "error": record.encoded_record.error,
         },
         "iteration_dir": record.iteration_dir,
-        "run_files": list(record.run_files),
     }
 
 

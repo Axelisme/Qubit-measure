@@ -82,7 +82,7 @@ def save_t2ramsey(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write Ramsey IQ and fixed evidence to Engine's exact native path.
+    """Write Ramsey IQ and fixed evidence to the workflow's exact native path.
 
     source supplies the completed cfg, rounded microsecond delays, complex IQ
     and acquisition/device evidence; snapshot supplies historical entry/roles.
@@ -198,7 +198,7 @@ def save_t1(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write native T1 data to Engine's exact, not-yet-existing path.
+    """Write native T1 data to the workflow's exact, not-yet-existing path.
 
     source supplies the complete cfg/result pair; snapshot is historical entry
     state. Keep microsecond-to-disk mapping and acquisition evidence from their
@@ -220,7 +220,7 @@ def save_t2echo(
     *,
     snapshot: RunSnapshot,
 ) -> None:
-    """Write zero-detune Echo to Engine's exact, not-yet-existing native path.
+    """Write zero-detune Echo to the workflow's exact, not-yet-existing native path.
 
     source owns cfg/result and fixed acquisition/device evidence. snapshot is
     historical entry/point/roles. Preserve native time-to-disk mapping and

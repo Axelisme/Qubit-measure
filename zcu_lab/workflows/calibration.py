@@ -1,6 +1,6 @@
 """Three-stage native calibration, with acceptance owned by the workflow.
 
-The Engine owns execution, cancellation and publication. Callers supply the
+The Engine owns execution and cancellation. Calibration owns its filenames. Callers supply the
 three exact-path savers explicitly; this module never selects a storage format.
 Selected modules are copied before applying calibration and generation tunables.
 """
@@ -177,6 +177,43 @@ class CalCarry:
     n_calibrated: int = 0
 
 
+@dataclass(frozen=True)
+class CalibrationFiles:
+    """Native filenames returned only after a complete accepted calibration.
+
+    frequency names completed spectroscopy attempts in widening order, relative
+    to this invocation's root. rabi names its completed Length-Rabi acquisition.
+    readout names the completed landscape, or None when cadence skips that stage.
+    These references do not guarantee later file existence or completeness.
+    """
+
+    frequency: tuple[str, ...]
+    rabi: str
+    readout: str | None
+
+
+@dataclass(frozen=True)
+class CalibrationSuccess:
+    """Accepted calibration scalars paired with this invocation's saved files.
+
+    calibration contains fitted pi/pi2 and accepted frequency/readout scalars,
+    with CalibratedPi2's units and validation. files names completed native
+    acquisitions. CalibrationFailed carries only stage/reason, not partial file
+    evidence; exceptional acquisition/fit/writer/plot failures propagate instead.
+    """
+
+    calibration: CalibratedPi2
+    files: CalibrationFiles
+
+
+@dataclass(frozen=True)
+class _FrequencyCalibration:
+    """Accepted center in MHz and completed spectroscopy filenames."""
+
+    frequency_mhz: float
+    files: tuple[str, ...]
+
+
 type FrequencySaver = Callable[[Completed[FreqCfg, FrequencyAcquisition], Path], None]
 type RabiSaver = Callable[[Completed[LenRabiCfg, RabiAcquisition], Path], None]
 type ReadoutSaver = Callable[[Completed[FreqGainCfg, ReadoutAcquisition], Path], None]
@@ -314,11 +351,11 @@ def _calibrate_frequency(
     tun: CalibrationTunables,
     carry: CalCarry,
     save: FrequencySaver,
-) -> Generator[Effect, None, float | None]:
+) -> Generator[Effect, None, _FrequencyCalibration | None]:
     """Acquire the widening sequence and return the accepted frequency in MHz.
 
     Use carry's prior calibration and EWMA history as the center. Each attempt
-    publishes through save and redraws its own live plot. Schedule rejection or
+    saves through the supplied writer and redraws its own live plot. Schedule rejection or
     exhausted fit gates returns None; fitting, callback and saver errors propagate.
     Do not change carry. Calibrate validates flux and timing before this stage.
     """
@@ -326,8 +363,8 @@ def _calibrate_frequency(
     hint = prior.f01_mhz
     for _, frequency in carry.f01_by_flux:
         hint = 0.5 * frequency + 0.5 * hint
-    f01 = None
-    for widen in tun.qf_widen:
+    filenames: list[str] = []
+    for attempt, widen in enumerate(tun.qf_widen, start=1):
         name = "calibration/qubit_freq"
         if name not in env.plots:
             env.plots.subplots(name)
@@ -349,13 +386,15 @@ def _calibrate_frequency(
         outcome = yield from env.run(
             run_qubit_freq,
             _frequency_cfg(qub_pulse, readout, tun, prior, widen, hint),
-            save=save,
             live=lambda axes, samples, plot=frequency_plot: plot.update(
                 axes[0], np.stack((np.abs(samples), np.full_like(samples.real, np.nan)))
             ),
         )
         if isinstance(outcome, Failed):
             continue
+        filename = f"frequency-{attempt:02d}.h5"
+        save(outcome, env.iteration_dir / filename)
+        filenames.append(filename)
         fit = analyze_qubit_freq(outcome.result)
         residual = fit.quality.normalized_residual_rms
         if (
@@ -369,12 +408,11 @@ def _calibrate_frequency(
             and residual is not None
             and residual < tun.max_fit_residual
         ):
-            f01 = fit.frequency_mhz
             frequency_plot.update(
                 outcome.result.freqs, np.stack((fit.observed, fit.fitted))
             )
-            break
-    return f01
+            return _FrequencyCalibration(fit.frequency_mhz, tuple(filenames))
+    return None
 
 
 def calibrate(
@@ -387,7 +425,7 @@ def calibrate(
     carry: CalCarry,
     t1_estimate_us: float,
     savers: CalibrationSavers,
-) -> Generator[Effect, None, CalibratedPi2 | CalibrationFailed]:
+) -> Generator[Effect, None, CalibrationSuccess | CalibrationFailed]:
     """Acquire native calibration stages and update carry only on full success.
 
     Use yield from inside a workflow step, passing env positionally and all
@@ -400,7 +438,9 @@ def calibrate(
     invalid estimates raise ValueError before any acquisition.
     savers groups three explicit writers, avoiding callable context/registry;
     each writer
-    writes/closes its exact Engine temporary path before Completed is returned.
+    writes/closes its calibration-selected path after Completed is returned.
+    CalibrationSuccess returns accepted scalars and completed filenames for
+    the caller's point record. CalibrationFailed has no partial file receipt.
 
     Each stage builds its native cfg from the selected modules and this call's
     tunables/history. Frequency relax_delay is 1 µs; Rabi/readout relax_delay
@@ -416,7 +456,7 @@ def calibrate(
     error/pi replacing error/FWHM. Readout scans
     on first success and then at n_calibrated % ro_every == 0; its finite maximum
     SNR must meet min_readout_snr. Other calls retain prior readout values.
-    Successful calibration returns CalibratedPi2, retaining the fitted pi/2
+    Successful calibration returns CalibrationSuccess, whose CalibratedPi2 retains the fitted pi/2
     duration at the same selected drive waveform/gain; the four-field seed is
     unchanged. Invalid fitted pi/2 durations raise, without inventing a seed or
     changing fit acceptance. Schedule failures and rejection return CalibrationFailed without modifying
@@ -428,20 +468,21 @@ def calibrate(
     prior = carry.seed if carry.last is None else carry.last
     stages = env.pbar("calibration", total=3)
     stages.set_progress(0)
-    f01 = yield from _calibrate_frequency(
+    frequency = yield from _calibrate_frequency(
         env, qub_pulse, readout, tun, carry, savers.frequency
     )
-    if f01 is None:
+    if frequency is None:
         return CalibrationFailed("frequency", "No accepted frequency fit")
+    f01 = frequency.frequency_mhz
 
     stages.set_progress(1)
     rabi = yield from env.run(
         run_len_rabi,
         _rabi_cfg(qub_pulse, readout, tun, prior, f01, t1_estimate_us),
-        save=savers.rabi,
     )
     if isinstance(rabi, Failed):
         return CalibrationFailed("rabi", rabi.reason)
+    savers.rabi(rabi, env.iteration_dir / "rabi.h5")
     rabi_fit = analyze_len_rabi(rabi.result)
     residual = rabi_fit.quality.normalized_residual_rms
     if not (
@@ -468,6 +509,7 @@ def calibrate(
 
     stages.set_progress(2)
     ro_freq, ro_gain = prior.readout_freq_mhz, prior.readout_gain
+    readout_file = None
     if carry.last is None or carry.n_calibrated % tun.ro_every == 0:
         ro_result = yield from env.run(
             run_ro_landscape,
@@ -479,10 +521,11 @@ def calibrate(
                 rabi_fit.pi_length_us,
                 t1_estimate_us,
             ),
-            save=savers.readout,
         )
         if isinstance(ro_result, Failed):
             return CalibrationFailed("readout", ro_result.reason)
+        savers.readout(ro_result, env.iteration_dir / "readout.h5")
+        readout_file = "readout.h5"
         signals = ro_result.result.signals
         accepted = np.isfinite(signals) & (signals >= tun.min_readout_snr)
         if not np.any(accepted):
@@ -501,4 +544,6 @@ def calibrate(
     carry.f01_by_flux.append((flux, f01))
     carry.n_calibrated += 1
     stages.set_progress(3)
-    return cal
+    return CalibrationSuccess(
+        cal, CalibrationFiles(frequency.files, "rabi.h5", readout_file)
+    )

@@ -216,9 +216,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             self._iteration_inputs = self._artifacts.capture_record(
                 started, captured.model
             )
-        env = WorkflowEnv(
-            self._started_at, self._ports, iteration.files_dir, self._displays
-        )
+        env = WorkflowEnv(self._started_at, self._ports, iteration.root, self._displays)
         generator = self._definition.step(
             env, deepcopy(self._plan), captured.model, deepcopy(self._state)
         )
@@ -250,7 +248,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     self._current_iteration()[1],
                     self._call_revision,
                     iteration.iteration_dir,
-                    iteration.run_files,
                     lifecycle,
                     reason,
                 )
@@ -292,7 +289,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                 self._call_revision,
                 encoded,
                 iteration.iteration_dir,
-                iteration.run_files,
             )
             # Requests cannot interrupt this journal-before-state publication.
             self._artifacts.append(committed)
@@ -317,7 +313,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                     call_seq,
                     self._call_revision,
                     iteration.iteration_dir,
-                    iteration.run_files,
                     "stop" if self._lifecycle == "stopping" else "pause",
                 )
                 self._artifacts.append(discarded)
@@ -362,14 +357,13 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
     def run[Cfg, Result](
         self, request: RunEffect[Cfg, Result]
     ) -> Completed[Cfg, Result] | Failed:
-        """Execute one typed experiment with a fresh signal and save before return.
+        """Execute one typed experiment with a fresh signal, without saving.
 
         Recover only this Run's Schedule failure. Live, external wrapper,
-        device, cfg-copy, and saver errors propagate to segment isolation.
+        device and cfg-copy errors propagate to segment isolation.
         Controls without a true failure discard the step, never return Failed.
         """
         signal = self._new_signal()
-        iteration, _ = self._current_iteration()
         self._run_no += 1
         try:
             devices = self._ports.devices
@@ -401,10 +395,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             if failure is not None:
                 return failure
             self._check_cancel()
-            completed = Completed(deepcopy(run.cfg), result)
-            iteration.save(self._run_no, request.name, completed, request.save)
-            self._check_cancel()
-            return completed
+            return Completed(deepcopy(run.cfg), result)
         finally:
             self._clear_signal(signal)
 
@@ -592,7 +583,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
                         call_seq,
                         self._call_revision,
                         iteration.iteration_dir,
-                        iteration.run_files,
                         describe_error(error),
                     )
                     self._artifacts.append(failed)

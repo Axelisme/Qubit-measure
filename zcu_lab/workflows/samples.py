@@ -17,7 +17,7 @@ def export_t1_samples(run: SampleRun[T1Plan]) -> tuple[SampleRow, ...]:
 
     run supplies the detached native plan, exact data_root and committed records.
     Each accepted point contributes freq_mhz, t1_us/t1_err_us and dev_value/unit
-    from the LAST native acquisition's flux_dev snapshot, not the plan or live
+    from the point-named native decay acquisition's flux_dev snapshot, not the plan or live
     device. Failed points are skipped. Keys are <run_id>/<zero-based index>.
     Invalid indices/scalars, degraded summaries, missing snapshot/device/native
     acquisition or escaped paths raise ValueError before returning any batch.
@@ -32,7 +32,7 @@ def export_t2echo_samples(run: SampleRun[T2Plan]) -> tuple[SampleRow, ...]:
     """Prepare Echo freq_mhz/t2echo_us/t2echo_err_us rows from fixed artifacts.
 
     Uses export_t1_samples' artifact/failure semantics: one accepted flux point
-    per key, last native flux_dev snapshot, no fit/conversion/write/live capture.
+    per key, named native decay flux_dev snapshot, no fit/conversion/write/live capture.
     Malformed evidence raises before any batch is returned; native I/O propagates.
     """
     points = tuple(_decode(record, TypeAdapter(T2Point)) for record in run.records)
@@ -43,7 +43,7 @@ def export_t2ramsey_samples(run: SampleRun[T2Plan]) -> tuple[SampleRow, ...]:
     """Prepare Ramsey freq_mhz/t2ramsey_us/t2ramsey_err_us from fixed artifacts.
 
     Uses export_t1_samples' artifact/failure semantics: one accepted flux point
-    per key, last native flux_dev snapshot, no fit/conversion/write/live capture.
+    per key, named native decay flux_dev snapshot, no fit/conversion/write/live capture.
     Malformed evidence raises before any batch is returned; native I/O propagates.
     """
     points = tuple(_decode(record, TypeAdapter(T2Point)) for record in run.records)
@@ -87,9 +87,9 @@ def _rows(
         frequency = point.calibration.f01_mhz
         if not isfinite(frequency) or frequency <= 0:
             raise ValueError("Accepted sample frequency must be finite and positive")
-        if not record.run_files:
+        if point.decay_file is None:
             raise ValueError("Accepted sample requires a native acquisition snapshot")
-        path = (root / record.iteration_dir / record.run_files[-1]).resolve()
+        path = (root / record.iteration_dir / point.decay_file).resolve()
         if not path.is_relative_to(root):
             raise ValueError("Sample acquisition path escapes data_root")
         snapshot = load_run_data(path).metadata.device_snapshot

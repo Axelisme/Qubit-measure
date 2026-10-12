@@ -36,6 +36,7 @@ from .calibration import (
     Calibrated,
     CalibratedPi2,
     CalibrationFailed,
+    CalibrationFiles,
     CalibrationSavers,
     CalibrationTunables,
     apply_readout_calibration,
@@ -120,6 +121,9 @@ class MISTPoint:
     calibration is the accepted pi/readout result or stage/reason failure.
     success is True only after native acquisition completes, otherwise False.
     reason is None on success or a calibration/Schedule diagnostic on failure.
+    calibration_files names completed stages relative to this iteration on
+    calibration success, or is None on calibration failure. gain_file names the
+    final native trace, or is None on failed calibration/acquisition.
     """
 
     index: int
@@ -127,6 +131,8 @@ class MISTPoint:
     calibration: CalibratedPi2 | CalibrationFailed
     success: bool
     reason: str | None
+    calibration_files: CalibrationFiles | None
+    gain_file: str | None
 
 
 def init_mist(env: InitEnv[Calibrated], plan: MISTPlan) -> MISTState:
@@ -213,11 +219,11 @@ def mist_fluxdep(
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
     _draw_map(env, plan, state)
     if not state.remaining:
-        env.plots.save("mist/vs_flux", env.iter_dir / "map.png")
+        env.plots.save("mist/vs_flux", env.iteration_dir / "map.png")
         return Done()
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    cal = yield from calibrate(
+    calibration = yield from calibrate(
         env,
         qub_pulse=plan.qub_pulse,
         readout=plan.readout,
@@ -231,8 +237,12 @@ def mist_fluxdep(
             partial(save_readout, snapshot=plan.snapshot),
         ),
     )
-    if isinstance(cal, CalibrationFailed):
-        return Next(MISTPoint(index, flux, cal, False, cal.reason), state)
+    if isinstance(calibration, CalibrationFailed):
+        return Next(
+            MISTPoint(index, flux, calibration, False, calibration.reason, None, None),
+            state,
+        )
+    cal, files = calibration.calibration, calibration.files
     name = "mist/gain"
     axes = None
     if name in env.plots:
@@ -247,12 +257,14 @@ def mist_fluxdep(
     outcome = yield from env.run(
         run_mist,
         mist_cfg(plan, tun, cal),
-        save=partial(save_mist, snapshot=plan.snapshot),
         live=lambda axes, samples: plot.update(axes[0], mist_signal2real(samples)),
     )
     if isinstance(outcome, Failed):
-        return Next(MISTPoint(index, flux, cal, False, outcome.reason), state)
+        return Next(
+            MISTPoint(index, flux, cal, False, outcome.reason, files, None), state
+        )
+    save_mist(outcome, env.iteration_dir / "mist.h5", snapshot=plan.snapshot)
     state.traces[index] = outcome.result.signals
     state.gains = outcome.result.gains.copy()
-    env.plots.save(name, env.iter_dir / "gain.png")
-    return Next(MISTPoint(index, flux, cal, True, None), state)
+    env.plots.save(name, env.iteration_dir / "gain.png")
+    return Next(MISTPoint(index, flux, cal, True, None, files, "mist.h5"), state)

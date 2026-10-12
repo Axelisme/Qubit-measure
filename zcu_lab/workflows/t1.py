@@ -1,7 +1,8 @@
 """Native T1 flux-dependence plan, state and complete cfg generation.
 
 The workflow owns generation, calibration policy and accepted scalar history.
-Engine owns copied inputs, cancellation, exact destinations and publication.
+Engine owns copied inputs, cancellation and record commits. The workflow owns
+native filenames and saving.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from zcu_lab.workflows.calibration import (
     CalCarry,
     Calibrated,
     CalibrationFailed,
+    CalibrationFiles,
     CalibrationSavers,
     CalibrationTunables,
     apply_readout_calibration,
@@ -169,6 +171,10 @@ class T1Point:
     lifetime_us and error_us are accepted lifetime/error in microseconds, or both
     None when acquisition/fit failed. reason is None on success, otherwise the
     calibration, Schedule or fit-rejection reason. Raw traces live in native files.
+    calibration_files names completed stages relative to this iteration on
+    calibration success, or is None on calibration failure. decay_file names the
+    final native trace, or is None on failed calibration/acquisition. Rejected
+    fits still retain their saved raw trace.
     """
 
     index: int
@@ -177,6 +183,8 @@ class T1Point:
     lifetime_us: float | None
     error_us: float | None
     reason: str | None
+    calibration_files: CalibrationFiles | None
+    decay_file: str | None
 
 
 @workflow(
@@ -201,7 +209,7 @@ def t1_fluxdep(
     Accepted T1 appends lifetime/error and saves its decay plot. The final step
     saves a summary built from committed lifetime history and returns Done.
     Pause/stop discards the current step through Engine. Native adapter, fitting,
-    plotting and saver errors propagate; already published files remain.
+    plotting and saver errors propagate; already written files remain.
     """
     # Check required ports before plots or any hardware effect.
     _ = env.soc
@@ -223,12 +231,12 @@ def t1_fluxdep(
 
     env.plots.draw(summary_name, summary)
     if not state.remaining:
-        env.plots.save(summary_name, env.iter_dir / "summary.png")
+        env.plots.save(summary_name, env.iteration_dir / "summary.png")
         return Done()
 
     flux = state.remaining.pop(0)
     yield from set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-    cal = yield from calibrate(
+    calibration = yield from calibrate(
         env,
         qub_pulse=plan.qub_pulse,
         readout=plan.readout,
@@ -242,9 +250,15 @@ def t1_fluxdep(
             partial(save_readout, snapshot=plan.snapshot),
         ),
     )
-    if isinstance(cal, CalibrationFailed):
-        return Next(T1Point(index, flux, cal, None, None, cal.reason), state)
+    if isinstance(calibration, CalibrationFailed):
+        return Next(
+            T1Point(
+                index, flux, calibration, None, None, calibration.reason, None, None
+            ),
+            state,
+        )
 
+    cal, files = calibration.calibration, calibration.files
     guess = tun.guess_us
     for _, lifetime in state.t1_by_flux:
         guess = 0.5 * lifetime + 0.5 * guess
@@ -262,11 +276,13 @@ def t1_fluxdep(
     outcome = yield from env.run(
         run_t1,
         t1_cfg(plan, tun, cal, guess),
-        save=partial(save_t1, snapshot=plan.snapshot),
         live=lambda axes, samples: decay_plot.update(axes[0], samples.real),
     )
     if isinstance(outcome, Failed):
-        return Next(T1Point(index, flux, cal, None, None, outcome.reason), state)
+        return Next(
+            T1Point(index, flux, cal, None, None, outcome.reason, files, None), state
+        )
+    save_t1(outcome, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
     fit = analyze_t1(outcome.result)
     residual = fit.quality.normalized_residual_rms
     if not (
@@ -278,7 +294,10 @@ def t1_fluxdep(
         and residual is not None
         and residual < tun.max_fit_residual
     ):
-        return Next(T1Point(index, flux, cal, None, None, "T1 fit rejected"), state)
+        return Next(
+            T1Point(index, flux, cal, None, None, "T1 fit rejected", files, "t1.h5"),
+            state,
+        )
 
     def overlay(figure: Figure) -> None:
         ax = figure.axes[0]
@@ -286,6 +305,9 @@ def t1_fluxdep(
         ax.set_title(f"T1 = {fit.lifetime_us:.2f} us")
 
     env.plots.draw(name, overlay)
-    env.plots.save(name, env.iter_dir / "decay.png")
+    env.plots.save(name, env.iteration_dir / "decay.png")
     state.t1_by_flux.append((flux, fit.lifetime_us))
-    return Next(T1Point(index, flux, cal, fit.lifetime_us, fit.error_us, None), state)
+    return Next(
+        T1Point(index, flux, cal, fit.lifetime_us, fit.error_us, None, files, "t1.h5"),
+        state,
+    )

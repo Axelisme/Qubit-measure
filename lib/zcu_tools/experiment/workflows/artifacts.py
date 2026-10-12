@@ -1,16 +1,13 @@
-"""Engine-owned run artifacts and no-clobber single-experiment publication."""
+"""Engine-owned manifest, journal and best-effort invocation summaries."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from re import fullmatch
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
@@ -30,7 +27,6 @@ from .journal import (
 )
 from .models import (
     CommittedRecord,
-    Completed,
     Lifecycle,
     RunIdentity,
     RunPaths,
@@ -123,9 +119,6 @@ def _relative_path(value: str) -> None:
 def _check_event_paths(event: JournalPayload) -> None:
     if isinstance(event, (IterationStarted, IterationResult, CommittedRecord)):
         _relative_path(event.iteration_dir)
-    if isinstance(event, (IterationResult, CommittedRecord)):
-        for path in event.run_files:
-            _relative_path(path)
 
 
 class RunArtifacts:
@@ -332,7 +325,7 @@ class RunArtifacts:
             )
 
     def new_iteration(self, call_seq: int) -> IterationArtifacts:
-        """Create iter/<call_seq>/runs and files and return its publication seam.
+        """Create iter/<call_seq>/ and return its summary-writing seam.
 
         call_seq is a positive invocation number, not a commit or flux index.
         It is padded to at least six digits and never wraps. Existing invocation
@@ -344,18 +337,14 @@ class RunArtifacts:
         relative = f"iter/{call_seq:06d}"
         root = self._paths.data_root / relative
         root.mkdir(parents=True, exist_ok=False)
-        (root / "runs").mkdir()
-        (root / "files").mkdir()
         return IterationArtifacts(root, relative)
 
 
 class IterationArtifacts:
-    """Publish Completed results in one newly allocated invocation directory.
+    """Write Engine-owned summaries in one newly allocated invocation root.
 
-    root is an absolute directory with existing runs/ and files/ children.
-    iteration_dir is its data-root-relative journal reference. RunArtifacts
-    constructs this object; the Engine is its sole writer. It neither inspects
-    nor scans workflow-owned files/ or the saver-owned file format.
+    root is absolute; iteration_dir is the data-root-relative journal reference.
+    Workflow-owned files are neither inspected nor tracked by this owner.
     """
 
     def __init__(self, root: Path, iteration_dir: str) -> None:
@@ -364,7 +353,6 @@ class IterationArtifacts:
             raise ValueError("Iteration root must be absolute")
         self._root = root
         self._iteration_dir = iteration_dir
-        self._run_files: dict[int, str] = {}
 
     @property
     def iteration_dir(self) -> str:
@@ -372,18 +360,9 @@ class IterationArtifacts:
         return self._iteration_dir
 
     @property
-    def files_dir(self) -> Path:
-        """Return the absolute workflow-owned files/ directory exposed in env."""
-        return self._root / "files"
-
-    @property
-    def run_files(self) -> tuple[str, ...]:
-        """Return published finals relative to this invocation, in run_no order.
-
-        Failed experiments leave gaps. Temporary files are never listed; finals
-        published before a later cleanup error are retained and listed.
-        """
-        return tuple(self._run_files[number] for number in sorted(self._run_files))
+    def root(self) -> Path:
+        """Return the existing absolute invocation root exposed to the workflow."""
+        return self._root
 
     def save_record(self, payload: dict[str, JsonValue]) -> None:
         """Atomically publish a finished invocation's JSON summary.
@@ -400,35 +379,3 @@ class IterationArtifacts:
                 raise OSError("Iteration record write was incomplete")
             writer.flush()
         temporary.replace(self._root / "record.json")
-
-    def save[Cfg, Result](
-        self,
-        run_no: int,
-        experiment: str,
-        completed: Completed[Cfg, Result],
-        saver: Callable[[Completed[Cfg, Result], Path], None],
-    ) -> None:
-        """Save to a unique temporary .h5 and publish without overwriting finals.
-
-        run_no counts experiment effects from 1, including recoverable failures.
-        experiment is the validated ASCII function-name stem. completed is the
-        paired cfg/Result; saver writes/closes the exact supplied temporary path.
-        Only successful publication is added to run_files. Saver, link, and
-        unlink errors propagate; files are retained, no retry occurs. After link
-        succeeds, an unlink error retains and lists the final and fails the run.
-        The Engine must call this before handing Completed back to workflow.
-        """
-        if type(run_no) is not int or run_no <= 0:
-            raise ValueError("run_no must be a positive integer")
-        if fullmatch(r"[A-Za-z0-9_]+", experiment) is None:
-            raise ValueError("Experiment stem must contain only ASCII letters/digits/_")
-        stem = f"{run_no:02d}-{experiment}"
-        final = self._root / "runs" / f"{stem}.h5"
-        if run_no in self._run_files or final.exists():
-            raise FileExistsError(f"Run file already exists: {final}")
-        temporary = final.with_name(f".{stem}-{uuid4().hex}.tmp.h5")
-        saver(completed, temporary)
-        # Same-directory hard link is atomic and refuses an existing final.
-        os.link(temporary, final)
-        self._run_files[run_no] = f"runs/{final.name}"
-        temporary.unlink()
