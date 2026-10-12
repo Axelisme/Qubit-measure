@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
+from qtpy.QtTest import QTest
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -18,6 +19,7 @@ from qtpy.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QListWidget,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -48,7 +50,7 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
-from zcu_tools.gui.cfg import DirectValue
+from zcu_tools.gui.cfg import DirectValue, EvalValue
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -184,6 +186,7 @@ def control_ui(
     registry = Registry()
     registry.register("stoppable", StoppableAdapter)
     registry.register("loadable", ModalLoadAdapter)
+    registry.register("group/nested", StoppableAdapter)
     loader = Loader()
     loader.candidate.register("stoppable", StoppableAdapter)
     ctrl = UiController(
@@ -927,3 +930,88 @@ def test_inspect_add_submit_after_close_has_no_owner_effects(
         assert changes == []
     finally:
         subscription.unsubscribe()
+
+
+@pytest.mark.parametrize("adapter_name", ["stoppable", "group/nested"])
+@pytest.mark.parametrize("decision", ["local", "cancel", "remote"])
+def test_live_new_tab_popup_preserves_local_selection_cancel_and_remote_gate(
+    control_ui: ControlUi, qapp: QApplication, adapter_name: str, decision: str
+) -> None:
+    ui = control_ui
+    baseline = tuple(ui.controller.list_tab_ids())
+    failures: list[Exception] = []
+    visited: list[bool] = []
+
+    def choose() -> None:
+        popup = qapp.activePopupWidget()
+        try:
+            assert isinstance(popup, QMenu), "New Tab must open a real popup"
+            assert qapp.activeModalWidget() is None
+            visited.append(True)
+            target_menu = popup
+            if "/" in adapter_name:
+                target_menu = next(
+                    menu for menu in popup.findChildren(QMenu) if menu.title() == "group"
+                )
+                popup.setActiveAction(target_menu.menuAction())
+                QTest.keyClick(popup, Qt.Key.Key_Right)
+                qapp.processEvents()
+            selected = next(
+                action for action in target_menu.actions()
+                if action.data() == adapter_name
+            )
+            if decision == "remote":
+                ui.connect()
+                assert ui.controller.control_identity.status().holder == "rpc:measure-agent"
+                assert not selected.isEnabled(), "Live adapter actions must receive Remote projection"
+            if decision != "cancel":
+                QTest.mouseClick(
+                    target_menu,
+                    Qt.MouseButton.LeftButton,
+                    pos=target_menu.actionGeometry(selected).center(),
+                )
+        except (AssertionError, StopIteration) as exc:
+            failures.append(exc)
+        finally:
+            if isinstance(popup, QMenu):
+                for submenu in popup.findChildren(QMenu):
+                    submenu.close()
+                popup.close()
+
+    QTimer.singleShot(0, choose)
+    button(ui.window, "New Tab ▾").click()
+    assert visited == [True]
+    if failures:
+        raise failures[0]
+    after = tuple(ui.controller.list_tab_ids())
+    if decision == "local":
+        assert len(after) == len(baseline) + 1
+        assert ui.controller.get_tab_snapshot(after[-1]).adapter_name == adapter_name
+    else:
+        assert after == baseline
+
+
+def test_alias_override_run_rejection_keeps_cfg_location_and_has_no_effects(
+    control_ui: ControlUi,
+) -> None:
+    ui = control_ui
+    cfg = ui.controller.cfg_resources.lookup(ui.tab_id)
+    before = cfg.edit((CfgEdit(("knob",), EvalValue("$qubit.gain")),))
+    publications = []
+    remove = cfg.watch(publications.append)
+    publications.clear()
+    rows = ui.controller.context_control.get_alias_rows()
+    ui.connect()
+    try:
+        rejected = ui.rpc("tab.run_start", tab_id=ui.tab_id, aliases={"qubit": "missing"})
+        assert rejected["ok"] is False
+        error = rejected["error"]
+        assert error["code"] == "precondition_failed"
+        assert error["reason"] == "not_valid"
+        assert error["data"]["path"] == ["knob"]
+        assert ui.controller.operation_control.active_operations() == ()
+        assert cfg.observe() == before
+        assert publications == []
+        assert ui.controller.context_control.get_alias_rows() == rows
+    finally:
+        remove()

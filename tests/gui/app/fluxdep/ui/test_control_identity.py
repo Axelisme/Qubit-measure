@@ -18,7 +18,6 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QLineEdit,
     QListWidget,
-    QMessageBox,
     QPushButton,
     QTabWidget,
 )
@@ -31,8 +30,11 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
+
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 
 
 def button(widget, text):
@@ -316,14 +318,15 @@ def pending_window(qapp, cross_controller, tmp_path):
         None,
         None,
     )
-    view = MainWindow(ctrl)
+    dialogs = RecordingDialogPresenter(confirm_answers=[False, False], defer_confirm=True)
+    view = MainWindow(ctrl, dialog_presenter=dialogs)
     view.show()
     button(view, "Analyze…").click()
     panel = view.findChild(AnalyzePanelWidget)
     assert panel is not None
     panel.show_tab("search")
     token = ctrl.search.start()
-    yield view, ctrl, panel, background, token
+    yield view, ctrl, panel, background, token, dialogs
     ctrl.control_identity.reclaim_local()
     if ctrl.search.active_token is not None:
         ctrl.search.cancel(token)
@@ -334,7 +337,7 @@ def pending_window(qapp, cross_controller, tmp_path):
 
 
 def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_window):
-    view, ctrl, panel, background, token = pending_window
+    view, ctrl, panel, background, token, _dialogs = pending_window
     cancel = button(panel, "Cancel search")
     assert cancel.isEnabled()
     ctrl.control_identity.connect("a", "flux-agent", "owner")
@@ -362,45 +365,42 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     assert not cancel.isEnabled() and button(panel, "Search database").isEnabled()
 
 
-def answer_close(answer, seen):
-    def respond():
-        box = QApplication.activeModalWidget()
-        assert isinstance(box, QMessageBox)
-        seen.append(box.text())
-        choice = (
-            QMessageBox.StandardButton.Yes if answer else QMessageBox.StandardButton.No
-        )
-        response_button = box.button(choice)
-        assert response_button is not None
-        response_button.click()
-
-    QTimer.singleShot(0, respond)
-
-
 def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(
     pending_window,
 ):
-    view, ctrl, panel, background, token = pending_window
+    view, ctrl, panel, background, token, dialogs = pending_window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    seen = []
-    indicator(view)
-    answer_close(False, seen)
-    assert not view.close(), "Remote close must ask before beginning shutdown"
-    assert seen and "flux-agent" in seen[0]
+    assert not view.close(), "Remote close must return while the decision is pending"
+    assert len(dialogs.calls) == 1 and "flux-agent" in dialogs.calls[0].message
+    assert not view.close(), "A pending decision must not open another confirmation"
+    assert len(dialogs.calls) == 1
+    # Search admission stays open until acceptance, not merely close intent.
+    with pytest.raises(FailedPreconditionError) as busy:
+        ctrl.search.start()
+    assert busy.value.reason_code == "search_busy"
     assert view.isVisible() and ctrl.search.active_token == token
+    dialogs.decide_confirm(False)
+    with pytest.raises(FailedPreconditionError) as still_busy:
+        ctrl.search.start()
+    assert still_busy.value.reason_code == "search_busy"
+    assert view.isVisible()
     ctrl.control_identity.disconnect("a")
     assert indicator(view).text().endswith("offline")
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert indicator(view).text().endswith("online")
-    answer_close(True, seen)
-    assert not view.close(), "Accepted close must retain the pending search owner"
+    assert not view.close()
+    assert len(dialogs.calls) == 2
+    dialogs.decide_confirm(True)
+    assert view.isVisible(), "Accepted close must retain the pending search owner"
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     ctrl.control_identity.disconnect("a")
     assert indicator(view).text().endswith("offline")
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert indicator(view).text().endswith("online")
+    assert not view.close(), "Drain refusal must not ask for confirmation again"
+    assert len(dialogs.calls) == 2
     background.complete_cancel()
     assert ctrl.search.outcome(token).status == "cancelled"
     assert panel.figures == {}
-    answer_close(True, seen)
     assert view.close()
+    assert len(dialogs.calls) == 2
