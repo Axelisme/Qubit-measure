@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-12, joint raw-IQ Rabi fitting
+**Last updated:** 2026-10-13, Rabi numerical fitting ownership
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics，不讀 cfg 或建立圖。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
@@ -29,12 +29,14 @@ covariance 依 reduced chi-square scaling，維持既有 `curve_fit(absolute_sig
 iminuit state。`fit_ge_decay(..., share_t1=True)` 是第一個 tracer：g/e trace 共用同一
 `t1` identity，並由 global covariance 投影既有 T1 error result。
 
-Singleshot readout-transition family亦提供固定histogram edges的integrated-bin conditional
-probabilities與radius-limited nearest-center g/e region積分；Len Rabi joint likelihood以同一conditional
-family建立multinomial NLL及derived confusion matrix，不以bin-center PDF高度或free matrix
-parameters取代其機率語意。這個analysis.fitting Module只擁有conditional probability與circle integration；
-Len Rabi experiment Module擁有optimizer continuation、backend validity、calibration阻擋與Figure
-呈現，避免generic fitting helper決定上層analysis lifecycle。
+Singleshot readout-transition family 提供固定 histogram edges 的 integrated-bin conditional
+probabilities 與 radius-limited nearest-center g/e region 積分。Rabi joint likelihood 以同一
+conditional family 建立 multinomial NLL 及 derived confusion matrix，不以 bin-center PDF
+高度或 free matrix parameters 取代其機率語意。`singleshot_rabi` 擁有數值擬合，包括
+Minuit continuation、backend validity、候選選擇與 fallback，以及 circle-classification calibration。
+實驗 caller 只為 backend valid 且中心、半徑與 confusion matrix 有限的結果產生 calibration
+寫回項目。Len Rabi 的 `core.analyze` 委派 fitting，從 cfg 取出 readout 長度，並把數值與
+圖尺寸交給 `plotting.singleshot_rabi` 建圖。Fitting 不決定實驗寫回，也不建立 Figure。
 
 Dual transition-rate fitting以六個stable rate names共享跨dataset identity，兩組initial
 g/e populations維持dataset-qualified local identity。`DualTransitionRateFitResult`直接持有
