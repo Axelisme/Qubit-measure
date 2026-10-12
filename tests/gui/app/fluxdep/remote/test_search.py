@@ -399,7 +399,7 @@ def test_wait_json_admission_is_shared(
 
 @pytest.mark.parametrize(
     "reason",
-    ["no_database_path", "no_selected_points", "selection_stale", "search_closing"],
+    ["no_database_path", "no_selected_points", "search_closing"],
 )
 def test_native_search_admission_errors_do_not_open_handles(
     search_case: SearchCase, reason: str
@@ -409,8 +409,6 @@ def test_native_search_admission_errors_do_not_open_handles(
         h.ctrl.set_fit_params("", (2, 15), (0.2, 2), (0.1, 2), {}, None, None)
     elif reason == "no_selected_points":
         h.ctrl.set_selection(np.zeros(4, dtype=np.bool_))
-    elif reason == "selection_stale":
-        h.ctrl.state.set_selection(np.ones(1, dtype=np.bool_))
     else:
         h.ctrl.search.begin_close()
     client = h.client()

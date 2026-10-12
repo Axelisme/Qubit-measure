@@ -76,7 +76,9 @@ class CrossSelectionPlot:
         )
         self._axes.minorticks_on()
         self._axes.grid(True, alpha=0.25)
-        self._axes.legend(loc="best", fontsize="small")
+        # A fixed corner: "best" re-scores every background mesh cell on each
+        # draw, which made opening the Filter view and every redraw stall.
+        self._axes.legend(loc="upper right", fontsize="small")
         figure.subplots_adjust(left=0.12, right=0.97, bottom=0.13, top=0.82)
 
     def show_state(
