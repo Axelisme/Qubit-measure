@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, named alignment and composed fit decisions
+**Last updated:** 2026-10-13, named sampling intent and evidence
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge.
@@ -45,6 +45,16 @@ or load-inherited lines without auto_align and attaches spectrum.render evidence
 image=true requests interactive.render for unfinished drafts. GUI open receipts
 supply discarded stage facts; downstream invalidation belongs to app publication,
 not MCP inference.
+
+`sample_tools.py` implements J3 as `fluxdep_sample(name, command, params?, image?)`.
+It opens `kind="sample"` without reading the spectrum first. The GUI chooses
+OneTone or TwoTone and rejects unknown or unaligned sources. MCP projects the
+returned native kind, detector settings and positional point differences.
+Setting changes list only changed fields as before/after pairs. TwoTone replies
+keep detected point counts separate from mask pixels. Initial and reopened
+TwoTone drafts start empty in both GUI and RPC. finish reads published point
+ranges and attaches spectrum.render evidence; image=true requests draft evidence
+for other commands. MCP exposes no brush mode setter or full-mask command.
 
 `fit_tools.py` composes `fluxdep_fit` as a current-input read, caller overlay,
 complete replacement, search, bounded native awaits until terminal, final result

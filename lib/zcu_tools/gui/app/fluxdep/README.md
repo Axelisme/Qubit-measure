@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，named contexts、readonly display 與 fit contracts
+**Last updated:** 2026-10-13，sampling intent 與空初始遮罩
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -75,6 +75,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   Active 只決定顯示。切換不退休草稿；同譜換 picker kind 才丟掉該譜草稿，open receipt 回 `discarded`。
   Source reload、remove 與 external publication 退休對應 context，Filter 仍驗證全部來源版本。
   每份 line plugin 有獨立 single-flight auto alignment；共用 background runner 可並行提交不同譜。
+  Sampling intent 依已發布譜型開 OneTone 或 TwoTone picker。TwoTone 初次與重新採樣都從空遮罩開始，不繼承已發布點。
   Finish 經 Controller services 發布。Window close dispose 全部 contexts 並 quiesce runner；view detach 不終止 Session。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。

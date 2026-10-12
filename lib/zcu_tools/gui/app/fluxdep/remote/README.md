@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，named interactive state, fit rendering and database metadata
+**Last updated:** 2026-10-13，sampling intent and native picker dispatch
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -15,6 +15,10 @@ Reads do not establish per-connection version guards.
 
 Each spectrum retains its own draft and Undo; Filter has one global context.
 Interactive context IDs bind commands to the owning session and named target.
+`spectrum.interactive.open(name, kind="sample")` asks the GUI owner to choose the
+picker from the published spectrum type. Unknown names and unaligned sources
+receive native admission errors. The receipt reports onetone/twotone, never
+sample. Explicit line/onetone/twotone requests keep their existing contracts.
 interactive.read(name) is inert; its optional context_id rejects cancelled,
 removed or replaced drafts. Numeric replies contain no figure or command schema.
 interactive.render(name), or name=selection for Filter, returns the current PNG
