@@ -73,6 +73,86 @@ def test_kernel_agrees_with_notebook_and_entry_results(tmp_path):
     np.testing.assert_allclose(result.predicted_freqs, args[1])
 
 
+@pytest.mark.parametrize("noisy", [False, True])
+def test_search_attributes_points_and_summarizes_all_transitions(tmp_path, noisy):
+    # Fixed bounds keep the existing winner and scale independently checkable.
+    # Categories are deliberately supplied out of compilation order.
+    transitions = TransitionDict(
+        {
+            "mirror2": [(0, 1)],
+            "mirror red": [(0, 1)],
+            "mirror blue": [(0, 1)],
+            "mirror": [(0, 1)],
+            "red side": [(0, 1)],
+            "blue side": [(0, 1)],
+            "transitions2": [(0, 1)],
+            "transitions": [(0, 1), (0, 2), (0, 1)],
+            "r_f": 4.0,
+            "sample_f": 10.0,
+        }
+    )
+    fluxs = np.array([0.0, 0.0, 0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0])
+    freqs = np.array([1.0, 2.0, 5.5, 3.0, 9.0, 4.5, 7.0, 0.5, 9.5])
+    predicted = freqs.copy()
+    indices = [0, 1, 3, 4, 5, 6, 7, 8, 9]
+    residuals = [0.0] * 9
+    if noisy:
+        freqs[:2] += [0.125, 0.25]
+        fluxs = np.append(fluxs, 0.0)
+        freqs = np.append(freqs, 20.0)
+        predicted = np.append(predicted, 9.5)
+        indices.append(9)
+        residuals = [0.125, 0.25, *([0.0] * 7), 10.5]
+    result = search_database(
+        fluxs,
+        freqs,
+        _database(tmp_path),
+        transitions,
+        ParamBounds(EJ=(3.0, 3.0), EC=(0.8, 0.8), EL=(0.5, 0.5)),
+    )
+    assert result.params == (3.0, 0.8, 0.5)
+    assert result.best_index == 0
+    assert result.best_scale == 1.0
+    assert result.best_distance == pytest.approx(1.0875 if noisy else 0.0)
+    np.testing.assert_array_equal(result.predicted_freqs, predicted)
+    np.testing.assert_array_equal(result.transition_indices, indices)
+    np.testing.assert_array_equal(result.residuals, residuals)
+    np.testing.assert_array_equal(result.outlier_mask, [False] * 9 + ([True] if noisy else []))
+    quality = result.quality
+    assert quality.mean == pytest.approx(1.0875 if noisy else 0.0)
+    assert quality.outlier_threshold == pytest.approx(3.2625 if noisy else 0.0)
+    assert quality.outliers == int(noisy)
+    assert [summary.transition for summary in quality.per_transition] == [
+        "transitions 0-1",
+        "transitions 0-2",
+        "transitions 0-1",
+        "blue side 0-1",
+        "red side 0-1",
+        "mirror 0-1",
+        "mirror blue 0-1",
+        "mirror red 0-1",
+        "transitions2 0-1",
+        "mirror2 0-1",
+    ]
+    assert [summary.points for summary in quality.per_transition] == [
+        1, 1, 0, 1, 1, 1, 1, 1, 1, 2 if noisy else 1
+    ]
+    assert [summary.mean for summary in quality.per_transition] == [
+        0.125 if noisy else 0.0,
+        0.25 if noisy else 0.0,
+        None,
+        *([0.0] * 6),
+        5.25 if noisy else 0.0,
+    ]
+    assert [summary.max for summary in quality.per_transition] == [
+        0.125 if noisy else 0.0,
+        0.25 if noisy else 0.0,
+        None,
+        *([0.0] * 6),
+        10.5 if noisy else 0.0,
+    ]
+
+
 def test_builder_matches_notebook_figure_and_show(tmp_path, monkeypatch):
     args = _search_args(tmp_path)
     result = search_database(*args[:4], ParamBounds(EJ=args[4], EC=args[5], EL=args[6]))
