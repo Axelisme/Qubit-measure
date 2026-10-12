@@ -44,7 +44,7 @@ def test_render_returns_png_without_mutating_published_state(
     client = route_harness.client()
     before = route_harness.ctrl.state.version.snapshot()
     reply = route_harness.request(client, "spectrum.render", name=spectrum.name)
-    assert reply["ok"], reply
+    assert reply["ok"] is True, reply
     result = reply["result"]
     encoded = result["png_b64"]
     assert isinstance(encoded, str)
@@ -65,7 +65,7 @@ def test_list_reports_unfinished_alignment_draft(
     if draft:
         route_harness.ctrl.interactive.begin_line_pick(spectrum.name)
     reply = route_harness.request(client, "spectrum.list")
-    assert reply["ok"], reply
+    assert reply["ok"] is True, reply
     rows = reply["result"]["spectrums"]
     assert isinstance(rows, list)
     assert rows[0]["pending"] == ("align" if draft else None)
@@ -79,7 +79,7 @@ def test_selection_snapshot_reports_unfinished_filter_draft(
     if draft:
         route_harness.ctrl.interactive.begin_cross_selection()
     reply = route_harness.request(client, "selection.snapshot")
-    assert reply["ok"], reply
+    assert reply["ok"] is True, reply
     assert reply["result"]["pending"] is draft
     # Draft inspection does not publish its temporary mask.
     assert reply["result"]["selected"] is None
