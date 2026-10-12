@@ -133,3 +133,85 @@ def test_read_only_scalar_remains_disabled_after_mode_publication(widgets):
     line = widget.findChild(QLineEdit)
     assert line is not None and not line.isEnabled()
     assert submitted == []
+
+
+@pytest.mark.parametrize(
+    "value,preview,tone",
+    [
+        (EvalValue("qubit.freq", resolved=600.0), "= 600.0", "gray"),
+        (EvalValue("missing", error="Unknown name"), "= ?", "red"),
+    ],
+)
+def test_expression_preview_wraps_below_full_width_input(widgets, value, preview, tone):
+    from qtpy.QtWidgets import QBoxLayout, QSizePolicy
+
+    widget = ScalarInputWidget(
+        ScalarSpec("Value", float), value, options=None, submit=lambda value: None
+    )
+    widgets.append(widget)
+    line = widget.findChild(QLineEdit)
+    ghost = widget.findChild(QLabel)
+    assert line is not None and ghost is not None
+    layout = widget.layout()
+    assert isinstance(layout, QBoxLayout)
+    assert layout.direction() == QBoxLayout.Direction.TopToBottom
+    assert layout.indexOf(ghost) > layout.indexOf(line)
+    assert ghost.wordWrap()
+    assert ghost.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+    assert ghost.font().pointSizeF() < line.font().pointSizeF()
+    assert ghost.text() == preview
+    assert tone in ghost.styleSheet()
+    assert ghost.toolTip() == (value.error or "")
+
+    widget.display(DirectValue(600), options=None)
+    direct_layout = widget.layout()
+    assert isinstance(direct_layout, QBoxLayout)
+    assert direct_layout.direction() == QBoxLayout.Direction.TopToBottom
+    direct_line = widget.findChild(QLineEdit)
+    assert direct_line is not None
+    assert direct_layout.indexOf(direct_line) == 0
+    assert direct_layout.itemAt(0).alignment() == layout.itemAt(0).alignment()
+
+
+def test_expression_blur_returns_cursor_to_start_without_losing_tooltip(widgets, qapp):
+    expression = "$qubit.resonator.freq - 4 * $qubit.resonator.kappa"
+    widget = ScalarInputWidget(
+        ScalarSpec("Value", float),
+        EvalValue(expression, resolved=5996),
+        options=None,
+        submit=lambda value: None,
+    )
+    widgets.append(widget)
+    widget.show()
+    widget.activateWindow()
+    line = widget.findChild(QLineEdit)
+    assert line is not None
+    line.setFocus()
+    qapp.processEvents()
+    assert line.hasFocus()
+    line.setCursorPosition(len(expression))
+    widget.display(EvalValue(expression, resolved=5996), options=None)
+    assert line.cursorPosition() == len(expression)
+    line.clearFocus()
+    qapp.processEvents()
+    assert not line.hasFocus()
+    assert line.cursorPosition() == 0
+    assert line.text() == expression
+    assert line.toolTip() == expression
+
+
+def test_unfocused_expression_publication_starts_at_beginning(widgets):
+    widget = ScalarInputWidget(
+        ScalarSpec("Value", float),
+        EvalValue("$qubit.freq", resolved=600),
+        options=None,
+        submit=lambda value: None,
+    )
+    widgets.append(widget)
+    line = widget.findChild(QLineEdit)
+    assert line is not None
+    assert not line.hasFocus()
+    assert line.cursorPosition() == 0
+    widget.display(EvalValue("$qubit.freq * 2", resolved=1200), options=None)
+    assert line.cursorPosition() == 0
+    assert line.toolTip() == "$qubit.freq * 2"
