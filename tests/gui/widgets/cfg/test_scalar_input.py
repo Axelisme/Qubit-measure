@@ -170,7 +170,9 @@ def test_expression_preview_wraps_below_full_width_input(widgets, value, preview
     direct_line = widget.findChild(QLineEdit)
     assert direct_line is not None
     assert direct_layout.indexOf(direct_line) == 0
-    assert direct_layout.itemAt(0).alignment() == layout.itemAt(0).alignment()
+    direct_item, expression_item = direct_layout.itemAt(0), layout.itemAt(0)
+    assert direct_item is not None and expression_item is not None
+    assert direct_item.alignment() == expression_item.alignment()
 
 
 def test_expression_blur_returns_cursor_to_start_without_losing_tooltip(widgets, qapp):
