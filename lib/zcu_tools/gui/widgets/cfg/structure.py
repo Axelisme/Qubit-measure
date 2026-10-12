@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.binding import CfgField, ReferenceField, SectionField
 
+from .decoration import FieldDecorationProtocol
 from .presentation import (
     InputLineLabelDelegate,
     apply_tree_item_decoration,
@@ -51,6 +52,26 @@ TREE_DEPTH_COLORS: tuple[str, ...] = (
 
 _INDENTATION_PX = 10
 _TREE_FONT_SIZE_PX = 13
+
+
+def _teardown_editor(widget: FieldWidgetProtocol) -> None:
+    """Best-effort unsubscribe; a stale Qt editor must not block tree cleanup."""
+    try:
+        widget.teardown()
+    except Exception:
+        pass
+
+
+def _delete_editor(widget: QWidget) -> None:
+    """Detach and defer deletion independently, even if Qt rejects either action."""
+    try:
+        widget.setParent(None)
+    except Exception:
+        pass
+    try:
+        widget.deleteLater()
+    except Exception:
+        pass
 
 
 def _branch_color(depth: int) -> QColor:
@@ -251,104 +272,84 @@ class TreeCfgWidget(QWidget):
         Both section and reference refresh keep the owner's item, depth and
         reference header. Decoration cache invalidation belongs to CfgFormWidget.
         """
-        # Collect descendant item paths (sections/references/groups) under target.
         descendant_item_paths = [
             p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
         ]
-        # Collect descendant leaf widget paths under target.
-        descendant_leaf_paths = [
-            p
-            for p in list(self._leaf_path_to_widget.keys())
-            if p.startswith(path + ".")
-        ]
-        # Teardown and remove descendant leaf widgets.
-        for leaf_path in descendant_leaf_paths:
-            widget = self._leaf_path_to_widget.pop(leaf_path, None)
-            if widget is not None:
-                try:
-                    widget.teardown()
-                except Exception:
-                    pass
-                try:
-                    self._leaf_widgets.remove(widget)
-                except ValueError:
-                    pass
-                try:
-                    cast(QWidget, widget).setParent(None)
-                except Exception:
-                    pass
-                try:
-                    cast(QWidget, widget).deleteLater()
-                except Exception:
-                    pass
-        # Teardown descendant reference headers and disconnect their callbacks.
-        # Find reference paths that are descendants of target.
+        self._clear_leaf_editors(path)
         descendant_ref_paths = [
             p
             for p in descendant_item_paths
             if self._find_reference_field(p) is not None
         ]
         for ref_path in descendant_ref_paths:
-            # Find header widget for this ref item (column 1 widget).
-            ref_item = self._path_to_item.get(ref_path)
-            if ref_item is not None:
-                header = self._tree.itemWidget(ref_item, 1)
-                if header is not None:
-                    try:
-                        cast(FieldWidgetProtocol, header).teardown()
-                    except Exception:
-                        pass
-                    try:
-                        header.setParent(None)
-                    except Exception:
-                        pass
-                    try:
-                        header.deleteLater()
-                    except Exception:
-                        pass
-                    try:
-                        self._ref_headers.remove(cast(FieldWidgetProtocol, header))
-                    except ValueError:
-                        pass
-            # Disconnect callbacks for this reference field.
-            ref_field = self._find_reference_field(ref_path)
-            if ref_field is not None:
-                for f, cb in list(self._ref_connections):
-                    if f is ref_field:
-                        try:
-                            f.on_change.disconnect(cb)
-                        except Exception:
-                            pass
-                for f, cb in list(self._ref_enabled_connections):
-                    if f is ref_field:
-                        try:
-                            f.on_enabled_changed.disconnect(cb)
-                        except Exception:
-                            pass
-                self._ref_connections = [
-                    (f, cb) for (f, cb) in self._ref_connections if f is not ref_field
-                ]
-                self._ref_enabled_connections = [
-                    (f, cb)
-                    for (f, cb) in self._ref_enabled_connections
-                    if f is not ref_field
-                ]
-                self._ref_prev_state.pop(ref_path, None)
-            # Remove from maps
-            self._path_to_item.pop(ref_path, None)
-            if ref_item is not None:
-                self._item_depth.pop(id(ref_item), None)
-        # Remove remaining descendant section/group items (non-reference sections and groups).
+            self._clear_reference_row(ref_path)
         for item_path in descendant_item_paths:
             if item_path in descendant_ref_paths:
                 continue
-            it = self._path_to_item.pop(item_path, None)
-            if it is not None:
-                self._item_depth.pop(id(it), None)
+            removed = self._path_to_item.pop(item_path, None)
+            if removed is not None:
+                self._item_depth.pop(id(removed), None)
             self._ref_prev_state.pop(item_path, None)
-        # Remove all child QTreeWidgetItems from target item (clears UI).
         while item.childCount():
             item.takeChild(0)
+
+    def _clear_leaf_editors(self, path: str) -> None:
+        """Unsubscribe and release leaf editors below a section-local refresh owner."""
+        descendant_leaf_paths = [
+            p
+            for p in list(self._leaf_path_to_widget.keys())
+            if p.startswith(path + ".")
+        ]
+        for leaf_path in descendant_leaf_paths:
+            widget = self._leaf_path_to_widget.pop(leaf_path, None)
+            if widget is not None:
+                _teardown_editor(widget)
+                try:
+                    self._leaf_widgets.remove(widget)
+                except ValueError:
+                    pass
+                _delete_editor(cast(QWidget, widget))
+
+    def _clear_reference_row(self, path: str) -> None:
+        """Release a descendant reference header, callbacks and row bookkeeping."""
+        item = self._path_to_item.get(path)
+        if item is not None:
+            header = self._tree.itemWidget(item, 1)
+            if header is not None:
+                _teardown_editor(cast(FieldWidgetProtocol, header))
+                _delete_editor(header)
+                try:
+                    self._ref_headers.remove(cast(FieldWidgetProtocol, header))
+                except ValueError:
+                    pass
+        field = self._find_reference_field(path)
+        if field is not None:
+            self._disconnect_reference(field)
+            self._ref_prev_state.pop(path, None)
+        self._path_to_item.pop(path, None)
+        if item is not None:
+            self._item_depth.pop(id(item), None)
+
+    def _disconnect_reference(self, field: ReferenceField) -> None:
+        """Disconnect both callbacks owned by one removed reference field."""
+        for f, cb in list(self._ref_connections):
+            if f is field:
+                try:
+                    f.on_change.disconnect(cb)
+                except Exception:
+                    pass
+        for f, cb in list(self._ref_enabled_connections):
+            if f is field:
+                try:
+                    f.on_enabled_changed.disconnect(cb)
+                except Exception:
+                    pass
+        self._ref_connections = [
+            (f, cb) for f, cb in self._ref_connections if f is not field
+        ]
+        self._ref_enabled_connections = [
+            (f, cb) for f, cb in self._ref_enabled_connections if f is not field
+        ]
 
     def _find_section_field(self, path: str) -> SectionField | None:
         if path == self._path or path == "":
@@ -426,29 +427,33 @@ class TreeCfgWidget(QWidget):
         if len(entries) == 1 and isinstance(entries[0][2], SectionField):
             wrapper_field = entries[0][2]
             wrapper_path = entries[0][1]
-            # Do not elide a wrapper that carries observable decoration
-            if self._context.decoration_for_path is not None:
-                try:
-                    dec = self._context.decoration_for_path(wrapper_path, wrapper_field)
-                except Exception:
-                    dec = None
-                if dec is not None:
-                    # FieldDecoration fields: hidden already excluded, but check remaining
-                    try:
-                        if not getattr(dec, "enabled", True):
-                            return None, None
-                        if (
-                            getattr(dec, "badge", "")
-                            or getattr(dec, "tooltip", "")
-                            or getattr(dec, "label_suffix", "")
-                        ):
-                            return None, None
-                        if getattr(dec, "tone", "normal") != "normal":
-                            return None, None
-                    except Exception:
-                        return None, None
+            if self._wrapper_has_decoration(wrapper_path, wrapper_field):
+                return None, None
             return wrapper_field, wrapper_path
         return None, None
+
+    def _wrapper_has_decoration(self, path: str, field: SectionField) -> bool:
+        """Keep a singleton wrapper when elision would hide its presentation metadata."""
+        if self._context.decoration_for_path is None:
+            return False
+        try:
+            dec = self._context.decoration_for_path(path, field)
+        except Exception:
+            dec = None
+        if dec is None:
+            return False
+        try:
+            if not getattr(dec, "enabled", True):
+                return True
+            if (
+                getattr(dec, "badge", "")
+                or getattr(dec, "tooltip", "")
+                or getattr(dec, "label_suffix", "")
+            ):
+                return True
+            return getattr(dec, "tone", "normal") != "normal"
+        except Exception:
+            return True
 
     def _maybe_resolve_elided_path(self, path: str) -> str:
         parent = self._elided_singleton_path_to_parent.get(path)
@@ -510,32 +515,12 @@ class TreeCfgWidget(QWidget):
         # Preserve expanded state before clear via internal map (already tracked).
         self._disconnect_refs()
         for header in self._ref_headers:
-            try:
-                header.teardown()
-            except Exception:
-                pass
-            try:
-                cast(QWidget, header).setParent(None)
-            except Exception:
-                pass
-            try:
-                cast(QWidget, header).deleteLater()
-            except Exception:
-                pass
+            _teardown_editor(header)
+            _delete_editor(cast(QWidget, header))
         self._ref_headers.clear()
         for widget in self._leaf_widgets:
-            try:
-                widget.teardown()
-            except Exception:
-                pass
-            try:
-                cast(QWidget, widget).setParent(None)
-            except Exception:
-                pass
-            try:
-                cast(QWidget, widget).deleteLater()
-            except Exception:
-                pass
+            _teardown_editor(widget)
+            _delete_editor(cast(QWidget, widget))
         self._leaf_widgets.clear()
         self._leaf_path_to_widget.clear()
         self._path_to_item.clear()
@@ -595,19 +580,7 @@ class TreeCfgWidget(QWidget):
             to_remove_empty = [
                 p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
             ]
-            for p in to_remove_empty:
-                widget = self._leaf_path_to_widget.pop(p, None)
-                if widget is not None:
-                    try:
-                        widget.teardown()
-                    except Exception:
-                        pass
-                    try:
-                        self._leaf_widgets.remove(widget)
-                    except ValueError:
-                        pass
-                    cast(QWidget, widget).deleteLater()
-                self._path_to_item.pop(p, None)
+            self._remove_reference_leaf_editors(to_remove_empty)
             while item.childCount():
                 item.takeChild(0)
             return
@@ -620,24 +593,25 @@ class TreeCfgWidget(QWidget):
             p for p in list(self._path_to_item.keys()) if p.startswith(path + ".")
         ]
         # Teardown leaf widgets whose path is under this reference
-        for p in to_remove:
-            widget = self._leaf_path_to_widget.pop(p, None)
-            if widget is not None:
-                try:
-                    widget.teardown()
-                except Exception:
-                    pass
-                try:
-                    self._leaf_widgets.remove(widget)
-                except ValueError:
-                    pass
-                cast(QWidget, widget).deleteLater()
-            self._path_to_item.pop(p, None)
+        self._remove_reference_leaf_editors(to_remove)
         # Clean up item depth entries for removed paths (best effort)
         # Remove all children from the reference item
         while item.childCount():
             item.takeChild(0)
         self._populate_reference_subtree(item, field, path, depth)
+
+    def _remove_reference_leaf_editors(self, paths: list[str]) -> None:
+        """Release old shape leaves during identity changes, then forget their rows."""
+        for path in paths:
+            widget = self._leaf_path_to_widget.pop(path, None)
+            if widget is not None:
+                _teardown_editor(widget)
+                try:
+                    self._leaf_widgets.remove(widget)
+                except ValueError:
+                    pass
+                cast(QWidget, widget).deleteLater()
+            self._path_to_item.pop(path, None)
 
     def _find_reference_field(self, path: str) -> ReferenceField | None:
         if not path or path == self._path:
@@ -742,7 +716,6 @@ class TreeCfgWidget(QWidget):
         child_path: str,
         depth: int,
     ) -> None:
-        # Resolve decoration once for this path/field
         dec = None
         if self._context.decoration_for_path is not None:
             try:
@@ -750,234 +723,254 @@ class TreeCfgWidget(QWidget):
             except Exception:
                 dec = None
         if isinstance(child_field, SectionField):
-            label = decorated_label(child_field, key, child_path, self._context)
-            item = QTreeWidgetItem(parent_item, (label, ""))
-            item.setData(0, Qt.ItemDataRole.UserRole, child_path)
-            font = item.font(0)
-            font.setBold(True)
-            font.setPixelSize(_TREE_FONT_SIZE_PX)
-            item.setFont(0, font)
-            apply_tree_item_decoration(item, None, dec)
-            # Propagate disabled from parent (ignore invisible root)
-            if (
-                isinstance(parent_item, QTreeWidgetItem)
-                and parent_item is not self._tree.invisibleRootItem()
-                and parent_item.isDisabled()
-            ):
-                item.setDisabled(True)
-            self._path_to_item[child_path] = item
-            self._item_depth[id(item)] = depth
-            item.setExpanded(self._expanded_state.get(child_path, True))
-            self._add_section_children(item, child_field, child_path, depth + 1)
-            return
-        if isinstance(child_field, ReferenceField):
-            label = decorated_label(child_field, key, child_path, self._context)
-            item = QTreeWidgetItem(parent_item, (label, ""))
-            item.setData(0, Qt.ItemDataRole.UserRole, child_path)
-            font = item.font(0)
-            font.setBold(True)
-            font.setPixelSize(_TREE_FONT_SIZE_PX)
-            item.setFont(0, font)
-            self._path_to_item[child_path] = item
-            self._item_depth[id(item)] = depth
-            # S1: library collapsed, custom expanded, disabled optional collapsed
-            if child_path in self._expanded_state:
-                if child_field.spec.optional and not child_field.is_enabled:
-                    expanded = False
-                    self._expanded_state[child_path] = False
-                else:
-                    expanded = self._expanded_state[child_path]
-            else:
-                expanded = self._default_expanded_for_reference(child_field)
-                self._expanded_state[child_path] = expanded
-            item.setExpanded(expanded)
-            # Use exact renderer authority: obtain reference header via registry
-            # (sole tree; ReferenceWidget is header-only, subtree owned by tree)
-            ref_context = self._context.derive(path=child_path, top_level=False)
-            header_widget = self._context.registry.render(child_field, ref_context)
-            cast(QWidget, header_widget).setFont(self._tree.font())
-            self._ref_headers.append(header_widget)
-            self._tree.setItemWidget(item, 1, cast(QWidget, header_widget))
-            apply_tree_item_decoration(item, cast(QWidget, header_widget), dec)
-            # Propagate disabled from parent (ignore invisible root)
-            if (
-                isinstance(parent_item, QTreeWidgetItem)
-                and parent_item is not self._tree.invisibleRootItem()
-                and parent_item.isDisabled()
-            ):
-                item.setDisabled(True)
-                cast(QWidget, header_widget).setEnabled(False)
-            sub = child_field.sub_field
-            self._populate_reference_subtree(item, child_field, child_path, depth)
-            # Keep reference children in sync only when structural identity changes
-            # (chosen key, materialized shape, or sub_field identity). Value edits
-            # must preserve leaf editors/focus.
-            prev_key = child_field.get_chosen_key()
-            prev_sub_id = id(sub) if sub is not None else None
-            prev_label = sub.spec.label if sub is not None else None
-            self._ref_prev_state[child_path] = (prev_key, prev_sub_id, prev_label)
+            self._create_section_item(
+                parent_item, child_field, key, child_path, depth, dec
+            )
+        elif isinstance(child_field, ReferenceField):
+            self._create_reference_item(
+                parent_item, child_field, key, child_path, depth, dec
+            )
+        else:
+            self._create_leaf_item(parent_item, child_field, key, child_path, dec)
 
-            def _on_ref_change(
-                *_: object, path: str = child_path, field: ReferenceField = child_field
-            ) -> None:
-                prev = self._ref_prev_state.get(path)
-                cur_key = field.get_chosen_key()
-                cur_sub = field.sub_field
-                cur_id = id(cur_sub) if cur_sub is not None else None
-                cur_label = cur_sub.spec.label if cur_sub is not None else None
-                cur_state = (cur_key, cur_id, cur_label)
-                if prev == cur_state:
-                    # Only value edits inside the shape – keep editors.
-                    return
-                self._ref_prev_state[path] = cur_state
-                # S1: reapply library/custom folding on identity change
-                if field.spec.optional and not field.is_enabled:
-                    new_expanded = False
-                else:
-                    try:
-                        new_expanded = is_custom_reference_key(cur_key)
-                    except Exception:
-                        new_expanded = False
-                self._expanded_state[path] = new_expanded
-                ref_item = self._path_to_item.get(path)
-                if ref_item is not None:
-                    try:
-                        ref_item.setExpanded(new_expanded)
-                    except Exception:
-                        pass
-                self._rebuild_reference_children(path)
+    def _new_container_item(
+        self,
+        parent: QTreeWidget | QTreeWidgetItem,
+        field: CfgField,
+        key: str,
+        path: str,
+    ) -> QTreeWidgetItem:
+        """Create a bold section/reference row before its caller tracks and populates it."""
+        label = decorated_label(field, key, path, self._context)
+        item = QTreeWidgetItem(parent, (label, ""))
+        item.setData(0, Qt.ItemDataRole.UserRole, path)
+        font = item.font(0)
+        font.setBold(True)
+        font.setPixelSize(_TREE_FONT_SIZE_PX)
+        item.setFont(0, font)
+        return item
 
-            child_field.on_change.connect(_on_ref_change)
-            self._ref_connections.append((child_field, _on_ref_change))
-
-            def _on_ref_enabled_changed(
-                enabled: bool,
-                path: str = child_path,
-                field: ReferenceField = child_field,
-            ) -> None:
-                # Re-enable must not overwrite descendant local authorities:
-                # nested optional references that remain disabled and
-                # decoration-disabled containers/children stay disabled
-                # (S1/A4, form/tree A2 parity). Compute inherited
-                # effective-enabled from decoration projection plus
-                # ancestor optional-reference gating, keeping the
-                # nested optional header itself enabled for re-selection.
-                ref_item = self._path_to_item.get(path)
-                if ref_item is None:
-                    return
-                if enabled:
-                    try:
-                        new_expanded = is_custom_reference_key(field.get_chosen_key())
-                    except Exception:
-                        new_expanded = False
-                    self._expanded_state[path] = new_expanded
-                    try:
-                        ref_item.setExpanded(new_expanded)
-                    except Exception:
-                        pass
-                else:
-                    self._expanded_state[path] = False
-                    try:
-                        ref_item.setExpanded(False)
-                    except Exception:
-                        pass
-                # Walk the QTreeWidget hierarchy so leaf rows (which are not in _path_to_item) are covered.
-                stack: list[QTreeWidgetItem] = [ref_item]
-                while stack:
-                    cur = stack.pop()
-                    for idx in range(cur.childCount()):
-                        ch = cur.child(idx)
-                        if ch is None:
-                            continue
-                        desc_path_obj = ch.data(0, Qt.ItemDataRole.UserRole)
-                        desc_path = (
-                            desc_path_obj if isinstance(desc_path_obj, str) else ""
-                        )
-                        # Compute inherited effective-enabled for this descendant:
-                        # own decoration plus every strict ancestor's decoration
-                        # and optional-reference gating. The descendant's own
-                        # optional is_enabled does NOT disable its header.
-                        effective = True
-                        # Own decoration
-                        if desc_path:
-                            desc_field = self._find_field_for_path(desc_path)
-                            if desc_field is not None:
-                                dec_inner = None
-                                if self._context.decoration_for_path is not None:
-                                    try:
-                                        dec_inner = self._context.decoration_for_path(
-                                            desc_path, desc_field
-                                        )
-                                    except Exception:
-                                        dec_inner = None
-                                if dec_inner is not None and not dec_inner.enabled:
-                                    effective = False
-                        # Strict ancestors: decoration gate + optional-reference gate
-                        if effective and desc_path and "." in desc_path:
-                            parts = desc_path.split(".")
-                            for i in range(1, len(parts)):
-                                anc = ".".join(parts[:i])
-                                anc_field = self._find_field_for_path(anc)
-                                if anc_field is None:
-                                    # Synthetic group header has no field; its
-                                    # ancestors are still checked in other iterations.
-                                    continue
-                                # Decoration gate for ancestor container (Section/Reference)
-                                anc_dec = None
-                                if self._context.decoration_for_path is not None:
-                                    try:
-                                        anc_dec = self._context.decoration_for_path(
-                                            anc, anc_field
-                                        )
-                                    except Exception:
-                                        anc_dec = None
-                                if anc_dec is not None and not anc_dec.enabled:
-                                    effective = False
-                                    break
-                                # Optional-reference gate for ancestors only
-                                if isinstance(anc_field, ReferenceField) and (
-                                    (
-                                        anc_field.spec.optional
-                                        and not anc_field.is_enabled
-                                    )
-                                    or not is_custom_reference_key(
-                                        anc_field.get_chosen_key()
-                                    )
-                                ):
-                                    effective = False
-                                    break
-                        ch.setDisabled(not effective)
-                        w = self._tree.itemWidget(ch, 1)
-                        if w is not None:
-                            w.setEnabled(effective)
-                        stack.append(ch)
-
-            if child_field.spec.optional:
-                child_field.on_enabled_changed.connect(_on_ref_enabled_changed)
-                self._ref_enabled_connections.append(
-                    (child_field, _on_ref_enabled_changed)
-                )
-            return
-        leaf_label = decorated_label(child_field, key, child_path, self._context)
-        item = QTreeWidgetItem(parent_item, (leaf_label, ""))
-        item.setData(0, Qt.ItemDataRole.UserRole, child_path)
-        # Create editor widget via exact registry.
-        child_context = self._context.derive(path=child_path, top_level=False)
-        widget = self._context.registry.render(child_field, child_context)
-        cast(QWidget, widget).setFont(self._tree.font())
-        # Track for teardown.
-        self._leaf_widgets.append(widget)
-        self._leaf_path_to_widget[child_path] = widget
-        self._tree.setItemWidget(item, 1, cast(QWidget, widget))
-        apply_tree_item_decoration(item, cast(QWidget, widget), dec)
-        # Propagate disabled from parent (ignore invisible root)
+    def _inherit_disabled(
+        self,
+        parent: QTreeWidget | QTreeWidgetItem,
+        item: QTreeWidgetItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        """Propagate container disabling while ignoring the invisible root."""
         if (
-            isinstance(parent_item, QTreeWidgetItem)
-            and parent_item is not self._tree.invisibleRootItem()
-            and parent_item.isDisabled()
+            isinstance(parent, QTreeWidgetItem)
+            and parent is not self._tree.invisibleRootItem()
+            and parent.isDisabled()
         ):
             item.setDisabled(True)
-            cast(QWidget, widget).setEnabled(False)
+            if widget is not None:
+                widget.setEnabled(False)
+
+    def _create_section_item(
+        self,
+        parent: QTreeWidget | QTreeWidgetItem,
+        field: SectionField,
+        key: str,
+        path: str,
+        depth: int,
+        dec: FieldDecorationProtocol | None,
+    ) -> None:
+        """Decorate a section row before rendering its children."""
+        item = self._new_container_item(parent, field, key, path)
+        apply_tree_item_decoration(item, None, dec)
+        self._inherit_disabled(parent, item)
+        self._path_to_item[path] = item
+        self._item_depth[id(item)] = depth
+        item.setExpanded(self._expanded_state.get(path, True))
+        self._add_section_children(item, field, path, depth + 1)
+
+    def _reference_expanded(self, path: str, field: ReferenceField) -> bool:
+        """Restore folding, with disabled optional references always collapsed."""
+        if path in self._expanded_state:
+            if field.spec.optional and not field.is_enabled:
+                self._expanded_state[path] = False
+            return self._expanded_state[path]
+        expanded = self._default_expanded_for_reference(field)
+        self._expanded_state[path] = expanded
+        return expanded
+
+    def _create_reference_item(
+        self,
+        parent: QTreeWidget | QTreeWidgetItem,
+        child_field: ReferenceField,
+        key: str,
+        child_path: str,
+        depth: int,
+        dec: FieldDecorationProtocol | None,
+    ) -> None:
+        """Attach a registry-owned reference header, shape and identity callbacks."""
+        item = self._new_container_item(parent, child_field, key, child_path)
+        self._path_to_item[child_path] = item
+        self._item_depth[id(item)] = depth
+        item.setExpanded(self._reference_expanded(child_path, child_field))
+        ref_context = self._context.derive(path=child_path, top_level=False)
+        header_widget = self._context.registry.render(child_field, ref_context)
+        cast(QWidget, header_widget).setFont(self._tree.font())
+        self._ref_headers.append(header_widget)
+        self._tree.setItemWidget(item, 1, cast(QWidget, header_widget))
+        apply_tree_item_decoration(item, cast(QWidget, header_widget), dec)
+        self._inherit_disabled(parent, item, cast(QWidget, header_widget))
+        sub = child_field.sub_field
+        self._populate_reference_subtree(item, child_field, child_path, depth)
+        prev_key = child_field.get_chosen_key()
+        prev_sub_id = id(sub) if sub is not None else None
+        prev_label = sub.spec.label if sub is not None else None
+        self._ref_prev_state[child_path] = (prev_key, prev_sub_id, prev_label)
+        self._connect_reference_callbacks(child_field, child_path)
+
+    def _connect_reference_callbacks(
+        self, child_field: ReferenceField, child_path: str
+    ) -> None:
+        """Keep value edits in place; identity and enabled changes update the view."""
+
+        def _on_ref_change(
+            *_: object, path: str = child_path, field: ReferenceField = child_field
+        ) -> None:
+            prev = self._ref_prev_state.get(path)
+            cur_key = field.get_chosen_key()
+            cur_sub = field.sub_field
+            cur_id = id(cur_sub) if cur_sub is not None else None
+            cur_label = cur_sub.spec.label if cur_sub is not None else None
+            cur_state = (cur_key, cur_id, cur_label)
+            if prev == cur_state:
+                # Only value edits inside the shape – keep editors.
+                return
+            self._ref_prev_state[path] = cur_state
+            # S1: reapply library/custom folding on identity change
+            if field.spec.optional and not field.is_enabled:
+                new_expanded = False
+            else:
+                try:
+                    new_expanded = is_custom_reference_key(cur_key)
+                except Exception:
+                    new_expanded = False
+            self._expanded_state[path] = new_expanded
+            ref_item = self._path_to_item.get(path)
+            if ref_item is not None:
+                try:
+                    ref_item.setExpanded(new_expanded)
+                except Exception:
+                    pass
+            self._rebuild_reference_children(path)
+
+        child_field.on_change.connect(_on_ref_change)
+        self._ref_connections.append((child_field, _on_ref_change))
+
+        def _on_ref_enabled_changed(
+            enabled: bool,
+            path: str = child_path,
+            field: ReferenceField = child_field,
+        ) -> None:
+            self._set_reference_enabled(path, field, enabled=enabled)
+
+        if child_field.spec.optional:
+            child_field.on_enabled_changed.connect(_on_ref_enabled_changed)
+            self._ref_enabled_connections.append((child_field, _on_ref_enabled_changed))
+
+    def _set_reference_enabled(
+        self, path: str, field: ReferenceField, *, enabled: bool
+    ) -> None:
+        """Fold the owner and recompute descendant gates without overwriting local authorities."""
+        ref_item = self._path_to_item.get(path)
+        if ref_item is None:
+            return
+        if enabled:
+            try:
+                new_expanded = is_custom_reference_key(field.get_chosen_key())
+            except Exception:
+                new_expanded = False
+            self._expanded_state[path] = new_expanded
+            try:
+                ref_item.setExpanded(new_expanded)
+            except Exception:
+                pass
+        else:
+            self._expanded_state[path] = False
+            try:
+                ref_item.setExpanded(False)
+            except Exception:
+                pass
+        # Walk Qt rows, including leaves and synthetic group headers.
+        stack: list[QTreeWidgetItem] = [ref_item]
+        while stack:
+            cur = stack.pop()
+            for idx in range(cur.childCount()):
+                ch = cur.child(idx)
+                if ch is None:
+                    continue
+                desc_path_obj = ch.data(0, Qt.ItemDataRole.UserRole)
+                desc_path = desc_path_obj if isinstance(desc_path_obj, str) else ""
+                effective = self._descendant_enabled(desc_path)
+                ch.setDisabled(not effective)
+                w = self._tree.itemWidget(ch, 1)
+                if w is not None:
+                    w.setEnabled(effective)
+                stack.append(ch)
+
+    def _decoration_enabled(self, path: str, field: CfgField) -> bool:
+        """Read the decoration gate; resolver failures mean no decoration."""
+        dec = None
+        if self._context.decoration_for_path is not None:
+            try:
+                dec = self._context.decoration_for_path(path, field)
+            except Exception:
+                dec = None
+        return dec is None or dec.enabled
+
+    def _ancestor_enabled(self, path: str) -> bool:
+        """Combine an ancestor's decoration and optional/library reference gates."""
+        field = self._find_field_for_path(path)
+        if field is None:
+            # Synthetic group headers have no field; other ancestors still apply.
+            return True
+        if not self._decoration_enabled(path, field):
+            return False
+        return not (
+            isinstance(field, ReferenceField)
+            and (
+                (field.spec.optional and not field.is_enabled)
+                or not is_custom_reference_key(field.get_chosen_key())
+            )
+        )
+
+    def _descendant_enabled(self, path: str) -> bool:
+        """Apply own decoration and strict ancestor gates, not the header's own optional toggle."""
+        if path:
+            field = self._find_field_for_path(path)
+            if field is not None and not self._decoration_enabled(path, field):
+                return False
+        if path and "." in path:
+            parts = path.split(".")
+            for i in range(1, len(parts)):
+                if not self._ancestor_enabled(".".join(parts[:i])):
+                    return False
+        return True
+
+    def _create_leaf_item(
+        self,
+        parent: QTreeWidget | QTreeWidgetItem,
+        field: CfgField,
+        key: str,
+        path: str,
+        dec: FieldDecorationProtocol | None,
+    ) -> None:
+        """Render and track a registry-owned leaf editor under its decorated row."""
+        label = decorated_label(field, key, path, self._context)
+        item = QTreeWidgetItem(parent, (label, ""))
+        item.setData(0, Qt.ItemDataRole.UserRole, path)
+        context = self._context.derive(path=path, top_level=False)
+        widget = self._context.registry.render(field, context)
+        cast(QWidget, widget).setFont(self._tree.font())
+        self._leaf_widgets.append(widget)
+        self._leaf_path_to_widget[path] = widget
+        self._tree.setItemWidget(item, 1, cast(QWidget, widget))
+        apply_tree_item_decoration(item, cast(QWidget, widget), dec)
+        self._inherit_disabled(parent, item, cast(QWidget, widget))
 
     # _leaf_label and _resolve_decoration removed; use presentation.decorated_label and apply_tree_item_decoration directly
 
