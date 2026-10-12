@@ -120,6 +120,43 @@ def test_combined_coherence_outputs_roundtrip_and_latest_wins(
     assert len(list(database.rglob("*.hdf5"))) == 2
 
 
+@pytest.mark.parametrize("workflow", ["coherence_fluxdep", "mist_fluxdep"])
+def test_all_missing_records_names_every_iteration_before_any_write(
+    inputs: Inputs, tmp_path: Path, workflow: str
+) -> None:
+    from zcu_lab.workflows.coherence_export import export_run as export_coherence
+    from zcu_lab.workflows.mist_export import export_run as export_mist
+
+    run = (
+        coherence_run(inputs, tmp_path / "run")
+        if workflow == "coherence_fluxdep"
+        else mist_run(inputs, tmp_path / "run")
+    )
+    missing = tuple(sorted((run.paths.data_root / "iter").glob("*/record.json")))
+    for path in missing:
+        path.unlink()
+    result, database = tmp_path / "result", tmp_path / "Database"
+    if workflow == "coherence_fluxdep":
+        with pytest.raises(ValueError) as failure:
+            export_coherence(
+                run.paths.metadata_root,
+                outputs=("merged", "labber", "samples"),
+                result=result,
+                database=database,
+            )
+    else:
+        with pytest.raises(ValueError) as failure:
+            export_mist(
+                run.paths.metadata_root,
+                outputs=("merged", "labber"),
+                database=database,
+            )
+    for path in missing:
+        assert str(path) in str(failure.value)
+    assert not (run.paths.data_root / "merged.h5").exists()
+    assert not result.exists() and not database.exists()
+
+
 @pytest.mark.parametrize("enabled", [(False, True, False), (True, False, True)])
 def test_disabled_items_have_no_channels_or_sample_fields(
     inputs: Inputs, tmp_path: Path, enabled: tuple[bool, bool, bool]
