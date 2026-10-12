@@ -135,6 +135,7 @@ def test_polluter():
         GuiCacheGuard(real_cache=real_cache, cache_root=tmp_path / "session-cache"),
     )
     output = capsys.readouterr().out
+    print(output)
     assert result != pytest.ExitCode.OK, "protected cache mutations must fail pytest"
     assert "GUI cache pollution" in output
     assert str(real_cache) in output
