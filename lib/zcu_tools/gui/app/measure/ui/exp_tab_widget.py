@@ -1085,8 +1085,13 @@ class ExpTabWidget(QWidget):
     def set_writable(self, *, writable: bool) -> None:
         """Receive Local write availability; domain and Stop gates remain separate."""
         self._writable = writable
-        for frontend in self.findChildren(InteractiveFrontend):
-            frontend.set_read_only(read_only=not writable)
+        if self._has_analysis:
+            # Removed widgets remain QObject children until DeferredDelete; only
+            # stack membership owns mounted presentations.
+            for index in range(self._analysis_stack.count()):
+                frontend = self._analysis_stack.widget(index)
+                if isinstance(frontend, InteractiveFrontend):
+                    frontend.set_read_only(read_only=not writable)
         if self._actions is not None:
             self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
