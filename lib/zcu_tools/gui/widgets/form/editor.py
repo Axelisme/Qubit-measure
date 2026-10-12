@@ -18,7 +18,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
 )
 
-from ._controls import FieldRow, LocalText
+from ._controls import ROW_SPACING, FieldRow, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
 
@@ -35,12 +35,18 @@ class FormEditor[F: FormModel](QWidget):
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
     form.mode.<path> is a numeric/complex/string QComboBox with data "direct" and "expr".
+    On a choice leaf (Literal, Enum or choices) it is hidden in Direct mode, so
+    the row shows one dropdown: the choices, then a last "Expression…" item
+    without data that switches the mode to "expr". Returning to Direct selects
+    the resolved value when it is a current choice, else the last Direct one.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
     form.enabled.<path> is a nullable-model activation QCheckBox.
-    form.value.<path> is a QLabel with the current evaluated value.
-    form.error.<path> is a QLabel with current field errors; form.error displays
-    model-wide errors. Mapping-key/index errors appear at their container field.
+    form.value.<path> is a QLabel with the resolved value of an Expression-mode
+    input; Direct input is not echoed, and the label is hidden while empty.
+    form.error.<path> is a QLabel under its field with current field errors;
+    form.error displays model-wide errors. Both are hidden while empty.
+    Mapping-key/index errors appear at their container field.
     Only current active fields have input controls. Sequences and typed mappings
     use JSON text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
@@ -76,10 +82,14 @@ class FormEditor[F: FormModel](QWidget):
         self._rows: dict[FormWritePath, FieldRow] = {}
         self._state_errors: FormErrors | None = None
         self._valid: bool | None = None
+        # Hosts own outer margins; rows keep ROW_SPACING apart.
         self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(ROW_SPACING)
         self._root_error = QLabel(self)
         self._root_error.setObjectName("form.error")
         self._root_error.setWordWrap(True)
+        self._root_error.hide()
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
         self._layout.addWidget(self._content)
@@ -225,8 +235,13 @@ class FormEditor[F: FormModel](QWidget):
         old = self._content
         self._content = QWidget(self)
         layout = QVBoxLayout(self._content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(ROW_SPACING)
         self._rows = {}
         self._add_rows(fields, self._content, layout)
+        # One stretch below the last row takes spare height; a stretch inside a
+        # group would make the group grow and spread its rows apart.
+        layout.addStretch()
         self._layout.replaceWidget(old, self._content)
         # Retire names immediately; deleteLater waits until the active Qt signal
         # finishes, so rebuilding a branch cannot delete its emitting selector.
@@ -244,7 +259,6 @@ class FormEditor[F: FormModel](QWidget):
                 child_layout = row.group.layout()
                 if isinstance(child_layout, QVBoxLayout):
                     self._add_rows(field.children, row.group, child_layout)
-        layout.addStretch()
 
     def _write(self, path: FormWritePath, value: JsonValue) -> None:
         state = self._require_state()
@@ -269,10 +283,11 @@ class FormEditor[F: FormModel](QWidget):
             else:
                 root = self._root_error.text()
                 self._root_error.setText("\n".join(filter(None, (root, message))))
+        self._root_error.setVisible(bool(self._root_error.text()))
         for path, row in self._rows.items():
-            row.error.setText("\n".join(by_row.get(path, ())))
+            row.set_error("\n".join(by_row.get(path, ())))
             if path in self._local:
-                row.value.clear()
+                row.clear_value()
         valid = errors is None
         if valid != self._valid:
             self._valid = valid

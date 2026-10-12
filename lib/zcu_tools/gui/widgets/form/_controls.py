@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +30,13 @@ from zcu_tools.gui.widgets.cfg.fields.common import (
 from ._schema_view import FieldView
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
+# Vertical density: pixels between sibling rows, between a row's header and
+# its error/group, and around a nested group's rows (left indents the group).
+ROW_SPACING = 4
+_HEADER_SPACING = 2
+_GROUP_MARGINS = (8, 4, 4, 4)
+# Last item of a Direct-mode choice combo; selecting it switches to Expression.
+EXPRESSION_ENTRY = "Expression…"
 
 
 @dataclass(frozen=True)
@@ -82,13 +90,24 @@ def _parse(field: FieldView, text: str, *, expression: bool) -> JsonValue:
     return _JSON.validate_json(text) if field.kind == "json" else text
 
 
+def _tight_label(text: str, parent: QWidget) -> QLabel:
+    """A header label that never takes spare width, so controls sit beside it."""
+    label = QLabel(text, parent)
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+    return label
+
+
 class FieldRow:
     """Keep one schema row stable while publication values change.
 
     field is the displayed FieldView; widget/layout own its Qt row. input is
     its optional scalar control; mode selects direct/Expr; enabled toggles
     nullable models; group hosts model children. value/error are public-named
-    presentation labels. These controls never own or evaluate form state.
+    presentation labels, hidden while empty: value shows only an
+    Expression-mode resolved value, error shows below the header. On choice
+    rows mode stays hidden in Direct mode; the choice combo's trailing
+    EXPRESSION_ENTRY switches to Expression. These controls never own or
+    evaluate form state.
     """
 
     def __init__(
@@ -107,30 +126,48 @@ class FieldRow:
         self._changed = changed
         self._unparsed = unparsed
         self._displaying = False
+        # Choice shown when Expression mode returns to Direct (see _direct_choice).
+        self._direct_raw: JsonValue = None
         self.widget = QWidget(parent)
         self.layout = QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
         self.mode: QComboBox | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
-        header.addWidget(QLabel(field.label, self.widget))
+        header.addWidget(_tight_label(field.label, self.widget))
         if field.kind == "model":
             self._build_group(header)
         else:
             self._build_input(header)
         if field.unit:
-            header.addWidget(QLabel(field.unit, self.widget))
+            header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
         self.value.setObjectName(self._name("value"))
+        self.value.hide()
         header.addWidget(self.value)
+        if field.kind == "model":
+            # Keep the fold button beside its label instead of stretching it.
+            header.addStretch()
         self.error = QLabel(self.widget)
         self.error.setObjectName(self._name("error"))
         self.error.setWordWrap(True)
+        self.error.hide()
         self.layout.addWidget(self.error)
         self.widget.setToolTip(field.description)
+
+    def set_error(self, text: str) -> None:
+        """Show text under the row's header; empty text hides the error label."""
+        self.error.setText(text)
+        self.error.setVisible(bool(text))
+
+    def clear_value(self) -> None:
+        """Clear and hide the resolved-value label, e.g. for unparsed local text."""
+        self.value.clear()
+        self.value.hide()
 
     def _name(self, kind: str) -> str:
         return f"form.{kind}." + ".".join(self.field.path)
@@ -142,7 +179,9 @@ class FieldRow:
             header.addWidget(self.enabled)
             self.enabled.toggled.connect(self._activate)
         self.group = QGroupBox(self.widget)
-        QVBoxLayout(self.group)
+        rows = QVBoxLayout(self.group)
+        rows.setContentsMargins(*_GROUP_MARGINS)
+        rows.setSpacing(ROW_SPACING)
         self.group.setVisible(not self.field.collapsed)
         fold = QPushButton(
             "Expand" if self.field.collapsed else "Collapse", self.widget
@@ -189,24 +228,42 @@ class FieldRow:
         if self._displaying:
             return
         if self.field.options is not None:
+            # Expression text starts from the direct choice; no choice is "".
             text = (
                 self.input.text()
                 if isinstance(self.input, QLineEdit)
-                else str(self.field.raw)
+                else ("" if self.field.raw is None else str(self.field.raw))
             )
             self._displaying = True
             try:
                 expression = self.mode is not None and self.mode.currentIndex() == 1
                 self._select_input(expression=expression)
+                self._show_mode(expression=expression)
                 if isinstance(self.input, QLineEdit):
                     self.input.setText(text)
                 else:
-                    self._display_choices(
-                        self.field.value if self.field.has_value else self.field.raw
-                    )
+                    self._display_choices(self._direct_choice())
             finally:
                 self._displaying = False
         self._input_changed()
+
+    def _direct_choice(self) -> object:
+        """Choice to select when Expression mode returns to Direct.
+
+        A resolved expression value that is a current option wins. Otherwise
+        the last Direct choice returns, because an expression made from the
+        direct text (for example "mA") need not resolve.
+        """
+        options = self.field.options or ()
+        if self.field.has_value and self.field.value in options:
+            return self.field.value
+        return self._direct_raw
+
+    def _show_mode(self, *, expression: bool) -> None:
+        # Choice rows reach Expression through EXPRESSION_ENTRY, so their
+        # mode combo appears only once Expression mode is selected.
+        if self.mode is not None:
+            self.mode.setVisible(expression or self.field.options is None)
 
     def _select_input(self, *, expression: bool) -> None:
         if self.field.options is None:
@@ -233,6 +290,8 @@ class FieldRow:
             widget.clear()
             for value in self.field.options or ():
                 widget.addItem(str(value), value)
+            if self.mode is not None:
+                widget.addItem(EXPRESSION_ENTRY)
             widget.setCurrentIndex(
                 next(
                     (
@@ -252,8 +311,12 @@ class FieldRow:
             self._changed(self.field.path, widget.isChecked())
         elif isinstance(widget, QComboBox):
             index = widget.currentIndex()
-            if index >= 0 and self.field.options is not None:
-                self._changed(self.field.path, self.field.options[index])
+            options = self.field.options or ()
+            if self.mode is not None and index == len(options):
+                # EXPRESSION_ENTRY: the mode change rebuilds input and writes.
+                self.mode.setCurrentIndex(self.mode.findData("expr"))
+            elif 0 <= index < len(options):
+                self._changed(self.field.path, options[index])
         elif isinstance(widget, QLineEdit):
             expression = self.mode is not None and self.mode.currentIndex() == 1
             text = widget.text()
@@ -270,31 +333,39 @@ class FieldRow:
         """Show a same-shape publication, keeping local text and blocking writes.
 
         editable controls input enablement, not model validity. local overrides
-        parsed text/mode and hides its evaluated label. Shape changes require
-        a new row; metadata/folding remain initially declared presentation.
+        parsed text/mode and hides its evaluated label. The value label shows
+        only a resolved Expression-mode value; Direct input is not echoed.
+        Shape changes require a new row; metadata/folding remain initially
+        declared presentation.
         """
         self.field = field
         self._displaying = True
         try:
             self._display_input(local, editable=editable)
-            shown = str(field.value) if field.has_value and local is None else ""
-            if shown and _expression(field) and isinstance(field.value, str):
-                shown = f"{_input_text(field)} = {json.dumps(field.value, ensure_ascii=False)}"
+            shown = ""
+            if local is None and field.has_value and _expression(field):
+                shown = str(field.value)
+                if isinstance(field.value, str):
+                    resolved = json.dumps(field.value, ensure_ascii=False)
+                    shown = f"{_input_text(field)} = {resolved}"
             self.value.setText(shown)
+            self.value.setVisible(bool(shown))
         finally:
             self._displaying = False
 
     def _display_input(self, local: LocalText | None, *, editable: bool) -> None:
         field = self.field
+        expression = local.expression if local else _expression(field)
+        if field.options is not None and not expression:
+            self._direct_raw = field.raw
         if self.enabled is not None:
             self.enabled.setChecked(field.active)
             self.enabled.setEnabled(editable)
         if self.mode is not None:
-            self.mode.setCurrentIndex(
-                1 if (local.expression if local else _expression(field)) else 0
-            )
+            self.mode.setCurrentIndex(1 if expression else 0)
             self.mode.setEnabled(editable)
-        self._select_input(expression=local.expression if local else _expression(field))
+        self._show_mode(expression=expression)
+        self._select_input(expression=expression)
         widget = self.input
         if widget is None:
             return

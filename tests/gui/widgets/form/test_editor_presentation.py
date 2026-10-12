@@ -214,6 +214,30 @@ def test_choice_round_trip_through_expression_keeps_the_direct_value(
     assert child(view, QComboBox, f"form.input.{path}").currentData() == value
 
 
+class RequiredChoiceForm(FormModel):
+    """A choice without a default starts with nothing selected."""
+
+    unit: Literal["native", "mA"]
+
+
+def test_unselected_choice_switches_to_an_empty_expression(
+    qapp: QApplication,
+) -> None:
+    env = alias_env()
+    state = FormState(RequiredChoiceForm.default_input(env))
+    view = FormEditor(state, env)
+    try:
+        direct = child(view, QComboBox, "form.input.unit")
+        assert direct.currentIndex() == -1
+        direct.setCurrentIndex(direct.findText(EXPRESSION_ENTRY))
+        assert child(view, QLineEdit, "form.input.unit").text() == ""
+        assert state.input.data["unit"] == {"expr": ""}
+    finally:
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+
+
 def test_rows_and_groups_are_dense_and_do_not_overlap(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
     qapp: QApplication,
@@ -240,8 +264,11 @@ def test_rows_and_groups_are_dense_and_do_not_overlap(
     assert gaps["inner.phase", "after"] < line, gaps
     for path, text in LABELS.items():
         label = label_rect(view, text)
+        mode = child(view, QComboBox, f"form.mode.{path}")
+        beside = inputs[path] if mode.isHidden() else rect(view, mode)
+        assert not label.intersects(beside), path
         assert not label.intersects(inputs[path]), path
-        assert inputs[path].left() - (label.left() + label.width()) < line, path
+        assert beside.left() - (label.left() + label.width()) < line, path
     for path in LEAVES:
         control = child(view, QWidget, f"form.input.{path}")
         assert control.height() >= control.minimumSizeHint().height(), path
