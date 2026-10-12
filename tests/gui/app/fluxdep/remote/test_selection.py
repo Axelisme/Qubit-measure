@@ -41,5 +41,5 @@ def test_selection_snapshot_reports_native_null_and_full_published_mask(
     assert current["ok"] is True
     assert current["result"] == {"selected": [False, True, False], "min_distance": 0.35}
     assert state.version.snapshot() == before
-    assert state.selection.selected is not None
-    np.testing.assert_array_equal(state.selection.selected, [False, True, False])
+    assert state.selection_mask() is not None
+    np.testing.assert_array_equal(state.selection_mask(), [False, True, False])

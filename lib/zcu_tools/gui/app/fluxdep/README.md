@@ -26,7 +26,7 @@ app 自帶（version table、worker 模式等仍 per-app）。
   → 定線(LinePicker)       → flux_half / flux_int / flux_period(per-spectrum, 可繼承)
   → 選點(OneTone slider / TwoTone brush mask)  → 每張譜的標註點
   → [累積多張 spectrum 進集合]
-  → 跨譜篩選(Selector)     → 聯合點雲的 selected 遮罩 + min_distance
+  → 跨譜篩選(Selector)     → 每張譜的 Filter 遮罩 + min_distance
   → 匯出 spectrums.hdf5
   → [v2] 搜資料庫(FitPanel) → (EJ,EC,EL) + 視覺化 + 診斷圖 → 匯出 params.json
 ```
@@ -57,7 +57,9 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
-  aligned/points_completed/alignment_seeded。raw/points 直接複用
+  aligned/points_completed/alignment_seeded/filter_mask。Filter 遮罩依點 index 儲存，
+  set_points、reset_points 與同名取代只清掉該譜的遮罩；對齊保留遮罩。
+  selection_mask() 依插入順序投影成聯合點雲的 bool 陣列，未篩選的譜全選。raw/points 直接複用
   `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。

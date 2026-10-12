@@ -129,6 +129,8 @@ class SpectrumEntry:
     # another spectrum or already aligned), so the line-picker should seed from
     # them rather than its centre/edge defaults.
     alignment_seeded: bool = False
+    # Filter identities follow point indices, not joint-cloud positions.
+    filter_mask: NDArray[np.bool_] | None = None
 
     @property
     def point_count(self) -> int:
@@ -138,17 +140,12 @@ class SpectrumEntry:
 
 @dataclass
 class SelectionState:
-    """Cross-spectrum joint-point-cloud filtering (InteractiveSelector result).
+    """Stable downsample threshold remembered across selector sessions.
 
-    ``selected`` is a boolean mask over the joint point cloud assembled from all
-    spectra's ``points``. The joint cloud itself (s_fluxs / s_freqs) is a derived
-    value computed on query, not stored. ``min_distance`` is the downsample
-    threshold (a stable filter parameter remembered across selector sessions —
-    the brush selection itself is NOT remembered, so removed points are easy to
-    bring back by re-opening with everything selected).
+    Filter masks live on each SpectrumEntry. The brush selection in a newly
+    opened selector is all-selected, independent of the published masks.
     """
 
-    selected: NDArray[np.bool_] | None = None
     min_distance: float = 0.0
 
 
@@ -207,6 +204,9 @@ class FluxDepState:
         """
         self._assert_owner()
         is_new = entry.name not in self.spectrums
+        if not is_new and self.spectrums[entry.name].filter_mask is not None:
+            self.version.bump(SELECTION_VERSION_KEY)
+        entry.filter_mask = None
         self.spectrums[entry.name] = entry
         self.version.bump(spectrum_version_key(entry.name))
         if is_new:
@@ -238,6 +238,8 @@ class FluxDepState:
         """
         self._assert_owner()
         self.get_spectrum(name)
+        if self.spectrums[name].filter_mask is not None:
+            self.version.bump(SELECTION_VERSION_KEY)
         del self.spectrums[name]
         self.version.retire(spectrum_version_key(name))
         self.version.bump(SPECTRUM_SET_VERSION_KEY)
@@ -309,10 +311,13 @@ class FluxDepState:
         KeyError. Availability is point_count, not the completion flag.
         """
         self._assert_owner()
+        if self.spectrums[name].filter_mask is not None:
+            self.version.bump(SELECTION_VERSION_KEY)
         self.spectrums[name] = replace(
             self.spectrums[name],
             points=points,
             points_completed=True,
+            filter_mask=None,
         )
         self.version.bump(spectrum_version_key(name))
 
@@ -331,8 +336,11 @@ class FluxDepState:
                 "spectrum must be aligned before resetting points",
                 reason_code="spectrum_not_aligned",
             )
+        if entry.filter_mask is not None:
+            self.version.bump(SELECTION_VERSION_KEY)
         self.spectrums[name] = replace(
             entry,
+            filter_mask=None,
             points=PointsData(
                 dev_values=np.empty(0, dtype=np.float64),
                 fluxs=np.empty(0, dtype=np.float64),
@@ -356,8 +364,37 @@ class FluxDepState:
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
     ) -> None:
         self._assert_owner()
-        self.selection = SelectionState(selected=selected, min_distance=min_distance)
+        mask = np.asarray(selected, dtype=np.bool_)
+        point_count = sum(entry.point_count for entry in self.spectrums.values())
+        if mask.shape != (point_count,):
+            raise ValueError("selection mask must match the joint point cloud shape")
+        offset = 0
+        for name, entry in self.spectrums.items():
+            end = offset + entry.point_count
+            self.spectrums[name] = replace(entry, filter_mask=mask[offset:end].copy())
+            offset = end
+        self.selection = SelectionState(min_distance=min_distance)
         self.version.bump(SELECTION_VERSION_KEY)
+
+    def selection_mask(self) -> NDArray[np.bool_] | None:
+        """Project per-spectrum Filter masks in joint-cloud insertion order.
+
+        Return a detached mask, with unfiltered spectra all-selected. None
+        means no spectrum has a published mask. Alignment preserves indices;
+        publishing points, replacing or removing a spectrum drops its mask.
+        """
+        self._assert_owner()
+        entries = self.spectrums.values()
+        if not any(entry.filter_mask is not None for entry in entries):
+            return None
+        return np.concatenate(
+            [
+                entry.filter_mask
+                if entry.filter_mask is not None
+                else np.ones(entry.point_count, dtype=np.bool_)
+                for entry in entries
+            ]
+        )
 
     def set_project(self, project: ProjectInfo) -> None:
         self._assert_owner()

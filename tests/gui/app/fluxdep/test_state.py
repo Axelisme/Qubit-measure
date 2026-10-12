@@ -291,9 +291,16 @@ def test_alignment_rejects_invalid_point_mapping_without_mutation(invalid):
 
 def test_set_selection_bumps_selection():
     st = FluxDepState()
+    st.put_spectrum(_make_entry("a"))
+    st.set_points(
+        "a",
+        PointsData(
+            dev_values=np.arange(3.0), fluxs=np.arange(3.0), freqs=np.arange(3.0)
+        ),
+    )
     st.set_selection(np.array([True, False, True]))
     assert st.version.get(SELECTION_VERSION_KEY) == 1
-    assert st.selection.selected is not None
+    assert st.selection_mask() is not None
 
 
 def test_set_project_bumps_project():
