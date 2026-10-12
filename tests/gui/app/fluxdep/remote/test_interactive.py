@@ -161,6 +161,35 @@ def _joint_command(
     )
 
 
+def test_observer_display_does_not_create_draft_while_gui_is_local(one_route: RouteHarness, qapp):
+    view = MainWindow(one_route.ctrl)
+    try:
+        one_route.ctrl.interactive.cancel("one")
+        observer = one_route.client(label="observer", mode="readonly")
+        assert one_route.ctrl.control_identity.status().holder == "gui"
+        displayed = one_route.request(observer, "spectrum.set_active", name="one")
+        assert displayed["ok"], displayed
+        assert one_route.ctrl.interactive.inspect("one") is None, "readonly viewing cannot establish input"
+    finally:
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("retirement", ["cancel", "replace", "remove"])
+def test_guarded_read_refuses_retired_alignment_identity(one_route: RouteHarness, retirement: str):
+    link = one_route.client()
+    draft = _open_picker(one_route, link, "one", "line")
+    if retirement == "cancel":
+        one_route.ctrl.interactive.cancel("one")
+    elif retirement == "replace":
+        one_route.ctrl.interactive.begin_onetone_pick("one")
+    else:
+        one_route.ctrl.remove_spectrum("one")
+    guarded = one_route.request(link, "interactive.read", name="one", context_id=draft["context_id"])
+    _error(guarded, "precondition_failed", "interactive_context_changed")
+
+
 def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteHarness):
     link = one_route.client()
     other = copy.deepcopy(one_route.ctrl.state.get_spectrum("one"))

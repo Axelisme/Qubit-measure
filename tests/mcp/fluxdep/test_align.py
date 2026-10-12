@@ -6,8 +6,9 @@ from io import BytesIO
 import pytest
 from PIL import Image
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.core.rpc import GuiInvocationError
 
-from tests.mcp.fluxdep._support import Client, GuiResponse
+from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 
 
 def native(
@@ -144,3 +145,16 @@ def test_finish_and_image_override_return_native_evidence(
     assert len(result.images) == 1
     assert client.transport.requests[-1]["method"] == render_method
     assert client.transport.requests[-1]["params"] == {"name": "one"}
+
+
+def test_auto_align_reports_guarded_context_interruption(client: Client):
+    client.transport.replies.extend([
+        GuiResponse(result=native()),
+        GuiResponse(result=native(busy=True)),
+        GuiResponse(error=GuiError(code="precondition_failed", message="interactive identity or target changed", reason="interactive_context_changed")),
+    ])
+    with pytest.raises(GuiInvocationError, match="auto_align interrupted.*cancelled or replaced") as refusal:
+        invoke(client, command="auto_align")
+    assert refusal.value.code == "precondition_failed"
+    assert refusal.value.reason == "interactive_context_changed"
+    assert client.transport.requests[-1]["params"] == {"name": "one", "context_id": 12}

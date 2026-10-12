@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QPushButton
+from qtpy.QtWidgets import QListWidget, QPushButton, QStackedWidget
 from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+from zcu_tools.gui.event_bus import EventOrigin
 
 
 @pytest.fixture
@@ -22,6 +24,35 @@ def composition(qapp):
     assembly.window.close()
     assembly.window.deleteLater()
     qapp.processEvents()
+
+
+def test_agent_follows_named_draft_and_remote_user_can_switch_display(qapp, onetone_controller):
+    ctrl = onetone_controller
+    other = deepcopy(ctrl.state.get_spectrum("one"))
+    other.name = "other"
+    ctrl.state.put_spectrum(other)
+    view = MainWindow(ctrl)
+    try:
+        first = ctrl.interactive.begin_line_pick("one")
+        ctrl.control_identity.connect("agent-link", "agent", "owner")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            second = ctrl.interactive.begin_line_pick("other")
+        assert ctrl.state.active_spectrum == "other", "GUI must follow the named agent draft"
+        spectra = view.findChild(QListWidget)
+        assert spectra is not None and spectra.isEnabled()
+        spectra.setCurrentRow(0)
+        assert ctrl.state.active_spectrum == "one"
+        first.session.ensure_input_open()
+        second.session.ensure_input_open()
+        stack = view.findChild(QStackedWidget)
+        assert stack is not None and isinstance(stack.currentWidget(), LinePickerWidget)
+        finish = next(button for button in stack.currentWidget().findChildren(QPushButton) if button.text() == "Finish")
+        assert not finish.isEnabled()
+    finally:
+        ctrl.control_identity.reclaim_local()
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
 
 
 def _wait_for_alignment(plugin, qapp) -> None:
