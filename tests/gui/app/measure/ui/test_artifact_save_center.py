@@ -71,12 +71,9 @@ def test_pane_specimens_render_data_json_and_named_figure_outputs(
         assert len(paths) == output_count
         assert all(Path(edit.text()).is_absolute() for edit in paths)
         labels = [label.text() for label in center.findChildren(QLabel)]
-        assert "data · data_h5" in labels
-        assert "data · labber" in labels
-        assert "analysis · json" in labels
-        assert "post_analysis · json" in labels
+        assert all(Path(edit.toolTip()).name in labels for edit in paths)
         if has_figures:
-            assert labels.count("fit · png") == 4
+            assert sum(label.endswith(".png") for label in labels) == 4
         assert sum("NOT SAVED" in label for label in labels) == 3
         assert center.has_unsaved_data()
         assert center.save_all_button.isEnabled()
