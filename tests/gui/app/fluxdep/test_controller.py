@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
@@ -305,3 +307,89 @@ def test_search_database_records_and_emits(tmp_path):
     assert len(result.params) == 3
     assert ctrl.state.fit.has_result
     assert len(seen) == 1
+
+
+# --- spectrum_rows: one row of published facts per spectrum ----------------
+
+
+def _stages(ctrl: Controller) -> list[tuple[str, str, str, int]]:
+    return [
+        (row.name, row.spec_type, row.stage, row.point_count)
+        for row in ctrl.spectrum_rows()
+    ]
+
+
+def test_spectrum_rows_report_published_stage_and_point_count(spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    ctrl = _ctrl()
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    assert _stages(ctrl) == [(name, "OneTone", "loaded", 0)]
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    assert _stages(ctrl) == [(name, "OneTone", "aligned", 0)]
+    ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    assert _stages(ctrl) == [(name, "OneTone", "sampled", 2)]
+    # Reopened alignment keeps the points, but the published stage is loaded.
+    ctrl.reset_alignment(name)
+    assert _stages(ctrl) == [(name, "OneTone", "loaded", 2)]
+
+
+def test_spectrum_rows_count_zero_point_completion_as_sampled(spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    ctrl = _ctrl()
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    ctrl.set_points(name, np.empty(0), np.empty(0))
+    assert _stages(ctrl) == [(name, "OneTone", "sampled", 0)]
+
+
+def test_spectrum_rows_count_only_published_filter_exclusions(cross_controller):
+    ctrl = cross_controller
+
+    def excluded() -> list[tuple[str, int]]:
+        return [(row.name, row.filter_excluded_count) for row in ctrl.spectrum_rows()]
+
+    # No published mask counts as zero exclusions.
+    assert excluded() == [("a", 0), ("empty", 0), ("b", 0)]
+    # Joint cloud order is a (3 points), empty, b (1 point).
+    ctrl.set_selection(np.array([True, False, True, False]))
+    assert excluded() == [("a", 1), ("empty", 0), ("b", 1)]
+    # A Filter draft opens all-selected; it does not change the published count.
+    ctrl.interactive.begin_cross_selection()
+    assert excluded() == [("a", 1), ("empty", 0), ("b", 1)]
+    ctrl.interactive.cancel("selection")
+    # min_distance downsampling is not a mask exclusion.
+    ctrl.set_selection(np.array([True, True, True, True]), min_distance=0.9)
+    assert excluded() == [("a", 0), ("empty", 0), ("b", 0)]
+
+
+def test_spectrum_rows_report_pending_draft_kind(cross_controller):
+    ctrl = cross_controller
+
+    def pending() -> list[tuple[str, str | None]]:
+        return [(row.name, row.pending) for row in ctrl.spectrum_rows()]
+
+    assert pending() == [("a", None), ("empty", None), ("b", None)]
+    ctrl.interactive.begin_line_pick("b")
+    assert pending() == [("a", None), ("empty", None), ("b", "align")]
+    ctrl.interactive.cancel("b")
+    ctrl.interactive.begin_sample_pick("a")
+    assert pending() == [("a", "sample"), ("empty", None), ("b", None)]
+    ctrl.interactive.cancel("a")
+    # The global Filter draft is not a per-spectrum pending kind.
+    ctrl.interactive.begin_cross_selection()
+    assert pending() == [("a", None), ("empty", None), ("b", None)]
+
+
+def test_spectrum_rows_do_not_attribute_the_filter_draft_to_a_spectrum_named_selection(
+    cross_controller,
+):
+    ctrl = cross_controller
+    entry = ctrl.state.spectrums["b"]
+    ctrl.remove_spectrum("b")
+    ctrl.state.put_spectrum(replace(entry, name="selection"))
+    ctrl.interactive.begin_cross_selection()
+    assert [(row.name, row.pending) for row in ctrl.spectrum_rows()] == [
+        ("a", None),
+        ("empty", None),
+        ("selection", None),
+    ]

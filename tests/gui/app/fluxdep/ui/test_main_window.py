@@ -7,6 +7,7 @@ block), and asserts the spectrum list reflects State.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -121,6 +122,27 @@ def test_stage_marker_updates_on_alignment(window, spectrum_hdf5):
     window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     label = list_labels(window)[0]
     assert "sampled" in label and "2 pts" in label
+
+
+def test_list_row_pending_matches_spectrum_list_for_a_spectrum_named_selection(
+    qapp, cross_controller
+):
+    # "selection" also addresses the global Filter draft; the row must report
+    # the same pending kind as spectrum.list, which attributes it to no spectrum.
+    ctrl = cross_controller
+    entry = ctrl.state.spectrums["b"]
+    ctrl.remove_spectrum("b")
+    ctrl.state.put_spectrum(replace(entry, name="selection"))
+    win = MainWindow(ctrl)
+    try:
+        ctrl.interactive.begin_cross_selection()
+        rows = dict(zip(ctrl.list_spectrums(), list_labels(win), strict=True))
+        assert "sampled" in rows["selection"]
+        assert not any("draft" in label for label in rows.values())
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
 
 
 def test_list_rows_show_pending_draft_and_filter_exclusions(qapp, cross_controller):
