@@ -6,6 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -16,16 +17,15 @@ from qtpy.QtWidgets import (
     QDialog,
     QFileDialog,
     QGroupBox,
+    QLabel,
     QLineEdit,
-    QListWidget,
     QPushButton,
     QTabWidget,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import SearchCancelled
+from zcu_tools.analysis.fluxdep.search import ParamBounds, SearchCancelled
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
-from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
@@ -35,6 +35,17 @@ from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTrans
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.fluxdep._search_result import (
+    perfect_fit_result,
+    synthetic_search_input,
+)
+from tests.gui.app.fluxdep._window import (
+    command,
+    current_page,
+    fit_panel,
+    show_page,
+    spectra_list,
+)
 
 
 def button(widget, text):
@@ -93,28 +104,97 @@ def test_indicator_projects_online_offline_reclaim_lock_and_unlock(window):
 def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window):
     view, ctrl = window
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    for text in (
-        "Project…",
-        "Add…",
-        "Remove",
-        "Restore",
-        "Export",
-        "Analyze…",
-        "Re-pick lines",
-        "Re-select points",
+    for name in (
+        "fluxdep.project",
+        "fluxdep.spectrum.add",
+        "fluxdep.spectrum.remove",
+        "fluxdep.spectra.restore",
+        "fluxdep.spectra.export",
     ):
+        assert not command(view, name).isEnabled(), name
+    for text in ("Re-pick lines", "Re-select points"):
         assert not button(view, text).isEnabled(), text
-    spectra = view.findChild(QListWidget)
-    assert spectra is not None and spectra.isEnabled()
+    spectra = spectra_list(view)
+    assert spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)
     assert canvas is not None and canvas.isEnabled()
     assert view.centralWidget().isEnabled()
-    button(view, "Remove").click()
+    command(view, "fluxdep.spectrum.remove").click()
     assert "a" in ctrl.state.spectrums
     indicator(view).click()
     assert spectra.isEnabled()
-    button(view, "Remove").click()
+    command(view, "fluxdep.spectrum.remove").click()
     assert "a" not in ctrl.state.spectrums
+
+
+def _record_stale_fit(ctrl, search_db):
+    ctrl.set_fit_params(
+        search_db,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+    ctrl.set_selection(np.array([True, False, True, True]))
+    assert ctrl.state.fit_stale_reasons == ["filter changed"]
+
+
+def test_remote_viewer_reads_fit_page_without_opening_filter(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    assert ctrl.interactive.current_cross_selection() is None
+    freshness = next(
+        label
+        for label in panel.findChildren(QLabel)
+        if label.accessibleName() == "Freshness"
+    )
+    assert freshness.text() == "Outdated: filter changed"
+    form = next(
+        g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
+    )
+    assert not form.isEnabled()
+    tabs = panel.findChild(QTabWidget)
+    assert tabs is not None and not tabs.isTabEnabled(0)
+    panel.show_tab("show")
+    title = panel.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+    assert "Outdated: filter changed" in title
+    assert ctrl.interactive.current_cross_selection() is None
+    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+
+
+def test_remote_page_switch_keeps_agent_filter_session(window):
+    view, ctrl = window
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        context = ctrl.interactive.begin_cross_selection()
+    assert current_page(view) == "fit"
+    panel = fit_panel(view)
+    assert panel is not None and panel.current_tab == "filter"
+    active = ctrl.interactive.inspect("selection")
+    assert active is not None and active.context is context
+    show_page(view, "spectra")
+    # Leaving Fit retires the Filter view (deferred Qt deletion) but not its input.
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert panel.findChild(SelectorWidget) is None
+    assert ctrl.interactive.inspect("selection") == active
+    show_page(view, "fit")
+    assert panel.current_tab == "filter"
+    assert panel.findChild(SelectorWidget) is not None
+    assert ctrl.interactive.inspect("selection") == active
 
 
 def choose_file(path, activate, *, cancel=False):
@@ -168,14 +248,14 @@ def test_local_chooser_preserves_path_and_cancel_contract(
     elif owner != "export":
         target = Path(spectrum_hdf5[0])
     if owner == "search":
-        button(view, "Analyze…").click()
-        panel = view.findChild(AnalyzePanelWidget)
+        show_page(view, "fit")
+        panel = fit_panel(view)
         assert panel is not None
         panel.show_tab("search")
         container = panel
     else:
-        command = {"load": "Add…", "export": "Export"}.get(owner, "Project…")
-        button(view, command).click()
+        name = {"load": "fluxdep.spectrum.add", "export": "fluxdep.spectra.export"}
+        command(view, name.get(owner, "fluxdep.project")).click()
         container = QApplication.activeModalWidget()
         assert isinstance(container, QDialog)
     edits = container.findChildren(QLineEdit)
@@ -203,29 +283,31 @@ def test_local_chooser_preserves_path_and_cancel_contract(
 
 def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
     view, ctrl = window
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
+    show_page(view, "fit")
+    panel = fit_panel(view)
     assert panel is not None
     active = ctrl.interactive.inspect()
     assert active is not None and active.kind == "selection"
     tabs = panel.findChild(QTabWidget)
     assert tabs is not None
+    bar = tabs.tabBar()
+    assert bar is not None
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    assert not tabs.tabBar().isEnabled()
+    assert not bar.isEnabled()
     selector = panel.findChild(SelectorWidget)
     assert selector is not None
     assert not button(selector, "Apply").isEnabled()
     assert ctrl.interactive.inspect() == active
     indicator(view).click()
-    assert tabs.tabBar().isEnabled()
+    assert bar.isEnabled()
     tabs.setCurrentIndex(1)
     assert ctrl.interactive.inspect() is None
 
 
 def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
     view, ctrl = window
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
+    show_page(view, "fit")
+    panel = fit_panel(view)
     assert panel is not None
     tabs = panel.findChild(QTabWidget)
     assert tabs is not None
@@ -321,8 +403,8 @@ def pending_window(qapp, cross_controller, search_database_hdf5):
     )
     view = MainWindow(ctrl, dialog_presenter=dialogs)
     view.show()
-    button(view, "Analyze…").click()
-    panel = view.findChild(AnalyzePanelWidget)
+    show_page(view, "fit")
+    panel = fit_panel(view)
     assert panel is not None
     panel.show_tab("search")
     token = ctrl.search.start()

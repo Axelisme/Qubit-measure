@@ -7,12 +7,14 @@ from copy import deepcopy
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QListWidget, QPushButton, QStackedWidget
+from qtpy.QtWidgets import QPushButton
 from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
+
+from tests.gui.app.fluxdep._window import editor, spectra_list
 
 
 @pytest.fixture
@@ -42,15 +44,13 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(
         assert ctrl.state.active_spectrum == "other", (
             "GUI must follow the named agent draft"
         )
-        spectra = view.findChild(QListWidget)
-        assert spectra is not None and spectra.isEnabled()
+        spectra = spectra_list(view)
+        assert spectra.isEnabled()
         spectra.setCurrentRow(0)
         assert ctrl.state.active_spectrum == "one"
         first.session.ensure_input_open()
         second.session.ensure_input_open()
-        stack = view.findChild(QStackedWidget)
-        assert stack is not None
-        displayed = stack.currentWidget()
+        displayed = editor(view)
         assert isinstance(displayed, LinePickerWidget)
         finish = next(
             button
@@ -80,7 +80,6 @@ def test_agent_reopens_completed_point_picker_and_gui_uses_same_session(
     composition, spectrum_hdf5, qapp, spec_type
 ):
     import numpy as np
-    from qtpy.QtWidgets import QStackedWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
     from zcu_tools.gui.event_bus import EventOrigin
@@ -99,9 +98,7 @@ def test_agent_reopens_completed_point_picker_and_gui_uses_same_session(
         else:
             context = ctrl.interactive.begin_twotone_pick(name)
             context.plugin.execute_command(context.session, "clear", {})
-    stack = window.findChild(QStackedWidget)
-    assert stack is not None
-    widget = stack.currentWidget()
+    widget = editor(window)
     if spec_type == "OneTone":
         assert isinstance(widget, OneToneWidget)
     else:
@@ -158,8 +155,7 @@ def test_production_background_delivery_and_gui_finish_publish_same_session(
 ):
     ctrl, window = composition
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="OneTone")
-    spectra = window.findChild(QListWidget)
-    assert spectra is not None
+    spectra = spectra_list(window)
     # A human list pick opens the line picker; an active change alone only displays.
     spectra.setCurrentRow(0)
     assert ctrl.state.active_spectrum == name

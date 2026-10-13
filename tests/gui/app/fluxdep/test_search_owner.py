@@ -27,6 +27,7 @@ from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._window import current_page, editor, fit_panel, show_page
 
 
 class ControlledBackground:
@@ -362,7 +363,6 @@ def test_failed_publication_releases_admission(search_case, monkeypatch):
 def test_search_start_reveals_only_agent_pending_without_opening_filter(
     qapp, search_case, origin
 ):
-    from qtpy import QtWidgets
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.event_bus import EventOrigin
@@ -371,28 +371,26 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
     window = MainWindow(ctrl)
     window.show()
     try:
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert stack is not None
-        original = stack.currentWidget()
+        original = current_page(window)
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind=origin)):
             token = ctrl.search.start()
-        panel = window.findChild(AnalyzePanelWidget)
+        panel = fit_panel(window)
         if origin == "agent":
             assert panel is not None
-            assert stack.currentWidget() is panel
+            assert current_page(window) == "fit"
             assert panel.current_tab == "search"
         else:
-            assert panel is None
-            assert stack.currentWidget() is original
+            assert window.findChild(AnalyzePanelWidget) is None
+            assert current_page(window) == original
         assert ctrl.interactive.inspect() is None
 
         ctrl.set_active_spectrum("b")
-        user_view = stack.currentWidget()
+        user_page, user_view = current_page(window), editor(window)
         bg.fail(SearchCancelled("requested"))
         outcome = ctrl.search.outcome(token)
         assert outcome is not None and outcome.status == "cancelled"
-        assert stack.currentWidget() is user_view
+        assert current_page(window) == user_page and editor(window) is user_view
         assert ctrl.interactive.inspect() is None
     finally:
         if ctrl.search.active_token is not None:
@@ -489,13 +487,8 @@ def test_startup_notification_close_waits_for_search_terminal(
     else:
         dispose = progress.attach_by_owner("fluxdep-search", close_during_startup)
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert close_results == [False]
@@ -542,13 +535,8 @@ def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     window = MainWindow(ctrl, search_runner=runner)
     window.show()
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert not window.close()
