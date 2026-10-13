@@ -1139,7 +1139,8 @@ class RecipeTab:
         for key in ("start", "stop", "expts"):
             if key not in values:
                 captured_sources[key] = "gui_default"
-            self._binding.origins[f"{field}.{key}"] = captured_sources[key]
+            model_field = "n" if key == "expts" else key
+            self._binding.origins[f"{field}.{model_field}"] = captured_sources[key]
         self._binding.origins[field] = captured_sources
 
     def run(self) -> RunOperation:
