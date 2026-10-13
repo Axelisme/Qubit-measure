@@ -522,12 +522,11 @@ def _automatic_options(
                 and isinstance(tags := variant.get("x-form-discriminator-values"), list)
                 and tags
             ):
-                result.append(
-                    Option(
-                        str(tags[0]),
-                        {tag: tags[0]},
-                        fields=schema_branch_model(info, tags),
-                    )
+                # Each intrinsic tag, an alias included, is its own option;
+                # all tags of one branch select that branch's fields.
+                fields = schema_branch_model(info, tags)
+                result.extend(
+                    Option(str(value), {tag: value}, fields=fields) for value in tags
                 )
         if type(None) in alternatives(info.annotation):
             result.insert(0, Option("None", None))
