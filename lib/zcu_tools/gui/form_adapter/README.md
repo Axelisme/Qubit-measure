@@ -1,17 +1,23 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-13，從 measure adapter 框架搬入
+**Last updated:** 2026-10-13，持久 Spec 表單與 module 欄位屏蔽政策
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用；目前的 caller 是 measure 的註冊、protocol 與分頁 Form resource。
 
-公開 root 只有兩個名字：
+公開 root 有三個名字：
 
 - `Form(core_cfg, tree, *, extras=None, lower=None)`：生成 FormModel 子類別、defaults hook、choices 與 `to_cfg`。Core annotations 決定形狀與驗證；樹決定起始值、鎖定、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。
+- `module_form(spec_type)`：為一個具體持久 module 或 waveform Spec class 建 Form。生成的 model 可當 FormState root，也可當 `ModuleInline` 的 module 欄位；host 的選項沿用自己的 `choices(env)`。`to_cfg` 回傳同一個 Spec，child library key 保持字串，不讀 library、asset，也不轉 native cfg。`Form.input_from_spec(spec, env)` 把既有 Spec（library entry 或 writeback proposal）投影成 input；它只接受這類 Form 的同型 Spec。
 - `ModuleValues`：`Form.read_module` 回傳的單一 module 欄位實際值、模式與來源。
+
+生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
+
+- `FieldMeta` 的 label、unit、decimals、description 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。
+- 生成 module 欄位時，選填的 `desc`、`mask`、`outsel`、`ro_ch` 與 `mux_*` 不在 model、input、schema 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位會在註冊時被拒。目前沒有露出覆寫機制。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Host 的註冊入口負責呼叫它，例如 measure `Registry.register(form=...)`。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 
-Module、seed 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_types.py`，只由 `form.py` 組合。
+Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`，只由 `form.py` 組合。
 
 ## 依賴方向
 

@@ -87,6 +87,31 @@ def selected_model(
     return matches[0]
 
 
+def supported_input(
+    model: type[BaseModel], data: Mapping[str, JsonValue]
+) -> dict[str, JsonValue]:
+    """Project a validated persistent Spec dump onto its generated input model.
+
+    data must dump a Spec of model's family. Fields absent from model are the
+    generator's unsupported module fields; their stored values are discarded,
+    so conversion restores Spec defaults. Inline children follow their tagged
+    branch; string keys and scalar leaves are copied. data is not modified.
+    """
+    result: dict[str, JsonValue] = {}
+    for name, value in data.items():
+        if name not in model.model_fields:
+            continue
+        annotation = model.model_fields[name].annotation
+        if isinstance(value, dict) and any(
+            isinstance(member, type) and issubclass(member, BaseModel)
+            for member in members(annotation)
+        ):
+            result[name] = supported_input(selected_model(annotation, value), value)
+        else:
+            result[name] = value
+    return result
+
+
 def complete_input(
     model: type[BaseModel],
     authored: Mapping[str, JsonValue],
@@ -260,7 +285,12 @@ def nested_slot(
             raise ValueError(f"Slot {slot.path!r} has incompatible module family")
         if not slot.copy and not slot.lock:
             return key
-        data = spec.model_dump(mode="json", exclude_none=True)
+        selected = next(
+            model for model in expected if type_tag(model) == type_tag(type(spec))
+        )
+        data = supported_input(
+            selected, spec.model_dump(mode="json", exclude_none=True)
+        )
         for path, seed in slot.set.items():
             set_path(data, path, scalar_seed(seed))
         for path, value in slot.lock.items():

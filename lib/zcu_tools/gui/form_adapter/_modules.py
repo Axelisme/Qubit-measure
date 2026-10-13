@@ -15,6 +15,7 @@ from typing import (
 )
 
 from pydantic import BaseModel, Field, JsonValue, create_model
+from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
 
@@ -27,10 +28,8 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
     TemplateLiteral,
-    get_field_meta,
 )
 from zcu_tools.gui.form import (
-    Display,
     FormEnv,
     FormErrors,
     FormInput,
@@ -43,12 +42,14 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
+from ._display import field_display
 from ._seeds import (
     complete_input,
     scalar_seed,
     selected_model,
     set_path,
     slot_key,
+    supported_input,
     template_input,
     template_seed_tree,
 )
@@ -80,6 +81,20 @@ def module_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
     return tuple(specs)
 
 
+_UNSUPPORTED_FIELDS = frozenset({"desc", "mask", "outsel", "ro_ch"})
+
+
+def _unsupported(name: str, info: FieldInfo) -> bool:
+    """Optional hardware-detail fields stay out of generated module input.
+
+    Spec defaults restore them when input is validated as the Spec. A required
+    field, such as DirectReadoutCfg.ro_ch, has no default to restore and stays.
+    """
+    return not info.is_required() and (
+        name in _UNSUPPORTED_FIELDS or name.startswith("mux_")
+    )
+
+
 def _editable(
     annotation: object,
     locks: Mapping[str, TemplateLiteral],
@@ -109,21 +124,34 @@ def _editable(
         )
         return union_type(items)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return _editable_spec(annotation, locks, seeds)
+        return editable_spec(annotation, locks, seeds)
     return annotation
 
 
-def _editable_spec(
+def editable_spec(
     model: type[BaseModel],
     locks: Mapping[str, TemplateLiteral],
     seeds: Mapping[str, JsonValue],
 ) -> type[BaseModel]:
+    """Derive the input subclass of a persistent Spec and its nested models.
+
+    locks maps relative leaf paths to single-value Literal fields with that
+    default. seeds marks Expr initial values, whose fields lose static defaults.
+    QickParam alternatives are removed. FieldMeta becomes Display metadata.
+    Optional desc, mask, outsel, ro_ch and mux_* fields are removed, so input,
+    schema and writes cannot set them; validating as the Spec restores defaults.
+    The Spec's validators are inherited; the Spec class is not modified.
+    """
     annotations: dict[str, object] = {}
     namespace: dict[str, object] = {
         "__module__": __name__,
         "__annotations__": annotations,
     }
     for name, info in model.model_fields.items():
+        if _unsupported(name, info):
+            # A ClassVar annotation removes the inherited Pydantic field.
+            annotations[name] = ClassVar[None]
+            continue
         nested = {
             path.partition(".")[2]: value
             for path, value in locks.items()
@@ -143,10 +171,8 @@ def _editable_spec(
             derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
-        if (meta := get_field_meta(info)) is not None:
-            derived.metadata.append(
-                Display(label=meta.label, unit=meta.unit, description=meta.description)
-            )
+        if (display := field_display(info)) is not None:
+            derived.metadata.append(display)
         namespace[name] = derived
     result = new_class(
         f"{model.__name__}Input", (model,), exec_body=lambda ns: ns.update(namespace)
@@ -214,7 +240,7 @@ class ModuleField:
         self.catalog: Mapping[str, TemplateDef] = {}
         self.locks = node.lock if node is not None else {}
         self.editable = tuple(
-            _editable_spec(spec, self.locks, {}) for spec in self.specs
+            editable_spec(spec, self.locks, {}) for spec in self.specs
         )
         self.native = any(
             isinstance(member, type) and issubclass(member, NativeModuleBase)
@@ -307,7 +333,7 @@ class ModuleField:
                 set_path(seeds, path, scalar_seed(value))
         if seeds:
             self.editable = tuple(
-                _editable_spec(spec, self.locks, seeds) for spec in self.specs
+                editable_spec(spec, self.locks, seeds) for spec in self.specs
             )
             module = union_type(self.editable)
             if len(self.specs) > 1:
@@ -340,7 +366,10 @@ class ModuleField:
                 )
             if not self.node.copy and not self.locks:
                 return {"kind": "ref", "name": key}
-            module = spec.model_dump(mode="json", exclude_none=True)
+            module = supported_input(
+                self._editable_for(spec.type),
+                spec.model_dump(mode="json", exclude_none=True),
+            )
         elif self.node.fallback is not None:
             module = template_input(
                 self.node.fallback, self.catalog, self.editable, env
@@ -355,6 +384,9 @@ class ModuleField:
             model for model in self.editable if type_tag(model) == module.get("type")
         )
         return {"kind": "inline", "module": complete_input(selected, module)}
+
+    def _editable_for(self, tag: str) -> type[BaseModel]:
+        return next(model for model in self.editable if type_tag(model) == tag)
 
     def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
         """Evaluate only this module, then materialize against its fixed capture.
@@ -412,9 +444,12 @@ class ModuleField:
                 raise ValueError(f"Incompatible module family at {'.'.join(self.path)}")
             # Bypass generated defaults to avoid re-entering this preparation.
             data = super(LockedInline, self.inline).defaults(env, previous)
-            module = data.get("module")
-            if not isinstance(module, dict):
+            copied = data.get("module")
+            if not isinstance(copied, dict) or not isinstance(
+                tag := copied.get("type"), str
+            ):
                 raise TypeError("ModuleInline defaults must produce module input")
+            module = supported_input(self._editable_for(tag), copied)
         else:
             template = (
                 self.node

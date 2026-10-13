@@ -17,11 +17,12 @@ from zcu_tools.cfg_model import (
     FormNode,
     Hidden,
     Locked,
+    ModuleSpec,
     Range,
     Slot,
     Template,
     TemplateDef,
-    get_field_meta,
+    WaveformSpec,
 )
 from zcu_tools.gui.form import (
     Display,
@@ -29,6 +30,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormState,
     FormWritePath,
     LinRange,
     static_defaults,
@@ -37,7 +39,9 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._modules import ModuleField, ModuleValues, module_specs
+from ._display import field_display
+from ._modules import ModuleField, ModuleValues, editable_spec, module_specs
+from ._seeds import supported_input
 from ._types import literal_type, union_type
 from ._types import members as _members
 
@@ -84,12 +88,51 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
 
 def _field_info(info: FieldInfo) -> FieldInfo:
     result = deepcopy(info)
-    meta = get_field_meta(info)
-    if meta is not None:
-        result.metadata.append(
-            Display(label=meta.label, unit=meta.unit, description=meta.description)
-        )
+    if (display := field_display(info)) is not None:
+        result.metadata.append(display)
     return result
+
+
+_PERSISTENT_SPECS = frozenset(
+    model
+    for model in (*_members(ModuleSpec), *_members(WaveformSpec))
+    if isinstance(model, type)
+)
+
+
+class _SpecSection:
+    """A persistent module or waveform Spec root converts input back to that Spec.
+
+    The generated model subclasses both FormModel and the Spec's input model, so
+    hosts use it as a FormState root or as a ModuleInline module field. Child
+    library keys stay ordinary strings; nothing is looked up or materialized.
+    It has no core sections or module fields, and no authored tree.
+    """
+
+    def __init__(self, spec: type[ConfigBase], tree: Mapping[str, FormNode]) -> None:
+        if tree:
+            raise ValueError(f"{spec.__name__}: Spec forms take no authored tree")
+        self.editable = editable_spec(spec, {}, {})
+        model = new_class(
+            f"{spec.__name__}Form",
+            (FormModel, self.editable),
+            exec_body=lambda ns: ns.update({"__module__": __name__}),
+        )
+        if not issubclass(model, FormModel):
+            raise TypeError("Generated Spec model must implement FormModel")
+        self.model: type[FormModel] = model
+        self.children: dict[str, _Section] = {}
+        self.modules: dict[str, ModuleField] = {}
+
+    def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
+        # The section contains no Template or Slot node to resolve.
+        del catalog, adapter
+
+    def to_raw(
+        self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
+    ) -> dict[str, CfgInputValue]:
+        del env, errors
+        return value.model_dump(mode="python")
 
 
 class _Section:
@@ -302,6 +345,12 @@ class Form[C: ConfigBase]:
     instead of falling back to core defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
+    Generated module input omits optional desc, mask, outsel, ro_ch and mux_*
+    fields; conversion restores their Spec defaults, and copying a library
+    entry inline discards its stored values for them. FieldMeta label, unit,
+    decimals and description become Display metadata.
+    A core_cfg that is a concrete persistent module or waveform Spec builds the
+    same Spec form as module_form and requires an empty tree.
     """
 
     def __init__[E: BaseModel](
@@ -315,7 +364,11 @@ class Form[C: ConfigBase]:
         if (extras is None) != (lower is None):
             raise ValueError("extras and lower must be provided together")
         self._core_cfg = core_cfg
-        self._section = _Section(core_cfg, tree, ())
+        self._section: _Section | _SpecSection = (
+            _SpecSection(core_cfg, tree)
+            if core_cfg in _PERSISTENT_SPECS
+            else _Section(core_cfg, tree, ())
+        )
         self.model: type[FormModel] = self._section.model
         self._lower: Callable[[BaseModel, ConfigBase], C] | None = None
         if extras is not None and lower is not None:
@@ -452,6 +505,35 @@ class Form[C: ConfigBase]:
             raw = raw.get(part) if isinstance(raw, dict) else None
         return field.read(raw, env)
 
+    def input_from_spec(self, spec: C, env: FormEnv) -> FormInput[FormModel]:
+        """Project an existing persistent Spec into fresh input for this Spec form.
+
+        Only Forms built for a persistent Spec accept this; a core cfg Form raises
+        TypeError. spec must be exactly core_cfg, not a subclass; otherwise raise
+        TypeError. Ordinary values and child library keys are copied, and None
+        values stay absent like static defaults. Values of unsupported module
+        fields are discarded, so to_cfg restores Spec defaults instead of the
+        stored values. env supplies the default input that the projection
+        overlays; captured source failures propagate. spec is not modified and
+        no library entry, asset or native cfg is read.
+        """
+        if not isinstance(self._section, _SpecSection):
+            raise TypeError("input_from_spec requires a persistent Spec form")
+        if type(spec) is not self.core_cfg:
+            raise TypeError(
+                f"Expected {self.core_cfg.__name__}, got {type(spec).__name__}"
+            )
+        state = FormState(self.default_input(env))
+        dropped = state.write_compatible(
+            supported_input(
+                self._section.editable, spec.model_dump(mode="json", exclude_none=True)
+            ),
+            env,
+        )
+        if dropped:
+            raise ValueError(f"Spec values do not fit generated input: {dropped}")
+        return state.input
+
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.
 
@@ -477,3 +559,22 @@ class Form[C: ConfigBase]:
         if self._lower is not None:
             cfg = self.core_cfg.model_validate(self._lower(value, cfg).model_dump())
         return cfg
+
+
+def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
+    """Build the Form for one concrete persistent module or waveform Spec class.
+
+    spec_type is a member class of ModuleSpec or WaveformSpec, such as PulseSpec
+    or DirectReadoutCfg. Union aliases, materialized or native runtime cfgs and
+    other classes raise TypeError. The model is a FormModel usable as a
+    FormState root or a ModuleInline module field; hosts add choices through
+    their own choices(env). to_cfg returns spec_type and keeps child library
+    keys without reading the library, assets or building native cfg. Generated
+    input omits optional desc, mask, outsel, ro_ch and mux_* fields, whose Spec
+    defaults return in to_cfg. Use input_from_spec to edit an existing Spec.
+    """
+    if spec_type not in _PERSISTENT_SPECS:
+        raise TypeError(
+            f"Not a concrete persistent module or waveform Spec: {spec_type!r}"
+        )
+    return Form(spec_type, {})

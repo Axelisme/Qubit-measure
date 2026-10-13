@@ -6,7 +6,6 @@ import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
     ConfigBase,
-    DirectReadoutCfg,
     ModuleSpec,
     PulseReadoutSpec,
     PulseSpec,
@@ -14,7 +13,14 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.cfg_model import PulseCfg as MaterializedPulseCfg
 from zcu_tools.gui import form_adapter
-from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, ModuleInline
+from zcu_tools.gui.form import (
+    FormEnv,
+    FormErrors,
+    FormModel,
+    FormState,
+    FormWritePath,
+    ModuleInline,
+)
 from zcu_tools.program.v2.modules import PulseCfg as NativePulseCfg
 
 UNSUPPORTED_PULSE_FIELDS = (
@@ -27,7 +33,7 @@ UNSUPPORTED_PULSE_FIELDS = (
     "ro_ch",
 )
 
-PULSE_LEAVES: dict[tuple[str | int, ...], JsonValue] = {
+PULSE_LEAVES: dict[FormWritePath, JsonValue] = {
     ("ch",): 2,
     ("nqz",): 1,
     ("freq",): 100.0,
@@ -69,9 +75,12 @@ def test_spec_form_evaluates_input_and_keeps_child_library_key() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
     state = FormState(form.default_input(env))
-    state.write(
-        {**PULSE_LEAVES, ("gain",): {"expr": "0.5 / 2"}, ("waveform",): "Q.flat"}, env
-    )
+    batch: dict[FormWritePath, JsonValue] = {
+        **PULSE_LEAVES,
+        ("gain",): {"expr": "0.5 / 2"},
+        ("waveform",): "Q.flat",
+    }
+    state.write(batch, env)
 
     cfg = result_spec(form, state, env)
 
@@ -91,7 +100,8 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
 
     with pytest.raises(ValueError, match="Unknown field path"):
         state.write({(name,): 1}, env)
-    state.write({**PULSE_LEAVES, ("waveform",): "Q.flat"}, env)
+    batch: dict[FormWritePath, JsonValue] = {**PULSE_LEAVES, ("waveform",): "Q.flat"}
+    state.write(batch, env)
     cfg = result_spec(form, state, env)
 
     assert isinstance(properties, dict) and name not in properties
@@ -211,12 +221,11 @@ class DerivedPulse(PulseSpec):
 def test_input_from_spec_rejects_another_spec_type_or_core_form() -> None:
     env = FormEnv()
     derived = DerivedPulse.model_validate(library_entry().model_dump(mode="json"))
-    direct = DirectReadoutCfg(ro_ch=1, ro_length=1.0, ro_freq=10.0)
 
     with pytest.raises(TypeError):
         form_adapter.module_form(PulseSpec).input_from_spec(derived, env)
     with pytest.raises(TypeError):
-        form_adapter.Form(DirectReadoutCfg, {}).input_from_spec(direct, env)
+        form_adapter.Form(SyntheticCfg, {}).input_from_spec(SyntheticCfg(), env)
 
 
 class HostInline(ModuleInline):
@@ -235,9 +244,12 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     host = create_model("PulseInline", __base__=HostInline, module=(form.model, ...))
     env = FormEnv()
     state = FormState(host.default_input(env))
-    leaves_batch = {("module", *path): value for path, value in PULSE_LEAVES.items()}
+    batch: dict[FormWritePath, JsonValue] = {
+        ("module", *path): value for path, value in PULSE_LEAVES.items()
+    }
+    batch |= {("module", "ch"): 7, ("module", "waveform"): "w"}
 
-    state.write({**leaves_batch, ("module", "ch"): 7, ("module", "waveform"): "w"}, env)
+    state.write(batch, env)
     rejected = state.result(env)
     state.write({("module", "ch"): 3}, env)
     accepted = state.result(env)
