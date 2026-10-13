@@ -202,6 +202,25 @@ def test_remote_page_switch_keeps_agent_filter_session(window):
     assert ctrl.interactive.inspect("selection") == active
 
 
+def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
+    view, ctrl = window
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    panel.show_tab("search")
+    show_page(view, "spectra")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.begin_cross_selection()
+        ctrl.interactive.cancel("selection")
+    indicator(view).click()
+    assert ctrl.control_identity.status().holder == "gui"
+    show_page(view, "fit")
+    # The agent's Filter has ended, so its event no longer picks the tab.
+    assert panel.current_tab == "search"
+    assert ctrl.interactive.current_cross_selection() is None
+
+
 @pytest.mark.parametrize("owner", ["load", "export", "result", "database"])
 @pytest.mark.parametrize("cancel", [False, True])
 def test_local_chooser_preserves_path_and_cancel_contract(
