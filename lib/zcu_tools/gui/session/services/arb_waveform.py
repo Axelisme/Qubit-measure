@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.measure.arb_waveform import (
+from zcu_tools.gui.session.arb_waveform import (
     ArbWaveformPreviewResult,
     ArbWaveformWriteStatus,
 )

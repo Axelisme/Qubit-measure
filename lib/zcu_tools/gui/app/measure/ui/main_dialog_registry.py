@@ -112,7 +112,7 @@ class MainDialogRegistry:
                 parent=self._parent,
             )
         if name is DialogName.ARB_WAVEFORM:
-            from .arb_waveform_dialog import ArbWaveformDialog
+            from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 
             return ArbWaveformDialog(
                 self._ctrl.arb_waveforms,

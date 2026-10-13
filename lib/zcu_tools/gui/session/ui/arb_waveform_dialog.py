@@ -38,7 +38,7 @@ from zcu_tools.resources.waveform_assets import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.arb_waveform import ArbWaveformPort
+    from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
 
 
 _DATA_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")

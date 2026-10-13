@@ -7,9 +7,9 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.gui.app.measure.services import arb_waveform
+from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import (
+from zcu_tools.gui.session.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
@@ -169,7 +169,7 @@ def test_dialog_validates_segments_and_saves_preview(qapp, monkeypatch) -> None:
     assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.QInputDialog.getText",
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QInputDialog.getText",
         lambda *args, **kwargs: ("renamed_data", True),
     )
     dlg._rename_btn.click()
@@ -275,7 +275,7 @@ def test_A3_data_key_change_does_not_trigger_render(qapp, monkeypatch) -> None:
         return original_render(recipe)
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.render_formula_recipe",
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.render_formula_recipe",
         counting_render,
     )
     dlg = ArbWaveformDialog(ctrl)  # type: ignore[arg-type]
@@ -369,7 +369,7 @@ def test_A6_save_with_deep_invalid_formula_reports_save_failed(
         critical_calls.append((title, msg))
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.QMessageBox.critical",
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
         fake_critical,
     )
     dlg._save_recipe()
@@ -418,7 +418,7 @@ def test_B7_reload_failure_reports_reload_failed_not_save_failed(
         critical_calls.append((title, msg))
 
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.QMessageBox.critical",
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
         fake_critical,
     )
 
@@ -500,7 +500,7 @@ def test_save_button_persists_without_remote_png(
 
     monkeypatch.setattr(arb_waveform, "render_preview_png", unavailable)
     monkeypatch.setattr(
-        "zcu_tools.gui.app.measure.ui.arb_waveform_dialog.QMessageBox.critical",
+        "zcu_tools.gui.session.ui.arb_waveform_dialog.QMessageBox.critical",
         lambda _parent, title, message: errors.append((title, message)),
     )
     dialog = ArbWaveformDialog(assets)

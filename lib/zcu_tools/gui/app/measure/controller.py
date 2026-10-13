@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
-    from .arb_waveform import ArbWaveformPort
+    from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from .services import AppServices
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort

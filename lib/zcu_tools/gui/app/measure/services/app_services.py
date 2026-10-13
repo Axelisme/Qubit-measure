@@ -22,7 +22,7 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
-from .arb_waveform import ArbWaveformService
+from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
 from .experiment_reload import ExperimentReloadService
 from .guard import GuardService

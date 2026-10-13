@@ -33,7 +33,7 @@ from zcu_tools.gui.session.value_lookup import (
 from zcu_tools.resources.context.library import LibrarySnapshot
 from zcu_tools.resources.entry import RoleResolutionError
 
-from .arb_waveform import ArbWaveformKeys
+from zcu_tools.gui.session.arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
 _DEVICES_SOURCE = "devices"

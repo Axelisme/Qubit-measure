@@ -43,7 +43,7 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.caretaker import create_persistence_caretaker
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
-from zcu_tools.gui.app.measure.ui.arb_waveform_dialog import ArbWaveformDialog
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from .analyze import AnalyzeService
     from .app_services import AppServices, build_app_services
-    from .arb_waveform import ArbWaveformService
+    from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
     from .caretaker import (
         AppSnapshotCodec,
         RestoreOutcome,
@@ -120,7 +120,7 @@ __all__ = [
 
 _EXPORT_MODULES: dict[str, str] = {
     "AnalyzeService": ".analyze",
-    "ArbWaveformService": ".arb_waveform",
+    "ArbWaveformService": "zcu_tools.gui.session.services.arb_waveform",
     "AppServices": ".app_services",
     "build_app_services": ".app_services",
     "SoCConnectionService": "zcu_tools.gui.session.services.connection",
