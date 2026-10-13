@@ -4,7 +4,7 @@ from typing import Annotated
 
 import pytest
 from pydantic import JsonValue, PydanticSchemaGenerationError
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec, ResetCfg
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.modules import PulseCfg
@@ -31,6 +31,57 @@ class ModuleCore(ConfigBase):
     """A synthetic experiment cfg is independent of real experiment modules."""
 
     modules: ModuleSection
+
+
+class ResetCore(ConfigBase):
+    """A required multi-kind module and its nullable counterpart."""
+
+    reset: ResetCfg
+    optional: ResetCfg | None = None
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_generated_module_options_offer_typed_keys_and_single_inline(nullable: bool) -> None:
+    form = Form(NullableModuleCore if nullable else ModuleSection, {})
+    env = module_env()
+    options = form.model.options(env).get(("probe",), ())
+    assert [option.label for option in options] == (
+        (["None"] if nullable else []) + ["Q.pulses.probe", "Inline"]
+    )
+    key = next(option for option in options if option.label == "Q.pulses.probe")
+    assert key.value == {"kind": "ref", "name": "Q.pulses.probe"}
+    assert key.fields is None
+    inline = options[-1]
+    assert inline.value == {"kind": "inline", "module": {"type": "pulse"}}
+    properties = expect_object(form.model.input_schema(env)["properties"])
+    projected = expect_object(properties["probe"])["x-form-options"]
+    assert isinstance(projected, list)
+    fields = expect_object(expect_object(projected[-1])["fields"])
+    module = expect_object(expect_object(fields["properties"])["module"])
+    assert set(expect_object(module["properties"])) >= {"ch", "freq", "gain", "waveform"}
+    assert "type" not in expect_object(module["properties"])
+    assert "kind" not in expect_object(fields["properties"])
+
+
+def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> None:
+    form = Form(ResetCore, {})
+    env = module_env()
+    expected = ["Inline: reset/pulse", "Inline: reset/two_pulse", "Inline: reset/bath"]
+    options = form.model.options(env)
+    assert [option.label for option in options.get(("reset",), ())] == expected
+    assert [option.label for option in options.get(("optional",), ())] == ["None", *expected]
+    assert [option.value for option in options[("reset",)]] == [
+        {"kind": "inline", "module": {"type": kind}}
+        for kind in ("reset/pulse", "reset/two_pulse", "reset/bath")
+    ]
+    schema = form.model.input_schema(env)
+    projected = expect_object(expect_object(schema["properties"])["reset"])["x-form-options"]
+    assert isinstance(projected, list)
+    expected_fields = [{"pulse_cfg"}, {"pulse1_cfg", "pulse2_cfg"}, {"cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg"}]
+    for item, names in zip(projected, expected_fields, strict=True):
+        fields = expect_object(expect_object(item)["fields"])
+        module = expect_object(expect_object(fields["properties"])["module"])
+        assert set(expect_object(module["properties"])) == names
 
 
 def module_env() -> FormEnv:

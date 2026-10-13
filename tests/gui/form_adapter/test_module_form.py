@@ -135,6 +135,24 @@ def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> Non
     assert state.input.data["waveform"] == current
 
 
+def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    options = form.model.options(env).get(("waveform",), ())
+    assert [option.label for option in options] == [
+        "Q.waveforms.flat", "Inline: const", "Inline: cosine", "Inline: gauss",
+        "Inline: drag", "Inline: arb", "Inline: flat_top",
+    ]
+    schema = expect_object(expect_object(form.model.input_schema(env)["properties"])["waveform"])
+    projected = schema["x-form-options"]
+    assert isinstance(projected, list)
+    const = expect_object(projected[1])
+    assert const["value"] == {"style": "const"}
+    assert set(expect_object(expect_object(const["fields"])["properties"])) == {"length"}
+    flat = expect_object(projected[-1])
+    assert set(expect_object(expect_object(flat["fields"])["properties"])) == {"length", "raise_waveform"}
+
+
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
