@@ -177,16 +177,13 @@ def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> 
     assert application.ctrl.get_running_tab_id() is None
 
 
-@pytest.mark.parametrize("command", ["edit", "reset", "load", "close"])
+@pytest.mark.parametrize("command", ["edit", "reset", "close"])
 def test_run_registration_notification_blocks_tab_mutation(
     application: Fixture, qapp: QApplication, command: str
 ) -> None:
     tab_id = application.ctrl.new_tab("fake")
     cfg = application.ctrl.cfg_resources.lookup(tab_id)
     original = cfg.input.data
-    current = cfg.result()
-    if isinstance(current, FormErrors):
-        pytest.fail(str(current.messages))
     outcomes: list[str] = []
 
     def during_registration(_event: GateChangedPayload) -> None:
@@ -198,8 +195,6 @@ def test_run_registration_notification_blocks_tab_mutation(
                 cfg.write({("reps",): 9})
             elif command == "reset":
                 cfg.reset()
-            elif command == "load":
-                cfg.load_cfg(current)
             else:
                 application.ctrl.close_tab(tab_id)
         except CfgPreconditionError as exc:

@@ -28,7 +28,6 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
-    FormState,
     LinRange,
     static_defaults,
 )
@@ -39,7 +38,6 @@ from zcu_tools.resources.entry.roles import RoleResolutionError
 from ._form_modules import ModuleField, module_specs
 from ._form_types import literal_type, union_type
 from ._form_types import members as _members
-from .cfg_input import CfgInputRejected, dump_differences
 
 
 class SweepRange(LinRange):
@@ -230,28 +228,6 @@ class _Section:
                 data[name] = child.default_data(env)
         return data
 
-    def cfg_data(self, cfg: BaseModel) -> dict[str, JsonValue]:
-        raw: dict[str, JsonValue] = cfg.model_dump(mode="json")
-        for name in cfg.__class__.model_fields:
-            if name not in self.model.model_fields:
-                raw.pop(name, None)
-                continue
-            item: object = getattr(cfg, name)
-            if name in self.children and isinstance(item, BaseModel):
-                raw[name] = self.children[name].cfg_data(item)
-            elif name in self.modules and isinstance(item, ConfigBase):
-                raw[name] = self.modules[name].cfg_input(item)
-            elif isinstance(item, SweepCfg):
-                raw[name] = {
-                    "kind": "linrange",
-                    "start": item.start,
-                    "stop": item.stop,
-                    "n": item.expts,
-                }
-            elif isinstance(item, complex):
-                raw[name] = _seed_json(item)
-        return raw
-
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         for field in self.modules.values():
             try:
@@ -387,66 +363,6 @@ class Form[C: ConfigBase]:
         them against this same env.
         """
         return self.model.default_input(env)
-
-    def cfg_input(
-        self,
-        cfg: ConfigBase,
-        *,
-        current: FormModel | None = None,
-        env: FormEnv | None = None,
-    ) -> FormInput[FormModel] | CfgInputRejected:
-        """Project native cfg into detached direct input, guarding extras lowering.
-
-        cfg must belong to core_cfg; a different type raises TypeError. current
-        is this Form's valid ordinary result, not authored input; a different
-        generated model raises TypeError. Native modules become inline persistent
-        Specs and SweepCfg becomes LinRange. Hidden fields are omitted. No source
-        is captured, defaults executed or expression text retained.
-
-        Without extras, current/env may be omitted. With extras lower, both a
-        valid current result and the tab's fixed env are required. Missing current
-        rejects with a repair-extras diagnostic; missing env raises ValueError.
-        Extras become current ordinary values. The candidate must validate and
-        lower to exactly the loaded native JSON-mode model dump. Invalid or
-        mismatching candidates return CfgInputRejected with directed errors and
-        difference paths; no inverse, defaults or tolerance is guessed. Malformed
-        module data raises ValueError from Spec validation. Input/cfg are untouched.
-        """
-        if not issubclass(type(cfg), self.core_cfg):
-            raise TypeError("cfg_input requires this form's core cfg type")
-        if current is not None and type(current) is not self.model:
-            raise TypeError("current must be this form's ordinary generated result")
-        data = self._section.cfg_data(cfg)
-        if self._lower is None:
-            return FormInput(self.model, data)
-        if current is None:
-            return CfgInputRejected(
-                FormErrors({("extras",): "Repair extras before loading cfg"})
-            )
-        if env is None:
-            raise ValueError("cfg_input with extras requires the tab's fixed env")
-        data["extras"] = current.model_dump(mode="json")["extras"]
-        candidate = FormInput(self.model, data)
-        result = FormState(candidate).result(env)
-        if isinstance(result, FormErrors):
-            return CfgInputRejected(result)
-        would_run = self.to_cfg(result, env)
-        if isinstance(would_run, FormErrors):
-            return CfgInputRejected(would_run)
-        differences = dump_differences(
-            cfg.model_dump(mode="json"), would_run.model_dump(mode="json")
-        )
-        if differences:
-            return CfgInputRejected(
-                FormErrors(
-                    {
-                        item.path: f"Loaded {item.loaded!r}; would run {item.would_run!r} ({item.reason})"
-                        for item in differences
-                    }
-                ),
-                differences,
-            )
-        return candidate
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.

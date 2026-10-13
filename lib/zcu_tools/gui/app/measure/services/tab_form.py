@@ -11,7 +11,7 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-from zcu_tools.gui.app.measure.adapter import CfgInputRejected, Form
+from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -93,7 +93,6 @@ class TabFormResource:
         self._to_cfg: Callable[[FormModel, FormEnv], ConfigBase | FormErrors] = (
             form.to_cfg
         )
-        self._cfg_input = form.cfg_input
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
@@ -222,36 +221,6 @@ class TabFormResource:
         self._sources = sources
         self._state = state
         self._notify()
-
-    def load_cfg(self, cfg: ConfigBase) -> CfgInputRejected | None:
-        """Backfill a native cfg with concrete direct input, without source capture.
-
-        cfg must match the Form core type; wrong types raise TypeError. Form owns
-        module/range conversion and extras roundtrip checks. Missing valid extras,
-        invalid candidates or roundtrip mismatches return CfgInputRejected and
-        preserve input. Success returns None and publishes the complete candidate.
-        Guards reject before preparation; source/author failures propagate without
-        input mutation. Loaded input does not retain expressions or live links.
-        """
-        self.require_mutation_allowed()
-        current = self._state.result(self._sources.env)
-        candidate = self._cfg_input(
-            cfg,
-            current=None if isinstance(current, FormErrors) else current,
-            env=self._sources.env,
-        )
-        if isinstance(candidate, CfgInputRejected):
-            return candidate
-        state = FormState(candidate)
-        result = state.result(self._sources.env)
-        if isinstance(result, FormErrors):
-            return CfgInputRejected(result)
-        converted = self._to_cfg(result, self._sources.env)
-        if isinstance(converted, FormErrors):
-            return CfgInputRejected(converted)
-        self._state = state
-        self._notify()
-        return None
 
     def require_mutation_allowed(self) -> None:
         """Guard related owner operations such as Load before replacing results."""

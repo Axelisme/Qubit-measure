@@ -18,7 +18,6 @@ from zcu_tools.cfg_model import (
     TemplateDef,
     TemplateLiteral,
     get_field_meta,
-    module_spec_from_raw,
 )
 from zcu_tools.gui.form import Display, FormEnv, ModuleInline, ModuleRef
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
@@ -242,20 +241,6 @@ class ModuleField:
             model for model in self.editable if type_tag(model) == module.get("type")
         )
         return {"kind": "inline", "module": complete_input(selected, module)}
-
-    def cfg_input(self, cfg: ConfigBase) -> dict[str, JsonValue]:
-        """Return detached inline input for a materialized module in this family.
-
-        No library/default lookup occurs. Unsupported persistent data and wrong
-        module families raise ValueError. Ordinary scalar values remain direct.
-        """
-        spec = module_spec_from_raw(cfg.to_dict())
-        if not isinstance(spec, self.specs):
-            raise ValueError(f"Incompatible loaded module at {'.'.join(self.path)}")
-        return {
-            "kind": "inline",
-            "module": spec.model_dump(mode="json", exclude_none=True),
-        }
 
     def materialize(self, item: BaseModel, env: FormEnv) -> ConfigBase:
         if isinstance(item, ModuleRef):

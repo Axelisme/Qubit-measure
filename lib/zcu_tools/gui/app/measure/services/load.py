@@ -3,15 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    CfgInputRejected,
     LoadDataRequest,
 )
-from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
@@ -30,16 +27,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class LoadTabResultOutcome:
+    """Committed Load facts, independent of the tab's editable Form input.
+
+    tab_id names the receiving tab; data_path is the selected source file.
+    result_type is the adapter result's class name. has_cfg_snapshot reports
+    native cfg presence, not form validity. has_analyze_params reports successful
+    analysis preparation; analysis_error carries its diagnostic on partial success.
+    source_kind identifies the loaded result rather than an acquired Run.
+    """
+
     tab_id: str
     data_path: str
     result_type: str
     has_cfg_snapshot: bool
     has_analyze_params: bool
     source_kind: str = "loaded"
-    cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
     analysis_error: str | None = None
-    # Directed Form-owned diagnostics when a native cfg cannot safely backfill.
-    cfg_rejection: CfgInputRejected | None = None
 
 
 class LoadDataError(FailedPreconditionError):
@@ -81,7 +84,7 @@ class LoadService:
         captured_parameters reads current point/library/storage and global aliases
         on the owner thread; its result must not follow later source changes.
         context reads the file's fixed point/roles in the opened entry without
-        changing selection. Cfg backfill uses only the existing tab form snapshot.
+        changing selection. Load preserves the tab's authored input and fixed sources.
         """
         self._context = context
         self._captured_parameters = captured_parameters
@@ -105,8 +108,9 @@ class LoadService:
         Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
         analysis remains available. Historical source read failures propagate
         before result replacement. Retain native history without acquisition.
-        Return committed result details and cfg backfill status. Busy or cfg
-        notification reentrancy rejects before loading; adapter file/capability
+        Return committed result details without validating or replacing form input.
+        Busy or cfg notification reentrancy rejects before loading;
+        adapter file/capability
         failures raise LoadDataError without replacing the previous result.
         """
         if self._state.is_tab_busy(tab_id):
@@ -169,37 +173,13 @@ class LoadService:
             storage=storage,
         )
         self._teardown_retired(retired)
-        cfg_backfill, cfg_rejection = self._backfill_cfg(tab_id, snapshot)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
             result_type=type(result).__name__,
             has_cfg_snapshot=snapshot is not None,
             has_analyze_params=False,
-            cfg_backfill=cfg_backfill,
-            cfg_rejection=cfg_rejection,
         )
-
-    def _backfill_cfg(
-        self, tab_id: str, snapshot: object
-    ) -> tuple[Literal["applied", "not_applied"], CfgInputRejected | None]:
-        if not isinstance(snapshot, ExpCfgModel):
-            return "not_applied", None
-        cfg = self._state.get_tab(tab_id).cfg
-        try:
-            rejected = cfg.load_cfg(snapshot)
-            if rejected is not None:
-                return "not_applied", rejected
-        except (
-            CfgInputError,
-            CfgPreconditionError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-        ):
-            logger.exception("loaded config was not applied: tab_id=%r", tab_id)
-            return "not_applied", None
-        return "applied", None
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:
