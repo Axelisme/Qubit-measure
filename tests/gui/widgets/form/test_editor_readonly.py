@@ -66,6 +66,22 @@ class ReadOnlyForm(FormModel):
     phase: Annotated[float, Display(group="Advanced")] = 0.5
 
 
+class GroupFirstForm(FormModel):
+    """ReadOnlyForm's rows with the grouped row declared first; the editor
+    still draws it in a group block after the ungrouped rows."""
+
+    phase: Annotated[float, Display(group="Advanced")] = 0.5
+    amount: float = 2.0
+    label: str = "probe"
+    mode: Literal["fast", "slow"] = "fast"
+    flag: bool = False
+    drive: str | PulseSpec = "Q1.pulses.pi"
+    section: Annotated[Section, Display(collapsed=True)] = Field(
+        default_factory=Section
+    )
+    extra: Extra | None = None
+
+
 DATA: dict[str, JsonValue] = {
     "amount": 2.0,
     "label": "probe",
@@ -99,13 +115,16 @@ def library_env() -> FormEnv:
     )
 
 
-type View = tuple[FormEditor[ReadOnlyForm], FormState[ReadOnlyForm]]
+type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 
 
-@pytest.fixture
-def view(qapp: QApplication) -> Iterator[View]:
-    """A shown editor over DATA, with editing disabled."""
-    state = FormState(FormInput(ReadOnlyForm, DATA))
+@pytest.fixture(
+    params=[ReadOnlyForm, GroupFirstForm], ids=["group-last", "group-first"]
+)
+def view(qapp: QApplication, request: pytest.FixtureRequest) -> Iterator[View]:
+    """A shown editor over DATA, with editing disabled, for each field order."""
+    model: type[FormModel] = request.param
+    state = FormState(FormInput(model, DATA))
     editor = FormEditor(state, library_env())
     editor.resize(520, 600)
     editor.show()
@@ -316,6 +335,8 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     key_click(amount, Qt.Key.Key_End)
     type_text(amount, "5")
     assert state.input.data["amount"] == 2.05
+    # The write keeps the form's shape, so the typed-into field stays.
+    assert child(editor, QLineEdit, "form.input.amount") is amount
     mode(editor, "amount").trigger()
     assert state.input.data["amount"] == {"expr": "2.05"}
 

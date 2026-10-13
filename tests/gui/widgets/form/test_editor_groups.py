@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from qtpy.QtCore import QPoint, Qt
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QLabel,
     QLineEdit,
@@ -16,6 +17,8 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
+
+from tests.gui._user_input import key_click, type_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 type Build = Callable[[type[FormModel], dict[str, JsonValue] | None], View]
@@ -302,3 +305,140 @@ def test_folded_group_title_shows_member_errors_without_unfolding(
     assert not error_note(view, "Advanced").isHidden()
     state.write({("inner", "level"): 0.5}, env)
     assert error_note(view, "Advanced").isHidden()
+
+
+class GroupFirst(FormModel):
+    """A grouped row declared before the ungrouped text row it follows on screen."""
+
+    phase: Annotated[float, Display(group="Advanced")] = 0.0
+    amount: float = 1.0
+
+
+class GroupLast(FormModel):
+    """The same rows with the grouped row declared last."""
+
+    amount: float = 1.0
+    phase: Annotated[float, Display(group="Advanced")] = 0.0
+
+
+class InnerGroupFirst(BaseModel):
+    """A nested level whose grouped row is declared before its ungrouped row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: Annotated[float, Display(group="Advanced")] = 0.0
+    amount: float = 1.0
+
+
+class NestedGroupFirst(FormModel):
+    """A root holding one nested level with a group declared first."""
+
+    drive: InnerGroupFirst = Field(default_factory=InnerGroupFirst)
+
+
+def value_at(data: dict[str, JsonValue], path: str) -> JsonValue:
+    """The input value at the dotted path inside data."""
+    value: JsonValue = data
+    for key in path.split("."):
+        assert isinstance(value, dict), path
+        value = value[key]
+    return value
+
+
+@pytest.mark.parametrize(
+    ("model", "path", "group"),
+    [
+        (GroupFirst, "amount", None),
+        (GroupLast, "amount", None),
+        (GroupFirst, "phase", "Advanced"),
+        (NestedGroupFirst, "drive.amount", None),
+        (NestedGroupFirst, "drive.phase", "drive.Advanced"),
+    ],
+)
+def test_typing_keeps_the_text_field_whatever_the_declaration_order(
+    build: Build,
+    qapp: QApplication,
+    model: type[FormModel],
+    path: str,
+    group: str | None,
+) -> None:
+    view, state = build(model, None)
+    if group is not None:
+        group_fold(view, group).click()
+    view.show()
+    qapp.processEvents()
+    field = child(view, QLineEdit, f"form.input.{path}")
+    field.setFocus()
+    qapp.processEvents()
+
+    typed = field.text() + "55"
+    key_click(field, Qt.Key.Key_End)
+    type_text(field, "55")
+    qapp.processEvents()
+
+    # Each key writes the state; a write that keeps the form's shape updates
+    # the row in place, so the field the user types into stays and keeps focus.
+    assert child(view, QLineEdit, f"form.input.{path}") is field
+    assert field.hasFocus()
+    assert field.text() == typed
+    assert value_at(state.input.data, path) == float(typed)
+
+
+class Extra(BaseModel):
+    """The model of a nullable section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = "n"
+
+
+class Tone(BaseModel):
+    """The inline model of a key-or-inline field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gain: float = 0.5
+
+
+class ShapeForm(FormModel):
+    """A group declared first, then every kind of row that changes the shape."""
+
+    delay: Annotated[float, Display(group="Advanced")] = 0.0
+    shape: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
+        default_factory=Alpha
+    )
+    extra: Extra | None = None
+    tone: str | Tone = "Q1.pulses.pi"
+
+
+def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
+    build: Build,
+) -> None:
+    view, state = build(ShapeForm, None)
+    group_fold(view, "Advanced").click()
+    group_fold(view, "shape.Advanced").click()
+
+    def folds_kept() -> bool:
+        return (
+            shown(view, "delay")
+            and shown(view, "shape.phase")
+            and group_fold(view, "Advanced").text() == "Collapse"
+        )
+
+    switch_shape(view, "beta")
+    assert view.findChild(QLineEdit, "form.input.shape.y") is not None
+    assert view.findChild(QLineEdit, "form.input.shape.x") is None
+    assert folds_kept()
+
+    assert view.findChild(QLineEdit, "form.input.extra.note") is None
+    child(view, QCheckBox, "form.enabled.extra").setChecked(True)
+    assert state.input.data["extra"] is not None
+    assert view.findChild(QLineEdit, "form.input.extra.note") is not None
+    assert folds_kept()
+
+    assert view.findChild(QLineEdit, "form.input.tone.gain") is None
+    tone = child(view, QComboBox, "form.input.tone")
+    tone.setCurrentIndex(tone.findText("Inline"))
+    assert isinstance(state.input.data["tone"], dict)
+    assert view.findChild(QLineEdit, "form.input.tone.gain") is not None
+    assert folds_kept()
