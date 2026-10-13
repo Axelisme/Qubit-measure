@@ -49,7 +49,9 @@ def pulse(
     ``freq`` is MHz, ``ch`` is a generator channel, ``gain`` is normalized
     amplitude, and ``length`` is waveform duration in us. ``at`` is an optional
     dotted path to the pulse section; an empty path seeds a root PulseSpec.
-    The Nyquist zone is 2. No library lookup or evaluation occurs here.
+    The Nyquist zone is 2 and the waveform style is explicitly const, preserving
+    the legacy creation value without adding a persistent Spec default.
+    No library lookup or evaluation occurs here.
     Wrap expressions in Expr; ordinary strings, including those starting with
     ``$``, are literal values. Both string kinds may use ``{qubit}`` and
     ``{resonator}``; TemplateDef validates and expands these placeholders.
@@ -61,6 +63,7 @@ def pulse(
         f"{prefix}ch": ch,
         f"{prefix}nqz": 2,
         f"{prefix}gain": gain,
+        f"{prefix}waveform.style": "const",
         f"{prefix}waveform.length": length,
     }
 
