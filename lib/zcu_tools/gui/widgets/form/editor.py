@@ -23,6 +23,10 @@ from zcu_tools.gui.form import (
 from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
+# What decides one row's controls: path, kind, options present, expression,
+# fixed and group. The rows are rebuilt when any field's shape changes.
+type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None]
+
 
 class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
@@ -166,6 +170,8 @@ class FormEditor[F: FormModel](QWidget):
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
+        # Field shapes in declaration order, as of the last rebuild.
+        self._shape: tuple[_RowShape, ...] = ()
         self._groups: list[GroupBlock] = []
         # User folds by model path, and by (model level path, group name).
         self._model_expanded: dict[FormWritePath, bool] = {}
@@ -323,19 +329,12 @@ class FormEditor[F: FormModel](QWidget):
             )
             for field in flat
         )
-        old_shape = tuple(
-            (
-                row.field.path,
-                row.field.kind,
-                row.field.options is not None,
-                row.field.expression,
-                row.field.fixed,
-                row.field.group,
-            )
-            for row in self._rows.values()
-        )
-        if shape != old_shape:
+        # Compare with the stored shape, not one read from self._rows: rows are
+        # in drawing order (a level's group blocks after its ungrouped rows),
+        # which differs from declaration order when a group comes first.
+        if shape != self._shape:
             self._rebuild(fields)
+            self._shape = shape
         for field in flat:
             self._rows[field.path].display(
                 field, self._local.get(field.path), editable=self._editing_enabled
