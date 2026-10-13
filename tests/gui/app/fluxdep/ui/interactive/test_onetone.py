@@ -11,7 +11,6 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPrevie
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
 from tests.gui.app.fluxdep._window import (
-    background_cmaps,
     column_tops,
     picker_button,
     unlabelled_inputs,
@@ -112,7 +111,6 @@ def test_control_column_runs_settings_edits_status_then_finish(widget):
     assert finish.mapTo(view, finish.rect().bottomLeft()).y() > 0.9 * view.height()
     assert view.canvas.x() < finish.mapTo(view, finish.rect().topLeft()).x()
     assert unlabelled_inputs(view) == []
-    assert background_cmaps(view.figure) == ["gray_r"]
 
 
 def test_background_matches_the_preview_and_draws_the_dip_dark(

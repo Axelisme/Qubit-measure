@@ -102,7 +102,7 @@ _ShowKey = tuple[int, tuple[tuple[str, int], ...], FitDisplay]
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz),
 # in the order the Bounds preset combo lists them.
-BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
+_BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
     "general": ((2.0, 15.0), (0.2, 2.0), (0.1, 2.0)),
     "integer": ((3.0, 6.0), (0.8, 2.0), (0.08, 0.2)),
     "all": ((1.0, 20.0), (0.1, 4.0), (0.01, 3.0)),
@@ -369,7 +369,7 @@ class AnalyzePanelWidget(QWidget):
 
         self._preset = QComboBox()
         self._preset.setObjectName("fluxdep.fit.bounds_preset")
-        self._preset.addItems([*BOUND_PRESETS, _CUSTOM_PRESET])
+        self._preset.addItems([*_BOUND_PRESETS, _CUSTOM_PRESET])
         self._preset.activated.connect(self._on_preset_selected)
         form.addRow("Bounds preset", self._preset)
 
@@ -681,7 +681,7 @@ class AnalyzePanelWidget(QWidget):
 
     def _on_preset_selected(self, index: int) -> None:
         """Fill the bound boxes from the chosen preset; custom keeps them."""
-        preset = BOUND_PRESETS.get(self._preset.itemText(index))
+        preset = _BOUND_PRESETS.get(self._preset.itemText(index))
         if preset is None:
             self._sync_preset()
             return
@@ -698,7 +698,7 @@ class AnalyzePanelWidget(QWidget):
             (lo_hi[4], lo_hi[5]),
         )
         name = next(
-            (name for name, preset in BOUND_PRESETS.items() if preset == shown),
+            (name for name, preset in _BOUND_PRESETS.items() if preset == shown),
             _CUSTOM_PRESET,
         )
         self._preset.setCurrentText(name)

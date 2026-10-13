@@ -53,8 +53,13 @@ from tests.gui.app.fluxdep._window import (
 
 
 @pytest.fixture
-def window(qapp):
-    ctrl = Controller(FluxDepState())
+def ctrl():
+    """The Controller the window fixture drives."""
+    return Controller(FluxDepState())
+
+
+@pytest.fixture
+def window(qapp, ctrl):
     win = MainWindow(ctrl)
     yield win
     win.close()
@@ -81,20 +86,20 @@ def test_shell_exposes_top_bar_commands_and_two_pages(window):
     assert current_page(window) == "spectra"
 
 
-def test_project_label_names_the_project_after_setup(window):
+def test_project_label_names_the_project_after_setup(window, ctrl):
     assert "Q5_2D" not in project_label(window).text()
-    window._ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
+    ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
     assert project_label(window).text() == "Project: Q5_2D / Q1"
 
 
-def test_window_close_removes_event_bus_subscriptions(window):
+def test_window_close_removes_event_bus_subscriptions(window, ctrl):
     for payload_type in (
         SpectrumAddedPayload,
         SpectrumRemovedPayload,
         SpectrumChangedPayload,
         ActiveSpectrumChangedPayload,
     ):
-        assert window._ctrl.bus._subs.get(payload_type)
+        assert ctrl.bus._subs.get(payload_type)
 
     window.close()
 
@@ -104,12 +109,12 @@ def test_window_close_removes_event_bus_subscriptions(window):
         SpectrumChangedPayload,
         ActiveSpectrumChangedPayload,
     ):
-        assert window._ctrl.bus._subs.get(payload_type, []) == []
+        assert ctrl.bus._subs.get(payload_type, []) == []
 
 
-def test_load_refreshes_list(window, spectrum_hdf5):
+def test_load_refreshes_list(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # The literal name on one line, kind · stage · published points below it.
     assert list_labels(window) == [f"{name}\nOneTone · loaded · 0 pts"]
     assert list_tooltips(window) == [name]
@@ -135,9 +140,9 @@ def long_name_window(qapp, cross_controller):
     qapp.processEvents()
 
 
-def test_list_rows_put_the_name_above_its_details(long_name_window):
+def test_list_rows_put_the_name_above_its_details(long_name_window, cross_controller):
     win = long_name_window
-    ctrl = win._ctrl
+    ctrl = cross_controller
     ctrl.interactive.begin_line_pick(_LONG_NAME)
     ctrl.set_selection(np.array([True, False, True, True]))
     assert list_labels(win) == [
@@ -168,12 +173,12 @@ def test_list_never_scrolls_sideways(qapp, long_name_window):
         assert not scrollbar.isVisible()
 
 
-def test_stage_marker_updates_on_alignment(window, spectrum_hdf5):
+def test_stage_marker_updates_on_alignment(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     assert "aligned" in list_labels(window)[0]
-    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     label = list_labels(window)[0]
     assert "sampled" in label and "2 pts" in label
 
@@ -226,109 +231,111 @@ def test_list_rows_show_pending_draft_and_filter_exclusions(qapp, cross_controll
         qapp.processEvents()
 
 
-def test_remove_updates_list(window, spectrum_hdf5):
+def test_remove_updates_list(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.remove_spectrum(name)
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.remove_spectrum(name)
     assert list_labels(window) == []
 
 
-def test_selecting_list_item_sets_active(window, spectrum_hdf5):
+def test_selecting_list_item_sets_active(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
     spectra_list(window).setCurrentRow(0)  # emits currentItemChanged
-    assert window._ctrl.state.active_spectrum == name
+    assert ctrl.state.active_spectrum == name
 
 
 # --- editing-area stage switching ------------------------------------------
 
 
-def test_picking_unaligned_from_list_opens_line_picker(window, spectrum_hdf5):
+def test_picking_unaligned_from_list_opens_line_picker(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # A human list pick is the Local write intention that opens the stage picker.
     spectra_list(window).setCurrentRow(0)
-    assert window._ctrl.state.active_spectrum == name
+    assert ctrl.state.active_spectrum == name
     assert isinstance(editor(window), LinePickerWidget)
-    assert window._ctrl.interactive.current_line_pick() is not None
+    assert ctrl.interactive.current_line_pick() is not None
 
 
-def test_aligned_onetone_shows_onetone_widget(window, spectrum_hdf5):
+def test_aligned_onetone_shows_onetone_widget(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_active_spectrum(name)
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     assert isinstance(editor(window), OneToneWidget)
 
 
-def test_aligned_twotone_shows_find_points_widget(window, spectrum_hdf5):
+def test_aligned_twotone_shows_find_points_widget(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="TwoTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    name = ctrl.load_spectrum(filepath, spec_type="TwoTone")
+    ctrl.set_active_spectrum(name)
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     assert isinstance(editor(window), FindPointsWidget)
 
 
-def test_selected_shows_result_preview(window, spectrum_hdf5):
+def test_selected_shows_result_preview(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
     )
 
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
-    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_active_spectrum(name)
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     # finished → a read-only result preview (not the placeholder)
     assert isinstance(editor(window), ResultPreviewWidget)
 
 
-def _sampled_onetone(window, spectrum_hdf5) -> str:
+def _sampled_onetone(ctrl, spectrum_hdf5) -> str:
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
-    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_active_spectrum(name)
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
     return name
 
 
-def test_unaligned_preview_offers_only_align(window, spectrum_hdf5):
+def test_unaligned_preview_offers_only_align(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
     )
 
     filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # A display change alone shows the published spectrum without input.
-    window._ctrl.set_active_spectrum(name)
+    ctrl.set_active_spectrum(name)
     preview = editor(window)
     assert isinstance(preview, ResultPreviewWidget)
     assert preview_actions(preview) == {"align"}
     preview_button(preview, "align").click()
     assert isinstance(editor(window), LinePickerWidget)
-    assert window._ctrl.interactive.current_line_pick(name) is not None
+    assert ctrl.interactive.current_line_pick(name) is not None
 
 
-def test_aligned_preview_offers_realign_and_sample(window, spectrum_hdf5):
-    _sampled_onetone(window, spectrum_hdf5)
+def test_aligned_preview_offers_realign_and_sample(window, ctrl, spectrum_hdf5):
+    _sampled_onetone(ctrl, spectrum_hdf5)
     assert preview_actions(editor(window)) == {"realign", "sample"}
 
 
-def test_preview_realign_opens_a_draft_without_unpublishing(window, spectrum_hdf5):
+def test_preview_realign_opens_a_draft_without_unpublishing(
+    window, ctrl, spectrum_hdf5
+):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
-    name = _sampled_onetone(window, spectrum_hdf5)
+    name = _sampled_onetone(ctrl, spectrum_hdf5)
     preview_button(editor(window), "realign").click()
     picker = editor(window)
     assert isinstance(picker, LinePickerWidget)
-    entry = window._ctrl.state.spectrums[name]
+    entry = ctrl.state.spectrums[name]
     assert entry.aligned and entry.points_completed and entry.point_count == 2
     label = list_labels(window)[0]
     assert "sampled" in label and "align draft" in label
@@ -337,14 +344,14 @@ def test_preview_realign_opens_a_draft_without_unpublishing(window, spectrum_hdf
 
 
 def test_preview_sample_opens_sampling_and_keeps_points_until_finish(
-    window, spectrum_hdf5
+    window, ctrl, spectrum_hdf5
 ):
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
-    name = _sampled_onetone(window, spectrum_hdf5)
+    name = _sampled_onetone(ctrl, spectrum_hdf5)
     preview_button(editor(window), "sample").click()
     assert isinstance(editor(window), OneToneWidget)
-    entry = window._ctrl.state.spectrums[name]
+    entry = ctrl.state.spectrums[name]
     assert entry.points_completed and entry.point_count == 2
     assert "sample draft" in list_labels(window)[0]
 
@@ -527,24 +534,23 @@ def test_empty_preview_reselect_can_commit_nonempty_points(qapp, onetone_control
         qapp.processEvents()
 
 
-def test_remove_focuses_next_spectrum(window, spectrum_hdf5):
+def test_remove_focuses_next_spectrum(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    a = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    a = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # second load replaces same basename; use a distinct file path via tmp copy
     import shutil
     import tempfile
 
     second_path = os.path.join(tempfile.mkdtemp(), "other.hdf5")
     shutil.copy(filepath, second_path)
-    b = window._ctrl.load_spectrum(second_path, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(a)
+    b = ctrl.load_spectrum(second_path, spec_type="OneTone")
+    ctrl.set_active_spectrum(a)
     command(window, "fluxdep.spectrum.remove").click()  # remove a → focus b
-    assert window._ctrl.state.active_spectrum == b
+    assert ctrl.state.active_spectrum == b
 
 
-def test_fit_page_without_points_opens_no_filter_input(window, spectrum_hdf5):
+def test_fit_page_without_points_opens_no_filter_input(window, ctrl, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
-    ctrl = window._ctrl
     name = ctrl.load_spectrum(filepath, "OneTone")
     ctrl.set_alignment(name, 0.0, 1.0)
     ctrl.set_points(name, np.empty(0), np.empty(0))

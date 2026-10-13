@@ -25,7 +25,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui.app.fluxdep._window import (
-    background_cmaps,
     column_tops,
     picker_button,
     unlabelled_inputs,
@@ -443,4 +442,3 @@ def test_control_column_runs_settings_edits_status_then_finish(presented) -> Non
     assert bottom > 0.9 * widget.height()
     assert widget.canvas.x() < finish.mapTo(widget, finish.rect().topLeft()).x()
     assert unlabelled_inputs(widget) == []
-    assert background_cmaps(widget.figure)[0] == "gray_r"

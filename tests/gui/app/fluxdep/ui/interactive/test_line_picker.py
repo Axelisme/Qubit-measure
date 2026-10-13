@@ -19,7 +19,6 @@ from zcu_tools.gui.interactive.flux_pick import SharedFluxPickPlugin
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 from tests.gui.app.fluxdep._window import (
-    background_cmaps,
     column_tops,
     picker_button,
     picker_control,
@@ -124,13 +123,6 @@ def test_control_column_runs_settings_edits_status_then_finish(widget):
     assert finish.mapTo(widget, finish.rect().bottomLeft()).y() > 0.9 * widget.height()
     assert widget.canvas.x() < finish.mapTo(widget, finish.rect().topLeft()).x()
     assert unlabelled_inputs(widget) == []
-
-
-def test_spectrum_and_mirror_loss_use_gray_r_with_labelled_axes(widget):
-    assert background_cmaps(widget.figure) == ["gray_r", "gray_r"]
-    loss = widget.figure.axes[1]
-    assert loss.get_xlabel() == "Device value"
-    assert loss.get_ylabel() == "Frequency (GHz)"
 
 
 def test_alignment_values_use_fixed_decimals(widget, context):

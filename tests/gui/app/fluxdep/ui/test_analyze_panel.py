@@ -33,10 +33,7 @@ from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FitState, FluxDepState
-from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
-    BOUND_PRESETS,
-    AnalyzePanelWidget,
-)
+from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -192,6 +189,13 @@ def _search_group(widget: AnalyzePanelWidget) -> QGroupBox:
 def _bound_values(widget: AnalyzePanelWidget) -> list[float]:
     """EJ/EC/EL lower and upper bounds as the Search form shows them."""
     return [box.value() for box in _search_group(widget).findChildren(QDoubleSpinBox)]
+
+
+def _preset_names(widget: AnalyzePanelWidget) -> list[str]:
+    """The named bounds presets the combo offers, without the custom entry."""
+    combo = named(widget, QComboBox, "fluxdep.fit.bounds_preset")
+    names = [combo.itemText(index) for index in range(combo.count())]
+    return [name for name in names if name != "custom"]
 
 
 def _choose_preset(widget: AnalyzePanelWidget, name: str) -> None:
@@ -476,39 +480,45 @@ def test_three_tabs_filter_search_show(panel):
     assert labels == ["Filter", "Search", "Show"]
 
 
-def test_presets_cover_the_notebook_ranges():
-    assert set(BOUND_PRESETS) == {"general", "integer", "all"}
-    for bounds in BOUND_PRESETS.values():
-        assert len(bounds) == 3
-        assert all(lo < hi for lo, hi in bounds)
-
-
-def test_preset_fills_bound_spinboxes(panel):
+def test_each_preset_fills_its_own_bounds(panel):
     w, _ = panel
-    _choose_preset(w, "integer")
-    ej, ec, el = BOUND_PRESETS["integer"]
-    assert _bound_values(w) == [*ej, *ec, *el]
+    preset = named(w, QComboBox, "fluxdep.fit.bounds_preset")
+    filled = {}
+    for name in _preset_names(w):
+        _choose_preset(w, name)
+        assert preset.currentText() == name
+        filled[name] = tuple(_bound_values(w))
+    assert len(filled) > 1
+    assert len(set(filled.values())) == len(filled), "presets must differ"
+
+
+def _publish_bounds(ctrl: Controller, search_db: str, values: tuple[float, ...]):
+    ej_lo, ej_hi, ec_lo, ec_hi, el_lo, el_hi = values
+    ctrl.set_fit_params(
+        search_db,
+        (ej_lo, ej_hi),
+        (ec_lo, ec_hi),
+        (el_lo, el_hi),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
 
 
 def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_hdf5):
     w, ctrl = panel
     preset = named(w, QComboBox, "fluxdep.fit.bounds_preset")
     default = FitState()
-    assert preset.currentText() == next(
-        name
-        for name, bounds in BOUND_PRESETS.items()
-        if bounds == (default.EJb, default.ECb, default.ELb)
-    ), "a fresh form names the preset its default bounds come from"
-    for name, (ej, ec, el) in BOUND_PRESETS.items():
-        ctrl.set_fit_params(
-            search_database_hdf5,
-            ej,
-            ec,
-            el,
-            TransitionDict({"transitions": [(0, 1)]}),
-            None,
-            None,
-        )
+    fresh = preset.currentText()
+    assert fresh != "custom", "a fresh form names the preset its default bounds are"
+    _choose_preset(w, fresh)
+    assert _bound_values(w) == [*default.EJb, *default.ECb, *default.ELb]
+    filled = {}
+    for name in _preset_names(w):
+        _choose_preset(w, name)
+        filled[name] = tuple(_bound_values(w))
+    for name, values in filled.items():
+        _publish_bounds(ctrl, search_database_hdf5, values)
         assert preset.currentText() == name
     ctrl.set_fit_params(
         search_database_hdf5,
@@ -526,7 +536,7 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
     ej_lo = _search_group(w).findChildren(QDoubleSpinBox)[0]
     ej_lo.setValue(ej_lo.value() + 0.5)
     assert preset.currentText() == "custom", "an edited bound is no longer the preset"
-    ej_lo.setValue(BOUND_PRESETS["integer"][0][0])
+    ej_lo.setValue(filled["integer"][0])
     assert preset.currentText() == "integer"
 
 

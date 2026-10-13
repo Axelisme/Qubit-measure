@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypeVar
 
-from matplotlib.figure import Figure
 from qtpy.QtCore import QMetaObject, QPoint, QRect, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -172,15 +171,6 @@ def unlabelled_inputs(root: QWidget) -> list[str]:
         for control in root.findChildren(QWidget)
         if isinstance(control, (QSlider, QComboBox))
         and not any(buddy is control for buddy in named)
-    ]
-
-
-def background_cmaps(figure: Figure) -> list[str]:
-    """Colormap of the first (background) image of every axes that has one."""
-    return [
-        axes.get_images()[0].get_cmap().name
-        for axes in figure.axes
-        if axes.get_images()
     ]
 
 
