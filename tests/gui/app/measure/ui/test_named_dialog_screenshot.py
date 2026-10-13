@@ -99,30 +99,37 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
         assert app.window.list_open_dialogs() == expected
 
 
-def _inspect_screenshot(app: LaunchedMeasureApp, tmp_path: Path, **params: str) -> Path:
+def _inspect_screenshot(app: LaunchedMeasureApp, tmp_path: Path) -> Path:
     reply = app.invoke(
         "rpc_call",
         {
             "method": "dialog.screenshot",
-            "params": {
-                "name": "inspect",
-                **params,
-                "out_path": str(tmp_path / "inspect.png"),
-            },
+            "params": {"name": "inspect", "out_path": str(tmp_path / "inspect.png")},
         },
     )
     return Path(reply["saved_to"])
 
 
-def _current_inspect_page(app: LaunchedMeasureApp) -> str:
+def _inspect_tabs(app: LaunchedMeasureApp) -> QTabWidget:
     (inspect,) = [d for d in app.window.findChildren(InspectDialog) if d.isVisible()]
     tabs = inspect.findChild(QTabWidget)
     assert tabs is not None
+    return tabs
+
+
+def _click_inspect_tab(app: LaunchedMeasureApp, title: str) -> None:
+    tabs = _inspect_tabs(app)
+    (index,) = [i for i in range(tabs.count()) if tabs.tabText(i) == title]
+    tabs.setCurrentIndex(index)
+
+
+def _current_inspect_page(app: LaunchedMeasureApp) -> str:
+    tabs = _inspect_tabs(app)
     return tabs.tabText(tabs.currentIndex())
 
 
 @pytest.mark.uses_wall_clock
-def test_inspect_screenshot_tab_selects_the_captured_page_through_mcp(
+def test_inspect_screenshot_captures_the_shown_page_without_switching_through_mcp(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     with launched_measure_app(qapp, tmp_path) as app:
@@ -131,29 +138,13 @@ def test_inspect_screenshot_tab_selects_the_captured_page_through_mcp(
         app.window.open_dialog(DialogName.INSPECT)
         qapp.processEvents()
 
-        for tab, title in (
-            ("aliases", "Aliases"),
-            ("modules", "Modules"),
-            ("parameters", "Parameters"),
-        ):
-            path = _inspect_screenshot(app, tmp_path, tab=tab)
+        for title in ("Aliases", "Modules", "Parameters"):
+            _click_inspect_tab(app, title)
+            qapp.processEvents()
+            path = _inspect_screenshot(app, tmp_path)
             assert path.read_bytes().startswith(b"\x89PNG")
             assert _current_inspect_page(app) == title
-        _inspect_screenshot(app, tmp_path, tab="aliases")
-        _inspect_screenshot(app, tmp_path)
-        assert _current_inspect_page(app) == "Parameters"
 
-        with pytest.raises(GuiRpcError, match="tab"):
-            _inspect_screenshot(app, tmp_path, tab="library")
-        assert _current_inspect_page(app) == "Parameters"
-        with pytest.raises(GuiRpcError, match="tab"):
-            app.invoke(
-                "rpc_call",
-                {
-                    "method": "dialog.screenshot",
-                    "params": {"name": "setup", "tab": "aliases"},
-                },
-            )
         with pytest.raises(GuiRpcError, match="unknown dialog name"):
             app.invoke(
                 "rpc_call",
