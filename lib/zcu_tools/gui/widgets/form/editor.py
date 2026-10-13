@@ -101,6 +101,16 @@ class FormEditor[F: FormModel](QWidget):
     use JSON text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
 
+    set_editing_enabled(enabled=False) makes the form read-only but readable;
+    no control is disabled or greyed out. Every form.input QLineEdit is
+    read-only (isReadOnly() is True): its text can be selected and copied,
+    and its right-click menu keeps only the copying items, with
+    form.mode.<path> listed but disabled. Dropdowns and checkboxes
+    (form.input and form.enabled) show the current value in normal colours
+    and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
+    a wheel turn over them scrolls an enclosing scroll area instead. Group
+    and model fold buttons still expand and collapse.
+
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
     After QObject destruction or garbage collection of this view, the next
@@ -216,10 +226,14 @@ class FormEditor[F: FormModel](QWidget):
         self._publish()
 
     def set_editing_enabled(self, *, enabled: bool) -> None:
-        """Enable or disable input controls without changing state or local text.
+        """Allow user edits (enabled=True, the initial mode) or make the form read-only.
 
-        External state changes remain visible while inputs are disabled.
-        Raises RuntimeError after detach.
+        Read-only (enabled=False) keeps every control enabled and readable:
+        text can be selected and copied, folds still work, and no user input
+        changes state or local text (see the class docstring for each
+        control). Neither mode writes state or drops local text. External
+        state changes remain visible while read-only. Raises RuntimeError
+        after detach.
         """
         self._require_state()
         self._editing_enabled = enabled

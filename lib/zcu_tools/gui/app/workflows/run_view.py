@@ -26,8 +26,10 @@ class WorkflowRunView[C]:
     Status bar: badge, native workflow name, "n committed" and run_id; it reads
     "ready" with the selected workflow before any run, and "Previous run:"
     leads while the selection names another workflow than the attached run.
-    From Start until terminal delivery the Start panels, selector and Start are
-    disabled and the Plan tab shows its fixed-plan note. Once the run is
+    From Start until terminal delivery the selector and Start are disabled,
+    the Start panels' editors are read-only (their values stay readable,
+    selectable and foldable; see FormEditor.set_editing_enabled) and the Plan
+    tab shows its fixed-plan note. Once the run is
     accepted, its tuning panel replaces the Start knobs in the Tunables tab,
     titled "Tunables (live)"; it is enabled while running, pausing or paused.
     Paused delivery selects that tab; the banner shows while the run sits
@@ -126,13 +128,10 @@ class WorkflowRunView[C]:
         self._knobs_from_run = True
         self._locked = True
         controls = self._controls
-        for widget in (
-            self._forms.plan,
-            self._forms.knobs,
-            controls.selector,
-            controls.start,
-        ):
-            widget.setEnabled(False)
+        for panel in (self._forms.plan, self._forms.knobs):
+            panel.editor.set_editing_enabled(enabled=False)
+        controls.selector.setEnabled(False)
+        controls.start.setEnabled(False)
         controls.message.clear()
         self._poll.start()
         self.refresh()
@@ -167,8 +166,10 @@ class WorkflowRunView[C]:
             knobs.state.reset(binding.accepted_input)
             knobs.editor.discard_local_text()
         controls = self._controls
-        for widget in (self._forms.plan, knobs, controls.selector, controls.start):
-            widget.setEnabled(True)
+        for panel in (self._forms.plan, knobs):
+            panel.editor.set_editing_enabled(enabled=True)
+        controls.selector.setEnabled(True)
+        controls.start.setEnabled(True)
         if error is not None:
             controls.message.setText(str(error))
         elif (

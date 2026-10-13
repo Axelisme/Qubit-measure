@@ -9,8 +9,8 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QPoint, Qt
-from qtpy.QtGui import QColor, QPalette
+from qtpy.QtCore import QEvent, QObject, QPoint, Qt
+from qtpy.QtGui import QColor, QKeyEvent, QPalette
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -55,6 +55,46 @@ GROUP_ERRORS_NOTE = "Contains errors"
 INLINE_ITEM = "Inline"
 MISSING_SUFFIX = " (missing)"
 _ERRORS_NOTE_STYLE = "QLabel { color: #b3261e; }"
+# User input a read-only dropdown or checkbox drops. Tab and Backtab key
+# presses still pass, so focus can move on past the control.
+_BLOCKED_EVENTS = frozenset(
+    {
+        QEvent.Type.MouseButtonPress,
+        QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick,
+        QEvent.Type.KeyPress,
+        QEvent.Type.KeyRelease,
+    }
+)
+_FOCUS_KEYS = frozenset({Qt.Key.Key_Tab, Qt.Key.Key_Backtab})
+
+
+class _UserInputBlock(QObject):
+    """Event filter that keeps dropdowns and checkboxes from user edits.
+
+    Qt has no read-only mode for QComboBox or QCheckBox, and setEnabled(False)
+    greys their text. While blocking is True, the watched controls get no
+    mouse clicks, no key presses except Tab and Backtab, and no wheel turns;
+    a wheel turn goes on to the parents, so a scroll area around the form
+    still scrolls. While it is False, every event passes.
+    """
+
+    def __init__(self, parent: QObject) -> None:
+        super().__init__(parent)
+        self.blocking = False
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        """Drop a1 for the watched control a0 while blocking; else pass it."""
+        del a0  # Every watched control is treated the same.
+        if not self.blocking or a1 is None:
+            return False
+        if a1.type() == QEvent.Type.Wheel:
+            # Ignored, the wheel event propagates to the parent widgets.
+            a1.ignore()
+            return True
+        if isinstance(a1, QKeyEvent) and a1.key() in _FOCUS_KEYS:
+            return False
+        return a1.type() in _BLOCKED_EVENTS
 
 
 @dataclass(frozen=True)
@@ -219,6 +259,8 @@ class FieldRow:
     inline rows. value/error are public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
     shows below the header. These controls never own or evaluate form state.
+    While display is called with editable=False the row is read-only: see
+    display.
     """
 
     def __init__(
@@ -246,6 +288,8 @@ class FieldRow:
         self._folds = folds
         self._displaying = False
         self.widget = QWidget(parent)
+        # Installed on this row's dropdowns and checkboxes; display sets it.
+        self._block = _UserInputBlock(self.widget)
         self.layout = QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(_HEADER_SPACING)
@@ -301,6 +345,7 @@ class FieldRow:
         if self.field.nullable:
             self.enabled = QCheckBox("Enabled", self.widget)
             self.enabled.setObjectName(self._name("enabled"))
+            self.enabled.installEventFilter(self._block)
             header.addWidget(self.enabled)
             self.enabled.toggled.connect(self._activate)
         self.group = QGroupBox(self.widget)
@@ -324,6 +369,7 @@ class FieldRow:
         widget.setObjectName(self._name("input"))
         # Take the spare width like a line edit.
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        widget.installEventFilter(self._block)
         widget.currentIndexChanged.connect(self._key_choice_changed)
         self.input = widget
         header.addWidget(widget)
@@ -377,6 +423,8 @@ class FieldRow:
         self.input = widget
         if isinstance(widget, QLineEdit):
             widget.setPlaceholderText(self.field.placeholder)
+        else:
+            widget.installEventFilter(self._block)
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
@@ -486,7 +534,12 @@ class FieldRow:
     ) -> None:
         """Show a same-shape publication, keeping local text and blocking writes.
 
-        editable controls input enablement, not model validity. local overrides
+        editable False makes the row read-only, not disabled: a text input is
+        a read-only QLineEdit whose text can still be selected and copied;
+        dropdowns and checkboxes (including Enabled) show their value in
+        normal colours but ignore clicks, wheel turns and keys other than Tab;
+        the Expression action is disabled. Folds still work. editable says
+        nothing about model validity. local overrides
         the text and mode of a text input and hides its evaluated label;
         checkboxes and dropdowns still show state. The value label shows
         only a resolved Expression-mode value; Direct input is not echoed.
@@ -508,7 +561,7 @@ class FieldRow:
         finally:
             self._displaying = False
 
-    def _display_key_choice(self, rule: KeyOrInline, *, editable: bool) -> None:
+    def _display_key_choice(self, rule: KeyOrInline) -> None:
         """Show Inline, the offered keys and a missing key; select the input's.
 
         Inline is selected for an inline input and nothing for an unfilled
@@ -541,15 +594,14 @@ class FieldRow:
             for item_text, item_data in items:
                 widget.addItem(item_text, item_data)
         widget.setCurrentIndex(selected)
-        widget.setEnabled(editable)
 
     def _display_input(self, local: LocalText | None, *, editable: bool) -> None:
         field = self.field
+        self._block.blocking = not editable
         if self.enabled is not None:
             self.enabled.setChecked(field.active)
-            self.enabled.setEnabled(editable)
         if field.key_or_inline is not None:
-            self._display_key_choice(field.key_or_inline, editable=editable)
+            self._display_key_choice(field.key_or_inline)
             return
         expression = local.expression if local else _expression(field)
         if self.mode is not None:
@@ -558,10 +610,11 @@ class FieldRow:
         widget = self.input
         if widget is None:
             return
-        widget.setEnabled(editable)
         if isinstance(widget, QComboBox):
             self._display_choices(field.raw)
         elif isinstance(widget, QLineEdit):
+            # A fixed one-value Literal stays read-only text either way.
+            widget.setReadOnly(field.fixed or not editable)
             text = local.text if local else _input_text(field)
             # Avoid resetting cursor/selection on unchanged publications.
             if widget.text() != text and not _shows_raw(field, widget.text()):
