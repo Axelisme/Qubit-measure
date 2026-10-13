@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
+    from zcu_tools.format_version import YamlMap
     from zcu_tools.gui.cfg.binding import CfgDraft
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
@@ -237,7 +238,7 @@ class WritebackDraft:
 
     @property
     def experiment_name(self) -> str:
-        """Experiment name fixed at creation, used as accepted provenance kind."""
+        """Experiment name fixed at creation, used as accepted evidence kind."""
         return self._run_source.experiment_name
 
     @property
@@ -352,7 +353,7 @@ class WritebackService:
         run_id is the source RunMetadata.run_id, including unsaved Runs and
         historical native Loads; None means no native acquisition evidence.
         It stays fixed through Save, selection changes, edits and application.
-        Application copies it into accepted evidence and destination provenance.
+        Application copies it into accepted evidence and library provenance.
         device_snapshot maps Run-fixed device names to their JSON settings; None
         means no device evidence. Samples require run_id and a captured flux
         binding with value/value_unit. Missing facts omit only those proposals
@@ -594,8 +595,10 @@ class WritebackService:
         captured SavedPoint in its still-open entry. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
-        Accepted payload and every destination provenance use draft.run_id;
+        Accepted payload and every library provenance use draft.run_id;
         application never re-reads Run or Save state to determine its identity.
+        Each parameter's metadata is replaced by {"stderr": x} when the item has
+        stderr, else by {}; no source, kind, run_id or time is written there.
         """
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft._entries, item_ids)
@@ -621,9 +624,10 @@ class WritebackService:
                 write = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
                 )
-                items.append(
-                    concrete.ParameterWriteback(path, write.value, item.stderr)
+                metadata: YamlMap = (
+                    {"stderr": item.stderr} if item.stderr is not None else {}
                 )
+                items.append(concrete.ParameterWriteback(path, write.value, metadata))
                 written["parameter"].append(path)
             else:
                 path = parameters.library_key(item.target_name)

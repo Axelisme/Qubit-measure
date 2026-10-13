@@ -20,7 +20,7 @@ Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 e
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後逐項提交，首錯停止，保留成功前綴與事件，不提供跨檔 rollback 或 retry。Context owner 發布實際成功前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。每項 parameter／module／waveform 的 stderr 隨 accepted provenance 保存。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後逐項提交，首錯停止，保留成功前綴與事件，不提供跨檔 rollback 或 retry。Context owner 發布實際成功前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module／waveform 的 stderr 隨 accepted provenance 保存。Selected Apply 的版本接受與其他尚待整合義務見 [Cfg 編輯 draft](draft/cfg-editing-boundaries.md#observationrun-與-apply)。
 
 全域有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_preset` 提供 Measure 初值，框架不宣告領域 preset，也不反向 import zcu_lab。使用者套件的唯一初值是 `ALIAS_PRESET`，flux_dev 空列不猜裝置或 cache。
 
@@ -71,6 +71,8 @@ GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Q
 Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 owner scheduler 更新 live artists。兩者都不依賴 ambient pyplot routing。Mathtext parsing 保留 lock／prewarm；這不保證任意 Matplotlib 計算 thread-safe。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。各 app 仍決定資料的讀寫時機與所有權，具體 presentation 契約見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
 
 ## Source catalog reload
+
+使用者在 2026-10-09 裁定：「A」。採用的分工是將 source-loading 抽到 shared GUI loader，各 app 提供 typed catalog builder。Source inventory 與 import 機制可共用，但 Measure Registry 與 workflow catalog 的宣告不同，由 app 決定如何建立與驗證。這樣 workflows 不必複製 loader，Measure 也保留原 recovery／UI。
 
 `gui.catalog_loader.SourceCatalogLoader[CatalogT]` 擁有 bounded source inventory、prepare/load、fixed-source restart，以及共用 SourcePackage、PreparedCatalogReload 和 CatalogReloadError。App 提供 typed catalog builder，負責宣告 validation、active admission、發布和 recovery；shared loader 不依賴 measure Registry 或具體 workflow。Measure 保留原 loader 簽名的 registration adapter與原 recovery/UI。
 

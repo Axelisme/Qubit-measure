@@ -23,13 +23,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.plotting.plots import Plots
-
-from zcu_lab.v2._support.measure import (
+from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
-    scaled_path_seed,
 )
+from zcu_tools.gui.app.measure.seeds import scaled_path_seed
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.allxy.core import (
     AllXY_Exp,
     AllXY_Result,
@@ -107,7 +108,9 @@ class AllXYAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
             .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")

@@ -35,7 +35,7 @@ def invoke(client: Client, command: str, **arguments: object):
     return reply["result"]["content"]
 
 
-def native(*, closed: bool = False) -> dict[str, object]:
+def native(*, closed: bool = False, min_distance: float = 0.025) -> dict[str, object]:
     """Deliberately distinct input and kept counts; per-source truth is native."""
     return {
         "context": {
@@ -44,7 +44,7 @@ def native(*, closed: bool = False) -> dict[str, object]:
             "closed": closed,
             "can_undo": not closed,
             "state": {
-                "min_distance": 0.025,
+                "min_distance": min_distance,
                 "selected": [True, True, True, False],
                 "selected_count": 2,
                 "per_spectrum": {"first": [2, 3], "second": [0, 1]},
@@ -88,6 +88,7 @@ def test_filter_composes_commands_counts_and_native_evidence(
     assert summary["stage"] == ("filtered" if command == "finish" else "filter")
     assert summary["pending"] is (command != "finish")
     assert summary["min_distance"] == 0.025
+    assert "changes" not in summary
     assert summary["selected"] == (
         {"count": 2, "total": 4}
         if command == "finish"
@@ -116,3 +117,32 @@ def test_filter_composes_commands_counts_and_native_evidence(
     assert [
         (request["method"], request["params"]) for request in client.transport.requests
     ] == expected
+
+
+@pytest.mark.parametrize(
+    "command,before,after", [("set_min_distance", 0.0, 0.025), ("undo", 0.025, 0.0)]
+)
+def test_distance_edits_report_native_parameter_and_point_changes(
+    client: Client, command: str, before: float, after: float
+):
+    client.transport.replies.extend(
+        [
+            GuiResponse(result=native(min_distance=before)),
+            GuiResponse(result=native(min_distance=after)),
+        ]
+    )
+    params = {"min_distance": after} if command == "set_min_distance" else {}
+    content = invoke(client, command, params=params)
+    summary = json.loads(content[0]["text"])
+    assert summary.get("changes") == {"min_distance": [before, after]}
+    assert summary["min_distance"] == after
+    assert summary["selected"] == {"count": 2, "total": 4, "changes": [0, 2]}
+    assert summary["per_spectrum"] == {"first": [2, 3], "second": [0, 1]}
+    assert len(content) == 1
+    assert [(r["method"], r["params"]) for r in client.transport.requests] == [
+        ("selection.interactive.open", {}),
+        (
+            "selection.interactive.command",
+            {"context_id": 23, "command": command, "params": params},
+        ),
+    ]

@@ -4,7 +4,11 @@ import base64
 from collections.abc import Sequence
 from typing import Literal, NotRequired, TypedDict
 
-from zcu_tools.gui.app.fluxdep.remote.dto import AxisSnapshot, PngImage
+from zcu_tools.gui.app.fluxdep.remote.dto import (
+    AxisSnapshot,
+    PngImage,
+    PublishedPointsReply,
+)
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import ToolReply
 
@@ -56,6 +60,19 @@ class FitQuality(TypedDict):
     outliers: int
     outlier_threshold: float
     per_transition: list[TransitionQuality]
+
+
+class PointSummary(TypedDict):
+    """Published point count and inclusive three-decimal coordinate ranges.
+
+    count is the number of paired points, including duplicates. flux_range is
+    min/max normalized flux (Phi_0); freq_range is min/max frequency (GHz).
+    Both ranges are None for an empty point cloud; source order is irrelevant.
+    """
+
+    count: int
+    flux_range: list[float] | None
+    freq_range: list[float] | None
 
 
 class AxisSummary(TypedDict):
@@ -115,6 +132,20 @@ def _range(values: Sequence[float]) -> list[float] | None:
     return [round(min(values), 3), round(max(values), 3)] if values else None
 
 
+def point_summary(points: PublishedPointsReply) -> PointSummary:
+    """Project paired published arrays to counts/ranges without retaining them.
+
+    points is the GUI's published dev_values/fluxs/freqs capture. The GUI owns
+    shape and value validation. Extents use min/max with three-decimal rounding;
+    empty captures return count=0 and None ranges. No GUI reads or mutations occur.
+    """
+    return PointSummary(
+        count=len(points["freqs"]),
+        flux_range=_range(points["fluxs"]),
+        freq_range=_range(points["freqs"]),
+    )
+
+
 def spectrum_summary(reply: ToolReply) -> ToolReply:
     """Summarize a complete spectrum.snapshot without losing GUI provenance.
 
@@ -143,11 +174,7 @@ def spectrum_summary(reply: ToolReply) -> ToolReply:
                 "flux_period": _rounded(data["flux_period"]),
                 "inherited_from": data["alignment"]["inherited_from"],
             },
-            "points": {
-                "count": len(data["points"]["freqs"]),
-                "flux_range": _range(data["points"]["fluxs"]),
-                "freq_range": _range(data["points"]["freqs"]),
-            },
+            "points": point_summary(data["points"]),
         }
     )
 

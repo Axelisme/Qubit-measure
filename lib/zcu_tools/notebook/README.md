@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-11，Notebook 參數容器入口
+**Last updated:** 2026-10-13，accept 參數 metadata mapping
 
 `zcu_tools.notebook` 提供 Notebook 逐步探索時使用的互動入口、顯示與 widgets，也保留工作流程專用的分析支援。Notebook 工作流程可組合計算與人工確認，不等於 GUI 的量測 session 或狀態管理。實際操作與結果解讀見 [Notebook 內容入口](../../../notebook_md/README.md)；這裡說明支援程式的位置。
 
@@ -28,7 +28,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=..., samples=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, stderr)` 帶有限非負的誤差。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Samples 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，samples 不解析角色。Provenance kind 自動使用該 run 的實驗名稱。
+`SavedRun.accept(parameter=..., module=..., waveform=..., samples=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Samples 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，samples 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
 
 流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform → samples 及各 mapping 的迭代順序逐項提交。項目失敗拋出 `WritebackApplyError`，帶 accepted `event_id`、成功前綴項數 `applied` 與原始 `__cause__`，並停止後項。已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
@@ -47,7 +47,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
 一般 T1 使用 `nb_adapter(T1Exp())` 與核心的 typed config／options，不另提供扁平參數 wrapper。T1Result 只有資料；RunRecord 是保存與分析的 explicit 來源。Canonical load 可保留 cfg=None 的有效資料，T1 可離線分析，預設 saver 則拒絕缺 cfg 的來源。
 - GE 的 run／FIT／save／load 使用 `nb_adapter(GE_Exp())` 與核心 typed cfg／options。Caller-owned `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
-- Caller-owned `FluxDepAnalyzer.start(source, options)` 明確接收 OneTone 或 TwoTone 通量光譜的 RunRecord，建立選線 widgets 與可拖曳的預覽。泛型保留 cfg／result 的來源型別，預設為 OneTone；TwoTone caller 明確指定 `FluxDepAnalyzer[FreqFluxCfg, FreqFluxResult]`。工具不綁定 core 或 Adapter 的目前來源。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。預覽與成果圖分開。
+- Caller-owned `flux_dep.FluxDepAnalyzer.start(source, inputs, options)` 明確接收 opaque RunRecord 與獨立 FluxPickInputs，不從具體實驗結果抽取 spectra。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。Notebook 拖曳預覽與 measure click-follow frontend 各自保留 gesture／lifecycle。
 - [`utils.py`](utils.py)：提供圖檔保存與設備資訊等 Notebook 輔助函式。Sweep 建構使用 `experiment.utils.make_sweep`，與核心實驗共用框架入口。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
 - [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
 

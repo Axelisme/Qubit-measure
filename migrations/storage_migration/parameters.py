@@ -43,6 +43,34 @@ def _seed_components(entry: ResultEntry, mapping: MigrationMapping) -> None:
             entry.setup.add_component(name, kind=kind, **fields)
 
 
+def _missing_evidence(rule: KeyRule, values: JsonObject) -> tuple[str, ...]:
+    return tuple(
+        key
+        for key in rule.requires_keys
+        if key not in values
+        or values[key] is None
+        or has_legacy_expression(values[key])
+    )
+
+
+def _value_accepted(path: str, values: JsonObject, mapping: MigrationMapping) -> bool:
+    """Whether this mapping's value rule for path accepts its explicit value."""
+    rule = next(
+        (
+            item
+            for item in mapping.rules
+            if item.action == "value" and item.target_path == path
+        ),
+        None,
+    )
+    return (
+        rule is not None
+        and rule.old_key in values
+        and not has_legacy_expression(values[rule.old_key])
+        and not _missing_evidence(rule, values)
+    )
+
+
 def _accept_parameter(
     view: SetupView | PointView | None,
     rule: KeyRule,
@@ -50,13 +78,7 @@ def _accept_parameter(
     values: JsonObject,
     mapping: MigrationMapping,
 ) -> str | None:
-    missing = tuple(
-        key
-        for key in rule.requires_keys
-        if key not in values
-        or values[key] is None
-        or has_legacy_expression(values[key])
-    )
+    missing = _missing_evidence(rule, values)
     if missing:
         return f"Missing explicit evidence keys: {', '.join(missing)}"
     if view is None:
@@ -66,29 +88,12 @@ def _accept_parameter(
         raise MigrationInputError(f"{rule.old_key}: missing target path")
     with view.edit() as draft:
         if rule.action == "stderr":
-            provenance = view.meta(path)
-            value_key = next(
-                (
-                    item.old_key
-                    for item in mapping.rules
-                    if item.action == "value" and item.target_path == path
-                ),
-                None,
-            )
-            if (
-                provenance is None
-                or value_key is None
-                or value_key not in values
-                or has_legacy_expression(values[value_key])
-            ):
+            if not _value_accepted(path, values, mapping):
                 return "No accepted explicit target value for stderr"
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise MigrationInputError(f"{rule.old_key}: stderr must be numeric")
-            draft.set(
-                path,
-                _YAML_VALUE.validate_python(values[value_key], strict=True),
-                provenance=replace(provenance, stderr=float(value)),
-            )
+            # Only stderr is owned here; other caller metadata keys stay.
+            draft.set_meta(path, {**(draft.meta(path) or {}), "stderr": float(value)})
         else:
             accepted = {rule.wrap_key: value} if rule.wrap_key is not None else value
             draft.set(path, _YAML_VALUE.validate_python(accepted, strict=True))

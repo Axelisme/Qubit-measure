@@ -20,7 +20,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter
 
 from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
@@ -69,7 +69,7 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(
     )
     tab_id = "tab-agent-cfg-read"
     fixture.prepare_tab(
-        tab_id, FakeAdapter(), CfgSchema(spec, make_default_value(spec))
+        tab_id, SampleAdapter(), CfgSchema(spec, make_default_value(spec))
     )
     fixture.start()
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
@@ -184,14 +184,14 @@ def test_reset_mcp_restores_gui_defaults(mcp_tab):
 def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch):
     fixture, tab_id = live_tab
     release = Event()
-    original_run = FakeAdapter.run
+    original_run = SampleAdapter.run
 
     def blocked_run(self, req, raw_cfg, *, context):
         if not release.wait(timeout=5):
             raise TimeoutError("test did not release the fake run")
         return original_run(self, req, raw_cfg, context=context)
 
-    monkeypatch.setattr(FakeAdapter, "run", blocked_run)
+    monkeypatch.setattr(SampleAdapter, "run", blocked_run)
     sock = open_client(fixture.service.port)
     try:
         observe_run_inputs(
@@ -368,7 +368,7 @@ def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
     tab_id = "reply-failure-tab"
     owner = fixture.prepare_tab(
         tab_id,
-        FakeAdapter(),
+        SampleAdapter(),
         CfgSchema(
             CfgSectionSpec(fields={"text": ScalarSpec("Text", str)}),
             CfgSectionValue({"text": DirectValue("before")}),
@@ -432,7 +432,7 @@ def test_edit_error_identifies_failed_path_and_index_without_committing(live_tab
 
 def test_library_editor_batch_retains_its_independent_prefix_contract(live_tab):
     fixture, _ = live_tab
-    schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
+    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False
@@ -480,7 +480,7 @@ def test_independent_editor_batch_preserves_precondition_and_prior_prefix(
     from zcu_tools.gui.session.value_lookup import ProviderError, UnavailableValue
 
     fixture, _ = live_tab
-    schema = FakeAdapter().make_default_cfg(fixture.state.session_env)
+    schema = SampleAdapter().make_default_cfg(fixture.state.session_env)
     parameters = fixture.ctrl.read_context()
     editor_id, _ = fixture.ctrl.open_seeded_cfg_editor(
         schema, parameters=parameters, gc=False

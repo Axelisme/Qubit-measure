@@ -36,7 +36,7 @@ def parameters() -> Generator[ParameterContext]:
         point = PointDocument.model_validate(
             {
                 "format": "zcu.parameter-container",
-                "format_version": "1.0",
+                "format_version": "2.0",
                 "general": {"created_at": "2026-10-08T00:00:00Z"},
                 "components": {"Q1": {"kind": "lowering/driver", "rate": 4300.0}},
             }
@@ -113,7 +113,7 @@ def test_finished_literal_data_is_independent() -> None:
 def test_path_seeds_use_roles_and_explicit_fallback(
     parameters: ParameterContext,
 ) -> None:
-    from zcu_lab.v2._support.measure.seeds import path_seed, scaled_path_seed
+    from zcu_tools.gui.app.measure.seeds import path_seed, scaled_path_seed
 
     environment = SessionEnv(parameters=parameters, soc=None, soccfg=None)
     value = path_seed("$qubit.rate", fallback=100.0).resolve(environment)

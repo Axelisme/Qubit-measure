@@ -22,48 +22,39 @@ from ._support import full_execution_reply, make_client
                 "readout_length_us": 2.5,
                 "trigger_offset_us": 0.2,
                 "rounds": 7,
-                "readout_ref": "readout",
-                "use_reset": "reset",
-                "init_pulse_ref": "init",
             },
             {},
         ),
         (
             {
-                "readout_ref": "readout",
-                "use_reset": "reset",
-                "init_pulse_ref": "init",
+                "frequency_mhz": 6120.0,
                 "readout_length_us": 2.5,
                 "trigger_offset_us": 0.2,
             },
             {
-                "frequency_mhz": {
-                    "value": 6120.0,
-                    "source": "$resonator.freq",
-                    "unit": "MHz",
-                },
-                "ro_frequency_mhz": {
-                    "value": 6120.0,
-                    "source": "$resonator.freq",
-                    "unit": "MHz",
-                },
                 "rounds": {"value": 3, "source": "gui_default"},
             },
         ),
     ],
-    ids=["all-explicit", "calibration-and-default"],
+    ids=["all-explicit", "retained-default"],
 )
 def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
     tmp_path, arguments, expected
 ):
     gui = LookbackGui()
-    gui.md["$resonator.freq"] = 6120.0
+    expected = {
+        **expected,
+        "use_reset": {"value": None, "source": "disabled"},
+        "init_pulse_ref": {"value": None, "source": "disabled"},
+    }
     with recipe_client(tmp_path, gui) as client:
-        initial = client.call("lookback", arguments)
+        initial = client.call("pipeline", arguments)
         assert initial.data["status"] == "awaiting_answer", initial.data
         key = initial.data["execution"]
         before = list(client.transport.sent)
-        gui.md["$resonator.freq"] = 6300.0
+        gui.publication["tree"]["children"]["rounds"]["input"].update(
+            raw=99, resolved=99
+        )
         for reply in (
             initial.data,
             client.call("status", {"execution": key}),
@@ -85,7 +76,7 @@ def test_recipe_initial_wait_and_status_share_the_same_summary(tmp_path, outcome
 
     with recipe_client(tmp_path, respond) as client:
         initial = client.call(
-            "lookback", {} if outcome == "missing" else {"frequency_mhz": 6020.0}
+            "pipeline", {} if outcome == "missing" else {"frequency_mhz": 6020.0}
         )
         key = initial.data["execution"]
         before = len(client.transport.sent)
@@ -137,7 +128,7 @@ def test_writeback_destination_summary_keeps_context_and_project_identity(tmp_pa
         return response
 
     with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        completed = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert completed.data["status"] == "awaiting_answer", completed.data
         key = completed.data["execution"]
         summary = client.call("status", {"execution": key})
@@ -208,7 +199,7 @@ def test_pulse_readout_candidate_summary_keeps_nested_values_and_captured_full(
         return response
 
     with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        completed = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert completed.data["status"] == "awaiting_answer", completed.data
         sent = list(client.transport.sent)
         summary = client.call("status", {"execution": completed.data["execution"]})
@@ -275,7 +266,7 @@ def test_module_candidate_summary_keeps_source_changes_and_full_proposal(tmp_pat
         return response
 
     with recipe_client(tmp_path, respond) as client:
-        completed = client.call("lookback", {"frequency_mhz": 6020.0})
+        completed = client.call("pipeline", {"frequency_mhz": 6020.0})
         assert completed.data["status"] == "awaiting_answer", completed.data
         key = completed.data["execution"]
         summary = client.call("status", {"execution": key})
@@ -346,7 +337,7 @@ def test_run_start_failure_preserves_confirmed_rejection_or_ambiguity(
                 return None
 
             monkeypatch.setattr(client.transport, "send_line", send)
-        initial = client.call("lookback", {"frequency_mhz": 6020.0})
+        initial = client.call("pipeline", {"frequency_mhz": 6020.0})
         execution = initial.data["execution"]
         if receipt == "lost":
             assert pending.wait(1)
@@ -385,7 +376,7 @@ def test_unconfirmed_run_receipt_stays_unknown_until_the_original_start_returns(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("lookback", {"frequency_mhz": 6020.0})
+            initial = client.call("pipeline", {"frequency_mhz": 6020.0})
             assert pending.wait(1)
             execution = initial.data["execution"]
             before = len(client.transport.sent)
@@ -440,7 +431,7 @@ def test_unconfirmed_analysis_start_reports_its_phase_without_new_reads(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     with recipe_client(tmp_path, respond) as client:
         try:
-            initial = client.call("lookback", {"frequency_mhz": 6020.0})
+            initial = client.call("pipeline", {"frequency_mhz": 6020.0})
             assert pending.wait(1)
             execution = initial.data["execution"]
             before = len(client.transport.sent)
@@ -482,7 +473,7 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         return response
 
     with recipe_client(tmp_path, respond) as client:
-        question = client.call("lookback", {"frequency_mhz": 6020.0, "rounds": 7})
+        question = client.call("pipeline", {"frequency_mhz": 6020.0, "rounds": 7})
         assert question.data["status"] == "awaiting_answer", question.data
         execution = question.data["execution"]
         client.call("answer", {"recipe": execution, "decision": "skipped"})
@@ -595,7 +586,7 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
 
     with recipe_client(tmp_path, respond) as client:
         reply = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6020.0})
+            client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         assert reply.is_error
         assert reply.data["status"] == "failed"
@@ -651,7 +642,7 @@ def test_recipe_connection_loss_retains_known_prefix_without_reconnecting(
     monkeypatch.setattr(tools_recipes, "INITIAL_WAIT_SECONDS", 0.01)
     try:
         initial = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6000.0})
+            client, client.call("pipeline", {"frequency_mhz": 6000.0})
         )
         assert pending.wait(1)
         client.transport.close()
@@ -733,7 +724,7 @@ def test_lookback_failure_preserves_completed_prefix_without_retry(
         }
     try:
         reply = full_execution_reply(
-            client, client.call("lookback", {"frequency_mhz": 6000.0})
+            client, client.call("pipeline", {"frequency_mhz": 6000.0})
         )
         data = reply.data
         before = len(client.transport.sent)

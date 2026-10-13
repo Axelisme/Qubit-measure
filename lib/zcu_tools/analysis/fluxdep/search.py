@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
-from h5py import Dataset, File
+from h5py import File
 from numba import set_num_threads
 from numpy.typing import NDArray
 
@@ -17,74 +17,6 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict, energy2linearform
 from zcu_tools.progress_bar import make_pbar
 
 from .search_models import compile_transitions, transition_labels
-
-
-@dataclass(frozen=True)
-class DatabaseInfo:
-    """Fluxonium search database metadata, without loading energy values.
-
-    path is the caller's filename. entries and levels are the energy table's
-    candidate and level counts. EJ/EC/EL are inclusive min/max GHz ranges over
-    all candidates. flux is the inclusive min/max normalized flux range.
-    """
-
-    path: str
-    entries: int
-    levels: int
-    EJ: tuple[float, float]
-    EC: tuple[float, float]
-    EL: tuple[float, float]
-    flux: tuple[float, float]
-
-
-def database_info(path: str) -> DatabaseInfo:
-    """Read candidate ranges and energy dimensions from an HDF5 search file.
-
-    Accepts fluxs or the historical flxs spelling, params (entries, 3), and
-    energies (entries, flux_count, levels). Does not read energy values or
-    populate the search cache. Invalid/empty tables raise ValueError; missing
-    datasets and native file I/O errors propagate. Does not mutate the file.
-    """
-    with File(path, "r") as database:
-        flux_table = database["fluxs" if "fluxs" in database else "flxs"]
-        param_table = database["params"]
-        energy_table = database["energies"]
-        if (
-            not isinstance(flux_table, Dataset)
-            or not isinstance(param_table, Dataset)
-            or not isinstance(energy_table, Dataset)
-        ):
-            raise ValueError("database tables must be datasets")
-        fluxs = np.asarray(flux_table, dtype=np.float64)
-        params = np.asarray(param_table, dtype=np.float64)
-        shape = energy_table.shape
-        if (
-            fluxs.ndim != 1
-            or fluxs.size == 0
-            or params.ndim != 2
-            or params.shape[1] != 3
-            or params.shape[0] == 0
-            or shape is None
-            or len(shape) != 3
-            or shape[:2] != (params.shape[0], fluxs.size)
-            or shape[2] < 1
-            or not np.all(np.isfinite(fluxs))
-            or not np.all(np.isfinite(params))
-        ):
-            raise ValueError("invalid database dimensions or parameter values")
-        ranges = [
-            (float(np.min(params[:, index])), float(np.max(params[:, index])))
-            for index in range(3)
-        ]
-        return DatabaseInfo(
-            path,
-            shape[0],
-            shape[2],
-            ranges[0],
-            ranges[1],
-            ranges[2],
-            (float(np.min(fluxs)), float(np.max(fluxs))),
-        )
 
 
 class SearchCancelled(RuntimeError):

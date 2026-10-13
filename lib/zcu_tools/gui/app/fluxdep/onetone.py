@@ -1,4 +1,8 @@
-"""Fluxdep one-tone commands against a captured-input interactive session."""
+"""Fluxdep one-tone commands against a captured-input interactive session.
+
+SET_THRESHOLD_PARAMS declares set_threshold: dimensionless prominence with
+inclusive limits shared by command validation and remote schema projection.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,16 @@ from zcu_tools.gui.interactive.plugin import Action, Command, PluginDefinition
 from zcu_tools.gui.interactive.session import Session
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, validate_params
+
+SET_THRESHOLD_PARAMS = (
+    ParamSpec(
+        "threshold",
+        JsonType.NUMBER,
+        minimum=THRESHOLD_MIN,
+        maximum=THRESHOLD_MAX,
+        description=f"Dimensionless prominence [{THRESHOLD_MIN:g},{THRESHOLD_MAX:g}].",
+    ),
+)
 
 
 class OneTonePickPlugin(PluginDefinition[OneTonePickState, OneTonePickResult]):
@@ -40,14 +54,6 @@ class OneTonePickPlugin(PluginDefinition[OneTonePickState, OneTonePickResult]):
         Finish builds native device/GHz points, including an empty selection.
         """
         seed = pick_onetone_state(inputs, threshold)
-        threshold_params = (
-            ParamSpec(
-                "threshold",
-                JsonType.NUMBER,
-                minimum=THRESHOLD_MIN,
-                maximum=THRESHOLD_MAX,
-            ),
-        )
 
         def calculate(_state: OneTonePickState, value: float) -> OneTonePickState:
             try:
@@ -64,7 +70,7 @@ class OneTonePickPlugin(PluginDefinition[OneTonePickState, OneTonePickResult]):
             if unknown:
                 raise InvalidInputError(f"unknown parameters: {sorted(unknown)!r}")
             try:
-                value = validate_params(threshold_params, params)["threshold"]
+                value = validate_params(SET_THRESHOLD_PARAMS, params)["threshold"]
             except RemoteError as exc:
                 raise InvalidInputError(str(exc)) from exc
             if not isinstance(value, float):
@@ -79,7 +85,9 @@ class OneTonePickPlugin(PluginDefinition[OneTonePickState, OneTonePickResult]):
             self,
             plugin_id="onetone_pick",
             seed=seed,
-            commands=(Command("set_threshold", threshold_params, threshold_command),),
+            commands=(
+                Command("set_threshold", SET_THRESHOLD_PARAMS, threshold_command),
+            ),
             can_finish=can_finish,
             build_result=lambda state: analyze_onetone_pick(inputs, state),
         )

@@ -24,8 +24,16 @@ from pathlib import Path
 from types import ModuleType
 from typing import Final
 
-# Repository Python includes the framework, user package, and offline migrations.
-CHECKED_ROOTS: Final = ("lib", "zcu_lab", "tests", "scripts", "tools", "migrations")
+# Include agent composition roots alongside user entrypoints and framework code.
+CHECKED_ROOTS: Final = (
+    "lib",
+    "zcu_lab",
+    "tests",
+    "scripts",
+    "mcp_servers",
+    "tools",
+    "migrations",
+)
 
 # Generated or vendored trees. Nothing here is written by hand, so no check has
 # an opinion about it.

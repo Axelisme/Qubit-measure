@@ -85,7 +85,7 @@ class LinePickContext:
     session: Session[FluxPickState]
     # Published source captured at begin; draft edits never mutate this source.
     inherited_from: str | None = None
-    # Any accepted edit or auto-align start makes this draft independently aligned.
+    # A line move or auto-align start makes this draft independently aligned.
     alignment_changed: bool = False
 
 
@@ -387,22 +387,30 @@ class FluxDepInteractiveOwner:
         else:
             self._contexts[context.spectrum_name] = active
         self._view_selection = isinstance(context, CrossSelectionContext)
-        subscriptions = [
-            context.session.subscribe(lambda: self._session_updated(active))
-        ]
         if isinstance(context, LinePickContext):
-            subscriptions.append(
+            initial = context.session.snapshot()
+            previous_lines = (initial.flux_half, initial.flux_int)
+
+            def line_updated() -> None:
+                nonlocal previous_lines
+                state = context.session.snapshot()
+                lines = (state.flux_half, state.flux_int)
+                # Session notifications also include no-ops and presentation flags.
+                if lines != previous_lines:
+                    context.alignment_changed = True
+                previous_lines = lines
+                self._updated(active)
+
+            subscriptions = [
+                context.session.subscribe(line_updated),
                 context.plugin.subscribe_alignment(
                     lambda busy, _error: self._alignment_updated(active, busy=busy)
-                )
-            )
+                ),
+            ]
+        else:
+            subscriptions = [context.session.subscribe(lambda: self._updated(active))]
         self._context_subscriptions[active.context_id] = tuple(subscriptions)
         self._emit_interactive(active, "opened")
-
-    def _session_updated(self, active: ActiveInteractiveContext) -> None:
-        if isinstance(active.context, LinePickContext):
-            active.context.alignment_changed = True
-        self._updated(active)
 
     def _alignment_updated(
         self, active: ActiveInteractiveContext, *, busy: bool

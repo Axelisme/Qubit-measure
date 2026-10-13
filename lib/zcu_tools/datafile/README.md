@@ -1,15 +1,22 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-12，固定 Run snapshot、workflow Labber 匯出、離線 legacy reader 與 analysis summary 的 numpy scalar 轉換
+**Last updated:** 2026-10-13，Fluxdep database metadata contract
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
-facade。caller 優先從 package root import model 與 function。`data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
+facade。caller 優先從 package root import model 與 function。Facade 在 caller 首次選用公開名稱時
+載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
+`data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
 
 - `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.0。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
   不同 variables 可以使用不同網格。`VariableSchema` 與
   `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
+- `read_fluxdep_database_info(path)` 回 `FluxdepDatabaseInfo`，擁有 fluxonium search HDF5 的 dataset 名稱、shape 與有限值驗證。
+  Reader 只讀參數／flux ranges 與 energies 維度，不讀 energy values、不建立 search cache。
+  EJ／EC／EL ranges 為 GHz，flux range 為 normalized flux。
+  缺 dataset 與原生 I/O 失敗向 caller 傳遞，非法或空 table 回 ValueError。
+  Reader 不執行 search，也不接管既有 analysis search 的檔案 I/O。
 - `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
   Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
   `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。

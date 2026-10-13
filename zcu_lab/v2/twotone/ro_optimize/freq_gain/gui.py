@@ -20,6 +20,21 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
+from zcu_tools.gui.app.measure.seeds import (
+    custom,
+    module_seed,
+    path_seed,
+    scaled_path_seed,
+)
+from zcu_tools.gui.app.measure.spec_helpers import (
+    make_pulse_module_spec,
+    make_pulse_readout_module_spec,
+    make_reset_module_spec,
+)
 from zcu_tools.gui.cfg import (
     EvalValue,
     ReferenceValue,
@@ -29,21 +44,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_lab.v2._support.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
-from zcu_lab.v2._support.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-)
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainAnalyzeOptions,
@@ -184,7 +185,9 @@ class RoOptFreqGainAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .field(
                 "modules.reset",
                 spec=make_reset_module_spec(optional=True),

@@ -36,6 +36,10 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.interactive_flux_pick import (
+    FluxPickParams,
+    FluxPickResult,
+)
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -55,27 +59,25 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey
 from zcu_tools.resources.entry.schema import PointDocument
 
+from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._completion_helpers import on_analyze_failed
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._components import QubitSchema
+from tests.gui.app.measure._flux_adapter import (
+    SpectrumAdapter,
+    SpectrumCfg,
+    SpectrumCore,
+    SpectrumResult,
+)
 from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
     NativeSaveSession,
+    PaneParams,
+    PaneSummary,
     native_save_session,
 )
 from tests.gui.session.ui._parameter_fakes import make_parameters
-from zcu_lab.components import QubitSchema
-from zcu_lab.v2._support.measure.interactive_flux_pick import (
-    FluxPickParams,
-    FluxPickResult,
-)
-from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
-from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
-from zcu_lab.v2.twotone.time_domain.t1.gui import (
-    T1Adapter,
-    T1AnalyzeParams,
-    T1AnalyzeResult,
-)
 
 
 @pytest.fixture
@@ -187,7 +189,7 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
     original = make_parameters({})
     point = PointDocument.model_construct(
         format="zcu.parameter-container",
-        format_version="1.0",
+        format_version="2.0",
         general=original.document().general,
         components={
             "Q1": QubitSchema(kind="qubit/fluxonium", freq=4200.0),
@@ -293,35 +295,44 @@ def test_start_analyze_passes_operation_plots_to_worker_adapter(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(
+def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
     native_session: NativeSaveSession,
 ) -> None:
     state = native_session.state
     tab = state.get_tab("tab")
-    tab.adapter = T1Adapter()
+
+    class NamedAdapter(AnalysisSavingAdapter):
+        def analyze(self, req, *, plots):
+            _, ax = plots.subplots("fit")
+            ax.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
+            return PaneSummary(mean=req.analyze_params.gain)
+
+    tab.adapter = NamedAdapter()
     times = np.linspace(0, 100, 101)
     signals = (0.2 + 0.8 * np.exp(-times / 20)).astype(np.complex128)
-    source = RunRecord[T1Cfg, T1Result](cfg=None, result=T1Result(times, signals))
+    source = RunRecord[SavingCfg, SavingResult](
+        cfg=None, result=SavingResult(times, signals)
+    )
     state.update_tab_result(
         "tab",
         source,
         metadata=replace(
-            native_session.metadata, experiment=T1Exp().persistence_spec().tag
+            native_session.metadata, experiment=SavingCore().persistence_spec().tag
         ),
         parameters=_flux_parameters(tab.run.parameters),
     )
     handles = OperationHandles()
     service, bg = _make_service(state, EventBus(), handles=handles)
     plots = _plots()
-    token = service.start_analyze("tab", T1AnalyzeParams(skip=3), plots=plots)
+    token = service.start_analyze("tab", PaneParams(gain=3), plots=plots)
     assert bg.last_work is not None and bg.last_on_done is not None
     bg.last_on_done(bg.last_work())
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
     pane = state.get_tab("tab").analysis
-    assert isinstance(pane.result, T1AnalyzeResult)
-    assert pane.result.t1 == pytest.approx(20, rel=0.01)
+    assert isinstance(pane.result, PaneSummary)
+    assert pane.result.mean == 3.0
     assert pane.plots is plots
     assert tuple(plots) == ("fit",)
     artifacts = [
@@ -353,7 +364,7 @@ def test_t1_gui_analysis_publishes_typed_result_and_saveable_named_fit(
 
 def _start_onetone_plugin(
     state: State,
-    source: RunRecord[FluxDepCfg, FluxDepResult],
+    source: RunRecord[SpectrumCfg, SpectrumResult],
     plots: Plots,
     handles: OperationHandles,
     *,
@@ -361,7 +372,7 @@ def _start_onetone_plugin(
     tab_id: str = "tab1",
 ) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
     adapter = state.get_tab(tab_id).adapter
-    assert isinstance(adapter, OneToneFluxDepAdapter)
+    assert isinstance(adapter, SpectrumAdapter)
     plugin = adapter.make_interactive_plugin(
         AnalyzeRequest(
             source,
@@ -388,7 +399,7 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
 ) -> None:
     state = native_session.state
     tab = state.get_tab("tab")
-    tab.adapter = OneToneFluxDepAdapter()
+    tab.adapter = SpectrumAdapter()
     values = np.linspace(-0.5, 0.5, 9)
     freqs = np.linspace(4.8, 5.4, 7)
     signals = np.asarray(
@@ -396,12 +407,12 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
         + 1j * np.cos(values[:, None] * 3 - freqs[None, :] * 7),
         dtype=np.complex128,
     )
-    source = RunRecord(cfg=None, result=FluxDepResult(values, freqs, signals))
+    source = RunRecord(cfg=None, result=SpectrumResult(values, freqs, signals))
     state.update_tab_result(
         "tab",
         source,
         metadata=replace(
-            native_session.metadata, experiment=FluxDepExp().persistence_spec().tag
+            native_session.metadata, experiment=SpectrumCore().persistence_spec().tag
         ),
         parameters=_flux_parameters(tab.run.parameters),
     )
@@ -467,7 +478,7 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
 def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None:
     state = _make_state()
     tab = state.get_tab("tab1")
-    tab.adapter = OneToneFluxDepAdapter()
+    tab.adapter = SpectrumAdapter()
     previous = object()
     previous_plots = _plots()
     old_figure, _ = previous_plots.subplots("old")
@@ -476,7 +487,7 @@ def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None
     freqs = np.linspace(4.8, 5.4, 7)
     source = RunRecord(
         cfg=None,
-        result=FluxDepResult(values, freqs, np.ones((9, 7), dtype=np.complex128)),
+        result=SpectrumResult(values, freqs, np.ones((9, 7), dtype=np.complex128)),
     )
     state.update_tab_result("tab1", source)
     state.update_tab_analyze("tab1", previous, previous_plots)
@@ -501,10 +512,10 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
 ) -> None:
     state = _make_state()
     tab = state.get_tab("tab1")
-    tab.adapter = OneToneFluxDepAdapter()
+    tab.adapter = SpectrumAdapter()
     source = RunRecord(
         cfg=None,
-        result=FluxDepResult(
+        result=SpectrumResult(
             np.linspace(-0.5, 0.5, 9),
             np.linspace(4.8, 5.4, 7),
             np.ones((9, 7), dtype=np.complex128),
@@ -530,7 +541,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
         raise RuntimeError("frontend analysis failed")
 
     monkeypatch.setattr(
-        "zcu_lab.v2._support.measure.flux_pick_plugin.analyze_flux_pick",
+        "zcu_tools.gui.app.measure.flux_pick_plugin.analyze_flux_pick",
         fail_kernel,
     )
     handles = OperationHandles()

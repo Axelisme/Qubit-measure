@@ -47,7 +47,12 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
+from zcu_tools.resources.entry import (
+    ResultEntry,
+    document_meta,
+    document_value,
+    snapshot,
+)
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.registry import RoleSpec
@@ -134,10 +139,8 @@ def test_accepted_retains_run_identity_with_or_without_save(
         assert event.kind == "accepted"
         assert isinstance(event.payload, AcceptedPayload)
         assert event.payload.run_id == source_run_id
-        source = control.read_target(captured.target).meta("general.ext.flux_value")
-        assert source is not None
-        assert source.source == event.id
-        assert source.run_id == source_run_id
+        current = control.read_target(captured.target)
+        assert document_meta(current.document(), "general.ext.flux_value") == {}
         assert draft.run_id == source_run_id
         service.teardown_draft(draft)
 
@@ -488,13 +491,10 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     assert isinstance(event.payload, AcceptedPayload)
     assert [write.path for write in event.payload.writes] == list(paths)
     assert [write.value for write in event.payload.writes] == tags
-    sources = [current.meta(path) for path in paths]
-    assert all(source is not None for source in sources)
-    assert [source.source for source in sources if source is not None] == [
-        event.id,
-        event.id,
+    assert [document_meta(current.document(), path) for path in paths] == [
+        {"stderr": 0.01},
+        {"stderr": 0.02},
     ]
-    assert [source.stderr for source in sources if source is not None] == [0.01, 0.02]
     reopened = ResultEntry.open(
         "entry",
         result_root=session.entry.result_path.parent,
@@ -537,10 +537,10 @@ def test_receipt_reads_actual_role_target_after_point_change(
     assert session.service.get_all_applied(draft) == {"param-1": True}
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
-    source = session.control.read_target(first).meta("Q1.rate")
-    assert source is not None and source.source == event.id and source.stderr == 0.05
+    target = session.control.read_target(first)
+    assert document_meta(target.document(), "Q1.rate") == {"stderr": 0.05}
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
+    assert event.payload.run_id == draft.run_id == "original-run"
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
@@ -601,10 +601,15 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
-def test_each_parameter_write_preserves_its_own_stderr(
+def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
     saved_session: WritebackSession,
 ) -> None:
     session = saved_session
+    target = session.control.read_context().target
+    for path in ("Q1.rate", "Q1.coherence"):
+        session.control.set_parameter(
+            target, path, 1.0, metadata={"stderr": 9.0, "comment": "old"}
+        )
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
@@ -618,21 +623,14 @@ def test_each_parameter_write_preserves_its_own_stderr(
         experiment_name="test/writeback",
     )
     session.service.apply_draft(draft)
-    current = session.control.read_context()
-    sources = [
-        current.meta(path) for path in ("Q1.rate", "Q1.duration", "Q1.coherence")
-    ]
-    assert all(source is not None for source in sources)
-    assert [source.stderr for source in sources if source is not None] == [
-        0.01,
-        0.4,
-        None,
-    ]
-    assert len({source.source for source in sources if source is not None}) == 1
+    document = session.control.read_context().document()
+    assert [
+        document_meta(document, path)
+        for path in ("Q1.rate", "Q1.duration", "Q1.coherence")
+    ] == [{"stderr": 0.01}, {"stderr": 0.4}, {}]
     event = session.entry.ledger.events()[-1]
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id is None
-    assert all(source.run_id is None for source in sources if source is not None)
     assert draft.run_id is None
 
 

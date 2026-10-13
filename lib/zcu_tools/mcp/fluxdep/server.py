@@ -31,7 +31,7 @@ from zcu_tools.gui.app.fluxdep.remote.wire_version import (  # noqa: E402
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
-MCP_VERSION = 5  # explicit spectrum/selection targets in draft reads and evidence
+MCP_VERSION = 6  # native command domains and Filter parameter differences
 
 _SERVER_INSTRUCTIONS = """\
 Drive Fluxdep flux-dependence analysis in the GUI the user also sees. No hardware

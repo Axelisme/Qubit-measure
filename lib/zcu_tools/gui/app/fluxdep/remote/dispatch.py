@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import database_info
+from zcu_tools.datafile import read_fluxdep_database_info
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
@@ -435,7 +435,7 @@ def _h_fit_database_info(
     del adapter
     path = params["path"]
     assert isinstance(path, str)
-    info = database_info(path)
+    info = read_fluxdep_database_info(path)
     return {
         "path": info.path,
         "entries": info.entries,

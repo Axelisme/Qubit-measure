@@ -1,0 +1,153 @@
+"""A module union with a named nested member union edits its active branch."""
+
+from collections.abc import Iterator
+from typing import Annotated, Literal
+
+import pytest
+from pydantic import BaseModel, ConfigDict, Field
+from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.widgets.form import FormEditor
+
+
+class DriveModule(BaseModel):
+    """Inline drive Spec: a single-model member of the module union."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["pulse"] = "pulse"
+    gain: float = 0.5
+
+
+class DirectReadoutModule(BaseModel):
+    """Nested readout member without the pulse readout's gain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["readout/direct"] = "readout/direct"
+    ro_length: float = 1.0
+
+
+class PulseReadoutModule(BaseModel):
+    """Nested readout member with its own branch-only gain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["readout/pulse"] = "readout/pulse"
+    ro_length: float = 2.0
+    ro_gain: float = 0.2
+
+
+type ReadoutModule = Annotated[
+    DirectReadoutModule | PulseReadoutModule, Field(discriminator="type")
+]
+"""Named readout union nested in the module union on the same tag key."""
+
+type AnyModule = Annotated[DriveModule | ReadoutModule, Field(discriminator="type")]
+
+
+class ModuleRefChoice(FormModel):
+    """Library reference branch of a module selection."""
+
+    kind: Literal["ref"] = "ref"
+    name: str
+
+
+class ModuleInlineChoice(FormModel):
+    """Inline branch whose module is the nested tagged module union."""
+
+    kind: Literal["inline"] = "inline"
+    module: AnyModule
+
+
+type ModuleChoice = Annotated[
+    ModuleRefChoice | ModuleInlineChoice, Field(discriminator="kind")
+]
+
+
+class InlineModuleForm(FormModel):
+    """Drive and readout selections shaped like workflow module inputs."""
+
+    qub_pulse: ModuleChoice
+    readout: ModuleChoice
+
+
+@pytest.fixture
+def editor_state(
+    qapp: QApplication,
+) -> Iterator[tuple[FormEditor[InlineModuleForm], FormState[InlineModuleForm]]]:
+    """Own a view over inline drive and pulse-readout input on the existing app."""
+    state = FormState(
+        FormInput(
+            InlineModuleForm,
+            {
+                "qub_pulse": {
+                    "kind": "inline",
+                    "module": {"type": "pulse", "gain": 0.4},
+                },
+                "readout": {
+                    "kind": "inline",
+                    "module": {
+                        "type": "readout/pulse",
+                        "ro_length": 3.0,
+                        "ro_gain": 0.25,
+                    },
+                },
+            },
+        )
+    )
+    editor = FormEditor(state, FormEnv())
+    yield editor, state
+    editor.deleteLater()
+    qapp.processEvents()
+
+
+def selector(editor: FormEditor[InlineModuleForm], path: str) -> QComboBox:
+    """Find the discriminator selector of a dotted model-field path."""
+    widget = editor.findChild(QComboBox, f"form.input.{path}")
+    assert isinstance(widget, QComboBox), path
+    return widget
+
+
+def text(editor: FormEditor[InlineModuleForm], path: str) -> QLineEdit:
+    """Find the text input of an active dotted model-field path."""
+    widget = editor.findChild(QLineEdit, f"form.input.{path}")
+    assert isinstance(widget, QLineEdit), path
+    return widget
+
+
+def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
+    editor_state: tuple[FormEditor[InlineModuleForm], FormState[InlineModuleForm]],
+) -> None:
+    editor, state = editor_state
+    env = FormEnv()
+    assert selector(editor, "readout.module.type").currentData() == "readout/pulse"
+    assert text(editor, "readout.module.ro_length").text() == "3.0"
+    gain = text(editor, "readout.module.ro_gain")
+    assert gain.text() == "0.25"
+    assert selector(editor, "qub_pulse.module.type").currentData() == "pulse"
+    assert text(editor, "qub_pulse.module.gain").text() == "0.4"
+    tags = {"pulse", "readout/direct", "readout/pulse"}
+    for name in ("readout", "qub_pulse"):
+        combo = selector(editor, f"{name}.module.type")
+        assert {combo.itemData(index) for index in range(combo.count())} == tags
+
+    gain.setText("0.3")
+    assert state.input.data["readout"] == {
+        "kind": "inline",
+        "module": {"type": "readout/pulse", "ro_length": 3.0, "ro_gain": 0.3},
+    }
+    result = state.result(env)
+    assert isinstance(result, InlineModuleForm)
+    assert isinstance(result.readout, ModuleInlineChoice)
+    assert result.readout.module == PulseReadoutModule(ro_length=3.0, ro_gain=0.3)
+
+    combo = selector(editor, "readout.module.type")
+    combo.setCurrentIndex(combo.findData("readout/direct"))
+    result = state.result(env)
+    assert isinstance(result, InlineModuleForm)
+    assert isinstance(result.readout, ModuleInlineChoice)
+    assert result.readout.module == DirectReadoutModule(ro_length=3.0)
+    assert selector(editor, "readout.module.type").currentData() == "readout/direct"
+    assert text(editor, "readout.module.ro_length").text() == "3.0"
+    assert editor.findChild(QLineEdit, "form.input.readout.module.ro_gain") is None

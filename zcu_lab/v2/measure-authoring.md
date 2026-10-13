@@ -128,8 +128,8 @@ adapter 不提供 legacy 單檔案的轉換或 fallback；canonical `exp.load()`
 一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
 `analysis=INTERACTIVE` 必須實作 `make_interactive_plugin()` 與
 `make_interactive_frontend()` 且不得實作 `analyze()`；`analysis=NONE` 不得實作
-analyze hooks。兩個 flux_dep adapters 共用 `_support/measure/flux_pick_plugin.py` 的 state/actions/commands，
-以及 Qt-only `_support/measure/flux_pick_frontend.py` 的 artists 與 preview；service 建立 session，
+analyze hooks。兩個 flux_dep adapters 共用 `zcu_tools.gui.app.measure.flux_pick_plugin` 的 state/actions/commands，
+以及 Qt-only `zcu_tools.gui.app.measure.flux_pick_frontend` 的 artists 與 preview；adapter 傳 FluxPickInputs 與初始數值，service 建立 session，
 adapter 不持有分析 operation 或 writeback draft。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
 時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
 沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作

@@ -69,8 +69,8 @@ def nested_kind(registry_state_guard: None) -> Generator[str]:
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-@pytest.mark.parametrize("version", ["1.0", "1.2"])
-def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
+@pytest.mark.parametrize("version", ["2.0", "2.2"])
+def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
     tmp_path: Path,
     registry_state_guard: None,
     owner: str,
@@ -97,14 +97,16 @@ def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
             if owner == "setup"
             else results / "entry/points/working/point.yaml"
         )
+        with view.edit() as draft:
+            draft.set_meta("N1.modern", {"comment": "original"})
         original_source = view.meta("N1.modern")
-        assert original_source is not None
+        assert original_source == {"comment": "original"}
         yaml = YAML(typ="rt")
         stored = yaml.load(source)
         stored["format_version"] = version
         component = stored["components"]["N1"]
         component["legacy"] = component.pop("modern")
-        if version == "1.2":
+        if version == "2.2":
             stored["future"] = {"quality": "next"}
         yaml.dump(stored, source)
         before = source.read_bytes()
@@ -125,15 +127,15 @@ def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
         saved = YAML(typ="safe").load(source)
         assert saved["components"]["N1"]["modern"] == 7
         assert "legacy" not in saved["components"]["N1"]
-        if version == "1.2":
+        if version == "2.2":
             assert saved["future"] == {"quality": "next"}
         assert loaded.meta("N1.modern") == original_source
         assert loaded.meta("N1.legacy") is None
         with loaded.edit() as draft:
             draft.set("N1.modern", 8)
+            draft.set_meta("N1.modern", {"comment": "accepted"})
         accepted = loaded.meta("N1.modern")
-        assert accepted is not None and accepted.source == "manual"
-        assert accepted.at != original_source.at
+        assert accepted == {"comment": "accepted"}
         with pytest.raises(ValidationError), loaded.edit() as draft:
             draft.set("N1.modren", 9)
         assert loaded.N1.modern == 8
@@ -141,7 +143,7 @@ def test_registered_legacy_rename_preserves_source_until_explicit_acceptance(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-def test_child_writes_validate_the_complete_parent_and_preserve_rejected_sources(
+def test_child_writes_validate_the_complete_parent_and_preserve_rejected_metadata(
     tmp_path: Path,
     owner: str,
 ) -> None:
@@ -169,6 +171,8 @@ def test_child_writes_validate_the_complete_parent_and_preserve_rejected_sources
         view = entry.setup if owner == "setup" else entry.new_point("working")
         assert view.N1.initialized is True
         box = field_view(view.N1.box)
+        with view.edit() as draft:
+            draft.set_meta("N1.box.low", {"stderr": 0.5})
         source = view.meta("N1.box.low")
         with pytest.raises(ValidationError, match="low must not exceed high"):
             box.low = 7
@@ -184,8 +188,7 @@ def test_child_writes_validate_the_complete_parent_and_preserve_rejected_sources
             assert candidate.low == 8
             assert box.low == 1
         assert box.low == 8 and box.high == 9
-        accepted = view.meta("N1.box.low")
-        assert accepted is not None and accepted.source == "manual"
+        assert view.meta("N1.box.low") == {"stderr": 0.5}
         reopened = ResultEntry.open(
             "entry", result_root=results, database_root=database
         )
@@ -574,7 +577,7 @@ def test_optional_nested_strings_accept_null_and_round_trip_without_reference_ch
 
 
 @pytest.mark.parametrize("operation", ["add", "attribute", "set"])
-def test_optional_nested_typos_preserve_values_sources_and_disk(
+def test_optional_nested_typos_preserve_values_metadata_and_disk(
     tmp_path: Path, operation: str
 ) -> None:
     with registered_model("notebook/optional-timing", OptionalNestedSchema) as kind:
@@ -582,10 +585,12 @@ def test_optional_nested_typos_preserve_values_sources_and_disk(
         entry.setup.add_component(
             "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
         )
+        with entry.setup.edit() as draft:
+            draft.set_meta("N1.timing.width", {"stderr": 0.1})
         setup_path = results / "entry" / "setup.yaml"
         before = setup_path.read_bytes()
         accepted = entry.setup.meta("N1.timing.width")
-        assert accepted is not None
+        assert accepted == {"stderr": 0.1}
 
         def perform_operation() -> None:
             if operation == "add":

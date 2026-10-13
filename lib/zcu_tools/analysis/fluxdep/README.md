@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-13，recorded quality、transition 能階需求、adapter 分工與 OneTone 背景正規化
+**Last updated:** 2026-10-13，recorded quality、transition 能階需求、adapter 分工、OneTone 背景正規化與 metadata reader 歸 datafile
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -21,7 +21,9 @@
 
 ## 輸入與能階契約
 
-`search.database_info(path)` 讀 HDF5 的參數範圍與能階維度，不 materialize energies。
+`datafile.read_fluxdep_database_info(path)` 擁有 HDF5 metadata 讀取契約，回參數範圍與能階維度，不 materialize energies。
+GUI 的輸入驗證與 readonly 查詢共用該 reader。
+既有 `search_database` 與 `io.py` 的 HDF5 讀寫仍是待搬到 datafile 的邊界債務。
 `search_models.transition_requires_levels` 先驗類別語法，指出是否需 DB 能階數。
 非空 pairs 與動態類別（含空列表）需要 M；基本空列表與空 mapping 不需要。
 `validate_transition_levels` 與 compilation 共用類別順序，拒絕未知類別、動態 order 不在 2..M-1 與索引不在 0..M-1。

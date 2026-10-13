@@ -102,6 +102,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     point = entry.new_point("base", description="native snapshot")
     with point.edit() as draft:
         draft.set("general.ext.nested", {"trace": [1.0, 2.0], "unset": None})
+        draft.set_meta("general.ext.nested.trace", {"stderr": [0.1, 0.2]})
     library = entry.module_library("base")
     with library.edit() as draft:
         draft.set_waveform(
@@ -130,7 +131,9 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     s1 = components["S1"]
     assert isinstance(q1, dict) and isinstance(s1, dict)
     assert q1["rate"] == 10.0 and s1["rate"] == 20.0
-    assert wire_point["provenance"]
+    assert wire_point["metadata"] == {
+        "general.ext.nested.trace": {"stderr": [0.1, 0.2]}
+    }
     wire_library = result["library"]
     assert isinstance(wire_library, dict)
     assert wire_library["provenance"]
@@ -350,7 +353,7 @@ def test_snapshot_alias_rows_isolate_unbound_and_invalid_links(
         assert row["alias"] == alias and row["value"] == value
         assert row["resolved"] is None
         assert alias in str(row["error"])
-    assert "Alias is not bound" in str(rows[2]["error"])
+    assert "$unbound" in str(rows[2]["error"]) and "Aliases" in str(rows[2]["error"])
     assert "must name a component or device" in str(rows[4]["error"])
 
 

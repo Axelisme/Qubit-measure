@@ -45,9 +45,12 @@ status: draft
 2. 實驗框架：`experiment`
 3. 前端框架：`gui`、`notebook`、`mcp`
 4. 使用者套件：`zcu_lab`
-5. 組合根：`scripts/` 與 MCP server 入口
+5. 組合根：使用者入口在 `scripts/`，agent MCP 入口在 `mcp_servers/`
 
-`zcu_tools` 不 import `zcu_lab`（D72）。定義由組合根注入（D73）。
+- `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
+- tests 不依賴 zcu_lab；刪掉 `zcu_lab/` 後整套 pytest 仍通過。
+
+框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
 ### 能力模組的兩類
 
@@ -57,6 +60,11 @@ status: draft
 | 有狀態的能力模組 | `program`、`resources`、`device`、`qick_remote` | 彼此不得 import，只透過 `cfg_model` 的型別與 Protocol 溝通 |
 
 依賴朝向穩定的一方：被很多模組依賴的模組必須少變，常加功能的模組不被別人依賴。純工具接收數值、回傳數值，不自己讀容器、硬體或檔案以外的狀態。
+
+Package 初始化不把專用依賴帶進無關工具。`analysis` 在選用 `fluxdep` 時才載入它，
+讓 fitting 不要求互動 line picker。`utils` 的 QICK import 留在選用的 `format_obj`
+轉換函式內。`datafile` facade 按公開名稱載入 owner，讓 storage 使用 path helpers 時
+不載入 HDF5。這些調整保留公開名稱及計算、保存契約，不改變 C8、C9、C12 的依賴方向。
 
 ### 共享核心 core 與 cfg_model
 
@@ -98,7 +106,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 
-兩個套件都是 import-linter 的 root packages。組合根顯式注入 measure registry、Autofluxdep catalog 與 MCP recipes，framework 不反向載入使用者定義。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `cfg_editing → gui.cfg`，註解寫明「不是債務」。`ignore_imports` 只減不增。
 

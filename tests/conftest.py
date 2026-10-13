@@ -1,8 +1,10 @@
+import atexit
 import os
 import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
-from pytest_cache_guard import GuiCacheGuard
 
 # BLAS thread pinning for xdist workers — must happen BEFORE numpy is imported
 # so that OpenBLAS / MKL / OpenMP size their thread pools from the environment
@@ -21,20 +23,15 @@ import numpy as np
 
 # Configure platformdirs before descendant conftests or test modules can create
 # a caretaker. Do not use pytest's basetemp: it is cleared during the session.
-_GUI_CACHE_GUARD = GuiCacheGuard(
-    process_lifetime=not GuiCacheGuard.process_isolation_active()
+if sys.platform != "linux":
+    raise pytest.UsageError("GUI cache isolation only supports Linux (XDG_CACHE_HOME)")
+_GUI_CACHE = TemporaryDirectory(
+    prefix=".pytest-tmp-cache-", dir=Path(__file__).resolve().parents[1]
 )
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register the cache guard with this session's active pytest configuration."""
-    config.pluginmanager.register(_GUI_CACHE_GUARD, "gui-cache-guard")
-
-
-def pytest_unconfigure() -> None:
-    """Release nested cache ownership; keep outer isolation through cleanup."""
-    # Also handle startup errors before pytest_configure could register it.
-    _GUI_CACHE_GUARD.pytest_unconfigure()
+# Keep each imported conftest's cache alive through all pytest cleanup, including
+# nested pytest.main() sessions. Never restore the user's cache environment.
+atexit.register(_GUI_CACHE.cleanup)
+os.environ["XDG_CACHE_HOME"] = _GUI_CACHE.name
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

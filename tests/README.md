@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-12，slow 選集與 GUI cache 隔離
+**Last updated:** 2026-10-13，slow 選集與 GUI cache 隔離生命週期
 
 本頁說明 `tests/` 的案例歸屬、fixture 與搬遷方法。測試範圍和斷言的品質判準見 [程式碼品質](../docs/code-quality.md)，環境和驗證流程見 [AGENTS.md](../AGENTS.md)。後半保留 GUI／硬體測試的局部注意事項；不要把歷史案例當成新測試的範本。
 
@@ -10,13 +10,15 @@
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
 2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/`、
-   `tests/tools/`、`tests/zcu_lab/` 和 `tests/migrations/` 對應 repo root 同名目錄，其餘對應 `lib/zcu_tools/` 下的模組。
+   `tests/tools/`、`tests/mcp_servers/` 和 `tests/migrations/` 對應 repo root 同名目錄，其餘框架測試對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
    Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
 3. 案例按情境與預期結果命名，從模組接縫或公開契約檢查可觀察結果。
    文件、靜態內容、設定值及腳本旗標直接審閱；既有白箱或靜態檢查案例不因本頁宣稱已搬遷。
    不新增頂層 unit／integration／e2e 目錄，亦不測 Notebook／腳本的主要內容。
+
+框架測試用最小合成 workflow／adapter，不 import `zcu_lab`，包括其 fake 實驗。Adapter、workflow 與 recipes 的個別實驗流程與預設值不寫測試；只因實驗定義改動而失敗的測試應刪除，不修成固定 lab 行為。宿主最高接縫是 caller 的註冊清單，再從 Window、RPC 或 MCP 驗證結果。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow，見 [模組定位 ADR](../docs/adr/draft/module-boundaries.md#分層)。
 
 ## Fixture 與測試支援碼
 
@@ -72,18 +74,11 @@ Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive
 
 ### GUI cache 隔離
 
-測試的 cache 隔離只支援 Linux，使用產品既有的公開 `XDG_CACHE_HOME`。
-root `tests/conftest.py` 在子目錄的 conftest 和測試匯入前導向暫存 cache，
-各 xdist worker 使用自己的 cache。guard 比對使用者真實 GUI cache 的存在性、metadata 與內容。
-測試不得寫入真實 cache；偵測到變動時，guard 讓 session 失敗並指出污染的 node 與 phase。
-啟動與 session finish 的污染以生命週期 phase 標示，比對止於 session finish。
-
-最外層 cache 隔離持續到 process 結束，不在 session finish 或 unconfigure 還原真實 cache。
-因此 pytest cleanup 仍寫入暫存目錄。巢狀 `pytest.main()` 結束時還原已隔離的外層
-`XDG_CACHE_HOME`，不切回使用者 cache。
-
-非 Linux 在 pytest 啟動時以 `UsageError` 拒絕執行，訊息說明只支援 Linux 的 `XDG_CACHE_HOME`。
-不降級成未隔離的測試。Windows 實測不在目前支援範圍。
+GUI cache 隔離只支援 Linux，其它平台在 root conftest 載入時直接報錯。
+`tests/conftest.py` 在子目錄 conftest 與產品模組 import 前設定 `XDG_CACHE_HOME`，
+指向 worktree 內獨立的暫存目錄。每個 xdist worker 各自建立目錄，不使用會被 pytest
+清掉的 basetemp。這些目錄保留到 process 結束，再由 `atexit` 清理。
+巢狀 `pytest.main()` session 的 teardown 不還原 `XDG_CACHE_HOME`，後續 cleanup 仍使用隔離目錄。
 
 ### BackgroundRunner.quiesce() — 測試 teardown 必要模式
 
@@ -121,8 +116,8 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 ## 現有 owner 導覽
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
-`tests/experiment/v2/` 擁有通用 runtime 與工具；`tests/zcu_lab/` 擁有 registry-wide adapter 契約，
-`tests/zcu_lab/v2/` 保留共用 helpers、role defaults 與使用者要求的 D142 特例。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/experiment/v2/` 擁有通用 runtime 與工具，`tests/experiment/workflows/` 擁有泛型 Engine、effects 與共用匯出機制。
+`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、builder 與 seed 框架契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。`tests/migrations/` 擁有 root `migrations/` 的離線轉換與 legacy reader 測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，
@@ -182,10 +177,6 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 `tests/experiment/v2/runtime/test_flow.py` 覆蓋 `SignalBuffer` / `Schedule` / `ProgramBuilder` 的 typed env、host scan、program-side sweep、buffer shape、stop checker、ProgramBuilder retry、failed attempt 後 stop 不再 retry、`ScheduleOutcome`、batch 與 raw conversion contract。`test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
-`tests/zcu_lab/test_adapter_definition.py` 逐一走過 registry，驗證 adapter conformance、
-empty／rich context 的成品 cfg validation、context-free spec 與 fresh schema。
-`test_definitions.py` 驗證 startup／reload 註冊結果非空且符合框架契約。
-
 ### Experiment device contracts
 
 `tests/experiment/utils/test_device.py` 在選定 driver 的公開接縫驗證 flux 單位、模式、安全限制、取消與錯誤傳播。Cfg assembly tests 驗證角色到名稱的 mapping，且不讀硬體。用到 device 的合成 cfg 在自身宣告該欄位，不依賴 framework base 的 default。
@@ -241,16 +232,14 @@ Import 規則由直接 review 相關檔案確認，對外行為由接縫測試�
 path/parent conflict與batch preflight、default carrier、optional ref、locked alignment、choice binding、
 caller alias隔離與one-shot build。domain role、Seed與app section policy不得進入這組shared tests。
 
-### User adapter 與共用 helper tests
+### Adapter 與共用工具 tests
 
-`tests/zcu_lab/v2/_support/measure/test_schema_builder.py` 驗證 context-free
+`tests/gui/app/measure/adapter/test_schema_builder.py` 驗證 context-free
 `MeasureCfgBuilder`／`MeasureCfgDefinition`、ModuleInit、Seed、override 與 definition isolation。
-Role defaults 與 startup policy 有各自的接縫測試。Singleshot joint-fit、classification、
-Notebook flux picker 也由共用 helper owner 驗證。
-
-個別實驗不另寫 cfg、fit 或 writeback 行為測試，除非使用者要求特殊邏輯。
-目前保留 AllXY、ZigZag 與 ZigZagScan 的四檔 D142 案例。新增或刪除其他 registry entry
-會自動改變通用契約的選集，不需要修改測試。
+同目錄的 module seeds 與 spec helpers 使用最小合成 role 表，不綁定 lab 的掃描預設。
+Singleshot Rabi 數值與畫圖分別由 `tests/analysis/fitting/test_singleshot_rabi.py`
+及 `tests/plotting/test_singleshot_rabi.py` 驗證。Notebook flux picker 使用 caller 提供的
+`FluxPickInputs`，由 `tests/notebook/test_flux_dep.py` 驗證。
 
 `tests/gui/app/measure/adapter/` 保留 BaseAdapter 的 capability、canonical load、
 post defaults、lowering 與 writeback framework 契約。

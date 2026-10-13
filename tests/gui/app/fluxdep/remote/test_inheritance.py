@@ -46,6 +46,46 @@ def _inline_background(
     on_done(compute())
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_conjugate_notification_finish_preserves_alignment_source(
+    route_harness: RouteHarness,
+    inherited_name: tuple[str, str],
+    enabled: bool,
+) -> None:
+    """No-op and flag-only commands do not independently align inherited lines."""
+    name, source = inherited_name
+    initial = _snapshot(route_harness, name)
+    opened = route_harness.request(
+        route_harness.links[0], "spectrum.interactive.open", name=name, kind="line"
+    )
+    assert opened["ok"] is True
+    context = opened["result"]["context"]
+    assert isinstance(context, dict)
+    params = {"name": name, "context_id": context["context_id"]}
+    changed = route_harness.request(
+        route_harness.links[0],
+        "spectrum.interactive.command",
+        **params,
+        command="set_conjugate",
+        params={"enabled": enabled},
+    )
+    assert changed["ok"] is True
+    draft = _snapshot(route_harness, name)
+    assert draft["alignment"] == {"inherited_from": source}
+    finished = route_harness.request(
+        route_harness.links[0],
+        "spectrum.interactive.command",
+        **params,
+        command="finish",
+    )
+    assert finished["ok"] is True
+    published = _snapshot(route_harness, name)
+    assert published["alignment"] == {"inherited_from": source}
+    assert published["flux_half"] == initial["flux_half"]
+    assert published["flux_int"] == initial["flux_int"]
+    assert published["pending"] is None
+
+
 @pytest.mark.parametrize("action", ["unchanged", "manual", "auto", "discard", "direct"])
 def test_alignment_source_is_published_with_alignment_not_with_draft(
     route_harness: RouteHarness,

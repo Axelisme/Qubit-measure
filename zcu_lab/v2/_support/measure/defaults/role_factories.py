@@ -21,9 +21,9 @@ library entry).
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
+
+from zcu_tools.gui.app.measure.role_factories import RoleFactorySpec
 
 from zcu_lab.v2._support.measure.defaults.role_table import (
     ROLE_TABLE,
@@ -34,29 +34,7 @@ from zcu_lab.v2._support.measure.defaults.role_table import (
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.gui.cfg import CfgSectionSpec, ReferenceValue
-
-# A blank factory always produces a value (never None); a ref factory's optional
-# path may return None (the disabled-optional ref, ADR-0010).
-BlankFactory = Callable[["SessionEnv"], "ReferenceValue"]
-RefFactory = Callable[..., "ReferenceValue | None"]
-
-
-@dataclass(frozen=True)
-class RoleFactorySpec:
-    """The factory pair for one role.
-
-    ``ref`` is ``None`` for roles that have no library-aware variant (a concrete
-    shape that is always built inline — e.g. ``direct_readout``, ``bath_reset``).
-    Asking such a role for a ref/optional mount is a Fast-Fail at the call site.
-    ``shape`` carries the context-free RoleDef shape into authoring validation;
-    callers never need to materialize a value tree to detect an incompatible role.
-    """
-
-    kind: Literal["module", "waveform"]
-    shape: Callable[[], CfgSectionSpec]
-    blank: BlankFactory
-    ref: RefFactory | None = None
+    from zcu_tools.gui.cfg import ReferenceValue
 
 
 def _from_role(role: RoleDef) -> RoleFactorySpec:
