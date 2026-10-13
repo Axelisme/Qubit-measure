@@ -29,6 +29,12 @@ class FitResultArguments(TypedDict):
     image: NotRequired[bool]
 
 
+class FitExportArguments(TypedDict):
+    """Optional GUI-local output path; omission uses the GUI project default."""
+
+    savepath: NotRequired[str]
+
+
 class FitArguments(TypedDict):
     """Optional overrides of current GUI inputs; omitted keys retain GUI values.
 
@@ -141,6 +147,17 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
     def fit_result(arguments: FitResultArguments) -> ToolReply:
         return _read_fit_result(bridge, arguments)
 
+    def export_params(arguments: FitExportArguments) -> ToolReply:
+        receipt = call_gui(
+            bridge, GuiRpcCall("fit.export_params", dict(arguments), 31.0)
+        )
+        return ToolReply(
+            {
+                name: receipt.data[name]
+                for name in ("savepath", "params", "alignment_from")
+            }
+        )
+
     # Reuse native declarations, changing only the agent patch/clear interface.
     properties: dict[str, object] = {
         spec.name: schema_property(spec)
@@ -180,6 +197,21 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
             "inputSchema": {
                 "type": "object",
                 "properties": {"image": {"type": "boolean", "default": True}},
+            },
+        },
+        bridge.config.tool_prefix + "fit_export_params": {
+            "handler": export_params,
+            "description": (
+                "Merge the accepted fit into params.json. Optional savepath is a "
+                "GUI-local destination; omission uses the GUI project default. "
+                "Return the GUI's successful path, full-precision EJ/EC/EL GHz "
+                "and actual calibration source. Stale fits are refused by GUI "
+                "with fit_stale. Native readiness, control and I/O failures "
+                "propagate without retry, fallback or rollback."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"savepath": {"type": "string"}},
             },
         },
         bridge.config.tool_prefix + "database_info": {
