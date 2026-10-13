@@ -7,14 +7,13 @@ from copy import deepcopy
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QPushButton
 from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
-from tests.gui.app.fluxdep._window import editor, spectra_list
+from tests.gui.app.fluxdep._window import editor, picker_button, spectra_list
 
 
 @pytest.fixture
@@ -52,12 +51,7 @@ def test_agent_follows_named_draft_and_remote_user_can_switch_display(
         second.session.ensure_input_open()
         displayed = editor(view)
         assert isinstance(displayed, LinePickerWidget)
-        finish = next(
-            button
-            for button in displayed.findChildren(QPushButton)
-            if button.text() == "Finish"
-        )
-        assert not finish.isEnabled()
+        assert not picker_button(displayed, "finish").isEnabled()
     finally:
         ctrl.control_identity.reclaim_local()
         view.close()
@@ -141,10 +135,7 @@ def test_production_twotone_preview_and_finish_advance_stage(
     assert view is not None
     expected = analyze_twotone_pick(context.plugin.inputs, context.session.snapshot())
     np.testing.assert_array_equal(view.result.dev_values, expected.dev_values)
-    finish = next(
-        item for item in widget.findChildren(QPushButton) if item.text() == "Finish"
-    )
-    finish.click()
+    picker_button(widget, "finish").click()
     assert ctrl.state.spectrums[name].points_completed
     assert ctrl.interactive.current_twotone_pick() is None
     assert window.findChild(ResultPreviewWidget) is not None
@@ -175,12 +166,7 @@ def test_production_background_delivery_and_gui_finish_publish_same_session(
     widget = window.findChild(LinePickerWidget)
     assert widget is not None
     assert widget.get_result() == (0.5, 2.0)
-    finish = next(
-        button
-        for button in widget.findChildren(QPushButton)
-        if button.text() == "Finish"
-    )
-    finish.click()
+    picker_button(widget, "finish").click()
     assert ctrl.state.spectrums[name].aligned
     assert ctrl.state.spectrums[name].flux_period == 3.0
     assert ctrl.interactive.current_line_pick() is None

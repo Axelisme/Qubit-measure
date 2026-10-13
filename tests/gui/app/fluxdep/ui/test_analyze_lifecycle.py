@@ -33,7 +33,9 @@ def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
 
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context = ctrl.interactive.begin_line_pick("a")
-        assert current_page(window) == "spectra"
+        # Agent work updates the Spectra page; the user stays on Fit.
+        assert current_page(window) == "fit"
+        assert panel.current_tab == "search"
         picker = editor(window)
         assert isinstance(picker, LinePickerWidget)
         active = ctrl.interactive.inspect()
@@ -50,7 +52,7 @@ def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
         assert current_page(window) == "fit"
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context.plugin.execute_command(context.session, "swap_lines", {})
-        assert current_page(window) == "spectra"
+        assert current_page(window) == "fit"
         shown = editor(window)
         assert isinstance(shown, LinePickerWidget)
         assert shown.get_result() == (
@@ -81,9 +83,11 @@ def test_agent_selection_updates_reuse_filter_view_and_undo(qapp, cross_controll
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context = ctrl.interactive.begin_cross_selection()
+        # The agent's Filter waits on the Fit page until the user enters it.
+        assert current_page(window) == "spectra"
+        show_page(window, "fit")
         panel = fit_panel(window)
         assert panel is not None
-        assert current_page(window) == "fit"
         assert panel.current_tab == "filter"
         selector = panel.findChild(SelectorWidget)
         assert selector is not None

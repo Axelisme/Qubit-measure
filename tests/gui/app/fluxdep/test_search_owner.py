@@ -375,14 +375,16 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind=origin)):
             token = ctrl.search.start()
-        panel = fit_panel(window)
+        # Neither origin moves the user's page; the agent's pending search
+        # waits on the Fit page for the next entry.
+        assert current_page(window) == original
         if origin == "agent":
+            show_page(window, "fit")
+            panel = fit_panel(window)
             assert panel is not None
-            assert current_page(window) == "fit"
             assert panel.current_tab == "search"
         else:
             assert window.findChild(AnalyzePanelWidget) is None
-            assert current_page(window) == original
         assert ctrl.interactive.inspect() is None
 
         ctrl.set_active_spectrum("b")

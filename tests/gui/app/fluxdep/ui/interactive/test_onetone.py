@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from qtpy.QtWidgets import QPushButton, QSlider
+from qtpy.QtWidgets import QSlider
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+
+from tests.gui.app.fluxdep._window import (
+    background_cmaps,
+    column_tops,
+    picker_button,
+    unlabelled_inputs,
+)
 
 
 @pytest.fixture
@@ -31,8 +38,7 @@ def test_controls_command_and_undo_share_committed_points(widget):
     context.plugin.execute_command(context.session, "set_threshold", {"threshold": 5.0})
     assert slider.value() == 500
     assert view.get_result()[0].size == 0
-    undo = next(b for b in view.findChildren(QPushButton) if b.text() == "Undo")
-    undo.click()
+    picker_button(view, "undo").click()
     assert context.session.snapshot() == low
     assert slider.value() == 10
     np.testing.assert_array_equal(view.get_result()[0], low_points[0])
@@ -42,7 +48,7 @@ def test_finish_request_rejected_after_terminal_input(widget, onetone_controller
     view, context = widget
     fired: list[bool] = []
     view.finished.connect(lambda: fired.append(True))
-    finish = next(b for b in view.findChildren(QPushButton) if b.text() == "Finish")
+    finish = picker_button(view, "finish")
     finish.click()
     assert fired == [True]
     committed = context.session.snapshot()
@@ -65,10 +71,7 @@ def test_detach_remount_retains_domain_and_undo(widget, onetone_controller, qapp
     replacement = OneToneWidget(context)
     try:
         assert replacement.findChildren(QSlider)[0].value() == 10
-        undo = next(
-            b for b in replacement.findChildren(QPushButton) if b.text() == "Undo"
-        )
-        undo.click()
+        picker_button(replacement, "undo").click()
         assert context.session.snapshot() == seed
     finally:
         replacement.teardown()
@@ -86,8 +89,7 @@ def test_main_window_finish_publishes_and_advances_to_preview(qapp, onetone_cont
             context.session, "set_threshold", {"threshold": 0.1}
         )
         expected = view.get_result()
-        finish = next(b for b in view.findChildren(QPushButton) if b.text() == "Finish")
-        finish.click()
+        picker_button(view, "finish").click()
         entry = onetone_controller.state.spectrums["one"]
         assert entry.points_completed
         np.testing.assert_array_equal(entry.points["dev_values"], np.sort(expected[0]))
@@ -97,3 +99,16 @@ def test_main_window_finish_publishes_and_advances_to_preview(qapp, onetone_cont
         window.close()
         window.deleteLater()
         qapp.processEvents()
+
+
+def test_control_column_runs_settings_edits_status_then_finish(widget):
+    view, _context = widget
+    view.resize(1000, 700)
+    view.show()
+    tops = column_tops(view, ["threshold", "undo", "status", "finish"])
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
+    finish = picker_button(view, "finish")
+    assert finish.mapTo(view, finish.rect().bottomLeft()).y() > 0.9 * view.height()
+    assert view.canvas.x() < finish.mapTo(view, finish.rect().topLeft()).x()
+    assert unlabelled_inputs(view) == []
+    assert background_cmaps(view.figure) == ["gray_r"]

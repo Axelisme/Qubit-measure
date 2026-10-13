@@ -10,12 +10,11 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, QMetaObject, Qt, QTimer
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
-    QFileDialog,
     QGroupBox,
     QLabel,
     QLineEdit,
@@ -40,9 +39,12 @@ from tests.gui.app.fluxdep._search_result import (
     synthetic_search_input,
 )
 from tests.gui.app.fluxdep._window import (
+    choose_file,
     command,
     current_page,
     fit_panel,
+    picker_button,
+    preview_button,
     show_page,
     spectra_list,
 )
@@ -112,8 +114,8 @@ def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window)
         "fluxdep.spectra.export",
     ):
         assert not command(view, name).isEnabled(), name
-    for text in ("Re-pick lines", "Re-select points"):
-        assert not button(view, text).isEnabled(), text
+    for action in ("realign", "sample"):
+        assert not preview_button(view, action).isEnabled(), action
     spectra = spectra_list(view)
     assert spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)
@@ -181,9 +183,12 @@ def test_remote_page_switch_keeps_agent_filter_session(window):
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     with ctrl.bus.origin(EventOrigin(kind="agent")):
         context = ctrl.interactive.begin_cross_selection()
-    assert current_page(view) == "fit"
+    # The agent's Filter waits on the Fit page; the viewer stays on Spectra.
+    assert current_page(view) == "spectra"
+    show_page(view, "fit")
     panel = fit_panel(view)
     assert panel is not None and panel.current_tab == "filter"
+    assert panel.findChild(SelectorWidget) is not None
     active = ctrl.interactive.inspect("selection")
     assert active is not None and active.context is context
     show_page(view, "spectra")
@@ -195,45 +200,6 @@ def test_remote_page_switch_keeps_agent_filter_session(window):
     assert panel.current_tab == "filter"
     assert panel.findChild(SelectorWidget) is not None
     assert ctrl.interactive.inspect("selection") == active
-
-
-def choose_file(path, activate, *, cancel=False):
-    """Accept or cancel the real Local file chooser."""
-    errors = []
-    seen = []
-
-    def respond():
-        chooser = QApplication.activeModalWidget()
-        try:
-            assert isinstance(chooser, QFileDialog)
-            seen.append(chooser.windowTitle())
-            chooser.selectFile(str(path))
-            QMetaObject.invokeMethod(
-                chooser,
-                "reject" if cancel else "accept",
-                Qt.ConnectionType.DirectConnection,
-            )
-        except (AssertionError, RuntimeError, TypeError) as exc:
-            errors.append(exc)
-            if isinstance(chooser, QDialog):
-                chooser.reject()
-
-    def abort():
-        chooser = QApplication.activeModalWidget()
-        errors.append(AssertionError("Static chooser did not finish within 2 seconds"))
-        if isinstance(chooser, QDialog):
-            chooser.reject()
-
-    timeout = QTimer()
-    timeout.setSingleShot(True)
-    timeout.timeout.connect(abort)
-    timeout.start(2000)
-    QTimer.singleShot(0, respond)
-    activate()
-    timeout.stop()
-    if errors:
-        raise errors[0]
-    assert seen, "The action must present a real modal file chooser"
 
 
 @pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
@@ -341,7 +307,7 @@ def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(win
         context = ctrl.interactive.begin_line_pick("a")
     picker = view.findChild(LinePickerWidget)
     assert picker is not None
-    assert not button(picker, "Swap Lines").isEnabled()
+    assert not picker_button(picker, "swap").isEnabled()
     assert picker.canvas.isEnabled()
     before = context.session.snapshot()
     picker.canvas.draw()
@@ -356,7 +322,7 @@ def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(win
         picker.canvas.callbacks.process(kind, event)
     assert context.session.snapshot() == before
     indicator(view).click()
-    button(picker, "Swap Lines").click()
+    picker_button(picker, "swap").click()
     assert context.session.snapshot().flux_half == before.flux_int
 
 

@@ -24,17 +24,23 @@ from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.project import ProjectInfo
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
 )
 from tests.gui.app.fluxdep._window import (
+    choose_file,
     command,
     current_page,
     editor,
     fit_panel,
+    has_picker_control,
     list_labels,
     pages,
+    picker_button,
+    preview_actions,
+    preview_button,
     project_label,
     show_page,
     spectra_list,
@@ -207,49 +213,171 @@ def test_selected_shows_result_preview(window, spectrum_hdf5):
     assert isinstance(editor(window), ResultPreviewWidget)
 
 
-def test_repick_lines_reopens_line_picker(window, spectrum_hdf5):
+def _sampled_onetone(window, spectrum_hdf5) -> str:
+    filepath, *_ = spectrum_hdf5
+    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    window._ctrl.set_active_spectrum(name)
+    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    return name
+
+
+def test_unaligned_preview_offers_only_align(window, spectrum_hdf5):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    filepath, *_ = spectrum_hdf5
+    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
+    # A display change alone shows the published spectrum without input.
+    window._ctrl.set_active_spectrum(name)
+    preview = editor(window)
+    assert isinstance(preview, ResultPreviewWidget)
+    assert preview_actions(preview) == {"align"}
+    preview_button(preview, "align").click()
+    assert isinstance(editor(window), LinePickerWidget)
+    assert window._ctrl.interactive.current_line_pick(name) is not None
+
+
+def test_aligned_preview_offers_realign_and_sample(window, spectrum_hdf5):
+    _sampled_onetone(window, spectrum_hdf5)
+    assert preview_actions(editor(window)) == {"realign", "sample"}
+
+
+def test_preview_realign_opens_a_draft_without_unpublishing(window, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
-    filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
-    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
-    from qtpy.QtWidgets import QPushButton
-
-    next(
-        b
-        for b in editor(window).findChildren(QPushButton)
-        if b.text() == "Re-pick lines"
-    ).click()
-    assert not window._ctrl.state.spectrums[name].aligned
-    assert isinstance(editor(window), LinePickerWidget)
+    name = _sampled_onetone(window, spectrum_hdf5)
+    preview_button(editor(window), "realign").click()
+    picker = editor(window)
+    assert isinstance(picker, LinePickerWidget)
+    entry = window._ctrl.state.spectrums[name]
+    assert entry.aligned and entry.points_completed and entry.point_count == 2
+    label = list_labels(window)[0]
+    assert "sampled" in label and "align draft" in label
+    # Re-aligning an aligned spectrum can still move on to sampling.
+    assert has_picker_control(picker, "sample")
 
 
-def test_reselect_points_reopens_selector(window, spectrum_hdf5):
+def test_preview_sample_opens_sampling_and_keeps_points_until_finish(
+    window, spectrum_hdf5
+):
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
-    filepath, *_ = spectrum_hdf5
-    name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    window._ctrl.set_active_spectrum(name)
-    window._ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
-    window._ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
-    from qtpy.QtWidgets import QPushButton
-
-    next(
-        b
-        for b in editor(window).findChildren(QPushButton)
-        if b.text() == "Re-select points"
-    ).click()
-    assert not window._ctrl.state.spectrums[name].points_completed
+    name = _sampled_onetone(window, spectrum_hdf5)
+    preview_button(editor(window), "sample").click()
     assert isinstance(editor(window), OneToneWidget)
+    entry = window._ctrl.state.spectrums[name]
+    assert entry.points_completed and entry.point_count == 2
+    assert "sample draft" in list_labels(window)[0]
+
+
+def test_gui_add_opens_line_picker_for_the_loaded_spectrum(qapp, spectrum_hdf5):
+    from qtpy.QtWidgets import QApplication, QDialogButtonBox, QPushButton
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+
+    ctrl = Controller(FluxDepState())
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        command(win, "fluxdep.spectrum.add").click()
+        dialog = QApplication.activeModalWidget()
+        assert dialog is not None
+        browse = next(
+            b for b in dialog.findChildren(QPushButton) if b.text() == "Browse…"
+        )
+        choose_file(spectrum_hdf5[0], browse.click)
+        box = dialog.findChild(QDialogButtonBox)
+        assert box is not None
+        ok = box.button(QDialogButtonBox.StandardButton.Ok)
+        assert ok is not None and ok.isEnabled()
+        ok.click()
+        name = ctrl.state.active_spectrum
+        assert name is not None
+        picker = editor(win)
+        assert isinstance(picker, LinePickerWidget)
+        active = ctrl.interactive.inspect(name)
+        assert active is not None and active.kind == "line"
+        assert current_page(win) == "spectra"
+        # An unaligned spectrum has no sampling step to switch to yet.
+        assert not has_picker_control(picker, "sample")
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_realign_from_sample_draft_confirms_and_cancel_keeps_draft(
+    qapp, onetone_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
+
+    ctrl = onetone_controller
+    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
+    win = MainWindow(ctrl, dialog_presenter=dialogs)
+    try:
+        sampler = editor(win)
+        assert isinstance(sampler, OneToneWidget)
+        draft = ctrl.interactive.inspect("one")
+        assert draft is not None and draft.kind == "onetone"
+        draft.context.plugin.set_threshold.execute(draft.context.session, 0.1)
+
+        picker_button(sampler, "realign").click()
+        assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
+        assert ctrl.interactive.inspect("one") == draft
+        assert editor(win) is sampler
+        assert draft.context.session.snapshot().threshold == 0.1
+
+        picker_button(sampler, "realign").click()
+        assert len(dialogs.calls) == 2
+        assert isinstance(editor(win), LinePickerWidget)
+        replaced = ctrl.interactive.inspect("one")
+        assert replaced is not None and replaced.kind == "line"
+        assert ctrl.state.spectrums["one"].aligned
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_sample_from_align_draft_confirms_before_discarding(qapp, cross_controller):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+
+    ctrl = cross_controller
+    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
+    win = MainWindow(ctrl, dialog_presenter=dialogs)
+    try:
+        # Opening a stage with no other draft asks nothing.
+        preview_button(editor(win), "realign").click()
+        assert dialogs.calls == []
+        aligner = editor(win)
+        assert isinstance(aligner, LinePickerWidget)
+        draft = ctrl.interactive.inspect("a")
+        assert draft is not None and draft.kind == "line"
+
+        picker_button(aligner, "sample").click()
+        assert ctrl.interactive.inspect("a") == draft
+        assert editor(win) is aligner
+
+        picker_button(aligner, "sample").click()
+        assert [call.kind for call in dialogs.calls] == ["destructive_confirm"] * 2
+        assert isinstance(editor(win), FindPointsWidget)
+        replaced = ctrl.interactive.inspect("a")
+        assert replaced is not None and replaced.kind == "twotone"
+        assert ctrl.state.spectrums["a"].point_count == 3
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize("kind", ["OneTone", "TwoTone"])
 def test_empty_finish_advances_preview_and_reselect_can_finish_again(
     qapp, onetone_controller, twotone_controller, kind
 ):
-    from qtpy.QtWidgets import QPushButton
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
@@ -270,34 +398,26 @@ def test_empty_finish_advances_preview_and_reselect_can_finish_again(
                 context.plugin.set_threshold.execute(context.session, 5.0)
             else:
                 context.plugin.clear.execute(context.session, None)
-            next(
-                b for b in shown.findChildren(QPushButton) if b.text() == "Finish"
-            ).click()
+            picker_button(shown, "finish").click()
             entry = ctrl.state.spectrums[name]
             assert entry.points_completed and entry.point_count == 0
             preview = editor(win)
             assert isinstance(preview, ResultPreviewWidget)
             assert "sampled" in list_labels(win)[0]
             if attempt == 0:
-                next(
-                    b
-                    for b in preview.findChildren(QPushButton)
-                    if b.text() == "Re-select points"
-                ).click()
-                assert not ctrl.state.spectrums[name].points_completed
+                preview_button(preview, "sample").click()
+                assert ctrl.state.spectrums[name].points_completed
+                assert "sample draft" in list_labels(win)[0]
                 assert not isinstance(editor(win), ResultPreviewWidget)
         preview = editor(win)
         assert isinstance(preview, ResultPreviewWidget)
-        next(
-            b for b in preview.findChildren(QPushButton) if b.text() == "Re-pick lines"
-        ).click()
+        preview_button(preview, "realign").click()
         assert isinstance(editor(win), LinePickerWidget)
-        assert not ctrl.state.spectrums[name].aligned
+        assert ctrl.state.spectrums[name].aligned
         assert ctrl.state.spectrums[name].points_completed
         label = list_labels(win)[0]
-        assert "sampled" not in label and "align draft" in label
-        shown = editor(win)
-        next(b for b in shown.findChildren(QPushButton) if b.text() == "Finish").click()
+        assert "sampled" in label and "align draft" in label
+        picker_button(editor(win), "finish").click()
         assert isinstance(editor(win), ResultPreviewWidget)
         assert ctrl.state.spectrums[name].point_count == 0
     finally:
@@ -307,7 +427,6 @@ def test_empty_finish_advances_preview_and_reselect_can_finish_again(
 
 
 def test_empty_preview_reselect_can_commit_nonempty_points(qapp, onetone_controller):
-    from qtpy.QtWidgets import QPushButton
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
     )
@@ -318,17 +437,11 @@ def test_empty_preview_reselect_can_commit_nonempty_points(qapp, onetone_control
     try:
         preview = editor(win)
         assert isinstance(preview, ResultPreviewWidget)
-        next(
-            b
-            for b in preview.findChildren(QPushButton)
-            if b.text() == "Re-select points"
-        ).click()
+        preview_button(preview, "sample").click()
         context = ctrl.interactive.current_onetone_pick()
         assert context is not None
         context.plugin.set_threshold.execute(context.session, 0.1)
-        next(
-            b for b in editor(win).findChildren(QPushButton) if b.text() == "Finish"
-        ).click()
+        picker_button(editor(win), "finish").click()
         assert isinstance(editor(win), ResultPreviewWidget)
         assert ctrl.state.spectrums["one"].points_completed
         assert ctrl.state.spectrums["one"].point_count == 2
@@ -414,15 +527,57 @@ def test_spectrum_work_does_not_replace_the_fit_page(
         qapp.processEvents()
 
 
-def test_agent_display_change_brings_spectra_page_back(qapp, cross_controller):
+def test_agent_display_change_keeps_the_users_page(qapp, cross_controller):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
     ctrl = cross_controller
     win = MainWindow(ctrl)
     try:
         show_page(win, "fit")
+        before = editor(win)
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             ctrl.set_active_spectrum("b")
-        assert current_page(win) == "spectra"
+        assert current_page(win) == "fit"
+        shown = editor(win)
+        assert isinstance(shown, ResultPreviewWidget) and shown is not before
+        assert ctrl.state.active_spectrum == "b"
     finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_agent_spectrum_work_updates_spectra_page_while_user_stays_on_fit(
+    qapp, cross_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+
+    ctrl = cross_controller
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        show_page(win, "fit")
+        panel = fit_panel(win)
+        assert panel is not None
+        panel.show_tab("search")
+        ctrl.control_identity.connect("agent-link", "agent", "owner")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            context = ctrl.interactive.begin_line_pick("b")
+            context.plugin.execute_command(context.session, "swap_lines", {})
+        assert current_page(win) == "fit"
+        assert panel.current_tab == "search"
+        assert ctrl.state.active_spectrum == "b"
+        shown = editor(win)
+        assert isinstance(shown, LinePickerWidget)
+        assert shown.get_result() == (
+            context.session.snapshot().flux_half,
+            context.session.snapshot().flux_int,
+        )
+        assert "align draft" in list_labels(win)[2]
+    finally:
+        ctrl.control_identity.reclaim_local()
         win.close()
         win.deleteLater()
         qapp.processEvents()
