@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, library entries, `context.ml_edit` and writeback module proposals share Form entries
+**Last updated:** 2026-10-13, library entries, `context.ml_edit` and writeback module proposals share Form entries
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -162,7 +162,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   apply/edit的app-owned fact會讓本地與remote入口都觸發同一writeback重投影；
   centered Current → Proposed columns on a shared-background continuous-boundary
   panel (white rows with bottom dividers), and equal 56×26 Edit/Copy actions。
-  Scalar parameter 與 editable module/waveform items 使用 Edit；non-scalar parameter 的
+  Scalar parameter 與 editable module items 使用 Edit；non-scalar parameter 的
   current/proposed headings使用一致的bounded summary（例如`3 × 3 matrix`）。small
   proposed matrix另外顯示read-only matrix view，current value維持summary-only；Copy會把
   complete proposed JSON放入clipboard。其它arbitrary long values只顯示bounded summary，

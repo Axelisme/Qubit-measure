@@ -633,9 +633,7 @@ class WritebackWidget(QWidget):
         actual_path.setText(fact.actual_path)
         self._refresh_item_applied_presentation(item, checkbox)
 
-    def _refresh_cfg_item_preview(
-        self, item: ModuleWriteback, *, valid: bool
-    ) -> None:
+    def _refresh_cfg_item_preview(self, item: ModuleWriteback, *, valid: bool) -> None:
         # Incomplete edits belong to the attached model, not finished lowering.
         if not valid:
             current_label, proposed_label, actual_path, checkbox = self._row_widgets[

@@ -249,8 +249,42 @@ class WritebackDraft:
         """Current item projection, without any editor identity."""
         return tuple(entry.item for entry in self._entries)
 
+    def require_owner(
+        self, service: WritebackService, *, allow_closed: bool = False
+    ) -> None:
+        """Require the creating service and an active draft before owner operations.
+
+        A different service raises InvalidInputError. A closed draft raises
+        FailedPreconditionError unless allow_closed permits idempotent teardown.
+        This check has no side effects.
+        """
+        if self._service is not service:
+            raise InvalidInputError("unknown writeback draft")
+        if self._closed and not allow_closed:
+            raise FailedPreconditionError("writeback draft has been torn down")
+
+    def entries_for(self, service: WritebackService) -> tuple[_DraftEntry, ...]:
+        """Lend item/Form associations to the creating service while active.
+
+        The tuple fixes order; the service may edit the contained associations.
+        Frontends use items or WritebackService.get_item_form instead.
+        Foreign/closed access raises as for require_owner.
+        """
+        self.require_owner(service)
+        return tuple(self._entries)
+
+    def close_for(self, service: WritebackService) -> None:
+        """Mark this draft closed for its creating service, idempotently.
+
+        Foreign access raises InvalidInputError. Closing releases no resources;
+        all later active owner operations raise FailedPreconditionError.
+        """
+        self.require_owner(service, allow_closed=True)
+        self._closed = True
+
     @property
     def is_active(self) -> bool:
+        """Whether this draft has not been torn down."""
         return not self._closed
 
     def preview(self) -> list[WritebackItem]:
@@ -287,7 +321,7 @@ class WritebackDraft:
 
 
 def _entries_to_apply(
-    entries: list[_DraftEntry], item_ids: tuple[str, ...] | None
+    entries: Sequence[_DraftEntry], item_ids: tuple[str, ...] | None
 ) -> list[_DraftEntry]:
     """Resolve explicit IDs independently of the GUI checkbox selection."""
     if item_ids is None:
@@ -591,7 +625,7 @@ class WritebackService:
         stderr, else by {}; no source, kind, run_id or time is written there.
         """
         self._require_draft(draft)
-        selected_entries = _entries_to_apply(draft._entries, item_ids)
+        selected_entries = _entries_to_apply(draft.entries_for(self), item_ids)
         written: dict[str, list[str]] = {
             "parameter": [],
             "ml_modules": [],
@@ -726,7 +760,7 @@ class WritebackService:
         Item Forms hold no session or resource, so closing releases nothing.
         """
         self._require_draft(draft, allow_closed=True)
-        draft._closed = True
+        draft.close_for(self)
 
     # Short behavior-oriented aliases for callers that already hold the opaque
     # draft. They keep the public surface independent of stage/subtab vocabulary.
@@ -745,10 +779,7 @@ class WritebackService:
     def _require_draft(
         self, draft: WritebackDraft, *, allow_closed: bool = False
     ) -> None:
-        if not isinstance(draft, WritebackDraft) or draft._service is not self:
-            raise InvalidInputError("unknown writeback draft")
-        if draft._closed and not allow_closed:
-            raise FailedPreconditionError("writeback draft has been torn down")
+        draft.require_owner(self, allow_closed=allow_closed)
 
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
@@ -772,7 +803,7 @@ class WritebackService:
         return f"{prefix}-{count + 1}"
 
     def _find_draft_entry(self, draft: WritebackDraft, session_id: str) -> _DraftEntry:
-        for entry in draft._entries:
+        for entry in draft.entries_for(self):
             if entry.item.session_id == session_id:
                 return entry
         raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
@@ -883,13 +914,15 @@ class WritebackService:
         self._require_draft(draft)
         return {
             e.item.session_id: (e.current_summary, e.proposed_summary)
-            for e in draft._entries
+            for e in draft.entries_for(self)
         }
 
     def get_all_applied(self, draft: WritebackDraft) -> dict[str, bool]:
         """Return the draft-owned applied state for presentation."""
         self._require_draft(draft)
-        return {entry.item.session_id: entry.applied for entry in draft._entries}
+        return {
+            entry.item.session_id: entry.applied for entry in draft.entries_for(self)
+        }
 
     @staticmethod
     def _values_equal(left: Any, right: Any) -> bool:

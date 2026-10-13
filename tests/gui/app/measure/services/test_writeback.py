@@ -506,4 +506,3 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
     assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
-

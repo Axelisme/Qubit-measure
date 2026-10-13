@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-14，library 與 writeback module edits 共用 Form 路徑陣列，editor.* 退休
+**Last updated:** 2026-10-13，library 與 writeback module edits 共用 Form 路徑陣列，editor.* 退休
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,

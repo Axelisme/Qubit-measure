@@ -1,7 +1,6 @@
 """Entry selection admission at real application, view and wire seams."""
 
 from collections.abc import Iterator
-from typing import NoReturn
 
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
@@ -9,8 +8,8 @@ from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.services.tab_cfg import TabCfgResources
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResources, TabFormSources
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.services.writeback import WritebackService
 from zcu_tools.gui.app.measure.services.writeback_control import WritebackControlFacet
@@ -18,6 +17,7 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -37,10 +37,6 @@ def entry_resource(application: PointApplication) -> ResultEntry:
         result_root=info.result_path.parent,
         database_root=info.database_path.parent,
     )
-
-
-def unused_resolution(_parameters: ParameterContext | None) -> NoReturn:
-    raise AssertionError("Writeback admission must not assemble Run cfg")
 
 
 @pytest.mark.parametrize("command", ["new", "open"])
@@ -141,11 +137,7 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     captured = control.read_context()
     bus = BaseEventBus()
     service = WritebackService(control, arb_names=lambda: ())
-    guard = GuardService(
-        application.state,
-        captured_parameters=lambda aliases: control.read_context(aliases=aliases),
-        cfg_resolution=unused_resolution,
-    )
+    guard = GuardService(application.state)
     facet = WritebackControlFacet(
         state=application.state,
         guard=guard,
@@ -208,11 +200,7 @@ def parameter_writeback_pane(
     service = WritebackService(control, arb_names=lambda: ())
     facet = WritebackControlFacet(
         state=application.state,
-        guard=GuardService(
-            application.state,
-            captured_parameters=lambda aliases: control.read_context(aliases=aliases),
-            cfg_resolution=unused_resolution,
-        ),
+        guard=GuardService(application.state),
         writeback=service,
         resource_versions=application.state.version.snapshot,
         bus=bus,
@@ -234,10 +222,12 @@ def parameter_writeback_pane(
         application.state,
         registry,
         service,
-        TabCfgResources(
+        TabFormResources(
             mutation_allowed=lambda tab_id: not application.state.is_tab_busy(tab_id)
         ),
-        unused_resolution,
+        lambda aliases: TabFormSources(
+            FormEnv(parameters=control.read_context(aliases=aliases))
+        ),
         lambda aliases: control.read_context(aliases=aliases),
     )
     application.remote.tab_control = TabControlFacet(

@@ -841,7 +841,7 @@ class Controller(SessionControllerMixin):
         )
 
     # ------------------------------------------------------------------
-    # Writeback (TabService)
+    # Pane-qualified writeback commands
     # ------------------------------------------------------------------
 
     def get_writeback_item_form_for_pane(
