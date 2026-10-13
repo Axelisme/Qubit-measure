@@ -129,3 +129,47 @@ def test_edit_structural_error_rejects_the_entire_batch(form_rpc) -> None:
     assert reply["ok"] is False
     assert reply["error"]["code"] == "invalid_params", reply
     assert owner.input.data == initial
+
+
+def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
+    from tests.resources.entry.fakes import (
+        register_fakes,
+        registry_state,
+        restore_registry,
+    )
+
+    fixture, tab, rpc = form_rpc
+    before = registry_state()
+    try:
+        register_fakes()
+        context = fixture.ctrl.context_control
+        context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+        context.add_component("Q2", "fake/drive/a", {"rate": 20.0})
+        rows = context.get_alias_rows()
+        reset = rpc.call("tab.reset_cfg", {"tab_id": tab, "aliases": {"qubit": "Q2"}})
+        assert reset["ok"], reset
+        context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
+        query = {"tab_id": tab, "paths": ["$qubit.rate"], "module_refs": []}
+        frozen = rpc.call("tab.parameter_read", query)
+        assert frozen["ok"], frozen
+        assert frozen["result"] == {"values": {"$qubit.rate": 20.0}, "modules": {}}
+        assert rpc.call("tab.get_cfg", {"tab_id": tab})["result"] == reset["result"]
+        assert context.get_alias_rows() == rows
+        reset = rpc.call("tab.reset_cfg", {"tab_id": tab, "aliases": {"qubit": "Q1"}})
+        assert reset["ok"], reset
+        assert rpc.call("tab.parameter_read", query)["result"]["values"] == {
+            "$qubit.rate": 10.0
+        }
+    finally:
+        restore_registry(before)
+
+
+def test_run_aliases_rejected_before_view_or_operation_effects(form_rpc) -> None:
+    fixture, tab, rpc = form_rpc
+    selected = []
+    fixture.view.select_tab_pane.side_effect = lambda *args: selected.append(args)
+    reply = rpc.call("tab.run_start", {"tab_id": tab, "aliases": {"qubit": "Q2"}})
+    assert reply["ok"] is False
+    assert reply["error"]["reason"] == "run_aliases_not_supported", reply
+    assert selected == []
+    assert fixture.ctrl.tab_control.get_running_tab_id() is None
