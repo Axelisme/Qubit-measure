@@ -101,24 +101,32 @@ class CoherencePlanForm(FormModel):
     selections stay unfilled until supplied. Runtime owns every cfg and grid.
     """
 
-    flux_dev: str = Field(min_length=1, description="Host flux device name")
-    flux_unit: Literal["A", "V", "native"] = Field(
-        description="Explicit flux coordinate: YOKO A/V, Fake native"
+    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+        min_length=1, description="Host flux device name"
     )
-    fluxes: RangeInput = Field(description="Ordered absolute device setpoints")
-    pi_length_us: float = Field(
+    flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
+        Field(description="Explicit flux coordinate: YOKO A/V, Fake native")
+    )
+    fluxes: Annotated[RangeInput, Display(label="Fluxes")] = Field(
+        description="Ordered absolute device setpoints"
+    )
+    pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(
         gt=0,
-        description="Initial pi-duration estimate in us at the selected drive gain",
+        description="Initial pi-duration estimate in µs at the selected drive gain",
     )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
-    qub_pulse: ModuleInput = Field(description="Shared spectroscopy/Rabi/pi drive")
-    readout: ModuleInput = Field(description="Shared pulse-backed readout")
+    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+        description="Shared spectroscopy/Rabi/pi drive"
+    )
+    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+        description="Shared pulse-backed readout"
+    )
 
     measure_t1: bool = Field(default=True, description="Measure T1 at each flux point")
-    measure_t2ramsey: bool = Field(
+    measure_t2ramsey: Annotated[bool, Display(label="Measure Ramsey")] = Field(
         default=True, description="Measure Ramsey at each flux point"
     )
-    measure_t2echo: bool = Field(
+    measure_t2echo: Annotated[bool, Display(label="Measure Echo")] = Field(
         default=True, description="Measure Echo at each flux point"
     )
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
 
 from zcu_tools.cfg_model import ModuleSpec
-from zcu_tools.device import DeviceInfo
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
@@ -41,9 +41,16 @@ type FormValue = (
 class Display:
     """Presentation metadata carried by Annotated fields.
 
-    label overrides the field-name label. description explains the input; unit
+    label overrides the field title (a model section's default title is its
+    field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
     is its display unit and placeholder is an input hint. None leaves each
     item unspecified. collapsed is an initial fold hint only for model fields.
+    decimals is how many digits a float field shows after the decimal point,
+    rounded with trailing zeros trimmed; None shows the full value. It never
+    rounds input. A negative count raises ValueError here; input_schema raises
+    ValueError when the field is not a float. hidden=True keeps the field out
+    of the editor only: its value and defaults stay in the input, it is still
+    validated, and the input schema still lists it.
     Declaration order sets order; nested models set groups. No layout registry.
     """
 
@@ -52,6 +59,13 @@ class Display:
     unit: str | None = None
     placeholder: str | None = None
     collapsed: bool = False
+    decimals: int | None = None
+    hidden: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject a negative decimals count with ValueError."""
+        if self.decimals is not None and self.decimals < 0:
+            raise ValueError(f"Display decimals must be >= 0, got {self.decimals}")
 
 
 @dataclass(frozen=True)
@@ -61,7 +75,9 @@ class FormEnv:
     parameters is the host's fixed ParameterContext, or None for source-free
     input and arithmetic. Parameter expressions use native point/library paths.
     library is the fixed LibrarySnapshot, or None when unused. devices maps
-    host device names to captured native DeviceInfo, or is empty when unused.
+    host device names to captured detached BaseDeviceInfo snapshots, including
+    custom driver infos, or is empty when unused. Shared tools read only the
+    names; a form that needs driver-specific fields narrows with isinstance.
     The frozen shell does not make these borrowed objects deeply immutable.
     Tools never mutate, load, refresh or poll them. A used missing capability
     fails with its field path, rather than being treated as an unfilled value.
@@ -69,7 +85,7 @@ class FormEnv:
 
     parameters: ParameterContext | None = None
     library: LibrarySnapshot | None = None
-    devices: Mapping[str, DeviceInfo] = field(default_factory=dict)
+    devices: Mapping[str, BaseDeviceInfo] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -116,6 +132,22 @@ class FormChange:
     path: FormWritePath
     input: JsonValue
     value: FormValue
+
+
+class WriteRejected(Exception):
+    """A host's write entry point refuses one input batch it will not install.
+
+    message is the human-readable reason, written by the host, that the user
+    sees at the edited field. Raise it before writing any of the batch, so the
+    state is unchanged; for example for an unknown captured key. Values the
+    model would reject belong in state instead, where result reports them.
+    Core FormState never raises this type.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Store message as both the exception text and the message field."""
+        super().__init__(message)
+        self.message = message
 
 
 def field_error(path: FormPath, message: str) -> PydanticCustomError:
@@ -198,10 +230,24 @@ class FormModel(BaseModel):
 
         Include Expr alternatives for numeric, complex and string value leaves,
         the shared complex tag, Field constraints, Display metadata and current
-        choices enums. Structural selectors accept only ordinary typed tags,
+        choices enums. Display decimals and hidden appear only where declared.
+        A model field without a Display label is titled by its field name,
+        underscores as spaces and only the first letter capitalized. A model
+        reached without a union selector keeps its one-value structural tag
+        marked hidden: the tag field of a tagged-union branch that this form,
+        ModuleInput or RangeInput declares for the model or a base class.
+        Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. This
+        tags as ordinary JSON values, independent of current choices. Each
+        branch reachable through model fields is one concrete model; a named
+        nested union tagged on the same key expands into its members. An
+        untagged str-or-model field (str | Model, Model possibly a tagged
+        union) uses the JSON type as its structural selector: its string branch
+        is a plain library key without Expr, and its object branch is the
+        inline model. With a captured library, that string branch's
+        x-form-library-keys lists the library keys whose Spec is one of the
+        field's models; they are suggestions, not choices. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """
@@ -296,6 +342,11 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
+        A str-or-model field takes a string key as an ordinary leaf. Writing {}
+        there switches a key or unfilled value to the inline model's defaults
+        (a tagged inline union starts at its first branch and tag) and leaves
+        an inline object unchanged; the old key is never converted. Other
+        whole objects are model replacement and raise ValueError.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
@@ -425,17 +476,24 @@ class FormState[F: FormModel]:
         without a discriminator overlays the current selected branch, retaining
         its tag and unsaved defaults; an empty object makes no change. If neither
         saved nor current input selects a branch, drop that object instead of
-        replacing the model section. Source failures retain their consuming
-        path; a changed restoration notifies once.
+        replacing the model section. A restored leaf whose captured source check
+        fails, such as a ref name absent from env.library or any ref without a
+        captured library, keeps the current input at that leaf (or stays unfilled
+        when current has none) and its leaf path is returned with the other
+        dropped paths. Source failures that no restored leaf causes, such as a
+        used static default or a model-wide error, raise PydanticCustomError
+        without installing. A changed restoration notifies once.
         """
         from ._json import copy_object
-        from ._sources import check_sources
+        from ._sources import drop_unmatched_sources
         from ._structure import restore
 
-        candidate, dropped = restore(self._model, self._data, copy_object(saved), env)
-        check_sources(self._model, candidate, env)
+        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
+        candidate, unmatched = drop_unmatched_sources(
+            self._model, restored, self._data, env
+        )
         self._install(candidate)
-        return dropped
+        return (*dropped, *unmatched)
 
 
 class LinRange(FormModel):

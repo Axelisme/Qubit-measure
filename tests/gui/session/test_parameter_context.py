@@ -587,7 +587,8 @@ def test_alias_projection_is_fixed_and_ignores_consumer_kind_constraints(
         ("missing", "Absent", "Absent"),
     ]
     assert [row.error for row in projection[:3]] == [None, None, None]
-    assert "Alias is not bound" in str(projection[3].error)
+    assert "$unbound" in str(projection[3].error)
+    assert "not bound" in str(projection[3].error)
     assert projection[4].error is None
     assert context.aliases == rows
 

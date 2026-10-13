@@ -43,13 +43,13 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 
-from tests.resources.entry.fakes import registry_state, restore_registry
+from tests.resources.entry.fakes import Driver, registry_state, restore_registry
 
 from ._recording_transport import WindowTransport, WireRoute
 from ._reload_source import InjectedCatalog
 from ._start_fakes import StartHarness
 from ._synthetic import Component, Context, Plan, Tunables, inline_input
-from ._window_support import RpcRequest
+from ._window_support import QUBIT_KIND, RpcRequest, WindowSession
 
 
 @pytest.fixture
@@ -306,3 +306,22 @@ def paused_tuning(
     assert harness.gate.snapshot() and harness.handles.live_count() == 1
     assert harness.handles.known_outcome(token) is None
     return attempts
+
+
+@pytest.fixture
+def window_session(qapp: QApplication, tmp_path: Path) -> Iterator[WindowSession]:
+    """Build a Window over synthetic workflows; restore the component registry."""
+    before = registry_state()
+    component_registry.register(QUBIT_KIND, Driver)
+    installed = registry_state()
+    session = None
+    try:
+        session = WindowSession(tmp_path)
+        yield session
+    finally:
+        try:
+            if session is not None:
+                session.close(qapp)
+            assert registry_state() == installed, "window test polluted registries"
+        finally:
+            restore_registry(before)

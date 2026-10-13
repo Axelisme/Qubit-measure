@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
 from zcu_tools.cfg_model import ModuleCfgFactory
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.gui.form import (
+    Display,
     FormEnv,
     FormErrors,
     FormModel,
@@ -50,21 +51,39 @@ class MISTPlanForm(FormModel):
     threshold replaces these old native modules.
     """
 
-    flux_dev: str = Field(min_length=1, description="Connected flux driver name")
-    flux_unit: Literal["A", "V", "native"] = Field(description="Explicit setpoint unit")
-    fluxes: RangeInput = Field(description="Ordered absolute flux setpoints")
-    pi_length_us: float = Field(gt=0, description="Initial pi-duration estimate (us)")
-    qub_pulse: ModuleInput = Field(description="Shared spectroscopy/Rabi/pi drive")
-    readout: ModuleInput = Field(description="Shared pulse-backed readout")
-    reset: ModuleInput | None = Field(
+    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+        min_length=1, description="Connected flux driver name"
+    )
+    flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
+        Field(description="Explicit setpoint unit")
+    )
+    fluxes: Annotated[RangeInput, Display(label="Fluxes")] = Field(
+        description="Ordered absolute flux setpoints"
+    )
+    pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(
+        gt=0, description="Initial pi-duration estimate (µs)"
+    )
+    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+        description="Shared spectroscopy/Rabi/pi drive"
+    )
+    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+        description="Shared pulse-backed readout"
+    )
+    reset: Annotated[ModuleInput | None, Display(label="Reset")] = Field(
         default=None, description="Native reset selection or explicit omission"
     )
-    mist_pulse: ModuleInput = Field(
+    mist_pulse: Annotated[ModuleInput, Display(label="MIST pulse")] = Field(
         description="Required native MIST disturbance pulse"
     )
-    gain_start: float = Field(description="Fixed sweep start gain (a.u.)")
-    gain_stop: float = Field(description="Fixed sweep stop gain (a.u.)")
-    gain_points: int = Field(ge=2, description="Run-locked uniform gain sample count")
+    gain_start: Annotated[float, Display(label="Gain start", unit="a.u.")] = Field(
+        description="Fixed sweep start gain (a.u.)"
+    )
+    gain_stop: Annotated[float, Display(label="Gain stop", unit="a.u.")] = Field(
+        description="Fixed sweep stop gain (a.u.)"
+    )
+    gain_points: Annotated[int, Display(label="Gain points")] = Field(
+        ge=2, description="Run-locked uniform gain sample count"
+    )
 
     @model_validator(mode="after")
     def _gain_range(self) -> MISTPlanForm:
@@ -157,13 +176,17 @@ class MISTTunablesForm(FormModel):
     relax_factor scales it. The fixed gain grid is plan input, not a knob.
     """
 
-    cal: CalibrationTunablesForm = Field(default_factory=CalibrationTunablesForm)
-    reps: int = Field(default=100, ge=1, description="MIST averages")
-    rounds: int = Field(default=10, ge=1, description="MIST averaging rounds")
-    guess_us: float = Field(
-        default=20.0, gt=0, description="Calibration T1 timing estimate (us)"
+    cal: Annotated[CalibrationTunablesForm, Display(label="Calibration")] = Field(
+        default_factory=CalibrationTunablesForm
     )
-    relax_factor: float = Field(
+    reps: Annotated[int, Display(label="Averages")] = Field(
+        default=100, ge=1, description="MIST averages"
+    )
+    rounds: int = Field(default=10, ge=1, description="MIST averaging rounds")
+    guess_us: Annotated[float, Display(label="T1 guess", unit="µs")] = Field(
+        default=20.0, gt=0, description="Calibration T1 timing estimate (µs)"
+    )
+    relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=3.0, gt=0, description="MIST relax delay divided by guess"
     )
 

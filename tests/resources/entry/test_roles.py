@@ -441,6 +441,24 @@ def test_multiple_qubits_do_not_choose_default_focus(tmp_path: Path) -> None:
     assert not hasattr(partial, "undeclared_alias")
 
 
+def test_resolution_message_omits_focus_and_kind_that_do_not_apply(
+    tmp_path: Path,
+) -> None:
+    point = make_point(tmp_path)
+    with pytest.raises(RoleResolutionError) as unknown:
+        resolve_path(snapshot(point), "missing.rate", roles={})
+    partial = point.resolve(["driver"])
+    with pytest.raises(RoleResolutionError) as unbound:
+        _ = partial.driver
+    assert unknown.value.focus is None and unknown.value.required_kind is None
+    assert unbound.value.focus is None
+    for error, named in ((unknown, "missing"), (unbound, "fake/drive/*")):
+        message = str(error.value)
+        assert error.value.role in message and named in message
+        assert error.value.reason in message
+        assert "None" not in message and "focus=" not in message
+
+
 @pytest.mark.parametrize("shared_reference", [False, True])
 def test_same_name_references_require_one_distinct_candidate(
     tmp_path: Path, shared_reference: bool

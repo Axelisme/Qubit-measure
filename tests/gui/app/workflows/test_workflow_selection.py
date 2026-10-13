@@ -155,3 +155,23 @@ def test_switching_workflows_preserves_separate_parsed_drafts(
     saved = window.capture_persisted_state()
     assert saved.plan["batches"] == 7
     assert saved.knobs["value"] == {"expr": "3 * 4"}
+
+
+def test_switching_after_terminal_keeps_the_edited_start_tunables(
+    selections: WorkflowWindow[Context],
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+) -> None:
+    window = selections
+    _window, harness, _entry = attachment
+    window.select_workflow("alternate")
+    assert isinstance(window.start("finished"), int)
+    harness.complete_segment()
+    status = window.controller.status()
+    assert status is not None and status.lifecycle == "done"
+
+    window.tunables_panel.state.write(
+        {("value",): {"expr": "3 * 5"}}, window.tunables_panel.env
+    )
+    window.select_workflow("sample")
+    window.select_workflow("alternate")
+    assert window.tunables_panel.state.input.data["value"] == {"expr": "3 * 5"}

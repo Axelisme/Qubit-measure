@@ -1,12 +1,13 @@
 """Independent fixed-flux overnight plan/knobs forms; no calibration inputs."""
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
 from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.gui.form import (
+    Display,
     FormEnv,
     FormErrors,
     FormModel,
@@ -32,20 +33,28 @@ class OvernightPlanForm(FormModel):
     receives the historical host snapshot separately, not a live source.
     """
 
-    flux_dev: str = Field(min_length=1, description="Connected flux driver name")
-    flux_unit: Literal["A", "V", "native"] = Field(
-        description="Explicit flux unit, without conversion"
+    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+        min_length=1, description="Connected flux driver name"
+    )
+    flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
+        Field(description="Explicit flux unit, without conversion")
     )
     flux: float = Field(description="Fixed absolute setpoint in flux_unit")
-    outer_rounds: int = Field(ge=1, description="Finite number of T1/Echo pairs")
-    start_interval_s: float = Field(
-        gt=0, description="Actual pair start spacing in seconds"
+    outer_rounds: Annotated[int, Display(label="Outer rounds")] = Field(
+        ge=1, description="Finite number of T1/Echo pairs"
+    )
+    start_interval_s: Annotated[float, Display(label="Start interval", unit="s")] = (
+        Field(gt=0, description="Actual pair start spacing in seconds")
     )
     points: int = Field(
         default=51, ge=5, description="Uniform delay samples per member"
     )
-    qub_pulse: ModuleInput = Field(description="Fixed calibrated pi drive")
-    readout: ModuleInput = Field(description="Fixed pulse-backed readout")
+    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+        description="Fixed calibrated pi drive"
+    )
+    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+        description="Fixed pulse-backed readout"
+    )
 
     @classmethod
     def defaults(
@@ -138,24 +147,26 @@ class OvernightTunablesForm(FormModel):
     stay in FormInput, while this model and native conversion carry ordinary values.
     """
 
-    reps: int = Field(default=100, ge=1, description="Native acquisition averages")
+    reps: Annotated[int, Display(label="Averages")] = Field(
+        default=100, ge=1, description="Native acquisition averages"
+    )
     rounds: int = Field(default=2, ge=1, description="Native acquisition rounds")
-    t1_guess_us: float = Field(
+    t1_guess_us: Annotated[float, Display(label="T1 guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Fixed T1 timing guess, microseconds"
     )
-    t2_guess_us: float = Field(
+    t2_guess_us: Annotated[float, Display(label="Echo guess", unit="µs")] = Field(
         default=10.0, gt=0, description="Fixed Echo timing guess, microseconds"
     )
-    sweep_factor: float = Field(
+    sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=4.0, gt=0, description="Delay endpoint / timing guess"
     )
-    relax_factor: float = Field(
+    relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=5.0, gt=0, description="Relaxation delay / timing guess"
     )
-    max_rel_err: float = Field(
+    max_rel_err: Annotated[float, Display(label="Max relative error")] = Field(
         default=0.5, gt=0, description="Strict error/lifetime upper bound"
     )
-    max_fit_residual: float = Field(
+    max_fit_residual: Annotated[float, Display(label="Max fit residual")] = Field(
         default=0.1, gt=0, description="Strict normalized residual RMS upper bound"
     )
 

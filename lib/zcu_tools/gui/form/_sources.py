@@ -7,8 +7,8 @@ from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
-from ._json import default_json
-from ._structure import alternatives, choice_fields, selected
+from ._json import copy_object, default_json
+from ._structure import alternatives, choice_fields, revert_leaf, selected
 from .model import FormEnv, FormModel, FormPath, ModuleRef, field_error
 
 
@@ -133,3 +133,32 @@ def check_sources(
                 )
             )
     return options
+
+
+def drop_unmatched_sources(
+    model: type[BaseModel],
+    candidate: dict[str, JsonValue],
+    current: dict[str, JsonValue],
+    env: FormEnv,
+) -> tuple[dict[str, JsonValue], tuple[FormPath, ...]]:
+    """Revert restored leaves whose directed source check fails; return them.
+
+    candidate is a compatible restoration built over current, the input before
+    restoration. Each failing consuming path reverts its containing active leaf
+    to current's value, or removes it when current has none, and reports that
+    leaf path. Model-wide errors, failures outside every candidate leaf (such as
+    a used static default) and failures that persist after their leaf reverts
+    raise the PydanticCustomError. Neither argument is edited; no I/O occurs.
+    """
+    result = copy_object(candidate)
+    dropped: list[FormPath] = []
+    while True:
+        try:
+            check_sources(model, result, env)
+            return result, tuple(dropped)
+        except PydanticCustomError as exc:
+            leaf = revert_leaf(model, result, current, error_path(exc))
+            # Each leaf reverts at most once, so a repeated failure ends the loop.
+            if leaf is None or leaf in dropped:
+                raise
+            dropped.append(leaf)

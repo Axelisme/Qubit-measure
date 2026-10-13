@@ -9,7 +9,9 @@ from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormPreview, FormValue, FormWritePath
 
-type _Kind = Literal["text", "integer", "number", "complex", "boolean", "json", "model"]
+type _Kind = Literal[
+    "text", "integer", "number", "complex", "boolean", "json", "model", "key"
+]
 
 
 @dataclass(frozen=True)
@@ -20,11 +22,19 @@ class FieldView:
     label, description, unit and placeholder are display text; collapsed is
     the initial model-group fold hint. nullable permits null; active identifies
     an enabled nullable model. expression permits scalar Expr input. options
-    is current choice data, or None for free input (empty means no choices).
+    is current choice data, or None for free input (empty means no choices);
+    for kind=key it holds suggested library keys, never a restriction, or
+    None when the captured library offers none. decimals is the schema's
+    display digit count for a number, or None to show the full value. fixed
+    marks a one-value Literal (schema const, not nullable): its row shows the
+    value as read-only text, so options is None and expression is False.
     raw is current JSON or a schema static default when present is False.
     value is the ordinary preview leaf when has_value is True; otherwise None
-    is only a placeholder. children are current model rows, never container
-    keys/indexes. Only kind=model can have children.
+    is only a placeholder. key_or_inline marks a field the schema marks
+    x-form-key-or-inline (an untagged str-or-model field): its row offers Key
+    and Inline modes, kind is key for a string or unfilled value and model
+    for an object. children are current model rows,
+    never container keys/indexes. Only kind=model can have children.
     """
 
     path: FormWritePath
@@ -42,6 +52,9 @@ class FieldView:
     present: bool
     value: FormValue
     has_value: bool
+    key_or_inline: bool
+    decimals: int | None
+    fixed: bool
     children: tuple[FieldView, ...] = ()
 
 
@@ -94,6 +107,59 @@ def _options(schema: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
     if isinstance(values, list):
         return tuple(values)
     return (schema["const"],) if "const" in schema else None
+
+
+def _key_and_inline(
+    schema: dict[str, JsonValue], variants: tuple[dict[str, JsonValue], ...]
+) -> tuple[dict[str, JsonValue], dict[str, JsonValue]] | None:
+    """Split a field the schema marks x-form-key-or-inline into key and inline.
+
+    Core decides which fields are str-or-model; unmarked fields return None.
+    variants are the field's flattened alternatives: the string node is the
+    library key, the other non-null node the inline model. A marked field
+    without exactly one of each raises ValueError.
+    """
+    if schema.get("x-form-key-or-inline") is not True:
+        return None
+    keys = [node for node in variants if node.get("type") == "string"]
+    inline = [node for node in variants if node.get("type") not in ("string", "null")]
+    if len(keys) != 1 or len(inline) != 1:
+        raise ValueError(
+            "x-form-key-or-inline schema requires one key and one inline alternative"
+        )
+    return keys[0], inline[0]
+
+
+def _shown(node: dict[str, JsonValue]) -> bool:
+    """Whether a property schema is drawn, i.e. not marked hidden.
+
+    The schema marks Display(hidden=True) fields and one-value structural
+    tags outside a union; their input stays in state and is still validated.
+    """
+    return node.get("hidden") is not True
+
+
+def _decimals(metadata: dict[str, JsonValue]) -> int | None:
+    value = metadata.get("decimals")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _selector_title(schema: dict[str, JsonValue], key: str) -> str:
+    """Title of the tag field key in the first branch declaring one, else key.
+
+    A placeholder selector (no branch selected yet) is then labelled like
+    the selector of a selected branch.
+    """
+    for branch in _objects(schema.get("oneOf")):
+        node = _properties(branch).get(key)
+        if isinstance(node, dict) and (title := _text(node, "title")):
+            return title
+    return key
+
+
+def _library_keys(key: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
+    keys = key.get("x-form-library-keys")
+    return tuple(keys) if isinstance(keys, list) and keys else None
 
 
 def _kind(variants: tuple[dict[str, JsonValue], ...]) -> _Kind:
@@ -152,13 +218,24 @@ def _field(
     preview: FormPreview,
 ) -> FieldView:
     variants = _variants(schema)
-    direct = _direct(schema)
-    metadata = {**direct, **schema}
     raw = data.get(path[-1])
-    kind = _kind(variants)
-    options = _options(direct)
-    nullable = any(node.get("type") == "null" for node in variants)
     present = path[-1] in data
+    split = _key_and_inline(schema, variants)
+    if split is None:
+        direct = _direct(schema)
+        kind: _Kind = _kind(variants)
+        options = _options(direct)
+    else:
+        key, inline = split
+        # The JSON type is the structural selector: an object is inline.
+        inline_mode = isinstance(raw if present else key.get("default"), dict)
+        direct = inline if inline_mode else key
+        kind = "model" if inline_mode else "key"
+        options = _library_keys(key)
+    metadata = {**direct, **schema}
+    nullable = any(node.get("type") == "null" for node in variants)
+    # One legal value leaves nothing to choose or compute.
+    fixed = split is None and "const" in direct and not nullable
     field = FieldView(
         path=path,
         kind=kind,
@@ -169,36 +246,58 @@ def _field(
         collapsed=metadata.get("collapsed") is True,
         nullable=nullable,
         active=not nullable or (present and raw is not None),
-        expression=any("expr" in _properties(node) for node in variants),
-        options=options,
+        expression=not fixed and any("expr" in _properties(node) for node in variants),
+        options=None if fixed else options,
         raw=raw if present else direct.get("default"),
         present=present,
         value=preview.values.get(path),
         has_value=path in preview.values,
+        key_or_inline=split is not None,
+        decimals=_decimals(metadata),
+        fixed=fixed,
     )
     if kind != "model" or not field.active:
         return field
+    # Recursion through _children: each nested model level projects its rows.
+    return replace(field, children=_children(direct, path, raw, preview))
+
+
+def _children(
+    schema: dict[str, JsonValue],
+    path: FormWritePath,
+    raw: JsonValue,
+    preview: FormPreview,
+) -> tuple[FieldView, ...]:
+    """Project the drawn property rows of the active model value raw at path.
+
+    schema is the model's node. A tagged model shows its selected branch, its
+    selector a plain tag dropdown of the branch choices; an unknown or missing
+    tag shows only a placeholder selector, titled like the branch selectors.
+    Properties the schema marks hidden have no rows.
+    """
     nested = raw if isinstance(raw, dict) else {}
     selector = ""
     choices: tuple[JsonValue, ...] = ()
-    if "discriminator" in direct:
-        branch, selector, choices = _branch(direct, nested)
+    if "discriminator" in schema:
+        branch, selector, choices = _branch(schema, nested)
         properties = _properties(branch)
         # An unknown/missing tag exposes only its selector; do not guess a branch.
         if not properties:
-            selector_schema: dict[str, JsonValue] = {"type": "string"}
+            selector_schema: dict[str, JsonValue] = {
+                "type": "string",
+                "title": _selector_title(schema, selector),
+            }
             properties = {selector: selector_schema}
     else:
-        properties = _properties(direct)
-    children = tuple(
-        replace(child, options=choices, expression=False)
+        properties = _properties(schema)
+    return tuple(
+        replace(child, options=choices, expression=False, fixed=False)
         if child.path[-1] == selector
         else child
         for name, node in properties.items()
-        if isinstance(node, dict)
+        if isinstance(node, dict) and _shown(node)
         for child in (_field(node, (*path, name), nested, preview),)
     )
-    return replace(field, children=children)
 
 
 def project_fields(
@@ -208,12 +307,14 @@ def project_fields(
 
     Preserve declaration order and metadata. Inspect the discriminator only
     to choose its visible schema branch; unknown tags show a selector without
-    guessing children. Do not evaluate, validate, write or generate defaults.
+    guessing children. Fields the schema marks hidden have no rows; their
+    input and errors stay with the state. Do not evaluate, validate, write
+    or generate defaults.
     """
     return tuple(
         _field(node, (name,), data, preview)
         for name, node in _properties(schema).items()
-        if isinstance(node, dict)
+        if isinstance(node, dict) and _shown(node)
     )
 
 

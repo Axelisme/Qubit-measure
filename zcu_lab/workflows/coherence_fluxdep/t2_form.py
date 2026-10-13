@@ -1,7 +1,9 @@
 """Independent Echo/Ramsey lifetime knob forms for Coherence."""
 
+from typing import Annotated
+
 from pydantic import Field
-from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form import Display, FormModel
 
 from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables, T2RamseyTunables
 
@@ -15,15 +17,17 @@ class T2EchoTunablesForm(FormModel):
     is fixed science policy, not extra T1 error/RMS fields or tunable thresholds.
     """
 
-    reps: int = Field(default=100, ge=1, description="Echo averages")
-    rounds: int = Field(default=10, ge=1, description="Echo averaging rounds")
-    guess_us: float = Field(
-        default=20.0, gt=0, description="Initial lifetime estimate (us)"
+    reps: Annotated[int, Display(label="Averages")] = Field(
+        default=100, ge=1, description="Echo averages"
     )
-    sweep_factor: float = Field(
+    rounds: int = Field(default=10, ge=1, description="Echo averaging rounds")
+    guess_us: Annotated[float, Display(label="Initial guess", unit="µs")] = Field(
+        default=20.0, gt=0, description="Initial lifetime estimate (µs)"
+    )
+    sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=5.0, gt=0, description="Maximum delay divided by guess"
     )
-    relax_factor: float = Field(
+    relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=3.0, gt=0, description="Relax delay divided by initial guess"
     )
 
@@ -46,18 +50,22 @@ class T2RamseyTunablesForm(FormModel):
     No guessed detune or extra T1 fit-quality threshold is supplied.
     """
 
-    reps: int = Field(default=100, ge=1, description="Ramsey averages")
-    rounds: int = Field(default=10, ge=1, description="Ramsey averaging rounds")
-    guess_us: float = Field(
-        default=20.0, gt=0, description="Initial lifetime estimate (us)"
+    reps: Annotated[int, Display(label="Averages")] = Field(
+        default=100, ge=1, description="Ramsey averages"
     )
-    sweep_factor: float = Field(
+    rounds: int = Field(default=10, ge=1, description="Ramsey averaging rounds")
+    guess_us: Annotated[float, Display(label="Initial guess", unit="µs")] = Field(
+        default=20.0, gt=0, description="Initial lifetime estimate (µs)"
+    )
+    sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=5.0, gt=0, description="Maximum delay divided by guess"
     )
-    relax_factor: float = Field(
+    relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=3.0, gt=0, description="Relax delay divided by initial guess"
     )
-    detune_ratio: float = Field(default=0.05, description="Fringes per delay step")
+    detune_ratio: Annotated[
+        float, Display(label="Detune ratio", unit="fringes/step")
+    ] = Field(default=0.05, description="Fringes per delay step")
 
     def to_cfg(self) -> T2RamseyTunables:
         """Copy ordinary knobs to native Ramsey, retaining required detune ratio."""

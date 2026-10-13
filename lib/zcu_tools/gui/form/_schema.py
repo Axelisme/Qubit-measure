@@ -1,6 +1,7 @@
 """Partial input schema projection, retaining Pydantic's field constraints."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from typing import get_args, get_origin
 
@@ -11,8 +12,16 @@ from pydantic_core import PydanticOmit, core_schema
 
 from ._json import copy_object, default_json
 from ._sources import local_choices
-from ._structure import alternatives, discriminator, model_types, schema_branch_model
-from .model import Display, FormEnv, FormModel, FormPath
+from ._structure import (
+    alternatives,
+    branch_tags,
+    discriminator,
+    fixed_tag,
+    key_or_inline,
+    model_types,
+    schema_branch_model,
+)
+from .model import Display, FormEnv, FormModel, FormPath, ModuleInput, RangeInput
 
 
 class _InputJsonSchema(GenerateJsonSchema):
@@ -110,6 +119,23 @@ def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return node
 
 
+def _without_expr(node: dict[str, JsonValue]) -> None:
+    """Collapse an {anyOf: [ordinary, Expr]} node to its ordinary branch in place.
+
+    Outer metadata is kept. Other nodes, including ones with several ordinary
+    branches, are left unchanged.
+    """
+    branches = node.get("anyOf")
+    if not isinstance(branches, list):
+        return
+    ordinary = [branch for branch in branches if branch != _EXPR]
+    if len(ordinary) == 1 and isinstance(ordinary[0], dict):
+        metadata = {key: value for key, value in node.items() if key != "anyOf"}
+        node.clear()
+        node.update(ordinary[0])
+        node.update(metadata)
+
+
 def _resolve(
     node: dict[str, JsonValue], root: dict[str, JsonValue]
 ) -> dict[str, JsonValue]:
@@ -146,17 +172,68 @@ def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
         target["anyOf"] = variants
     for metadata in info.metadata:
         if isinstance(metadata, Display):
+            if metadata.decimals is not None and float not in alternatives(
+                info.annotation
+            ):
+                raise ValueError(
+                    f"Display decimals requires a float field, not {info.annotation!r}"
+                )
             for key, value in (
                 ("title", metadata.label),
                 ("description", metadata.description),
                 ("unit", metadata.unit),
                 ("placeholder", metadata.placeholder),
+                ("decimals", metadata.decimals),
             ):
                 if value is not None:
                     target[key] = value
             target["collapsed"] = metadata.collapsed
+            # Only declared: forms without hidden fields keep their schema.
+            if metadata.hidden:
+                target["hidden"] = True
     for child_info, child_target in _container_nodes(info, target):
         _field_metadata(child_info, child_target)
+
+
+def _label(info: FieldInfo) -> str | None:
+    """Return the field's Display label, or None when it declares none."""
+    return next(
+        (
+            metadata.label
+            for metadata in info.metadata
+            if isinstance(metadata, Display) and metadata.label is not None
+        ),
+        None,
+    )
+
+
+def _section_title(name: str) -> str:
+    """Title a model field by name: underscores as spaces, first letter upper.
+
+    For example ro_cfg becomes "Ro cfg" and module becomes "Module".
+    """
+    text = name.replace("_", " ")
+    return text[:1].upper() + text[1:]
+
+
+def _hide_fixed_tag(
+    model: type[BaseModel],
+    node: dict[str, JsonValue],
+    tags: Mapping[type[BaseModel], str],
+) -> None:
+    """Mark model's one-value structural tag hidden in its schema node.
+
+    The caller reached model without a union selector, so its tag can hold
+    only one value and the editor does not draw it. Models without such a tag
+    (see fixed_tag) are left unchanged.
+    """
+    key = fixed_tag(model, tags)
+    properties = node.get("properties")
+    if key is None or not isinstance(properties, dict):
+        return
+    selector = properties.get(key)
+    if isinstance(selector, dict):
+        selector["hidden"] = True
 
 
 def _non_null(target: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -201,42 +278,79 @@ def _container_nodes(
     return ()
 
 
+def _tagged_branches(
+    variants: list[JsonValue], tag_key: str, root: dict[str, JsonValue]
+) -> list[tuple[list[JsonValue], dict[str, JsonValue]]]:
+    """Inline emitted tagged branches as (intrinsic tags, model branch) pairs.
+
+    Pydantic emits a named union member (a ``type`` alias) that is tagged on
+    the same key as one branch carrying all of its members' tags. Replace that
+    branch with its own branches, recursively, so every branch is one concrete
+    model with its own tags, as the field annotation's flattened union is.
+    Raise ValueError for a non-object branch or one without emitted tags.
+    """
+    branches: list[tuple[list[JsonValue], dict[str, JsonValue]]] = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise ValueError("Tagged schema branch must be an object")
+        tags = variant.get("x-form-discriminator-values")
+        if not isinstance(tags, list):
+            raise ValueError("Tagged schema branch lacks intrinsic identities")
+        _inline_ref(variant, root)
+        nested = variant.get("oneOf")
+        marker = variant.get("discriminator")
+        if (
+            isinstance(nested, list)
+            and isinstance(marker, dict)
+            and marker.get("propertyName") == tag_key
+        ):
+            branches.extend(_tagged_branches(nested, tag_key, root))
+        else:
+            branches.append((tags, variant))
+    return branches
+
+
+def _inline_variant(target: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Return the model alternative of a str-or-model field schema.
+
+    Pydantic emits that alternative as a $ref, an object or a tagged oneOf; the
+    key alternative is a string. A schema without one is returned unchanged.
+    """
+    variants = target.get("anyOf")
+    return next(
+        (
+            variant
+            for variant in (variants if isinstance(variants, list) else ())
+            if isinstance(variant, dict)
+            and ("$ref" in variant or "properties" in variant or "oneOf" in variant)
+        ),
+        target,
+    )
+
+
 def _child_nodes(
     info: FieldInfo, target: dict[str, JsonValue], root: dict[str, JsonValue]
 ) -> tuple[tuple[type[BaseModel], dict[str, JsonValue]], ...]:
     _inline_ref(target, root)
-    node = _non_null(target)
+    node = (
+        _inline_variant(target) if key_or_inline(info.annotation) else _non_null(target)
+    )
     _inline_ref(node, root)
     models = model_types(info.annotation)
     variants = node.get("oneOf")
     if isinstance(variants, list):
         if (tag_key := discriminator(info)) is not None:
+            tagged = _tagged_branches(variants, tag_key, root)
+            node["oneOf"] = [variant for _, variant in tagged]
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
-            for variant in variants:
-                if not isinstance(variant, dict):
-                    raise ValueError("Tagged schema branch must be an object")
-                tags = variant.get("x-form-discriminator-values")
-                if not isinstance(tags, list):
-                    raise ValueError("Tagged schema branch lacks intrinsic identities")
-                _inline_ref(variant, root)
+            for tags, variant in tagged:
                 properties = variant.get("properties")
                 selector = (
                     properties.get(tag_key) if isinstance(properties, dict) else None
                 )
+                # Selectors determine shape before value evaluation.
                 if isinstance(selector, dict):
-                    branches = selector.get("anyOf")
-                    if isinstance(branches, list):
-                        ordinary = [branch for branch in branches if branch != _EXPR]
-                        # Selectors determine shape before value evaluation.
-                        if len(ordinary) == 1 and isinstance(ordinary[0], dict):
-                            metadata = {
-                                key: value
-                                for key, value in selector.items()
-                                if key != "anyOf"
-                            }
-                            selector.clear()
-                            selector.update(ordinary[0])
-                            selector.update(metadata)
+                    _without_expr(selector)
                 children.append((schema_branch_model(info, tags), variant))
             return tuple(children)
         return tuple(
@@ -272,11 +386,59 @@ def _enum(target: dict[str, JsonValue], options: tuple[JsonValue, ...]) -> None:
         target["not"] = {}
 
 
+@dataclass(frozen=True)
+class _Projection:
+    """Inputs shared by one input_schema call.
+
+    root is the partial schema being decorated in place. env is the caller's
+    environment. library_specs holds each captured library key with its Spec, read
+    once per call, or is None when env has no captured library. branch_tags maps
+    each tagged-union branch model of this form, ModuleInput and RangeInput to
+    its tag key (see branch_tags).
+    """
+
+    root: dict[str, JsonValue]
+    env: FormEnv
+    library_specs: tuple[tuple[str, BaseModel], ...] | None
+    branch_tags: Mapping[type[BaseModel], str]
+
+
+def _library_specs(env: FormEnv) -> tuple[tuple[str, BaseModel], ...] | None:
+    library = env.library
+    if library is None:
+        return None
+    return (
+        *((key, library.module_spec(key)) for key in library.module_keys()),
+        *((key, library.waveform_spec(key)) for key in library.waveform_keys()),
+    )
+
+
+def _key_branch(
+    info: FieldInfo, target: dict[str, JsonValue], projection: _Projection
+) -> None:
+    """Make a str-or-model field's string branch a plain library key.
+
+    The JSON type selects key or inline, so the key has no Expr envelope: an
+    object selects the inline model. With a captured library, the branch's
+    x-form-library-keys lists the keys whose Spec is one of the field's
+    models, as suggestions; any string remains acceptable input.
+    """
+    variants = target.get("anyOf")
+    models = model_types(info.annotation)
+    for variant in variants if isinstance(variants, list) else ():
+        if isinstance(variant, dict):
+            _without_expr(variant)
+            specs = projection.library_specs
+            if variant.get("type") == "string" and specs is not None:
+                variant["x-form-library-keys"] = [
+                    key for key, spec in specs if isinstance(spec, models)
+                ]
+
+
 def _decorate(
     model: type[BaseModel],
     node: dict[str, JsonValue],
-    root: dict[str, JsonValue],
-    env: FormEnv,
+    projection: _Projection,
     seen: set[type[BaseModel]],
     inherited: Mapping[FormPath, tuple[JsonValue, ...]],
 ) -> None:
@@ -284,8 +446,9 @@ def _decorate(
         return
     # Track only this ancestry; reused sibling occurrences have distinct choices.
     seen = seen | {model}
+    root = projection.root
     _inline_ref(node, root)
-    options = {**inherited, **local_choices(model, env)}
+    options = {**inherited, **local_choices(model, projection.env)}
     props = node.get("properties")
     if not isinstance(props, dict):
         return
@@ -295,13 +458,25 @@ def _decorate(
             continue
         _inline_ref(target, root)
         _field_metadata(info, target)
+        models = model_types(info.annotation)
+        if models and _label(info) is None:
+            # The inlined definition carries its class name as title.
+            target["title"] = _section_title(name)
+        if key_or_inline(info.annotation):
+            # Core owns the str-or-model rule; views read this marker only.
+            target["x-form-key-or-inline"] = True
+            _key_branch(info, target, projection)
         child_options = {
             path[1:]: values
             for path, values in options.items()
             if len(path) > 1 and path[0] == name
         }
+        # Without a union selector, a branch model's tag has only one value.
+        fixed = bool(models) and discriminator(info) is None
         for child, variant in _child_nodes(info, target, root):
-            _decorate(child, variant, root, env, seen, child_options)
+            _decorate(child, variant, projection, seen, child_options)
+            if fixed:
+                _hide_fixed_tag(child, variant, projection.branch_tags)
         values = options.get((name,))
         if values is not None:
             _apply_choices(target, values)
@@ -311,5 +486,7 @@ def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     """Project a Pydantic schema to partial tagged JSON input for this environment."""
     raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
     root = copy_object(_partial(raw))
-    _decorate(model, root, root, env, set(), {})
+    tags = branch_tags((model, ModuleInput, RangeInput))
+    projection = _Projection(root, env, _library_specs(env), tags)
+    _decorate(model, root, projection, set(), {})
     return root
