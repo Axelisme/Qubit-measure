@@ -135,6 +135,58 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert values["freq"] == 100.0
 
 
+def test_use_library_writes_one_declared_option_value(tmp_path: Path) -> None:
+    with recipe_client(tmp_path, FormGui()) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = len(client.transport.sent)
+        tab.use_library("pulse", "Q1.pulses.pi")
+        assert client.transport.sent[before:] == [
+            (
+                "tab.edit_cfg",
+                {
+                    "tab_id": "t",
+                    "edits": [
+                        {
+                            "path": ["pulse"],
+                            "value": {"kind": "ref", "name": "Q1.pulses.pi"},
+                        }
+                    ],
+                },
+            )
+        ]
+
+
+@pytest.mark.parametrize("captured", [False, True])
+def test_unoffered_library_key_reports_available_options_without_writing(
+    tmp_path: Path, captured: bool
+) -> None:
+    gui = FormGui()
+    if not captured:
+        gui.owner = TabFormResource(
+            Form(AuthorCfg, {}),
+            capture=lambda aliases: TabFormSources(FormEnv()),
+            mutation_allowed=lambda: True,
+        )
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        assert not tab.read_field("pulse").locked
+        before = gui.owner.input.data
+        sent = list(client.transport.sent)
+        error: Exception | None = None
+        try:
+            tab.use_library("pulse", "Q1.pulses.absent")
+        except Exception as failure:
+            error = failure
+        assert isinstance(error, GuiRpcError), error
+        assert error.reason == "invalid_cfg"
+        assert "pulse" in str(error)
+        assert "Available keys" in str(error)
+        if captured:
+            assert "Q1.pulses.pi" in str(error)
+        assert client.transport.sent == sent
+        assert gui.owner.input.data == before
+
+
 def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -> None:
     gui = FormGui()
     library = gui.owner.env.library
