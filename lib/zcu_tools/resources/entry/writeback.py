@@ -17,6 +17,7 @@ from zcu_tools.cfg_model import (
     module_spec_from_raw,
     waveform_spec_from_raw,
 )
+from zcu_tools.format_version import YamlMap
 
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -38,16 +39,18 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ParameterWriteback:
-    """One concrete dotted point path, working-unit JSON value and uncertainty.
+    """One concrete dotted point path, working-unit JSON value and caller metadata.
 
     path has its role prefix already resolved by the caller. value may also be
-    native complex, encoded by AcceptedWrite. stderr is None for unknown or a
-    finite non-negative working-unit number; it is never converted to SI.
+    native complex, encoded by AcceptedWrite. metadata is None to keep the
+    path's existing opaque metadata, or a string-keyed YAML mapping that
+    replaces it in the same point commit ({} clears it). The executor neither
+    interprets its keys nor adds source, time or event fields.
     """
 
     path: str
     value: JsonValue | complex
-    stderr: float | None = None
+    metadata: YamlMap | None = None
 
 
 @dataclass(frozen=True)
@@ -121,7 +124,12 @@ def _require_named_spec(value: object) -> None:
 
 
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
-    if not isinstance(item, SampleWriteback) and item.stderr is not None:
+    if isinstance(item, ParameterWriteback) and item.metadata is not None:
+        TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
+    if (
+        isinstance(item, (ModuleWriteback, WaveformWriteback))
+        and item.stderr is not None
+    ):
         stderr = TypeAdapter(float).validate_python(item.stderr, strict=True)
         if not isfinite(stderr) or stderr < 0:
             raise ValueError("stderr must be finite and non-negative, or None")
@@ -157,9 +165,11 @@ class WritebackTarget(Protocol):
 
     entry_id/ledger identify the owning entry; point is its saved label.
     Each setter commits and validates one item or raises without installing it.
-    set_parameter accepts a concrete dotted point path and a working-unit JSON
-    value. set_module/set_waveform accept concrete library keys and named Specs.
-    source is the accepted Provenance for that item. Publication belongs to the
+    set_parameter accepts a concrete dotted point path, a working-unit JSON
+    value and caller metadata: None keeps the path's metadata, a mapping
+    replaces it in the same commit. set_module/set_waveform accept concrete
+    library keys and named Specs; source is the accepted library Provenance for
+    that item. Publication belongs to the
     context owner, not this protocol or the executor. append_sample accepts a
     safe component segment, producer fields and separate accepted run_id/UTC
     at/event source; it records this target's point label through the sample owner.
@@ -170,7 +180,7 @@ class WritebackTarget(Protocol):
     point: str
 
     def set_parameter(
-        self, path: str, value: JsonValue, source: Provenance
+        self, path: str, value: JsonValue, metadata: YamlMap | None
     ) -> None: ...
     def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None: ...
     def set_waveform(
@@ -203,10 +213,14 @@ class PointWritebackTarget:
         self.point = storage.point
         self._library_handle: ModuleLibrary | None = None
 
-    def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
-        """Commit one concrete point path with already-built provenance."""
+    def set_parameter(
+        self, path: str, value: JsonValue, metadata: YamlMap | None
+    ) -> None:
+        """Commit one point path value and, unless None, its replacement metadata."""
         with self._point.edit() as draft:
-            draft.set(path, value, provenance=source)
+            draft.set(path, value)
+            if metadata is not None:
+                draft.set_meta(path, metadata)
 
     def _library(self) -> ModuleLibrary:
         # Library imports entry provenance; defer to avoid the package cycle.
@@ -257,11 +271,14 @@ def apply_writeback(
     """Validate concrete values, append accepted, then commit in supplied order.
 
     target binds the destination and its entry ledger; callers resolve roles
-    before this entry. Nonempty items, strict JSON/Spec values, finite nonnegative
-    stderr, kind and sample run_id are validated before append. Target owners
-    validate paths, schema, sources and transactions when each item is reached.
-    Samples receive run_id, saved point, UTC at and accepted source; producer
-    device fields are preserved, not inferred. Return the event ID on success.
+    before this entry. Nonempty items, strict JSON/Spec values, parameter
+    metadata representation, finite nonnegative library stderr, kind and sample
+    run_id are validated before append. Target owners validate paths, schema,
+    sources and transactions when each item is reached. Parameters commit the
+    caller's metadata unchanged, or keep existing metadata when it is None; no
+    event, source or time is added to it. Library items receive the accepted
+    Provenance. Samples receive run_id, saved point, UTC at and accepted source;
+    producer device fields are preserved, not inferred. Return the event ID.
 
     Ledger append failures propagate unchanged, with no writes. An item failure
     raises WritebackApplyError(event_id, applied) from its original cause, stops
@@ -290,13 +307,6 @@ def apply_writeback(
     )
     target.ledger.append(event)
     for applied, (item, write) in enumerate(zip(items, writes, strict=True)):
-        provenance = Provenance(
-            source=event.id,
-            kind=kind,
-            run_id=evidence.run_id,
-            at=event.at,
-            stderr=None if isinstance(item, SampleWriteback) else item.stderr,
-        )
         try:
             if isinstance(item, SampleWriteback):
                 if evidence.run_id is None:
@@ -314,11 +324,19 @@ def apply_writeback(
                     source=event.id,
                 )
             elif isinstance(item, ParameterWriteback):
-                target.set_parameter(write.path, write.value, provenance)
-            elif isinstance(item, ModuleWriteback):
-                target.set_module(item.path, item.value, provenance)
+                target.set_parameter(write.path, write.value, item.metadata)
             else:
-                target.set_waveform(item.path, item.value, provenance)
+                provenance = Provenance(
+                    source=event.id,
+                    kind=kind,
+                    run_id=evidence.run_id,
+                    at=event.at,
+                    stderr=item.stderr,
+                )
+                if isinstance(item, ModuleWriteback):
+                    target.set_module(item.path, item.value, provenance)
+                else:
+                    target.set_waveform(item.path, item.value, provenance)
         except Exception as exc:
             raise WritebackApplyError(event_id=event.id, applied=applied) from exc
     return event.id

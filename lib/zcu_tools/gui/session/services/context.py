@@ -95,8 +95,10 @@ class _ContextWritebackTarget:
         self.ledger = entry.ledger
         self.point = target.point
 
-    def set_parameter(self, path: str, value: JsonValue, source: Provenance) -> None:
-        self._context.set_parameter(self._target, path, value, source=source)
+    def set_parameter(
+        self, path: str, value: JsonValue, metadata: YamlMap | None
+    ) -> None:
+        self._context.set_parameter(self._target, path, value, metadata=metadata)
 
     def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None:
         self._context.set_module(self._target, path, value, source=source)
@@ -559,17 +561,18 @@ class ContextService:
         path: str,
         value: YamlValue,
         *,
-        source: Provenance | None = None,
+        metadata: YamlMap | None = None,
     ) -> None:
         """Write one concrete component/general path in working units.
 
         Use the captured target, not the current selection. SavedPoint writes
         one point file in the opened entry; a nonselected point stays unselected.
-        Omitted source records manual provenance; explicit source
-        is validated against this entry's ledger. Success publishes only when
-        writing the selected target, after resource commit/validation.
-        Cross-entry, missing selection, path/schema/source, conflict and I/O failures
-        propagate without publishing a candidate. No retry or batch receipt.
+        metadata=None keeps the path's opaque metadata; a mapping replaces it
+        in the same commit ({} clears). No source, time or event is added.
+        Success publishes only when writing the selected target, after resource
+        commit/validation. Cross-entry, missing selection, path/schema/metadata
+        representation, conflict and I/O failures propagate without publishing
+        a candidate. No retry or batch receipt.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)
@@ -580,7 +583,9 @@ class ContextService:
             else entry.use_point(target.point)
         )
         with point.edit() as draft:
-            draft.set(path, value, provenance=source)
+            draft.set(path, value)
+            if metadata is not None:
+                draft.set_meta(path, metadata)
         document = snapshot(point)
         self._points = tuple(
             replace(info, description=document.general.description or "")
@@ -617,8 +622,9 @@ class ContextService:
     ) -> None:
         """Write a validated ModuleSpec at a concrete library root.
 
-        Target/publication/source/error rules match set_parameter. SavedPoint
-        uses one library transaction.
+        Target/publication/error rules match set_parameter. Omitted source is
+        manual; explicit Provenance is validated by the library owner against
+        this entry's ledger. SavedPoint uses one library transaction.
         No lowering, materialization, accepted event production or batch receipt.
         """
         self._owner.assert_owner()

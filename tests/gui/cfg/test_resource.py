@@ -591,7 +591,7 @@ class ExpressionSources:
             point=PointDocument.model_validate(
                 {
                     "format": "zcu.parameter-container",
-                    "format_version": "1.0",
+                    "format_version": "2.0",
                     "general": {
                         "created_at": "2026-10-08T00:00:00Z",
                         "ext": self.names,
