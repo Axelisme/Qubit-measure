@@ -304,14 +304,25 @@ class AnalyzePanelWidget(QWidget):
         return holder
 
     def _refresh_filter_tab(self) -> None:
-        """Attach current valid app context, after retiring the prior view."""
+        """Attach the valid app context, after retiring the prior view.
+
+        The holder reuses or begins the Filter context. A non-holder only
+        reattaches a live one, such as an agent's, and never begins input.
+        """
         from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
         self.detach()
         if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
             self._filter_placeholder.setVisible(True)
             return
-        context = self._ctrl.interactive.begin_cross_selection()
+        if self._writable:
+            context = self._ctrl.interactive.begin_cross_selection()
+        else:
+            live = self._ctrl.interactive.current_cross_selection()
+            if live is None:
+                self._filter_placeholder.setVisible(True)
+                return
+            context = live
         active = self._ctrl.interactive.inspect("selection")
         if active is None or active.context is not context:
             raise RuntimeError("selection context changed while attaching its view")
@@ -566,10 +577,12 @@ class AnalyzePanelWidget(QWidget):
     def show_tab(self, tab: AnalyzeTab) -> None:
         """Select and refresh a domain tab on the State-owner Qt thread.
 
-        Filter reuses an attached valid context without resetting input/Undo.
-        Search/show detach Filter and cancel its live context, even if already
-        selected. Search forms/progress refresh from the app owner. Invalid tab
-        raises ValueError; foreign-thread access raises RuntimeError.
+        Filter reuses an attached valid context without resetting input/Undo;
+        a non-holder only reattaches a live one. Search/show detach Filter,
+        even if already selected; the holder's switch also cancels the live
+        Filter context, a non-holder's leaves it open. Search forms/progress
+        refresh from the app owner. Invalid tab raises ValueError;
+        foreign-thread access raises RuntimeError.
         This does not raise or activate the top-level window.
         """
         self._ctrl.state.assert_owner_thread()
@@ -593,6 +606,9 @@ class AnalyzePanelWidget(QWidget):
     def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
         if payload.phase == "closed" and payload.context_id == self._filter_context_id:
             self.detach()
+        if payload.kind == "selection" and payload.phase != "updated":
+            # A live Filter decides whether a non-holder may enter its tab.
+            self._set_tab_availability(editable=self._writable)
 
     def activate(self) -> None:
         """Activate the singleton; on Filter, reattach valid or new app context.
@@ -627,16 +643,14 @@ class AnalyzePanelWidget(QWidget):
             self._filter_widget.set_editable(editable=writable)
 
     def _set_tab_availability(self, *, editable: bool) -> None:
-        # Entering Filter opens input; leaving it cancels input. Search/Show
-        # switching without Filter input is pure viewing and remains available.
-        bar = self._tabs.tabBar()
-        if bar is None:
-            raise RuntimeError("Analyze tabs have no tab bar")
-        bar.setEnabled(editable or self.current_tab != "filter")
-        self._tabs.setTabEnabled(0, editable or self.current_tab == "filter")
-        # QTabWidget handles Ctrl+Tab itself, even with a disabled tab bar.
-        for index in (1, 2):
-            self._tabs.setTabEnabled(index, editable or self.current_tab != "filter")
+        # The holder's Filter entry opens input. A non-holder enters Filter only
+        # to view a live context; Search/Show are pure viewing for everyone.
+        viewable_filter = (
+            editable
+            or self.current_tab == "filter"
+            or self._ctrl.interactive.current_cross_selection() is not None
+        )
+        self._tabs.setTabEnabled(0, viewable_filter)
 
     def _on_tab_changed(self, index: int) -> None:
         self._set_tab_availability(editable=self._writable)
@@ -644,7 +658,12 @@ class AnalyzePanelWidget(QWidget):
             self._refresh_filter_tab()
         else:
             self.detach()
-            if self._ctrl.interactive.current_cross_selection() is not None:
+            # Only the holder's leaving ends the Session; a viewer's switch
+            # retires the view, like leaving the Fit page.
+            if (
+                self._writable
+                and self._ctrl.interactive.current_cross_selection() is not None
+            ):
                 self._ctrl.interactive.cancel("selection")
 
     # --- Search actions --------------------------------------------------
