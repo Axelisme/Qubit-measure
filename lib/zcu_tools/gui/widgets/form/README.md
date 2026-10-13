@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-13, host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
+**Last updated:** 2026-10-13, Key/Inline rows follow the core's x-form-key-or-inline marker; host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
 
@@ -12,7 +12,7 @@ Tagged branch identity comes from the schema owner's x-form-discriminator-values
 
 String value leaves, including Literal[str] and string Enum values, offer Direct and Expression modes like numeric fields. Direct text stays literal, including text starting with $. Expression mode writes an explicit envelope to FormState. The view displays the core-resolved preview as `$flux_dev = "yoko1"` and shows alias-naming errors without fallback. It never replaces the authored expression with the resolved name.
 
-An untagged str-or-model field (`str | Model`, such as a pulse's waveform or a readout's pulse_cfg) shows a Key/Inline mode combo in its row, like the tagged-union and ModuleRef/ModuleInline switches. The JSON type selects the mode. A string shows Key mode: a key input, which becomes an editable dropdown of the schema's x-form-library-keys when the captured library has matching keys. An object shows Inline mode: the model's rows, a tagged union with its selector. Switching writes that mode's default, an empty key or `{}` for the core's inline defaults; it never turns the other mode's value into text.
+A field the schema marks `x-form-key-or-inline` shows a Key/Inline mode combo in its row, like the tagged-union and ModuleRef/ModuleInline switches. Core marks each untagged str-or-model field (`str | Model`, such as a pulse's waveform or a readout's pulse_cfg); the view reads only that marker and does not infer it from the schema's shape. The JSON type selects the mode. A string shows Key mode: a key input, which becomes an editable dropdown of the schema's x-form-library-keys when the captured library has matching keys. An object shows Inline mode: the model's rows, a tagged union with its selector. Switching writes that mode's default, an empty key or `{}` for the core's inline defaults; it never turns the other mode's value into text.
 
 The value label shows only an Expression-mode resolved value; Direct input is not echoed. Empty value and error labels are hidden and take no space; field errors appear under their row. A choice leaf with expression support (Literal, string Enum or a choices entry) shows one dropdown in Direct mode: the current choices, then an `Expression…` entry. Its mode combo appears only in Expression mode. Returning to Direct selects the resolved value when it is a current choice, otherwise the last Direct choice. Discriminators keep their plain tag dropdown.
 

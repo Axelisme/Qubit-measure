@@ -177,6 +177,62 @@ def test_schema_offers_a_plain_key_or_the_inline_model(
     assert validator.is_valid(data) is valid
 
 
+class Holder(BaseModel):
+    """An ordinary nested model whose own field is str-or-model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inner: str | Tone = "Q1.pulses.pi"
+
+
+class MarkerForm(FormModel):
+    """Str-or-model fields beside string, nullable and model fields."""
+
+    tone: str | Tone
+    shape: str | Shape
+    optional: str | Tone | None = None
+    holder: Holder = Field(default_factory=Holder)
+    name: str = "x"
+    maybe: str | None = None
+    plain: Tone = Field(default_factory=lambda: Tone(ch=0))
+    either: Shape = Field(default_factory=lambda: FlatShape(style="flat"))
+
+
+def _marked(node: JsonValue, path: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    """Return the property paths of every schema node marked key-or-inline.
+
+    Defaults are data, not schema, so they are not searched.
+    """
+    found: set[tuple[str, ...]] = set()
+    if isinstance(node, list):
+        for item in node:
+            found |= _marked(item, path)
+    if not isinstance(node, dict):
+        return found
+    marker = node.get("x-form-key-or-inline")
+    if marker is not None:
+        assert marker is True, path
+        found.add(path)
+    for key, child in node.items():
+        if key == "properties" and isinstance(child, dict):
+            for name, prop in child.items():
+                found |= _marked(prop, (*path, name))
+        elif key != "default":
+            found |= _marked(child, path)
+    return found
+
+
+def test_schema_marks_exactly_the_str_or_model_fields() -> None:
+    schema = MarkerForm.input_schema(FormEnv())
+
+    assert _marked(schema) == {
+        ("tone",),
+        ("shape",),
+        ("optional",),
+        ("holder", "inner"),
+    }
+
+
 class SpecKeyForm(FormModel):
     """Library-backed fields: a pulse key and a waveform key."""
 
