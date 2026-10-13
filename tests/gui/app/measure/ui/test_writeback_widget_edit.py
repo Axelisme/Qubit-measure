@@ -6,18 +6,16 @@ from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent, Qt
-from qtpy.QtGui import QAction, QKeyEvent
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback, SessionEnv
@@ -233,6 +231,10 @@ class _WidgetController(Controller):
         """Join workers and flush their deliveries before Qt objects are deleted."""
         return self._background_svc.quiesce()
 
+    def set_running(self, tab_id: str, *, running: bool) -> None:
+        """Publish a synthetic busy state through the real State owner."""
+        self._state.set_tab_running(tab_id, running=running)
+
 
 @pytest.fixture(params=["analysis", "post_analysis"])
 def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureRequest):
@@ -418,52 +420,6 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
     assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
 
 
-def test_module_dialog_readonly_keeps_text_and_scroll_accessible(module_widget, qapp):
-    _ctrl, widget, _tab_id, _pane = _populate_module(module_widget)
-    dialog = _module_dialog(widget)
-    widget.set_editing_enabled(enabled=False)
-    gain = _input(dialog, "gain")
-    assert gain.isReadOnly() and gain.isEnabled()
-    gain.selectAll()
-    assert gain.selectedText()
-    name = dialog.findChildren(QLineEdit)[0]
-    assert name.isReadOnly() and name.isEnabled()
-    mode = dialog.findChild(QAction, "form.mode.gain")
-    assert mode is not None and not mode.isEnabled()
-    scroll = dialog.findChild(QScrollArea)
-    assert scroll is not None and scroll.isEnabled()
-    dialog.resize(560, 500)
-    # A short public viewport guarantees overflow regardless of form row height.
-    scroll.setFixedHeight(120)
-    qapp.processEvents()
-    expand = next(
-        button
-        for button in dialog.findChildren(QPushButton)
-        if button.text() == "Expand"
-    )
-    expand.click()
-    qapp.processEvents()
-    bar = scroll.verticalScrollBar()
-    assert bar is not None and bar.isEnabled() and bar.maximum() > 0
-    bar.setValue(bar.maximum())
-    assert bar.value() > 0
-    combo = dialog.findChild(QComboBox, "form.input.waveform")
-    assert combo is not None and combo.isEnabled()
-    index = combo.currentIndex()
-    QCoreApplication.sendEvent(
-        combo,
-        QKeyEvent(
-            QEvent.Type.KeyPress, Qt.Key.Key_Home, Qt.KeyboardModifier.NoModifier
-        ),
-    )
-    assert combo.currentIndex() == index
-    assert not _apply(widget).isEnabled()
-    assert not widget.findChildren(QCheckBox)[0].isEnabled()
-    widget.set_editing_enabled(enabled=True)
-    assert not gain.isReadOnly()
-    assert _apply(widget).isEnabled()
-
-
 def test_module_dialog_reports_retired_draft_without_opening_form(module_widget, qapp):
     ctrl, widget, tab_id, _pane = _populate_module(module_widget)
     ctrl.tab_control.close_tab(tab_id)
@@ -506,3 +462,53 @@ def test_module_validity_refresh_uses_current_view_or_repaired_state(
         ctrl.set_writeback_item_for_pane(tab_id, pane, "ml-1", edits={("gain",): 0.5})
         _populate_module(module_widget)
         assert _apply(widget).isEnabled()
+
+
+def test_busy_module_field_edit_is_rejected_and_dialog_keeps_authored_input(
+    module_widget,
+):
+    ctrl, widget, tab_id, pane = _populate_module(module_widget)
+    dialog = _module_dialog(widget)
+    _input(dialog, "freq").setText("5100.125")
+    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    before = form.state.input.data
+    ctrl.set_running(tab_id, running=True)
+    try:
+        _input(dialog, "gain").setText("0.6")
+        error = dialog.findChild(QLabel, "form.error.gain")
+        assert error is not None and "busy" in error.text().lower()
+        assert form.state.input.data == before
+        assert dialog.isVisible()
+        assert _input(dialog, "freq").text() == "5100.125"
+        assert _input(dialog, "gain").text() == "0.6"
+        assert (
+            MODULE_PROPOSAL_TARGET
+            not in ctrl.context_control.read_context().library.module_keys()
+        )
+    finally:
+        ctrl.set_running(tab_id, running=False)
+
+
+def test_busy_edit_request_shows_guard_reason_without_opening_dialog(
+    module_widget, qapp
+):
+    ctrl, widget, tab_id, _pane = _populate_module(module_widget)
+    messages: list[str] = []
+
+    def acknowledge(dialog: QMessageBox) -> None:
+        messages.append(dialog.text())
+        dialog.accept()
+
+    ctrl.set_running(tab_id, running=True)
+    try:
+        modal_action(
+            qapp, lambda: _edit_button(widget).click(), [(QMessageBox, acknowledge)]
+        )
+        assert messages and "busy" in messages[0].lower()
+        assert not any(dialog.isVisible() for dialog in widget.findChildren(QDialog))
+        assert (
+            MODULE_PROPOSAL_TARGET
+            not in ctrl.context_control.read_context().library.module_keys()
+        )
+    finally:
+        ctrl.set_running(tab_id, running=False)
