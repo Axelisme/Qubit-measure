@@ -184,10 +184,8 @@ def test_parameter_set_without_point_preserves_failed_precondition(
         "context.set_parameter",
         {"path": "general.description", "value": "new"},
     )
-    assert (error["code"], error["reason"]) == (
-        ErrorCode.PRECONDITION_FAILED,
-        "no_context",
-    )
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED, error
+    assert error.get("reason") == "no_context"
     assert application.state.session_env.parameters is None
 
 
@@ -228,7 +226,8 @@ def test_context_mutations_require_holder_without_domain_effects(
     rows = control.get_alias_rows()
     application.result("control.release", {})
     error = rpc_error(application, method, params)
-    assert error["reason"] == "not_holder"
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED, error
+    assert error.get("reason") == "not_holder"
     assert control.read_context().document() == before.document()
     assert control.get_alias_rows() == rows
 
