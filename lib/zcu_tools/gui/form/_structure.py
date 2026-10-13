@@ -48,11 +48,8 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     are text values (int, float, complex, str), typed into a text field, or
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
     A text field has a text member and no picked member, possibly nullable.
-    A str-or-model key (see key_or_inline) is not a text field: an Expr
-    envelope is an object, and an object selects the inline model. Two
-    leaves this annotation check cannot see are not text fields either: a
-    leaf with declared choices (by path) and a ModuleRef name (see
-    library_key).
+    Two leaves this annotation check cannot see are not text fields: a
+    leaf with declared choices (by path) and a KeyRef name (see library_key).
 
     path is the leaf's field path, used only in the error. A union with both
     text and picked members raises ValueError naming path: the editor has no
@@ -74,14 +71,13 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
         raise ValueError(
             f"{dotted}: a union of text and picked values is not supported"
         )
-    return text and not key_or_inline(annotation)
+    return text
 
 
 def library_key(model: type[BaseModel], name: str) -> bool:
     """Whether field name of model holds a literal key: a KeyRef's name.
 
-    A library key is a plain string, never an Expr envelope, like the key
-    of a str-or-model field.
+    A library key is a plain string, never an Expr envelope.
     """
     return issubclass(model, KeyRef) and name == "name"
 
@@ -95,21 +91,41 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
-def key_or_inline(annotation: object) -> bool:
-    """Whether annotation is an untagged union of str and model branches.
+def check_form_shape(model: type[BaseModel]) -> None:
+    """Reject retired str-or-model selectors throughout a form's declaration.
 
-    Its JSON type is the structural selector: a string is a library key and
-    an object is the inline model, a sole model or one branch of a tagged union.
+    Inspect all branches, including inactive and nullable sections, before input
+    or source hooks run. Ordinary models and model-only unions remain supported.
     """
-    return str in alternatives(annotation) and bool(model_types(annotation))
+    pending: list[tuple[object, FormPath]] = [(model, ())]
+    seen: set[object] = set()
+    while pending:
+        annotation, path = pending.pop()
+        members = alternatives(annotation)
+        if str in members and model_types(annotation):
+            dotted = ".".join(str(part) for part in path)
+            raise ValueError(
+                f"{dotted}: untagged str | Model input is not supported; "
+                "use a tagged ref/inline union"
+            )
+        for member in members:
+            if isinstance(member, type) and issubclass(member, BaseModel):
+                if member not in seen:
+                    seen.add(member)
+                    pending.extend(
+                        (info.annotation, (*path, name))
+                        for name, info in member.model_fields.items()
+                    )
+            elif (
+                get_origin(member) in (list, tuple, dict, Mapping)
+                and member not in seen
+            ):
+                seen.add(member)
+                pending.extend((item, path) for item in get_args(member))
 
 
 def discriminator(info: FieldInfo) -> str | None:
-    """Read a string tag through aliases/nullable wrappers; absent tags return None.
-
-    A str-or-model union reads the tag of its inline part, so an inline
-    object selects its tagged branch like any tagged model field.
-    """
+    """Read a string tag through aliases/nullable wrappers; absent tags return None."""
     if isinstance(info.discriminator, str):
         return info.discriminator
     return union_tag(info.annotation)
@@ -137,9 +153,6 @@ def union_tag(annotation: object) -> str | None:
             members = tuple(
                 item for item in get_args(annotation) if item is not type(None)
             )
-            if str in members and len(members) > 1:
-                # The key alternative selects no branch; the inline part may.
-                members = tuple(item for item in members if item is not str)
             if len(members) == 1:
                 annotation = members[0]
                 continue
@@ -351,28 +364,6 @@ def _switch(
     return True
 
 
-def _switch_inline(
-    model: type[BaseModel],
-    data: dict[str, JsonValue],
-    path: FormWritePath,
-    value: JsonValue,
-    env: FormEnv,
-) -> bool:
-    """Treat {} at a str-or-model field as the switch to its inline model.
-
-    A key or unfilled value becomes the inline defaults; an inline object
-    stays unchanged. Other values return False and remain leaf writes.
-    """
-    if value != {}:
-        return False
-    parent, key, info = _field_at(model, data, path)
-    if not key_or_inline(info.annotation):
-        return False
-    if not isinstance(parent.get(key), dict):
-        parent[key] = _inline_defaults(info, env, path)
-    return True
-
-
 def _select_object(
     model: type[BaseModel],
     data: dict[str, JsonValue],
@@ -385,7 +376,7 @@ def _select_object(
         return False
     parent, key, info = _field_at(model, data, path)
     tag = discriminator(info)
-    if tag is None and not key_or_inline(info.annotation):
+    if tag is None:
         return False
     old = parent.get(key)
     branch = selected(info, value if tag in value else old)
@@ -420,7 +411,6 @@ def _partial_model(
             isinstance(item, dict)
             and model_types(info.annotation)
             and discriminator(info) is None
-            and not key_or_inline(info.annotation)
         ):
             child = selected(info, item)
             if child is None:
@@ -444,30 +434,6 @@ def _partial_model(
     return build_candidate(model, seed, batch, env)
 
 
-def _inline_defaults(
-    info: FieldInfo, env: FormEnv, path: FormWritePath
-) -> dict[str, JsonValue]:
-    """Defaults of a str-or-model field's inline model, never its old key.
-
-    A tagged inline union starts at its first declared branch and tag. An
-    untagged choice between several models has no default branch and raises.
-    """
-    branch, *others = model_types(info.annotation)
-    tag_key = discriminator(info)
-    if others and tag_key is None:
-        raise ValueError(f"Ambiguous untagged inline model at path {path!r}")
-    try:
-        new = _branch_defaults(branch, env, {})
-    except PydanticCustomError as exc:
-        from ._sources import prefix_error
-
-        raise prefix_error(exc, path) from exc
-    if tag_key is not None:
-        tag = _tag(branch, tag_key)[0]
-        new[tag_key] = default_json(tag.value if isinstance(tag, Enum) else tag)
-    return new
-
-
 def build_candidate(
     model: type[BaseModel],
     data: dict[str, JsonValue],
@@ -488,7 +454,6 @@ def build_candidate(
         value = copied[path]
         if not (
             _switch(model, result, path, value, env)
-            or _switch_inline(model, result, path, value, env)
             or _select_object(model, result, path, value, env)
         ):
             pending[path] = value
@@ -504,7 +469,7 @@ def _require_leaf(info: FieldInfo, value: JsonValue, path: FormWritePath) -> Non
     if model_types(info.annotation):
         if type(None) in types and (value is None or isinstance(value, dict)):
             return
-        # Spec unions also admit scalar reference keys; those remain ordinary leaves.
+        # Other mixed scalar/model annotations retain ordinary scalar leaves.
         if not isinstance(value, dict) and any(
             t is str or t is int or t is float or t is bool or t is complex
             for t in types

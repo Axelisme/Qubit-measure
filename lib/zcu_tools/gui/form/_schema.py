@@ -18,9 +18,9 @@ from ._structure import (
     accepts_expression,
     alternatives,
     branch_tags,
+    check_form_shape,
     discriminator,
     fixed_tag,
-    key_or_inline,
     library_key,
     model_types,
     schema_branch_model,
@@ -346,31 +346,11 @@ def _tagged_branches(
     return branches
 
 
-def _inline_variant(target: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Return the model alternative of a str-or-model field schema.
-
-    Pydantic emits that alternative as a $ref, an object or a tagged oneOf; the
-    key alternative is a string. A schema without one is returned unchanged.
-    """
-    variants = target.get("anyOf")
-    return next(
-        (
-            variant
-            for variant in (variants if isinstance(variants, list) else ())
-            if isinstance(variant, dict)
-            and ("$ref" in variant or "properties" in variant or "oneOf" in variant)
-        ),
-        target,
-    )
-
-
 def _child_nodes(
     info: FieldInfo, target: dict[str, JsonValue], root: dict[str, JsonValue]
 ) -> tuple[tuple[type[BaseModel], dict[str, JsonValue]], ...]:
     _inline_ref(target, root)
-    node = (
-        _inline_variant(target) if key_or_inline(info.annotation) else _non_null(target)
-    )
+    node = _non_null(target)
     _inline_ref(node, root)
     models = model_types(info.annotation)
     variants = node.get("oneOf")
@@ -444,27 +424,6 @@ def _library_specs(env: FormEnv) -> tuple[tuple[str, BaseModel], ...] | None:
         *((key, library.module_spec(key)) for key in library.module_keys()),
         *((key, library.waveform_spec(key)) for key in library.waveform_keys()),
     )
-
-
-def _key_branch(
-    info: FieldInfo, target: dict[str, JsonValue], projection: _Projection
-) -> None:
-    """List a str-or-model field's offered library keys on its string branch.
-
-    The branch is already a plain key without Expr (see accepts_expression).
-    With a captured library, the branch's x-form-library-keys lists the keys
-    whose Spec is one of the field's models, as suggestions; any string
-    remains acceptable input.
-    """
-    variants = target.get("anyOf")
-    models = model_types(info.annotation)
-    for variant in variants if isinstance(variants, list) else ():
-        if isinstance(variant, dict):
-            specs = projection.library_specs
-            if variant.get("type") == "string" and specs is not None:
-                variant["x-form-library-keys"] = [
-                    key for key, spec in specs if isinstance(spec, models)
-                ]
 
 
 def _module_input(info: FieldInfo) -> bool:
@@ -745,14 +704,10 @@ def _decorate(
         if models and _label(info) is None:
             # The inlined definition carries its class name as title.
             target["title"] = _section_title(name)
-        if key_or_inline(info.annotation):
-            # Core owns the str-or-model rule; views read this marker only.
-            target["x-form-key-or-inline"] = True
-            _key_branch(info, target, projection)
-        elif _module_input(info):
+        if _module_input(info):
             _non_null(target)["x-form-key-or-inline"] = True
         if library_key(model, name):
-            # A library key is a plain string, like a str-or-model key.
+            # A library key is a plain string, never an Expr envelope.
             _without_expr(target)
             _ref_keys(target, projection, declarations.choices.get((name,)))
         # Without a union selector, a branch model's tag has only one value.
@@ -794,6 +749,7 @@ def _active_fields(
 def _project(
     model: type[FormModel], env: FormEnv, data: Mapping[str, JsonValue] | None = None
 ) -> _Projection:
+    check_form_shape(model)
     raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
     root = copy_object(_partial(raw))
     tags = branch_tags((model, ModuleInput))
