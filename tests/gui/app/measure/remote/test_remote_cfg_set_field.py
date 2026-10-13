@@ -1,15 +1,7 @@
-"""RemoteControlAdapter tab-cfg editing via the CfgEditorService session.
+"""Independent library editor contracts and separate tab Form observations.
 
-A tab's cfg draft is a service-owned ``CfgEditorSession`` keyed by the tab_id
-(the same draft the open form attaches to). Agents read it with
-``tab.get_cfg`` and edit it with ``tab.set_cfg`` or ``editor.set_field`` on the
-tab's ``editor_id`` (from ``tab.snapshot``) — the same draft the GUI form uses,
-so user + agent share one model (ADR-0068).
-
-Here the fixture opens a real seeded session owned by the tab on the real
-Controller, then drives edits through ``editor.set_field`` and discovery
-through ``tab.get_cfg`` (which reads that same session). Path-resolver edge
-cases (sweep edges, literal rejection, unknown paths) each get a focused case.
+Editor sessions retain their own CfgDraft/tree interface. Tab reads use the
+Form resource; an independent editor never publishes tab input.
 """
 
 from __future__ import annotations
@@ -48,8 +40,7 @@ class _LiveFixture(Fixture):
         from tests.gui.app.measure._synthetic import SampleAdapter
 
         cfg = SampleAdapter().make_default_cfg(self.state.session_env)
-        self._tab_id = "tab-live"
-        self.prepare_tab(self._tab_id, SampleAdapter(), cfg)
+        self._tab_id = self.ctrl.new_tab("fake")
         # Independent library editor; it never publishes tab cfg.
         self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
             cfg, parameters=self.ctrl.read_context(), gc=False
@@ -433,31 +424,33 @@ def test_device_list_and_snapshot(lf):
 # ---------------------------------------------------------------------------
 
 
-def test_tab_get_cfg_returns_nested_tree_with_scalar_values(lf):
+def test_tab_get_cfg_returns_form_scalar_values(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "expected": {}})
+        resp = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})
         assert resp["ok"] is True
-        tree = resp["result"]["tree"]
-        assert isinstance(tree, dict)
-        reps = tree["children"]["reps"]
-        assert reps["kind"] == "scalar"
-        assert reps["path"] == ["reps"]
-        assert reps["input"]["resolved"] == lf.get_value("reps")
+        observed = resp["result"]
+        assert observed["input"]["reps"] == 100
+        leaves = {tuple(item["path"]): item["value"] for item in observed["values"]}
+        assert leaves[("reps",)] == 100
+        assert observed["schema"]["properties"]["reps"]
+        assert observed["errors"] == []
     finally:
         sock.close()
 
 
-def test_tab_get_cfg_sweep_contains_input_states(lf):
+def test_tab_get_cfg_range_has_authored_model_fields(lf):
     sock = open_client(lf.service.port)
     try:
-        tree = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id, "expected": {}})[
-            "result"
-        ]["tree"]
-        sweep = tree["children"]["sweep"]
-        assert sweep["kind"] == "sweep"
-        assert set(sweep["inputs"]) == {"start", "stop", "expts", "step"}
-        assert sweep["inputs"]["expts"]["resolved"] == lf.get_value("sweep.expts")
+        observed = call(sock, "tab.get_cfg", {"tab_id": lf._tab_id})["result"]
+        assert observed["input"]["sweep"] == {
+            "kind": "linrange",
+            "start": 5.0,
+            "stop": 6.0,
+            "n": 11,
+        }
+        leaves = {tuple(item["path"]): item["value"] for item in observed["values"]}
+        assert leaves[("sweep", "n")] == 11
     finally:
         sock.close()
 
@@ -485,7 +478,7 @@ def test_editor_read_rejects_unrepresentable_cfg_instead_of_stringifying(lf):
 def test_tab_get_cfg_unknown_tab_rejected(lf):
     sock = open_client(lf.service.port)
     try:
-        resp = call(sock, "tab.get_cfg", {"tab_id": "nope", "expected": {}})
+        resp = call(sock, "tab.get_cfg", {"tab_id": "nope"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
         assert resp["error"]["reason"] == "resource_gone"
