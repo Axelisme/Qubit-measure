@@ -48,7 +48,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.controller import Controller, SpectrumRow
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
@@ -66,7 +66,6 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     OneTonePickContext,
     TwoTonePickContext,
 )
-from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
@@ -397,35 +396,23 @@ class MainWindow(QMainWindow):
                 f"Project: {project.chip_name} / {project.qub_name}"
             )
 
-    def _row_text(self, entry: SpectrumEntry) -> str:
-        """One list row from the same State facts that spectrum.list reports.
+    def _row_text(self, row: SpectrumRow) -> str:
+        """One list row from the Controller query that spectrum.list also reports.
 
         Literal name, spec type, stage and published point count always show;
         an unfinished draft kind and the Filter-excluded count only when present.
         """
-        if entry.aligned and entry.points_completed:
-            stage = "sampled"
-        elif entry.aligned:
-            stage = "aligned"
-        else:
-            stage = "loaded"
-        parts = [entry.name, entry.spec_type, stage, f"{entry.point_count} pts"]
-        active = self._ctrl.interactive.inspect(entry.name)
-        if active is not None:
-            parts.append("align draft" if active.kind == "line" else "sample draft")
-        if entry.filter_mask is not None:
-            excluded = int(entry.filter_mask.size - entry.filter_mask.sum())
-            if excluded:
-                parts.append(f"{excluded} excluded")
+        parts = [row.name, row.spec_type, row.stage, f"{row.point_count} pts"]
+        if row.pending is not None:
+            parts.append(f"{row.pending} draft")
+        if row.filter_excluded_count:
+            parts.append(f"{row.filter_excluded_count} excluded")
         return " · ".join(parts)
 
     def _refresh_list(self) -> None:
-        """Rebuild the spectrum list from State and the live drafts."""
-        # Rows first: inspect may retire a dead draft and re-enter this refresh.
-        rows = [
-            (name, self._row_text(self._ctrl.state.spectrums[name]))
-            for name in self._ctrl.list_spectrums()
-        ]
+        """Rebuild the spectrum list from the Controller's published rows."""
+        # Rows first: the query may retire a dead draft and re-enter this refresh.
+        rows = [(row.name, self._row_text(row)) for row in self._ctrl.spectrum_rows()]
         active = self._ctrl.state.active_spectrum
         self._list.blockSignals(True)
         self._list.clear()

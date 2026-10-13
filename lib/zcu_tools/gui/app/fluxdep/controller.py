@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -62,6 +64,34 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.ports import OwnerScheduler
 
 logger = logging.getLogger(__name__)
+
+SpectrumStage = Literal["loaded", "aligned", "sampled"]
+PendingKind = Literal["align", "sample"]
+
+
+@dataclass(frozen=True)
+class SpectrumRow:
+    """Published list facts for one spectrum, read by the GUI list and RPC list.
+
+    name is the literal collection identifier; spec_type is OneTone or TwoTone.
+    stage is the published state, independent of pending: "loaded" until
+    alignment is committed (even with retained points), "aligned" once alignment
+    is committed and sampling is not, and "sampled" once both are committed,
+    including a zero-point completion. point_count is the nonnegative number of
+    published annotated points. filter_excluded_count is the number of False
+    values in this spectrum's published Filter mask, 0 without a mask; Filter
+    drafts and min_distance downsampling never change it. pending is the
+    spectrum's unfinished draft kind: "align" for a line pick, "sample" for
+    OneTone/TwoTone sampling, or None. The global Filter draft belongs to no
+    spectrum.
+    """
+
+    name: str
+    spec_type: SpecType
+    stage: SpectrumStage
+    point_count: int
+    filter_excluded_count: int
+    pending: PendingKind | None
 
 
 class Controller(BaseController[FluxDepState, EventBus]):
@@ -169,6 +199,51 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def list_spectrums(self) -> list[str]:
         return self._store.list_spectrums()
+
+    def spectrum_rows(self) -> list[SpectrumRow]:
+        """Return one SpectrumRow per spectrum in collection insertion order.
+
+        Owner-thread read; foreign threads raise RuntimeError. It writes no
+        State, display or Undo and never begins a draft. Each pending read goes
+        through interactive.inspect, which retires an invalidated or closed
+        draft; that retirement emits its usual events, so subscribers may
+        re-enter. A caller that renders rows should build all of them before
+        changing its view.
+        """
+        self.state.assert_owner_thread()
+        rows: list[SpectrumRow] = []
+        # Copy: a retirement callback must not invalidate this iteration.
+        for entry in list(self.state.spectrums.values()):
+            if not entry.aligned:
+                stage: SpectrumStage = "loaded"
+            elif entry.points_completed:
+                stage = "sampled"
+            else:
+                stage = "aligned"
+            excluded = (
+                0
+                if entry.filter_mask is None
+                else entry.point_count - int(np.count_nonzero(entry.filter_mask))
+            )
+            active = self._interactive.inspect(entry.name)
+            # inspect("selection") addresses the global Filter, not a spectrum.
+            if active is None or active.spectrum_name != entry.name:
+                pending: PendingKind | None = None
+            elif active.kind == "line":
+                pending = "align"
+            else:
+                pending = "sample"
+            rows.append(
+                SpectrumRow(
+                    name=entry.name,
+                    spec_type=entry.spec_type,
+                    stage=stage,
+                    point_count=entry.point_count,
+                    filter_excluded_count=excluded,
+                    pending=pending,
+                )
+            )
+        return rows
 
     # --- alignment / points ---------------------------------------------
 

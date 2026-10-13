@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁；Fit 頁表單、狀態列與 Project 對話框的 Data root；published spectrum list 與 Filter 排除數
+**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁；Fit 頁表單、狀態列與 Project 對話框的 Data root；清單與 spectrum.list 共用的已發布列查詢
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -130,8 +130,10 @@ Spectra 頁是譜清單（Remove 在清單下方）加階段驅動編輯區，Fi
 使用者點 tab，或 GUI Add／Restore 後回到 Spectra。Agent-origin 的 active、picker、Filter 與
 search pending 只更新所屬頁的內容，不把使用者從目前的頁拉走（見「Interactive context facts 與 GUI 跟隨」）。
 離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
-清單每列取 State 與 interactive owner 的同一份事實（即 `spectrum.list` 的資料）：字面譜名、種類、
-階段（loaded／aligned／sampled）、已發布點數，有才加未完成草稿種類與 Filter 排除點數。
+清單每列與 `spectrum.list` 都讀 `Controller.spectrum_rows()` 的 `SpectrumRow`：字面譜名、種類、
+已發布階段（loaded／aligned／sampled，零點完成算 sampled）、已發布點數、已發布 Filter 遮罩的排除點數
+與未完成草稿種類（align／sample）；清單有才顯示後兩者。查詢經 `interactive.inspect` 讀草稿，
+可能退休失效草稿並觸發重入，所以清單先算好全部列再填入。
 測試以 objectName 定位外殼元件（`fluxdep.session.project`、`fluxdep.pages`、`fluxdep.page.*`、
 `fluxdep.spectra`、`fluxdep.editor`、`fluxdep.project`、`fluxdep.spectrum.*`、`fluxdep.spectra.*`）。
 

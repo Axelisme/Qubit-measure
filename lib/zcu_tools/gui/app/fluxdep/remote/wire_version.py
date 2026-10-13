@@ -26,4 +26,6 @@ WIRE_VERSION = 7
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 9  # published spectrum stages and per-source Filter exclusion counts
+# 10: window shell with Spectra/Fit pages, editing flow and picker columns,
+# Fit page form/status, shared spectrum row query.
+GUI_VERSION = 10
