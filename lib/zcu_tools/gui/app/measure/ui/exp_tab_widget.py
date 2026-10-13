@@ -367,7 +367,6 @@ class ExpTabWidget(QWidget):
         # install a new one, so the editor is remounted when the state changes.
         self._form_scroll = QScrollArea()
         self._form_scroll.setWidgetResizable(True)
-        self._form_scroll.setFrameShape(QFrame.Shape.StyledPanel)  # type: ignore[attr-defined]
         self._editor: FormEditor[FormModel] | None = None
         self._editor_state: FormState[FormModel] | None = None
         self._editing_enabled = True
