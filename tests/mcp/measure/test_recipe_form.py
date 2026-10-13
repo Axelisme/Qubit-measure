@@ -7,7 +7,7 @@ from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpe
 from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form import FormEnv, ModuleInline
 from zcu_tools.mcp.measure.recipe import RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
@@ -52,7 +52,9 @@ class FormGui(LookbackGui):
             capture=lambda aliases: TabFormSources(FormEnv(library=library)),
             mutation_allowed=lambda: True,
         )
-        self.owner.write({("locked_pulse",): {}})
+        self.owner.write(
+            {("locked_pulse",): ModuleInline(module=pulse).model_dump(mode="json")}
+        )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.reset_cfg":
