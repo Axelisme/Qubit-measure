@@ -230,15 +230,14 @@ def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
     presenter.assert_no_unexpected_messages()
 
 
-def test_child_key_is_offered_in_the_dropdown_and_stays_a_key(
-    session: _Session,
-) -> None:
+def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
+    # Only the stored key is pinned here; the selector's offered options and
+    # item text belong to the shared Form choices work, not to Inspect.
     presenter = RecordingDialogPresenter()
     dialog = _open(session, presenter)
     _select(dialog, PULSE)
     waveform = _child(dialog, QComboBox, "form.input.waveform")
     assert waveform.currentData() == WAVEFORM
-    assert waveform.findData(WAVEFORM) >= 0
     _child(dialog, QLineEdit, "form.input.freq").setText("150")
     _child(dialog, QPushButton, "inspect.entry.apply").click()
     written = _library(session).module_spec(PULSE)
