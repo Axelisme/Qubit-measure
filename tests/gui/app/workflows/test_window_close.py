@@ -12,7 +12,7 @@ import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 
 from ._start_fakes import StartHarness
-from ._window_support import WindowSession, bind_point, install_soc
+from ._window_support import WindowSession, bind_point, form_editable, install_soc
 
 RUN_ID = "close-fault"
 
@@ -96,7 +96,7 @@ def test_close_of_paused_run_settles_stop_journal_failure(
         assert_close_rejected_with_diagnostic(window_session, journal, caplog)
         assert not window.controller.has_pending_segment
         assert harness.background.work is None
-        assert window.plan_panel.isEnabled()
+        assert form_editable(window.plan_panel)
         assert harness.handles.known_outcome(token) is not None
     assert_failed_settlement(harness, token, journal)
     assert_closes_and_releases_canvas(window_session, qapp, figures)
@@ -117,7 +117,7 @@ def test_close_of_active_run_keeps_canvas_until_owner_delivery(
         controller = window.controller
         assert controller.has_pending_segment and controller.binding is panel.host
         assert figures.count() == 2 and figures.currentWidget() is canvas
-        assert not window.plan_panel.isEnabled()
+        assert not form_editable(window.plan_panel)
         assert harness.background.work is not None and harness.gate.snapshot()
         assert harness.handles.live_count() == 1
         assert harness.handles.known_outcome(token) is None

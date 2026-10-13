@@ -139,23 +139,21 @@ def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
 
 def test_run_inputs_detaches_reference_shape_and_values() -> None:
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
-    native = ModuleAdmissionCfg(
-        asset=PulseCfg.model_validate(
-            {
-                "ch": 0,
-                "nqz": 1,
-                "waveform": {"style": "const", "length": 0.4},
-                "gain": 0.25,
-                "freq": 4000,
-                "phase": 0,
-            }
-        )
-    )
     cfg = make_form(Form(ModuleAdmissionCfg, {}), state=state)
     state.get_tab(tab_id).cfg = cfg
-    assert cfg.load_cfg(native) is None
+    cfg.write(
+        {
+            ("asset", "kind"): "inline",
+            ("asset", "module", "ch"): 0,
+            ("asset", "module", "nqz"): 1,
+            ("asset", "module", "waveform", "style"): "const",
+            ("asset", "module", "waveform", "length"): 0.4,
+            ("asset", "module", "gain"): 0.25,
+            ("asset", "module", "freq"): 4000,
+            ("asset", "module", "phase"): 0,
+        }
+    )
     inputs = _make_guard(state).capture_run_inputs(tab_id)
-    native.asset.gain = 9.0
     cfg.write({("asset", "module", "gain"): 0.75})
     payload = inputs.accepted_cfg.values["asset"]
     assert isinstance(payload, dict)

@@ -166,7 +166,6 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
         for command in (
             lambda: second.write({("amount",): 9.0}),
             second.reset,
-            lambda: second.load_cfg(ScalarCore(amount=9.0)),
             second.accept,
             lambda: pool.retire("second"),
             lambda: pool.create("third", form, capture=capture),
@@ -178,14 +177,13 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
 
     first.subscribe(notification)
     first.write({("amount",): 4.0})
-    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 6
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 5
     assert second.result() == ScalarCore(amount=1.0)
     allowed = False
     for command in (
         lambda: second.write({("amount",): 9.0}),
         lambda: second.write_compatible({"amount": 9.0}),
         second.reset,
-        lambda: second.load_cfg(ScalarCore(amount=9.0)),
     ):
         with pytest.raises(CfgPreconditionError) as caught:
             command()

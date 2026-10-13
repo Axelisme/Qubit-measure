@@ -13,7 +13,7 @@ from typing import Annotated
 
 from matplotlib.figure import Figure
 from pydantic import Field
-from qtpy.QtWidgets import QApplication, QPushButton, QWidget
+from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton, QWidget
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -275,11 +275,26 @@ def install_soc(harness: StartHarness) -> None:
     )
 
 
+def form_editable(panel: QWidget) -> bool:
+    """Whether a user can type into panel's form.
+
+    True when some form.input text field under panel is enabled and not
+    read-only. A run leaves the Start forms enabled and readable, with every
+    text field read-only.
+    """
+    return any(
+        field.objectName().startswith("form.input.")
+        and field.isEnabled()
+        and not field.isReadOnly()
+        for field in panel.findChildren(QLineEdit)
+    )
+
+
 def expand_all(widget: QWidget, qapp: QApplication) -> None:
     """Click every enabled Expand fold, including folds revealed by an outer one.
 
-    Disabled folds (a form locked during a run) cannot be clicked by a user and
-    are left as they are.
+    Disabled folds (a detached form) cannot be clicked by a user and are left
+    as they are.
     """
     while True:
         folds = [

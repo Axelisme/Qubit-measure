@@ -24,7 +24,8 @@ from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunable
 class OvernightPlanForm(FormModel):
     """Select fixed-flux T1/Echo pairs to monitor lifetime drift without feedback.
 
-    flux_dev defaults to the captured $flux_dev expression; flux_unit is required
+    flux_dev defaults to the device name the captured $flux_dev alias resolves
+    to when input is built, or stays unfilled without one; flux_unit is required
     A/V/native with no conversion or membership precheck. flux is its absolute
     fixed setpoint. outer_rounds is finite pair count; start_interval_s is actual
     start spacing in seconds; points is delay samples per native acquisition.
@@ -60,7 +61,7 @@ class OvernightPlanForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Keep the explicit flux alias expression; leave required monitoring inputs empty."""
+        """Declare flux_dev from $flux_dev, evaluated when input is built; leave monitoring inputs empty."""
         data = super().defaults(env, previous)
         data["flux_dev"] = {"expr": "$flux_dev"}
         return data

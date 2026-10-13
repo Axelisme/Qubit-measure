@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from pydantic import Field, JsonValue
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
@@ -16,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
+from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -150,13 +152,96 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     emit.assert_not_called()
     assert outcome.result_type == "RunRecord"
     assert outcome.has_cfg_snapshot is (not missing_cfg)
-    assert outcome.cfg_backfill == ("not_applied" if missing_cfg else "applied")
     assert outcome.has_analyze_params is False
     assert state.version.get(f"tab:{tab_id}:result") == 1
     assert state.version.get(f"tab:{tab_id}:analyze") == 1
     assert state.version.get(f"tab:{tab_id}:post_analyze") == 1
     assert state.version.get(f"tab:{tab_id}:cfg") == cfg_version
     assert state.version.get(f"tab:{tab_id}:save_path") == save_path_version
+
+
+class RepeatsCfg(ExpCfgModel):
+    """A result snapshot and the editable draft can have different repeats."""
+
+    reps: int = Field(default=20, ge=1)
+
+
+@pytest.mark.parametrize("draft", [7, 0, {"expr": "unfinished +"}])
+def test_load_preserves_authored_input_including_invalid_drafts(
+    draft: JsonValue,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    tab = state.get_tab(tab_id)
+    tab.cfg.revoke()
+    tab.cfg = make_form(Form(RepeatsCfg, {}), state=state)
+    tab.cfg.write({("reps",): draft})
+    before = tab.cfg.input.data
+    env = tab.cfg.env
+    cfg_version = state.version.get(f"tab:{tab_id}:cfg")
+    loaded = RunRecord(RepeatsCfg(reps=40), object())
+    metadata = historical_metadata()
+    adapter.load.return_value = (loaded, metadata)
+    service, _emit, _writeback = _service(state)
+
+    try:
+        outcome = service.load_result(tab_id, "result.h5")
+
+        assert tab.cfg.input.data == before
+        assert tab.cfg.env is env
+        assert state.version.get(f"tab:{tab_id}:cfg") == cfg_version
+        assert tab.run.result is loaded
+        assert loaded.cfg is not None
+        assert loaded.cfg.reps == 40
+        assert tab.run.metadata is metadata
+        assert tab.run.source_path == "result.h5"
+        assert outcome.has_cfg_snapshot
+    finally:
+        tab.cfg.revoke()
+
+
+@dataclass
+class AdapterSnapshot:
+    """Adapter-owned data may expose a cfg other than an experiment model."""
+
+    cfg: object
+
+
+@pytest.mark.parametrize("snapshot", [None, object()])
+def test_load_keeps_input_and_result_with_unavailable_cfg(snapshot: object) -> None:
+    state, tab_id, adapter = _make_state()
+    tab = state.get_tab(tab_id)
+    loaded = AdapterSnapshot(snapshot)
+    adapter.load.return_value = (loaded, historical_metadata())
+    before = tab.cfg.input.data
+    service, _emit, _writeback = _service(state)
+
+    outcome = service.load_result(tab_id, "result.h5")
+
+    assert tab.cfg.input.data == before
+    assert tab.run.result is loaded
+    assert outcome.has_cfg_snapshot is (snapshot is not None)
+
+
+def test_reentrant_load_does_not_replace_result() -> None:
+    state, tab_id, adapter = _make_state()
+    tab = state.get_tab(tab_id)
+    service, _emit, _writeback = _service(state)
+    failures: list[CfgPreconditionReason] = []
+
+    def callback() -> None:
+        try:
+            service.load_result(tab_id, "result.h5")
+        except CfgPreconditionError as exc:
+            failures.append(exc.reason)
+
+    unsubscribe = tab.cfg.subscribe(callback)
+    try:
+        tab.cfg.reset()
+    finally:
+        unsubscribe()
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION]
+    assert tab.run.result is None
+    adapter.load.assert_not_called()
 
 
 def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
