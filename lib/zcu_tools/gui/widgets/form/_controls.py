@@ -9,8 +9,8 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, QObject, QPoint, Qt
-from qtpy.QtGui import QColor, QKeyEvent, QPalette
+from qtpy.QtCore import QEvent, QObject, QPoint, QSize, Qt
+from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPalette
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,7 +18,6 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -50,6 +49,9 @@ _EXPRESSION_TINT = 0.18
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
+# A fold title starts with one of these marks, a space, then its label.
+FOLDED_MARK = "\u25b8"
+EXPANDED_MARK = "\u25be"
 # Key-or-inline dropdown: the first item's text, and the suffix of an item
 # showing the input's key when the offered library keys do not include it.
 INLINE_ITEM = "Inline"
@@ -216,50 +218,106 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
+class _FoldTitle(QLabel):
+    """A section title that folds its body on a left-button double-click.
+
+    Its text is FOLDED_MARK while body is hidden, EXPANDED_MARK while body
+    is shown, then a space and label. A double-click flips body's
+    visibility and the mark, then calls toggled(); a single click does
+    nothing. It is a title, not an input, so a read-only form still folds;
+    a disabled one gets no mouse input.
+    A QLabel that overrides mouseDoubleClickEvent is the plainest Qt widget
+    that reads as a title and reacts only to a double-click.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        body: QWidget,
+        parent: QWidget,
+        toggled: Callable[[], None],
+    ) -> None:
+        super().__init__(parent)
+        self._label = label
+        self._body = body
+        self._toggled = toggled
+        # Never take spare width, so controls sit beside the title.
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self._show_mark()
+
+    def sizeHint(self) -> QSize:
+        """QLabel's hint, widened to fit the wider mark.
+
+        A label column gets the fixed width of its widest hint at build;
+        fitting both marks keeps a flipped title from clipping its text.
+        """
+        hint = super().sizeHint()
+        metrics = self.fontMetrics()
+        widest = max(
+            metrics.horizontalAdvance(mark) for mark in (FOLDED_MARK, EXPANDED_MARK)
+        )
+        extra = widest - metrics.horizontalAdvance(self._mark())
+        return QSize(hint.width() + extra, hint.height())
+
+    def mouseDoubleClickEvent(self, a0: QMouseEvent | None) -> None:
+        """Fold or unfold the body on a left-button double-click a0."""
+        if a0 is None or a0.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(a0)
+            return
+        self._body.setVisible(self._body.isHidden())
+        self._show_mark()
+        self._toggled()
+
+    def _mark(self) -> str:
+        return FOLDED_MARK if self._body.isHidden() else EXPANDED_MARK
+
+    def _show_mark(self) -> None:
+        self.setText(f"{self._mark()} {self._label}")
+
+
 def _foldable_rows[K](
     parent: QWidget,
-    header: QHBoxLayout,
-    layout: QVBoxLayout,
     folds: dict[K, bool],
     key: K,
     *,
+    label: str,
+    name: str,
     expanded: bool,
-) -> tuple[QGroupBox, QVBoxLayout]:
-    """Add a foldable box of rows under parent; return it and its rows layout.
+) -> tuple[QLabel, QGroupBox, QVBoxLayout]:
+    """Build a fold title and the foldable box of rows it folds, under parent.
 
-    The box goes next into layout, below header, and an Expand/Collapse
-    button goes next into header. The rows layout has nested-group margins
-    and ROW_SPACING. folds records user folds (True is expanded) across
-    rebuilds: the box starts shown when folds[key] is True; without that
-    key, when expanded is True. Each click flips the box's visibility and
-    the button text and records the new state as folds[key].
+    Returns the title, named name and showing label after its fold mark;
+    the box; and the box's rows layout, which has nested-group margins and
+    ROW_SPACING. The caller puts the title in a header and the box below
+    it. folds records user folds (True is expanded) across rebuilds: the
+    box starts shown when folds[key] is True; without that key, when
+    expanded is True. Each double-click on the title flips the box's
+    visibility and the title's mark and records the new state as folds[key].
     """
     body = QGroupBox(parent)
     rows = QVBoxLayout(body)
     rows.setContentsMargins(*_GROUP_MARGINS)
     rows.setSpacing(ROW_SPACING)
-    shown = folds.get(key, expanded)
-    body.setVisible(shown)
-    button = QPushButton("Collapse" if shown else "Expand", parent)
+    body.setVisible(folds.get(key, expanded))
 
-    def clicked() -> None:
-        now_expanded = body.isHidden()
-        body.setVisible(now_expanded)
-        button.setText("Collapse" if now_expanded else "Expand")
-        folds[key] = now_expanded
+    def record() -> None:
+        folds[key] = not body.isHidden()
 
-    button.clicked.connect(clicked)
-    header.addWidget(button)
-    layout.addWidget(body)
-    return body, rows
+    title = _FoldTitle(label, body, parent, record)
+    title.setObjectName(name)
+    return title, body, rows
 
 
 class FieldRow:
     """Keep one schema row stable while publication values change.
 
     field is the displayed FieldView; widget/layout own its Qt row. label is
-    the left-aligned name label at the start of the header; its parent sets
-    one width for a model level's labels so their controls share a left edge.
+    the left-aligned title at the start of the header; its parent sets one
+    width for a model level's labels so their controls share a left edge.
+    On a model row with rows to fold (every model row except a disabled
+    nullable one) label is the fold title form.fold.<path>: a fold mark,
+    then the field label, folding group on a double-click. Other rows,
+    including a disabled nullable model, show the plain field label.
     input is its optional scalar control (read-only text for a fixed one-value
     Literal, which has no mode), or on a key-or-inline field its one
     non-editable dropdown: INLINE_ITEM (item data None), then the offered
@@ -270,7 +328,9 @@ class FieldRow:
     and its right-click menu, after the standard items. A choice row's input
     is a dropdown of only the choices, without mode. enabled toggles nullable
     models; group hosts model children, including a key-or-inline field's
-    inline rows, in its layout rows (both None for other rows). value/error are public-named presentation labels, hidden
+    inline rows, in its layout rows (both None for other rows, and for a
+    disabled nullable model, which draws no box). value/error are
+    public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
     shows below the header. These controls never own or evaluate form state.
     While display is called with editable=False the row is read-only: see
@@ -314,18 +374,30 @@ class FieldRow:
         self.rows: QVBoxLayout | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
-        self.label = _tight_label(field.label, self.widget)
-        header.addWidget(self.label)
+        if field.kind == "model" and field.active:
+            self.label, self.group, self.rows = _foldable_rows(
+                self.widget,
+                self._folds,
+                field.path,
+                label=field.label,
+                name=self._name("fold"),
+                expanded=not field.collapsed,
+            )
+            header.addWidget(self.label)
+            self.layout.addWidget(self.group)
+        else:
+            self.label = _tight_label(field.label, self.widget)
+            header.addWidget(self.label)
         if field.key_or_inline is not None:
             self._build_key_choice(header)
-            if field.kind == "model":
-                self._build_group(header)
-        elif field.kind == "model":
-            self._build_group(header)
-        elif field.fixed:
-            self._build_fixed(header)
-        else:
-            self._build_input(header)
+        if field.kind == "model":
+            if field.nullable:
+                self._build_enabled(header)
+        elif field.key_or_inline is None:
+            if field.fixed:
+                self._build_fixed(header)
+            else:
+                self._build_input(header)
         if field.unit:
             header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
@@ -333,7 +405,7 @@ class FieldRow:
         self.value.hide()
         header.addWidget(self.value)
         if field.kind == "model" and field.key_or_inline is None:
-            # Keep the fold button beside its label instead of stretching it.
+            # Keep the Enabled box beside the title instead of stretching it.
             header.addStretch()
         self.error = QLabel(self.widget)
         self.error.setObjectName(self._name("error"))
@@ -356,21 +428,12 @@ class FieldRow:
     def _name(self, kind: str) -> str:
         return f"form.{kind}." + ".".join(self.field.path)
 
-    def _build_group(self, header: QHBoxLayout) -> None:
-        if self.field.nullable:
-            self.enabled = QCheckBox("Enabled", self.widget)
-            self.enabled.setObjectName(self._name("enabled"))
-            self.enabled.installEventFilter(self._block)
-            header.addWidget(self.enabled)
-            self.enabled.toggled.connect(self._activate)
-        self.group, self.rows = _foldable_rows(
-            self.widget,
-            header,
-            self.layout,
-            self._folds,
-            self.field.path,
-            expanded=not self.field.collapsed,
-        )
+    def _build_enabled(self, header: QHBoxLayout) -> None:
+        self.enabled = QCheckBox("Enabled", self.widget)
+        self.enabled.setObjectName(self._name("enabled"))
+        self.enabled.installEventFilter(self._block)
+        header.addWidget(self.enabled)
+        self.enabled.toggled.connect(self._activate)
 
     def _build_key_choice(self, header: QHBoxLayout) -> None:
         # Not editable: the GUI picks Inline or an offered key, while wire
@@ -638,11 +701,13 @@ class GroupBlock:
 
     widget is the block, named form.group.<path>.<name> (form.group.<name>
     for the root level), where path is the model level's path and name the
-    fields' Display group. Its header holds label, the group name, which the
-    editor puts in the level's label column; the Expand/Collapse fold button;
-    and a GROUP_ERRORS_NOTE label, hidden until set_has_errors(True). body is
-    a QGroupBox, hidden while folded, whose layout rows takes the member
-    rows; members are their paths in order. The block owns no form state.
+    fields' Display group. Its header holds label, the fold title
+    form.fold.group.<path>.<name> (form.fold.group.<name> at the root): a
+    fold mark, then the group name, folding body on a double-click; the
+    editor puts it in the level's label column. A GROUP_ERRORS_NOTE label
+    follows it, hidden until set_has_errors(True). body is a QGroupBox,
+    hidden while folded, whose layout rows takes the member rows; members
+    are their paths in order. The block owns no form state.
     """
 
     def __init__(
@@ -667,16 +732,21 @@ class GroupBlock:
         layout.setSpacing(_HEADER_SPACING)
         header = QHBoxLayout()
         layout.addLayout(header)
-        self.label = _tight_label(name, self.widget)
-        header.addWidget(self.label)
-        self.body, self.rows = _foldable_rows(
-            self.widget, header, layout, folds, (path, name), expanded=False
+        self.label, self.body, self.rows = _foldable_rows(
+            self.widget,
+            folds,
+            (path, name),
+            label=name,
+            name="form.fold.group." + ".".join((*path, name)),
+            expanded=False,
         )
+        header.addWidget(self.label)
+        layout.addWidget(self.body)
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
         self._errors_note.setStyleSheet(_ERRORS_NOTE_STYLE)
         self._errors_note.hide()
         header.addWidget(self._errors_note)
-        # Keep the fold button beside its label instead of stretching it.
+        # Keep the errors note beside the title instead of stretching it.
         header.addStretch()
 
     def set_has_errors(self, *, has_errors: bool) -> None:

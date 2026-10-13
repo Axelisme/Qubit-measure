@@ -61,9 +61,20 @@ def row_names(view: QWidget, path: str) -> list[str]:
 
 
 def row_label(view: QWidget, path: str) -> str:
-    """Text of the row's own leading label, found beside its value label."""
+    """Text of the row's own leading label, without a fold title's mark.
+
+    A model row's leading label is its fold title form.fold.<path>; another
+    row's is the unnamed label beside its value label.
+    """
+    titles = view.findChildren(QLabel, f"form.fold.{path}")
+    if titles:
+        (title,) = titles
+        mark, label = title.text().split(" ", 1)
+        assert mark in ("\u25b8", "\u25be"), title.text()
+        return label
     row = child(view, QLabel, f"form.value.{path}").parentWidget()
     assert row is not None
+    # An empty name finds only unnamed children: the name label.
     labels = row.findChildren(QLabel, "", Qt.FindChildOption.FindDirectChildrenOnly)
     return labels[0].text()
 

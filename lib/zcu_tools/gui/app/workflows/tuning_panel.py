@@ -67,17 +67,38 @@ class WorkflowTuningPanel[F: FormModel, C](QWidget):
         )
         self._message = QLabel(self)
         self._message.setObjectName("workflow.tuning.message")
-        apply_button = QPushButton("Apply", self)
-        apply_button.setObjectName("workflow.tuning.apply")
-        apply_button.clicked.connect(self._apply_clicked)
-        discard_button = QPushButton("Discard", self)
-        discard_button.setObjectName("workflow.tuning.discard")
-        discard_button.clicked.connect(self.discard)
+        self._apply_button = QPushButton("Apply", self)
+        self._apply_button.setObjectName("workflow.tuning.apply")
+        self._apply_button.clicked.connect(self._apply_clicked)
+        self._discard_button = QPushButton("Discard", self)
+        self._discard_button.setObjectName("workflow.tuning.discard")
+        self._discard_button.clicked.connect(self.discard)
+        self._editing_enabled = True
         layout = QVBoxLayout(self)
         layout.addWidget(self.panel)
         layout.addWidget(self._message)
-        layout.addWidget(apply_button)
-        layout.addWidget(discard_button)
+        layout.addWidget(self._apply_button)
+        layout.addWidget(self._discard_button)
+
+    def set_editing_enabled(self, *, enabled: bool) -> None:
+        """Let the user edit and submit knobs (enabled=True, the initial mode) or not.
+
+        enabled=False makes the editor read-only but readable (see
+        FormEditor.set_editing_enabled: no control greys out, text stays
+        selectable, folds still work) and disables Apply and Discard. The panel
+        itself stays enabled. Remote apply_external and discard() still work;
+        this only gates the user's input. Neither mode writes state. Calling
+        with the current mode does nothing; changing the mode after close
+        (the editor is detached) raises RuntimeError.
+        """
+        # The run view calls this on every status poll; the editor redraws on
+        # each call, so only a change reaches it.
+        if enabled == self._editing_enabled:
+            return
+        self._editing_enabled = enabled
+        self.panel.editor.set_editing_enabled(enabled=enabled)
+        self._apply_button.setEnabled(enabled)
+        self._discard_button.setEnabled(enabled)
 
     def apply(self) -> TunablesSnapshot | FormErrors:
         """Submit current complete input as a user, without a GUI version guard.

@@ -41,3 +41,26 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
                 kind, local, screen, left, buttons, Qt.KeyboardModifier.NoModifier
             ),
         )
+
+
+def mouse_double_click(widget: QWidget, at: QPoint) -> None:
+    """Double-click the left mouse button at widget coordinates at.
+
+    Qt delivers a double click as press, release, double-click, release; the
+    first press and release alone are a single click.
+    """
+    local = QPointF(at)
+    screen = QPointF(widget.mapToGlobal(at))
+    left = Qt.MouseButton.LeftButton
+    for kind, buttons in (
+        (QEvent.Type.MouseButtonPress, left),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        (QEvent.Type.MouseButtonDblClick, left),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        QApplication.sendEvent(
+            widget,
+            QMouseEvent(
+                kind, local, screen, left, buttons, Qt.KeyboardModifier.NoModifier
+            ),
+        )

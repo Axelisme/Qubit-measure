@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
-from tests.gui._user_input import key_click, type_text
+from tests.gui._user_input import key_click, mouse_double_click, type_text
 
 from ._window_support import (
     FigurePoint,
@@ -303,16 +303,9 @@ class Readable:
     input_kept: bool
 
 
-def model_fold(panel: QWidget, path: str) -> QPushButton:
-    """The Expand/Collapse button in the header of the model row at path."""
-    row = child(panel, QLabel, f"form.value.{path}").parentWidget()
-    assert row is not None
-    (fold,) = [
-        button
-        for button in row.findChildren(QPushButton)
-        if button.parentWidget() is row and button.text() in ("Expand", "Collapse")
-    ]
-    return fold
+def model_fold(panel: QWidget, path: str) -> QLabel:
+    """The fold title in the header of the model row at path."""
+    return child(panel, QLabel, f"form.fold.{path}")
 
 
 def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
@@ -331,7 +324,8 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
         type_text(child(plan, QLineEdit, "form.input.count"), "9")
         alpha = child(plan, QLineEdit, "form.input.first.alpha")
         folded_before = not alpha.isVisibleTo(plan)
-        model_fold(plan, "first").click()
+        title = model_fold(plan, "first")
+        mouse_double_click(title, title.rect().center())
         qapp.processEvents()
         seen.append(
             Readable(
@@ -453,6 +447,115 @@ def test_stopping_disables_stop_until_the_stopped_terminal(
 
     assert status_text(window) == f"stopped synthetic_wide 1 committed · run {RUN_ID}"
     assert_start_tunables(window)
+
+
+@dataclass(frozen=True)
+class LiveTuning:
+    """How the live tuning panel answered a user at one moment of a run."""
+
+    panel_enabled: bool
+    editable: bool
+    apply: bool
+    discard: bool
+    unfolded: bool
+    input_kept: bool
+
+
+def try_live_tuning(window: WorkflowWindow[None], qapp: QApplication) -> LiveTuning:
+    """Type into the live value, unfold Timing, and read what changed."""
+    tuning = window.tuning_panel
+    assert tuning is not None and tuning.isVisibleTo(window)
+    before = tuning.host.state.input.data
+    editable = form_editable(tuning)
+    value = child(tuning, QLineEdit, "form.input.value")
+    key_click(value, Qt.Key.Key_End)
+    type_text(value, "9")
+    title = model_fold(tuning, "timing")
+    mouse_double_click(title, title.rect().center())
+    qapp.processEvents()
+    return LiveTuning(
+        panel_enabled=tuning.isEnabled(),
+        editable=editable,
+        apply=child(tuning, QPushButton, "workflow.tuning.apply").isEnabled(),
+        discard=child(tuning, QPushButton, "workflow.tuning.discard").isEnabled(),
+        unfolded=child(tuning, QLineEdit, "form.input.timing.alpha").isVisibleTo(
+            tuning
+        ),
+        input_kept=tuning.host.state.input.data == before,
+    )
+
+
+def test_stopping_live_tunables_stay_readable_and_unfold_but_ignore_typing(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    window = bound(window_session, qapp)
+    tabs(window).setCurrentIndex(TUNABLES_TAB)
+    seen: list[LiveTuning] = []
+
+    def hook(point: int) -> None:
+        if point != 1:
+            return
+        window.stop(RUN_ID)
+        wait_for(qapp, lambda: badge(window) == "stopping")
+        seen.append(try_live_tuning(window, qapp))
+
+    window_session.during_point = hook
+    assert isinstance(window.start(RUN_ID), int)
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+
+    assert seen == [
+        LiveTuning(
+            panel_enabled=True,
+            editable=False,
+            apply=False,
+            discard=False,
+            unfolded=True,
+            input_kept=True,
+        )
+    ]
+    assert badge(window) == "stopped"
+    assert_start_tunables(window)
+
+
+@pytest.mark.parametrize("lifecycle", ["running", "paused"])
+def test_running_and_paused_live_tunables_take_typing_and_apply(
+    window_session: WindowSession, qapp: QApplication, lifecycle: str
+) -> None:
+    window = bound(window_session, qapp)
+    tabs(window).setCurrentIndex(TUNABLES_TAB)
+    seen: list[LiveTuning] = []
+    if lifecycle == "paused":
+        window_session.pause_at = 1
+    else:
+
+        def hook(point: int) -> None:
+            if point == 1:
+                wait_for(qapp, lambda: badge(window) == "running")
+                seen.append(try_live_tuning(window, qapp))
+
+        window_session.during_point = hook
+    assert isinstance(window.start(RUN_ID), int)
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+    if lifecycle == "paused":
+        assert badge(window) == "paused"
+        seen.append(try_live_tuning(window, qapp))
+
+    assert seen == [
+        LiveTuning(
+            panel_enabled=True,
+            editable=True,
+            apply=True,
+            discard=True,
+            unfolded=True,
+            input_kept=False,
+        )
+    ]
+    if lifecycle == "paused":
+        button(window, "stop").click()
+        qapp.processEvents()
+        assert badge(window) == "stopped"
 
 
 def test_paused_stop_button_ends_the_run_as_stopped(
