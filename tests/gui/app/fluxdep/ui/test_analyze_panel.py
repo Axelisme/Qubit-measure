@@ -14,12 +14,9 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
-from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QGroupBox,
     QLabel,
@@ -34,7 +31,6 @@ from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FitState, FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
-from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -623,57 +619,43 @@ def test_frequency_field_is_marked_while_a_transition_needs_it(
     assert required.isHidden()
 
 
-def test_search_without_needed_sample_f_reports_the_rejection_without_a_modal(
-    qapp, spectrum_hdf5, search_database_hdf5
+@pytest.mark.parametrize(
+    ("needing", "field"),
+    [
+        (TransitionDict({"transitions": [(0, 1)], "mirror": [(0, 1)]}), "sample_f"),
+        (TransitionDict({"red side": [(0, 1)]}), "r_f"),
+    ],
+    ids=["mirror", "red side"],
+)
+def test_search_waits_for_a_needed_frequency_and_keeps_the_result(
+    qapp, cross_controller, search_database_hdf5, needing, field
 ):
-    runner = BackgroundRunner()
-    ctrl = Controller(
-        FluxDepState(),
-        interactive_owner=QtOwnerScheduler(),
-        search_runtime=FluxDepSearchRuntime(
-            runner, ProgressService(QtProgressTransport())
-        ),
-    )
-    name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
-    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
-    ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
+    ctrl = cross_controller
+    _record_perfect_fit(ctrl, _set_joint_fit_inputs(ctrl, search_database_hdf5))
+    recorded = ctrl.state.fit.params
     widget = AnalyzePanelWidget(ctrl)
-    modals: list[str] = []
-
-    def close_modal() -> None:
-        modal = QApplication.activeModalWidget()
-        if isinstance(modal, QDialog):
-            modals.append(modal.windowTitle())
-            modal.reject()
-
     try:
         widget.show_tab("search")
-        required = named(widget, QLabel, "fluxdep.fit.sample_f.required")
-        assert not required.isHidden(), "the default transitions include mirror"
-        _search_group(widget).findChildren(TransitionsForm)[0].set_transitions(
-            TransitionDict({"transitions": [(0, 1)], "mirror": [(0, 1)]})
-        )
+        search = named(widget, QPushButton, "fluxdep.fit.search")
+        required = named(widget, QLabel, f"fluxdep.fit.{field}.required")
+        assert search.isEnabled()
+        form = _search_group(widget).findChildren(TransitionsForm)[0]
+        form.set_transitions(needing)
         assert not required.isHidden()
-        named(widget, QLineEdit, "fluxdep.fit.search_db").setText(search_database_hdf5)
-        QTimer.singleShot(0, close_modal)
-        named(widget, QPushButton, "fluxdep.fit.search").click()
-        assert runner.quiesce()
-        qapp.processEvents()
-        assert modals == []
-        activity = ctrl.search.current
-        assert activity is not None and activity.status == "failed"
-        assert activity.error is not None
-        assert named(widget, QLabel, "fluxdep.fit.status").text() == (
-            friendly_fit_message("Search", activity.error)
-        )
-        assert ctrl.state.fit.params is None
+        assert not search.isEnabled(), "a search bound to fail must not start"
+        search.click()
+        assert ctrl.search.current is None
+        assert ctrl.state.fit.params == recorded, "the recorded result stays"
+        named(widget, QLineEdit, f"fluxdep.fit.{field}").setText("6.0")
+        assert required.isHidden() and search.isEnabled()
+        named(widget, QLineEdit, f"fluxdep.fit.{field}").setText("")
+        assert not search.isEnabled()
+        form.set_transitions(TransitionDict({"transitions": [(0, 1)]}))
+        assert search.isEnabled()
     finally:
-        ctrl.search.begin_close()
-        assert runner.quiesce()
         widget.quiesce()
         widget.dispose()
         widget.deleteLater()
-        ctrl.interactive.dispose()
 
 
 def test_freq_fields_are_blank_by_default(panel):
