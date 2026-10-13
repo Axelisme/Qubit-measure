@@ -18,9 +18,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_new",
         MethodSpec(
             10.0,
-            "Create a new tab using current global aliases. Unbound aliases allow "
-            "creation with an Invalid cfg. The tab retains no source capture; "
-            "named alias overrides belong to a single Run. Returns {tab_id}.",
+            "Create a new tab and capture current parameter/library/global aliases "
+            "once. Unbound aliases may leave Form errors. Reads, edits and Run "
+            "reuse this capture; Reset captures new sources. Returns {tab_id}.",
             (required_string("adapter_name", "Adapter to instantiate"),),
         ),
     ),
@@ -32,8 +32,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create a tab, load a result file without a SoC, and focus it. "
             "A load failure closes the new "
             "tab and restores prior focus. Returns the load outcome including "
-            "tab_id, cfg_backfill and analysis_error. Failed analysis preparation "
-            "retains the loaded result and the new tab. not_applied retains the result.",
+            "tab_id and analysis_error. Failed analysis preparation "
+            "retains the loaded result and the new tab.",
             (required_string("adapter_name"), required_string("data_path")),
         ),
     ),
@@ -131,8 +131,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_reset_cfg",
         MethodSpec(
             5.0,
-            "Reset cfg to current adapter defaults. Returns the complete new "
-            "publication, which may be Invalid. Busy and notification-reentrant "
+            "Capture current sources once, optionally overriding named aliases "
+            "for this Reset only, and restore fresh adapter Form defaults. "
+            "Returns schema, input, values and errors. Overrides are not persisted "
+            "or written to global aliases. Busy and notification-reentrant "
             "resets are rejected. Does not clear results or save artifacts.",
             (
                 required_string("tab_id"),

@@ -13,6 +13,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 from ..cfg_observation import cfg_error_to_remote
+from ..load_types import project_load_outcome
 from ..save_types import SaveArtifactRefWire, project_save_report
 from ._common import follow_tab
 from .tab import temporary_aliases
@@ -59,7 +60,7 @@ def h_tab_load_data(
     snap = control.get_tab_snapshot(tab_id)
     interaction = snap.interaction
     assert interaction is not None
-    result: dict[str, object] = dataclasses.asdict(outcome)
+    result = project_load_outcome(outcome)
     result["has_run_result"] = bool(interaction.has_run_result)
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None:

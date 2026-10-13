@@ -16,10 +16,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Start the current cfg inputs with fixed execution values. "
             "Requires an explicitly selected or newly created working point. "
-            "Nonempty aliases maps names to concrete components for this Run only. None and {} accept cached cfg, "
-            "resolving its cfg and evidence from the same current source capture; "
-            "global aliases and tab publication do not change. Non-Valid cfg and "
-            "unresolvable aliases reject admission. Use wait(op=handle) for terminal "
+            "Nonempty aliases are rejected before focus or operation effects. "
+            "Reset with aliases first. None and {} use displayed Form values and "
+            "the fixed Open/Reset parameter capture. Invalid Form errors reject "
+            "admission. Use wait(op=handle) for terminal "
             "status, failure/cancellation and Send & Stop feedback. The GUI "
             "returns an operation_id, which MCP exposes as {handle}; starting "
             "is not completion. After completion, read result state with "
@@ -31,7 +31,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "aliases",
                     JsonType.OBJECT,
                     required=False,
-                    description="Single-Run named overrides; None and {} mean cached acceptance",
+                    description="Nonempty overrides are rejected; Reset with aliases first. None and {} use the fixed tab capture.",
                 ),
             ),
         ),
@@ -47,9 +47,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Load an exact native result file and its original history into an "
             "already-open adapter tab. The tab "
             "then has a run result and can be analyzed without a SoC connection. "
-            "Compatible snapshot values backfill Config automatically, replacing "
-            "unsubmitted edits. cfg_backfill reports applied or not_applied; a "
-            "backfill failure does not undo the loaded result. analysis_error "
+            "The native cfg remains part of the loaded result, not Form input. "
+            "analysis_error "
             "reports analysis preparation failure without undoing the load; "
             "has_analyze_params is false until preparation succeeds.",
             (

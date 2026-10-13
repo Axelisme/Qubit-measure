@@ -33,12 +33,12 @@ def h_tab_new(
 def h_tab_open_file(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from dataclasses import asdict
+    from ..load_types import project_load_outcome
 
     name = str(params["adapter_name"])
     if name not in adapter.ctrl.get_adapter_names():
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown adapter: {name!r}")
-    return asdict(
+    return project_load_outcome(
         adapter.tab_control.open_tab_from_file(name, str(params["data_path"]))
     )
 
