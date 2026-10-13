@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, fixed Form sources and native cfg Load
+**Last updated:** 2026-10-13, Run panel FormEditor over the tab form resource
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -566,7 +566,7 @@ bar. Active and running tabs are identified by tab id, not visual index.
 
 ## Config model
 
-`Session.cfg` owns one `TabFormResource`. The resource keeps a private `FormState`
+`Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library, cached device infos and published value sources
 on Open and Reset. Preview, result and Run use that capture until the next Reset.
 Source events do not refresh existing forms. Device capture copies cached infos;
@@ -598,6 +598,15 @@ changes across tab resources. Subscriber faults log a traceback; the committed
 input remains installed and other subscribers still receive the change. Close
 revokes retained handles. Reopening creates a new resource and source capture.
 Frontend attach and detach do not own resource lifetime.
+
+The Qt Run panel mounts the shared `FormEditor` over `resource.editor_state`, the
+same FormState lent for reading and subscribing, and passes `write=resource.write`.
+Editor input therefore takes the resource guards and publishes to resource
+subscribers and the tab cfg version. Reset and Load install a new FormState; the
+panel watches the resource and mounts a new editor on that state. While the tab
+runs or analyzes, the panel only calls `set_editing_enabled(enabled=False)`: inputs
+lock, but the form still scrolls and its groups still fold. Detach unsubscribes
+and detaches the editor before the tab closes.
 
 Load converts materialized native modules into detached inline Specs and
 `SweepCfg` into editable `LinRange` input. It uses the existing tab capture.
