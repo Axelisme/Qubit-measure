@@ -522,7 +522,7 @@ def module_host(module_widget, qapp):
     """Mount the same registered caller and real EventBus in its Qt host."""
     ctrl, _isolated, tab_id, pane = module_widget
     presenter = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=presenter)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=presenter)
     window.add_tab_widget(tab_id, "synthetic/module")
     window.refresh_tab_writeback(tab_id)
     window.select_tab_pane(tab_id, "analysis")
