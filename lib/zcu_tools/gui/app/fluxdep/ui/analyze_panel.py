@@ -21,6 +21,7 @@ import logging
 import os
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -61,6 +62,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
 from zcu_tools.gui.app.fluxdep.services.viz import (
+    FitDisplay,
     derive_auto_limits,
     format_stale_reasons,
 )
@@ -82,8 +84,9 @@ AnalyzeTab = Literal["filter", "search", "show"]
 _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
 # One Show drawing: the fit result version, every published source/graph
-# version the renderer reads (stale reasons derive from them), and x/y limits.
-_ShowKey = tuple[int, tuple[tuple[str, int], ...], float, float, float, float]
+# version the renderer reads (stale reasons derive from them), and the
+# applied display choices. Pending control edits are not part of it.
+_ShowKey = tuple[int, tuple[tuple[str, int], ...], FitDisplay]
 
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
@@ -177,6 +180,8 @@ class AnalyzePanelWidget(QWidget):
         self._filter_widget: SelectorWidget | None = None
         self._filter_context_id: int | None = None
         self._shown_fit: _ShowKey | None = None
+        # Display choices taken by Apply; the controls may hold pending edits.
+        self._applied_display = FitDisplay()
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
@@ -206,6 +211,7 @@ class AnalyzePanelWidget(QWidget):
         self._refresh_search()
         if self._ctrl.state.fit.has_result:
             self._apply_auto_limits()
+            self._apply_limit_boxes()
         self._refresh_show()
         self.set_writable(writable=self._writable)
         # MainWindow explicitly activates this singleton on every Analyze click.
@@ -378,7 +384,7 @@ class AnalyzePanelWidget(QWidget):
         tools.addRow(self._transitions_show)
 
         redraw = QPushButton("Apply")
-        redraw.clicked.connect(self._redraw_show)
+        redraw.clicked.connect(self._apply_display)
         tools.addRow(redraw)
 
         self._fit_figure = Figure(figsize=(6, 4))
@@ -428,6 +434,7 @@ class AnalyzePanelWidget(QWidget):
         _set_freq(self._sample_f, fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
+        self._applied_display = self._display_from_controls()
         self._export_btn.setEnabled(fit.has_result)
         # Compare published inputs, not results, to preserve local display edits.
         self._loaded_fit_inputs = _published_inputs(fit)
@@ -699,6 +706,7 @@ class AnalyzePanelWidget(QWidget):
                 f"Search result retained; export is available.\n{exc}",
             )
         self._apply_auto_limits()
+        self._apply_limit_boxes()
         self._refresh_show()
         # The Show tab is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
@@ -759,21 +767,40 @@ class AnalyzePanelWidget(QWidget):
         """State's root-change reasons for the stored result; empty while fresh."""
         return tuple(self._ctrl.state.fit_stale_reasons)
 
+    def _display_from_controls(self) -> FitDisplay:
+        """Snapshot every Show control as detached display choices."""
+        return FitDisplay(
+            xlim=(self._x_lo.value(), self._x_hi.value()),
+            ylim=(self._y_lo.value(), self._y_hi.value()),
+            show_const_freq=self._show_const_freq.isChecked(),
+            plot_transitions=deepcopy(self._transitions_show.get_transitions()),
+        )
+
+    def _apply_display(self) -> None:
+        """Apply: take every pending Show control and redraw with it."""
+        self._applied_display = self._display_from_controls()
+        self._redraw_show()
+
+    def _apply_limit_boxes(self) -> None:
+        """Take only the limit boxes (e.g. auto limits); other edits stay pending."""
+        boxes = self._display_from_controls()
+        self._applied_display = replace(
+            self._applied_display, xlim=boxes.xlim, ylim=boxes.ylim
+        )
+
     def _show_key(self) -> _ShowKey:
         state = self._ctrl.state
         return (
             state.version.get(FIT_VERSION_KEY),
             tuple((stage.name, stage.version) for stage in state.pipeline_snapshot()),
-            self._x_lo.value(),
-            self._x_hi.value(),
-            self._y_lo.value(),
-            self._y_hi.value(),
+            self._applied_display,
         )
 
     def _refresh_show(self) -> None:
-        """Redraw Show only when the result, its sources or the limits changed.
+        """Redraw Show with the applied choices when result, sources or they changed.
 
-        Display edits (transition subset, reference lines) wait for Apply.
+        Pending control edits (transition subset, reference lines, limits) stay
+        in the controls until Apply.
         """
         if self._ctrl.state.fit.params is None:
             return
@@ -781,13 +808,18 @@ class AnalyzePanelWidget(QWidget):
             self._redraw_show()
 
     def _redraw_show(self) -> None:
-        """Render the fit visualisation with the current display tools."""
+        """Render the fit visualisation with the applied display choices."""
         fit = self._ctrl.state.fit
         if fit.params is None:
             return
+        display = self._applied_display
         # The show-transitions subset may need an r_f/sample_f that's unset;
         # check before drawing so it surfaces a friendly message, not a crash.
-        show_transitions = self._transitions_show.get_transitions()
+        show_transitions = (
+            display.plot_transitions
+            if display.plot_transitions is not None
+            else fit.transitions
+        )
         missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
         if missing:
             self._status.setText("Show: " + missing.split(".")[0] + ".")
@@ -796,9 +828,9 @@ class AnalyzePanelWidget(QWidget):
         try:
             self._ctrl.render_fit(
                 self._fit_figure,
-                xlim=(self._x_lo.value(), self._x_hi.value()),
-                ylim=(self._y_lo.value(), self._y_hi.value()),
-                show_const_freq=self._show_const_freq.isChecked(),
+                xlim=display.xlim,
+                ylim=display.ylim,
+                show_const_freq=display.show_const_freq,
                 plot_transitions=show_transitions,
             )
         except Exception as exc:

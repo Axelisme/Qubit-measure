@@ -294,7 +294,8 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
     `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
-  Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export；Show 只在結果、過期原因或軸範圍改變時重畫，display edits 仍等 Apply。
+  Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
+  Show 的 display choices 分 applied 與 pending：Apply 取走全部欄位並重畫；自動刷新只用 applied choices，只在結果版本或 `pipeline_snapshot` 的來源版本改變時重畫（同一原因文字的第二次對齊也重畫），不清掉、也不套用尚未 Apply 的欄位。新結果只套用 auto limits 的數值。
   Visualization 的 fallback 使用已發布的 fit transitions，不使用未提交的 Search 表單。
 - Search 診斷图 builder 建立原生 Agg Figure，不登記 pyplot manager。Panel 替換或關閉時 release presentation，不以全域 `plt.close("all")` 管理其他 caller 的圖。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar
