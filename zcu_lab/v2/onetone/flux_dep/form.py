@@ -10,7 +10,7 @@ FORM = Form(
     tree={
         "modules": {
             "reset": Hidden(),
-            # A fresh inline readout; the frequency sweep drives both freqs.
+            # A fresh inline readout; the freq sweep overwrites both freqs at Run.
             "readout": Template(
                 "readout",
                 set={
@@ -19,7 +19,6 @@ FORM = Form(
                         "$resonator.ext.default_probe_length - 0.1"
                     ),
                 },
-                lock={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
             ),
         },
         "flux_dev": AliasName("flux_dev"),

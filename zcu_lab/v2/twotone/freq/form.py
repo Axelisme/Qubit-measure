@@ -11,11 +11,10 @@ FORM = Form(
         "modules": {
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Hidden(),
-            # A fresh inline probe; the sweep drives freq, so it stays locked at 0.
+            # A fresh inline probe; the freq sweep overwrites its freq at Run.
             "qub_pulse": Template(
                 "qub_probe",
                 set={"gain": 0.1, "waveform.length": 5.0},
-                lock={"freq": 0.0},
             ),
             "readout": Slot("$qubit.module.readout", fallback=Template("readout")),
         },
