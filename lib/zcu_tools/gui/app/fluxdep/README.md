@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，決策點介面、fit 依賴、共用渲染與匯出收據、Show capture 座標基準
+**Last updated:** 2026-10-13，主視窗上方列、Spectra／Fit 兩頁與譜清單列
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -79,7 +79,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   Finish 經 Controller services 發布。Window close dispose 全部 contexts 並 quiesce runner；view detach 不終止 Session。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
-- **`ui/`** — `MainWindow`（左 spectrum 列表 + 右階段驅動編輯區）、互動 widget
+- **`ui/`** — `MainWindow`（上方列 + Spectra／Fit 兩頁，見「主視窗外殼」）、互動 widget
   （`ui/interactive/`）、`load_dialog`/`export_dialog`。共用層（與 dispersive）：
   `LoadSpectrumDialog` subclass `gui/widgets/load_dialog.LoadDataDialog`（共用 file
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
@@ -121,6 +121,18 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
 - DB 搜尋由 app-owned `FluxDepSearchOwner` 提交到專用 `BackgroundRunner`。
   Worker 只計算 detached snapshot。Owner 提交有效數值後，panel 才呈現診斷圖。
+
+### 主視窗外殼
+上方列左邊是 project 標籤（`Project: <chip> / <qubit>`，chip 與 qubit 都是預設值時顯示提示）與控制權燈，
+右邊是 Project…、Add spectrum…、Restore…、Export spectra…。主區是 Spectra 與 Fit 兩頁 tab：
+Spectra 頁是譜清單（Remove 在清單下方）加階段驅動編輯區，Fit 頁承載 AnalyzePanel 單例。
+選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁；切頁由使用者點 tab、
+GUI Add／Restore 後回到 Spectra，或跟隨 agent-origin 的 picker／Filter／search／active 事件。
+離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
+清單每列取 State 與 interactive owner 的同一份事實（即 `spectrum.list` 的資料）：字面譜名、種類、
+階段（loaded／aligned／sampled）、已發布點數，有才加未完成草稿種類與 Filter 排除點數。
+測試以 objectName 定位外殼元件（`fluxdep.session.project`、`fluxdep.pages`、`fluxdep.page.*`、
+`fluxdep.spectra`、`fluxdep.editor`、`fluxdep.project`、`fluxdep.spectrum.*`、`fluxdep.spectra.*`）。
 
 ### 編輯區階段驅動
 MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
@@ -175,7 +187,7 @@ Agent-origin search pending 顯示 lazy Search 面板；terminal 更新結果，
 
 ### 跨譜篩選：繼承 min_distance 不繼承 select
 App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
-Analyze singleton 每次啟用 Filter 都重新 attach 有效 context；離開 Filter 取消 context，切走 Analyze 則只 detach view。
+Analyze singleton 每次進入 Fit 頁的 Filter 都重新 attach 有效 context；離開 Filter tab 取消 context，切到 Spectra 頁則只 detach view。
 Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
 Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
@@ -235,7 +247,7 @@ Local、Local 鎖定及 Remote label／在線狀態。點燈呼叫 `toggle_local
 鎖定或切換 Local 鎖定；轉移本身不取消 search 或 interactive Session。
 
 MainWindow 的 `set_writable` 停用 collection／project／IO 命令與
-redo controls，spectrum 清單仍能切換顯示。主視窗推送狀態給 Analyze panel 和目前 picker。新 view 套用當下狀態，
+redo controls，spectrum 清單與 Spectra／Fit 切頁仍可用。主視窗推送狀態給 Analyze panel 和目前 picker。新 view 套用當下狀態，
 子元件不訂閱 authority。Picker 停用 controls 與 domain pointer gestures，
 canvas 保持可用，接管時丟棄未提交的 Local pointer preview。
 Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt remote adapter
@@ -244,7 +256,9 @@ chooser 返回與 accepted callback 不重查 holder。
 
 Analyze 的 Search form（含 Cancel search）在 Remote 停用。Filter tab 的進出會開啟或
 取消 Session，所以在 Remote 停用；無 Filter input 時 Search／Show 切換及 Show
-的 display controls 保持可用。Filter view detach 仍只是 teardown，不收回控制權。
+的 display controls 保持可用。非 holder 可進 Fit 頁閱讀結果與 `Outdated: …`；沒有 live Filter
+context 時進入 Search tab，不為閱讀開 Filter input，有 live context（例如 agent 的）則 reattach。
+Filter view detach 仍只是 teardown，不收回控制權。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
 Remote 關窗先確認，拒絕不開始 shutdown。接受後沿原 search cancel／drain 與
@@ -287,9 +301,8 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   + 結果 params(EJ,EC,EL)、kernel quality／attribution、原始 search cloud 與捕獲版本。`set_fit_params` 改輸入會清掉舊結果。
   品質保留完整精度 GHz、編譯順序與重複 labels，無 recorded quality 時為 null。
   四種 picker finish 回 `PublicationReceipt`，包含 accepted 數值與 Controller 在 emit 前捕獲的 invalidated。同步事件 subscriber 開 successor 或再發布都不能改掉本次 receipt。Filter Apply 維持數值回傳。
-- **AnalyzePanel UI**（`ui/analyze_panel.py`）：selection 後的三步分析集中到**一個「Analyze…」按鈕**
-  開的單例面板，內含 **QTabWidget: Filter / Search / Show**（取代舊的 Cross-spectrum filter + Fit
-  spectrum 兩按鈕）。
+- **AnalyzePanel UI**（`ui/analyze_panel.py`）：selection 後的三步分析集中在**主視窗 Fit 頁**承載的
+  單例面板，內含 **QTabWidget: Filter / Search / Show**。
   - **Filter**：嵌 cross-spectrum `SelectorWidget`（進此 tab 時依當前 spectrums 重建）。
   - **Search**：db 搜尋表單（bounds preset 下拉 `general`/`integer`/`all` 填三組 bound spinbox——
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset）+
@@ -297,7 +310,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
     status/tooltip，不參與 panel 水平最小寬度。
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
-  AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
+  AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
   Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
   Show 的 display choices 分 applied 與 pending：Apply 取走全部欄位並重畫；自動刷新只用 applied choices，只在結果版本或 `pipeline_snapshot` 的來源版本改變時重畫（同一原因文字的第二次對齊也重畫，但已記錄 search 的背景維持 capture，fresh search 後才換新背景），不清掉、也不套用尚未 Apply 的欄位。新結果只套用 auto limits 的數值。

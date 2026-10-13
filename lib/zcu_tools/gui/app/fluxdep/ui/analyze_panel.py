@@ -210,7 +210,7 @@ class AnalyzePanelWidget(QWidget):
             self._apply_limit_boxes()
         self._refresh_show()
         self.set_writable(writable=self._writable)
-        # MainWindow explicitly activates this singleton on every Analyze click.
+        # MainWindow routes every Fit page entry through show_tab.
 
     # --- construction ----------------------------------------------------
 
@@ -488,7 +488,7 @@ class AnalyzePanelWidget(QWidget):
     def activate(self) -> None:
         """Activate the singleton; on Filter, reattach valid or new app context.
 
-        Explicit refresh; MainWindow routes Analyze clicks through show_tab.
+        Explicit refresh; MainWindow routes Fit page entries through show_tab.
         Retire the old view first, so hidden controls cannot Apply stale data.
         Empty cloud shows a placeholder; invalid inputs propagate to the caller.
         """
@@ -499,7 +499,7 @@ class AnalyzePanelWidget(QWidget):
     def detach(self) -> None:
         """Retire Filter's view without cancelling the app context.
 
-        Call when switching to a spectrum editor. Other tabs/forms remain intact.
+        Call when leaving the Fit page. Other tabs/forms remain intact.
         The app owns context invalidation on active/source/picker switches.
         """
         if self._filter_widget is not None:
