@@ -820,6 +820,66 @@ def test_agent_spectrum_work_updates_spectra_page_while_user_stays_on_fit(
         qapp.processEvents()
 
 
+def test_agent_cancel_of_the_shown_draft_shows_the_published_preview(
+    qapp, cross_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = cross_controller
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        ctrl.control_identity.connect("agent-link", "agent", "owner")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_sample_pick("a")
+        assert isinstance(editor(win), FindPointsWidget)
+        show_page(win, "fit")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.cancel("a")
+        qapp.processEvents()
+        qapp.processEvents()
+        assert isinstance(editor(win), ResultPreviewWidget)
+        assert current_page(win) == "fit"
+        assert ctrl.interactive.inspect("a") is None
+        assert stage_status(win, "sample") == "done"
+        assert current_stage(win) is None
+    finally:
+        ctrl.control_identity.reclaim_local()
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_cancel_of_the_shown_draft_shows_the_published_preview(qapp, cross_controller):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = cross_controller
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        stage_button(win, "align").click()
+        assert isinstance(editor(win), LinePickerWidget)
+        ctrl.interactive.cancel("a")
+        qapp.processEvents()
+        qapp.processEvents()
+        # The preview only displays: the holder gets no new picker.
+        assert isinstance(editor(win), ResultPreviewWidget)
+        assert current_page(win) == "spectra"
+        assert ctrl.interactive.inspect("a") is None
+        assert stage_status(win, "align") == "done"
+        assert current_stage(win) is None
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
 def test_non_holder_stage_click_views_without_opening_a_picker(qapp, cross_controller):
     from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
