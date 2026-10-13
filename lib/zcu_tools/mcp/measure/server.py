@@ -154,8 +154,19 @@ receipt, not terminal results; use wait or status to confirm the outcome.
 Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
 GUI hook and may report operation_failed for an already failed operation.
 
-Cfg editing applies to current inputs; Run accepts only Valid cfg and fixes
-its execution values at admission. apply_writeback(tab, items) selects current
+Tab cfg reads and edits return Form schema/input/values/errors. Ordinary strings
+are literal; expressions use {expr: text}, complex uses the reversible __complex__
+tag, and library keys are actual keys. Edit unique model-field leaf paths;
+write range start/stop/n separately. Invalid input remains editable with errors.
+Open and explicit Reset capture sources once. Recipe preparation always Reset
+before edits, including new tabs. Reset(aliases=...) is the single-use source
+override; it changes neither global aliases nor saved input. Parameter reads,
+cfg, edits and Run use that fixed capture until the next Reset. parameter_read
+and get_cfg take no aliases. run_start rejects nonempty aliases before focus or
+operation effects; None and {} use displayed values. Run accepts only current
+valid Form values. Load restores results and analysis sources, not Form input;
+inspect the result's native cfg separately. Load replies report result/analysis
+facts, not cfg backfill. apply_writeback(tab, items) selects current
 Primary/Post candidates by stable target_name. Omit items for all; an empty array
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes.

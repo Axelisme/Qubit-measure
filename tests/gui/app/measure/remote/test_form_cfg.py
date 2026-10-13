@@ -268,6 +268,8 @@ def test_recipe_with_real_form_and_adapter_preserves_acquisition_result(
         assert fixture.ctrl.quiesce()
         completed, status = operation.complete_in_current_worker()
         assert status == "completed"
+        if completed is None:
+            raise TypeError("Expected completed recipe Run")
         assert completed.snapshot().actual["fields"]["gain"]["value"] == 0.75
         snapshot = fixture.ctrl.tab_control.get_tab_snapshot(tab)
         if snapshot.run is None or not isinstance(snapshot.run.result, RunRecord):

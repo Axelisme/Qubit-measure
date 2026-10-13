@@ -458,11 +458,10 @@ class _TabBinding:
     """Cfg preparation state hidden behind an author tab handle.
 
     tools is the execution's fixed connection. tab is the GUI locator.
-    publication is the last returned cfg observation, never refreshed on failure.
-    aliases is an owned single-use mapping of alias names to components, never tab binding.
-    Parameter sources are queried from current globals with these overrides. origins records sources
-    by public/derived field name for the later Run capture, including individual
-    sweep labels. summary_parameters selects the fixed Run facts to capture.
+    publication is the last Form observation, never refreshed on failure.
+    Parameter sources are read from the tab's fixed Open/Reset environment.
+    origins records sources by public/derived field name for the later Run
+    capture, including individual sweep labels. summary_parameters selects the fixed Run facts to capture.
     """
 
     tools: MeasureToolContext
@@ -471,7 +470,6 @@ class _TabBinding:
     observe_run: Callable[[RunOperation], None]
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
-    aliases: Mapping[str, str] | None = None
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
     summary_parameters: tuple[SummaryParameter, ...] = ()
     closed: Event = field(default_factory=Event)
@@ -645,7 +643,7 @@ class RecipeSession:
         """Bind tools and optional execution lifetime/admission collaborators.
 
         summary_parameters is the recipe definition's declared cfg fields and
-        units for Run capture. Empty tuple records only the internal cfg ref.
+        units for Run capture. Empty tuple records no actual conditions.
         closed/condition are the driver's close event and wake condition; omission
         creates local ones. consume_cancel atomically consumes one pending cancel
         before a Run/analysis start and returns whether to suppress it. This
@@ -814,7 +812,6 @@ class RecipeSession:
                 closed=self._closed,
                 condition=self._condition,
                 consume_cancel=self._consume_cancel,
-                aliases=overrides,
                 summary_parameters=self._summary_parameters,
             )
         )
@@ -823,10 +820,9 @@ class RecipeSession:
 class RecipeTab:
     """Opaque tab handle returned by RecipeSession.open_tab.
 
-    field names are dot-separated public cfg fields (for example rounds or
-    modules.readout), not wire path lists. Methods preserve the observed cfg ref
-    and record parameter sources. GUI errors propagate without re-read, retry or
-    rollback. Authors obtain
+    Field names are dot-separated Form model fields, not wire path lists.
+    Methods keep a detached Form observation and record parameter sources.
+    GUI errors propagate without re-read, retry or rollback. Authors obtain
     this handle from open_tab rather than constructing the private binding.
     """
 
@@ -838,8 +834,8 @@ class RecipeTab:
 
         path is a parameter path such as $custom.threshold or Q1.ext.seed, not an
         arithmetic formula. Missing and explicit null both return None. Each call
-        uses tab.parameter_read without overrides, returning a detached value without changing cfg,
-        provenance or Run state or refreshing context/operation guards. Source,
+        uses tab.parameter_read without overrides and returns a detached value.
+        It does not change cfg, provenance or Run state, or refresh guards. Source,
         alias and fixed-connection failures propagate without fallback or retry.
         ValueError rejects blank paths; malformed wire raises incompatible_wire.
         """
@@ -861,13 +857,17 @@ class RecipeTab:
         return self._library_reference(reference)
 
     def read_field(self, field: str) -> RecipeFormField:
-        """Read a detached field from the last successful cfg publication, without RPC.
+        """Read a detached field from the last Form observation, without RPC.
 
-        field is a non-empty dotted public cfg path. Invalid fields retain their
-        cached inputs and diagnostics. Later successful edits or alias previews
-        replace the tab's publication but do not change previously returned states.
-        Failed edits do not refresh it. Unknown/malformed paths raise ValueError;
-        malformed wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
+        field is a non-empty dotted model-field path. Inline paths include
+        module, for example modules.readout.module.pulse_cfg.freq. Range count
+        is n, not set_sweep's public expts argument. RecipeFormField exposes
+        input, input_present, ordinary value, key/inline mode, actual key, lock,
+        current child field names and directed errors. It reconstructs no old
+        CfgSchema kind or ref-readonly subtree. Successful edits replace the
+        observation without changing previously returned states. Failed edits
+        do not refresh it. Unknown/malformed paths raise ValueError; malformed
+        wire raises GuiRpcError(incompatible_wire), not invalid_cfg.
         """
         return self._node(field)
 
@@ -998,9 +998,8 @@ class RecipeTab:
         string, such as a library label; this method interprets no domain policy.
         It changes only this tab's source metadata for the next Run. Subsequent
         set/set_sweep calls can replace the label, and captured Runs remain fixed.
-        No RPC, cfg edit, revision change or validation of the resolved value
-        occurs. Unknown/non-scalar/non-sweep fields and empty labels raise
-        ValueError before metadata changes. set(None) still records gui_default.
+        No RPC, Form input change or validation of the resolved value occurs.
+        Unknown/non-scalar/non-sweep fields and empty labels raise ValueError before metadata changes. set(None) still records gui_default.
         """
         label = _source_label(source)
         node = self._node(field)
@@ -1018,11 +1017,11 @@ class RecipeTab:
         and record gui_default. Empty/default-only batches send no edit. Validate
         every path, scalar kind, carrier and label before any mutation; local
         errors raise ValueError. Expressions go unchanged to the GUI owner.
-        Supplied values share the retained cfg ref and one returned revision.
-        Check their returned validity/diagnostics before recording sources; invalid
-        replies raise GuiRpcError(invalid_cfg) but retain the returned publication.
+        The resource returns one complete Form observation. Check directed
+        errors before recording sources; invalid replies raise invalid_cfg
+        but retain the returned input and preview.
         GUI/connection failures propagate without refresh, retry or rollback;
-        this method adds no atomicity guarantee beyond the existing GUI protocol.
+        the resource owns the atomic write.
         """
         planned = tuple(edits)
         wire: list[_CfgEdit] = []
