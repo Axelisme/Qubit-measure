@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, Expr, PulseSpec, Range
-from zcu_tools.gui.app.measure.adapter import Form, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.remote.handlers.tab import (
 )
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow

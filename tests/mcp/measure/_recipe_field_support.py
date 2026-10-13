@@ -1,9 +1,9 @@
 """Real Form recording fixture for two independent authored ranges."""
 
 from zcu_tools.cfg_model import ConfigBase, Range, Slot, Template
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2 import SweepCfg
 
 from ._recipe_support import READOUT_TEMPLATE, LookbackGui, RecipeControlsBase

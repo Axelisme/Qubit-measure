@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    Form,
     ParameterWriteback,
     PostAnalyzeRequest,
     PostWritebackRequest,
@@ -23,6 +22,7 @@ from zcu_tools.gui.app.measure.adapter.types import (
     PostAnalyzeResultBase,
     T_PostAnalyzeResult,
 )
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult

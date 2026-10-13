@@ -13,10 +13,10 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError

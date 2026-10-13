@@ -13,9 +13,9 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState, ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -27,7 +27,7 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
-from ._cfg_fakes import CalibrationAdapter
+from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter
 
 
 class Core(ConfigBase):

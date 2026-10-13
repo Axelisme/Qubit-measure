@@ -37,9 +37,9 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._form_modules import ModuleField, ModuleValues, module_specs
-from ._form_types import literal_type, union_type
-from ._form_types import members as _members
+from ._modules import ModuleField, ModuleValues, module_specs
+from ._types import literal_type, union_type
+from ._types import members as _members
 
 
 class SweepRange(LinRange):

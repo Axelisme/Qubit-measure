@@ -8,7 +8,7 @@ from typing import ClassVar, Literal
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.native_persistence import PreparedRunData
-from zcu_tools.gui.app.measure.adapter import Form, LoadDataRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import LoadDataRequest, SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import (
@@ -18,6 +18,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
+from zcu_tools.gui.form_adapter import Form
 
 from tests.gui._adapter_fakes import DummyAdapter
 

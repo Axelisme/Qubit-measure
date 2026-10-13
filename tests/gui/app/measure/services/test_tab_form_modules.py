@@ -11,10 +11,10 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,

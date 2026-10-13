@@ -10,13 +10,13 @@ from zcu_tools.cfg_model import (
     Slot,
     WaveformCfgFactory,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.cfg_schemas import (
     module_cfg_to_value,
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.form import ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import LibraryChange
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg

@@ -5,8 +5,8 @@ from typing import Annotated
 import pytest
 from pydantic import JsonValue, PydanticSchemaGenerationError
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
     ComponentLibrary,

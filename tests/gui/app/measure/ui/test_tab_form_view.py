@@ -18,7 +18,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode, Form
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
@@ -30,6 +30,7 @@ from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.widgets.form import FormEditor
 

@@ -18,7 +18,7 @@ from zcu_tools.gui.form import FormEnv, static_defaults
 from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._form_types import members, type_tag
+from ._types import members, type_tag
 
 
 def slot_key(slot: Slot, env: FormEnv) -> str | None:

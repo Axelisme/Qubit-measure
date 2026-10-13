@@ -6,8 +6,8 @@ from threading import Event
 
 import pytest
 from zcu_tools.cfg_model import Range
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote import ControlOptions
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
