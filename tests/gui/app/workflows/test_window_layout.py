@@ -113,7 +113,7 @@ def assert_only_form_in_tab(tabs: QTabWidget, index: int, panel: QWidget) -> Non
     assert shown == [], "a replaced or second form remains shown in this tab"
 
 
-def assert_d_layout(window: WorkflowWindow[None], qapp: QApplication) -> None:
+def assert_two_column_layout(window: WorkflowWindow[None], qapp: QApplication) -> None:
     """Strip on top; selector, tabs and fixed run row left; run status/figures right."""
     show(window, qapp, 1600, 1000)
     assert (window.width(), window.height()) == (1600, 1000)
@@ -167,7 +167,7 @@ def test_expanded_forms_keep_the_run_row_and_tall_figures_at_1600x1000(
 ) -> None:
     window = window_session.window
     expand_forms(window, qapp)
-    assert_d_layout(window, qapp)
+    assert_two_column_layout(window, qapp)
     tabs = child(window, QTabWidget, "workflow.forms")
     assert_only_form_in_tab(tabs, 0, window.plan_panel)
     assert_only_form_in_tab(tabs, 1, window.tunables_panel)
@@ -225,4 +225,4 @@ def test_replaced_panels_appear_in_their_own_tabs(
 
     for action in ("select", "prepare", "reload"):
         replace_with(action)
-    assert_d_layout(window, qapp)
+    assert_two_column_layout(window, qapp)

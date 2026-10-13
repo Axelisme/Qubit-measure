@@ -463,6 +463,8 @@ def _decorate(
             # The inlined definition carries its class name as title.
             target["title"] = _section_title(name)
         if key_or_inline(info.annotation):
+            # Core owns the str-or-model rule; views read this marker only.
+            target["x-form-key-or-inline"] = True
             _key_branch(info, target, projection)
         child_options = {
             path[1:]: values
