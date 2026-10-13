@@ -1,5 +1,6 @@
 """Recipe author fields consume the real generated Form wire contract."""
 
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, ModuleInline
+from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
@@ -69,6 +71,17 @@ class FormGui(LookbackGui):
             return dict(observe_form(self.owner))
         if method == "tab.edit_cfg":
             self.owner.write(form_writes(params["edits"]))
+            return dict(observe_form(self.owner))
+        if method == "tab.run_start":
+            assert params == {"tab_id": "t"}
+            self.ran = True
+            return {"operation_id": 71}
+        if method == "tab.read_module":
+            return asdict(
+                self.owner.read_module(tuple(str(params["field"]).split(".")))
+            )
+        if method == "tab.use_inline":
+            self.owner.use_inline(tuple(str(params["field"]).split(".")))
             return dict(observe_form(self.owner))
         return super().__call__(method, params)
 
@@ -202,3 +215,98 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("locked_pulse", "Q1.pulses.pi")
         assert client.transport.sent == before
+
+
+def test_read_module_returns_lowered_values_without_editing_key(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        before = gui.owner.input.data
+        assert hasattr(tab, "read_module"), "Missing public execution module read"
+        module = tab.read_module("pulse")
+        assert module.mode == "key"
+        assert module.source == "library:Q1.pulses.pi"
+        assert module.value["freq"] == 100.0
+        assert gui.owner.input.data == before
+        module.value["freq"] = -1.0
+        assert tab.read_module("pulse").value["freq"] == 100.0
+
+
+@pytest.mark.parametrize("source", ["explicit", "calibration"])
+def test_use_inline_copies_library_then_accepts_public_frequency_write(
+    tmp_path: Path, source: str
+) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        assert hasattr(tab, "use_inline"), "Missing public inline conversion"
+        tab.use_inline("pulse")
+        assert tab.read_field("pulse").mode == "inline"
+        assert tab.read_field("pulse.module.gain").value == 0.2
+        tab.set("pulse.module.freq", 125.0, source=source)
+        module = tab.read_module("pulse")
+        assert module.mode == "inline"
+        assert module.source == "pulse"
+        assert module.value["freq"] == 125.0
+        assert AuthorCfg.model_validate(gui.owner.accept().cfg).pulse == PulseCfg(
+            ch=0, nqz=1, freq=125.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+        )
+
+
+def test_retained_module_source_keeps_key_and_numeric_summary(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(
+                SummaryParameter("frequency", "pulse.module.freq", "MHz"),
+            ),
+        ).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        before = gui.owner.input.data
+        assert hasattr(tab, "retain_module_source"), "Missing module summary projection"
+        tab.retain_module_source(
+            "pulse", summary_field="pulse.module.freq", value_path=("freq",)
+        )
+        assert gui.owner.input.data == before
+        assert tab.read_field("pulse").mode == "key"
+        operation = tab.run()
+        captured = operation.snapshot()
+        assert captured is not None
+        assert captured.actual["fields"]["pulse.module.freq"] == {
+            "value": 100.0,
+            "source": "library:Q1.pulses.pi",
+            "unit": "MHz",
+        }
+        tab.use_inline("pulse")
+        tab.set("pulse.module.freq", 125.0, source="calibration")
+        assert captured.actual["fields"]["pulse.module.freq"]["value"] == 100.0
+        next_capture = tab.run().snapshot()
+        assert next_capture is not None
+        assert next_capture.actual["fields"]["pulse.module.freq"] == {
+            "value": 125.0,
+            "source": "calibration",
+            "unit": "MHz",
+        }
+
+
+def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(SummaryParameter("frequency", "pulse.module.freq"),),
+        ).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        assert hasattr(tab, "retain_module_source"), (
+            "Missing validated summary projection"
+        )
+        with pytest.raises(ValueError, match="module value path"):
+            tab.retain_module_source(
+                "pulse", summary_field="pulse.module.freq", value_path=("missing",)
+            )
+        captured = tab.run().snapshot()
+        assert captured is not None
+        assert "pulse.module.freq" not in captured.actual["fields"]

@@ -12,6 +12,7 @@ from zcu_tools.gui.session.types import (
     SocProtocol,
 )
 
+from ._form_modules import ModuleValues
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
 from .form import Form
 from .interactive import InteractivePluginProvider

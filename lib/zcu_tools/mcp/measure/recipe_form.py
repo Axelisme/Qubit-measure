@@ -56,6 +56,60 @@ class RecipeFormField:
     errors: tuple[RecipeFormError, ...]
 
 
+@dataclass(frozen=True)
+class RecipeModuleValues:
+    """Detached field-local module value from the tab's fixed Reset capture.
+
+    value contains materialized module fields in their declared units. It is not
+    the full native cfg after to_cfg and excludes extras lowering. mode is key
+    or inline. source is library:<actual-key> for key mode, or the dotted Form
+    module field for inline. Other invalid draft fields do not block this view;
+    invalid module fields raise instead of returning unavailable/empty values.
+    All containers are detached from input, library and retained observations.
+    """
+
+    value: dict[str, YamlValue]
+    mode: Literal["key", "inline"]
+    source: str
+
+
+def read_module_values(reply: Mapping[str, object]) -> RecipeModuleValues:
+    """Decode the owner's value/mode/source reply; malformed wire raises.
+
+    reply is a tab.read_module response, not a Form preview. No values are
+    materialized or repaired here; incompatible replies raise incompatible_wire.
+    """
+    mode = reply.get("mode")
+    source = reply.get("source")
+    if mode not in ("key", "inline") or not isinstance(source, str) or not source:
+        raise GuiRpcError("Invalid module origin", reason="incompatible_wire")
+    values = wire_object(reply.get("value"))
+    return RecipeModuleValues(
+        {name: wire_value(value) for name, value in values.items()},
+        "key" if mode == "key" else "inline",
+        source,
+    )
+
+
+def module_scalar(value: Mapping[str, YamlValue], path: tuple[str, ...]) -> YamlValue:
+    """Project one scalar module value for summary capture, not Form editing.
+
+    path is a nonempty tuple of module-relative field names, without the Slot's
+    module envelope. Unknown paths, blank segments and non-scalar targets raise
+    ValueError. The returned scalar uses the module's units; no policy runs.
+    """
+    if not path or any(not part or part != part.strip() for part in path):
+        raise ValueError("value_path must contain nonempty module field names")
+    selected: YamlValue = dict(value)
+    for part in path:
+        if not isinstance(selected, dict) or part not in selected:
+            raise ValueError(f"Unknown module value path: {'.'.join(path)}")
+        selected = selected[part]
+    if isinstance(selected, (dict, list)):
+        raise ValueError("Module summary projection must select a scalar")
+    return selected
+
+
 def wire_object(value: object) -> dict[str, object]:
     """Validate an object received from the GUI without accepting bad keys."""
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):

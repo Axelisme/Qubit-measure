@@ -166,4 +166,38 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             ),
         ),
     ),
+    method_entry(
+        "tab.read_module",
+        "tab:h_tab_read_module",
+        MethodSpec(
+            5.0,
+            "Read {value, mode, source} for one dotted core module field from fixed "
+            "Open/Reset sources. Key mode reads the captured library; inline mode "
+            "evaluates only this module. Other invalid fields do not block reads. "
+            "No native cfg or extras lowering, mutation or source refresh occurs. "
+            "This module's invalid values are rejected. Busy reads are allowed.",
+            (
+                required_string("tab_id"),
+                required_string("field", "Dotted core module field"),
+            ),
+            readonly=True,
+        ),
+    ),
+    method_entry(
+        "tab.use_inline",
+        "tab:h_tab_use_inline",
+        MethodSpec(
+            5.0,
+            "Convert one dotted core module field to inline input through guarded "
+            "resource write. Copy captured library content or use Template/static "
+            "blank fallback when absent. Preserve locks. Existing inline is a "
+            "no-op. Busy, revoked and reentrant writes are rejected. One changed "
+            "input publishes once; structural failures have no successful prefix. "
+            "Returns the Form observation; blank input may need leaf edits.",
+            (
+                required_string("tab_id"),
+                required_string("field", "Dotted core module field"),
+            ),
+        ),
+    ),
 )

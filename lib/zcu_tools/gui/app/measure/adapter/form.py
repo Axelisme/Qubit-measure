@@ -29,6 +29,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormWritePath,
     LinRange,
     static_defaults,
 )
@@ -36,7 +37,7 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._form_modules import ModuleField, module_specs
+from ._form_modules import ModuleField, ModuleValues, module_specs
 from ._form_types import literal_type, union_type
 from ._form_types import members as _members
 
@@ -370,6 +371,86 @@ class Form[C: ConfigBase]:
         input against this env. Unresolved or invalid defaults stay absent.
         """
         return self.model.default_input(env)
+
+    def _module_field(self, path: tuple[str, ...]) -> ModuleField:
+        section = self._section
+        if not path or any(not part for part in path):
+            raise ValueError("Module path must contain nonempty field names")
+        for part in path[:-1]:
+            if part not in section.children:
+                raise ValueError(f"Not a core module field: {'.'.join(path)}")
+            section = section.children[part]
+        if path[-1] not in section.modules:
+            raise ValueError(f"Not a core module field: {'.'.join(path)}")
+        return section.modules[path[-1]]
+
+    def module_inline_input(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        """Prepare inline input for a core module path against fixed env.
+
+        input must belong to this Form; otherwise raise TypeError. path consists
+        of nonempty core field names, not module descendants; invalid paths raise
+        ValueError. Copy a captured library Spec through ModuleInline.defaults;
+        absent library/key uses Template fallback or editable static blank.
+        Wrong family/source failures propagate. Preserve existing inline values
+        and locks. No mutation, validation of the whole draft, or publication
+        occurs; blank may still require ordinary leaf edits before Run.
+        """
+        if input.model is not self.model:
+            raise TypeError("module_inline_input requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        return field.inline_input(raw if isinstance(raw, dict) else {}, env)
+
+    def module_inline_writes(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> dict[FormWritePath, JsonValue]:
+        """Prepare one public leaf batch for required or nullable module input.
+
+        input, path and env follow module_inline_input, with the same failures,
+        locks and captured-library/Template/blank preparation. The generated
+        inline branch defaults use that same preparation during discriminator
+        switching. Return no writes for already-inline input. The resource must
+        apply this batch once through guarded public write; preparation changes
+        no input and publishes nothing. Callers need not know module layout.
+        """
+        if input.model is not self.model:
+            raise TypeError("module_inline_writes requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        previous = raw if isinstance(raw, dict) else {}
+        return (
+            {}
+            if previous.get("kind") == "inline"
+            else field.inline_writes(previous, env)
+        )
+
+    def read_module(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> ModuleValues | FormErrors:
+        """Read this module field's evaluated value without mutation or refresh.
+
+        input must belong to this Form; other models raise TypeError. path uses
+        nonempty core field names; unknown/nonmodule paths raise ValueError.
+        env is the fixed capture used to evaluate input. Key mode materializes
+        its captured library Spec; inline mode evaluates this field's input.
+        Other invalid draft fields do not block this read. Only this module's
+        validation/source failures return FormErrors at the consuming path.
+        Values exclude full-cfg validation and extras lowering: this is not the
+        native cfg after to_cfg. Unexpected source exceptions propagate.
+        """
+        if input.model is not self.model:
+            raise TypeError("read_module requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        return field.read(raw, env)
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.
