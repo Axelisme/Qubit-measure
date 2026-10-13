@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
+from .field_meta import FieldMeta
 from .waveform import WaveformCfg, WaveformSpec
 
 
@@ -41,14 +42,26 @@ class _PulseFields(_ModuleFields):
     """
 
     type: Literal["pulse"] = "pulse"
-    ch: int
-    nqz: Literal[1, 2]
-    freq: float | QickParam
-    phase: float | QickParam = 0.0
-    gain: float | QickParam
-    pre_delay: float | QickParam = 0.0
-    post_delay: float | QickParam = 0.0
-    mixer_freq: float | None = None
+    ch: Annotated[int, FieldMeta(label="Gen ch")]
+    nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
+    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=2)]
+    phase: Annotated[
+        float | QickParam,
+        FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
+    ] = 0.0
+    gain: Annotated[float | QickParam, FieldMeta(label="Gain", decimals=4)]
+    pre_delay: Annotated[
+        float | QickParam,
+        FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
+    ] = 0.0
+    post_delay: Annotated[
+        float | QickParam,
+        FieldMeta(label="Post-delay", unit="us", decimals=3, group="Advanced"),
+    ] = 0.0
+    mixer_freq: Annotated[
+        float | None,
+        FieldMeta(label="Mixer freq", unit="MHz", decimals=2, group="Advanced"),
+    ] = None
     mux_freqs: list[float] | None = None
     mux_gains: list[float] | None = None
     mux_phases: list[float] | None = None
@@ -60,7 +73,7 @@ class _PulseFields(_ModuleFields):
 class PulseSpec(_PulseFields):
     """Persistent pulse; waveform is a concrete library key or inline WaveformSpec."""
 
-    waveform: str | WaveformSpec
+    waveform: Annotated[str | WaveformSpec, FieldMeta(label="Waveform")]
 
 
 class PulseCfg(_PulseFields, AbsModuleCfg):
@@ -90,11 +103,17 @@ class DirectReadoutCfg(AbsReadoutCfg):
     """
 
     type: Literal["readout/direct"] = "readout/direct"
-    ro_ch: int
-    ro_length: float | QickParam
-    ro_freq: float | QickParam
-    trig_offset: float | QickParam = 0.0
-    gen_ch: int | None = None
+    ro_ch: Annotated[int, FieldMeta(label="RO ch")]
+    ro_length: Annotated[
+        float | QickParam, FieldMeta(label="RO length", unit="us", decimals=3)
+    ]
+    ro_freq: Annotated[
+        float | QickParam, FieldMeta(label="RO Freq", unit="MHz", decimals=2)
+    ]
+    trig_offset: Annotated[
+        float | QickParam, FieldMeta(label="Trig offset", unit="us", decimals=3)
+    ] = 0.0
+    gen_ch: Annotated[int | None, FieldMeta(label="Gen ch", group="Advanced")] = None
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set ro_freq (MHz) or ro_length (µs); other names raise ValueError."""
@@ -115,7 +134,7 @@ class _PulseReadoutFields(_ModuleFields):
     """
 
     type: Literal["readout/pulse"] = "readout/pulse"
-    ro_cfg: DirectReadoutCfg
+    ro_cfg: Annotated[DirectReadoutCfg, FieldMeta(label="Direct Readout")]
 
     @model_validator(mode="before")
     @classmethod
@@ -136,7 +155,7 @@ class _PulseReadoutFields(_ModuleFields):
 class PulseReadoutSpec(_PulseReadoutFields):
     """Persistent pulse readout; pulse_cfg is a concrete key or inline PulseSpec."""
 
-    pulse_cfg: str | PulseSpec
+    pulse_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pulse")]
 
 
 class PulseReadoutCfg(_PulseReadoutFields, AbsReadoutCfg):
@@ -187,7 +206,7 @@ class _PulseResetFields(_ModuleFields):
 class PulseResetSpec(_PulseResetFields):
     """Persistent one-pulse reset; pulse_cfg is a concrete key or inline PulseSpec."""
 
-    pulse_cfg: str | PulseSpec
+    pulse_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pulse")]
 
 
 class PulseResetCfg(_PulseResetFields, AbsResetCfg):
@@ -209,8 +228,8 @@ class _TwoPulseResetFields(_ModuleFields):
 class TwoPulseResetSpec(_TwoPulseResetFields):
     """Persistent two-pulse reset; pulse1_cfg/pulse2_cfg are keys or inline PulseSpecs."""
 
-    pulse1_cfg: str | PulseSpec
-    pulse2_cfg: str | PulseSpec
+    pulse1_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pulse 1")]
+    pulse2_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pulse 2")]
 
 
 class TwoPulseResetCfg(_TwoPulseResetFields, AbsResetCfg):
@@ -241,9 +260,9 @@ class _BathResetFields(_ModuleFields):
 class BathResetSpec(_BathResetFields):
     """Persistent bath reset; cavity_tone_cfg/qubit_tone_cfg/pi2_cfg are keys or PulseSpecs."""
 
-    cavity_tone_cfg: str | PulseSpec
-    qubit_tone_cfg: str | PulseSpec
-    pi2_cfg: str | PulseSpec
+    cavity_tone_cfg: Annotated[str | PulseSpec, FieldMeta(label="Cavity Tone")]
+    qubit_tone_cfg: Annotated[str | PulseSpec, FieldMeta(label="Qubit Tone")]
+    pi2_cfg: Annotated[str | PulseSpec, FieldMeta(label="Pi/2 Pulse")]
 
 
 class BathResetCfg(_BathResetFields, AbsResetCfg):

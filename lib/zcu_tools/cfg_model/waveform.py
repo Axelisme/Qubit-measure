@@ -13,6 +13,7 @@ from zcu_tools.core.waveform_format import WaveformSamples
 
 from .base import ConfigBase
 from .dependencies import CfgValidationContext, WaveformAssetInfo
+from .field_meta import FieldMeta
 
 
 class AbsWaveformCfg(ConfigBase, ABC):
@@ -29,7 +30,9 @@ class ConstWaveformCfg(AbsWaveformCfg):
     """Constant envelope. length is its duration in µs, optionally a QICK sweep."""
 
     style: Literal["const"] = "const"
-    length: float | QickParam
+    length: Annotated[
+        float | QickParam, FieldMeta(label="Length", unit="us", decimals=3)
+    ]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set length in µs, accepting a sweep; any other name raises ValueError."""
@@ -43,7 +46,7 @@ class CosineWaveformCfg(AbsWaveformCfg):
     """Cosine envelope. length is a fixed duration in µs; sweeps are unsupported."""
 
     style: Literal["cosine"] = "cosine"
-    length: float
+    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set fixed length in µs; unknown names and QickParam raise ValueError."""
@@ -58,8 +61,8 @@ class GaussWaveformCfg(AbsWaveformCfg):
     """Gaussian envelope. length and sigma are fixed duration and width in µs."""
 
     style: Literal["gauss"] = "gauss"
-    length: float
-    sigma: float
+    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
+    sigma: Annotated[float, FieldMeta(label="Sigma", unit="us", decimals=3)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set length (rescaling sigma), only_length, or sigma in µs.
@@ -87,10 +90,10 @@ class DragWaveformCfg(AbsWaveformCfg):
     """
 
     style: Literal["drag"] = "drag"
-    length: float
-    sigma: float
-    delta: float
-    alpha: float
+    length: Annotated[float, FieldMeta(label="Length", unit="us", decimals=3)]
+    sigma: Annotated[float, FieldMeta(label="Sigma", unit="us", decimals=3)]
+    delta: Annotated[float, FieldMeta(label="Delta", unit="MHz", decimals=2)]
+    alpha: Annotated[float, FieldMeta(label="Alpha", decimals=4)]
 
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Set length (rescaling sigma), only_length, sigma, delta, or alpha.
@@ -134,7 +137,7 @@ class ArbWaveformCfg(AbsWaveformCfg):
     """
 
     style: Literal["arb"] = "arb"
-    data: str
+    data: Annotated[str, FieldMeta(label="Data key")]
     _asset_binding: _AssetBinding | None = PrivateAttr(default=None)
 
     def model_post_init(self, context: object) -> None:
@@ -190,7 +193,9 @@ class _FlatTopFields(ConfigBase):
     """
 
     style: Literal["flat_top"] = "flat_top"
-    length: float | QickParam
+    length: Annotated[
+        float | QickParam, FieldMeta(label="Length", unit="us", decimals=3)
+    ]
 
 
 class FlatTopWaveformSpec(_FlatTopFields):
@@ -199,7 +204,9 @@ class FlatTopWaveformSpec(_FlatTopFields):
     The ramp accepts cosine, gauss, drag, or arb, never const or flat_top.
     """
 
-    raise_waveform: str | RaiseWaveformSpec
+    raise_waveform: Annotated[
+        str | RaiseWaveformSpec, FieldMeta(label="Raise Waveform")
+    ]
 
 
 class FlatTopWaveformCfg(_FlatTopFields, AbsWaveformCfg):
