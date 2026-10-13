@@ -3,7 +3,15 @@
 from pathlib import Path
 
 import pytest
-from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpec, Slot
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    ConstWaveformCfg,
+    PulseCfg,
+    PulseSpec,
+    Slot,
+    Template,
+    TemplateDef,
+)
 from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -130,6 +138,49 @@ def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -
         if cfg.pulse is None:
             raise TypeError("Expected accepted pulse")
         assert cfg.pulse.freq == 100.0
+
+
+class RequiredCfg(ConfigBase):
+    pulse: PulseCfg
+
+
+def test_use_library_switches_required_inline_slot_to_actual_key(
+    tmp_path: Path,
+) -> None:
+    gui = FormGui()
+    env = gui.owner.env
+    form = Form(RequiredCfg, {"pulse": Template("pulse")})
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
+                },
+            )
+        },
+        adapter="lookback",
+    )
+    gui.owner = TabFormResource(
+        form, capture=lambda aliases: TabFormSources(env), mutation_allowed=lambda: True
+    )
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        assert tab.read_field("pulse").mode == "inline"
+        try:
+            tab.use_library("pulse", "Q1.pulses.pi")
+        except ValueError as error:
+            raise AssertionError(
+                "use_library must switch a required inline Slot"
+            ) from error
+        assert tab.read_field("pulse").key == "Q1.pulses.pi"
+        assert RequiredCfg.model_validate(gui.owner.accept().cfg).pulse.freq == 100.0
 
 
 def test_locked_inline_slot_rejects_library_selection_before_rpc(
