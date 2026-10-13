@@ -224,9 +224,9 @@ def test_required_module_branch_switch_uses_owner_fallback(
     state.write({("modules", "probe", "kind"): "inline"}, env)
     assert notifications == ["changed"]
     assert input.data == before
-    module = state.input.data["modules"]["probe"]
+    module = expect_object(expect_object(state.input.data["modules"])["probe"])
     assert module["kind"] == "inline"
-    assert module["module"]["type"] == "pulse"
+    assert expect_object(module["module"])["type"] == "pulse"
     if fallback:
         observed = form.read_module(state.input, ("modules", "probe"), env)
         assert not isinstance(observed, FormErrors), observed
@@ -236,3 +236,9 @@ def test_required_module_branch_switch_uses_owner_fallback(
         assert (
             state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
         )
+
+
+def expect_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Narrow a public input observation without altering it."""
+    assert isinstance(value, dict)
+    return value

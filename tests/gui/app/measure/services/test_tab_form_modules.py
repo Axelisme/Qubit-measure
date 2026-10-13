@@ -1,7 +1,7 @@
 """Execution module observations and guarded conversion through the Form owner."""
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -231,7 +231,7 @@ def test_required_module_conversion_uses_public_write_once(captured: bool) -> No
     resource.subscribe(lambda: notifications.append("changed"))
     resource.use_inline(("pulse",))
     assert notifications == ["changed"]
-    assert resource.input.data["pulse"]["kind"] == "inline"
+    assert expect_object(resource.input.data["pulse"])["kind"] == "inline"
     if captured:
         assert resource.read_module(("pulse",)).value["freq"] == 100.0
         resource.write({("pulse", "module", "freq"): 125.0})
@@ -243,3 +243,9 @@ def test_required_module_conversion_uses_public_write_once(captured: bool) -> No
     resource.use_inline(("pulse",))
     assert resource.input.data == before
     assert len(notifications) == changed
+
+
+def expect_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Narrow a public input observation without altering it."""
+    assert isinstance(value, dict)
+    return value
