@@ -143,14 +143,16 @@ class CoherencePlanForm(FormModel):
         """Prefill the captured device name and x180 pi estimate.
 
         Resolve $flux_dev only for new defaults and keep the name literal.
-        Missing captures or unbound aliases retain the expression error input
-        for public preview/Start to report Invalid, without a device fallback. Device membership is checked only when used.
+        Missing captures or unbound aliases keep the $flux_dev expression
+        default, which default_input cannot evaluate, so flux_dev stays
+        unfilled and required, without a device fallback. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
-        the fixed alias capture and retain its concrete path as an expression
-        if readable and non-null. No capture, absent/null values or
-        unreadable paths leave the field unfilled for explicit user input. Other
-        modules and simulator constants are never consulted. Invalid readable
-        values produce ordinary field validation errors, not a fallback.
+        the fixed alias capture and declare its concrete path as an expression
+        default if readable and non-null; default_input stores its value. No
+        capture, absent/null values or unreadable paths leave the field
+        unfilled for explicit user input. Other modules and simulator constants
+        are never consulted. Invalid readable values leave it unfilled too,
+        not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
         data = calibration_defaults(super().defaults(env, previous), env, previous)
@@ -161,7 +163,7 @@ class CoherencePlanForm(FormModel):
         except RoleResolutionError as error:
             if error.reason not in {"Alias is not bound", "Unknown alias"}:
                 raise
-            # Keep the existing expression error input; the editor names the alias.
+            # Keep the $flux_dev expression default; flux_dev then stays unfilled.
         return data
 
     @classmethod

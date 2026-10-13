@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-13，defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -47,15 +47,15 @@ Editor 預設直接呼叫 `FormState.write`。Host 需要在寫入前檢查或�
 
 ## Defaults、分支與 module reference
 
-`defaults(env, previous)` 是唯一 defaults hook。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env, {})`、檢查來源並建立 FormInput。Defaults 可以包含 expression 與 complex tags。Required keys 沒有預設時保持未填。
+`defaults(env, previous)` 是唯一 defaults hook。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env, {})`、檢查來源、求值 expression defaults 並建立 FormInput。Defaults 可以包含 complex tags，也可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。Core 用同一個 env 當場求值，input 只存算好的 direct 值，畫面在 Direct 模式顯示這個值；畫面上的初始值就是會跑的值。來源之後改變，要重新建立 default input（Reset、Prepare）才反映。Expression 算不出來（缺 path、alias 未綁定、值不是數字），或算出的值在 result 的該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。不另設初始值錯誤機制。Captured source 本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。Required keys 沒有預設時保持未填。
 
-Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input。接著沿用同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
+Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input，expression defaults 照 `default_input` 的規則算成值。接著沿用同名欄位（使用者寫的 expression 保留原文），明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
 
 只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core schema 不因此改變。Model 不經 union selector 到達時，例如單一 model 欄位、nullable model 或 `str | Model` 的單一 model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Schema 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
 
 未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Core 在這類欄位的 schema 節點標 `x-form-key-or-inline: true`，editor 只依這個標記以 Key／Inline 切換呈現，不自己從 schema 形狀判斷，所以規則只在 core。切換時寫入該模式的預設值，不轉換另一模式的值。Captured library 中 Spec 型別相符的 keys 只是建議，不限制輸入。
 
-T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured point 的 `general.ext.guess_us` 存在時保留引用，即使它是 null 或無效值。缺 leaf 或沒有 capture 時使用暫定普通值。無效引用在 guess_us 回報錯誤，不降級為 fallback。
+T1TunablesForm 只在 previous 為空、captured point 有 `general.ext.guess_us` leaf 時，以這個 path 的 expression 宣告 lifetime 初始值，開表單時 core 把它算成值。這個 leaf 是 null 或不是正數時算不出合法值，guess_us 留空；guess_us 有 20 µs 的靜態預設，所以驗證時用這個預設。缺 leaf 或沒有 capture 時同樣使用這個暫定普通值。
 
 `choices(env)` 提供 model-field leaf 的合法值。最深 nested FormModel 的 local choices 優先，包含空選項。Input schema 與 result 共用這些選項。Display 只描述標籤、說明、單位與呈現，順序沿欄位宣告，段落沿 nested model，畫面群組沿 Display 的 `group`。
 

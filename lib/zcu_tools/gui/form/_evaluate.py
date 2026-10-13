@@ -11,7 +11,7 @@ from pydantic_core import PydanticCustomError
 from zcu_tools.gui.cfg.codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
-from ._json import default_json
+from ._json import copy_object, default_json
 from ._sources import check_sources, error_path
 from ._structure import (
     accepts_expression,
@@ -22,7 +22,15 @@ from ._structure import (
     selected,
     unwrap,
 )
-from .model import FormEnv, FormErrors, FormModel, FormPath, FormPreview, FormValue
+from .model import (
+    FormEnv,
+    FormErrors,
+    FormModel,
+    FormPath,
+    FormPreview,
+    FormValue,
+    FormWritePath,
+)
 
 
 @dataclass
@@ -330,3 +338,73 @@ def _validate[F: FormModel](
         if current not in values:
             errors[path] = "Value is not among current choices"
     return FormErrors(errors) if errors else validated
+
+
+def evaluate_defaults(
+    model: type[FormModel], data: Mapping[str, JsonValue], env: FormEnv
+) -> dict[str, JsonValue]:
+    """Return a detached copy of defaults data with Expr leaves turned into values.
+
+    data is what model.defaults returned. Each scalar model-field leaf holding
+    exactly {"expr": text}, in model or nested/selected-branch sections, is
+    evaluated once with env.parameters and replaced by its JSON value. A leaf
+    is removed instead when its expression raises ExpressionError (a missing
+    path, an unbound alias, a non-numeric value), when its value is not finite
+    JSON, or when result(env) then reports an error inside that leaf. Its
+    field is then unfilled: a required field reports "Field required", and a
+    field with a static Pydantic default validates with that default. Other
+    exceptions from evaluation, such as unavailable captured sources,
+    propagate. Envelopes inside whole sequences or mappings, malformed
+    envelopes and every other value are copied unchanged. data is not edited.
+    """
+    evaluated = copy_object(data)
+    # Leaf path -> the object in evaluated that holds that leaf.
+    substituted: dict[FormWritePath, dict[str, JsonValue]] = {}
+    _evaluate_section(model, evaluated, env, (), None, substituted)
+    if not substituted:
+        return evaluated
+    checked = result(model, evaluated, env)
+    if isinstance(checked, FormErrors):
+        for leaf, parent in substituted.items():
+            if any(path[: len(leaf)] == leaf for path in checked.messages):
+                del parent[leaf[-1]]
+    return evaluated
+
+
+def _evaluate_section(
+    model: type[BaseModel],
+    data: dict[str, JsonValue],
+    env: FormEnv,
+    prefix: FormWritePath,
+    tag_key: str | None,
+    substituted: dict[FormWritePath, dict[str, JsonValue]],
+) -> None:
+    """Evaluate one model object's Expr leaves in place; tag_key is its selector."""
+    for name, value in tuple(data.items()):
+        info = model.model_fields.get(name)
+        if info is None or name == tag_key:
+            continue
+        path = (*prefix, name)
+        child = selected(info, value)
+        if child is not None and isinstance(value, dict):
+            _evaluate_section(child, value, env, path, discriminator(info), substituted)
+            continue
+        if not (
+            isinstance(value, dict)
+            and set(value) == {"expr"}
+            and isinstance(text := value["expr"], str)
+            and accepts_expression(info.annotation)
+        ):
+            continue
+        try:
+            evaluated = evaluate_scalar_expr(text, env.parameters)
+        except ExpressionError:
+            del data[name]
+            continue
+        try:
+            data[name] = default_json(evaluated)
+        except ValueError:
+            # Non-finite results have no JSON value to show or store.
+            del data[name]
+            continue
+        substituted[path] = data

@@ -46,15 +46,16 @@ class T1TunablesForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Build defaults, retaining a captured guess expression for initial input.
+        """Build defaults, deriving the initial guess from the captured point.
 
         When previous is empty and parameters contain general.ext.guess_us
-        (even explicit null),
-        retain that path as an expression rather than copying its value. With
-        no capture or an absent leaf, keep the provisional ordinary 20 us.
-        Invalid referenced values remain result errors, not a fallback. Reads
-        use the fixed point only, never materialization, devices or I/O.
-        Unavailable captured sources propagate their source error.
+        (even explicit null), declare that path as an expression default;
+        default_input evaluates it into a direct value. A null, non-numeric
+        or non-positive leaf leaves guess_us unfilled, so the declared 20 us
+        default validates. With no capture or an absent leaf, keep the
+        provisional ordinary 20 us. Reads use the fixed point only, never
+        materialization, devices or I/O. Unavailable captured sources
+        propagate their source error.
         """
         data = super().defaults(env, previous)
         if (
