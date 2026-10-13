@@ -107,7 +107,7 @@ def test_filter_composes_commands_counts_and_native_evidence(
         expected.append(
             ("selection.render", {})
             if command == "finish"
-            else ("interactive.render", {"name": "selection"})
+            else ("interactive.render", {"target": "selection"})
         )
         assert content[1]["type"] == "image"
         assert base64.b64decode(content[1]["data"]) == png.getvalue()

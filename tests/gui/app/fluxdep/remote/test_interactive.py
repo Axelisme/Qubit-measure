@@ -118,6 +118,144 @@ def _joint_command(
     )
 
 
+def test_explicit_targets_keep_selection_name_and_filter_independent(
+    route_harness: RouteHarness,
+    selection_name_controller: Controller,
+):
+    harness = copy_sources(route_harness, selection_name_controller)
+    link = harness.client()
+    named = _open_picker(harness, link, "selection", "line")
+    joint = _context(harness.request(link, "selection.interactive.open"))
+    assert named["context_id"] != joint["context_id"]
+    assert _picker_command(
+        harness, link, named, "move_line", role="half", position=0.5
+    )["ok"]
+    assert _joint_command(harness, link, joint, "set_min_distance", min_distance=0.2)[
+        "ok"
+    ]
+    observer = harness.client(mode="readonly", label="observer")
+    versions = harness.ctrl.state.version.snapshot()
+    active_name = harness.ctrl.state.active_spectrum
+    for target, draft, extra in (
+        ("spectrum", named, {"name": "selection"}),
+        ("selection", joint, {}),
+    ):
+        read = _context(
+            harness.request(observer, "interactive.read", target=target, **extra)
+        )
+        assert read["context_id"] == draft["context_id"]
+        assert read["can_undo"] is True
+        assert harness.request(observer, "interactive.render", target=target, **extra)[
+            "ok"
+        ]
+    listed = harness.request(observer, "spectrum.list")
+    assert listed["ok"] and listed["result"]["spectrums"][0]["pending"] == "align"
+    snapshot = harness.request(observer, "spectrum.snapshot", name="selection")
+    assert snapshot["ok"] and snapshot["result"]["pending"] == "align"
+    assert harness.ctrl.state.version.snapshot() == versions
+    assert harness.ctrl.state.active_spectrum == active_name
+    for target, wrong_id, extra in (
+        ("spectrum", joint["context_id"], {"name": "selection"}),
+        ("selection", named["context_id"], {}),
+    ):
+        _error(
+            harness.request(
+                observer,
+                "interactive.read",
+                target=target,
+                context_id=wrong_id,
+                **extra,
+            ),
+            "precondition_failed",
+            "interactive_context_changed",
+        )
+    _error(
+        _picker_command(harness, link, joint | {"spectrum_name": "selection"}, "undo"),
+        "precondition_failed",
+        "interactive_context_changed",
+    )
+    _error(
+        _joint_command(harness, link, named, "undo"),
+        "precondition_failed",
+        "interactive_context_changed",
+    )
+    assert _joint_command(harness, link, joint, "cancel")["ok"]
+    read_named = _context(
+        harness.request(
+            observer, "interactive.read", target="spectrum", name="selection"
+        )
+    )
+    assert read_named["context_id"] == named["context_id"]
+    sample = _open_picker(harness, link, "selection", "sample")
+    assert sample["kind"] == "onetone"
+    assert _picker_command(harness, link, sample, "set_threshold", threshold=0.2)["ok"]
+    assert (
+        harness.request(observer, "spectrum.snapshot", name="selection")["result"][
+            "pending"
+        ]
+        == "sample"
+    )
+    _error(
+        harness.request(
+            observer,
+            "interactive.read",
+            target="spectrum",
+            name="selection",
+            context_id=named["context_id"],
+        ),
+        "precondition_failed",
+        "interactive_context_changed",
+    )
+    joint = _context(harness.request(link, "selection.interactive.open"))
+    assert _picker_command(harness, link, sample, "cancel")["ok"]
+    assert (
+        _context(harness.request(observer, "interactive.read", target="selection"))[
+            "context_id"
+        ]
+        == joint["context_id"]
+    )
+    assert (
+        harness.request(observer, "spectrum.snapshot", name="selection")["result"][
+            "pending"
+        ]
+        is None
+    )
+    harness.ctrl.interactive.dispose()
+    for target, extra in (("spectrum", {"name": "selection"}), ("selection", {})):
+        assert (
+            harness.request(observer, "interactive.read", target=target, **extra)[
+                "result"
+            ]["context"]
+            is None
+        )
+
+
+@pytest.mark.parametrize("method", ["interactive.read", "interactive.render"])
+def test_explicit_targets_reject_ambiguous_envelopes(
+    joint_route: RouteHarness, method: str
+):
+    link = joint_route.client()
+    _context(joint_route.request(link, "selection.interactive.open"))
+    versions = joint_route.ctrl.state.version.snapshot()
+    for params in (
+        {"name": "selection"},
+        {"target": "wrong", "name": "selection"},
+        {"target": "selection", "name": "selection"},
+        {"target": "selection", "name": None},
+        {"target": "spectrum"},
+        {"target": "spectrum", "name": None},
+        {"target": "spectrum", "name": ""},
+    ):
+        try:
+            reply = joint_route.request(link, method, **params)
+        except RemoteError as error:
+            assert error.code == ErrorCode.INVALID_PARAMS
+        else:
+            _error(reply, "invalid_params", None)
+    assert joint_route.request(link, method, target="selection")["ok"]
+    assert joint_route.ctrl.state.version.snapshot() == versions
+
+
 def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
     one_route: RouteHarness,
 ):

@@ -170,6 +170,36 @@ def onetone_controller():
 
 
 @pytest.fixture
+def selection_name_controller():
+    """Literal selection spectrum with a synthetic 5x5 image and published point."""
+    axis = np.linspace(0.0, 4.0, 5)
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="selection",
+            spec_type="OneTone",
+            raw={
+                "dev_values": axis.copy(),
+                "fluxs": axis.copy(),
+                "freqs": np.linspace(4.0, 5.0, 5),
+                "signals": np.ones((5, 5), dtype=np.complex128),
+            },
+            points={
+                "dev_values": np.array([0.5]),
+                "fluxs": np.array([0.25]),
+                "freqs": np.array([4.5]),
+            },
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("selection")
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+@pytest.fixture
 def cross_controller():
     """Joint cloud with duplicate identities and an intervening empty source."""
     state = FluxDepState()
