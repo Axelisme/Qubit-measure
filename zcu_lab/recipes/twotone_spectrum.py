@@ -193,7 +193,9 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/freq",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
         SummaryParameter(
             "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
