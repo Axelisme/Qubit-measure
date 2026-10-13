@@ -327,14 +327,12 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
         assert notifications == ["changed"]
         owner.write(
             {
-                ("pulse", "module"): {
-                    "type": "pulse",
-                    "ch": 0,
-                    "nqz": 1,
-                    "freq": {"expr": "50 * 2"},
-                    "gain": 0.2,
-                    "waveform": {"style": "const", "length": 0.1},
-                },
+                ("pulse", "module", "ch"): 0,
+                ("pulse", "module", "nqz"): 1,
+                ("pulse", "module", "freq"): {"expr": "50 * 2"},
+                ("pulse", "module", "gain"): 0.2,
+                ("pulse", "module", "waveform", "style"): "const",
+                ("pulse", "module", "waveform", "length"): 0.1,
                 ("gain",): {"expr": "1 / 0"},
             }
         )

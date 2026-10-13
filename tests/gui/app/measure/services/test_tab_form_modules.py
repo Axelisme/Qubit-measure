@@ -173,9 +173,9 @@ def test_conversion_guards_and_nonmodule_rejections_preserve_input() -> None:
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
     allowed = True
     for path in [("amount",), ("unknown",), ("pulse", "module", "freq")]:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="core module field"):
             resource.use_inline(path)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="core module field"):
             resource.read_module(path)
     assert resource.input.data == before
     assert notifications == []

@@ -303,7 +303,7 @@ def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> 
         assert hasattr(tab, "retain_module_source"), (
             "Missing validated summary projection"
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="module value path"):
             tab.retain_module_source(
                 "pulse", summary_field="pulse.module.freq", value_path=("missing",)
             )
