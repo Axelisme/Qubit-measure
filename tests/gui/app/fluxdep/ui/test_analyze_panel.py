@@ -276,7 +276,23 @@ def _background_grids(figure: Figure) -> list[np.ndarray]:
     ]
 
 
-def test_repeated_alignment_with_same_reason_redraws_show_background(
+def _assert_same_grids(drawn: list[np.ndarray], expected: list[np.ndarray]) -> None:
+    assert expected
+    assert len(drawn) == len(expected)
+    for grid, reference in zip(drawn, expected, strict=True):
+        np.testing.assert_allclose(grid, reference)
+
+
+def _assert_native_background(shown: Figure, ctrl: Controller) -> list[np.ndarray]:
+    """Show's heatmaps equal the shared Controller renderer's; return them."""
+    native = Figure()
+    ctrl.render_fit(native)
+    expected = _background_grids(native)
+    _assert_same_grids(_background_grids(shown), expected)
+    return expected
+
+
+def test_repeated_stale_alignment_keeps_captured_show_background(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
@@ -286,23 +302,105 @@ def test_repeated_alignment_with_same_reason_redraws_show_background(
         _record_perfect_fit(ctrl, bounds)
         widget.show_tab("show")
         shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
-        ctrl.set_alignment("a", 0.55, 1.05)
-        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
-        first = _background_grids(shown)
-        ctrl.set_alignment("a", 0.60, 1.10)
-        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
-        native = Figure()
-        ctrl.render_fit(native)
-        expected = _background_grids(native)
-        assert expected
-        second = _background_grids(shown)
-        assert len(second) == len(expected)
-        for drawn, current in zip(second, expected, strict=True):
-            np.testing.assert_allclose(drawn, current)
+        captured = _assert_native_background(shown, ctrl)
+
+        for flux_half, flux_int in ((0.55, 1.05), (0.60, 1.10)):
+            ctrl.set_alignment("a", flux_half, flux_int)
+            assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+            assert "Outdated: a re-aligned" in shown.axes[0].get_title()
+            _assert_same_grids(_background_grids(shown), captured)
+            _assert_native_background(shown, ctrl)
+
+        _record_perfect_fit(ctrl, bounds)
+        assert ctrl.state.fit_stale_reasons == []
+        assert "Outdated" not in shown.axes[0].get_title()
+        fresh = _assert_native_background(shown, ctrl)
         assert any(
-            drawn.shape != current.shape or not np.allclose(drawn, current)
-            for drawn, current in zip(first, expected, strict=True)
-        ), "the second alignment must move the source background"
+            grid.shape != reference.shape or not np.allclose(grid, reference)
+            for grid, reference in zip(fresh, captured, strict=True)
+        ), "a fresh search must draw the newly aligned source background"
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+Limits = tuple[tuple[float, float], tuple[float, float]]
+
+
+def _display_group(widget: AnalyzePanelWidget) -> QGroupBox:
+    return next(
+        group for group in widget.findChildren(QGroupBox) if group.title() == "Display"
+    )
+
+
+def _click_auto_limits(widget: AnalyzePanelWidget) -> Limits:
+    """Click Show's Auto limits and read the x/y limit boxes it filled."""
+    display = _display_group(widget)
+    next(
+        button
+        for button in display.findChildren(QPushButton)
+        if button.text() == "Auto limits"
+    ).click()
+    x_lo, x_hi, y_lo, y_hi = display.findChildren(QDoubleSpinBox)[:4]
+    return (x_lo.value(), x_hi.value()), (y_lo.value(), y_hi.value())
+
+
+def _as_displayed(widget: AnalyzePanelWidget, limits: Limits) -> Limits:
+    """Round normalized-flux/GHz limits to the limit boxes' display precision."""
+    decimals = _display_group(widget).findChildren(QDoubleSpinBox)[0].decimals()
+    (x_lo, x_hi), (y_lo, y_hi) = limits
+    return (
+        (round(x_lo, decimals), round(x_hi, decimals)),
+        (round(y_lo, decimals), round(y_hi, decimals)),
+    )
+
+
+def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        widget.show_tab("show")
+        assert _click_auto_limits(widget) == _as_displayed(
+            widget, ctrl.fit_auto_limits()
+        ), "before search, Auto limits use the published sources"
+
+        _record_perfect_fit(ctrl, bounds)
+        captured = _click_auto_limits(widget)
+        assert captured == _as_displayed(widget, ctrl.fit_auto_limits())
+
+        # A non-integer shift of one source; the recorded search keeps its frame.
+        ctrl.set_alignment("a", 0.685, 1.185)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        assert _click_auto_limits(widget) == captured
+
+        _record_perfect_fit(ctrl, bounds)
+        fresh = _click_auto_limits(widget)
+        assert fresh == _as_displayed(widget, ctrl.fit_auto_limits())
+        assert fresh[0] != captured[0], "a fresh search adopts the new frame"
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+def test_params_only_auto_limits_follow_current_sources(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    ctrl.state.set_fit_result((5.0, 1.0, 0.5))
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        widget.show_tab("show")
+        before = _click_auto_limits(widget)
+        ctrl.set_alignment("a", 0.685, 1.185)
+        moved = _click_auto_limits(widget)
+        assert moved == _as_displayed(widget, ctrl.fit_auto_limits())
+        assert moved[0] != before[0], "params-only display has no recorded frame"
     finally:
         widget.quiesce()
         widget.dispose()
