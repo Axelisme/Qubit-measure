@@ -1,6 +1,6 @@
 # Workflow form attachments
 
-**Last updated:** 2026-10-12，表單保留、宿主搬至 lib
+**Last updated:** 2026-10-13，defaults 的 expression 開表單時算成值
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
 Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../lib/zcu_tools/gui/app/workflows/README.md)。
@@ -20,8 +20,8 @@ Plan 透過通用 WorkflowPlanPanel preview；local parse errors 先阻擋 previ
 `CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 paused tunables。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
-T1 guess 初次輸入保留 captured general.ext.guess_us expression，位於 t1.guess_us；沒有 capture／leaf 時用 native ordinary default。
-Null 或 invalid referenced value 產生欄位錯誤，不 fallback。Expression 留在 FormInput，Engine journal 只存普通值。
+T1 guess 初次輸入以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時用 native ordinary default。
+Null 或不合法的 referenced value 讓 guess_us 留空，驗證時用宣告的 native ordinary default。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
@@ -33,7 +33,7 @@ Saved run conversion 由 coherence_fluxdep.export 與 mist_fluxdep.export 獨立
 
 Prepare/Start 用 read_context() 固定完整 alias 表與 sources，不宣告角色或檢查 kind。
 Global qubit alias 必須可讀；EMPTY 可建 app，但來源依 base 契約拒 Prepare/Start。
-Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，保留具體路徑 expression，缺值或不可讀就留 pi_length_us 未填。
+Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體路徑 expression 宣告，開表單時算成值；缺值、不可讀或不合法就留 pi_length_us 未填。
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
 `common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
@@ -43,7 +43,7 @@ Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field er
 
 Coherence 的新 flux_dev defaults 在固定 capture 解析 $flux_dev，成功就用 direct literal device name。
 既有 direct draft 不隨 alias 修改，使用者仍可切 eval。合法 saved input 與 MIST defaults 不改。
-Missing capture/unbound alias 保留 $flux_dev expression error input，公開欄位顯示 Invalid 並指名 flux_dev，不阻斷 panel 或補造 device。
+Missing capture/unbound alias 時 $flux_dev expression default 算不出來，flux_dev 留空並只顯示 Field required，不阻斷 panel 或補造 device。
 Fake caller 明填 native；YOKO 明填 A 或 V。表單不推測單位、不轉換值、不預驗 device membership。
 Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不重解析既有 run。
 

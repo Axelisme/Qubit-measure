@@ -270,7 +270,9 @@ def _branch_defaults(
     model: type[BaseModel], env: FormEnv, previous: Mapping[str, JsonValue]
 ) -> dict[str, JsonValue]:
     if issubclass(model, FormModel):
-        return copy_object(model.defaults(env, copy_object(previous)))
+        from ._evaluate import evaluate_defaults
+
+        return evaluate_defaults(model, model.defaults(env, copy_object(previous)), env)
     return static_defaults(model)
 
 

@@ -90,10 +90,14 @@ def calibration_defaults(
 ) -> dict[str, JsonValue]:
     """Extend a fresh form-default dict with fixed flux alias and pi estimate.
 
-    data is caller-owned and changed in place. Always retain $flux_dev as an
-    expression. With no previous input, resolve captured $qubit x180 length and
-    retain its concrete path expression if present/non-null. Missing/unreadable
-    optional defaults stay required, without simulator literals or live lookups.
+    data is caller-owned and changed in place. Always declare flux_dev as the
+    $flux_dev expression default; default_input and branch defaults evaluate it
+    into the captured device name, or leave the required field unfilled when
+    the alias is missing or unbound. With no previous input, resolve captured
+    $qubit x180 length and declare its concrete path as the pi_length_us
+    expression default if present/non-null, evaluated the same way.
+    Missing/unreadable optional defaults stay required, without simulator
+    literals or live lookups.
     """
     data["flux_dev"] = {"expr": "$flux_dev"}
     if previous or env.parameters is None:

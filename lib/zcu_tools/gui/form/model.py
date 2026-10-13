@@ -173,8 +173,9 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
 class FormModel(BaseModel):
     """Ordinary values with typed class-level input hooks.
 
-    Override defaults for initial and branch defaults (including Expr), and
-    choices for dynamic path-to-options mappings. default_input is final.
+    Override defaults for initial and branch defaults (an Expr default is
+    evaluated into its value), and choices for dynamic path-to-options
+    mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
     """
@@ -187,14 +188,23 @@ class FormModel(BaseModel):
         """Build isolated input from declared defaults; required keys stay absent.
 
         Calls defaults(env, {}) before checking sources and assembling input.
-        defaults may include Expr/complex JSON. Used missing library or
-        device sources raise field_error with the consuming path. No I/O occurs.
+        Used missing library or device sources raise field_error with the
+        consuming path. A scalar {"expr": text} default is evaluated once with
+        env.parameters and stored as its direct value, so the input holds no
+        envelope for it; later source changes need a new default_input. When
+        that expression fails (missing path, unbound alias, non-numeric value)
+        or its value is invalid for the field, the field is left unfilled: a
+        required field then reports only "Field required" from result, and a
+        field with a static Pydantic default validates with it. Other
+        evaluation exceptions, such as unavailable captured sources, propagate.
+        Complex JSON tags stay as they are. No I/O occurs.
         """
+        from ._evaluate import evaluate_defaults
         from ._sources import check_sources
 
         data = cls.defaults(env, {})
         check_sources(cls, data, env)
-        return FormInput(cls, data)
+        return FormInput(cls, evaluate_defaults(cls, data, env))
 
     @classmethod
     def defaults(
@@ -206,6 +216,10 @@ class FormModel(BaseModel):
         defaults and leaves required keys absent; it does not validate a partial
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
+        A scalar leaf may be {"expr": text} to derive its initial value from
+        env, such as {"expr": "$flux_dev"}; default_input and branch switches
+        evaluate it into a direct value (see default_input), so it never stays
+        in input as an expression.
         """
         from ._structure import static_defaults
 
@@ -349,7 +363,9 @@ class FormState[F: FormModel]:
         """Install one input batch, keeping model-invalid drafts editable.
 
         Discriminator changes apply first: use the new branch's defaults(env,
-        previous), then inherit old same-name fields except the discriminator.
+        previous), with Expr defaults evaluated as in default_input, then
+        inherit old same-name fields (authored expressions stay expressions)
+        except the discriminator.
         Apply all remaining leaf writes afterwards, so explicitly supplied
         content wins. Required fields without defaults stay absent. Writes use
         model-field leaf paths. Sequences and typed mappings are whole leaves;
