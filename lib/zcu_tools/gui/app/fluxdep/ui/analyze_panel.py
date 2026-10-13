@@ -82,12 +82,12 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.widgets.control_indicator import CAUTION_COLOR
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
 
 from .error_messages import friendly_fit_message
+from .frequency_field import FrequencyField
 from .transitions_form import TransitionsForm
 
 logger = logging.getLogger(__name__)
@@ -110,8 +110,6 @@ _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 # Preset combo entry shown while the bounds match no preset; choosing it keeps them.
 _CUSTOM_PRESET = "custom"
-# Hint text color, the amber the control indicator uses for "Local locked".
-_HINT_STYLE = f"color: {CAUTION_COLOR};"
 
 
 def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
@@ -121,54 +119,6 @@ def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
     box.setSingleStep(0.1)
     box.setValue(value)
     return box
-
-
-def _freq_edit(object_name: str) -> QLineEdit:
-    """A nullable frequency field: blank means unset, else a float."""
-    from qtpy.QtGui import QDoubleValidator
-
-    edit = QLineEdit()
-    edit.setObjectName(object_name)
-    edit.setPlaceholderText("(unset)")
-    edit.setValidator(QDoubleValidator())
-    return edit
-
-
-def _required_mark(object_name: str, text: str) -> QLabel:
-    """A hidden hint that marks a field some chosen transitions need."""
-    label = QLabel(text)
-    label.setObjectName(object_name)
-    label.setStyleSheet(_HINT_STYLE)
-    label.setWordWrap(True)
-    label.setHidden(True)
-    return label
-
-
-def _field_with_mark(field: QLineEdit, mark: QLabel) -> QWidget:
-    """The field with its hint directly underneath, as one form-row widget."""
-    holder = QWidget()
-    layout = QVBoxLayout(holder)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(2)
-    layout.addWidget(field)
-    layout.addWidget(mark)
-    return holder
-
-
-def _parse_freq(edit: QLineEdit) -> float | None:
-    """The field's value as float, or None when blank / unparseable."""
-    text = edit.text().strip()
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def _set_freq(edit: QLineEdit, value: float | None) -> None:
-    """Show ``value`` in the field (blank when None)."""
-    edit.setText("" if value is None else f"{value:g}")
 
 
 def _message_label(accessible_name: str, object_name: str) -> QLabel:
@@ -401,12 +351,9 @@ class AnalyzePanelWidget(QWidget):
         self._transitions_form = TransitionsForm()
         form.addRow(QLabel("Transitions"))
         form.addRow(self._transitions_form)
-        for changed in (
-            self._transitions_form.changed,
-            self._r_f.textChanged,
-            self._sample_f.textChanged,
-        ):
-            changed.connect(self._refresh_frequency_marks)
+        self._transitions_form.changed.connect(self._refresh_frequency_marks)
+        for field in (self._r_f, self._sample_f):
+            field.on_change(self._refresh_frequency_marks)
 
         self._add_search_actions(form)
         return form_box
@@ -418,18 +365,14 @@ class AnalyzePanelWidget(QWidget):
         transitions need it, and Search stays disabled until it is filled; a
         submitted search still leaves validation to the Controller.
         """
-        self._r_f = _freq_edit("fluxdep.fit.r_f")
-        self._sample_f = _freq_edit("fluxdep.fit.sample_f")
-        self._r_f_required = _required_mark(
-            "fluxdep.fit.r_f.required", "Needed by the sideband transitions."
+        self._r_f = FrequencyField(
+            "fluxdep.fit.r_f", "Needed by the sideband transitions."
         )
-        self._sample_f_required = _required_mark(
-            "fluxdep.fit.sample_f.required", "Needed by the mirror transitions."
+        self._sample_f = FrequencyField(
+            "fluxdep.fit.sample_f", "Needed by the mirror transitions."
         )
-        form.addRow("r_f (GHz)", _field_with_mark(self._r_f, self._r_f_required))
-        form.addRow(
-            "sample_f (GHz)", _field_with_mark(self._sample_f, self._sample_f_required)
-        )
+        form.addRow("r_f (GHz)", self._r_f)
+        form.addRow("sample_f (GHz)", self._sample_f)
 
     def _add_search_actions(self, form: QFormLayout) -> None:
         """Add Search / Cancel, the progress bar and Export params…."""
@@ -545,8 +488,8 @@ class AnalyzePanelWidget(QWidget):
         self._ec_hi.setValue(fit.ECb[1])
         self._el_lo.setValue(fit.ELb[0])
         self._el_hi.setValue(fit.ELb[1])
-        _set_freq(self._r_f, fit.r_f)
-        _set_freq(self._sample_f, fit.sample_f)
+        self._r_f.set_value(fit.r_f)
+        self._sample_f.set_value(fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
         self._sync_preset()
@@ -695,8 +638,8 @@ class AnalyzePanelWidget(QWidget):
 
     def _commit_params(self) -> None:
         transitions = self._transitions_form.get_transitions()
-        r_f = _parse_freq(self._r_f)
-        sample_f = _parse_freq(self._sample_f)
+        r_f = self._r_f.value()
+        sample_f = self._sample_f.value()
         self._ctrl.set_fit_params(
             search_db=self._db_edit.text().strip(),
             EJb=(self._ej_lo.value(), self._ej_hi.value()),
@@ -743,13 +686,10 @@ class AnalyzePanelWidget(QWidget):
             # Malformed pairs are reported when Search parses them; until then
             # no category counts as entered.
             transitions = TransitionDict()
-        needs_r_f = transitions_need_r_f(transitions) and _parse_freq(self._r_f) is None
-        needs_sample_f = (
-            transitions_need_sample_f(transitions)
-            and _parse_freq(self._sample_f) is None
+        needs_r_f = self._r_f.mark_needed(needed=transitions_need_r_f(transitions))
+        needs_sample_f = self._sample_f.mark_needed(
+            needed=transitions_need_sample_f(transitions)
         )
-        self._r_f_required.setHidden(not needs_r_f)
-        self._sample_f_required.setHidden(not needs_sample_f)
         self._needs_frequency = needs_r_f or needs_sample_f
         self._refresh_search_button()
 
