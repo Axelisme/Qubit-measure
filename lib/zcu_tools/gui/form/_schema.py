@@ -571,4 +571,5 @@ def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     tags = branch_tags((model, ModuleInput, RangeInput))
     projection = _Projection(root, env, _library_specs(env), tags)
     _decorate(model, root, projection, set(), {}, ())
+    _hide_fixed_tag(model, root, tags)
     return root
