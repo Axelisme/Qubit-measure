@@ -353,7 +353,7 @@ def test_spectrum_rows_count_only_published_filter_exclusions(cross_controller):
     # Joint cloud order is a (3 points), empty, b (1 point).
     ctrl.set_selection(np.array([True, False, True, False]))
     assert excluded() == [("a", 1), ("empty", 0), ("b", 1)]
-    # A Filter draft opens all-selected; it does not change the published count.
+    # An open Filter draft does not change the published count.
     ctrl.interactive.begin_cross_selection()
     assert excluded() == [("a", 1), ("empty", 0), ("b", 1)]
     ctrl.interactive.cancel_selection()

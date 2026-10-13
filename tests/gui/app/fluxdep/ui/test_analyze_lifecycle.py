@@ -4,13 +4,26 @@ import copy
 
 import numpy as np
 from qtpy import QtWidgets
+from qtpy.QtCore import QEvent
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
-from tests.gui.app.fluxdep._window import current_page, editor, fit_panel, show_page
+from tests.gui.app.fluxdep._window import (
+    current_page,
+    editor,
+    filter_button,
+    fit_panel,
+    show_page,
+)
+
+
+def _selectors(panel):
+    """Selector views under panel once deferred Qt deletions have run."""
+    QtWidgets.QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return panel.findChildren(SelectorWidget)
 
 
 def apply_button(widget):
@@ -108,23 +121,29 @@ def test_agent_selection_updates_reuse_filter_view_and_undo(qapp, cross_controll
         assert panel.findChild(SelectorWidget) is selector
         panel.show_tab("search")
         assert panel.current_tab == "search"
-        assert ctrl.interactive.inspect() is None
+        # Leaving Filter only retires its view; the Session stays open.
+        assert _selectors(panel) == []
+        assert ctrl.interactive.inspect() == active
         panel.show_tab("filter")
-        fresh = ctrl.interactive.inspect()
-        assert fresh is not None and fresh.context_id > active.context_id
+        assert ctrl.interactive.inspect() == active
+        assert len(_selectors(panel)) == 1
     finally:
         window.close()
         window.deleteLater()
         qapp.processEvents()
 
 
-def test_activate_detaches_old_view_reuses_context_and_filter_search_resets(
+def test_activate_detaches_old_view_reuses_context_and_discard_edit_resets(
     qapp, cross_controller
 ):
     ctrl = cross_controller
     panel = AnalyzePanelWidget(ctrl)
     try:
         panel.activate()
+        # Activation shows the published masks; only Edit opens input.
+        assert ctrl.interactive.current_cross_selection() is None
+        assert _selectors(panel) == []
+        filter_button(panel, "edit").click()
         selector = panel.findChild(SelectorWidget)
         assert selector is not None
         context = ctrl.interactive.current_cross_selection()
@@ -136,11 +155,9 @@ def test_activate_detaches_old_view_reuses_context_and_filter_search_resets(
         assert selector.preview_view() is None
         stale_apply.click()
         assert ctrl.state.selection_mask() is None
-        tabs = panel.findChild(QtWidgets.QTabWidget)
-        assert tabs is not None
-        tabs.setCurrentIndex(1)
+        filter_button(panel, "discard").click()
         assert ctrl.interactive.current_cross_selection() is None
-        tabs.setCurrentIndex(0)
+        filter_button(panel, "edit").click()
         fresh = ctrl.interactive.current_cross_selection()
         assert fresh is not None and fresh is not context
         assert fresh.session.snapshot().selected.all()
@@ -160,6 +177,7 @@ def test_fit_page_reentry_reactivates_singleton_after_external_change(
         show_page(window, "fit")
         panel = fit_panel(window)
         assert panel is not None
+        filter_button(panel, "edit").click()
         context = ctrl.interactive.current_cross_selection()
         assert context is not None
         ctrl.set_points("b", np.array([0.8]), np.array([4.8]))
@@ -167,6 +185,9 @@ def test_fit_page_reentry_reactivates_singleton_after_external_change(
         show_page(window, "spectra")
         show_page(window, "fit")
         assert fit_panel(window) is panel
+        # Re-entry shows the published masks; Edit captures the new cloud.
+        assert ctrl.interactive.current_cross_selection() is None
+        filter_button(panel, "edit").click()
         fresh = ctrl.interactive.current_cross_selection()
         assert fresh is not None and fresh is not context
         np.testing.assert_array_equal(fresh.plugin.inputs.fluxs, [0.0, 0.5, 1.0, 0.8])
@@ -190,6 +211,7 @@ def test_filter_view_attaches_global_filter_beside_spectrum_named_selection(
     panel = AnalyzePanelWidget(ctrl)
     try:
         panel.activate()
+        filter_button(panel, "edit").click()
         selector = panel.findChild(SelectorWidget)
         assert selector is not None
         filter_active = ctrl.interactive.inspect_selection()
@@ -206,7 +228,7 @@ def test_filter_view_attaches_global_filter_beside_spectrum_named_selection(
         qapp.processEvents()
 
 
-def test_leaving_filter_cancels_global_filter_not_spectrum_named_selection(
+def test_leaving_filter_keeps_global_filter_and_spectrum_named_selection(
     qapp, cross_controller
 ):
     ctrl = cross_controller
@@ -214,10 +236,11 @@ def test_leaving_filter_cancels_global_filter_not_spectrum_named_selection(
     draft = ctrl.interactive.begin_line_pick("selection")
     panel = AnalyzePanelWidget(ctrl)
     try:
-        ctrl.interactive.begin_cross_selection()
+        joint = ctrl.interactive.begin_cross_selection()
         panel.show_tab("search")
         assert panel.current_tab == "search"
-        assert ctrl.interactive.inspect_selection() is None
+        filter_active = ctrl.interactive.inspect_selection()
+        assert filter_active is not None and filter_active.context is joint
         named = ctrl.interactive.inspect("selection")
         assert named is not None and named.context is draft
     finally:

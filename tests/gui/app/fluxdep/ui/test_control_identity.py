@@ -10,8 +10,7 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from qtpy.QtCore import QEvent, Qt
-from qtpy.QtGui import QKeyEvent
+from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -21,7 +20,6 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QTabWidget,
     QToolBar,
     QWidget,
 )
@@ -45,9 +43,13 @@ from tests.gui.app.fluxdep._search_result import (
 )
 from tests.gui.app.fluxdep._window import (
     choose_file,
+    click_fit_stage,
     command,
     current_page,
+    filter_button,
     fit_panel,
+    fit_stage_button,
+    fit_stage_status,
     named,
     open_chooser,
     picker_button,
@@ -176,8 +178,12 @@ def test_remote_viewer_reads_fit_page_without_opening_filter(
         g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
     )
     assert not form.isEnabled()
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None and not tabs.isTabEnabled(0)
+    # A viewer lands on the read-only published Filter; it cannot open input.
+    assert panel.current_tab == "filter"
+    assert fit_stage_button(panel, "filter").isEnabled()
+    published = named(panel, FigureCanvasQTAgg, "fluxdep.filter.published")
+    assert published.isVisibleTo(panel)
+    assert not filter_button(panel, "edit").isEnabled()
     panel.show_tab("show")
     title = show_canvas(panel).figure.axes[0].get_title()
     assert "Outdated: filter changed" in title
@@ -360,57 +366,38 @@ def test_remote_filter_switch_detaches_and_cannot_cancel_until_reclaim(window):
     show_page(view, "fit")
     panel = fit_panel(view)
     assert panel is not None
+    filter_button(panel, "edit").click()
     active = ctrl.interactive.inspect()
     assert active is not None and active.kind == "selection"
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     selector = panel.findChild(SelectorWidget)
     assert selector is not None
     assert not button(selector, "Apply").isEnabled()
+    discard = filter_button(panel, "discard")
+    assert not discard.isEnabled()
+    discard.click()
+    assert ctrl.interactive.inspect() == active
     # A non-holder leaving Filter only retires the view; the Session stays.
-    tabs.setCurrentIndex(1)
-    assert panel.current_tab == "search"
+    show_page(view, "spectra")
     assert _selector_count(panel) == 0
     assert ctrl.interactive.inspect() == active
     # Coming back reattaches the same Session, still read-only.
-    tabs.setCurrentIndex(0)
+    show_page(view, "fit")
     assert panel.current_tab == "filter"
     assert _selector_count(panel) == 1
     selector = panel.findChild(SelectorWidget)
     assert selector is not None and not button(selector, "Apply").isEnabled()
     assert ctrl.interactive.inspect() == active
     indicator(view).click()
-    tabs.setCurrentIndex(1)
-    assert ctrl.interactive.inspect() is None
-
-
-def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
-    view, ctrl = window
+    # The holder's leaving keeps the Session as well; only Discard ends it.
+    show_page(view, "spectra")
+    assert ctrl.interactive.inspect() == active
     show_page(view, "fit")
-    panel = fit_panel(view)
-    assert panel is not None
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None
-    active = ctrl.interactive.inspect()
-    assert active is not None and active.kind == "selection"
-    ctrl.control_identity.connect("a", "flux-agent", "owner")
-    next_tab = QKeyEvent(
-        QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
-    )
-    QApplication.sendEvent(tabs, next_tab)
-    assert panel.current_tab == "search"
-    assert ctrl.interactive.inspect() == active
-    assert ctrl.control_identity.status().holder == "rpc:flux-agent"
-    indicator(view).click()
-    panel.show_tab("filter")
-    assert ctrl.interactive.inspect() == active
-    QApplication.sendEvent(tabs, next_tab)
-    assert panel.current_tab == "search"
+    filter_button(panel, "discard").click()
     assert ctrl.interactive.inspect() is None
 
 
-def test_remote_viewer_reads_search_while_the_agent_filter_runs(
+def test_remote_viewer_sees_stages_locked_while_the_agent_filter_runs(
     window, search_database_hdf5
 ):
     view, ctrl = window
@@ -421,26 +408,27 @@ def test_remote_viewer_reads_search_while_the_agent_filter_runs(
     show_page(view, "fit")
     panel = fit_panel(view)
     assert panel is not None and panel.current_tab == "filter"
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(1)
+    assert _selector_count(panel) == 1
+    active = ctrl.interactive.inspect_selection()
+    assert active is not None and active.context is context
+    # The live agent draft locks Search and Show for every viewer.
+    assert fit_stage_status(panel, "filter") == "draft"
+    assert not fit_stage_button(panel, "search").isEnabled()
+    assert not fit_stage_button(panel, "show").isEnabled()
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.cancel_selection()
+    # Without a live Filter the viewer reads the published masks, opening nothing.
+    assert _selector_count(panel) == 0
+    published = named(panel, FigureCanvasQTAgg, "fluxdep.filter.published")
+    assert published.isVisibleTo(panel)
+    click_fit_stage(panel, "search")
     assert panel.current_tab == "search"
     freshness = named(panel, QLabel, "fluxdep.fit.freshness")
     assert freshness.text().startswith("Outdated: ")
-    active = ctrl.interactive.inspect_selection()
-    assert active is not None and active.context is context
-    tabs.setCurrentIndex(2)
+    click_fit_stage(panel, "show")
     assert panel.current_tab == "show"
-    assert tabs.isTabEnabled(0), "the live agent Filter can be viewed again"
-    tabs.setCurrentIndex(0)
+    click_fit_stage(panel, "filter")
     assert panel.current_tab == "filter"
-    assert _selector_count(panel) == 1
-    assert ctrl.interactive.inspect_selection() == active
-    tabs.setCurrentIndex(1)
-    with ctrl.bus.origin(EventOrigin(kind="agent")):
-        ctrl.interactive.cancel_selection()
-    # Without a live Filter a viewer cannot enter Filter, which would begin one.
-    assert not tabs.isTabEnabled(0)
     assert ctrl.interactive.current_cross_selection() is None
 
 
@@ -539,9 +527,10 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
         g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
     )
     assert not form.isEnabled()
-    tabs = panel.findChild(QTabWidget)
-    assert tabs is not None and tabs.tabBar().isTabEnabled(2)
-    tabs.setCurrentIndex(2)
+    # Show stays locked without a recorded result; shown programmatically, its
+    # Display group still follows control authority.
+    assert fit_stage_status(panel, "show") == "locked"
+    panel.show_tab("show")
     assert panel.current_tab == "show"
     assert not next(
         g for g in panel.findChildren(QGroupBox) if g.title() == "Display"

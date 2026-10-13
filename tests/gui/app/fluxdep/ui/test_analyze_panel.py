@@ -43,7 +43,12 @@ from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
 )
-from tests.gui.app.fluxdep._window import named, show_canvas
+from tests.gui.app.fluxdep._window import (
+    filter_button,
+    fit_stage_button,
+    named,
+    show_canvas,
+)
 
 
 @pytest.fixture
@@ -476,12 +481,15 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         widget.deleteLater()
 
 
-def test_three_tabs_filter_search_show(panel):
+def test_three_stages_filter_search_show(panel):
     w, _ = panel
-    tabs = w.findChildren(QTabWidget)
-    assert len(tabs) == 1
-    labels = [tabs[0].tabText(i) for i in range(tabs[0].count())]
-    assert labels == ["Filter", "Search", "Show"]
+    assert w.findChildren(QTabWidget) == []
+    labels = [
+        fit_stage_button(w, stage).text().split(" ")[:2]
+        for stage in ("filter", "search", "show")
+    ]
+    assert labels == [["1", "Filter"], ["2", "Search"], ["3", "Show"]]
+    assert fit_stage_button(w, "filter").isChecked()
 
 
 def test_each_preset_fills_its_own_bounds(panel):
@@ -694,6 +702,9 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
     w = AnalyzePanelWidget(ctrl)
     try:
         w.activate()
+        edit = filter_button(w, "edit")
+        assert edit.isEnabled() == usable
+        edit.click()
         selectors = w.findChildren(SelectorWidget)
         assert len(selectors) == (1 if usable else 0)
         if usable:
@@ -707,7 +718,7 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
         qapp.processEvents()
 
 
-def test_activate_attaches_selector_when_points_exist(qapp):
+def test_edit_attaches_selector_when_points_exist(qapp):
     import numpy as np
     from zcu_tools.analysis.fluxdep.models import PointsData
     from zcu_tools.analysis.spectrum import SpectrumData
@@ -737,6 +748,9 @@ def test_activate_attaches_selector_when_points_exist(qapp):
     w = AnalyzePanelWidget(ctrl)
     try:
         w.activate()
+        assert w.findChild(SelectorWidget) is None
+        assert ctrl.interactive.current_cross_selection() is None
+        filter_button(w, "edit").click()
         selector = w.findChild(SelectorWidget)
         assert selector is not None
         assert selector.get_result().selected.all()

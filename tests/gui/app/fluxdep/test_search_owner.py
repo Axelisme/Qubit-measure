@@ -425,9 +425,7 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
     monkeypatch.setattr(fit, "search_database", compute)
     panel = AnalyzePanelWidget(ctrl)
     panel.show()
-    tabs = panel.findChild(QtWidgets.QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(1)
+    panel.show_tab("search")
     search = command(panel, "fluxdep.fit.search")
     cancel = command(panel, "fluxdep.fit.cancel")
     try:

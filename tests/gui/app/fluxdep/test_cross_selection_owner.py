@@ -21,7 +21,9 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 
-def test_capture_full_cloud_sources_and_reuse_only_published_distance(cross_controller):
+def test_capture_full_cloud_sources_and_seed_published_mask_and_distance(
+    cross_controller,
+):
     ctrl = cross_controller
     ctrl.set_selection(np.array([False, True, False, False]), 0.08)
     context = ctrl.interactive.begin_cross_selection()
@@ -36,13 +38,54 @@ def test_capture_full_cloud_sources_and_reuse_only_published_distance(cross_cont
     np.testing.assert_array_equal(inputs.fluxs, [0.0, 0.5, 1.0, 0.5])
     assert inputs.flux_bound == (0.0, 1.0)
     assert inputs.freq_bound == (4.0, 5.0)
-    assert context.session.snapshot().selected.all()
+    np.testing.assert_array_equal(
+        context.session.snapshot().selected, [False, True, False, False]
+    )
     assert context.session.snapshot().min_distance == 0.08
+    assert not context.session.can_undo()
     context.plugin.clear.execute(context.session, None)
     ctrl.interactive.cancel()
     new = ctrl.interactive.begin_cross_selection()
-    assert new is not context and new.session.snapshot().selected.all()
+    # A cancelled draft publishes nothing, so the next one starts from the
+    # same published mask, not from the cancelled draft.
+    assert new is not context
+    np.testing.assert_array_equal(
+        new.session.snapshot().selected, [False, True, False, False]
+    )
     assert new.session.snapshot().min_distance == 0.08
+
+
+def test_new_context_starts_all_selected_without_a_published_mask(cross_controller):
+    ctrl = cross_controller
+    assert ctrl.state.selection_mask() is None
+    context = ctrl.interactive.begin_cross_selection()
+    assert context.session.snapshot().selected.all()
+    assert context.session.snapshot().selected.size == 4
+
+
+def test_new_context_seeds_unmasked_spectra_all_selected(cross_controller):
+    ctrl = cross_controller
+    ctrl.set_selection(np.array([True, False, False, False]), 0.0)
+    # New points for b drop only b's mask; a keeps its published exclusions.
+    ctrl.set_points("b", np.array([0.2, 0.8]), np.array([4.2, 4.8]))
+    context = ctrl.interactive.begin_cross_selection()
+    np.testing.assert_array_equal(
+        context.session.snapshot().selected, [True, False, False, True, True]
+    )
+
+
+def test_finished_mask_seeds_the_next_context(cross_controller):
+    ctrl = cross_controller
+    first = ctrl.interactive.begin_cross_selection()
+    first.plugin.stroke.execute(
+        first.session, BrushStroke((BrushPoint(0.0, 4.0),), 0.0, "erase")
+    )
+    ctrl.interactive.finish_cross_selection()
+    assert ctrl.interactive.current_cross_selection() is None
+    reopened = ctrl.interactive.begin_cross_selection()
+    np.testing.assert_array_equal(
+        reopened.session.snapshot().selected, [False, True, True, True]
+    )
 
 
 def test_apply_publishes_exact_snapshot_once_retaining_input_and_undo(cross_controller):
