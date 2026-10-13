@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，決策點介面、草稿與發布、fit 依賴及共用渲染
+**Last updated:** 2026-10-13，決策點介面、fit 依賴、共用渲染與匯出收據
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -202,6 +202,11 @@ GUI Show 與 `fit.render` 共用 Controller 的 native overlay 入口。顯示�
 
 Spectrum export 預設 create-only，明示 overwrite 才替換。Params export 沿原生 merge，
 保留 sections，取第一張 aligned spectrum 的 calibration，包含零點譜。
+`FitService.export_params_receipt` 在一次 owner-thread 匯出中捕獲 immutable `FitExportReceipt`，
+包含成功路徑、全精度 GHz 的 EJ／EC／EL 與實際校準譜名 `alignment_from`。
+Controller 提供同名入口，RPC `fit.export_params` 投影該收據，MCP 不重讀狀態或推導來源。
+既有 `export_params` 取收據的路徑並維持 str 回傳，Qt 與 Notebook caller 不變。
+沒有 fit、fit 過期或沒有已對齊譜時，在 I/O 前拒絕；I/O 失敗不回成功收據。
 Export 不改 State；失敗保留成功前綴，不 cleanup／rollback。
 Search 使用同一 app owner token，status 可找 GUI 或 agent 的最新 activity。
 Await 在 IO thread 等待，不碰 State；timeout 不取消，cancel receipt 不代表 cancelled outcome。

@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, decision points, composed RPCs and recorded evidence
+**Last updated:** 2026-10-13, 19 decision/control/lifecycle tools and native fit export
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -23,6 +23,37 @@ measure_knowledge supplies detailed interpretation, examples and counterexamples
 These design principles are recorded in
 [Agent interface layers](../../../../docs/adr/draft/agent-interface-layers.md#mcp-設計原則).
 Fluxdep's fit dependency model is app-specific, not a rule for every MCP.
+
+## Tool inventory
+
+The server exposes 13 analysis tools, 3 control tools and 3 lifecycle tools, for
+19 tools in total.
+
+| Category | Tool | Decision or result |
+| --- | --- | --- |
+| Lifecycle | `fluxdep_connect` | Attach, initialize control identity and summarize project, spectra and fit. |
+| Lifecycle | `fluxdep_launch` | Start an authorized GUI; attach by default. |
+| Lifecycle | `fluxdep_disconnect` | Detach without closing the GUI. |
+| Control | `fluxdep_control_status` | Read native control identity. |
+| Control | `fluxdep_control_acquire` | Request control for the fixed owner connection. |
+| Control | `fluxdep_control_release` | Return control to Local without cancelling work. |
+| Analysis | `fluxdep_spectrum_list` | Spectrum stages/drafts, Filter counts and fit freshness. |
+| Analysis | `fluxdep_spectrum_snapshot` | Revisit one spectrum with evidence PNG. |
+| Analysis | `fluxdep_spectrum_load` | J1 raw-data usability, with summary and PNG. |
+| Analysis | `fluxdep_spectrum_remove` | Remove one named source. |
+| Analysis | `fluxdep_align` | J2 symmetry alignment; finish publishes and returns evidence. |
+| Analysis | `fluxdep_sample` | J3 native picker sampling; finish publishes and returns evidence. |
+| Analysis | `fluxdep_filter` | J6 joint-cloud filtering; finish publishes and returns evidence. |
+| Analysis | `fluxdep_database_info` | Search database ranges, entries and levels. |
+| Analysis | `fluxdep_fit` | J4 inputs/search and J5 recorded quality plus Show evidence. |
+| Analysis | `fluxdep_fit_result` | Recorded params, inputs and freshness; images only for fresh quality-bearing results. |
+| Analysis | `fluxdep_export_spectrums` | Sampled checkpoint, including empty completed spectra, without Filter masks. |
+| Analysis | `fluxdep_spectrum_load_processed` | Restore checkpoint; reject all conflicting names before publication. |
+| Analysis | `fluxdep_fit_export_params` | Fresh params.json handoff; native path, full-precision params and calibration source. |
+
+Command parameters, numeric ranges and transition formulas are in each tool's
+description. The agent does not manage open/cancel, context IDs, search tokens or
+active display.
 
 ## Authority and lifecycle
 
@@ -118,6 +149,17 @@ return status=no_result and params=null. Params-only reads keep native inputs,
 with points/residual/per_transition null, and attach no image. Neither state
 creates zero statistics or reads the current cloud. Stage finish tools project
 native invalidated labels without rebuilding the dependency graph.
+
+`fluxdep_fit_export_params(savepath?)` calls only `fit.export_params`. Omission
+uses the GUI project's default params.json; an explicit string names a GUI-local
+destination. The GUI merges the fit while preserving independent sections. The
+reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL, and
+`alignment_from`, the actual first aligned spectrum used for calibration, including
+zero-point spectra. This is the export source, not alignment inheritance provenance.
+MCP projects the native receipt without reading fit/spectrum state again, rounding
+params, inferring the source or requesting an image. The GUI refuses stale fits
+with `fit_stale` before I/O. Native readiness, control and I/O failures propagate
+without retry, fallback or rollback.
 
 ## Failures and verification
 
