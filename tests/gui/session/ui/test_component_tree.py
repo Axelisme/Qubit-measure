@@ -118,6 +118,9 @@ def component_widget(
     try:
         yield widget, control
     finally:
+        # An open Add dialog stays activeModalWidget() after its parent closes.
+        for dialog in _visible_dialogs(widget):
+            dialog.reject()
         _close(qapp, widget)
 
 
