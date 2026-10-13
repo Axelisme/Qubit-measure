@@ -240,3 +240,26 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
     resource.reset()
     assert resource.result() == ScalarCore(amount=2.0)
     assert captures == 3
+
+
+def test_editor_state_borrows_the_same_input_for_reading_and_subscribing() -> None:
+    resource = resource_api.TabFormResource(
+        Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+        mutation_allowed=lambda: True,
+    )
+    state = resource.editor_state
+    assert state is resource.editor_state
+    published: list[float] = []
+    state.subscribe(lambda: published.append(state.input.data["amount"]))
+
+    resource.write({("amount",): 3.0})
+
+    assert published == [3.0]
+    assert state.input.data == resource.input.data
+    assert resource.editor_state.result(resource.env) == ScalarCore(amount=3.0)
+
+    resource.revoke()
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.editor_state
+    assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE

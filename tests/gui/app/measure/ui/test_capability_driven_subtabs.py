@@ -18,7 +18,11 @@ from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.artifact_save_center import ArtifactSaveCenter
 from zcu_tools.gui.control_identity import ControlIdentity
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, make_cfg
+from tests.gui.app.measure._form_fakes import (
+    LookupCfg,
+    configure_form_lookup,
+    make_form,
+)
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -42,7 +46,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl = MagicMock()
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = {}
@@ -115,7 +119,7 @@ def make_snapshot(
     save_snap = SavePaneSnapshot()
     snapshot = TabSnapshot(
         adapter_name="fake",
-        cfg_schema=MagicMock(),
+        cfg_input={},
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=False,
@@ -402,8 +406,8 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     assert tab.get_run_container() is run_c
     assert tab.get_post_container() is post_c
     # Busy tab cannot be closed
+    from zcu_tools.gui.app.measure.adapter import Form
     from zcu_tools.gui.app.measure.state import Session, State
-    from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
     from zcu_tools.gui.session.types import SessionEnv
 
     exp_ctx = SessionEnv(
@@ -424,7 +428,7 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
+            cfg=make_form(Form(LookupCfg, {}), state=state),
         ),
     )
     state.set_tab_analyzing("tab-1", analyzing=True)

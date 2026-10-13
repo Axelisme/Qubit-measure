@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
@@ -12,6 +14,7 @@ from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabForm
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.aliases import AliasTable
+from zcu_tools.gui.session.types import SessionEnv
 
 
 def form_sources(
@@ -55,3 +58,24 @@ def make_form[C: ConfigBase](form: Form[C], *, state: State) -> TabFormResource:
         ),
     )
     return resource
+
+
+class LookupCfg(ExpCfgModel):
+    """Three plain scalars a measure tab view can display and edit."""
+
+    reps: int = 100
+    rounds: int = 10
+    gain: float = 0.1
+
+
+def configure_form_lookup(ctrl: MagicMock) -> None:
+    """Make ctrl.cfg_resources.lookup return one fixed LookupCfg resource per tab."""
+    resources: dict[str, TabFormResource] = {}
+
+    def lookup(tab_id: str) -> TabFormResource:
+        if tab_id not in resources:
+            state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+            resources[tab_id] = make_form(Form(LookupCfg, {}), state=state)
+        return resources[tab_id]
+
+    ctrl.cfg_resources.lookup.side_effect = lookup
