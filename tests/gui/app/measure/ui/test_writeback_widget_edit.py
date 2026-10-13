@@ -556,6 +556,15 @@ def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
     assert not _apply(widget).isEnabled()
     with pytest.raises(LibraryEntryInvalid):
         ctrl.apply_writeback_for_pane(tab_id, pane)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    proposed = widget.findChild(QLabel, "writebackProposed")
+    assert proposed is not None and proposed.text() == "Invalid configuration"
+    selection = widget.findChild(QCheckBox)
+    assert selection is not None and selection.isChecked()
+    assert not _apply(widget).isEnabled()
+    assert dialog.isVisible()
+    assert _input(dialog, "freq").text() == "5100.125"
+    assert _input(dialog, "gain").text() == "missing.value"
     assert (
         MODULE_PROPOSAL_TARGET
         not in ctrl.context_control.read_context().library.module_keys()
