@@ -4,7 +4,14 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QPushButton,
+    QTabWidget,
+    QWidget,
+)
 from zcu_tools.cfg_model import PulseSpec, TemplateDef
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -13,11 +20,14 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_dialog_registry import MainDialogRegistry
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.widgets import DialogRefStore
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._app_launch import (
+    LaunchedMeasureApp,
     click_toolbar_setup,
     launched_measure_app,
     visible_setup_dialogs,
@@ -87,6 +97,70 @@ def test_setup_screenshot_uses_visible_gui_dialog_through_mcp(
         )
         assert path.is_file() and path.read_bytes().startswith(b"\x89PNG")
         assert app.window.list_open_dialogs() == expected
+
+
+def _inspect_screenshot(app: LaunchedMeasureApp, tmp_path: Path, **params: str) -> Path:
+    reply = app.invoke(
+        "rpc_call",
+        {
+            "method": "dialog.screenshot",
+            "params": {
+                "name": "inspect",
+                **params,
+                "out_path": str(tmp_path / "inspect.png"),
+            },
+        },
+    )
+    return Path(reply["saved_to"])
+
+
+def _current_inspect_page(app: LaunchedMeasureApp) -> str:
+    (inspect,) = [d for d in app.window.findChildren(InspectDialog) if d.isVisible()]
+    tabs = inspect.findChild(QTabWidget)
+    assert tabs is not None
+    return tabs.tabText(tabs.currentIndex())
+
+
+@pytest.mark.uses_wall_clock
+def test_inspect_screenshot_tab_selects_the_captured_page_through_mcp(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    with launched_measure_app(qapp, tmp_path) as app:
+        (startup,) = visible_setup_dialogs(app.window)
+        startup.reject()
+        app.window.open_dialog(DialogName.INSPECT)
+        qapp.processEvents()
+
+        for tab, title in (
+            ("aliases", "Aliases"),
+            ("modules", "Modules"),
+            ("parameters", "Parameters"),
+        ):
+            path = _inspect_screenshot(app, tmp_path, tab=tab)
+            assert path.read_bytes().startswith(b"\x89PNG")
+            assert _current_inspect_page(app) == title
+        _inspect_screenshot(app, tmp_path, tab="aliases")
+        _inspect_screenshot(app, tmp_path)
+        assert _current_inspect_page(app) == "Parameters"
+
+        with pytest.raises(GuiRpcError, match="tab"):
+            _inspect_screenshot(app, tmp_path, tab="library")
+        assert _current_inspect_page(app) == "Parameters"
+        with pytest.raises(GuiRpcError, match="tab"):
+            app.invoke(
+                "rpc_call",
+                {
+                    "method": "dialog.screenshot",
+                    "params": {"name": "setup", "tab": "aliases"},
+                },
+            )
+        with pytest.raises(GuiRpcError, match="unknown dialog name"):
+            app.invoke(
+                "rpc_call",
+                {"method": "dialog.screenshot", "params": {"name": "aliases"}},
+            )
+        app.window.close_dialog(DialogName.INSPECT)
+        qapp.processEvents()
 
 
 def test_inspect_uses_composition_templates_and_the_named_arb_dialog(
