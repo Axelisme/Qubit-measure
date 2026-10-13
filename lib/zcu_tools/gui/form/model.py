@@ -50,8 +50,13 @@ class Display:
     rounds input. A negative count raises ValueError here; input_schema raises
     ValueError when the field is not a float. hidden=True keeps the field out
     of the editor only: its value and defaults stay in the input, it is still
-    validated, and the input schema still lists it.
-    Declaration order sets order; nested models set groups. No layout registry.
+    validated, and the input schema still lists it. group names a foldable
+    display group within the field's model level, such as "Advanced"; the
+    input schema marks the field with x-form-group and the editor draws the
+    level's groups after its ungrouped fields. None leaves the field
+    ungrouped; an empty name raises ValueError here. Groups never change
+    validation, defaults, choices or input.
+    Declaration order sets order; nested models set sections. No layout registry.
     """
 
     label: str | None = None
@@ -61,11 +66,14 @@ class Display:
     collapsed: bool = False
     decimals: int | None = None
     hidden: bool = False
+    group: str | None = None
 
     def __post_init__(self) -> None:
-        """Reject a negative decimals count with ValueError."""
+        """Reject a negative decimals count or an empty group with ValueError."""
         if self.decimals is not None and self.decimals < 0:
             raise ValueError(f"Display decimals must be >= 0, got {self.decimals}")
+        if self.group == "":
+            raise ValueError("Display group must be a nonempty name or None")
 
 
 @dataclass(frozen=True)

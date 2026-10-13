@@ -191,6 +191,8 @@ def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
             # Only declared: forms without hidden fields keep their schema.
             if metadata.hidden:
                 target["hidden"] = True
+            if metadata.group is not None:
+                target["x-form-group"] = metadata.group
     for child_info, child_target in _container_nodes(info, target):
         _field_metadata(child_info, child_target)
 
