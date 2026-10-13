@@ -328,7 +328,7 @@ def creation_templates() -> dict[str, TemplateDef]:
             {
                 "ch": 2,
                 "nqz": 1,
-                "freq": Expr("$general.ext.seed"),
+                "freq": Expr("general.ext.seed"),
                 "gain": 0.25,
                 "waveform.style": "const",
                 "waveform.length": Expr("2 * .2"),
