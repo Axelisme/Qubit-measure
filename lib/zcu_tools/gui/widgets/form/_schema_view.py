@@ -85,8 +85,10 @@ class FieldView:
     path is the canonical model-field path. kind selects a Qt representation.
     label, description, unit and placeholder are display text; collapsed is
     the initial model-group fold hint. nullable permits null; active identifies
-    an enabled nullable model. expression permits scalar Expr input. options
-    is current choice data, or None for free input (empty means no choices).
+    an enabled nullable model. expression permits scalar Expr input: the
+    schema offers an Expr alternative, which the core does only for text
+    fields, so a row with options never has it. options is current choice
+    data, or None for free input (empty means no choices).
     decimals is the schema's
     display digit count for a number, or None to show the full value. fixed
     marks a one-value Literal (schema const, not nullable): its row shows the
@@ -369,7 +371,7 @@ def _field(
         collapsed=metadata.get("collapsed") is True,
         nullable=nullable,
         active=not nullable or (present and raw is not None),
-        expression=expression and not fixed,
+        expression=expression,
         options=None if fixed else options,
         raw=raw if present else default,
         present=present,

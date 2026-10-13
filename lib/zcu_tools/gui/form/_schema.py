@@ -18,6 +18,7 @@ from ._structure import (
     discriminator,
     fixed_tag,
     key_or_inline,
+    library_key,
     model_types,
     schema_branch_model,
 )
@@ -93,6 +94,13 @@ _COMPLEX: dict[str, JsonValue] = {
 
 
 def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Copy schema without required lists, with an Expr alternative per text leaf.
+
+    A text leaf is an integer, number or string node without enum or const:
+    Literal and Enum values are picked, not typed. Boolean nodes get none.
+    Leaves this shape cannot tell apart, such as choice leaves, lose the
+    alternative in _decorate.
+    """
     node = copy_object(schema)
     node.pop("required", None)
     # Only schema positions are traversed: property names and defaults are data.
@@ -123,16 +131,21 @@ def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
                 _partial(branch) if isinstance(branch, dict) else branch
                 for branch in branches
             ]
-    if node.get("type") in ("integer", "number", "string"):
+    if (
+        node.get("type") in ("integer", "number", "string")
+        and "enum" not in node
+        and "const" not in node
+    ):
         return {"anyOf": [node, copy_object(_EXPR)]}
     return node
 
 
 def _without_expr(node: dict[str, JsonValue]) -> None:
-    """Collapse an {anyOf: [ordinary, Expr]} node to its ordinary branch in place.
+    """Drop the Expr alternatives of node's anyOf in place.
 
-    Outer metadata is kept. Other nodes, including ones with several ordinary
-    branches, are left unchanged.
+    When one ordinary alternative remains, node collapses to it and keeps its
+    outer metadata. Nested anyOf alternatives, such as the inner node of a
+    nullable leaf, are left to the caller. A node without anyOf is unchanged.
     """
     branches = node.get("anyOf")
     if not isinstance(branches, list):
@@ -143,6 +156,8 @@ def _without_expr(node: dict[str, JsonValue]) -> None:
         node.clear()
         node.update(ordinary[0])
         node.update(metadata)
+    else:
+        node["anyOf"] = ordinary
 
 
 def _resolve(
@@ -355,13 +370,6 @@ def _child_nodes(
             node["oneOf"] = [variant for _, variant in tagged]
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
             for tags, variant in tagged:
-                properties = variant.get("properties")
-                selector = (
-                    properties.get(tag_key) if isinstance(properties, dict) else None
-                )
-                # Selectors determine shape before value evaluation.
-                if isinstance(selector, dict):
-                    _without_expr(selector)
                 children.append((schema_branch_model(info, tags), variant))
             return tuple(children)
         return tuple(
@@ -381,10 +389,12 @@ def _child_nodes(
 def _apply_choices(
     target: dict[str, JsonValue], options: tuple[JsonValue, ...]
 ) -> None:
+    """Restrict a choice leaf's node to options; it takes no Expr envelope."""
+    _without_expr(target)
     variants = target.get("anyOf")
     if isinstance(variants, list):
         for variant in variants:
-            if isinstance(variant, dict) and variant != _EXPR:
+            if isinstance(variant, dict):
                 _apply_choices(variant, options)
     else:
         _enum(target, options)
@@ -510,7 +520,9 @@ def _decorate(
             _key_branch(info, target, projection)
         elif _module_input(info):
             target["x-form-key-or-inline"] = True
-        if issubclass(model, ModuleRef) and name == "name":
+        if library_key(model, name):
+            # A library key is a plain string, like a str-or-model key.
+            _without_expr(target)
             _ref_keys(target, projection, options.get((name,)))
         child_options = {
             path[1:]: values

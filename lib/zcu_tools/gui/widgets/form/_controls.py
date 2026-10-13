@@ -211,11 +211,10 @@ class FieldRow:
     non-editable dropdown: INLINE_ITEM (item data None), then the offered
     library keys (data is the key), then, while the input holds a key they
     lack, that key's text plus MISSING_SUFFIX (data is the text). mode is
-    the checkable Expression action of a
-    row that offers Expression input, checked in Expression mode; input lists
-    it in actions() and its right-click menu, after a text field's standard
-    items. A choice row's input is a dropdown of only the choices in Direct
-    mode and a text field in Expression mode. enabled toggles nullable
+    the checkable Expression action of a text row that offers Expression
+    input, checked in Expression mode; its text field lists it in actions()
+    and its right-click menu, after the standard items. A choice row's input
+    is a dropdown of only the choices, without mode. enabled toggles nullable
     models; group hosts model children, including a key-or-inline field's
     inline rows. value/error are public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
@@ -246,8 +245,6 @@ class FieldRow:
         self._unparsed = unparsed
         self._folds = folds
         self._displaying = False
-        # Choice shown when Expression mode returns to Direct (see _direct_choice).
-        self._direct_raw: JsonValue = None
         self.widget = QWidget(parent)
         self.layout = QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -380,32 +377,24 @@ class FieldRow:
         self.input = widget
         if isinstance(widget, QLineEdit):
             widget.setPlaceholderText(self.field.placeholder)
-        if self.field.expression:
-            # Owned by the row, so it outlives a choice row's input swaps.
-            self.mode = QAction("Expression", self.widget)
-            self.mode.setObjectName(self._name("mode"))
-            self.mode.setCheckable(True)
-            self.mode.triggered.connect(self._mode_changed)
-        self._input_layout = header
         header.addWidget(widget)
-        self._offer_mode(widget)
+        if self.field.expression and isinstance(widget, QLineEdit):
+            self.mode = self._build_mode(widget)
         connect_value_widget(widget, self._input_changed)
 
-    def _offer_mode(self, widget: QWidget) -> None:
-        """List mode on widget and in its right-click menu."""
-        mode = self.mode
-        if mode is None:
-            return
+    def _build_mode(self, widget: QLineEdit) -> QAction:
+        """Return the Expression action, listed on widget and after its menu."""
+        mode = QAction("Expression", self.widget)
+        mode.setObjectName(self._name("mode"))
+        mode.setCheckable(True)
+        mode.triggered.connect(self._mode_changed)
         widget.addAction(mode)
-        if isinstance(widget, QLineEdit):
-            # Keep the text field's standard menu; mode follows it.
-            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            widget.customContextMenuRequested.connect(
-                lambda pos: _show_text_menu(widget, mode, pos)
-            )
-        else:
-            # A dropdown has no standard menu: its menu is its actions.
-            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
+        # Keep the text field's standard menu; mode follows it.
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda pos: _show_text_menu(widget, mode, pos)
+        )
+        return mode
 
     def _activate(self) -> None:
         if not self._displaying and self.enabled is not None:
@@ -414,40 +403,12 @@ class FieldRow:
     def _mode_changed(self) -> None:
         if self._displaying:
             return
-        expression = self._expression_selected()
-        self._displaying = True
-        try:
-            if self.field.options is not None:
-                # Expression text starts from the direct choice; no choice is "".
-                text = (
-                    self.input.text()
-                    if isinstance(self.input, QLineEdit)
-                    else ("" if self.field.raw is None else str(self.field.raw))
-                )
-                self._select_input(expression=expression)
-                if isinstance(self.input, QLineEdit):
-                    self.input.setText(text)
-                else:
-                    self._display_choices(self._direct_choice())
-            self._show_mode(expression=expression)
-        finally:
-            self._displaying = False
+        # The text stays; it is written again in the new mode.
+        self._show_mode(expression=self._expression_selected())
         self._input_changed()
 
     def _expression_selected(self) -> bool:
         return self.mode is not None and self.mode.isChecked()
-
-    def _direct_choice(self) -> object:
-        """Choice to select when Expression mode returns to Direct.
-
-        A resolved expression value that is a current option wins. Otherwise
-        the last Direct choice returns, because an expression made from the
-        direct text (for example "mA") need not resolve.
-        """
-        options = self.field.options or ()
-        if self.field.has_value and self.field.value in options:
-            return self.field.value
-        return self._direct_raw
 
     def _show_mode(self, *, expression: bool) -> None:
         """Check mode and tint the current input for the given mode."""
@@ -467,26 +428,6 @@ class FieldRow:
                 ),
             )
         self.input.setPalette(palette)
-
-    def _select_input(self, *, expression: bool) -> None:
-        if self.field.options is None:
-            return
-        use_text = expression
-        if use_text == isinstance(self.input, QLineEdit):
-            return
-        old = self.input
-        widget = make_value_widget(str, "", None if use_text else self.field.options)
-        widget.setParent(self.widget)
-        widget.setObjectName(self._name("input"))
-        if isinstance(widget, QLineEdit):
-            widget.setPlaceholderText(self.field.placeholder)
-        if old is not None:
-            self._input_layout.replaceWidget(old, widget)
-            old.setParent(None)
-            old.deleteLater()
-        self.input = widget
-        self._offer_mode(widget)
-        connect_value_widget(widget, self._input_changed)
 
     def _display_choices(self, selected: object) -> None:
         widget = self.input
@@ -611,11 +552,8 @@ class FieldRow:
             self._display_key_choice(field.key_or_inline, editable=editable)
             return
         expression = local.expression if local else _expression(field)
-        if field.options is not None and not expression:
-            self._direct_raw = field.raw
         if self.mode is not None:
             self.mode.setEnabled(editable)
-        self._select_input(expression=expression)
         self._show_mode(expression=expression)
         widget = self.input
         if widget is None:

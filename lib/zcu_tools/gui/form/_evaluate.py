@@ -19,6 +19,7 @@ from ._structure import (
     discriminator,
     key_or_inline,
     leaves,
+    library_key,
     selected,
     unwrap,
 )
@@ -31,6 +32,10 @@ from .model import (
     FormValue,
     FormWritePath,
 )
+
+# A choice leaf takes one of its listed values, so an Expr envelope there is
+# rejected before evaluation.
+_CHOICE_EXPRESSION = "Choice fields take a listed value, not an expression"
 
 
 @dataclass
@@ -45,43 +50,70 @@ class _Selections:
     inline: set[FormPath] = field(default_factory=set)
 
 
+@dataclass(frozen=True)
+class _Decoding:
+    """What one decode of an input reads and records.
+
+    env evaluates expressions. choices maps the form's choice leaf paths to
+    their current options, as check_sources returns them; an Expr envelope
+    at one of these paths is an error and is not evaluated. source_error is
+    the directed source failure that check_sources raised as (path, message),
+    with choices then empty, or None. errors collects decoding errors by
+    path; selections records the selected structure.
+    """
+
+    env: FormEnv
+    choices: Mapping[FormPath, tuple[JsonValue, ...]]
+    source_error: tuple[FormPath, str] | None = None
+    errors: dict[FormPath, str] = field(default_factory=dict)
+    selections: _Selections = field(default_factory=_Selections)
+
+
 def _decode(
-    info: FieldInfo,
-    value: JsonValue,
-    env: FormEnv,
-    path: FormPath,
-    errors: dict[FormPath, str],
-    selections: _Selections,
+    info: FieldInfo, value: JsonValue, path: FormPath, decoding: _Decoding
 ) -> FormValue:
     annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
     if isinstance(value, dict) and key_or_inline(info.annotation):
-        selections.inline.add(path)
+        decoding.selections.inline.add(path)
     if child is not None and isinstance(value, dict):
         tag_key = discriminator(info)
         tag = value.get(tag_key) if tag_key is not None else None
         if isinstance(tag, str):
-            selections.tags[path] = tag
+            decoding.selections.tags[path] = tag
         # Selectors determine shape before any value-leaf evaluation.
         fields = {key: item for key, item in value.items() if key != tag_key}
-        ordinary = _decode_model(child, fields, env, path, errors, selections)
+        ordinary = _decode_model(child, fields, path, decoding)
         if tag_key is not None and tag_key in value:
             ordinary[tag_key] = _ordinary(value[tag_key])
         return ordinary
     numeric = _numeric_annotation(annotation)
+    expression = isinstance(value, dict) and "expr" in value
+    if expression and path in decoding.choices:
+        decoding.errors[path] = _CHOICE_EXPRESSION
+        return None
+    # Only text fields evaluate an Expr envelope; other leaves keep it as
+    # ordinary input, which Pydantic rejects with its own type message.
     if isinstance(value, dict) and (
-        (accepts_expression(annotation) and "expr" in value) or numeric
+        accepts_expression(annotation) if expression else numeric
     ):
-        return _scalar(value, env, path, errors, numeric=numeric)
+        return _scalar(value, path, decoding, numeric=numeric)
+    return _decode_container(annotation, value, path, decoding)
+
+
+def _decode_container(
+    annotation: object, value: JsonValue, path: FormPath, decoding: _Decoding
+) -> FormValue:
+    """Decode a typed mapping or sequence item by item; other values are ordinary."""
     if get_origin(annotation) in (dict, Mapping) and isinstance(value, dict):
         args = get_args(annotation)
         item_info = FieldInfo.from_annotation(args[1])
         return {
-            key: _decode(item_info, item, env, (*path, key), errors, selections)
+            key: _decode(item_info, item, (*path, key), decoding)
             for key, item in value.items()
         }
     if get_origin(annotation) in (list, tuple) and isinstance(value, list):
-        return _decode_sequence(annotation, value, env, path, errors, selections)
+        return _decode_sequence(annotation, value, path, decoding)
     return _ordinary(value)
 
 
@@ -102,10 +134,8 @@ def _numeric_annotation(annotation: object) -> bool:
 def _decode_sequence(
     annotation: object,
     value: list[JsonValue],
-    env: FormEnv,
     path: FormPath,
-    errors: dict[FormPath, str],
-    selections: _Selections,
+    decoding: _Decoding,
 ) -> list[FormValue]:
     """Evaluate sequence items by annotation; Pydantic checks shape afterwards."""
     args = get_args(annotation)
@@ -121,12 +151,7 @@ def _decode_sequence(
         # decoder to preserve expression evaluation, tag collection, and error paths.
         decoded.append(
             _decode(
-                FieldInfo.from_annotation(item_type),
-                item,
-                env,
-                (*path, index),
-                errors,
-                selections,
+                FieldInfo.from_annotation(item_type), item, (*path, index), decoding
             )
         )
     return decoded
@@ -134,9 +159,8 @@ def _decode_sequence(
 
 def _scalar(
     value: dict[str, JsonValue],
-    env: FormEnv,
     path: FormPath,
-    errors: dict[FormPath, str],
+    decoding: _Decoding,
     *,
     numeric: bool,
 ) -> FormValue:
@@ -145,11 +169,11 @@ def _scalar(
             if set(value) != {"expr"} or not isinstance(value["expr"], str):
                 kind = "Numeric" if numeric else "String"
                 raise ValueError(f"{kind} expression requires {{expr: text}}")
-            return evaluate_scalar_expr(value["expr"], env.parameters)
+            return evaluate_scalar_expr(value["expr"], decoding.env.parameters)
         if "__complex__" in value:
             return decode_complex(value)
     except (ExpressionError, ValueError) as exc:
-        errors[path] = str(exc)
+        decoding.errors[path] = str(exc)
         return None
     return _ordinary(value)
 
@@ -165,14 +189,13 @@ def _ordinary(value: JsonValue) -> FormValue:
 def _decode_model(
     model: type[BaseModel],
     data: Mapping[str, JsonValue],
-    env: FormEnv,
     path: FormPath,
-    errors: dict[FormPath, str],
-    selections: _Selections,
+    decoding: _Decoding,
 ) -> dict[str, FormValue]:
     return {
-        key: _decode(info, value, env, (*path, key), errors, selections)
+        key: _decode(info, value, (*path, key), decoding)
         if (info := model.model_fields.get(key)) is not None
+        and not library_key(model, key)
         else _ordinary(value)
         for key, value in data.items()
     }
@@ -267,21 +290,19 @@ def result[F: FormModel](
     model: type[F], data: dict[str, JsonValue], env: FormEnv
 ) -> F | FormErrors:
     """Evaluate one detached input and return its model or canonical errors."""
-    errors: dict[FormPath, str] = {}
-    selections = _Selections()
-    ordinary = _decode_model(model, data, env, (), errors, selections)
-    return _validate(model, data, ordinary, env, errors, selections)
+    decoding = _start(model, data, env)
+    ordinary = _decode_model(model, data, (), decoding)
+    return _validate(model, ordinary, decoding)
 
 
 def preview(
     model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
 ) -> FormPreview:
     """Share decoding/validation while retaining non-failing leaves for display."""
-    errors: dict[FormPath, str] = {}
-    selections = _Selections()
-    ordinary = _decode_model(model, data, env, (), errors, selections)
-    failed_decoding = tuple(errors)
-    validated = _validate(model, data, ordinary, env, errors, selections)
+    decoding = _start(model, data, env)
+    ordinary = _decode_model(model, data, (), decoding)
+    failed_decoding = tuple(decoding.errors)
+    validated = _validate(model, ordinary, decoding)
     if not isinstance(validated, FormErrors):
         complete = {
             key: default_json(getattr(validated, key)) for key in model.model_fields
@@ -297,24 +318,34 @@ def preview(
     return FormPreview(values, validated)
 
 
-def _validate[F: FormModel](
-    model: type[F],
-    data: dict[str, JsonValue],
-    ordinary: dict[str, FormValue],
-    env: FormEnv,
-    errors: dict[FormPath, str],
-    selections: _Selections,
-) -> F | FormErrors:
+def _start(
+    model: type[FormModel], data: dict[str, JsonValue], env: FormEnv
+) -> _Decoding:
+    """Check data's captured sources and return a decoding of data in env.
+
+    Its choices are the options check_sources collects. A directed source
+    failure becomes its source_error, and the decoding then knows no
+    choices. Invalid choice declarations raise ValueError.
+    """
     try:
-        options = check_sources(model, data, env, validate_paths=True)
+        return _Decoding(env, check_sources(model, data, env, validate_paths=True))
     except PydanticCustomError as exc:
-        errors[error_path(exc)] = exc.message()
-        options = {}
+        return _Decoding(env, {}, (error_path(exc), exc.message()))
+
+
+def _validate[F: FormModel](
+    model: type[F], ordinary: dict[str, FormValue], decoding: _Decoding
+) -> F | FormErrors:
+    errors = decoding.errors
+    if decoding.source_error is not None:
+        path, message = decoding.source_error
+        errors[path] = message
     if errors:
         return FormErrors(errors)
     try:
         validated = model.model_validate(ordinary)
     except ValidationError as exc:
+        selections = decoding.selections
         for error in exc.errors():
             path = _canonical(error["loc"], selections)
             if path in selections.inline and error["type"] == "string_type":
@@ -331,7 +362,7 @@ def _validate[F: FormModel](
                     )
             errors[path] = error["msg"]
         return FormErrors(errors)
-    for path, values in options.items():
+    for path, values in decoding.choices.items():
         if not _active_leaf(validated, path):
             continue
         current = default_json(_read(validated, path))
@@ -345,7 +376,8 @@ def evaluate_defaults(
 ) -> dict[str, JsonValue]:
     """Return a detached copy of defaults data with Expr leaves turned into values.
 
-    data is what model.defaults returned. Each scalar model-field leaf holding
+    data is what model.defaults returned. Each text-field leaf (see
+    accepts_expression; a choice leaf included, a ModuleRef name not) holding
     exactly {"expr": text}, in model or nested/selected-branch sections, is
     evaluated once with env.parameters and replaced by its JSON value. A leaf
     is removed instead when its expression raises ExpressionError (a missing
@@ -382,7 +414,7 @@ def _evaluate_section(
     """Evaluate one model object's Expr leaves in place; tag_key is its selector."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
-        if info is None or name == tag_key:
+        if info is None or name == tag_key or library_key(model, name):
             continue
         path = (*prefix, name)
         child = selected(info, value)

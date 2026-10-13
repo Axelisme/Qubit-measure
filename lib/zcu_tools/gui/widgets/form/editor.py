@@ -38,17 +38,18 @@ class FormEditor[F: FormModel](QWidget):
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
-    form.mode.<path> is the checkable QAction "Expression" of a numeric,
-    complex or string input, checked in Expression mode. form.input.<path>
-    lists it in actions() and in its right-click menu, after a text field's
-    standard items; the row tooltip says so. Triggering it switches the mode
-    and writes the input again: {"expr": <current text or choice>} in
-    Expression mode, the parsed text or a choice in Direct mode. An
-    Expression-mode input has a light tint of the palette's highlight colour.
-    On a choice leaf (Literal, Enum or choices) form.input.<path> is a
-    dropdown of only the choices in Direct mode and a QLineEdit in Expression
-    mode. Returning to Direct selects the resolved value when it is a current
-    choice, else the last Direct one.
+    form.mode.<path> is the checkable QAction "Expression" of a field whose
+    schema offers an Expr alternative: the core offers it on text fields
+    (int, float, complex and str values typed into a QLineEdit). It is
+    checked in Expression mode. form.input.<path> lists it in actions() and
+    in its right-click menu, after the text field's standard items; the row
+    tooltip says so. Triggering it switches the mode and writes the input
+    again: {"expr": <current text>} in Expression mode, the parsed text in
+    Direct mode. An Expression-mode input has a light tint of the palette's
+    highlight colour. Dropdown and checkbox fields (Literal, Enum, choices,
+    bool and key-or-inline fields) have no form.mode.<path>: a choice
+    leaf's form.input.<path> is a dropdown of only the choices, and its
+    right-click opens no menu.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of

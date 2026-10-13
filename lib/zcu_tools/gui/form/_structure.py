@@ -14,7 +14,7 @@ from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json
-from .model import FormEnv, FormModel, FormPath, FormWritePath
+from .model import FormEnv, FormModel, FormPath, FormWritePath, ModuleRef
 
 
 def unwrap(annotation: object) -> object:
@@ -39,27 +39,38 @@ def alternatives(annotation: object) -> tuple[object, ...]:
 
 
 def accepts_expression(annotation: object) -> bool:
-    """Accept numeric and string value annotations, including string choices.
+    """Whether a value leaf of this annotation is a text field taking Expr input.
 
-    Literal strings and string Enum values still undergo Pydantic validation
-    after evaluation. Nullable wrappers do not change expression support.
-    A str-or-model key (see key_or_inline) accepts no expression: an Expr
-    envelope is an object, and an object selects the inline model.
+    A text field holds an int, float, complex or str value, possibly nullable,
+    and is typed as text: no member is a Literal, an Enum or a bool, whose
+    values are picked rather than typed. A str-or-model key (see key_or_inline)
+    is not a text field either: an Expr envelope is an object, and an object
+    selects the inline model. Two leaves that this annotation check cannot
+    see are not text fields as well: a leaf with declared choices (by path)
+    and a ModuleRef name (see library_key).
     """
     if key_or_inline(annotation):
         return False
-    return any(
-        item is int
-        or item is float
-        or item is complex
-        or item is str
-        or (
-            get_origin(item) is Literal
-            and any(isinstance(tag, str) for tag in get_args(item))
-        )
-        or (isinstance(item, type) and issubclass(item, str) and issubclass(item, Enum))
-        for item in alternatives(annotation)
+    members = alternatives(annotation)
+    picked = any(
+        get_origin(item) is Literal
+        or item is bool
+        or (isinstance(item, type) and issubclass(item, Enum))
+        for item in members
     )
+    return not picked and any(
+        item is int or item is float or item is complex or item is str
+        for item in members
+    )
+
+
+def library_key(model: type[BaseModel], name: str) -> bool:
+    """Whether field name of model holds a library key: a ModuleRef's name.
+
+    A library key is a plain string, never an Expr envelope, like the key
+    of a str-or-model field.
+    """
+    return issubclass(model, ModuleRef) and name == "name"
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -612,7 +623,8 @@ def _restore_model(
     for name, value in saved.items():
         path = (*prefix, name)
         info = model.model_fields.get(name)
-        if info is None:
+        if info is None or (library_key(model, name) and isinstance(value, dict)):
+            # A library key is a plain string, so an envelope cannot restore.
             dropped.append(path)
         else:
             previous = current.get(name)
