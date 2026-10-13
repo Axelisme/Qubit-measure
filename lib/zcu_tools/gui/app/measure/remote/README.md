@@ -1,10 +1,10 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-13，library 編輯 wire 改用 Form，editor.* 退休
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
-serializes selected events, and owns measure-specific editor lifecycle tracking.
+serializes selected events, and pushes diagnostics.
 
 The agent-facing MCP bridge lives in `zcu_tools.mcp.measure`. This package does
 not declare MCP tools and does not own stdio transport.
@@ -13,7 +13,7 @@ not declare MCP tools and does not own stdio transport.
 
 - `service.py`：`RemoteControlAdapter`, a measure-gui subclass of shared
   `RemoteControlServiceBase`; injects control authority, and owns
-  client editor context, writeback key aliases, diagnostics and editor cleanup.
+  writeback key aliases and diagnostics.
 - `dispatch.py`：runtime method registry projection; keeps the public
   `METHOD_REGISTRY` import path stable.
 - `handlers/`：grouped wire method handlers bound to controller, control facets,
@@ -25,9 +25,11 @@ not declare MCP tools and does not own stdio transport.
   only by dispatch.
 - `events.py`：domain payload type to wire event serializer mapping.
 - `dialogs.py`：wire-stable dialog names.
-- `path_resolver.py`：flat mutation-target projection for cfg-editor sessions.
-- `form_observation.py`：tab Form schema/input/values/errors projection.
-- `cfg_observation.py`：independent cfg-editor tree and prefix projection.
+- `path_resolver.py`：flat target projection of an old `CfgDraft`; no wire method uses it.
+- `form_observation.py`：tab Form schema/input/values/errors projection and
+  the shared path-array edit decoder.
+- `cfg_observation.py`：old `CfgDraft` tree projection, now used by no wire
+  method, and `cfg_error_to_remote`.
 - `load_types.py`：result and analysis Load facts, without Form backfill details.
 - `wire_version.py`：measure-gui wire contract version and GUI code revision.
 
@@ -136,8 +138,7 @@ Only bounded wait handlers run off-main:
 - `operation.await`
 
 Off-main handlers only consume thread-safe channels. They do not read or mutate
-owner-thread state, version tables, controller objects, editor sessions, or
-Qt widgets.
+owner-thread state, version tables, controller objects or Qt widgets.
 
 ## Events And Diagnostics
 
@@ -149,8 +150,8 @@ the wire. Parameter／library 變更事件以 `context.snapshot` 提示訂閱者
 accepted Run sources stay fixed. Use explicit Reset to capture new aliases. MCP completion still uses operation replies, not events.
 EventBus pushes add process-wide `seq` and `origin={kind, operation_id}` without
 changing the event name or payload shape. The per-connection `client_id` is
-RPC-side bookkeeping and is deliberately omitted. Diagnostic and cfg-editor
-pushes are not EventBus broadcasts and retain `{event, payload}`.
+RPC-side bookkeeping and is deliberately omitted. Diagnostic pushes are not
+EventBus broadcasts and retain `{event, payload}`.
 Event serializers and NDJSON encoding run only when the endpoint finds a matching
 live subscriber. Recipient selection is two-phase: payload construction stays on
 the State owner thread and outside the endpoint registry lock, then subscribe state
@@ -160,11 +161,6 @@ cannot receive a late push.
 Internal tab interaction/content payloads include closed domain facts used by the
 Qt reaction matrix. Their serializers deliberately omit those facts and preserve
 the existing event names and `{tab_id, requery}` shape.
-
-Cfg-editor change producers pass a payload factory rather than transport state.
-`current_targets()` is materialized and projected once
-only when an `editor_id` subscriber exists. `editor_closed` removes a client's
-subscription only after its close push is accepted by that client's queue.
 
 Diagnostics are separate from EventBus. The controller pushes diagnostics to the
 remote adapter sink, which broadcasts diagnostic payloads to clients regardless
@@ -217,7 +213,7 @@ context owner 按 native 檔案的 point 與 resolved alias names 一次讀取�
 不是原始量測的參數版本。跨 entry、EMPTY 或無歷史 point 時，analysis source 為 None；
 context-free analysis 仍可用，不回退目前 alias。同 entry 的來源讀取失敗在替換結果前傳遞，
 舊結果不變。Load preserves the file's original metadata; it guards tab/result/analysis revisions,
-not session focus. Editor commit and writeback retain their captured context lifetime.
+not session focus. Library entry commits and writeback retain their captured context lifetime.
 
 `tab.snapshot` reports availability, effective paths and published artifact
 state, not raw arrays or writeback contents. Its source operation ID identifies
@@ -275,8 +271,7 @@ The wire surface is grouped by ownership:
   `ContextControlPort`. `context.snapshot` returns native `{target, point, library, aliases}`
   from the current fixed projection, not a historical Run's parameters. Callers do not use
   old flattened md keys or an ml runtime index. Library editing and template create/list use the app controller;
-  delete/rename accept concrete three-segment keys and preserve owner errors;
-  `editor.*` provides independent library-entry drafts.
+  delete/rename accept concrete three-segment keys and preserve owner errors.
 - `soc.*`：real SoC connection and current SoC queries. `soc.connect` requires `kind='remote'`, `ip` and `port`; it rejects mock connections.
 - `simulation.initialize`：no-argument asynchronous environment initialization through the same `SetupControlPort` coordinator as GUI **Use Simulate Env**. It disconnects real devices, prepares `fake_flux`, binds its live value to MockSoc. Predictor is not part of simulation readiness. Repeated initialization preserves a valid simulation and its values. Failure may leave partial changes; inspect state before retrying.
 - `device.*`：device connect/disconnect/setup/snapshot through `DeviceControlPort`.
@@ -290,7 +285,6 @@ For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or
 - `tab.analyze` / `tab.post_analyze`：primary and secondary analysis (analysis owns `analysis` pane; post owns `post_analysis`).
 - `tab.interact`：以 `tab_id` 讀 active interactive plugin 的 committed `state`、`commands`、`info`、`figure` 和 `preview_active`；可帶 `payload={command, args}` 執行單一經 ParamSpec 驗證的 command。`done` 為保留命令，丟棄 local preview、完成原 analysis operation；agent 透過 `cancel(op)` 對應 GUI `operation.cancel` 請求取消。`include_figure` 預設 true，figure 是 `{png_b64, bytes}` 或無 widget 時的 `null`。False 完全略過 PNG renderer 並回 figure=null，不改變 command 驗證、state 或原 operation_id。MCP done 用此 receipt 先接住原 operation，再觀察完成及保存；其他 command 與純讀保留預設圖像行為。此 method 的純讀與 command 都要求 holder；同一 owner loop 的較晚提交生效。固定 MCP `tab_interact` tool 轉送一次請求：讀取不切焦點，經驗證的 command 跟隨 Analysis pane。
 - `tab.writeback_*`：pane-qualified writeback preview/edit/apply via `(tab_id, subtab_id=analysis|post_analysis)`; draft is opaque, not bound to source context; preview/apply echo `destination_context` (active SessionEnv projection at reply time). Preview accepts an optional `operation_id` to require the original analysis result rather than another run's draft.
-- `editor.*`：headless cfg-editor session lifecycle.
 - `operation.*`：live operation indexing, bounded wait, domain-owned cancellation and progress.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
@@ -313,10 +307,6 @@ terminal status, not removed aliases. No tool inventory is generated from
 `MethodSpec`.
 
 ## Cfg Editing
-
-`path_resolver.py` projects nominal `SettableTarget` entries for mutations and path
-changes. `cfg_observation.py` projects `CfgDraft.observe()` data, never binding
-field/editor classes. Setters retain canonical paths and reject legacy aliases.
 
 `tab.get_cfg` returns Form schema, authored input, ordinary leaf values and
 directed errors. It has no prefix or widget prerequisite. Each value has a
@@ -359,37 +349,20 @@ None and {} use the displayed capture. Domain readiness, SoC/device safety and
 authentication remain separate guards. Active Run blocks edits, Reset,
 replacement and close on that tab; other tabs remain editable.
 
-`editor.get` and `editor.new` retain the independent draft tree with dotted paths.
-Nodes contain kind/path/label/valid/readonly. Sections and active references have named
-children, including locked literals. Scalar/literal input and sweep inputs retain
-mode/raw/resolved/error/validation_error. Reference nodes include their chosen key,
-cached shape label, error, mode inline/ref or null when disabled, and choices.
-Ref descendants are readonly; library selection creates ref rather than an override.
-The local cfg owner exposes explicit inline conversion, without a new RPC endpoint.
-Reads do not resolve sources.
-Unknown objects, non-string object keys, and nonfinite numbers fail serialization;
-complex numbers use the shared reversible tag, with no string fallback.
-
-Independent editor prefix reads select a node while preserving its full path;
-sweep edges and reference keys select their parent node. Unknown prefixes return an empty object. Prefix selection does not grant mutation authority.
-Wire keys children/input/inputs are not mutation-path segments.
-
-Scalar values may be direct values, tagged eval values, or tagged value refs.
-Eval values store a resolved snapshot at set/lower time. Value refs resolve once
-through the session value lookup and then become direct scalars.
-
-Sweep nodes appear as editable subtrees, not as lowered `SweepCfg` objects.
-`SweepSpec` exposes `start` / `stop` / `expts` / `step`; `CenteredSweepSpec`
-exposes `center` / `span` / `expts` / `step`. Independent `editor.set_field`
-accepts dotted edge paths from the editor read model. Tab cfg observations and
-`tab.edit_cfg` use string-array paths instead.
+`context.ml_edit(kind, name, edits, save_as?)` edits one library entry with
+the same path arrays and Form values as `tab.edit_cfg`. The controller opens
+the entry form at one fixed capture, writes the whole batch once and evaluates
+it. Expressions become numbers from that capture; child library keys stay
+keys; the root type/style tag is not editable. Only a valid form is written,
+at `save_as` (a new name) or at `name`. The reply is `{valid, errors}` with
+Form error paths; invalid values leave the library unchanged. Unknown paths
+are `invalid_params` with reason `form_errors`, and values carrying the retired
+`__kind` tags are rejected with the `{expr: text}` form before any write.
 
 `TabFormResources` owns tab cfg lifetime. Tab creation provides the resource
 before any view attaches; close revokes old handles. Qt detach only stops
-watching. Independent editor sessions never publish tab Form input.
-`CfgEditorService` owns separate library, inspect and writeback drafts.
-Agent-created sessions are garbage-collected on commit/discard/client drop;
-UI-owned independent drafts follow their own owner lifetime.
+watching. Library entry forms and writeback drafts never publish tab Form
+input.
 
 ## Operation Handles
 

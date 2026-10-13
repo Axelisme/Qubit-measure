@@ -101,25 +101,3 @@ def test_tab_cfg_and_revision_publish_without_viewer_timer(
     qapp.processEvents()
     assert ctrl.resources_versions()[key] == before[key] + 2
     assert ctrl.resources_versions()[other_key] == before[other_key]
-
-
-def test_non_tab_editor_does_not_publish_into_tab_state(
-    qapp: QApplication, measure_gui: Controller
-) -> None:
-    ctrl = measure_gui
-    tab_id = ctrl.new_tab("fake")
-    qapp.processEvents()
-    original = ctrl.get_tab_snapshot(tab_id).cfg_schema
-    key = f"tab:{tab_id}:cfg"
-    before = ctrl.resources_versions()[key]
-    editor_id, _ = ctrl.open_seeded_cfg_editor(
-        original,
-        parameters=ctrl.get_session_env().parameters,
-        owner_key="writeback-test",
-    )
-    try:
-        ctrl.cfg_editor_set_field(editor_id, "gain", 0.75)
-        assert ctrl.get_tab_snapshot(tab_id).cfg_schema == original
-        assert ctrl.resources_versions()[key] == before
-    finally:
-        ctrl.teardown_cfg_editor(editor_id)

@@ -5,6 +5,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
+from pydantic import JsonValue
+
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
@@ -15,7 +17,8 @@ from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventOrigin
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.form import FormErrors, FormWritePath
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
@@ -25,6 +28,7 @@ from zcu_tools.gui.session.events import (
     GatePresence,
 )
 from zcu_tools.gui.session.library_entry import (
+    LibraryEntryInvalid,
     LibraryKind,
     ModuleEntryForm,
     WaveformEntryForm,
@@ -63,7 +67,6 @@ from .services import (
     build_app_services,
 )
 from .services.cfg_lowering import lowered_library_change
-from .services.ports import CfgEdit, CfgEditResult
 from .state import State
 from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
@@ -86,7 +89,6 @@ if TYPE_CHECKING:
 
     from .arb_waveform import ArbWaveformPort
     from .services import AppServices
-    from .services.cfg_editor import ChangeListener
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
@@ -1014,8 +1016,51 @@ class Controller(SessionControllerMixin):
         """
         self.apply_library_change(entry.parameters, entry.replace(source, new_name))
 
+    def edit_library_entry(
+        self,
+        item_kind: LibraryKind,
+        name: str,
+        batch: Mapping[FormWritePath, JsonValue],
+        *,
+        save_as: str | None = None,
+    ) -> FormErrors | None:
+        """Apply one Form write batch to library root name and write it if valid.
+
+        The root opens as with open_library_entry. batch maps model-field leaf
+        paths to Form input values, such as {"expr": text} for an expression
+        or a plain key string for a child library entry, and is written in one
+        FormState.write. A valid result is put at save_as, which must be a
+        new root of this kind, or at name when save_as is None; save_as leaves
+        name unchanged. Returns None after the write, or the form's FormErrors
+        with the library unchanged. Unknown or overlapping paths, an existing
+        save_as root, an unknown kind or a missing root raise
+        InvalidInputError before any write. Target, conflict and I/O failures
+        from apply_library_change propagate.
+        """
+        entry = self.open_library_entry(item_kind, name)
+        if save_as is not None:
+            library = entry.parameters.library
+            keys = (
+                library.module_keys()
+                if item_kind == "module"
+                else library.waveform_keys()
+            )
+            if save_as in keys:
+                raise InvalidInputError(
+                    f"{item_kind} destination already exists: {save_as!r}"
+                )
+        try:
+            entry.state.write(batch, entry.env)
+        except ValueError as exc:
+            raise InvalidInputError(str(exc), reason_code="form_errors") from exc
+        try:
+            self.commit_library_entry(entry, name if save_as is None else save_as)
+        except LibraryEntryInvalid as exc:
+            return exc.errors
+        return None
+
     # ------------------------------------------------------------------
-    # CfgEditor sessions (CfgEditorService) — seeded drafts and ml_edit
+    # CfgEditor sessions (CfgEditorService) — seeded drafts
     # ------------------------------------------------------------------
 
     def open_seeded_cfg_editor(
@@ -1048,10 +1093,6 @@ class Controller(SessionControllerMixin):
     def editor_id_for_owner(self, owner_key: str) -> str | None:
         return self._cfg_editor_svc.editor_id_for_owner(owner_key)
 
-    def set_cfg_editor_change_listener(self, listener: ChangeListener | None) -> None:
-        """Wire the per-session push listener (remote layer injects this)."""
-        self._cfg_editor_svc.set_change_listener(listener)
-
     def bump_editor_version(self, editor_id: str) -> None:
         """Bump draft version; teardown drops the key to invalidate stale guards."""
         self._state.version.bump(f"editor:{editor_id}")
@@ -1061,38 +1102,6 @@ class Controller(SessionControllerMixin):
         device drop). A stale dependency on a gone editor then reads version 0,
         so the guard treats it as stale rather than spuriously matching."""
         self._state.version.drop_prefix(f"editor:{editor_id}")
-
-    def cfg_editor_set_field(
-        self, editor_id: str, path: str, value: object
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_field(editor_id, path, value)
-
-    def cfg_editor_set_fields(
-        self, editor_id: str, edits: list[CfgEdit], *, agent_edit: bool = False
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.set_fields(editor_id, edits, agent_edit=agent_edit)
-
-    def owner_of_editor(self, editor_id: str) -> str | None:
-        """The owner_key a cfg-editor session is keyed to (tab_id for tab cfg)."""
-        return self._cfg_editor_svc.owner_of_editor(editor_id)
-
-    def edit_library(
-        self,
-        item_kind: str,
-        name: str,
-        edits: list[CfgEdit],
-        *,
-        save_as: str | None = None,
-    ) -> CfgEditResult:
-        return self._cfg_editor_svc.edit_library(
-            item_kind, name, edits, save_as=save_as
-        )
-
-    def discard_cfg_editor(self, editor_id: str) -> None:
-        self._cfg_editor_svc.discard(editor_id)
-
-    def discard_cfg_editors(self, editor_ids: list[str]) -> None:
-        self._cfg_editor_svc.discard_for_client(editor_ids)
 
     # ------------------------------------------------------------------
     # Device (DeviceService)

@@ -1,7 +1,7 @@
-"""Independent library editor contracts and separate tab Form observations.
+"""CfgDraft path resolution and tree projection, and tab Form observations.
 
-Editor sessions retain their own CfgDraft/tree interface. Tab reads use the
-Form resource; an independent editor never publishes tab input.
+Draft-level tests drive the old CfgDraft projection directly. Tab reads use
+the Form resource over the socket.
 """
 
 from __future__ import annotations
@@ -28,35 +28,16 @@ def _set(draft: CfgDraft, path: str, value: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fixture: open a real seeded cfg-editor session owned by one tab
+# Fixture: one live tab behind the socket
 # ---------------------------------------------------------------------------
 
 
 class _LiveFixture(Fixture):
-    """Fixture with a real CfgEditorService session owned by one tab."""
+    """Fixture with one synthetic tab."""
 
     def __init__(self) -> None:
         super().__init__()
-        from tests.gui.app.measure._synthetic import SampleAdapter
-
-        cfg = SampleAdapter().make_default_cfg(self.state.session_env)
         self._tab_id = self.ctrl.new_tab("fake")
-        # Independent library editor; it never publishes tab cfg.
-        self.editor_id, _ = self.ctrl.open_seeded_cfg_editor(
-            cfg, parameters=self.ctrl.read_context(), gc=False
-        )
-
-    def get_value(self, path: str):
-        """Read the current value of a path off the live session draft."""
-        from zcu_tools.gui.app.measure.remote.path_resolver import (
-            project_target_entries,
-        )
-
-        draft = self.ctrl.get_cfg_editor_draft(self.editor_id)
-        for entry in project_target_entries(draft):
-            if entry["path"] == path:
-                return entry["value"]
-        raise KeyError(path)
 
 
 @pytest.fixture()
@@ -67,134 +48,9 @@ def lf(qapp):
     f.stop()
 
 
-def _set_field(sock, lf, path, value, rid="1"):
-    return call(
-        sock,
-        "editor.set_field",
-        {"editor_id": lf.editor_id, "path": path, "value": value},
-        rid=rid,
-    )
-
-
 # ---------------------------------------------------------------------------
-# Scalar
+# Centered sweep edges
 # ---------------------------------------------------------------------------
-
-
-def test_set_field_scalar_updates_session(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "reps", 42)
-        assert resp["ok"] is True
-        assert lf.get_value("reps") == 42
-    finally:
-        sock.close()
-
-
-def test_set_field_scalar_float(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "gain", 0.25)
-        assert resp["ok"] is True
-        assert lf.get_value("gain") == 0.25
-    finally:
-        sock.close()
-
-
-def test_value_ref_provider_failure_maps_to_controller_error(lf, monkeypatch):
-    from zcu_tools.gui.session.value_lookup import ProviderError
-
-    error = ProviderError("device.flux.value", "device:flux", RuntimeError("boom"))
-
-    def fail_read(*_args):
-        raise error
-
-    monkeypatch.setattr(lf.ctrl, "read_value_source", fail_read)
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(
-            sock,
-            lf,
-            "gain",
-            {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
-        )
-        assert resp["ok"] is False
-        assert resp["error"] == {
-            "code": "controller_error",
-            "message": str(error),
-        }
-    finally:
-        sock.close()
-
-
-def test_value_ref_unavailable_maps_to_precondition_failed(lf, monkeypatch):
-    from zcu_tools.gui.session.value_lookup import UnavailableValue
-
-    error = UnavailableValue("device.flux.value", "flux device is unavailable")
-
-    def fail_read(*_args):
-        raise error
-
-    monkeypatch.setattr(lf.ctrl, "read_value_source", fail_read)
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(
-            sock,
-            lf,
-            "gain",
-            {"__kind": "value_ref", "key": "device.flux.value", "type": "float"},
-        )
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "precondition_failed"
-        assert resp["error"]["message"] == str(error)
-        assert resp["error"].get("reason", "") == ""
-    finally:
-        sock.close()
-
-
-# ---------------------------------------------------------------------------
-# Sweep edges
-# ---------------------------------------------------------------------------
-
-
-def test_set_field_sweep_expts(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "sweep.expts", 5)
-        assert resp["ok"] is True
-        assert lf.get_value("sweep.expts") == 5
-    finally:
-        sock.close()
-
-
-def test_set_field_sweep_start_stop(lf):
-    sock = open_client(lf.service.port)
-    try:
-        _set_field(sock, lf, "sweep.start", 2.0, rid="a")
-        _set_field(sock, lf, "sweep.stop", 8.0, rid="b")
-        assert lf.get_value("sweep.start") == 2.0
-        assert lf.get_value("sweep.stop") == 8.0
-    finally:
-        sock.close()
-
-
-def test_set_field_sweep_step(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "sweep.step", 0.5)
-        assert resp["ok"] is True
-    finally:
-        sock.close()
-
-
-def test_set_field_sweep_expts_non_integer_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "sweep.expts", 3.5)
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
 
 
 def _centered_sweep_root():
@@ -359,46 +215,6 @@ def test_resolver_centered_sweep_rejects_zero_span_promoted_to_multi_point(
 
 
 # ---------------------------------------------------------------------------
-# Error paths
-# ---------------------------------------------------------------------------
-
-
-def test_set_field_unknown_path_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = _set_field(sock, lf, "does_not_exist", 1)
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_set_field_unknown_editor_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        resp = call(
-            sock,
-            "editor.set_field",
-            {"editor_id": "ghost", "path": "reps", "value": 1},
-        )
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-def test_set_field_section_target_rejected(lf):
-    sock = open_client(lf.service.port)
-    try:
-        # 'sweep' alone targets a sweep container, not a leaf.
-        resp = _set_field(sock, lf, "sweep", 1)
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
-# ---------------------------------------------------------------------------
 # Context / device queries
 # ---------------------------------------------------------------------------
 
@@ -455,26 +271,6 @@ def test_tab_get_cfg_range_has_authored_model_fields(lf):
         sock.close()
 
 
-def test_editor_read_rejects_unrepresentable_cfg_instead_of_stringifying(lf):
-    from zcu_tools.gui.cfg import LiteralSpec, make_default_value
-    from zcu_tools.gui.remote.errors import ErrorCode
-
-    spec = CfgSectionSpec(fields={"fixed": LiteralSpec(object())})
-    editor_id, _ = lf.ctrl.open_seeded_cfg_editor(
-        CfgSchema(spec, make_default_value(spec)),
-        parameters=lf.ctrl.read_context(),
-        gc=False,
-    )
-    sock = open_client(lf.service.port)
-    try:
-        response = call(sock, "editor.get", {"editor_id": editor_id})
-        assert not response["ok"]
-        assert response["error"]["code"] == ErrorCode.CONTROLLER_ERROR.value
-        assert "Unsupported cfg observation value" in response["error"]["message"]
-    finally:
-        sock.close()
-
-
 def test_tab_get_cfg_unknown_tab_rejected(lf):
     sock = open_client(lf.service.port)
     try:
@@ -484,12 +280,6 @@ def test_tab_get_cfg_unknown_tab_rejected(lf):
         assert resp["error"]["reason"] == "resource_gone"
     finally:
         sock.close()
-
-
-# ---------------------------------------------------------------------------
-# tab.set_cfg — batch setter; applies ordered {path, value} edits to the tab's
-# cfg-editor session via the same controller path as editor.set_field.
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

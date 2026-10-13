@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from time import monotonic
+from typing import Any
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
@@ -59,7 +60,9 @@ def library_socket(qapp, tmp_path: Path):
             restore_registry(before)
 
 
-def ml_edit(sock, kind: str, name: str, edits: list[dict], **extra) -> dict:
+def ml_edit(
+    sock, kind: str, name: str, edits: list[dict[str, object]], **extra
+) -> dict[str, Any]:
     params = {"kind": kind, "name": name, "edits": edits, **extra}
     return call(sock, "context.ml_edit", params)
 

@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.services.cfg_editor import (
     CfgEditorError,
     CfgEditorService,
 )
-from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -249,17 +248,3 @@ def test_detached_rename_then_delete_preserves_sources_without_materializing(
         deleted.module_keys() if kind == "module" else deleted.waveform_keys()
     ) == ()
     assert session.state.version.get("context") == version
-
-
-def test_ordered_library_edit_keeps_successful_prefix(session: LibrarySession) -> None:
-    _seed(session)
-    result = session.editor.edit_library(
-        "waveform",
-        "Q1.waveforms.base",
-        [CfgEdit("length", 3.0), CfgEdit("unknown", 5.0)],
-    )
-    assert result.applied == 1 and not result.valid
-    assert (
-        session.control.read_context().library.waveform_spec("Q1.waveforms.base").length
-        == 3.0
-    )

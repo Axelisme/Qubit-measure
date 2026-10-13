@@ -517,61 +517,6 @@ class CfgEditorService:
             session.set_agent_fields(edits) if agent_edit else session.set_fields(edits)
         )
 
-    def edit_library(
-        self,
-        item_kind: str,
-        name: str,
-        edits: Sequence[CfgEdit],
-        *,
-        save_as: str | None = None,
-    ) -> CfgEditResult:
-        """Edit the captured library in order, retaining successful writes on failure.
-
-        Open captures the selected point once. save_as creates a new destination
-        and rejects an existing root before any edit; otherwise overwrite name.
-        Each edit lowers with that capture and commits one structure command.
-        Expected edit/write failure returns the successful prefix count. Other
-        failures propagate. The internal editor is always torn down.
-        """
-        if not edits:
-            raise CfgEditorError("library edits must not be empty")
-        editor_id, _ = self.open(item_kind, from_name=name, gc=False)
-        try:
-            session = self._require(editor_id)
-            parameters = session.parameters
-            kind = session.item_kind
-            if parameters is None or kind is None:
-                raise CfgEditorError("library session requires a parameter capture")
-            if save_as is not None:
-                keys = (
-                    parameters.library.module_keys()
-                    if kind == "module"
-                    else parameters.library.waveform_keys()
-                )
-                if save_as in keys:
-                    raise CfgEditorError(
-                        f"{kind} destination already exists: {save_as!r}"
-                    )
-            destination = save_as if save_as is not None else name
-            for applied, edit in enumerate(edits):
-                try:
-                    session.set_agent_fields((edit,))
-                    if not session.draft.is_valid():
-                        raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
-                    change = lowered_library_change(
-                        parameters, kind, "put", destination, session.commit_schema()
-                    )
-                    self._write.apply_library_change(parameters, change)
-                except ExpectedError as exc:
-                    return CfgEditResult(
-                        valid=False,
-                        applied=applied,
-                        errors=({"path": edit.path, "message": str(exc)},),
-                    )
-            return CfgEditResult(valid=True, applied=len(edits))
-        finally:
-            self.teardown(editor_id, reason="library_edit_finished")
-
     def commit(self, editor_id: str, name: str) -> None:
         """Put the complete draft at a concrete root in its captured destination.
 

@@ -18,15 +18,26 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context:h_context_ml_edit",
         MethodSpec(
             10.0,
-            "Apply nonempty ordered library edits through the shared draft model. "
-            "Commit each successful edit, stop at the first failure without rollback. "
-            "save_as creates a new entry after the first successful edit; source stays unchanged. "
-            "Returns valid/applied/errors.",
+            "Edit one ModuleLibrary entry as one atomic Form batch, like tab.edit_cfg. "
+            "Each edit has path: [model-field segments] and value: Form input JSON. "
+            'Expressions use {"expr": text} and are evaluated once to numbers; '
+            "child library keys are plain strings; the root type/style tag is fixed. "
+            "Only a valid form is written; otherwise the library is unchanged. "
+            "Returns {valid, errors: [{path, message}]}. Unknown paths and retired "
+            "__kind value tags are rejected before any write. save_as writes a new "
+            "entry, rejects an existing name and leaves 'name' unchanged.",
             (
-                required_string("kind"),
-                required_string("name"),
-                required_json("edits"),
-                optional_string("save_as"),
+                ParamSpec(
+                    "kind",
+                    JsonType.STRING,
+                    description="'module' or 'waveform'",
+                    enum=("module", "waveform"),
+                ),
+                required_string("name", "Existing library entry key"),
+                required_json(
+                    "edits", "Nonempty list of {path: [segments], value} inputs"
+                ),
+                optional_string("save_as", "New entry key to write instead of name"),
             ),
         ),
     ),
@@ -194,7 +205,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(module/waveform) is derived from 'role_id'. One-shot: seeds the role's "
             "md-linked defaults (lowered to the md's current values) — it does NOT open "
             "an editing session. Echoes {created: name}. To then change the entry use "
-            "rpc_call on editor.new(item_kind, from_name=name).",
+            "context.ml_edit(kind, name, edits).",
             (
                 required_string("role_id", "role id from context.ml_list_roles"),
                 required_string("name", "new ml entry name"),

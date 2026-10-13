@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
@@ -23,29 +22,45 @@ if TYPE_CHECKING:
 def h_context_ml_edit(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
+    """Write one atomic Form edit batch to a library entry; reply {valid, errors}.
+
+    Edits use tab.edit_cfg paths and values. Values carrying the retired
+    __kind tags are rejected with the expression form before any write.
+    """
+    from ..form_observation import form_writes
+
     raw = params["edits"]
     if not isinstance(raw, list) or not raw:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "edits must be a nonempty list")
-    edits: list[CfgEdit] = []
     for index, item in enumerate(raw):
-        if (
-            not isinstance(item, dict)
-            or not isinstance(item.get("path"), str)
-            or not item["path"]
-            or "value" not in item
-        ):
+        value = item.get("value") if isinstance(item, dict) else None
+        if isinstance(value, dict) and "__kind" in value:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                f"edits[{index}] requires a nonempty string path and value",
+                f"edits[{index}].value uses a retired __kind tag; write an "
+                'expression as {"expr": "<text>"} and other values directly',
             )
-        edits.append(CfgEdit(item["path"], item["value"]))
+    batch = form_writes(raw)
+    kind = params["kind"]
+    # The method entry restricts kind to these names; this narrows its type.
+    if kind not in ("module", "waveform"):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown library kind {kind!r}")
     save_as = params["save_as"]
-    return adapter.ctrl.edit_library(
-        str(params["kind"]),
+    errors = adapter.ctrl.edit_library_entry(
+        kind,
         str(params["name"]),
-        edits,
+        batch,
         save_as=str(save_as) if save_as is not None else None,
-    ).to_wire()
+    )
+    if errors is None:
+        return {"valid": True, "errors": []}
+    return {
+        "valid": False,
+        "errors": [
+            {"path": list(path), "message": message}
+            for path, message in errors.messages.items()
+        ],
+    }
 
 
 def h_context_labels(
@@ -235,7 +250,7 @@ def h_context_ml_create_from_role(
     """Create a ModuleLibrary entry from the template ID in wire role_id.
 
     One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
-    Edit afterwards via editor.new(from_name=...).
+    Edit afterwards via context.ml_edit.
     """
     template_id = str(params["role_id"])
     name = str(params["name"])

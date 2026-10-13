@@ -251,8 +251,8 @@ source retention、nullable options、失敗隔離與 widget lifecycle，不使�
 `tests/gui/remote/test_lazy_broadcast.py`以barrier鎖定two-phase recipient
 selection：零matching recipient不build、多client只build一次、unsubscribe/disconnect送前重驗、
 late subscribe不補收舊event，以及slow-client drop budget不阻塞healthy client或改變per-client order。
-remote EventBus與cfg-editor focused tests另鎖serializer/current-path/encode lazy cost、failure logging、
-`editor_closed` delivery cleanup；diagnostic測試確認fault channel仍不受subscription gate影響。
+remote EventBus focused tests另鎖serializer/current-path/encode lazy cost與failure logging；
+diagnostic測試確認fault channel仍不受subscription gate影響。
 
 `tests/gui/app/measure/ui/test_main_window_events.py`鎖定closed tab facts到Qt reaction的
 完整call sequence、zero-reaction local edits與lazy單次snapshot；service與真實UI測試覆蓋

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, library entries edit through the shared Form entry
+**Last updated:** 2026-10-13, library entries and `context.ml_edit` edit through the shared Form entry
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -48,12 +48,13 @@ analyze 不檢查 adapter 的 analysis capability。操作期間的 busy／硬�
 
 Library entry 的開啟、提交與取代由 controller 交給 session 的
 `LibraryEntryForm`：controller 開啟時捕捉 parameters 與 arb 名稱，表單由呼叫端
-持有，寫入與捨棄不經 controller。`CfgEditorService` 按 `editor_id` 保存其餘
-cfg draft（`ml_edit` 的內部 draft 與 seeded draft）；由 UI owner 建立的
+持有，寫入與捨棄不經 controller。`context.ml_edit` 經 controller 的
+`edit_library_entry` 走同一個表單：整批寫入一次，只有 Valid 才寫 library。
+`CfgEditorService` 按 `editor_id` 保存 seeded cfg draft；由 UI owner 建立的
 seeded session 由 owner 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
 Tab cfg 由 `Session.cfg` 的 `TabFormResource` 擁有。Open／Reset 捕捉來源，
 preview、result 和 Run 都使用這份來源。Input、來源與 guard 不交給 view 管理。
-`ml_edit` 與 writeback 尚保留獨立 `CfgDraft`，其共用機制見
+Writeback 尚保留獨立 `CfgDraft`，其機制見
 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md) 與
 [GUI cfg README](../../cfg/README.md)。分頁 Form 契約見本頁 Config model。
 
@@ -728,7 +729,7 @@ commit explicitly clears canvases when the new State has no figure.
 
 `remote/` is the GUI-process driving adapter, peer to `ui/` rather than an
 application service. It owns app-specific request coercion and wire projection:
-method registry, event serialization, main-thread dispatch, holder admission, editor lifecycle, and diagnostics.
+method registry, event serialization, main-thread dispatch, holder admission, and diagnostics.
 It projects internal tab interaction/content facts to the coarse
 `{tab_id, requery:["tab.snapshot"]}` event envelope; GUI refresh masks and
 pane figure details stay internal to `MainWindowEventCoordinator`. The wire event
