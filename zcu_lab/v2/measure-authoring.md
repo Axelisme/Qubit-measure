@@ -108,7 +108,7 @@ conversion 保留點數與順序，格點 collision 直接提示擴大 span 或�
 instantiate時透過`ctx.values` resolve once，成功後寫入普通direct value，不把lazy ref放進cfg
 tree。role default table的同類入口是`Source(key, type_name?)` seed；只用於來源多變、
 強型別 helper 反而會拉寬依賴的情境。device source 只發布具名 device 資訊，不推論 flux
-語義；`onetone/flux_dep` 與 `twotone/flux_dep` 的 `dev.flux_dev` 以 `device.flux.name`
+語義；`twotone/flux_dep` 的 `dev.flux_dev` 以 `device.flux.name`
 為預設（也就是名為 `flux` 的 registered device），無可用來源時 fallback 到 `flux_yoko`。
 
 Role default characterization golden 跟隨 `ROLE_TABLE` 與 `make_default_value` 產出的完整 value tree；

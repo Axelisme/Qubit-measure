@@ -5,6 +5,7 @@ from typing import Any
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
@@ -16,6 +17,7 @@ from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.gui import LookbackAdapter
+from zcu_lab.v2.onetone.flux_dep.form import FORM as ONETONE_FLUX_DEP_FORM
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
@@ -37,6 +39,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
+from zcu_lab.v2.twotone.freq.form import FORM as TWOTONE_FREQ_FORM
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
 from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
@@ -124,6 +127,12 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
     "jpa/check": JpaCheckAdapter,
 }
 
+# Core-derived forms of migrated adapters, registered with their adapter names.
+FORMS: dict[str, Form[Any]] = {
+    "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
+    "twotone/freq": TWOTONE_FREQ_FORM,
+}
+
 
 def register_all(
     registry: Registry,
@@ -140,10 +149,12 @@ def register_all(
     component models and roles. Omit these startup receivers on reload to
     preserve identities. Duplicate entries and invalid definitions raise the
     receiving catalog's registration errors; duplicate adapters raise ValueError.
+    Each FORMS entry is registered with its adapter, binding registry.templates;
+    an unknown template id or incompatible seed raises ValueError naming them.
     """
     if components is not None:
         register_components(components)
     if template_catalog is not None:
         template_catalog.register_definitions(registry.templates)
     for name, cls in ADAPTERS.items():
-        registry.register(name, cls)
+        registry.register(name, cls, form=FORMS.get(name))

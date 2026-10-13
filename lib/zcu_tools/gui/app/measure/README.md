@@ -746,7 +746,7 @@ New GUI RPC methods that should be agent-accessible need a live catalog policy a
 領域政策由 `zcu_lab.recipes.helpers` 擁有。`RecipeTab` 只提供通用 parameter／library／
 cfg field／device 讀取與 set／set_fields／set_sweep，框架不推論 calibration 或 linewidth。
 `zcu_lab.recipes.helpers.use_flux_device` 使用通用 `RecipeTab.read_device` 讀 cached
-snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 dev.flux_dev
+snapshot，caller 明填 unit 必須完全匹配，包括 native。驗證成功後才寫 cfg.flux_dev
 與獨立 cfg.flux_unit，不換算、不連線或 setup，也不改 recipe policy 或 alias capture。
 
 ## Dialog Rules

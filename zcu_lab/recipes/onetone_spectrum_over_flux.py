@@ -160,7 +160,7 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("flux_sweep", "sweep.flux"),
-        SummaryParameter("flux_device", "dev.flux_dev"),
+        SummaryParameter("flux_device", "flux_dev"),
         SummaryParameter("flux_unit", "flux_unit"),
     ),
     summary_estimates=(),

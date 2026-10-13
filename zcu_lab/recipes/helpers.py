@@ -308,14 +308,14 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
     tab is opened; name/unit are nonblank strings. unit must match snapshot unit
     exactly, including explicitly requested native. Missing/blank/none snapshot
     units or mismatch raise GuiRpcError(invalid_device); unknown-device errors
-    propagate from the owner. Validate before editing dev.flux_dev/flux_unit.
+    propagate from the owner. Validate before editing flux_dev/flux_unit.
     Never connect/setup a device, convert coordinates, or retry failures.
     """
     if not name or not name.strip():
         raise ValueError("flux device name must be non-empty")
     if not unit or not unit.strip():
         raise ValueError("flux unit must be non-empty")
-    tab.read_field("dev.flux_dev")
+    tab.read_field("flux_dev")
     observed = tab.read_device(name).unit
     if not isinstance(observed, str) or not observed.strip() or observed == "none":
         raise GuiRpcError(
@@ -325,5 +325,5 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
         raise GuiRpcError(
             "Flux unit does not match the device coordinate", reason="invalid_device"
         )
-    tab.set("dev.flux_dev", name)
+    tab.set("flux_dev", name)
     tab.set("flux_unit", observed)
