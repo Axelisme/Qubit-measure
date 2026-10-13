@@ -597,7 +597,7 @@ def test_template_input_failed_expr_requires_input_instead_of_static_default(
     ("spec_type", "template_id", "child", "authored_kind", "other_kind", "length"),
     [
         (PulseSpec, "pulse", "waveform", "const", "cosine", 0.4),
-        (FlatTopWaveformSpec, "flat", "raise_waveform", "cosine", "const", 0.1),
+        (FlatTopWaveformSpec, "flat", "raise_waveform", "cosine", "gauss", 0.1),
     ],
     ids=["pulse", "flat-top"],
 )
