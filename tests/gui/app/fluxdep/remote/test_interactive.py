@@ -130,7 +130,7 @@ def test_explicit_targets_keep_selection_name_and_filter_independent(
     assert _picker_command(
         harness, link, named, "move_line", role="half", position=0.5
     )["ok"]
-    assert _joint_command(harness, link, joint, "set_min_distance", min_distance=0.2)[
+    assert _joint_command(harness, link, joint, "set_min_distance", min_distance=0.05)[
         "ok"
     ]
     observer = harness.client(mode="readonly", label="observer")
