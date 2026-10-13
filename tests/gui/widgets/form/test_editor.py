@@ -1,5 +1,6 @@
 """Public Qt controls edit drafts while preserving local parse failures."""
 
+import gc
 from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal, Self
 
@@ -448,6 +449,35 @@ def test_destroying_the_view_leaves_the_caller_state_usable(qapp: QApplication) 
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 7.0
+
+
+class CycleHost(QWidget):
+    """A parentless host that refers to itself, so only cyclic GC frees it."""
+
+    def __init__(self) -> None:
+        """Create the host and its self-reference."""
+        super().__init__()
+        self.cycle: CycleHost | None = self
+
+
+@pytest.mark.parametrize("detach", [True, False], ids=["detached", "attached"])
+def test_cyclic_gc_frees_an_editor_host_and_leaves_its_state_writable(
+    qapp: QApplication, detach: bool
+) -> None:
+    env = environment()
+    states: list[FormState[SampleForm]] = []
+    for _ in range(20):
+        state = FormState(SampleForm.default_input(env))
+        states.append(state)
+        editor = FormEditor(state, env, CycleHost())
+        if detach:
+            editor.detach()
+        del editor
+        gc.collect()
+    qapp.processEvents()
+    for state in states:
+        state.write({("amount",): 7.0}, env)
+        assert state.input.data["amount"] == 7.0
 
 
 @pytest.mark.parametrize("action", ["detach", "close"])
