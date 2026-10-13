@@ -1,7 +1,9 @@
 """Writeback Edit dialogs: scalar parameter values and module item Forms."""
 
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import TracebackType
 from typing import Literal
 from unittest.mock import MagicMock, patch
 
@@ -402,6 +404,72 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     assert spec.gain == pytest.approx(0.2)
     assert spec.waveform == MODULE_PROPOSAL_WAVEFORM
     assert MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()
+
+
+@pytest.mark.parametrize("busy", [False, True], ids=["convert", "busy-refusal"])
+def test_module_option_command_uses_captured_source_and_current_admission(
+    module_widget, busy: bool
+):
+    ctrl, widget, tab_id, pane = _populate_module(module_widget)
+    errors: list[BaseException] = []
+
+    def record_qt_exception(
+        _kind: type[BaseException],
+        error: BaseException,
+        _traceback: TracebackType | None,
+    ) -> None:
+        errors.append(error)
+
+    previous_hook = sys.excepthook
+    try:
+        sys.excepthook = record_qt_exception
+        _edit_button(widget).click()
+        assert not errors, f"Module Edit must open through the public Qt seam: {errors}"
+        dialog = _find_open_dialog("Edit Config:")
+        form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+        captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
+        ctrl.apply_writeback_for_pane(tab_id, pane)
+        assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
+            "ml-1"
+        ]
+        before = form.state.input.data
+        context = ctrl.context_control
+        context.set_waveform(
+            context.read_context().target,
+            MODULE_PROPOSAL_WAVEFORM,
+            ConstWaveformCfg(length=0.75),
+        )
+        action = dialog.findChild(QAction, "form.command.waveform.to_inline")
+        assert action is not None
+        if busy:
+            ctrl.set_running(tab_id, running=True)
+        action.trigger()
+        assert not errors, f"Option commands must use the public editor route: {errors}"
+        if busy:
+            assert form.state.input.data == before
+            error = dialog.findChild(QLabel, "form.error.waveform")
+            assert error is not None and "busy" in error.text().lower()
+            assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
+                "ml-1"
+            ]
+        else:
+            assert form.state.input.data["waveform"] != before["waveform"]
+            result = form.spec()
+            assert isinstance(result, PulseSpec)
+            assert result.waveform == captured
+            preview = ctrl.writeback_control.get_writeback_values_for_pane(tab_id, pane)
+            assert preview["ml-1"].proposed["waveform"] == captured.model_dump(
+                mode="python"
+            )
+            assert not ctrl.writeback_control.get_writeback_applied_for_pane(
+                tab_id, pane
+            )["ml-1"]
+            ctrl.apply_writeback_for_pane(tab_id, pane)
+            assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).waveform == captured
+        assert dialog.isVisible()
+    finally:
+        sys.excepthook = previous_hook
+        ctrl.set_running(tab_id, running=False)
 
 
 @pytest.mark.parametrize("invalid_kind", ["unparsed", "expression"])
