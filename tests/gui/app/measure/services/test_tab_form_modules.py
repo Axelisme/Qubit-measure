@@ -139,7 +139,7 @@ def shift_frequency(extras: ModuleExtras, cfg: ModuleCore) -> ModuleCore:
     return result
 
 
-def test_module_read_includes_extras_lowering() -> None:
+def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
     resource = TabFormResource(
         Form(ModuleCore, {}, extras=ModuleExtras, lower=shift_frequency),
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
@@ -149,7 +149,7 @@ def test_module_read_includes_extras_lowering() -> None:
     assert hasattr(resource, "read_module"), (
         "Missing lowered execution module observation"
     )
-    assert resource.read_module(("pulse",)).value["freq"] == 105.0
+    assert resource.read_module(("pulse",)).value["freq"] == 100.0
     resource.use_inline(("pulse",))
     assert resource.read_module(("pulse",)).value["freq"] == 105.0
 
@@ -194,3 +194,21 @@ def test_conversion_guards_and_nonmodule_rejections_preserve_input() -> None:
         with pytest.raises(CfgPreconditionError) as gone:
             operation(("pulse",))
         assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
+def test_module_read_allows_other_invalid_input_but_rejects_own_errors() -> None:
+    resource = TabFormResource(
+        Form(ModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(module_env(100.0)),
+        mutation_allowed=lambda: True,
+    )
+    resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    resource.write({("amount",): {"expr": "unfinished +"}})
+    assert hasattr(resource, "read_module"), "Missing field-local module read"
+    assert resource.read_module(("pulse",)).value["freq"] == 100.0
+    resource.use_inline(("pulse",))
+    resource.write({("pulse", "module", "freq"): {"expr": "1 / 0"}})
+    with pytest.raises(CfgPreconditionError) as invalid:
+        resource.read_module(("pulse",))
+    assert invalid.value.reason is CfgPreconditionReason.NOT_VALID
+    assert "pulse" in str(invalid.value)

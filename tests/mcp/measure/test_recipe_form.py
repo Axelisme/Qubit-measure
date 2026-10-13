@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, ModuleInline
+from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
@@ -248,3 +249,60 @@ def test_use_inline_copies_library_then_accepts_public_frequency_write(
         assert AuthorCfg.model_validate(gui.owner.accept().cfg).pulse == PulseCfg(
             ch=0, nqz=1, freq=125.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
         )
+
+
+def test_retained_module_source_keeps_key_and_numeric_summary(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(
+                SummaryParameter("frequency", "pulse.module.freq", "MHz"),
+            ),
+        ).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        before = gui.owner.input.data
+        assert hasattr(tab, "retain_module_source"), "Missing module summary projection"
+        tab.retain_module_source(
+            "pulse", summary_field="pulse.module.freq", value_path=("freq",)
+        )
+        assert gui.owner.input.data == before
+        assert tab.read_field("pulse").mode == "key"
+        operation = tab.run()
+        captured = operation.snapshot()
+        assert captured is not None
+        assert captured.actual["fields"]["pulse.module.freq"] == {
+            "value": 100.0,
+            "source": "library:Q1.pulses.pi",
+            "unit": "MHz",
+        }
+        tab.use_inline("pulse")
+        tab.set("pulse.module.freq", 125.0, source="calibration")
+        assert captured.actual["fields"]["pulse.module.freq"]["value"] == 100.0
+        next_capture = tab.run().snapshot()
+        assert next_capture is not None
+        assert next_capture.actual["fields"]["pulse.module.freq"] == {
+            "value": 125.0,
+            "source": "calibration",
+            "unit": "MHz",
+        }
+
+
+def test_invalid_module_projection_records_no_success_prefix(tmp_path: Path) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(
+            client.context,
+            summary_parameters=(SummaryParameter("frequency", "pulse.module.freq"),),
+        ).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        assert hasattr(tab, "retain_module_source"), (
+            "Missing validated summary projection"
+        )
+        with pytest.raises(ValueError):
+            tab.retain_module_source(
+                "pulse", summary_field="pulse.module.freq", value_path=("missing",)
+            )
+        captured = tab.run().snapshot()
+        assert captured is not None
+        assert "pulse.module.freq" not in captured.actual["fields"]
