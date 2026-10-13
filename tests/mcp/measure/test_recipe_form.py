@@ -4,9 +4,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
-
 import pytest
+from pydantic import Field
+from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -172,11 +172,9 @@ def test_unoffered_library_key_reports_available_options_without_writing(
         assert not tab.read_field("pulse").locked
         before = gui.owner.input.data
         sent = list(client.transport.sent)
-        error: Exception | None = None
-        try:
+        with pytest.raises((GuiRpcError, PydanticCustomError)) as failure:
             tab.use_library("pulse", "Q1.pulses.absent")
-        except Exception as failure:
-            error = failure
+        error = failure.value
         assert isinstance(error, GuiRpcError), error
         assert error.reason == "invalid_cfg"
         assert "pulse" in str(error)
