@@ -1,7 +1,7 @@
 """set_editing_enabled(enabled=False) leaves the form readable but not editable.
 
 Every check is a user action on a shown editor: typing, clicking, the mouse
-wheel, arrow keys, the Expression action and the fold buttons. Each action is
+wheel, arrow keys, the Expression action and double-clicks on fold titles. Each action is
 also shown to edit the form once editing is enabled again, so a check of
 "nothing changed" cannot pass because the action never reached the control.
 """
@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QWidget,
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
@@ -32,7 +31,12 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
-from tests.gui._user_input import key_click, mouse_click, type_text
+from tests.gui._user_input import (
+    key_click,
+    mouse_click,
+    mouse_double_click,
+    type_text,
+)
 
 
 class Section(BaseModel):
@@ -155,16 +159,9 @@ def enabled_box(view: QWidget, path: str) -> QCheckBox:
     return child(view, QCheckBox, f"form.enabled.{path}")
 
 
-def fold(block: QWidget) -> QPushButton:
-    """The Expand/Collapse button directly inside a row or group block."""
-    (button,) = [
-        button
-        for button in block.findChildren(
-            QPushButton, "", Qt.FindChildOption.FindDirectChildrenOnly
-        )
-        if button.text() in ("Expand", "Collapse")
-    ]
-    return button
+def fold(title: QLabel) -> None:
+    """Double-click title, as a user folds or unfolds its section."""
+    mouse_double_click(title, title.rect().center())
 
 
 def row_of(view: QWidget, path: str) -> QWidget:
@@ -300,20 +297,23 @@ def test_folds_still_expand_and_collapse_without_writing(
     view: View, qapp: QApplication
 ) -> None:
     editor, state = view
-    for block, inner in (
-        (child(editor, QWidget, "form.group.Advanced"), "form.input.phase"),
-        (row_of(editor, "section"), "form.input.section.level"),
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
     ):
-        button = fold(block)
+        title = child(editor, QLabel, name)
         content = child(editor, QLineEdit, inner)
-        assert button.isEnabled() and not content.isVisibleTo(editor)
-        button.click()
+        assert title.isEnabled() and not content.isVisibleTo(editor)
+        assert title.text().startswith("\u25b8 "), name
+        fold(title)
         qapp.processEvents()
         assert content.isVisibleTo(editor), inner
         assert content.isEnabled(), f"{inner} must not be greyed out"
-        button.click()
+        assert title.text().startswith("\u25be "), name
+        fold(title)
         qapp.processEvents()
         assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
     assert state.input.data == DATA
 
 
