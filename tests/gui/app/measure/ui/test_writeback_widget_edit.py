@@ -433,6 +433,8 @@ def test_module_dialog_readonly_keeps_text_and_scroll_accessible(module_widget, 
     scroll = dialog.findChild(QScrollArea)
     assert scroll is not None and scroll.isEnabled()
     dialog.resize(560, 500)
+    # A short public viewport guarantees overflow regardless of form row height.
+    scroll.setFixedHeight(120)
     qapp.processEvents()
     expand = next(
         button
