@@ -205,6 +205,10 @@ class SpectrumListItem(TypedDict):
     name is the opaque loaded identifier. spec_type is OneTone or TwoTone.
     aligned marks committed alignment. points_completed marks completion even
     with zero points. point_count is a nonnegative annotation count, not a gate.
+    stage is the published loaded/aligned/sampled state, independent of pending;
+    unaligned spectra stay loaded even with retained completed points.
+    filter_excluded_count counts False values in the published per-spectrum
+    Filter mask, or zero without a mask. It excludes draft edits and downsampling.
     """
 
     name: str
@@ -212,6 +216,8 @@ class SpectrumListItem(TypedDict):
     aligned: bool
     points_completed: bool
     point_count: int
+    stage: Literal["loaded", "aligned", "sampled"]
+    filter_excluded_count: int
     # Unfinished alignment or sampling draft, otherwise None.
     pending: Literal["align", "sample"] | None
 
