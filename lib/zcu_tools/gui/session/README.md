@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，元件樹 Metadata 欄
+**Last updated:** 2026-10-13，參數 setter 驗證契約與元件樹 Metadata 欄
 
 # gui/session/ — 量測 session core
 
@@ -9,7 +9,7 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟或建立 entry 只發布 metadata 和 point list，不自選 point。此時 readiness=EMPTY、parameters=None，但 entry metadata、point list 與 setup source binding 仍可讀。未開 entry 時 metadata 與 source binding 才是 None，point list 為空。SoC、device 與獨立 predictor 保留各自能力。明確選取或建立 point 後才發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
-三個 target setter 經 resources owner 驗證值與來源。SavedPoint 是唯一 target，使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
+三個 target setter 都經 resources owner 驗證。`set_parameter` 驗 value schema 與 metadata 的 YAML 保存表示；metadata 是 caller 的 opaque mapping，setter 不解讀 key，也不查來源。`set_module`／`set_waveform` 驗 library spec，並由 library owner 對該 entry 的 ledger 驗證來源 Provenance。SavedPoint 是唯一 target，使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
 
 `ContextService.apply_writeback` 是底層 accept 入口，先驗 captured SavedPoint 的 entry、point label、存在性與文件，再綁定資源交共用 executor。Executor 先 append accepted event，再沿項目順序呼叫 setters。Parameter／library setter 要求目前已有選取的 point，sample-only 不要求 selection，直接追加 entry JSONL 並記 captured point label。直接呼叫底層入口時，未選 point 的 parameter／library 項目可在 append 後失敗；成功前綴與 accepted event 保留，首錯停止，不 rollback 或 retry。Application 的 `GuardService.check_writeback` 才在未選工作點時以 no_context 提前拒絕，提示先選或建立工作點。同 entry 現選 B 只允許開始命令，不把 captured SavedPoint(E, A) 改成 B；跨 entry 在 append 前拒絕。入口不寫記憶體、不自動建點。成功前綴依每項實際提交發布。樣本 preview／receipt 經 sample owner 讀 entry JSONL，不維護另一份樣本或延後 flush。
 

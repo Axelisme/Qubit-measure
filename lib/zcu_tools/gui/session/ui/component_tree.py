@@ -89,8 +89,8 @@ class ComponentTreeWidget(QWidget):
 
     The widget owns presentation only. The tree has Field, Value, Unit and
     Metadata columns. Metadata shows a row's opaque caller mapping as one-line
-    flow YAML with a block YAML tooltip, blank when absent or empty; no key is
-    interpreted. Each component row shows its kind; its children follow
+    flow YAML with a block YAML tooltip on each field row, including group
+    and unset rows, blank when absent or empty; no key is interpreted. Each component row shows its kind; its children follow
     component_field_specs(kind), so unset fields stay visible as an italic
     gray "(unset)" and nested models expand into child rows. Document data
     the schema does not declare follows the declared rows. Double-click or F2
@@ -313,6 +313,7 @@ class ComponentTreeWidget(QWidget):
             items[key] = item
             path = ".".join(key)
             item.setToolTip(_FIELD, field_tooltip(spec, path))
+            self._show_metadata(item, document_meta(document, path))
             if spec.value_kind == "group":
                 default_expanded[key] = present
                 if not present:
@@ -320,7 +321,6 @@ class ComponentTreeWidget(QWidget):
                 continue
             if present:
                 item.setText(_VALUE, _display(value))
-                self._show_metadata(item, document_meta(document, path))
             else:
                 self._mark_unset(item)
             if _addressable(key):
@@ -405,8 +405,12 @@ class ComponentTreeWidget(QWidget):
         if not metadata:
             return
         # Caller key order is kept; one line avoids PyYAML's default wrapping.
-        summary = yaml.safe_dump(
-            metadata, default_flow_style=True, sort_keys=False, width=sys.maxsize
+        summary = yaml.dump(
+            metadata,
+            Dumper=_OneLineDumper,
+            default_flow_style=True,
+            sort_keys=False,
+            width=sys.maxsize,
         )
         item.setText(_METADATA, summary.strip())
         details = yaml.safe_dump(metadata, default_flow_style=False, sort_keys=False)
@@ -516,6 +520,19 @@ class _ValueDelegate(QStyledItemDelegate):
     def _finish(self, combo: QComboBox) -> None:
         self.commitData.emit(combo)
         self.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
+
+
+class _OneLineDumper(yaml.SafeDumper):
+    """SafeDumper whose strings with line breaks use escaped double quotes."""
+
+
+def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
+    # Plain and single-quoted scalars write a newline as a real line break.
+    style = '"' if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_OneLineDumper.add_representer(str, _represent_str)
 
 
 def _row_key(item: QTreeWidgetItem) -> _RowKey:
