@@ -66,7 +66,8 @@ the stroke will select or erase.
 previews as well as notebook and MCP PNGs. They come from the Okabe–Ito palette,
 which red–green colour-blind users can tell apart: Kept/Current orange, Added
 blue hollow circles, Removed reddish-purple crosses, Dropped grey and the brush
-sky blue. Half/integer flux lines use `HALF_FLUX_COLOR`/`INTEGER_FLUX_COLOR`
+sky blue. `transition_color(i)` cycles the eight Okabe–Ito colours for the fit's
+compiled transitions, so Show's model lines and attributed points match. Half/integer flux lines use `HALF_FLUX_COLOR`/`INTEGER_FLUX_COLOR`
 from `analysis.fluxdep.line_picker`, the line picker's own red and blue, in
 pickers, previews and the spectrum PNG.
 

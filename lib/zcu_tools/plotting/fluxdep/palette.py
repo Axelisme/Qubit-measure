@@ -22,3 +22,26 @@ REMOVED_MARKER = "x"
 DROPPED_COLOR = "#707070"
 # Brush path and the band the brush sweeps along it: sky blue.
 BRUSH_COLOR = "#56B4E9"
+
+# The eight Okabe–Ito colours, ordered for model transitions on a gray_r
+# background: the strongest contrasts first, yellow and black (weakest on
+# white and on dark resonance lines) last.
+TRANSITION_COLORS = (
+    "#0072B2",  # blue
+    "#D55E00",  # vermillion
+    "#009E73",  # bluish green
+    "#CC79A7",  # reddish purple
+    "#56B4E9",  # sky blue
+    "#E69F00",  # orange
+    "#F0E442",  # yellow
+    "#000000",  # black
+)
+
+
+def transition_color(index: int) -> str:
+    """Colour of the index-th compiled transition, cycling TRANSITION_COLORS.
+
+    index is a nonnegative position in the fit's compiled transition order;
+    the Show lines and the points attributed to that transition share it.
+    """
+    return TRANSITION_COLORS[index % len(TRANSITION_COLORS)]

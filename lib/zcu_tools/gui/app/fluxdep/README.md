@@ -224,7 +224,8 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 ### 配色
 互動圖背景一律 `gray_r`（白底、高值=黑），點落在高值共振線上對比最強
 （vs viridis 高值=黃，點不明顯）。點的顏色共用 `plotting.fluxdep.palette`（Okabe–Ito，紅綠色弱也能分辨）：
-Kept／Current 橘、Added 藍色空心圓、Removed 紫色 ×、Dropped 灰；Show 與唯讀 Filter 圖的選中點也用 Kept 色。
+Kept／Current 橘、Added 藍色空心圓、Removed 紫色 ×、Dropped 灰；Show 與唯讀 Filter 圖的選中點也用 Kept 色，
+Show 的模型線與依 transition 歸屬的點用 Okabe–Ito 八色循環。
 half／integer 線在 picker、ResultPreview、Add spectrum 預覽與譜 PNG 都用定線 picker 的紅／藍。
 選點筆刷在拖曳中與 stroke 預覽都畫成沿整條路徑的半透明帶。對齊 notebook plotly 版的 Greys。定線圖的 renderer 是共用的
 `analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines 與 MCP 的定線 PNG 同樣是 `gray_r`。
@@ -367,7 +368,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   dataclass**（會更弱型）。
 - `services/viz.py`：matplotlib 重寫 notebook 的 plotly `FreqFluxDependVisualizer`，純函式畫進傳入的
   Figure（background heatmap gray_r + simulation lines + 選中點 + r_f/sample_f const-freq 線 +
-  dev_value secondary axis）。`Controller.render_fit` 畫 recorded search cloud，點依 compiled transition 上色，偏大殘差點空心，標題列 State 的 stale reasons。`Controller.render_selection` 畫 published masks，並疊 stored fit 曲線，不標 residual，也不讀 live draft。兩者共用 kernel 能階需求與 simulation，合法高階 transition 不讀 DB 也不漏線。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
+  dev_value secondary axis）。`Controller.render_fit` 畫 recorded search cloud，點依 compiled transition 上色（與該 transition 的模型線同色，取自 `palette.transition_color` 的 Okabe–Ito 八色循環），偏大殘差點空心，標題列 State 的 stale reasons。`Controller.render_selection` 畫 published masks，並疊 stored fit 曲線，不標 residual，也不讀 live draft。兩者共用 kernel 能階需求與 simulation，合法高階 transition 不讀 DB 也不漏線。診斷圖直接用共用 builder 的後端原生 Figure，不重畫。
 - params.json 的 flux_half/int/period 取**第一張已對齊譜**（notebook 單譜語意；多譜同對齊到同 flux 座標）。
 - params.json export 透過 `resources.qubit_params.QubitParams` 寫 `project` 與 `fluxdep_fit`；重寫 fluxdep fit 會更新 `fluxdep_fit.timestamp`，但不刪除獨立的 `dispersive` section。
 

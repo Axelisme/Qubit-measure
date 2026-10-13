@@ -37,7 +37,11 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
     transitions_with_freqs,
 )
-from zcu_tools.plotting.fluxdep.palette import DROPPED_COLOR, KEPT_COLOR
+from zcu_tools.plotting.fluxdep.palette import (
+    DROPPED_COLOR,
+    KEPT_COLOR,
+    transition_color,
+)
 from zcu_tools.simulate import flux2value
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
@@ -259,7 +263,7 @@ def _plot_simulation_lines(
             t_fluxs,
             freqs[:, index],
             label=label,
-            color=f"C{palette[slot] % 10}",
+            color=transition_color(palette[slot]),
             linewidth=1.0,
             zorder=1,
         )
@@ -520,7 +524,7 @@ def render_fit_figure(
         )
     else:
         colors = np.array(
-            [f"C{int(index) % 10}" for index in attribution.transition_indices]
+            [transition_color(int(index)) for index in attribution.transition_indices]
         )
         outliers = attribution.outlier_mask
         ax.scatter(
