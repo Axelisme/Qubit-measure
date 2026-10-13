@@ -356,12 +356,16 @@ class TaggedExtraInputs(BaseModel):
     kind: Literal["inline"] = "inline"
 
 
+def retain_tagged_cfg(extras: TaggedExtraInputs, cfg: ModuleRpcCfg) -> ModuleRpcCfg:
+    return cfg
+
+
 class TaggedExtrasAdapter(ModuleRpcAdapter):
     form = Form(
         ModuleRpcCfg,
         {"sweep": Range.between(1.0, 2.0, expts=3)},
         extras=TaggedExtraInputs,
-        lower=retain_cfg,
+        lower=retain_tagged_cfg,
     )
 
 
