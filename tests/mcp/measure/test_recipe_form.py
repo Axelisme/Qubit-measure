@@ -72,6 +72,10 @@ class FormGui(LookbackGui):
         if method == "tab.edit_cfg":
             self.owner.write(form_writes(params["edits"]))
             return dict(observe_form(self.owner))
+        if method == "tab.run_start":
+            assert params == {"tab_id": "t"}
+            self.ran = True
+            return {"operation_id": 71}
         if method == "tab.read_module":
             return asdict(
                 self.owner.read_module(tuple(str(params["field"]).split(".")))
