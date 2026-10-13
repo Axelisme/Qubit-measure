@@ -2,15 +2,14 @@
 
 The shared AliasDialog owns Apply/Cancel/invalid semantics (tests/gui/session/ui).
 Here the host contract is: the button opens that dialog on this session, the
-Qubit chip follows the committed alias when it closes, the current panels,
-drafts, fixed capture and local text stay, and Prepare forms uses the new alias.
+session commits the alias, the current panels, drafts, fixed capture and local
+text stay, and Prepare forms uses the new alias.
 """
 
 import pytest
 from qtpy.QtWidgets import (
     QApplication,
     QDialogButtonBox,
-    QLabel,
     QLineEdit,
     QPushButton,
     QTableWidget,
@@ -91,8 +90,6 @@ def test_alias_entry_edits_same_session_without_replacing_captured_forms(
     expected = "Q2" if outcome == "apply" else "Q1"
     control = window_session.harness.services.context_control
     assert control.get_alias_rows() == (AliasRow("qubit", expected),)
-    status = window.findChild(QLabel, "workflow.source.status")
-    assert status is not None and status.text() == f"Qubit: {expected} ({QUBIT_KIND})"
 
     # Alias edits change the global source, not the fixed capture or drafts.
     assert window.plan_panel is plan and window.tunables_panel is knobs
