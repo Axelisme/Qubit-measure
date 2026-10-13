@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.services.cfg_editor import (
     CfgEditorService,
     CfgEditorSession,
 )
-from zcu_tools.gui.app.measure.services.cfg_lowering import lower_module, lower_waveform
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
@@ -90,9 +89,7 @@ def ctrl(control):
     c.arb_waveforms.list_data_keys.return_value = []
 
     def apply(parameters: ParameterContext, change: LibraryChange) -> None:
-        control.apply_library_change(
-            parameters, change, lower_module=lower_module, lower_waveform=lower_waveform
-        )
+        control.apply_library_change(parameters, change)
 
     c.apply_library_change.side_effect = apply
     return c

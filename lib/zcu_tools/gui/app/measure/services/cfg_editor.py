@@ -78,11 +78,11 @@ from zcu_tools.gui.expected_error import (
     FailedPreconditionError,
     InvalidInputError,
 )
-from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ports import ContextReadPort
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.gui.session.value_lookup import ValueRef, decode_value_ref
 
+from .cfg_lowering import lowered_library_change
 from .ports import (
     CfgEdit,
     CfgEditResult,
@@ -301,9 +301,9 @@ class CfgEditorSession:
     def commit_schema(self) -> CfgSchema:
         """Snapshot the draft as an **un-lowered** CfgSchema for the writer.
 
-        ADR-0067: the session's job ends at the CfgSchema snapshot. The app
-        supplies lowering against the fixed capture; ContextService owns registration,
-        versioning, and event publication. ``commit`` applies only to
+        ADR-0067: the session's job ends at the CfgSchema snapshot. The service
+        lowers it to a Spec against the fixed capture; ContextService owns
+        registration, versioning, and event publication. ``commit`` applies only to
         ml-entry sessions (those carrying an ``item_kind``); a seeded session
         (tab cfg / writeback draft) is teardown-only and rejects commit.
         """
@@ -558,12 +558,10 @@ class CfgEditorService:
                     session.set_agent_fields((edit,))
                     if not session.draft.is_valid():
                         raise CfgEditorError(f"invalid cfg draft after {edit.path!r}")
-                    self._write.apply_library_change(
-                        parameters,
-                        LibraryChange(
-                            kind, "put", destination, schema=session.commit_schema()
-                        ),
+                    change = lowered_library_change(
+                        parameters, kind, "put", destination, session.commit_schema()
                     )
+                    self._write.apply_library_change(parameters, change)
                 except ExpectedError as exc:
                     return CfgEditResult(
                         valid=False,
@@ -587,9 +585,8 @@ class CfgEditorService:
         parameters = session.parameters
         if kind is None or parameters is None:
             raise CfgEditorError("library session requires a parameter capture")
-        self._write.apply_library_change(
-            parameters, LibraryChange(kind, "put", name, schema=schema)
-        )
+        change = lowered_library_change(parameters, kind, "put", name, schema)
+        self._write.apply_library_change(parameters, change)
         self._remove(editor_id, teardown=True, reason="committed")
 
     def replace(self, editor_id: str, old_name: str, new_name: str) -> None:
@@ -613,10 +610,15 @@ class CfgEditorService:
                 f"replacement source {old_name!r} does not match the session's "
                 f"original name {session.source_name!r}"
             )
-        self._write.apply_library_change(
+        change = lowered_library_change(
             parameters,
-            LibraryChange(kind, "replace", old_name, new_name, session.commit_schema()),
+            kind,
+            "replace",
+            old_name,
+            session.commit_schema(),
+            new_path=new_name,
         )
+        self._write.apply_library_change(parameters, change)
         self._remove(editor_id, teardown=True, reason="committed")
 
     def discard(self, editor_id: str) -> None:

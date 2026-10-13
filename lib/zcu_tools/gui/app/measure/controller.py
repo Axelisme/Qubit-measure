@@ -56,7 +56,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
-from .services.cfg_lowering import lower_module, lower_waveform
+from .services.cfg_lowering import lowered_library_change
 from .services.ports import CfgEdit, CfgEditResult
 from .state import State
 from .template_catalog import TemplateCatalog
@@ -893,16 +893,11 @@ class Controller(SessionControllerMixin):
     ) -> None:
         """Commit one library structure command at the supplied fixed capture.
 
-        App lowering callbacks convert schemas to Spec; ContextService owns
+        Put/replace carry the persistent Spec to write. ContextService owns
         target validation, the single resource transaction and publication.
         Failed commands leave editor teardown to the caller.
         """
-        self._context_control.apply_library_change(
-            parameters,
-            change,
-            lower_module=lower_module,
-            lower_waveform=lower_waveform,
-        )
+        self._context_control.apply_library_change(parameters, change)
 
     # ------------------------------------------------------------------
     # Arbitrary waveform assets (qubit-scoped repository)
@@ -957,7 +952,8 @@ class Controller(SessionControllerMixin):
         ref = entry.make_value(ctx)
         schema = CfgSchema(spec=entry.shape(), value=ref.value)
         self.apply_library_change(
-            parameters, LibraryChange(item_kind, "put", name, schema=schema)
+            parameters,
+            lowered_library_change(parameters, item_kind, "put", name, schema),
         )
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:
