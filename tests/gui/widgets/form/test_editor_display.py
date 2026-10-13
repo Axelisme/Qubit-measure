@@ -15,7 +15,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     LinRange,
-    ModuleInput,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -90,6 +89,24 @@ class Beta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["beta"] = "beta"
+
+
+class DriveRef(BaseModel):
+    """Key branch of a tagged ref-or-inline selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["ref"] = "ref"
+    name: str = ""
+
+
+class DriveInline(BaseModel):
+    """Inline branch whose module is an ordinary nested model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["inline"] = "inline"
+    module: Section = Field(default_factory=Section)
 
 
 def test_decimals_round_the_shown_number_without_rounding_input(build: Build) -> None:
@@ -188,13 +205,13 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
         labelled: Annotated[Section, Display(label="Readout")] = Field(
             default_factory=Section
         )
-        drive: ModuleInput
+        drive: Annotated[DriveRef | DriveInline, Field(discriminator="kind")]
         choice: Annotated[Alpha | Beta, Field(discriminator="kind")]
 
     view, state = build(
         TitleForm,
         {
-            "drive": {"kind": "inline", "module": {"type": "pulse"}},
+            "drive": {"kind": "inline", "module": {"level": 1.0}},
             # Without a tag no option matches; the row keeps its title.
             "choice": {"x": 3.0},
         },
