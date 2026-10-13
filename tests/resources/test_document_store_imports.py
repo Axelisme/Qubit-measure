@@ -40,11 +40,11 @@ def test_document_storage_and_path_helpers_without_hdf5(tmp_path: Path) -> None:
         path = directory / "parameters.yaml"
         path.write_text("format: synthetic\\nformat_version: '1.0'\\nt1: 2.5\\n", encoding="utf-8")
         store = DocumentStore(path, Parameters, format="synthetic")
-        assert store.snapshot.t1 == 2.5
+        assert store.snapshot().t1 == 2.5
         with store.edit() as draft:
             draft.t1 = 4.5
         reopened = DocumentStore(path, Parameters, format="synthetic")
-        assert reopened.snapshot.t1 == 4.5
+        assert reopened.snapshot().t1 == 4.5
         """
     )
     result = subprocess.run(
