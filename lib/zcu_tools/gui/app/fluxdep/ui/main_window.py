@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -123,6 +123,8 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = False
         self._close_confirmed = False
         self._control_disposed = False
+        # Set once an accepted close starts disposing views and owners.
+        self._shutting_down = False
         self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
         self._search_runner = search_runner
@@ -347,6 +349,8 @@ class MainWindow(QMainWindow):
         if payload.phase == "closed":
             if payload.context_id == self._editor_context_id:
                 self._clear_editor()
+                # The owner is still emitting; refill once this event returns.
+                QTimer.singleShot(0, self._show_after_closed_draft)
             if payload.kind == "selection" and self._fit_entry_tab == "filter":
                 # An agent's Filter routes the next Fit entry only while live.
                 self._fit_entry_tab = None
@@ -463,6 +467,18 @@ class MainWindow(QMainWindow):
         self._editor_context_id = None
         self._editor_stage = None
         self._editor_stack.setCurrentWidget(self._placeholder)
+
+    def _show_after_closed_draft(self) -> None:
+        """Refill an editing area a closed draft left empty, opening no input.
+
+        It runs after the closing event has returned, so the rebuild's inspect
+        never re-enters the owner during retirement. A view mounted meanwhile
+        (a successor picker or a stage advance) stays, and a window that is
+        shutting down stays empty.
+        """
+        if self._shutting_down or self._current_editor is not None:
+            return
+        self._rebuild_editor()
 
     def _rebuild_editor(self, *, open_picker: bool = False) -> None:
         """Show an existing draft or published data without creating input.
@@ -926,6 +942,7 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 a0.ignore()
             return
+        self._shutting_down = True
         self.dispose_control_watches()
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:

@@ -208,7 +208,8 @@ active 跟著切到該譜，階段列標示該階段 draft，但不切頁。Agen
 Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。記住的 Filter 只在 Filter context
 仍 live 時有效，context 結束就清掉，人類下次進 Fit 不會因 agent 已結束的事件落進 Filter 並開 Session。
 GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
-Closed 只清除旧 view，不開新 Session。純讀取與 user-origin edits 不強制切換畫面。
+Closed 只清除旧 view，不開新 Session。編輯區正顯示的草稿 closed（agent 或人取消）後，等該事件返回再重建，
+顯示該譜的已發布預覽，不開 picker、不切頁；期間已掛上的新 view 保留，關窗中不重建。純讀取與 user-origin edits 不強制切換畫面。
 AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
 Search terminal 更新結果，不搶回使用者已切換的畫面。
 
