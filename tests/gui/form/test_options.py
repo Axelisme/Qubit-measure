@@ -543,3 +543,70 @@ def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity
     assert state.input.data == before
     assert state.base.data == before
     assert events == []
+
+
+class AliasedBranch(FormModel):
+    kind: Literal["a", "alias"] = "a"
+    shared: float = 1.0
+    a_only: float = 3.0
+
+
+class PlainBranch(FormModel):
+    kind: Literal["b"] = "b"
+    shared: float = 9.0
+    b_only: float = 4.0
+
+
+class StringAliasForm(FormModel):
+    branch: AliasedBranch | PlainBranch = Field(discriminator="kind")
+
+
+class NumericAliasedBranch(FormModel):
+    kind: Literal[1, 2] = 1
+    shared: float = 1.0
+    a_only: float = 3.0
+
+
+class NumericPlainBranch(FormModel):
+    kind: Literal[3] = 3
+    shared: float = 9.0
+    b_only: float = 4.0
+
+
+class NumericAliasForm(FormModel):
+    branch: NumericAliasedBranch | NumericPlainBranch = Field(discriminator="kind")
+
+
+@pytest.mark.parametrize(
+    ("model", "tags", "alias"),
+    [(StringAliasForm, ["a", "alias", "b"], "alias"), (NumericAliasForm, [1, 2, 3], 2)],
+    ids=["string", "numeric"],
+)
+def test_every_intrinsic_tag_is_a_typed_option_sharing_its_branch_fields(
+    model: type[FormModel], tags: list[JsonValue], alias: JsonValue
+) -> None:
+    env = FormEnv()
+    properties = obj(model.input_schema(env)["properties"])
+    options = obj(properties["branch"]).get("x-form-options")
+    assert isinstance(options, list)
+    values = [obj(option)["value"] for option in options]
+    assert values == [{"kind": tag} for tag in tags]
+    assert [type(obj(value)["kind"]) for value in values] == [type(t) for t in tags]
+    assert [obj(option)["label"] for option in options] == [str(tag) for tag in tags]
+    first, second, plain = (obj(obj(option)["fields"]) for option in options)
+    # Tags of one branch select the same editable fields, without the tag.
+    assert first == second
+    assert set(obj(first["properties"])) == {"shared", "a_only"}
+    assert set(obj(plain["properties"])) == {"shared", "b_only"}
+
+    state = FormState(FormInput(model, {"branch": {"kind": alias, "shared": 6.0}}))
+    current = state.input.data["branch"]
+    matching = [
+        obj(option)["label"]
+        for option in options
+        if api.Option(str(obj(option)["label"]), obj(option)["value"]).matches(current)
+    ]
+    assert matching == [str(alias)]
+    result = state.result(env)
+    assert not isinstance(result, FormErrors)
+    assert obj(result.model_dump(mode="json")["branch"])["kind"] == alias
