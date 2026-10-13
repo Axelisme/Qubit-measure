@@ -12,7 +12,7 @@ class FieldMeta:
     """Describe a cfg field without changing its validation or serialized value.
 
     Attach with ``Annotated[T, FieldMeta(...)]``. All attributes are optional;
-    None means that the consumer chooses its own presentation default.
+    None leaves the hint unspecified, except group where it means no group.
 
     Attributes
     ----------
@@ -25,12 +25,21 @@ class FieldMeta:
         Use a non-negative integer, or None for the consumer's default precision.
     description:
         One-sentence explanation of what the field controls.
+    group:
+        Presentation group name, such as "Advanced", or None for no group.
+        An empty string raises ValueError at construction.
     """
 
     label: str | None = None
     unit: str | None = None
     decimals: int | None = None
     description: str | None = None
+    group: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject an empty presentation group with ValueError."""
+        if self.group == "":
+            raise ValueError("group must be non-empty or None")
 
 
 def get_field_meta(field: FieldInfo) -> FieldMeta | None:
