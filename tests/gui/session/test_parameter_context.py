@@ -258,38 +258,6 @@ def test_partial_capture_reports_unbound_role_only_when_read(
         context.library_key("capture_driver.module.x180")
 
 
-def test_metadata_routes_to_real_point_or_library_source(
-    source: tuple[PointDocument, LibrarySnapshot],
-) -> None:
-    point, library = source
-    point.provenance["Q1.rate"] = {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": "2026-10-04T00:00:00Z",
-        "stderr": 0.5,
-    }
-    library = library.replaced_module(
-        "Q1.pulses.pi", library.module_spec("Q1.pulses.pi")
-    )
-    context = capture((point, library)).bind_roles(
-        declarations(), focus="Q1", explicit={}
-    )
-    actual = context.meta("capture_driver.rate")
-    assert actual is not None
-    assert actual.stderr == 0.5
-    assert context.meta("capture_driver.rate") == actual
-    library_source = context.meta("capture_driver.module.x180.gain")
-    assert library_source == library.meta("Q1.pulses.pi.gain")
-    assert library_source is not None
-    assert library_source.source == "manual"
-    slot_source = context.meta("Q1.module.x180")
-    assert slot_source is not None
-    assert slot_source.at == point.provenance["Q1.module.x180"]["at"]
-    assert context.meta("general.ext.nullable") is None
-    assert context.meta("Q1.absent") is None
-
-
 def test_empty_roles_do_not_use_notebook_shorthand(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
@@ -392,7 +360,6 @@ def test_library_and_slot_reads_use_same_fixed_role_binding(
     assert context.lookup("Q1.pulses.missing.gain") == DocumentValue(False, None)
     assert context.lookup("Q1.pulses.pi.mixer_freq") == DocumentValue(True, None)
     assert context.value("Q1.pulses.pi.waveform.length") == 0.05
-    assert context.meta("Q1.pulses.pi.gain") is None
     for path in (
         "Q1.module.empty.gain",
         "Q1.module.missing.gain",
@@ -463,7 +430,6 @@ def read_projection(context: ParameterContext, method: str) -> None:
         "lookup",
         "lookup_point",
         "value",
-        "meta",
     ],
 )
 def test_fault_capture_refuses_data_but_keeps_diagnostics(
@@ -546,7 +512,6 @@ def test_authored_aliases_route_library_and_point_provenance_from_one_capture(
     assert context.value("$capture_driver.module.x180.gain") == 0.25
     assert context.value("$capture_driver.pulses.pi.waveform.length") == 0.05
     assert context.lookup_point("$capture_driver.rate") == DocumentValue(True, 4300.0)
-    assert context.meta("$capture_driver.pulses.pi.gain") is None
 
 
 def test_wrong_kind_authored_alias_is_reported_only_when_consumed(

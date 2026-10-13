@@ -1,9 +1,12 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-09-27 — debug helper merge; fitting relocation
+**Last updated:** 2026-10-13 — QICK serialization import isolation
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
+
+Package 初始化不載入 QICK。`format_obj` 在 caller 呼叫時才載入 QickParam，保留其
+既有字串轉換；通用數值 helper 與 `deepupdate` 不要求 QICK。
 
 ## fitting helpers
 

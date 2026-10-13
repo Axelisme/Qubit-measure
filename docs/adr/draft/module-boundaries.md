@@ -61,6 +61,11 @@ status: draft
 
 依賴朝向穩定的一方：被很多模組依賴的模組必須少變，常加功能的模組不被別人依賴。純工具接收數值、回傳數值，不自己讀容器、硬體或檔案以外的狀態。
 
+Package 初始化不把專用依賴帶進無關工具。`analysis` 在選用 `fluxdep` 時才載入它，
+讓 fitting 不要求互動 line picker。`utils` 的 QICK import 留在選用的 `format_obj`
+轉換函式內。`datafile` facade 按公開名稱載入 owner，讓 storage 使用 path helpers 時
+不載入 HDF5。這些調整保留公開名稱及計算、保存契約，不改變 C8、C9、C12 的依賴方向。
+
 ### 共享核心 core 與 cfg_model
 
 `zcu_tools.core` 只依賴標準庫、外部函式庫與 repo 的 utils。`core.waveform_format` 擁有 WaveformSamples、NPZ codec 及單一 WaveformFormatError。它只驗 recipe 的 JSON 語法。Resources 解讀 formula 與管理檔案，program/sim 播放 path 指定的 samples。

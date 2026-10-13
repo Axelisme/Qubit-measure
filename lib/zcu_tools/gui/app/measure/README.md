@@ -463,7 +463,7 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    at start and pass it to the opaque draft. Post captures the Primary draft's
    identity at operation start and passes it to its new draft. A missing Primary
    identity stays None, even if live Run metadata or Save has an id. Accepted
-   ledger events and destination provenance use that identity whether or not Save
+   ledger events and library provenance use that identity whether or not Save
    occurred. The identity does not imply a saved file; consult saved events for
    persistence. Native Load retains the original identity, and analysis without
    native metadata uses `None`.

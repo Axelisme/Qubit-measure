@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.format_version import YamlValue
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -30,7 +30,13 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.document_store import ConflictError
-from zcu_tools.resources.entry import EditView, PointView, ResultEntry, snapshot
+from zcu_tools.resources.entry import (
+    EditView,
+    PointView,
+    ResultEntry,
+    document_meta,
+    snapshot,
+)
 from zcu_tools.resources.entry.ledger_models import (
     AcceptedPayload,
     AcceptedWrite,
@@ -72,6 +78,7 @@ def _write(
     number: float,
     *,
     source: Provenance | None = None,
+    metadata: YamlMap | None = None,
     path: str | None = None,
 ) -> None:
     destination = (
@@ -84,7 +91,7 @@ def _write(
         }[kind]
     )
     if kind == "parameter":
-        control.set_parameter(target, destination, number, source=source)
+        control.set_parameter(target, destination, number, metadata=metadata)
     elif kind == "module":
         control.set_module(
             target,
@@ -108,13 +115,9 @@ def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
     return capture.library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
 
 
-def _meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
-    path = {
-        "parameter": "general.ext.flux_value",
-        "module": "Q1.pulses.pi.gain",
-        "waveform": "Q1.waveforms.base.length",
-    }[kind]
-    return capture.meta(path) if kind == "parameter" else capture.library.meta(path)
+def _library_meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
+    path = {"module": "Q1.pulses.pi.gain", "waveform": "Q1.waveforms.base.length"}[kind]
+    return capture.library.meta(path)
 
 
 def _select(session: _Session, label: str) -> SavedPoint:
@@ -191,9 +194,28 @@ def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
     return library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
 
 
-@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("metadata", [None, {}, {"stderr": 0.01, "source": "caller"}])
+def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
+    session: _Session, metadata: YamlMap | None
+) -> None:
+    target = _select(session, "a")
+    with session.entry.use_point("a").edit() as draft:
+        draft.set_meta("general.ext.flux_value", {"comment": "old"})
+    capture = session.control.read_context()
+    old_document = capture.document()
+    _write(session.control, target, "parameter", 0.2, metadata=metadata)
+    current = session.control.read_context()
+    assert _value(current, "parameter") == pytest.approx(0.2)
+    expected = {"comment": "old"} if metadata is None else metadata
+    assert document_meta(current.document(), "general.ext.flux_value") == expected
+    stored = snapshot(session.entry.use_point("a"))
+    assert document_meta(stored, "general.ext.flux_value") == expected
+    assert capture.document() == old_document
+
+
+@pytest.mark.parametrize("kind", ["module", "waveform"])
 @pytest.mark.parametrize("explicit_source", [False, True], ids=["manual", "accepted"])
-def test_target_setters_preserve_source_and_old_capture(
+def test_library_setters_preserve_source_and_old_capture(
     session: _Session, kind: Kind, explicit_source: bool
 ) -> None:
     target = _select(session, "a")
@@ -205,7 +227,7 @@ def test_target_setters_preserve_source_and_old_capture(
     _write(session.control, target, kind, 0.2, source=source)
     current = session.control.read_context()
     assert _value(current, kind) == pytest.approx(0.2)
-    provenance = _meta(current, kind)
+    provenance = _library_meta(current, kind)
     assert provenance is not None
     if source is None:
         assert provenance.source == "manual" and provenance.kind is None
@@ -262,8 +284,8 @@ def test_cross_entry_target_rejected_before_any_write(
     assert other.list_points() == []
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_invalid_source_keeps_projection_and_version(
+@pytest.mark.parametrize("kind", ["module", "waveform"])
+def test_invalid_library_source_keeps_projection_and_version(
     session: _Session, kind: Kind
 ) -> None:
     target = _select(session, "a")
@@ -447,7 +469,7 @@ def test_wrong_path_or_library_partition_keeps_publication(
     )
 
 
-def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
+def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
     session: _Session,
 ) -> None:
     from zcu_tools.resources.entry import writeback
@@ -464,7 +486,9 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
                 writeback.WaveformWriteback(
                     "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
                 ),
-                writeback.ParameterWriteback("general.description", "retained", 0.2),
+                writeback.ParameterWriteback(
+                    "general.description", "retained", metadata={"stderr": 0.2}
+                ),
                 writeback.ParameterWriteback("general.description", 42),
                 writeback.ParameterWriteback("general.ext.later", 3.0),
             ),
@@ -483,14 +507,7 @@ def test_shared_writeback_entry_retains_order_sources_and_failure_prefix(
     assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
         length=0.1
     )
-    meta = current.meta("general.description")
-    assert meta is not None
-    assert (meta.source, meta.kind, meta.run_id, meta.stderr) == (
-        error.event_id,
-        "test/ordered",
-        "run-1",
-        0.2,
-    )
+    assert document_meta(current.document(), "general.description") == {"stderr": 0.2}
     assert [type(item) for item in events] == [MlChangedPayload, MdChangedPayload]
     assert session.state.version.get("context") == before + 2
     assert session.entry.use_point("a").description == "retained"

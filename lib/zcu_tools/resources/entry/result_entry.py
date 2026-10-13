@@ -32,13 +32,11 @@ from .ledger_models import (
     validate_origin,
 )
 from .points import PointView
-from .provenance import ProvenanceData, validate_source
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
-    is_forward_minor,
 )
 from .storage import bind_sample_table
 from .views import (
@@ -121,12 +119,7 @@ class ResultEntry:
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(
-            self._setup_store,
-            self._result_path / "setup.yaml",
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
-        )
+        return SetupView(self._setup_store, self._result_path / "setup.yaml")
 
     @property
     def entry_id(self) -> str:
@@ -188,7 +181,7 @@ class ResultEntry:
         The analyzed event uses this entry's UUID, current UTC time and notebook
         origin. A non-None record (including {}) is attached as records/<id>.json.
         The returned ID can be read with ledger.get(id). No values are written;
-        callers use ordinary point or setup edits for manual value provenance.
+        callers use ordinary point or setup edits and choose any metadata.
 
         Payload validation and RecordsLedger I/O/validation errors propagate
         unchanged. The ledger owns locking and publication; failure may leave
@@ -246,13 +239,14 @@ class ResultEntry:
 
         label is a safe single path segment; existing destinations raise
         DestinationExistsError before writes.
-        Without clone_from, copy the latest setup components and provenance.
+        Without clone_from, copy the latest setup components and metadata.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
-        point and module_cfg, renew creation time and mark the direct clone origin.
-        Cross-entry nonmanual sources become local import events with copied JSON
-        attachments; same-entry source IDs remain unchanged. origin identifies
-        the importing frontend as gui, notebook or mcp.
+        point and module_cfg and renew creation time. Point values and opaque
+        metadata copy verbatim. Library sources keep the library contract:
+        cross-entry nonmanual library sources become local import events with
+        copied JSON attachments, and library sources mark the direct clone
+        origin. origin identifies the importing frontend as gui, notebook or mcp.
         description=None preserves seed/clone metadata; a string explicitly sets it,
         including empty text, within this creation/cleanup scope.
         No source files, data or images change. Failure removes only the new point;
@@ -294,7 +288,7 @@ class ResultEntry:
                     .replace("+00:00", "Z")
                 },
                 "components": deepcopy(template.get("components", {})),
-                "provenance": deepcopy(template.get("provenance", {})),
+                "metadata": deepcopy(template.get("metadata", {})),
             }
             with (destination / "point.yaml").open("x", encoding="utf-8") as stream:
                 yaml.dump(document, stream)
@@ -360,33 +354,10 @@ class ResultEntry:
                 entry_id=source_entry.entry_id,
             )
             shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
-        forward_minor = is_forward_minor(
-            {
-                "format": point_document.format,
-                "format_version": point_document.format_version,
-            },
-            source=source / "point.yaml",
-        )
-        # Validate known source fields without narrowing the point's future-field policy.
-        point_sources = {
-            path: ProvenanceData.model_validate(
-                metadata, extra="ignore" if forward_minor else None
-            )
-            for path, metadata in point_document.provenance.items()
-        }
-        for metadata in point_sources.values():
-            validate_source(
-                metadata.to_provenance(),
-                source_entry._result_path / "records/ledger.jsonl",
-                source_entry.entry_id,
-            )
         event_ids = tuple(
             dict.fromkeys(
                 metadata.source
-                for metadata in (
-                    *point_sources.values(),
-                    *library_document.provenance.values(),
-                )
+                for metadata in library_document.provenance.values()
                 if metadata.source != "manual"
             )
         )
@@ -399,14 +370,6 @@ class ResultEntry:
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
-            for metadata in draft.provenance.values():
-                event_id = metadata.get("source")
-                if isinstance(event_id, str) and event_id in imports:
-                    metadata["source"] = imports[event_id]
-                metadata["cloned_from"] = {
-                    "entry_id": source_entry.entry_id,
-                    "point": source.name,
-                }
         # New destination is private until both independent file commits succeed.
         cloned_library = self._library_store(destination / "module_cfg.yaml")
         with cloned_library.edit() as draft:
@@ -492,7 +455,6 @@ class ResultEntry:
         return PointView(
             self._point_store(source),
             source,
-            ledger=self._result_path / "records/ledger.jsonl",
             entry_id=self.entry_id,
             result_root=self._result_path.parent,
             database_root=self._database_path.parent,
@@ -562,8 +524,8 @@ class ResultEntry:
             (result_path / "records").mkdir()
             (result_path / "points").mkdir()
             document = {
-                "format": "zcu.parameter-container",
-                "format_version": "1.0",
+                "format": PARAMETER_FORMAT,
+                "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
                     "entry_id": str(uuid4()),
                     "created_at": datetime.now(timezone.utc)
@@ -571,7 +533,7 @@ class ResultEntry:
                     .replace("+00:00", "Z"),
                 },
                 "components": {},
-                "provenance": {},
+                "metadata": {},
             }
             with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
                 YAML(typ="rt").dump(document, stream)

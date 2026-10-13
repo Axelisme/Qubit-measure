@@ -3,7 +3,6 @@
 import shutil
 from collections.abc import Generator
 from contextlib import ExitStack
-from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -16,7 +15,6 @@ from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ComponentSchema,
     PointView,
-    Provenance,
     ResultEntry,
     UnknownKindError,
     component_registry,
@@ -430,34 +428,6 @@ def test_setup_commit_does_not_validate_or_modify_existing_points(
     assert entry.new_point("b").Q1.rate == 5300.0
 
 
-def test_seed_copies_provenance_without_clone_origin_and_keeps_it_independent(
-    entry: ResultEntry, entry_roots: tuple[Path, Path]
-) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    root = entry_roots[0] / "entry"
-    source = root / "setup.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(source.read_text())
-    provenance = {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": "2026-10-04T00:00:00Z",
-        "stderr": 1e6,
-    }
-    stored["provenance"]["Q1.rate"] = provenance
-    write_yaml(source, stored)
-    point = entry.new_point("a")
-    destination = root / "points/a/point.yaml"
-    seeded = yaml.load(destination.read_text())
-    assert seeded["provenance"]["Q1.rate"] == provenance
-    point.Q1.rate = 5100.0
-    assert yaml.load(source.read_text())["provenance"]["Q1.rate"] == provenance
-    entry.setup.Q1.rate = 5200.0
-    assert point.Q1.rate == 5100.0
-    assert point.Q1.kind == "fake/drive/a"
-
-
 @pytest.mark.parametrize("source_mode", ["label", "view"])
 def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     entry: ResultEntry, entry_roots: tuple[Path, Path], source_mode: str
@@ -498,7 +468,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     assert entry.list_points() == ["source", "target"]
 
 
-def test_yaml_extensions_survive_seed_clone_reload_and_keep_source_units(
+def test_yaml_extensions_survive_seed_clone_reload_and_keep_metadata_units(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     payload: YamlMap = {
@@ -520,9 +490,9 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_source_units(
     assert general_blob["slash/key"] == expected
     with pytest.raises(KeyError):
         _ = blob["new"]
-    source = Provenance("manual", None, None, "2026-10-04T00:00:00Z", 2.0)
     with point.edit() as draft:
-        draft.set("R1.ext.noise", 12.0, provenance=source)
+        draft.set("R1.ext.noise", 12.0)
+        draft.set_meta("R1.ext.noise", {"stderr": 2.0})
     clone = entry.new_point("b", clone_from="a")
     field_view(clone.R1.ext).blob = {"independent": False}
     clone.general.ext["_misc-key"] = None
@@ -535,119 +505,10 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_source_units(
     assert field_view(original.general.ext["_misc-key"])["slash/key"] == expected
     assert field_view(field_view(copied.R1.ext).blob).independent is False
     assert copied.general.ext["_misc-key"] is None
-    metadata = copied.meta("R1.ext.noise")
-    assert metadata is not None
-    assert metadata.stderr == 2.0
-    assert metadata.cloned_from is not None
-    assert metadata.cloned_from["point"] == "a"
-    field_view(copied.R1.ext).noise = 12.0
-    accepted = copied.meta("R1.ext.noise")
-    assert accepted is not None
-    assert accepted.cloned_from is None
+    assert copied.meta("R1.ext.noise") == {"stderr": 2.0}
+    field_view(copied.R1.ext).noise = 13.0
+    assert copied.meta("R1.ext.noise") == {"stderr": 2.0}
     assert field_view(entry.setup.R1.ext).noise == 11.0
-
-
-def test_clone_marks_each_copied_source_with_its_direct_point(
-    entry: ResultEntry, entry_roots: tuple[Path, Path]
-) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    entry.new_point("a").Q1.duration = 12.0
-    root = entry_roots[0] / "entry"
-    yaml = YAML(typ="rt")
-    source = root / "points/a/point.yaml"
-    stored = yaml.load(source.read_text())
-    original = {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": "2026-10-04T00:00:00Z",
-        "stderr": 1e-6,
-    }
-    stored["provenance"]["Q1.duration"] = original
-    write_yaml(source, stored)
-    entry.new_point("b", clone_from="a")
-    cloned = yaml.load((root / "points/b/point.yaml").read_text())
-    assert cloned["provenance"]["Q1.duration"] == {
-        **original,
-        "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
-    }
-    entry.new_point("c", clone_from="b")
-    cloned_again = yaml.load((root / "points/c/point.yaml").read_text())
-    assert cloned_again["provenance"]["Q1.duration"] == {
-        **original,
-        "cloned_from": {"entry_id": entry.entry_id, "point": "b"},
-    }
-
-
-@pytest.mark.parametrize(
-    ("write", "path"),
-    [
-        ("attribute", "Q1.duration"),
-        ("edit", "Q1.duration"),
-        ("set", "Q1.duration"),
-        ("set", "Q1.wiring.bias_ch"),
-        ("set", "Q1.ext.nested.note"),
-    ],
-)
-def test_rewriting_same_cloned_value_clears_only_accepted_field_origin(
-    entry: ResultEntry, entry_roots: tuple[Path, Path], write: str, path: str
-) -> None:
-    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
-    original = entry.new_point("a")
-    original.Q1.duration = 12.0
-    original.Q1.coherence = 13.0
-    field_view(original.Q1.wiring).bias_ch = 3
-    field_view(original.Q1.ext).nested = {"note": "accepted"}
-    root = entry_roots[0] / "entry"
-    source = root / "points/a/point.yaml"
-    yaml = YAML(typ="rt")
-    stored = yaml.load(source.read_text())
-    provenance = {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": "2026-10-04T00:00:00Z",
-        "stderr": None,
-    }
-    paths = ["Q1.duration", "Q1.coherence", "Q1.wiring.bias_ch", "Q1.ext.nested.note"]
-    stored["provenance"] = {key: deepcopy(provenance) for key in paths}
-    write_yaml(source, stored)
-    point = entry.new_point("b", clone_from="a")
-    setup_before = (root / "setup.yaml").read_bytes()
-    if write == "attribute":
-        with pytest.raises(ValidationError):
-            point.Q1.coherence = "not-a-number"
-        point.Q1.duration = 12.0
-    else:
-        with point.edit() as draft:
-            with pytest.raises(ValidationError):
-                draft.set("Q1.coherence", "not-a-number")
-            if write == "edit":
-                draft.Q1.duration = 12.0
-            else:
-                value = (
-                    "accepted"
-                    if path == "Q1.ext.nested.note"
-                    else 3
-                    if path == "Q1.wiring.bias_ch"
-                    else 12.0
-                )
-                draft.set(path, value)
-    rewritten = yaml.load((root / "points/b/point.yaml").read_text())
-    accepted = rewritten["provenance"][path]
-    assert accepted == {**provenance, "at": accepted["at"]}
-    assert accepted["at"] != provenance["at"]
-    for untouched in set(paths) - {path}:
-        assert rewritten["provenance"][untouched] == {
-            **provenance,
-            "cloned_from": {"entry_id": entry.entry_id, "point": "a"},
-        }
-    assert (root / "setup.yaml").read_bytes() == setup_before
-    for view in (point, entry.use_point("b")):
-        assert view.Q1.duration == 12.0
-        assert view.Q1.coherence == 13.0
-        assert field_view(view.Q1.wiring).bias_ch == 3
-        assert field_view(field_view(view.Q1.ext).nested).note == "accepted"
 
 
 def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
