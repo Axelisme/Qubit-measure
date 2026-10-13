@@ -27,10 +27,10 @@ from .onetone import (
     smoothed_slice,
 )
 from .processing import (
+    OneToneBackground,
     cast2real_and_norm,
     contrast_limits,
     diff_mirror,
-    OneToneBackground,
     downsample_points,
     onetone_background,
     spectrum2d_findpoint,
