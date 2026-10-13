@@ -98,7 +98,7 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set("modules.readout.pulse_cfg.gain", gain)
+    tab.set("modules.readout.module.pulse_cfg.gain", gain)
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()
@@ -155,7 +155,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/flux_dep",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.pulse_cfg.gain"),
+        SummaryParameter("gain", "modules.readout.module.pulse_cfg.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
