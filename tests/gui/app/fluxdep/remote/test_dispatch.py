@@ -158,6 +158,8 @@ def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
                 "spec_type": "OneTone",
                 "aligned": True,
                 "points_completed": True,
+                "stage": "sampled",
+                "filter_excluded_count": 0,
                 "point_count": 0,
                 "pending": None,
             }

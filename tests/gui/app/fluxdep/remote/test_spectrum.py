@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 
 import numpy as np
@@ -37,6 +38,133 @@ def _spectrum(name: str) -> SpectrumEntry:
         alignment_seeded=True,
         points_completed=True,
     )
+
+
+@pytest.mark.parametrize(
+    ("aligned", "completed", "empty", "draft", "stage", "pending"),
+    [
+        (False, False, True, None, "loaded", None),
+        (False, True, False, "line", "loaded", "align"),
+        (True, False, True, "sample", "aligned", "sample"),
+        (True, True, True, None, "sampled", None),
+        (True, True, False, "line", "sampled", "align"),
+        (True, True, False, "sample", "sampled", "sample"),
+    ],
+)
+def test_list_reports_published_stage_independently_of_drafts(
+    route_harness: RouteHarness,
+    aligned: bool,
+    completed: bool,
+    empty: bool,
+    draft: str | None,
+    stage: str,
+    pending: str | None,
+) -> None:
+    ctrl = route_harness.ctrl
+    axis = np.linspace(0.0, 3.0, 5)
+    entry = replace(
+        _spectrum("one"),
+        aligned=aligned,
+        points_completed=completed,
+        raw={
+            "dev_values": axis.copy(),
+            "fluxs": axis.copy(),
+            "freqs": np.linspace(4.0, 5.0, 5),
+            "signals": np.ones((5, 5), dtype=np.complex128),
+        },
+    )
+    if empty:
+        entry.points = {
+            "dev_values": entry.points["dev_values"][:0],
+            "fluxs": entry.points["fluxs"][:0],
+            "freqs": entry.points["freqs"][:0],
+        }
+    ctrl.state.put_spectrum(entry)
+    owner = route_harness.client()
+    if draft is not None:
+        assert route_harness.request(
+            owner, "spectrum.interactive.open", name="one", kind=draft
+        )["ok"]
+    observer = route_harness.client(mode="readonly")
+    before = ctrl.state.version.snapshot()
+    active = ctrl.state.active_spectrum
+    context = ctrl.interactive.inspect("one")
+    for _ in range(2):
+        reply = route_harness.request(observer, "spectrum.list")
+        assert reply["ok"] is True, reply
+        assert reply["result"]["spectrums"] == [
+            {
+                "name": "one",
+                "spec_type": "TwoTone",
+                "aligned": aligned,
+                "points_completed": completed,
+                "point_count": 0 if empty else 2,
+                "stage": stage,
+                "filter_excluded_count": 0,
+                "pending": pending,
+            }
+        ]
+        assert ctrl.interactive.inspect("one") is context
+        assert ctrl.state.active_spectrum == active
+        assert ctrl.state.version.snapshot() == before
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_list_counts_only_published_per_spectrum_filter_masks(
+    joint_route: RouteHarness, published: bool
+) -> None:
+    ctrl = joint_route.ctrl
+    ctrl.state.put_spectrum(_spectrum("c"))
+    ctrl.set_points("a", np.array([0.0, 0.5, 0.01]), np.array([4.0, 4.5, 4.01]))
+    if published:
+        ctrl.set_selection(np.array([True, False, True, False, False, False]), 0.1)
+    # Filter opens all-selected, not from the published per-spectrum masks.
+    owner = joint_route.client()
+    opened = joint_route.request(owner, "selection.interactive.open")
+    assert opened["ok"] is True, opened
+    context = opened["result"]["context"]
+    assert isinstance(context, dict)
+    edited = joint_route.request(
+        owner,
+        "selection.interactive.command",
+        context_id=context["context_id"],
+        command="stroke",
+        params={"vertices": [[0.0, 4.0]], "width": 0.03, "mode": "erase"},
+    )
+    assert edited["ok"], edited
+    observer = joint_route.client(mode="readonly")
+    before = ctrl.state.version.snapshot()
+    sources = copy.deepcopy(ctrl.state.spectrums)
+    draft = ctrl.interactive.inspect("selection")
+    selection = joint_route.request(observer, "selection.snapshot")
+    assert selection["ok"] is True, selection
+    assert selection["result"]["pending"] is True
+    for _ in range(2):
+        reply = joint_route.request(observer, "spectrum.list")
+        assert reply["ok"] is True, reply
+        rows = reply["result"]["spectrums"]
+        assert isinstance(rows, list)
+        assert [
+            (row["name"], row["point_count"], row.get("filter_excluded_count"))
+            for row in rows
+        ] == [
+            ("a", 3, 1 if published else 0),
+            ("empty", 0, 0),
+            ("b", 1, 1 if published else 0),
+            ("c", 2, 2 if published else 0),
+        ]
+        after_selection = joint_route.request(observer, "selection.snapshot")
+        assert after_selection["ok"] is True, after_selection
+        assert after_selection["result"] == selection["result"]
+        assert ctrl.interactive.inspect("selection") is draft
+        assert all(ctrl.interactive.inspect(name) is None for name in sources)
+        assert ctrl.state.active_spectrum == "a"
+        assert ctrl.state.version.snapshot() == before
+        for name, source in sources.items():
+            current = ctrl.state.get_spectrum(name)
+            for key in ("dev_values", "fluxs", "freqs"):
+                np.testing.assert_array_equal(current.points[key], source.points[key])
+            np.testing.assert_array_equal(current.filter_mask, source.filter_mask)
 
 
 def _assert_unknown_spectrum(reply: RouteReply) -> None:

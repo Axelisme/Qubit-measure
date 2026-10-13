@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, 19 decision/control/lifecycle tools and native fit export
+**Last updated:** 2026-10-13, native spectrum stages and Filter exclusion counts
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -87,7 +87,11 @@ and render. `projection.py` converts complete RPC point arrays into count/ranges
 rounds numerical spectrum summaries to three decimals and preserves GUI
 alignment provenance. Published stages are loaded/aligned/sampled; pending is
 align/sample/null independently of the published stage. Completed zero-point
-sampling is still sampled. Internal stage counters are not agent observations.
+sampling is still sampled. Spectrum lists directly project the GUI's stage and
+per-spectrum filter_excluded_count; MCP does not reconstruct them from booleans
+or the joint mask. Exclusion counts describe published Filter masks, not live
+drafts or min_distance downsampling. List keeps the global Filter/fit summaries.
+Internal stage counters are not agent observations.
 Load and snapshot attach the native evidence PNG as image
 content, not base64 text or an image file. PNG integrity uses the same core
 producer as Measure. MCP retains no spectrum, draft, provenance or fit state.

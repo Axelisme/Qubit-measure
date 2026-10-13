@@ -67,6 +67,8 @@ def test_connection_returns_project_stages_fit_and_control_in_one_reply(
                             "spec_type": "TwoTone",
                             "aligned": True,
                             "points_completed": True,
+                            "stage": "sampled",
+                            "filter_excluded_count": 0,
                             "point_count": 3,
                             "pending": None,
                         }
@@ -106,6 +108,7 @@ def test_connection_returns_project_stages_fit_and_control_in_one_reply(
                     "name": "a",
                     "type": "TwoTone",
                     "stage": "sampled",
+                    "filter_excluded_count": 0,
                     "point_count": 3,
                     "pending": None,
                 }
