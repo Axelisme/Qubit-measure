@@ -389,7 +389,8 @@ def test_use_inline_rejects_disabled_module_without_fallback(form_rpc) -> None:
         owner.subscribe(lambda: notifications.append("changed"))
         reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
         assert not reply["ok"], "Disabled module must not silently become blank inline"
-        assert reply["error"]["reason"] == "not_valid"
+        assert reply["error"]["reason"] == "form_errors"
+        assert reply["error"]["code"] == "invalid_params"
         assert "pulse" in reply["error"]["message"]
         assert "Inline" in reply["error"]["message"]
         assert owner.input.data == before
