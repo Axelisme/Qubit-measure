@@ -76,29 +76,22 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
 
 
-def test_capture_tokens_are_fixed_before_atomic_input_write() -> None:
-    latest = 2.0
-
-    def capture(_aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
-        return resource_api.TabFormSources(
-            env=captured_env(latest), captures={"device.flux.value": latest}
-        )
-
+def test_rejected_batch_preserves_input_without_publication() -> None:
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {}), capture=capture, mutation_allowed=lambda: True
+        Form(ScalarCore, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
+        mutation_allowed=lambda: True,
     )
-    latest = 5.0
-    resource.write({("amount",): {"expr": "2 * @{device.flux.value}"}})
-    assert resource.result() == ScalarCore(amount=4.0)
-    assert resource.input.data["amount"] == {"expr": "2 * (2.0)"}
     before = resource.input.data
-    with pytest.raises(CfgPreconditionError) as caught:
-        resource.write({("amount",): {"expr": "@{missing.value}"}})
-    assert caught.value.reason is CfgPreconditionReason.CAPTURE_UNAVAILABLE
+    published: list[ConfigBase | FormErrors] = []
+    resource.subscribe(lambda: published.append(resource.result()))
+
+    with pytest.raises(ValueError, match="missing"):
+        resource.write({("amount",): 4.0, ("missing",): 9.0})
+
     assert resource.input.data == before
-    resource.reset()
-    resource.write({("amount",): {"expr": "2 * @{device.flux.value}"}})
-    assert resource.result() == ScalarCore(amount=10.0)
+    assert resource.result() == ScalarCore(amount=1.0)
+    assert published == []
 
 
 def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths() -> (

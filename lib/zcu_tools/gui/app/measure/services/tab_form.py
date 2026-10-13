@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from logging import getLogger
 
 from pydantic import JsonValue
@@ -12,7 +12,6 @@ from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.gui.app.measure.adapter import CfgInputRejected, Form
-from zcu_tools.gui.cfg.capture import ExpressionCapture
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -28,9 +27,6 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
-from zcu_tools.gui.session.expression import validate_scalar_expr
-from zcu_tools.gui.session.parameters import ModuleSlotError
-from zcu_tools.resources.entry import RoleResolutionError
 
 _logger = getLogger(__name__)
 
@@ -40,13 +36,11 @@ class TabFormSources:
     """One owner-captured source used from Open or Reset until the next Reset.
 
     env borrows fixed parameter/library snapshots and detached cached device infos.
-    captures contains published dotted value-source cache entries, never live
-    providers. source_basis describes their provenance; empty means no revision
-    provenance was supplied. Callers must not mutate these captured sources.
+    source_basis describes their provenance; empty means no revision provenance
+    was supplied. Callers must not mutate these captured sources.
     """
 
     env: FormEnv
-    captures: Mapping[str, object] = field(default_factory=dict)
     source_basis: SourceBasis = ()
 
 
@@ -196,31 +190,21 @@ class TabFormResource:
 
         FormState's structural/source errors propagate without a partial batch.
         Ordinary invalid values remain editable and make result return errors.
-        Expression @{key} tokens are fixed numeric literals before any input is
-        installed. Token grammar/value failures raise CfgInputError; missing
-        captured keys raise CfgPreconditionError(CAPTURE_UNAVAILABLE), without
-        changing input. Busy, revoked or notification-reentrant calls raise
-        CfgPreconditionError.
+        Busy, revoked or notification-reentrant calls raise CfgPreconditionError.
         """
         self.require_mutation_allowed()
-        capture = ExpressionCapture(self._read_capture, validate_scalar_expr)
-        prepared = {
-            path: _capture_input(value, capture) for path, value in batch.items()
-        }
-        self._state.write(prepared, self._sources.env)
+        self._state.write(batch, self._sources.env)
         self._notify()
 
     def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
         """Overlay compatible saved leaves and report discarded input paths.
 
         Preserve expression text and unfinished input. FormState owns branch/type
-        and source compatibility. Token preparation and mutation guards match
-        write; failures preserve the entire input. No source is recaptured.
+        and source compatibility. Mutation guards match write; failures preserve
+        the entire input. No source is recaptured.
         """
         self.require_mutation_allowed()
-        capture = ExpressionCapture(self._read_capture, validate_scalar_expr)
-        prepared = {key: _capture_input(value, capture) for key, value in saved.items()}
-        dropped = self._state.write_compatible(prepared, self._sources.env)
+        dropped = self._state.write_compatible(saved, self._sources.env)
         self._notify()
         return dropped
 
@@ -300,19 +284,6 @@ class TabFormResource:
         self._open = False
         self._callbacks.clear()
 
-    def _read_capture(self, key: str) -> object:
-        if key in self._sources.captures:
-            return self._sources.captures[key]
-        parameters = self._sources.env.parameters
-        if parameters is not None:
-            try:
-                item = parameters.lookup(key)
-            except (RoleResolutionError, ModuleSlotError) as exc:
-                raise KeyError(key) from exc
-            if item.present:
-                return item.value
-        raise KeyError(key)
-
     @staticmethod
     def notifications_active(resources: Sequence[TabFormResource]) -> bool:
         """Report whether any supplied resource is delivering owner notifications."""
@@ -346,16 +317,6 @@ class TabFormResource:
                     _logger.exception("Tab form subscriber failed")
         finally:
             self._notifying = False
-
-
-def _capture_input(value: JsonValue, capture: ExpressionCapture) -> JsonValue:
-    if isinstance(value, dict):
-        if set(value) == {"expr"} and isinstance(expression := value["expr"], str):
-            return {"expr": capture.prepare(expression)}
-        return {key: _capture_input(item, capture) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_capture_input(item, capture) for item in value]
-    return value
 
 
 class TabFormResources:

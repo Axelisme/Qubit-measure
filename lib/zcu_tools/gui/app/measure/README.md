@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, Run panel FormEditor over the tab form resource
+**Last updated:** 2026-10-13, tab form writes without token capture
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -567,8 +567,7 @@ bar. Active and running tabs are identified by tab id, not visual index.
 ## Config model
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
-and captures parameters, library, cached device infos and published value sources
-on Open and Reset. Preview, result and Run use that capture until the next Reset.
+and captures parameters, library and cached device infos on Open and Reset. Preview, result and Run use that capture until the next Reset.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 
@@ -580,11 +579,9 @@ Ordinary strings remain literal; expression input uses an explicit envelope.
 Nullable named device choices include None independently of whether a core field
 has a default. Missing required input remains Invalid.
 
-Frontends submit writes to the same resource. A complete batch prepares capture
-expressions before mutation; rejection leaves no successful prefix. `@{key}` uses
-the fixed published cache, then the same captured parameter namespace. Reads do
-not poll providers. Invalid input remains editable, including unfinished
-expressions. Run accepts only the current valid result and never uses an older
+Frontends submit writes to the same resource. FormState applies a complete batch
+atomically; rejection leaves no successful prefix. Reads do not poll providers.
+Invalid input remains editable, including unfinished expressions. Run accepts only the current valid result and never uses an older
 valid cfg. Busy, lifetime, context and SoC guards remain separate requirements.
 
 `Reset(aliases=...)` captures one-shot named overrides and recomputes defaults.
