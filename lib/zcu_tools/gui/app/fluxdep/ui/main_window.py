@@ -124,7 +124,9 @@ class _SpectrumRowDelegate(QStyledItemDelegate):
         elided = option.fontMetrics.elidedText(
             name, Qt.TextElideMode.ElideMiddle, width
         )
-        option.text = f"{elided}\n{details}"
+        # Qt lays item text out with QTextLayout, which breaks lines only at
+        # U+2028 (QChar.LineSeparator), not at "\n".
+        option.text = f"{elided}\u2028{details}"
 
 
 def _draft_stage(active: ActiveInteractiveContext) -> Stage | None:
