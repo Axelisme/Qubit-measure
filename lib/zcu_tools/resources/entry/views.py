@@ -5,12 +5,10 @@ Copy incoming values before assignment: notebook models can validate assignment.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Generator, Mapping
+from collections.abc import Collection, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from math import isfinite
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
@@ -18,6 +16,8 @@ from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.parameter_fields import stage_model
+from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
 
 from ._point_origin import PointOrigin
 from .errors import RoleResolutionError
@@ -35,7 +35,6 @@ from .field_views import (
 from .field_views import (
     GeneralView as GeneralView,
 )
-from .provenance import Provenance, validate_source
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
@@ -66,14 +65,11 @@ class _ViewRead:
     document is the store/draft owned by this view.
     source is the bound YAML path, or None for an edit draft with no source getter.
     origin is a point's constructor identity, or None for setup/edit views.
-    source_metadata validates/copies sources using an edit's local ledger;
-    None for read-only views. It never changes the draft or produces an event.
     """
 
     document: _ViewDocument
     source: Path | None
     origin: PointOrigin | None
-    source_metadata: Callable[[Provenance], YamlMap] | None
 
 
 def _validate_view_component_name(name: str, *, source: Path | None) -> None:
@@ -110,15 +106,12 @@ def register_view_read(
     source: Path | None,
     *,
     origin: PointOrigin | None = None,
-    source_metadata: Callable[[Provenance], YamlMap] | None = None,
 ) -> None:
     """Bind one entry-internal read record during view construction, without I/O.
 
     Not a package export. document is the view's validated store/draft, source
     its YAML path (None for EditView), and origin its full point identity (None
-    for setup/edit). source_metadata is an edit's local source-validation
-    capability, absent for read-only views. The private attribute cannot collide
-    with legal components.
+    for setup/edit). The private attribute cannot collide with legal components.
     Already bound handles or components shadowing any public view member raise
     ValueError; objects without an instance dictionary raise TypeError.
     Validate the cached document without I/O before binding. No model hook runs.
@@ -130,7 +123,7 @@ def register_view_read(
     state = vars(view)
     if "_entry_read" in state:
         raise ValueError("Entry view is already bound")
-    state["_entry_read"] = _ViewRead(document, source, origin, source_metadata)
+    state["_entry_read"] = _ViewRead(document, source, origin)
 
 
 def _view_read(view: object) -> _ViewRead:
@@ -179,52 +172,6 @@ def snapshot(
     return document.model_copy(deep=True)
 
 
-def manual_update(
-    document: PointDocument,
-    path: str,
-    value: YamlValue,
-    *,
-    stderr: float | None = None,
-) -> PointDocument:
-    """Copy and validate a manual working-unit write to an actual point field.
-
-    path is a dotted component/general field, without role expansion. Invalid
-    paths, missing components, schema values or non-finite/negative stderr
-    raise before returning. The input and caller's value remain isolated.
-    Record manual provenance on the accepted path and its leaves, clearing
-    clone origin. Preserve general.created_at unless explicitly assigned.
-    No file, ledger, notification or default timestamp creation is involved.
-    """
-    if stderr is not None and (not isfinite(stderr) or stderr < 0):
-        raise ValueError("stderr must be finite and non-negative, or None")
-    candidate = document.model_copy(deep=True)
-    metadata = _manual_source()
-    metadata["stderr"] = stderr
-    _set_document_value(candidate, path, value, metadata=metadata)
-    return PointDocument.model_validate(_logical_value(candidate))
-
-
-def accept_source(view: EditView, path: str, *, provenance: Provenance) -> None:
-    """Attach a local source to an existing draft value without changing it.
-
-    path is an actual dotted component/general field. Containers accept all
-    current leaves and clear clone origin on the path and descendants.
-    Missing values/invalid paths or invalid local ledger sources raise without
-    changing the source table. Ledger schema and I/O errors propagate.
-    Never validate the value, run model hooks or commit; view.edit() owns commit.
-    """
-    parts = _path_parts(path)
-    if len(parts) < 2:
-        raise ValueError(f"{path!r}: expected a dotted field path")
-    binding = _view_read(view)
-    draft = binding.document
-    if isinstance(draft, DocumentStore) or binding.source_metadata is None:
-        raise TypeError("Source acceptance requires an edit draft")
-    value = document_value(draft, path)
-    metadata = binding.source_metadata(provenance)
-    draft.provenance = _sources_after_write(draft.provenance, path, value, metadata)
-
-
 def source_path(view: PointView | SetupView) -> Path:
     """Return the YAML path bound to this handle, without I/O.
 
@@ -242,14 +189,15 @@ class DocumentField:
 
     segments retains literal keys without a components wrapper. editable_path
     is their dotted path, or None if any segment is empty or contains a dot.
-    value uses working units; provenance is the full recorded source or None,
-    including cloned_from when present. Rows never expose opaque future data.
+    value uses working units. metadata is a detached copy of the caller's
+    opaque mapping stored at editable_path, or None when absent or the path is
+    unaddressable. Rows never expose opaque future data.
     """
 
     segments: tuple[str, ...]
     editable_path: str | None
     value: YamlValue
-    provenance: Provenance | None
+    metadata: YamlMap | None
 
 
 def document_fields(
@@ -259,7 +207,7 @@ def document_fields(
 
     Expand models/mappings in data order; lists, null and empty mappings remain
     single rows. Preserve unaddressable literal keys with editable_path=None
-    and no dotted provenance lookup. Invalid logical YAML values raise TypeError
+    and no dotted metadata lookup. Invalid logical YAML values raise TypeError
     or Pydantic ValidationError rather than hiding the document.
     """
     rows: list[DocumentField] = []
@@ -274,13 +222,8 @@ def document_fields(
             if all(part and "." not in part for part in segments)
             else None
         )
-        source = document.provenance.get(path) if path is not None else None
-        provenance = (
-            TypeAdapter(Provenance).validate_python(deepcopy(source))
-            if source is not None
-            else None
-        )
-        rows.append(DocumentField(segments, path, value, provenance))
+        metadata = read_metadata(document.metadata, path) if path is not None else None
+        rows.append(DocumentField(segments, path, value, metadata))
 
     append_rows(("general",), _logical_value(document.general))
     for name, component in document.components.items():
@@ -463,177 +406,92 @@ def add_component_to_draft(
         raise ValueError(f"Component {name!r} already exists")
     component = model.model_validate({"kind": kind, **fields})
     _retain_component_defaults(component)
-    sources = _sources_after_write(draft.provenance, name, component, _manual_source())
     draft.components[name] = component
-    draft.provenance = sources
 
 
-def _manual_source() -> YamlMap:
-    return {
-        "source": "manual",
-        "kind": None,
-        "run_id": None,
-        "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "stderr": None,
-    }
+def document_meta(document: SetupDocument | PointDocument, path: str) -> YamlMap | None:
+    """Return this document's isolated opaque metadata for a dotted path, or None.
 
-
-def _field_value(node: object, path: str) -> object:
-    """Read a dotted logical model/mapping path; missing or null returns None."""
-    for part in path.split("."):
-        if isinstance(node, BaseModel):
-            node = model_field_value(node, part)
-        elif isinstance(node, dict):
-            node = node.get(part)
-        else:
-            return None
-    return node
-
-
-def _sources_after_write(
-    sources: dict[str, YamlMap], path: str, value: object, metadata: YamlMap
-) -> dict[str, YamlMap]:
-    """Prepare sources for an accepted field and its written leaves without mutation."""
-    result = deepcopy(sources)
-    if isinstance(value, BaseModel):
-        value = value.model_dump(
-            exclude_unset=True, serialize_as_any=True, warnings=False
-        )
-    tree = TypeAdapter[YamlValue](YamlValue).validate_python(value)
-
-    def include(field: str, node: YamlValue) -> None:
-        result.setdefault(field, {})
-        if isinstance(node, dict):
-            for name, child in node.items():
-                include(f"{field}.{name}", child)
-
-    include(path, tree)
-    for field, source in result.items():
-        if field == path or field.startswith(f"{path}."):
-            source.update(deepcopy(metadata))
-            source.pop("cloned_from", None)
-    return result
-
-
-def document_meta(
-    document: SetupDocument | PointDocument, path: str
-) -> Provenance | None:
-    """Return an isolated source for this document's actual dotted path.
-
-    Missing values, null or missing sources return None. Invalid empty paths or
-    empty path segments raise ValueError. Reads use only this document, without
-    file I/O, role expansion or model hooks; stderr stays in working units.
+    Invalid empty paths or empty path segments raise ValueError. The value at
+    path is not looked up: metadata may exist for an absent value and an empty
+    stored mapping returns {}. No key is interpreted and no file I/O, role
+    expansion or model hook runs.
     """
-    parts = _path_parts(path)
-    root = document if parts[0] == "general" else document.components
-    if _field_value(root, path) is None or path not in document.provenance:
-        return None
-    return TypeAdapter(Provenance).validate_python(deepcopy(document.provenance[path]))
+    _path_parts(path)
+    return read_metadata(document.metadata, path)
 
 
 @contextmanager
 def stage_component(
-    draft: SetupDocument | PointDocument, name: str, field: str
+    draft: SetupDocument | PointDocument, name: str
 ) -> Generator[ComponentSchema]:
     """Yield an independent working-unit component candidate for a draft edit.
 
     draft is a complete setup or point draft. name identifies an existing
-    component; an unknown name raises KeyError. field is the accepted relative
-    dotted path within it, such as t1 or wiring.ch, used for source bookkeeping.
-    Normal exit validates the original complete model and accepts its value
-    with a fresh manual source, clearing cloned_from on the path and descendants
-    even for an unchanged value.
-    A body exception or validation failure leaves the draft and sources intact.
-    The owning store commits the complete document. No I/O occurs here.
+    component; an unknown name raises KeyError. Normal exit validates the
+    original complete model and replaces the draft component. Metadata is
+    neither read nor changed. A body exception or validation failure leaves the
+    draft intact. The owning store commits the complete document. No I/O occurs.
     """
-    candidate = draft.components[name].model_copy(deep=True)
-    yield candidate
-    accepted = type(candidate).model_validate(
-        candidate.model_dump(exclude_unset=True, serialize_as_any=True, warnings=False)
-    )
-    sources = _sources_after_write(
-        draft.provenance,
-        f"{name}.{field}",
-        _field_value(accepted, field),
-        _manual_source(),
-    )
-    draft.components[name] = accepted
-    draft.provenance = sources
+
+    def publish(accepted: ComponentSchema) -> None:
+        draft.components[name] = accepted
+
+    with stage_model(draft.components[name], publish) as candidate:
+        yield candidate
 
 
 @overload
-def stage_general(
-    draft: SetupDocument, field: str
-) -> AbstractContextManager[SetupGeneral]: ...
+def stage_general(draft: SetupDocument) -> AbstractContextManager[SetupGeneral]: ...
 
 
 @overload
-def stage_general(
-    draft: PointDocument, field: str
-) -> AbstractContextManager[PointGeneral]: ...
+def stage_general(draft: PointDocument) -> AbstractContextManager[PointGeneral]: ...
 
 
 @contextmanager
 def stage_general(
-    draft: SetupDocument | PointDocument, field: str
+    draft: SetupDocument | PointDocument,
 ) -> Generator[SetupGeneral | PointGeneral]:
-    """Yield independent metadata, accepting it into draft on normal exit.
+    """Yield independent general fields, accepting them into draft on normal exit.
 
     draft is a complete setup or point draft. The candidate is SetupGeneral for
-    setup, PointGeneral for a point. Successful validation accepts the field
-    with its manual source; a body exception or ValidationError leaves both unchanged.
-    This does no I/O and does not enforce entry identity or document references.
+    setup, PointGeneral for a point. Successful validation replaces the draft's
+    general fields; a body exception or ValidationError leaves it unchanged.
+    Metadata is untouched. This does no I/O and does not enforce entry identity.
     """
-    candidate = draft.general.model_copy(deep=True)
-    yield candidate
-    fields = candidate.model_dump(exclude_unset=True, warnings=False)
     if isinstance(draft, SetupDocument):
-        general = SetupGeneral.model_validate(fields)
-        draft.provenance = _sources_after_write(
-            draft.provenance,
-            f"general.{field}",
-            _field_value(general, field),
-            _manual_source(),
-        )
-        draft.general = general
+
+        def publish_setup(accepted: SetupGeneral) -> None:
+            draft.general = accepted
+
+        with stage_model(draft.general, publish_setup) as setup_candidate:
+            yield setup_candidate
     else:
-        point_general = PointGeneral.model_validate(fields)
-        draft.provenance = _sources_after_write(
-            draft.provenance,
-            f"general.{field}",
-            _field_value(point_general, field),
-            _manual_source(),
-        )
-        draft.general = point_general
 
+        def publish_point(accepted: PointGeneral) -> None:
+            draft.general = accepted
 
-def _accepted_source(provenance: Provenance, ledger: Path, entry_id: str) -> YamlMap:
-    """Validate and isolate source fields before touching any draft."""
-    accepted = TypeAdapter(Provenance).validate_python(asdict(provenance))
-    validate_source(accepted, ledger, entry_id)
-    metadata = TypeAdapter[YamlMap](YamlMap).validate_python(asdict(accepted))
-    metadata.pop("cloned_from", None)
-    return metadata
+        with stage_model(draft.general, publish_point) as point_candidate:
+            yield point_candidate
 
 
 def _set_document_value(
     draft: SetupDocument | PointDocument,
     path: str,
     value: YamlValue | complex,
-    *,
-    metadata: YamlMap | None,
 ) -> None:
-    """Share field validation and acceptance across persistent and memory edits."""
+    """Validate and accept one dotted value into a draft, leaving metadata unchanged."""
     parts = _path_parts(path)
     if len(parts) < 2:
         raise ValueError(f"{path!r}: expected a dotted field path")
     edit_root: AbstractContextManager[BaseModel]
     if parts[0] == "general":
-        edit_root = stage_general(draft, ".".join(parts[1:]))
+        edit_root = stage_general(draft)
     else:
         if parts[0] not in draft.components:
             raise AttributeError(f"Unknown component {parts[0]!r}")
-        edit_root = stage_component(draft, parts[0], ".".join(parts[1:]))
+        edit_root = stage_component(draft, parts[0])
     with edit_root as root:
         node: FieldNode = root
         for index, name in enumerate(parts[1:-1], start=1):
@@ -652,73 +510,67 @@ def _set_document_value(
             yield node
 
         FieldView(lambda: node, edit_node, ".".join(parts[:-1]))[parts[-1]] = value
-    if metadata is not None:
-        root = draft if parts[0] == "general" else draft.components
-        draft.provenance = _sources_after_write(
-            draft.provenance, path, _field_value(root, path), metadata
-        )
 
 
 class EditView:
-    """An isolated edit draft whose components cannot shadow public view members."""
+    """An isolated value/metadata draft whose components cannot shadow view members.
 
-    def __init__(
-        self, draft: SetupDocument | PointDocument, *, ledger: Path, entry_id: str
-    ) -> None:
+    Component and general attributes, set and set_meta share one draft; the
+    enclosing SetupView/PointView edit() validates the complete document and
+    owns commit, conflict and publication. Value writes keep metadata.
+    """
+
+    def __init__(self, draft: SetupDocument | PointDocument) -> None:
         """Bind a typed setup/point draft, rejecting view-shadowing component names.
 
-        ledger is this entry's ledger.jsonl path and entry_id its immutable UUID.
-        set validates explicit sources against that ledger. Binding does not run
-        model hooks, read disk, mutate the draft or commit; the enclosing edit
-        owns publication. Shadowing raises ValueError naming the member.
+        Binding does not run model hooks, read disk, mutate the draft or commit;
+        the enclosing edit owns publication. Shadowing raises ValueError naming
+        the member.
         """
         self._draft = draft
-        self._ledger = ledger
-        self._entry_id = entry_id
-        register_view_read(
-            self,
-            draft,
-            None,
-            source_metadata=lambda provenance: _accepted_source(
-                provenance, ledger, entry_id
-            ),
-        )
+        register_view_read(self, draft, None)
 
     @property
     def general(self) -> GeneralView:
         return GeneralView(lambda: self._draft.general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self, field: str) -> Generator[SetupGeneral | PointGeneral]:
-        with stage_general(self._draft, field) as candidate:
+    def _edit_general(self, _field: str) -> Generator[SetupGeneral | PointGeneral]:
+        with stage_general(self._draft) as candidate:
             yield candidate
 
-    def set(
-        self,
-        path: str,
-        value: YamlValue | complex,
-        *,
-        provenance: Provenance | None = None,
-    ) -> None:
+    def set(self, path: str, value: YamlValue | complex) -> None:
         """Accept a logical dotted path and working-unit value into this draft.
 
         Native complex scalars encode through the core codec before the original
-        schema/source validation; the stored value remains a YAML tag.
-
-        Omitted provenance records manual acceptance. An explicit source keeps
-        its five fixed fields and clears clone origin; non-manual event ids must
-        belong to this entry's ledger. Written containers accept their leaves
-        together. Invalid paths, schema values or source references raise before
-        acceptance. The enclosing view.edit() validates the complete document
-        and owns commit, conflict and publication. Empty or dotted mapping keys
-        cannot be addressed through this dotted syntax.
+        schema validation; the stored value remains a YAML tag. Containers
+        replace their whole value. Invalid paths or schema values raise before
+        changing the draft. Metadata at every path is kept unchanged, including
+        for same-value writes. Empty or dotted mapping keys cannot be addressed
+        through this dotted syntax.
         """
-        metadata = (
-            None
-            if provenance is None
-            else _accepted_source(provenance, self._ledger, self._entry_id)
-        )
-        _set_document_value(self._draft, path, value, metadata=metadata)
+        _set_document_value(self._draft, path, value)
+
+    def meta(self, path: str) -> YamlMap | None:
+        """Read isolated opaque draft metadata; absent paths return None.
+
+        path uses nonempty dotted segments. No value lookup or key
+        interpretation occurs; an empty stored mapping returns {}.
+        """
+        return read_metadata(self._draft.metadata, path)
+
+    def set_meta(self, path: str, metadata: object) -> None:
+        """Replace one dotted path's complete draft metadata with a detached copy.
+
+        metadata accepts only string keys and YAML null/bool/int/float/str/list/
+        mapping values, checked strictly. Invalid representation raises
+        ValidationError before changing the draft. {} clears the path. No value
+        lookup, merge, unit conversion or key interpretation occurs; values and
+        other paths are unchanged. DocumentStore's mapping-leaf merge and
+        conflict rules apply when the enclosing edit commits.
+        """
+        write_metadata(self._draft.metadata, path, metadata)
+        self._draft.model_fields_set.add("metadata")
 
     @property
     def description(self) -> str | None:
@@ -738,8 +590,8 @@ class EditView:
         )
 
     @contextmanager
-    def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
-        with stage_component(self._draft, name, field) as candidate:
+    def _edit_component(self, name: str, _field: str) -> Generator[ComponentSchema]:
+        with stage_component(self._draft, name) as candidate:
             yield candidate
 
 
@@ -748,15 +600,12 @@ class SetupView:
         self,
         store: DocumentStore[SetupDocument],
         source: Path,
-        *,
-        ledger: Path,
-        entry_id: str,
     ) -> None:
         """Bind one complete template Store and its source path without I/O.
 
         Reads use the cached working-unit snapshot. All edits commit only this
         template; existing points neither change nor participate in validation.
-        ResultEntry supplies the validated store, source, identity and ledger path.
+        ResultEntry supplies the validated store and source.
         Components shadowing any SetupView/PointView/EditView public member raise
         ValueError naming the member before this handle is bound.
         ResultEntry's store callback also rejects collisions on refresh/mutation
@@ -767,8 +616,6 @@ class SetupView:
         """
         self._store = store
         self._source = source
-        self._ledger = ledger
-        self._entry_id = entry_id
         self._edit_document = store.edit
         register_view_read(self, store, source)
 
@@ -777,8 +624,8 @@ class SetupView:
         return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
 
     @contextmanager
-    def _edit_general(self, field: str) -> Generator[SetupGeneral]:
-        with self._edit_document() as draft, stage_general(draft, field) as candidate:
+    def _edit_general(self, _field: str) -> Generator[SetupGeneral]:
+        with self._edit_document() as draft, stage_general(draft) as candidate:
             yield candidate
 
     @property
@@ -792,11 +639,12 @@ class SetupView:
 
     @contextmanager
     def edit(self) -> Generator[EditView]:
+        """Yield one value/metadata draft and commit only setup.yaml on normal exit."""
         with self._edit_document() as draft:
-            yield EditView(draft, ledger=self._ledger, entry_id=self._entry_id)
+            yield EditView(draft)
 
-    def meta(self, path: str) -> Provenance | None:
-        """Return an independent cached source in working units, or None."""
+    def meta(self, path: str) -> YamlMap | None:
+        """Return isolated cached opaque metadata for a dotted path, or None."""
         return document_meta(self._store.snapshot(), path)
 
     def refresh(self) -> None:
@@ -808,7 +656,7 @@ class SetupView:
         name must be a public identifier, not a keyword or a public member of
         SetupView, PointView or EditView. Shadowing raises ValueError naming the
         member. Unknown kind, duplicate or original model validation errors
-        propagate without publishing values, sources or file changes.
+        propagate without publishing values or file changes. No metadata is added.
         """
         with self._edit_document() as draft:
             add_component_to_draft(draft, name, kind, fields, self._source)
@@ -823,9 +671,9 @@ class SetupView:
         )
 
     @contextmanager
-    def _edit_component(self, name: str, field: str) -> Generator[ComponentSchema]:
+    def _edit_component(self, name: str, _field: str) -> Generator[ComponentSchema]:
         with (
             self._edit_document() as draft,
-            stage_component(draft, name, field) as candidate,
+            stage_component(draft, name) as candidate,
         ):
             yield candidate

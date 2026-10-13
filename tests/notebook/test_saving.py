@@ -20,6 +20,7 @@ from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
+from zcu_tools.format_version import YamlMap
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.notebook import saving as saving_module
@@ -42,7 +43,7 @@ from zcu_tools.resources.entry import (
     source_path,
     writeback,
 )
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import PARAMETER_VERSION, PointDocument
 
 from tests._native_support import native_metadata
 from tests.device._snapshot_fakes import SnapshotDevice
@@ -603,10 +604,15 @@ def test_ledger_append_failure_propagates_after_files_are_written(
     assert load_run_data(native).metadata.run_id == exp.acquisition_for(source).run_id
 
 
-@pytest.mark.parametrize("stderr", [0.0, 0.25, None])
-def test_accept_writes_role_values_and_local_accepted_provenance(
-    accept_point: PointView, ledger: RecordsLedger, stderr: float | None
+@pytest.mark.parametrize(
+    "metadata", [{"stderr": 0.25}, {}, {"stderr": -1, "comment": ["caller", None]}]
+)
+def test_accept_writes_role_values_and_caller_metadata(
+    accept_point: PointView, ledger: RecordsLedger, metadata: YamlMap
 ) -> None:
+    with accept_point.edit() as draft:
+        draft.set_meta("D1.rate", {"stderr": 9.0, "stale": True})
+        draft.set_meta("general.description", {"comment": "kept"})
     exp = experiment()
     source = exp.run(SavingCfg())
     roles = accept_point.resolve(("notebook_target",), notebook_target="D1")
@@ -620,7 +626,7 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert acquired_payload(ledger).roles == {"notebook_target": "D1"}
     event_id = saved.accept(
         parameter={
-            "notebook_target.rate": (1250.0, stderr),
+            "notebook_target.rate": (1250.0, metadata),
             "general.description": "accepted fit",
         },
     )
@@ -636,29 +642,20 @@ def test_accept_writes_role_values_and_local_accepted_provenance(
     assert accept_point.D1.rate == 1250.0
     assert accept_point.D2.rate == 2000.0
     assert accept_point.description == "accepted fit"
-    metadata = accept_point.meta("D1.rate")
-    assert metadata is not None
-    assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
-        event_id,
-        "test/saving",
-        saved.run_id,
-        event.at,
-    )
-    assert metadata.stderr == stderr
-    description_source = accept_point.meta("general.description")
-    assert description_source is not None
-    assert description_source.source == event_id
-    assert description_source.stderr is None
+    assert accept_point.meta("D1.rate") == metadata
+    assert accept_point.meta("general.description") == {"comment": "kept"}
 
 
-def test_accept_preserves_json_containers_and_unknown_stderr(
+def test_accept_preserves_json_containers_and_existing_metadata(
     point: PointView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(point, source=source)
+    with point.edit() as draft:
+        draft.set_meta("general.ext.series", {"comment": "kept"})
     event_id = saved.accept(
-        parameter={"general.ext": ({"series": [1, 2], "optional": None}, None)}
+        parameter={"general.ext": {"series": [1, 2], "optional": None}}
     )
     point.refresh()
     assert point.general.ext.series == [1, 2]
@@ -666,10 +663,7 @@ def test_accept_preserves_json_containers_and_unknown_stderr(
     event = ledger.get(event_id).event
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.writes[0].value == {"series": [1, 2], "optional": None}
-    metadata = point.meta("general.ext.series")
-    assert metadata is not None
-    assert metadata.source == event_id
-    assert metadata.stderr is None
+    assert point.meta("general.ext.series") == {"comment": "kept"}
 
 
 def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
@@ -703,15 +697,15 @@ def test_accept_keeps_original_point_roles_and_run_after_later_acquisition(
         ({}, "nonempty"),
         ({"general.ext.flux_value": float("nan")}, "strict JSON"),
         ({"general.ext.flux_value": float("inf")}, "strict JSON"),
-        ({"general.ext.flux_value": (1.0, -0.1)}, "stderr"),
-        ({"general.ext.flux_value": (1.0, float("nan"))}, "stderr"),
-        ({"general.ext.flux_value": (1.0, float("inf"))}, "stderr"),
+        ({"general.ext.flux_value": (1.0, 0.25)}, "dictionary"),
+        ({"general.ext.flux_value": (1.0, None)}, "dictionary"),
+        ({"general.ext.flux_value": (1.0, {"bad": (1, 2)})}, "bad"),
     ],
 )
 def test_accept_rejects_invalid_input_without_point_writes(
     point: PointView,
     ledger: RecordsLedger,
-    values: Mapping[str, JsonValue | tuple[JsonValue, float | None]],
+    values: Mapping[str, JsonValue | tuple[JsonValue, YamlMap]],
     message: str,
 ) -> None:
     exp = experiment()
@@ -778,10 +772,13 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     binding = capture_point_storage(point)
     bound = PointView(
         DocumentStore(
-            path, PointDocument, format="zcu.parameter-container", validate=reject_fit
+            path,
+            PointDocument,
+            format="zcu.parameter-container",
+            supported_version=PARAMETER_VERSION,
+            validate=reject_fit,
         ),
         path,
-        ledger=tmp_path / "results" / "entry" / "records" / "ledger.jsonl",
         entry_id=str(binding.entry_id),
         result_root=tmp_path / "results",
         database_root=tmp_path / "Database",
@@ -841,7 +838,7 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
     waveform = ConstWaveformCfg(length=0.075)
     before = len(ledger.events())
     event_id = saved.accept(
-        parameter={"notebook_target.rate": (1500.0, 0.5)},
+        parameter={"notebook_target.rate": (1500.0, {"stderr": 0.5})},
         module={"notebook_target.pulses.pi": pulse},
         waveform={"notebook_target.waveforms.base": waveform},
     )
@@ -864,7 +861,6 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
     assert library.waveform_spec("D1.waveforms.base") == waveform
     assert accept_point.D1.rate == 1500.0
     for metadata in (
-        accept_point.meta("D1.rate"),
         library.meta("D1.pulses.pi.gain"),
         library.meta("D1.waveforms.base.length"),
     ):
@@ -876,9 +872,8 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
             event.at,
         )
     module_meta = library.meta("D1.pulses.pi.gain")
-    rate_meta = accept_point.meta("D1.rate")
     assert module_meta is not None and module_meta.stderr is None
-    assert rate_meta is not None and rate_meta.stderr == 0.5
+    assert accept_point.meta("D1.rate") == {"stderr": 0.5}
 
 
 @pytest.mark.parametrize("family", ["module", "waveform"])
@@ -932,9 +927,7 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
     assert isinstance(caught.value.__cause__, ValueError)
     assert "Wrong module family" in str(caught.value.__cause__)
     assert library.waveform_keys() == ()
-    rate_meta = accept_point.meta("D1.rate")
     module_meta = library.meta("D1.pulses.good.gain")
-    assert rate_meta is not None and rate_meta.source == ledger.events()[-1].id
     assert module_meta is not None and module_meta.source == ledger.events()[-1].id
 
 

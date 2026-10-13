@@ -29,6 +29,7 @@ from zcu_tools.experiment.run_saving import (
     SaveReport,
     save_artifacts,
 )
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     ArtifactKey,
@@ -220,7 +221,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         self,
         *,
         parameter: Mapping[
-            str, JsonValue | complex | tuple[JsonValue | complex, float | None]
+            str, JsonValue | complex | tuple[JsonValue | complex, YamlMap]
         ]
         | None = None,
         module: Mapping[str, ModuleSpec] | None = None,
@@ -230,8 +231,12 @@ class SavedRun(Generic[CfgT, ResultT]):
         """Accept results into this run's captured point, library and samples.
 
         parameter maps dotted point paths to working-unit JSON/complex values
-        or (value, stderr) pairs; stderr is finite, non-negative or None for
-        unknown. module and waveform map library keys to named persistent Specs,
+        or (value, metadata) pairs. A plain value keeps the path's existing
+        metadata. A pair replaces it with the caller's opaque string-keyed YAML
+        mapping in the same point commit; {} clears it. The second item must be
+        such a mapping; anything else, including a number or None, raises
+        ValidationError before the ledger append. Keys such as stderr are not
+        interpreted. module and waveform map library keys to named persistent Specs,
         not raw dictionaries. Parameter and library paths expand only their
         first segment using this run's captured roles. At least one mapping
         must be nonempty.
@@ -247,7 +252,8 @@ class SavedRun(Generic[CfgT, ResultT]):
         with event_id/applied and the original cause; ledger append fails unchanged.
         The first failure stops later writes; prior successful items
         and the event remain. No cross-item rollback or retry is provided.
-        Provenance kind is this run's experiment name, never caller-supplied.
+        Library Provenance kind is this run's experiment name, never
+        caller-supplied. Parameter metadata receives no event, run or time.
         Return the accepted event ID after all items succeed.
         """
         if not parameter and not module and not waveform and not samples:
@@ -256,11 +262,14 @@ class SavedRun(Generic[CfgT, ResultT]):
         items: list[WritebackItem] = []
         for path, item in (parameter or {}).items():
             if isinstance(item, tuple):
-                value, stderr = item
+                value, raw_metadata = item
+                metadata = TypeAdapter(YamlMap).validate_python(
+                    raw_metadata, strict=True
+                )
             else:
-                value, stderr = item, None
+                value, metadata = item, None
             actual_path = resolve_path(document, path, roles=self._storage.roles)
-            items.append(ParameterWriteback(actual_path, value, stderr))
+            items.append(ParameterWriteback(actual_path, value, metadata))
         for path, spec in (module or {}).items():
             actual_path = resolve_path(document, path, roles=self._storage.roles)
             items.append(ModuleWriteback(actual_path, spec))
