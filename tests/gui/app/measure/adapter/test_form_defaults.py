@@ -310,6 +310,107 @@ def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> No
     assert cfg.readout.ro_cfg.ro_freq == 0
 
 
+def readout_expression_form(expression: Expr | None) -> Form[ReadoutCore]:
+    """Author nested defaults on existing persistent Spec families only."""
+    seeds = {
+        "pulse_cfg.type": "pulse",
+        "pulse_cfg.ch": 1,
+        "pulse_cfg.nqz": 1,
+        "pulse_cfg.freq": 100.0,
+        "pulse_cfg.gain": 0.3,
+        "pulse_cfg.waveform.style": "cosine",
+        "pulse_cfg.waveform.length": expression if expression is not None else 0.2,
+        "ro_cfg.ro_ch": 0,
+        "ro_cfg.ro_length": 0.2,
+    }
+    if expression is not None:
+        seeds["ro_cfg.trig_offset"] = expression
+        seeds["pulse_cfg.phase"] = expression
+    form = Form(ReadoutCore, {"readout": Template("synthetic-readout")})
+    form.bind_templates(
+        {"synthetic-readout": TemplateDef(PulseReadoutSpec, "Readout", seeds)},
+        adapter="synthetic",
+    )
+    return form
+
+
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'"])
+def test_nested_template_expression_failure_requires_input(expression: str) -> None:
+    env = FormEnv()
+    form = readout_expression_form(Expr(expression))
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    assert isinstance(result, FormErrors), result
+    assert result.messages == {
+        ("readout", "module", "ro_cfg", "trig_offset"): "Field required",
+        ("readout", "module", "pulse_cfg", "phase"): "Field required",
+        ("readout", "module", "pulse_cfg", "waveform", "length"): "Field required",
+    }
+    state.write(
+        {
+            ("readout", "module", "ro_cfg", "trig_offset"): 0.4,
+            ("readout", "module", "pulse_cfg", "phase"): 0.4,
+            ("readout", "module", "pulse_cfg", "waveform", "length"): 0.4,
+        },
+        env,
+    )
+    result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    assert cfg.readout.ro_cfg.trig_offset == 0.4
+    assert cfg.readout.pulse_cfg.phase == 0.4
+    assert cfg.readout.pulse_cfg.waveform.length == 0.4
+
+
+@pytest.mark.parametrize("expression", [None, Expr("2 * .2")])
+def test_nested_template_expression_and_static_defaults_are_isolated(
+    expression: Expr | None,
+) -> None:
+    env = FormEnv()
+    failed = readout_expression_form(Expr("$unbound.value"))
+    form = readout_expression_form(expression)
+    state = FormState(form.default_input(env))
+    readout = state.input.data["readout"]
+    assert isinstance(readout, dict)
+    module = readout["module"]
+    assert isinstance(module, dict)
+    ro = module["ro_cfg"]
+    pulse = module["pulse_cfg"]
+    assert isinstance(ro, dict) and isinstance(pulse, dict)
+    waveform = pulse["waveform"]
+    assert isinstance(waveform, dict)
+    expected = 0.0 if expression is None else 0.4
+    assert ro["trig_offset"] == pulse["phase"] == expected
+    assert waveform["length"] == (0.2 if expression is None else 0.4)
+    result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    assert cfg.readout.ro_cfg.trig_offset == cfg.readout.pulse_cfg.phase == expected
+    assert cfg.readout.pulse_cfg.waveform.length == waveform["length"]
+    # Another form's failed seeds must not affect this form or persistent Specs.
+    failed.default_input(env)
+    native = PulseReadoutCfg.model_validate(
+        {
+            "pulse_cfg": {
+                "ch": 1,
+                "nqz": 1,
+                "freq": 100,
+                "gain": 0.3,
+                "waveform": {"style": "cosine", "length": 0.2},
+            },
+            "ro_cfg": {"ro_ch": 0, "ro_length": 0.2},
+        }
+    )
+    assert native.ro_cfg.trig_offset == native.pulse_cfg.phase == 0
+    assert state.result(env) == result
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_missing_discriminator_error_names_template_and_nested_field(
     nested: bool,
