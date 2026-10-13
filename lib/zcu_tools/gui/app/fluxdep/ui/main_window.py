@@ -710,7 +710,7 @@ class MainWindow(QMainWindow):
         dialog = ProjectDialog(
             self._ctrl.state.project,
             parent=self,
-            db_label="Database path",
+            db_label="Data root",
             project_root=self._ctrl.get_project_root(),
         )
         # Non-blocking open() keeps the Qt event loop (and the read-only control

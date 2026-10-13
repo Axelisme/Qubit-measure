@@ -12,7 +12,15 @@ steps that used to be separate buttons:
 
 The search runs on a worker thread. After recording its numeric result, the main
 thread renders its diagnostic figure into a FigureContainer. Plot failures are
-reported separately and do not invalidate the fit.
+reported separately and do not invalidate the fit. Search problems (a missing
+database, a rejected search) go to the Search status line and Show drawing
+problems to the Show status line; neither opens a modal.
+
+Public Qt seams (objectName): ``fluxdep.fit.search_db``, ``fluxdep.fit.bounds_preset``,
+``fluxdep.fit.r_f`` / ``fluxdep.fit.sample_f`` with their ``.required`` marks,
+``fluxdep.fit.search`` / ``cancel`` / ``export_params``, ``fluxdep.fit.status``,
+``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits`` and
+``fluxdep.show.status``.
 """
 
 from __future__ import annotations
@@ -62,7 +70,12 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
 from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, format_stale_reasons
-from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY, FitState
+from zcu_tools.gui.app.fluxdep.state import (
+    FIT_VERSION_KEY,
+    FitState,
+    transitions_need_r_f,
+    transitions_need_sample_f,
+)
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -85,12 +98,17 @@ _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 _ShowKey = tuple[int, tuple[tuple[str, int], ...], FitDisplay]
 
 
-# (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
-_BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
+# (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz),
+# in the order the Bounds preset combo lists them.
+BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
     "general": ((2.0, 15.0), (0.2, 2.0), (0.1, 2.0)),
     "integer": ((3.0, 6.0), (0.8, 2.0), (0.08, 0.2)),
     "all": ((1.0, 20.0), (0.1, 4.0), (0.01, 3.0)),
 }
+# Preset combo entry shown while the bounds match no preset; choosing it keeps them.
+_CUSTOM_PRESET = "custom"
+# Hint text color, the shared amber the control indicator uses for "Local locked".
+_HINT_STYLE = "color: #a66b00;"
 
 
 def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
@@ -102,14 +120,36 @@ def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
     return box
 
 
-def _freq_edit() -> QLineEdit:
+def _freq_edit(object_name: str) -> QLineEdit:
     """A nullable frequency field: blank means unset, else a float."""
     from qtpy.QtGui import QDoubleValidator
 
     edit = QLineEdit()
+    edit.setObjectName(object_name)
     edit.setPlaceholderText("(unset)")
     edit.setValidator(QDoubleValidator())
     return edit
+
+
+def _required_mark(object_name: str, text: str) -> QLabel:
+    """A hidden hint that marks a field some chosen transitions need."""
+    label = QLabel(text)
+    label.setObjectName(object_name)
+    label.setStyleSheet(_HINT_STYLE)
+    label.setWordWrap(True)
+    label.setHidden(True)
+    return label
+
+
+def _field_with_mark(field: QLineEdit, mark: QLabel) -> QWidget:
+    """The field with its hint directly underneath, as one form-row widget."""
+    holder = QWidget()
+    layout = QVBoxLayout(holder)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(2)
+    layout.addWidget(field)
+    layout.addWidget(mark)
+    return holder
 
 
 def _parse_freq(edit: QLineEdit) -> float | None:
@@ -128,13 +168,26 @@ def _set_freq(edit: QLineEdit, value: float | None) -> None:
     edit.setText("" if value is None else f"{value:g}")
 
 
-def _message_label(accessible_name: str) -> QLabel:
+def _message_label(accessible_name: str, object_name: str) -> QLabel:
     """A wrapping message label that never widens the form (Ignored horizontal)."""
     label = QLabel("")
     label.setAccessibleName(accessible_name)
+    label.setObjectName(object_name)
     label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     label.setWordWrap(True)
     return label
+
+
+def _control_column(*widgets: QWidget) -> QWidget:
+    """Stack widgets at the top of a column; spare height stays below them."""
+    column = QWidget()
+    layout = QVBoxLayout(column)
+    layout.setContentsMargins(0, 0, 0, 0)
+    for widget in widgets:
+        layout.addWidget(widget)
+    layout.addStretch(1)
+    column.setMaximumWidth(380)
+    return column
 
 
 def _published_inputs(
@@ -273,6 +326,10 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtWidgets import QSplitter
 
         form_box = self._build_search_form()
+        # Status lines sit outside the form, so a non-holder reads them enabled.
+        self._status = _message_label("Status", "fluxdep.fit.status")
+        # Outdated-fit line with its root-change reasons; blank while fresh.
+        self._freshness = _message_label("Freshness", "fluxdep.fit.freshness")
 
         # Right: the search's native diagnostic figure, explicitly presented.
         self._diag_stack = QStackedWidget()
@@ -282,7 +339,7 @@ class AnalyzePanelWidget(QWidget):
         self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(form_box)
+        splitter.addWidget(_control_column(form_box, self._status, self._freshness))
         splitter.addWidget(self._diag_stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -291,70 +348,97 @@ class AnalyzePanelWidget(QWidget):
         QVBoxLayout(holder).addWidget(splitter)
         return holder
 
-    # --- Show tab --------------------------------------------------------
-
     def _build_search_form(self) -> QGroupBox:
         form_box = QGroupBox("Search parameters")
         form = QFormLayout(form_box)
         self._search_form = form_box
 
         self._db_edit = QLineEdit()
+        self._db_edit.setObjectName("fluxdep.fit.search_db")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._on_browse_db)
         db_row = QHBoxLayout()
+        db_row.setContentsMargins(0, 0, 0, 0)
         db_row.addWidget(self._db_edit, stretch=1)
         db_row.addWidget(browse)
         db_holder = QWidget()
         db_holder.setLayout(db_row)
-        form.addRow("Database", db_holder)
+        form.addRow("Search DB", db_holder)
 
         self._preset = QComboBox()
-        self._preset.addItems(sorted(_BOUND_PRESETS))
+        self._preset.setObjectName("fluxdep.fit.bounds_preset")
+        self._preset.addItems([*BOUND_PRESETS, _CUSTOM_PRESET])
         self._preset.activated.connect(self._on_preset_selected)
         form.addRow("Bounds preset", self._preset)
 
         self._ej_lo, self._ej_hi = _bound_spinbox(2.0), _bound_spinbox(15.0)
         self._ec_lo, self._ec_hi = _bound_spinbox(0.2), _bound_spinbox(2.0)
         self._el_lo, self._el_hi = _bound_spinbox(0.1), _bound_spinbox(2.0)
-        form.addRow("EJ bounds", self._bound_row(self._ej_lo, self._ej_hi))
-        form.addRow("EC bounds", self._bound_row(self._ec_lo, self._ec_hi))
-        form.addRow("EL bounds", self._bound_row(self._el_lo, self._el_hi))
+        form.addRow("EJ (GHz)", self._bound_row(self._ej_lo, self._ej_hi))
+        form.addRow("EC (GHz)", self._bound_row(self._ec_lo, self._ec_hi))
+        form.addRow("EL (GHz)", self._bound_row(self._el_lo, self._el_hi))
+        for box in self._bound_boxes():
+            box.valueChanged.connect(self._sync_preset)
 
-        # r_f / sample_f are optional (blank = unset); a transition category that
-        # needs one is validated before search.
-        self._r_f = _freq_edit()
-        self._sample_f = _freq_edit()
-        form.addRow("r_f (GHz)", self._r_f)
-        form.addRow("sample_f (GHz)", self._sample_f)
+        self._add_frequency_rows(form)
 
         self._transitions_form = TransitionsForm()
         form.addRow(QLabel("Transitions"))
         form.addRow(self._transitions_form)
+        for changed in (
+            self._transitions_form.changed,
+            self._r_f.textChanged,
+            self._sample_f.textChanged,
+        ):
+            changed.connect(self._refresh_frequency_marks)
 
-        self._search_btn = QPushButton("Search database")
+        self._add_search_actions(form)
+        return form_box
+
+    def _add_frequency_rows(self, form: QFormLayout) -> None:
+        """Add the r_f / sample_f fields, each with its hidden required mark.
+
+        Both are optional (blank = unset). A field is marked while the entered
+        transitions need it; Search still leaves validation to the Controller.
+        """
+        self._r_f = _freq_edit("fluxdep.fit.r_f")
+        self._sample_f = _freq_edit("fluxdep.fit.sample_f")
+        self._r_f_required = _required_mark(
+            "fluxdep.fit.r_f.required", "Needed by the sideband transitions."
+        )
+        self._sample_f_required = _required_mark(
+            "fluxdep.fit.sample_f.required", "Needed by the mirror transitions."
+        )
+        form.addRow("r_f (GHz)", _field_with_mark(self._r_f, self._r_f_required))
+        form.addRow(
+            "sample_f (GHz)", _field_with_mark(self._sample_f, self._sample_f_required)
+        )
+
+    def _add_search_actions(self, form: QFormLayout) -> None:
+        """Add Search / Cancel, the progress bar and Export params…."""
+        self._search_btn = QPushButton("Search")
+        self._search_btn.setObjectName("fluxdep.fit.search")
         self._search_btn.clicked.connect(self._on_search)
-        form.addRow(self._search_btn)
-        self._cancel_btn = QPushButton("Cancel search")
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("fluxdep.fit.cancel")
         self._cancel_btn.clicked.connect(self._on_cancel_search)
         self._cancel_btn.setEnabled(False)
-        form.addRow(self._cancel_btn)
+        run_row = QHBoxLayout()
+        run_row.addWidget(self._search_btn)
+        run_row.addWidget(self._cancel_btn)
+        form.addRow(run_row)
 
         self._progress = QProgressBar()
         self._progress.setVisible(False)
         form.addRow(self._progress)
 
-        self._export_btn = QPushButton("Export params.json")
+        self._export_btn = QPushButton("Export params…")
+        self._export_btn.setObjectName("fluxdep.fit.export_params")
         self._export_btn.clicked.connect(self._on_export)
         self._export_btn.setEnabled(False)
         form.addRow(self._export_btn)
 
-        self._status = _message_label("Status")
-        form.addRow(self._status)
-        # Outdated-fit line with its root-change reasons; blank while fresh.
-        self._freshness = _message_label("Freshness")
-        form.addRow(self._freshness)
-
-        return form_box
+    # --- Show tab --------------------------------------------------------
 
     def _build_show_tab(self) -> QWidget:
         from qtpy.QtCore import Qt
@@ -368,6 +452,7 @@ class AnalyzePanelWidget(QWidget):
         tools.addRow("x limits", self._bound_row(self._x_lo, self._x_hi))
         tools.addRow("y limits", self._bound_row(self._y_lo, self._y_hi))
         auto_btn = QPushButton("Auto limits")
+        auto_btn.setObjectName("fluxdep.show.auto_limits")
         auto_btn.clicked.connect(self._apply_auto_limits)
         tools.addRow(auto_btn)
 
@@ -380,15 +465,18 @@ class AnalyzePanelWidget(QWidget):
         tools.addRow(self._transitions_show)
 
         redraw = QPushButton("Apply")
+        redraw.setObjectName("fluxdep.show.apply")
         redraw.clicked.connect(self._apply_display)
         tools.addRow(redraw)
+
+        # Show's drawing problems; the Search status line stays Search's.
+        self._show_status = _message_label("Show status", "fluxdep.show.status")
 
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
 
-        tools_box.setMaximumWidth(380)
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(tools_box)
+        splitter.addWidget(_control_column(tools_box, self._show_status))
         splitter.addWidget(self._fit_canvas)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -399,8 +487,20 @@ class AnalyzePanelWidget(QWidget):
 
     # --- helpers ---------------------------------------------------------
 
+    def _bound_boxes(self) -> tuple[QDoubleSpinBox, ...]:
+        """The Search EJ/EC/EL lower and upper bound boxes, in that order."""
+        return (
+            self._ej_lo,
+            self._ej_hi,
+            self._ec_lo,
+            self._ec_hi,
+            self._el_lo,
+            self._el_hi,
+        )
+
     def _bound_row(self, lo: QDoubleSpinBox, hi: QDoubleSpinBox) -> QWidget:
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(lo)
         row.addWidget(QLabel("–"))
         row.addWidget(hi)
@@ -430,6 +530,8 @@ class AnalyzePanelWidget(QWidget):
         _set_freq(self._sample_f, fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
+        self._sync_preset()
+        self._refresh_frequency_marks()
         self._applied_display = self._display_from_controls()
         self._export_btn.setEnabled(fit.has_result)
         # Compare published inputs, not results, to preserve local display edits.
@@ -540,13 +642,13 @@ class AnalyzePanelWidget(QWidget):
 
     # --- Search actions --------------------------------------------------
 
-    def _missing_freq_message(self, transitions, r_f, sample_f):
+    def _missing_freq_message(
+        self,
+        transitions: TransitionDict,
+        r_f: float | None,
+        sample_f: float | None,
+    ) -> str | None:
         """Return a message if a chosen transition needs an unset r_f/sample_f."""
-        from zcu_tools.gui.app.fluxdep.state import (
-            transitions_need_r_f,
-            transitions_need_sample_f,
-        )
-
         if transitions_need_r_f(transitions) and r_f is None:
             return (
                 "The transitions include a blue/red-side or mirror category, which "
@@ -573,17 +675,45 @@ class AnalyzePanelWidget(QWidget):
             sample_f=sample_f,
         )
 
-    def _on_preset_selected(self, _index: int) -> None:
-        preset = _BOUND_PRESETS.get(self._preset.currentText())
+    def _on_preset_selected(self, index: int) -> None:
+        """Fill the bound boxes from the chosen preset; custom keeps them."""
+        preset = BOUND_PRESETS.get(self._preset.itemText(index))
         if preset is None:
+            self._sync_preset()
             return
-        (ej, ec, el) = preset
-        self._ej_lo.setValue(ej[0])
-        self._ej_hi.setValue(ej[1])
-        self._ec_lo.setValue(ec[0])
-        self._ec_hi.setValue(ec[1])
-        self._el_lo.setValue(el[0])
-        self._el_hi.setValue(el[1])
+        values = [bound for pair in preset for bound in pair]
+        for box, value in zip(self._bound_boxes(), values, strict=True):
+            box.setValue(value)
+
+    def _sync_preset(self) -> None:
+        """Name the preset the bound boxes hold exactly, else custom."""
+        lo_hi = [box.value() for box in self._bound_boxes()]
+        shown = (
+            (lo_hi[0], lo_hi[1]),
+            (lo_hi[2], lo_hi[3]),
+            (lo_hi[4], lo_hi[5]),
+        )
+        name = next(
+            (name for name, preset in BOUND_PRESETS.items() if preset == shown),
+            _CUSTOM_PRESET,
+        )
+        self._preset.setCurrentText(name)
+
+    def _refresh_frequency_marks(self) -> None:
+        """Mark r_f / sample_f while the entered transitions need a blank one."""
+        try:
+            transitions = self._transitions_form.get_transitions()
+        except ValueError:
+            # Malformed pairs are reported when Search parses them; until then
+            # no category counts as entered.
+            transitions = TransitionDict()
+        self._r_f_required.setHidden(
+            not transitions_need_r_f(transitions) or _parse_freq(self._r_f) is not None
+        )
+        self._sample_f_required.setHidden(
+            not transitions_need_sample_f(transitions)
+            or _parse_freq(self._sample_f) is not None
+        )
 
     def _on_browse_db(self) -> None:
         from .paths import database_dir
@@ -614,16 +744,8 @@ class AnalyzePanelWidget(QWidget):
         if not os.path.isfile(db_path):
             self._status.setText(f"Database not found: {db_path}")
             return
-        # Pre-check that needed r_f / sample_f are filled for the chosen
-        # transitions (else search_database would fail with a cryptic error).
-        missing = self._missing_freq_message(
-            self._transitions_form.get_transitions(),
-            _parse_freq(self._r_f),
-            _parse_freq(self._sample_f),
-        )
-        if missing:
-            self._show_message("Missing frequency", missing)
-            return
+        # A transition missing its r_f / sample_f is marked on the field; the
+        # Controller rejects the search and the status line reports it.
         try:
             self._commit_params()
         except ValueError as exc:
@@ -635,9 +757,9 @@ class AnalyzePanelWidget(QWidget):
         except Exception as exc:
             logger.exception("search start failed")
             self._refresh_search()
-            # Opened failures already published one SearchChanged warning.
+            # An opened failure already set the status from its activity.
             if self._ctrl.search.current == previous:
-                self._on_search_error(exc)
+                self._status.setText(friendly_fit_message("Search", exc))
 
     def _on_cancel_search(self) -> None:
         token = self._ctrl.search.active_token
@@ -645,9 +767,8 @@ class AnalyzePanelWidget(QWidget):
             self._ctrl.search.cancel(token)
 
     def _on_search_changed(self, payload: SearchChangedPayload) -> None:
+        del payload
         self._refresh_search()
-        if payload.status == "failed":
-            self._show_message("Search failed", payload.error or "Search failed.")
 
     def _refresh_search(self) -> None:
         activity = self._ctrl.search.current
@@ -671,7 +792,11 @@ class AnalyzePanelWidget(QWidget):
                     self._shown_token = activity.token
                     self._present_search_result(result)
             elif activity.status == "failed":
-                self._status.setText(f"Search failed: {activity.error}")
+                self._status.setText(
+                    friendly_fit_message("Search", activity.error)
+                    if activity.error is not None
+                    else "Search failed."
+                )
             else:
                 self._status.setText("Search cancelled.")
 
@@ -723,11 +848,6 @@ class AnalyzePanelWidget(QWidget):
             self._progress_dispose()
             self._progress_dispose = None
         self.release_figures()
-
-    def _on_search_error(self, exc: Exception) -> None:
-        logger.exception("search worker failed", exc_info=exc)
-        self._status.setText("Search failed.")
-        self._show_message("Search failed", friendly_fit_message("Search", exc))
 
     def _on_export(self) -> None:
         try:
@@ -813,8 +933,9 @@ class AnalyzePanelWidget(QWidget):
             else fit.transitions
         )
         missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
+        notice = ""
         if missing:
-            self._status.setText("Show: " + missing.split(".")[0] + ".")
+            notice = missing.split(".")[0] + ". Showing the fit transitions instead."
             show_transitions = fit.transitions
 
         try:
@@ -827,7 +948,8 @@ class AnalyzePanelWidget(QWidget):
             )
         except Exception as exc:
             logger.exception("render_fit_figure failed")
-            self._status.setText(f"Could not draw: {exc}")
+            self._show_status.setText(f"Could not draw: {exc}")
             return
+        self._show_status.setText(notice)
         self._shown_fit = self._show_key()
         self._fit_canvas.draw_idle()

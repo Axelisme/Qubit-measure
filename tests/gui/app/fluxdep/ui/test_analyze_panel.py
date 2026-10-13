@@ -14,13 +14,17 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
-from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
-from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
-from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
     QSizePolicy,
     QTabWidget,
 )
@@ -30,7 +34,7 @@ from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FitState, FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
-    _BOUND_PRESETS,
+    BOUND_PRESETS,
     AnalyzePanelWidget,
 )
 from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
@@ -473,8 +477,8 @@ def test_three_tabs_filter_search_show(panel):
 
 
 def test_presets_cover_the_notebook_ranges():
-    assert set(_BOUND_PRESETS) == {"general", "integer", "all"}
-    for bounds in _BOUND_PRESETS.values():
+    assert set(BOUND_PRESETS) == {"general", "integer", "all"}
+    for bounds in BOUND_PRESETS.values():
         assert len(bounds) == 3
         assert all(lo < hi for lo, hi in bounds)
 
@@ -482,7 +486,7 @@ def test_presets_cover_the_notebook_ranges():
 def test_preset_fills_bound_spinboxes(panel):
     w, _ = panel
     _choose_preset(w, "integer")
-    ej, ec, el = _BOUND_PRESETS["integer"]
+    ej, ec, el = BOUND_PRESETS["integer"]
     assert _bound_values(w) == [*ej, *ec, *el]
 
 
@@ -492,10 +496,10 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
     default = FitState()
     assert preset.currentText() == next(
         name
-        for name, bounds in _BOUND_PRESETS.items()
+        for name, bounds in BOUND_PRESETS.items()
         if bounds == (default.EJb, default.ECb, default.ELb)
     ), "a fresh form names the preset its default bounds come from"
-    for name, (ej, ec, el) in _BOUND_PRESETS.items():
+    for name, (ej, ec, el) in BOUND_PRESETS.items():
         ctrl.set_fit_params(
             search_database_hdf5,
             ej,
@@ -522,7 +526,7 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
     ej_lo = _search_group(w).findChildren(QDoubleSpinBox)[0]
     ej_lo.setValue(ej_lo.value() + 0.5)
     assert preset.currentText() == "custom", "an edited bound is no longer the preset"
-    ej_lo.setValue(_BOUND_PRESETS["integer"][0][0])
+    ej_lo.setValue(BOUND_PRESETS["integer"][0][0])
     assert preset.currentText() == "integer"
 
 
@@ -582,11 +586,15 @@ def test_auto_limits_match_visualizer(panel, qapp):
 
 
 @pytest.mark.parametrize(
-    ("category", "needed", "other"),
-    [("mirror", "sample_f", "r_f"), ("red side", "r_f", "sample_f")],
+    ("needing", "needed", "other"),
+    [
+        (TransitionDict({"mirror": [(0, 1)]}), "sample_f", "r_f"),
+        (TransitionDict({"red side": [(0, 1)]}), "r_f", "sample_f"),
+    ],
+    ids=["mirror", "red side"],
 )
 def test_frequency_field_is_marked_while_a_transition_needs_it(
-    panel, category, needed, other
+    panel, needing, needed, other
 ):
     w, _ = panel
     form = _search_group(w).findChildren(TransitionsForm)[0]
@@ -594,7 +602,7 @@ def test_frequency_field_is_marked_while_a_transition_needs_it(
     field = named(w, QLineEdit, f"fluxdep.fit.{needed}")
     form.set_transitions(TransitionDict({"transitions": [(0, 1)]}))
     assert required.isHidden()
-    form.set_transitions(TransitionDict({category: [(0, 1)]}))
+    form.set_transitions(needing)
     assert not required.isHidden()
     assert named(w, QLabel, f"fluxdep.fit.{other}.required").isHidden()
     field.setText("6.0")

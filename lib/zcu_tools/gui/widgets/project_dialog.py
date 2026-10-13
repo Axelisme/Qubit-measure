@@ -10,7 +10,7 @@ have a Browse button (choose a folder). Returns a ``ProjectInfo`` (or None on
 cancel).
 
 The single per-app difference is the database field's label (``db_label``):
-fluxdep calls it "Database path" (the raw spectrum root), dispersive "One-tone
+fluxdep calls it "Data root" (the raw spectrum root), dispersive "One-tone
 dir" (its raw one-tone root). The app passes its label; everything else is shared.
 """
 
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # fluxdep's label; the database field's default form-row label. dispersive passes
 # its own ("One-tone dir") explicitly.
-DEFAULT_DB_LABEL = "Database path"
+DEFAULT_DB_LABEL = "Data root"
 
 
 class ProjectDialog(QDialog):
