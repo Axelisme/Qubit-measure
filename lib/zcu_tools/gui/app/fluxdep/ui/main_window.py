@@ -108,13 +108,16 @@ class _SpectrumRowDelegate(QStyledItemDelegate):
         index: QModelIndex,
     ) -> None:
         super().initStyleOption(option, index)
-        assert option is not None  # Qt always passes the option it paints with
+        if option is None:
+            raise TypeError("initStyleOption needs the option Qt paints with")
         name = index.data(Qt.ItemDataRole.UserRole)
         details = index.data(_DETAILS_ROLE)
-        assert isinstance(name, str) and isinstance(details, str)  # _refresh_list
+        if not isinstance(name, str) or not isinstance(details, str):
+            raise TypeError("spectrum rows hold a str name and str details")
         widget = option.widget
         style = widget.style()
-        assert style is not None  # a shown QListWidget always has a style
+        if style is None:
+            raise RuntimeError("spectrum rows are painted by a styled list widget")
         text_rect = style.subElementRect(
             QStyle.SubElement.SE_ItemViewItemText, option, widget
         )

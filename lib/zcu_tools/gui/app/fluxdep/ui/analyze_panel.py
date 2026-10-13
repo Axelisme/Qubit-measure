@@ -82,6 +82,7 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.widgets.control_indicator import CAUTION_COLOR
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
@@ -109,8 +110,8 @@ _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 # Preset combo entry shown while the bounds match no preset; choosing it keeps them.
 _CUSTOM_PRESET = "custom"
-# Hint text color, the shared amber the control indicator uses for "Local locked".
-_HINT_STYLE = "color: #a66b00;"
+# Hint text color, the amber the control indicator uses for "Local locked".
+_HINT_STYLE = f"color: {CAUTION_COLOR};"
 
 
 def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
@@ -668,22 +669,27 @@ class AnalyzePanelWidget(QWidget):
 
     # --- Search actions --------------------------------------------------
 
-    def _missing_freq_message(
-        self,
+    @staticmethod
+    def _show_subset_notice(
         transitions: TransitionDict,
         r_f: float | None,
         sample_f: float | None,
     ) -> str | None:
-        """Return a message if a chosen transition needs an unset r_f/sample_f."""
+        """The Show notice when the chosen subset needs an unset r_f/sample_f.
+
+        None when the subset can be drawn with the recorded frequencies;
+        otherwise Show draws the fit transitions and reports this notice.
+        """
+        fallback = "Showing the fit transitions instead."
         if transitions_need_r_f(transitions) and r_f is None:
             return (
-                "The transitions include a blue/red-side or mirror category, which "
-                "needs r_f. Fill r_f (GHz), or remove those transitions."
+                "The transitions include a blue/red-side or mirror category, "
+                f"which needs r_f. {fallback}"
             )
         if transitions_need_sample_f(transitions) and sample_f is None:
             return (
-                "The transitions include a mirror category, which needs sample_f. "
-                "Fill sample_f (GHz), or remove the mirror transitions."
+                "The transitions include a mirror category, which needs "
+                f"sample_f. {fallback}"
             )
         return None
 
@@ -977,10 +983,8 @@ class AnalyzePanelWidget(QWidget):
             if display.plot_transitions is not None
             else fit.transitions
         )
-        missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
-        notice = ""
-        if missing:
-            notice = missing.split(".")[0] + ". Showing the fit transitions instead."
+        notice = self._show_subset_notice(show_transitions, fit.r_f, fit.sample_f)
+        if notice is not None:
             show_transitions = fit.transitions
 
         try:
@@ -995,6 +999,6 @@ class AnalyzePanelWidget(QWidget):
             logger.exception("render_fit_figure failed")
             self._show_status.setText(f"Could not draw: {exc}")
             return
-        self._show_status.setText(notice)
+        self._show_status.setText(notice or "")
         self._shown_fit = self._show_key()
         self._fit_canvas.draw_idle()
