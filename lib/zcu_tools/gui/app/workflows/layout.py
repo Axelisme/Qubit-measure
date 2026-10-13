@@ -15,12 +15,14 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from ._palette import PRIMARY_COLOR
 from .run_status import WorkflowRunStatus
 
 # Start is the primary action; Stop reads as destructive. Disabled states are
 # visibly grey so an unavailable action does not look clickable.
 _START_STYLE = (
-    "QPushButton { background-color: #286ac7; color: white; font-weight: 600;"
+    f"QPushButton {{ background-color: {PRIMARY_COLOR}; color: white;"
+    " font-weight: 600;"
     " border: 1px solid #205aa9; border-radius: 4px; padding: 5px 12px; }"
     "QPushButton:hover:!disabled { background-color: #2f76dc; }"
     "QPushButton:disabled { background-color: #c3ccd8; color: #eef1f5;"
@@ -48,7 +50,9 @@ class WorkflowControls:
     alias editing), prepare (captures forms) and reload (bounded source
     replacement). Below it a splitter holds two user-resizable columns.
     Left: selector chooses the workflow above forms, whose tab 0 is Plan and
-    tab 1 is Tunables; plan_page and tunables_page are the layouts inside each
+    tab 1 is Tunables; tunables_tab is the Tunables tab's page widget, so
+    forms.indexOf(tunables_tab) locates that tab without assuming its index;
+    plan_page and tunables_page are the layouts inside each
     tab's scroll area that hold the current Start panels (and the live tuning
     panel); plan_note and tunables_note sit above each scroll area, hidden,
     reading that the plan is fixed and that live Apply changes uncommitted
@@ -56,7 +60,8 @@ class WorkflowControls:
     tabs. Right: status is the run status bar with its paused banner; message
     shows input/command/run diagnostics under it, above the caller's figures.
     Pause/resume start disabled; all other buttons start enabled. Window
-    sets reload availability, selector items and all signal/admission policy.
+    sets prepare/reload availability, selector items and all signal/admission
+    policy.
     """
 
     selector: QComboBox
@@ -73,6 +78,7 @@ class WorkflowControls:
     forms: QTabWidget
     plan_page: QVBoxLayout
     tunables_page: QVBoxLayout
+    tunables_tab: QWidget
     plan_note: QLabel
     tunables_note: QLabel
 
@@ -85,10 +91,10 @@ def _button(text: str, name: str, parent: QWidget) -> QPushButton:
 
 def _scroll_tab(
     forms: QTabWidget, title: str, panel: QWidget, note_text: str
-) -> tuple[QVBoxLayout, QLabel]:
+) -> tuple[QWidget, QVBoxLayout, QLabel]:
     """Add a tab: a hidden note above content that scrolls.
 
-    Return the layout holding panel and the note.
+    Return the tab's page widget, the layout holding panel and the note.
     """
     tab = QWidget(forms)
     tab_layout = QVBoxLayout(tab)
@@ -112,7 +118,7 @@ def _scroll_tab(
     scroll.setWidget(page)
     tab_layout.addWidget(scroll, 1)
     forms.addTab(tab, title)
-    return layout, note
+    return tab, layout, note
 
 
 def _run_buttons(
@@ -189,8 +195,9 @@ def build_workflow_layout(
     left_layout.addLayout(choose)
     forms = QTabWidget(left)
     forms.setObjectName("workflow.forms")
-    plan_page, plan_note = _scroll_tab(forms, "Plan", plan_panel, _PLAN_NOTE)
-    tunables_page, tunables_note = _scroll_tab(
+    # Only the Tunables tab is located later (paused delivery selects it).
+    _, plan_page, plan_note = _scroll_tab(forms, "Plan", plan_panel, _PLAN_NOTE)
+    tunables_tab, tunables_page, tunables_note = _scroll_tab(
         forms, "Tunables", tunables_panel, _TUNABLES_NOTE
     )
     left_layout.addWidget(forms, 1)
@@ -222,6 +229,7 @@ def build_workflow_layout(
         forms,
         plan_page,
         tunables_page,
+        tunables_tab,
         plan_note,
         tunables_note,
     )

@@ -118,11 +118,13 @@ class WorkflowSessionStrip(QWidget):
             parameters = self._services.context.read_context()
             name = parameters.resolve_path("$qubit")
             kind = parameters.lookup_point("$qubit.kind")
+        # ContextSourceUnavailableError subclasses FailedPreconditionError, so it
+        # must be caught first: an unreadable source is not an EMPTY context.
+        except (RoleResolutionError, ContextSourceUnavailableError) as error:
+            return f"Qubit unavailable: {error}", False
         except FailedPreconditionError:
             # EMPTY is expected at fresh app startup; status must not block it.
             return "Qubit: no context", True
-        except (RoleResolutionError, ContextSourceUnavailableError) as error:
-            return f"Qubit unavailable: {error}", False
         if not kind.present:
             return f"Qubit unavailable: {name} has no kind", False
         return f"Qubit: {name} ({kind.value})", True

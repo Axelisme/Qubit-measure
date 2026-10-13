@@ -26,6 +26,8 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.plotting.plots import Plots
 
+from ._palette import PRIMARY_COLOR
+
 # Thumbnails redraw from the canvases at most this often; the focused figure
 # keeps the shared 50 ms presentation coalescing.
 _THUMBNAIL_INTERVAL_MS = 250
@@ -37,7 +39,7 @@ _THUMBNAIL_STYLE = (
     "QToolButton { border: 1px solid #c8ced6; border-radius: 4px;"
     " background: white; color: #4a5260; padding: 2px; }"
     "QToolButton:hover { border-color: #8fb3e6; }"
-    "QToolButton:checked { border: 2px solid #286ac7; background: #eaf2fd;"
+    f"QToolButton:checked {{ border: 2px solid {PRIMARY_COLOR}; background: #eaf2fd;"
     " color: #111827; font-weight: 600; }"
 )
 
