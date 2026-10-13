@@ -12,7 +12,6 @@ from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    Form,
 )
 from zcu_tools.gui.app.measure.services.guard import (
     GuardError,
@@ -21,6 +20,7 @@ from zcu_tools.gui.app.measure.services.guard import (
 )
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.cfg.resource import CfgPreconditionError
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.program.v2.modules import PulseCfg
 

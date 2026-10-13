@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import Form, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabClosedPayload
 from zcu_tools.gui.app.measure.registry import Registry
@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel
+from zcu_tools.gui.form_adapter import Form
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._reload_fakes import (

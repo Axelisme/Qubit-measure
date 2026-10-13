@@ -70,7 +70,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v115: read-only predictor inputs and readiness without an installed predictor.
 # v116: explicit working-point selection and saved writeback destinations.
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
-MCP_VERSION = 117
+MCP_VERSION = 118
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

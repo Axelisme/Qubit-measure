@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel, Field
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
-from zcu_tools.gui.app.measure import adapter as adapter_api
+from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -50,7 +50,7 @@ def test_failed_expression_defaults_require_input_without_changing_core(
     expression: str,
 ) -> None:
     env = FormEnv()
-    form = adapter_api.Form(
+    form = form_adapter.Form(
         DefaultedCfg, {"amount": Expr(expression), "count": Expr(expression)}
     )
     state = FormState(form.default_input(env))
@@ -61,7 +61,7 @@ def test_failed_expression_defaults_require_input_without_changing_core(
         ("amount",): "Field required",
         ("count",): "Field required",
     }
-    control = adapter_api.Form(DefaultedCfg, {})
+    control = form_adapter.Form(DefaultedCfg, {})
     assert (
         control.to_cfg(require_result(FormState(control.default_input(env)), env), env)
         == DefaultedCfg()
@@ -74,7 +74,7 @@ def test_failed_expression_defaults_require_input_without_changing_core(
 
 def test_successful_expression_defaults_are_direct_native_values() -> None:
     env = FormEnv()
-    form = adapter_api.Form(DefaultedCfg, {"amount": Expr("6 * 2")})
+    form = form_adapter.Form(DefaultedCfg, {"amount": Expr("6 * 2")})
     state = FormState(form.default_input(env))
     assert state.input.data == {"amount": 12, "count": 3}
     assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
@@ -102,8 +102,8 @@ def require_result(state: FormState[FormModel], env: FormEnv) -> FormModel:
 
 
 def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
-    assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
-    form = adapter_api.Form(
+    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
+    form = form_adapter.Form(
         ScalarCfg,
         {
             "sweep": {"freq": nodes.Range.around("10", halfwidth="2", expts=5)},
@@ -144,8 +144,8 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
 
 
 def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> None:
-    assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
-    form = adapter_api.Form(
+    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
+    form = form_adapter.Form(
         ScalarCfg, {"sweep": {"freq": nodes.Range.between(1, 2, expts=1)}}
     )
     env = FormEnv()
@@ -156,12 +156,12 @@ def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> Non
 
 @pytest.mark.parametrize("scenario", ["unknown", "hidden_required"])
 def test_invalid_authored_tree_fails_at_construction(scenario: str) -> None:
-    assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
+    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
     tree: dict[str, nodes.FormNode] = (
         {"unknown": 1} if scenario == "unknown" else {"sweep": nodes.Hidden()}
     )
     with pytest.raises(ValueError, match="unknown|sweep"):
-        adapter_api.Form(ScalarCfg, tree)
+        form_adapter.Form(ScalarCfg, tree)
 
 
 def alias_env() -> FormEnv:
@@ -184,9 +184,9 @@ def alias_env() -> FormEnv:
 
 
 def test_alias_name_resolves_direct_name_and_missing_required_is_invalid() -> None:
-    assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
+    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
     env = alias_env()
-    form = adapter_api.Form(
+    form = form_adapter.Form(
         DeviceCfg,
         {
             "flux_dev": nodes.AliasName("flux_dev", choices_source=None),
@@ -197,7 +197,7 @@ def test_alias_name_resolves_direct_name_and_missing_required_is_invalid() -> No
     assert form.to_cfg(
         require_result(FormState(form.default_input(env)), env), env
     ) == DeviceCfg(flux_dev="yoko")
-    missing = adapter_api.Form(
+    missing = form_adapter.Form(
         DeviceCfg, {"flux_dev": nodes.AliasName("missing", choices_source=None)}
     )
     state = FormState(missing.default_input(env))
@@ -212,8 +212,8 @@ def lower_extras(extras: Extras, cfg: ScalarCfg) -> ScalarCfg:
 
 
 def test_extras_lower_receives_validated_named_models() -> None:
-    assert hasattr(adapter_api, "Form"), "Missing core-derived Form"
-    form = adapter_api.Form(
+    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
+    form = form_adapter.Form(
         ScalarCfg,
         {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
         extras=Extras,
@@ -234,7 +234,7 @@ class NullableDeviceNames(ConfigBase):
 
 def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
     env = FormEnv()
-    form = adapter_api.Form(
+    form = form_adapter.Form(
         NullableDeviceNames,
         {
             "optional_dev": nodes.AliasName("missing"),
@@ -252,6 +252,6 @@ def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
         ("optional_dev",): (None,),
         ("nullable_required_dev",): (None,),
     }
-    required = adapter_api.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
+    required = form_adapter.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
     assert required.model.choices(env)[("flux_dev",)] == ()
     assert isinstance(FormState(required.default_input(env)).result(env), FormErrors)

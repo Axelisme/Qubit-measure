@@ -8,8 +8,8 @@ from zcu_tools.cfg_model import (
     Range,
     Slot,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.form import ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import LibraryChange
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg

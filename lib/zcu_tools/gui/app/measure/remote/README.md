@@ -175,9 +175,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 100`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 133`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 117`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 101`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 134`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 118`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -328,6 +328,21 @@ values use the public reversible `__complex__` tag.
 fields are separate leaves such as start, stop and n. Ordinary invalid input
 stays editable with errors. Structural/source rejection leaves the entire input
 unchanged. No successful prefix, hidden refresh, retry or rollback is added.
+
+`tab.read_module(tab_id, field)` reads one dotted core module field and returns
+detached value/mode/source. Key mode reads the fixed library capture and labels
+source as library:<key>. Inline mode evaluates that field's input. Other invalid
+fields do not block reads; this module's errors return NOT_VALID. Values exclude
+full-cfg validation, native to_cfg and extras lowering. Busy and observer reads
+are allowed. Reads do not mutate input, publish or refresh sources.
+
+`tab.use_inline(tab_id, field)` requires holder and resource mutation admission.
+The Form owner prepares captured library content or Template/static blank
+fallback when library/key is absent. Locks remain applied. The resource applies
+one public write batch for required or nullable modules and publishes once on
+change. Existing inline input is a no-op. Wrong families, structural/source
+failures and busy/lifetime/reentrant guards reject before mutation. The reply is
+the complete Form observation; blank input may still need leaf edits.
 
 `tab.reset_cfg(aliases=...)` captures sources once and restores fresh adapter
 defaults. The observation may contain errors. Reset keeps results and saved

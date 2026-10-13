@@ -27,7 +27,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    Form,
     LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -48,6 +47,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:

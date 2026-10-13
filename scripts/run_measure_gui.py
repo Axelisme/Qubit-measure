@@ -71,8 +71,9 @@ def _build_measure_catalogs():
     from zcu_tools.resources.entry.registry import component_registry
 
     from zcu_lab.definitions import register_all
+    from zcu_lab.templates import TEMPLATES
 
-    registry = Registry()
+    registry = Registry(templates=TEMPLATES)
     template_catalog = TemplateCatalog()
     register_all(
         registry, template_catalog=template_catalog, components=component_registry
@@ -89,6 +90,7 @@ def _build_measure_catalogs():
             "zcu_lab.v2._support.singleshot",
         ),
         catalog_module="zcu_lab.definitions",
+        current_registry=registry,
     )
     return registry, template_catalog, loader
 

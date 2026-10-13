@@ -5,8 +5,9 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from zcu_tools.cfg_model import ConfigBase, TemplateDef
+from zcu_tools.gui.form_adapter import Form
 
-from .adapter import AdapterCapabilities, ExpAdapterProtocol, Form
+from .adapter import AdapterCapabilities, ExpAdapterProtocol
 
 logger = logging.getLogger(__name__)
 

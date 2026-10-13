@@ -39,8 +39,11 @@ from zcu_tools.mcp.measure.recipe_capture import (
 )
 from zcu_tools.mcp.measure.recipe_form import (
     RecipeFormField,
+    RecipeModuleValues,
     field_schema,
+    module_scalar,
     read_form_field,
+    read_module_values,
     slot_schema,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -470,6 +473,9 @@ class _TabBinding:
     observe_analysis: Callable[[AnalyzeOperation], None]
     observe_writeback: Callable[[WritebackReceipt], None]
     origins: dict[str, str | SweepSources] = field(default_factory=dict)
+    module_projections: dict[str, tuple[str, tuple[str, ...]]] = field(
+        default_factory=dict
+    )
     summary_parameters: tuple[SummaryParameter, ...] = ()
     closed: Event = field(default_factory=Event)
     condition: Condition = field(default_factory=Condition)
@@ -989,6 +995,66 @@ class RecipeTab:
             raise GuiRpcError(f"Cannot disable {field}", reason="invalid_cfg")
         self._binding.origins[field] = "disabled"
 
+    def read_module(self, field: str) -> RecipeModuleValues:
+        """Read one core module's value, mode and source from fixed Reset sources.
+
+        field is a nonempty dotted core module path, not an inline leaf. Values
+        are detached module JSON, without full-cfg validation, native to_cfg or
+        extras lowering. Other invalid fields do not block this read. The owner
+        rejects this module's invalid values with NOT_VALID, unknown/nonmodule
+        paths with invalid_params, and revoked resources with RESOURCE_GONE.
+        Busy and notification reads are allowed. No input change, publication,
+        source refresh or retry occurs. GUI/source/connection failures propagate.
+        """
+        _field_path(field)
+        return read_module_values(
+            self._binding.tools.send_gui_rpc(
+                "tab.read_module", {"tab_id": self._binding.tab, "field": field}
+            )
+        )
+
+    def use_inline(self, field: str) -> None:
+        """Ask the owner to convert a whole core module to editable inline input.
+
+        field follows read_module. Copy the fixed captured library Spec through
+        ModuleInline defaults; absent library/key uses Template fallback or
+        static blank. Locks remain applied. Existing inline input is unchanged.
+        No caller layout construction or full-cfg/extras lowering occurs here.
+        Holder, busy, lifetime and notification-reentrant guards apply before
+        preparation. Rejection has no successful prefix. A changed input uses
+        one public write/publication; this handle retains the returned Form view.
+        Blank input may need ordinary set calls before Run. Source, structural
+        and connection failures propagate without refresh, retry or rollback.
+        """
+        _field_path(field)
+        reply = self._binding.tools.send_gui_rpc(
+            "tab.use_inline", {"tab_id": self._binding.tab, "field": field}
+        )
+        self._binding.publication = _cfg_object(reply)
+
+    def retain_module_source(
+        self, field: str, *, summary_field: str, value_path: tuple[str, ...]
+    ) -> None:
+        """Record a generic scalar projection and module provenance for next Run.
+
+        field follows read_module. summary_field is the dotted inline leaf path
+        used as the summary identity. Use that same inline path in key mode,
+        even though the current key-mode input has no such leaf.
+        value_path contains module-relative field names, without the inline
+        envelope. Missing/non-scalar projections raise ValueError before metadata
+        changes. Module errors propagate. No frequency/calibration policy runs.
+        Validate now, then read the current module value at Run capture. Keep
+        numeric values and the library:<key> or dotted module source, not a key
+        string or whole module. Later set/set_sweep calls replace provenance;
+        already captured Runs remain detached. No Form mutation/publication or
+        source refresh occurs, and no success prefix is recorded on failure.
+        """
+        _field_path(summary_field)
+        module = self.read_module(field)
+        module_scalar(module.value, value_path)
+        self._binding.module_projections[summary_field] = (field, value_path)
+        self._binding.origins[summary_field] = module.source
+
     def retain_source(self, field: str, source: str) -> None:
         """Record a caller-chosen provenance label for an unchanged cfg field.
 
@@ -1205,6 +1271,11 @@ class RecipeTab:
         return operation
 
     def _capture_cfg_field(self, name: str, source: str | SweepSources) -> ActualField:
+        projection = self._binding.module_projections.get(name)
+        if projection is not None:
+            module_field, value_path = projection
+            module = self.read_module(module_field)
+            return {"value": module_scalar(module.value, value_path), "source": source}
         node = self._node(name)
         value = node.value
         if node.mode == "key":

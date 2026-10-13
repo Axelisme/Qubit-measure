@@ -11,7 +11,6 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -27,6 +26,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
+from zcu_tools.gui.form_adapter import Form, ModuleValues
 
 _logger = getLogger(__name__)
 
@@ -93,6 +93,8 @@ class TabFormResource:
         self._to_cfg: Callable[[FormModel, FormEnv], ConfigBase | FormErrors] = (
             form.to_cfg
         )
+        self._read_module = form.read_module
+        self._module_inline_writes = form.module_inline_writes
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
@@ -194,6 +196,43 @@ class TabFormResource:
         self.require_mutation_allowed()
         self._state.write(batch, self._sources.env)
         self._notify()
+
+    def read_module(self, path: tuple[str, ...]) -> ModuleValues:
+        """Read one core module field using the fixed Open/Reset capture.
+
+        path contains nonempty core field names, not inline leaf paths. Unknown
+        or nonmodule paths raise ValueError. Return detached field-local values
+        and origin, not native cfg after to_cfg or extras lowering. Other invalid
+        fields do not block reads; this module's errors raise
+        CfgPreconditionError(NOT_VALID). Revocation raises RESOURCE_GONE.
+        Busy/notification reads are allowed. No capture, input change or
+        publication occurs. Unexpected source failures propagate.
+        """
+        self._require_open()
+        result = self._read_module(self.input, path, self._sources.env)
+        if isinstance(result, FormErrors):
+            raise CfgPreconditionError(
+                CfgPreconditionReason.NOT_VALID,
+                f"Module is not valid: {dict(result.messages)}",
+            )
+        return result
+
+    def use_inline(self, path: tuple[str, ...]) -> None:
+        """Convert one core module field to editable inline input atomically.
+
+        path follows read_module. Copy captured library content, or use authored
+        Template fallback/static blank if library/key is absent. Preserve locks;
+        existing inline input is unchanged with no notification. Wrong families,
+        structural/source failures raise before mutation. Unfilled blank values
+        remain editable and may still be invalid. Busy, revoked and notification
+        reentrant calls raise CfgPreconditionError before preparation. One public
+        write publishes once on change; rejection has no successful prefix.
+        No sources are captured, and no full cfg/extras lowering occurs.
+        """
+        self.require_mutation_allowed()
+        batch = self._module_inline_writes(self.input, path, self._sources.env)
+        if batch:
+            self.write(batch)
 
     def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
         """Overlay compatible saved leaves and report discarded input paths.

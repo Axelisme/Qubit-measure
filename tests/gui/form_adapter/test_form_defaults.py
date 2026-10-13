@@ -1,7 +1,5 @@
 """Templates and slots resolve captured sources into editable persistent inputs."""
 
-from inspect import signature
-
 import pytest
 from zcu_tools.cfg_model import (
     BathResetSpec,
@@ -13,9 +11,8 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.adapter import Form
-from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState, ModuleInline
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -26,8 +23,6 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
-
-from ._cfg_fakes import CalibrationAdapter
 
 
 class Core(ConfigBase):
@@ -87,13 +82,10 @@ def environment() -> FormEnv:
     return FormEnv(parameters=parameters, library=library)
 
 
-def registered(node: Slot | Template) -> Form[Core]:
-    """Bind a form explicitly through the registry, not adapter capability probes."""
-    assert "form" in signature(Registry.register).parameters, (
-        "Missing explicit form registration"
-    )
+def bound_form(node: Slot | Template) -> Form[Core]:
+    """Bind the synthetic template catalog through the public Form seam."""
     form = Form(Core, {"probe": node})
-    Registry(templates=templates()).register("synthetic", CalibrationAdapter, form=form)
+    form.bind_templates(templates(), adapter="synthetic")
     return form
 
 
@@ -119,7 +111,7 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
             fallback=Template("pulse") if scenario.endswith("fallback") else None,
         )
     )
-    form = registered(node)
+    form = bound_form(node)
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
@@ -141,7 +133,7 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
 def test_template_required_nested_defaults_omit_none_and_preserve_literal_strings() -> (
     None
 ):
-    form = registered(Template("pulse"))
+    form = bound_form(Template("pulse"))
     env = environment()
     state = FormState(form.default_input(env))
     probe = state.input.data["probe"]
@@ -161,7 +153,7 @@ def test_template_required_nested_defaults_omit_none_and_preserve_literal_string
 
 
 def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
-    form = registered(Slot("Q.pulses.probe", copy=True, set={"gain": 0.8}))
+    form = bound_form(Slot("Q.pulses.probe", copy=True, set={"gain": 0.8}))
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
@@ -177,7 +169,7 @@ def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
 
 
 def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
-    form = registered(Slot("Q.pulses.probe", set={"gain": 0.8}, lock={"freq": 0.0}))
+    form = bound_form(Slot("Q.pulses.probe", set={"gain": 0.8}, lock={"freq": 0.0}))
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
@@ -199,7 +191,7 @@ def test_root_slot_expression_overrides_require_input(
     mode: str,
     expression: str,
 ) -> None:
-    form = registered(
+    form = bound_form(
         Slot("Q.pulses.probe", copy=True, set={"phase": Expr(expression)})
         if mode == "copy"
         else Slot(
@@ -220,7 +212,7 @@ def test_root_slot_expression_overrides_require_input(
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
     assert cfg.probe.phase == (6 if expression == "2 * 3" else 4)
-    control = registered(
+    control = bound_form(
         Slot("Q.pulses.probe", copy=True)
         if mode == "copy"
         else Slot("missing", fallback=Template("pulse"))
@@ -242,14 +234,9 @@ class OptionalCore(ConfigBase):
 
 @pytest.mark.parametrize("optional", [False, True])
 def test_unbound_slot_obeys_core_required_or_optional_default(optional: bool) -> None:
-    assert "form" in signature(Registry.register).parameters, (
-        "Missing explicit form registration"
-    )
     cfg_type = OptionalCore if optional else Core
     form = Form(cfg_type, {"probe": Slot("$unbound.module.probe")})
-    Registry(templates=templates()).register(
-        "synthetic-optional", CalibrationAdapter, form=form
-    )
+    form.bind_templates(templates(), adapter="synthetic-optional")
     env = environment()
     state = FormState(form.default_input(env))
     assert state.input.data == {}
@@ -270,9 +257,6 @@ class ResetCore(ConfigBase):
 
 @pytest.mark.parametrize("unbound", [False, True])
 def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -> None:
-    assert "form" in signature(Registry.register).parameters, (
-        "Missing explicit form registration"
-    )
     catalog = {
         "reset": TemplateDef(
             BathResetSpec,
@@ -287,9 +271,7 @@ def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -
         )
     }
     form = Form(ResetCore, {"reset": Template("reset")})
-    Registry(templates=catalog).register(
-        "synthetic-reset", CalibrationAdapter, form=form
-    )
+    form.bind_templates(catalog, adapter="synthetic-reset")
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
@@ -313,9 +295,6 @@ class ReadoutCore(ConfigBase):
 
 
 def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> None:
-    assert "form" in signature(Registry.register).parameters, (
-        "Missing explicit form registration"
-    )
     catalog = {
         "readout": TemplateDef(
             PulseReadoutSpec,
@@ -337,9 +316,7 @@ def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> No
     form = Form(
         ReadoutCore, {"readout": Template("readout", lock={"pulse_cfg.freq": 0.0})}
     )
-    Registry(templates=catalog).register(
-        "synthetic-readout", CalibrationAdapter, form=form
-    )
+    form.bind_templates(catalog, adapter="synthetic-readout")
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
@@ -522,16 +499,13 @@ def test_missing_discriminator_error_names_template_and_nested_field(
         if nested
         else Form(Core, {"probe": Template(template_id)})
     )
-    registry = Registry(
-        templates={template_id: TemplateDef(spec, "Partial", {f"{path}.length": 5.1})}
-    )
+    catalog = {template_id: TemplateDef(spec, "Partial", {f"{path}.length": 5.1})}
     with pytest.raises(ValueError, match="synthetic") as caught:
-        registry.register("synthetic", CalibrationAdapter, form=form)
+        form.bind_templates(catalog, adapter="synthetic")
     message = str(caught.value)
     assert template_id in message, message
     assert path in message, message
     assert "discriminator" in message.lower(), message
-    assert not registry.has("synthetic")
 
 
 def test_explicit_discriminator_and_partial_seeds_keep_spec_defaults() -> None:
@@ -550,7 +524,7 @@ def test_explicit_discriminator_and_partial_seeds_keep_spec_defaults() -> None:
         )
     }
     form = Form(Core, {"probe": Template("synthetic-pulse", set={"gain": 0.7})})
-    Registry(templates=catalog).register("synthetic", CalibrationAdapter, form=form)
+    form.bind_templates(catalog, adapter="synthetic")
     env = FormEnv()
     state = FormState(form.default_input(env))
     result = state.result(env)
@@ -575,10 +549,7 @@ def test_explicit_discriminator_and_partial_seeds_keep_spec_defaults() -> None:
 
 
 @pytest.mark.parametrize("fault", ["unknown", "family", "tag"])
-def test_registration_error_names_adapter_and_field_path(fault: str) -> None:
-    assert "form" in signature(Registry.register).parameters, (
-        "Missing explicit form registration"
-    )
+def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None:
     node = Template("missing") if fault == "unknown" else Template("pulse")
     catalog = templates()
     if fault == "family":
@@ -591,4 +562,4 @@ def test_registration_error_names_adapter_and_field_path(fault: str) -> None:
         )
     form = Form(Core, {"probe": node})
     with pytest.raises(ValueError, match="synthetic.*probe"):
-        Registry(templates=catalog).register("synthetic", CalibrationAdapter, form=form)
+        form.bind_templates(catalog, adapter="synthetic")

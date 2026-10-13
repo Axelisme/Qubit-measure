@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    Form,
     PostAnalyzeRequest,
     RunRequest,
     SessionEnv,
@@ -39,6 +38,7 @@ from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
