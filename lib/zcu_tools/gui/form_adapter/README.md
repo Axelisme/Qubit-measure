@@ -17,6 +17,10 @@
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Host 的註冊入口負責呼叫它，例如 measure `Registry.register(form=...)`。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 
+Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的 fresh input，不需先 bind。它沿用 Expr 初值、literal lock 與 Slot fallback 規則。已綁定 Slot 保留 child library key，`to_cfg` 回持久 Spec，不展開 native cfg。Core cfg Form 拒絕這個入口。
+
+回傳的 `input.model` 可以是 `Form.model` 的專用 subclass，讓不同範本的 required 欄位與 lock 互不影響。用回傳 input 建新 `FormState`。同一範本重算初值用 `input.model.default_input(env)`，換範本則建新 state。原 Form.model、範本目錄與 captured sources 不變。
+
 Module、seed、Display 與 annotation 翻譯放在私有模組 `_modules.py`、`_seeds.py`、`_display.py`、`_types.py`，只由 `form.py` 組合。
 
 ## 依賴方向

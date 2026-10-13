@@ -41,7 +41,8 @@ from zcu_tools.resources.entry.roles import RoleResolutionError
 
 from ._display import field_display
 from ._modules import ModuleField, ModuleValues, editable_spec, module_specs
-from ._seeds import supported_input
+from ._seeds import supported_input, template_seed_tree
+from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
 
@@ -511,6 +512,59 @@ class Form[C: ConfigBase]:
             raw = raw.get(part) if isinstance(raw, dict) else None
         return field.read(raw, env)
 
+    def template_input(
+        self,
+        template: Template,
+        catalog: Mapping[str, TemplateDef],
+        env: FormEnv,
+    ) -> FormInput[FormModel]:
+        """Build fresh creation input for this persistent module or waveform Spec.
+
+        template names a catalog ID, with optional qubit/resonator bindings,
+        relative-path seed overrides and literal locks. catalog maps IDs to
+        TemplateDef values. env supplies captured parameters and library for
+        Expr initial values and Slot resolution. Partial seeds overlay Spec
+        defaults; failed Expr initial values leave required fields unfilled.
+        Bound Slots keep child library keys; unbound Slots use their fallback.
+        No native cfg or asset is materialized. to_cfg returns the original Spec.
+
+        input.model may be a subclass of this Form's model, specialized for
+        this template's Expr requirements and locks. Build a new FormState from
+        the returned input. Recompute the same template's initial values with
+        input.model.default_input(env); changing templates requires a new state.
+        The original Form.model, template, catalog and sources are not modified.
+        The input model retains a detached catalog mapping, not the caller's map.
+
+        Core cfg Forms raise TypeError. Unknown IDs, incompatible Spec families,
+        unsupported or malformed seed/lock paths and recursive fallbacks raise
+        ValueError naming the template or path. Captured-source and default
+        factory failures propagate; they never silently use a fallback.
+        """
+        if not isinstance(self._section, _SpecSection):
+            raise TypeError("template_input requires a persistent Spec form")
+        bound = MappingProxyType(dict(catalog))
+        _template_input(template, bound, (self.model,), None)
+        editable = editable_spec(
+            self.model, template.lock, template_seed_tree(template, bound)
+        )
+
+        def defaults(
+            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            del previous
+            return _template_input(template, bound, (cls,), env)
+
+        model = new_class(
+            f"{self.model.__name__}Template",
+            (editable,),
+            exec_body=lambda ns: ns.update(
+                {"__module__": __name__, "defaults": classmethod(defaults)}
+            ),
+        )
+        if not issubclass(model, FormModel):
+            raise TypeError("Template input model must implement FormModel")
+        return model.default_input(env)
+
     def input_from_spec(self, spec: C, env: FormEnv) -> FormInput[FormModel]:
         """Project an existing persistent Spec into fresh input for this Spec form.
 
@@ -543,8 +597,9 @@ class Form[C: ConfigBase]:
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.
 
-        value must be a result of this generated model; another model raises
-        TypeError. env is the same captured source used by result. Core validation
+        value must be a result of this generated model or its template_input
+        subclass; another model raises TypeError. env is the same captured
+        source used by result. Core validation
         failures return FormErrors at their cfg field paths. Conversion does not
         mutate input or sources. Exceptions from the author-provided lower hook
         propagate; its result is validated again against core_cfg.
