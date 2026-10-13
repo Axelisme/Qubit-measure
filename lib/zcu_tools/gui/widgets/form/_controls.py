@@ -43,11 +43,19 @@ EXPRESSION_ENTRY = "Expression…"
 
 @dataclass(frozen=True)
 class LocalText:
-    """Unparsed view text, its syntax error, and the selected Expr mode."""
+    """View input that state does not hold, shown in place of state's input.
+
+    text is the unparsed or host-rejected typed text ("" for a control that
+    has no text). error is its parse error or the host's rejection message.
+    expression is whether Expr mode was selected. section is True when it was
+    recorded on a model section's row (a rejected Enabled box or Key/Inline
+    switch), which carries only the error.
+    """
 
     text: str
     error: str
     expression: bool
+    section: bool
 
 
 def _expression(field: FieldView) -> bool:
@@ -421,9 +429,28 @@ class FieldRow:
             try:
                 parsed = _parse(self.field, text, expression=expression)
             except ValueError as exc:
-                self._unparsed(self.field.path, LocalText(text, str(exc), expression))
+                local = LocalText(text, str(exc), expression, section=False)
+                self._unparsed(self.field.path, local)
                 return
             self._changed(self.field.path, parsed)
+
+    def rejected_input(self, message: str) -> LocalText:
+        """Return the row's current input as local input the host rejected.
+
+        message is the host's reason. Text and key inputs keep their typed
+        text and Expr mode; other controls keep no text, so display shows
+        state's value again. Reads widgets only; writes nothing.
+        """
+        widget = self.input
+        if isinstance(widget, QLineEdit):
+            text = widget.text()
+        elif isinstance(widget, QComboBox) and widget.isEditable():
+            text = widget.currentText()
+        else:
+            text = ""
+        expression = self.mode is not None and self.mode.currentIndex() == 1
+        section = self.field.kind == "model"
+        return LocalText(text, message, expression, section=section)
 
     def display(
         self, field: FieldView, local: LocalText | None, *, editable: bool
@@ -431,7 +458,8 @@ class FieldRow:
         """Show a same-shape publication, keeping local text and blocking writes.
 
         editable controls input enablement, not model validity. local overrides
-        parsed text/mode and hides its evaluated label. The value label shows
+        the text and mode of a text or key input and hides its evaluated label;
+        checkboxes, dropdowns and switches still show state. The value label shows
         only a resolved Expression-mode value; Direct input is not echoed.
         Shape changes require a new row; metadata/folding remain initially
         declared presentation.
@@ -451,9 +479,12 @@ class FieldRow:
         finally:
             self._displaying = False
 
-    def _display_key(self, *, editable: bool) -> None:
+    def _display_key(self, local: LocalText | None, *, editable: bool) -> None:
         widget = self.input
-        text = "" if self.field.raw is None else str(self.field.raw)
+        if local is not None:
+            text = local.text
+        else:
+            text = "" if self.field.raw is None else str(self.field.raw)
         if isinstance(widget, QComboBox):
             widget.setEnabled(editable)
             keys = [str(key) for key in self.field.options or ()]
@@ -474,7 +505,7 @@ class FieldRow:
             self.switch.setCurrentIndex(1 if field.kind == "model" else 0)
             self.switch.setEnabled(editable)
         if field.kind == "key":
-            self._display_key(editable=editable)
+            self._display_key(local, editable=editable)
             return
         expression = local.expression if local else _expression(field)
         if field.options is not None and not expression:

@@ -1,6 +1,6 @@
 """Qt rendering and local text drafts for the caller-owned form state."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from weakref import ref
 
 from pydantic import JsonValue
@@ -16,6 +16,7 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     FormWritePath,
+    WriteRejected,
 )
 
 from ._controls import ROW_SPACING, FieldRow, LocalText
@@ -26,8 +27,10 @@ class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
 
     The editor borrows state and the host-captured env. Parsed input writes the
-    state immediately; unparseable text remains local and blocks editor validity.
-    Evaluation, choices, branch defaults and model validation belong to state.
+    state immediately, or goes to the host's write callable (see __init__);
+    unparseable text and host-rejected input remain local and block editor
+    validity. Evaluation, choices, branch defaults and model validation belong
+    to state.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
     Public child object names use model-field paths joined by dots:
@@ -75,13 +78,36 @@ class FormEditor[F: FormModel](QWidget):
     validity_changed = pyqtSignal(bool)
 
     def __init__(
-        self, state: FormState[F], env: FormEnv, parent: QWidget | None = None
+        self,
+        state: FormState[F],
+        env: FormEnv,
+        parent: QWidget | None = None,
+        *,
+        write: Callable[[Mapping[FormWritePath, JsonValue]], None] | None = None,
     ) -> None:
         """Build controls for state using env, then subscribe to state changes.
 
         State/source validation errors are displayed, not replaced by defaults.
         Structural/schema or source failures propagate; failed construction
         leaves no state subscription. parent controls the ordinary Qt lifetime.
+
+        write decides where parsed input goes. When it is None (the default),
+        each parsed batch is installed with state.write(batch, env) using the
+        current env. When it is a callable, it receives every parsed batch, a
+        one-entry mapping from the edited field's write path to its JSON
+        input, and the editor never writes state itself. The callable installs
+        accepted input into this same state (for example after its own checks
+        or substitutions); the editor still reads and subscribes to state, so
+        input the callable does not install is not shown.
+        To refuse a batch, the callable raises WriteRejected(message) before
+        writing state. That field then keeps the user's input as local view
+        input with message as its error: text and key inputs keep the typed
+        text and mode; a checkbox, dropdown, Enabled box or Key/Inline switch
+        shows the state's value again. Like unparseable text, it appears in
+        local_parse_errors and errors, blocks validity, survives refresh and
+        publications, and clears on that field's next accepted write, on
+        discard_local_text, or when the field leaves the form. Any other
+        exception from the callable propagates.
         """
         app = QApplication.instance()
         if not isinstance(app, QApplication) or app.thread() != QThread.currentThread():
@@ -89,6 +115,7 @@ class FormEditor[F: FormModel](QWidget):
         super().__init__(parent)
         self._state: FormState[F] | None = state
         self._env: FormEnv | None = env
+        self._host_write = write
         self._unsubscribe: Callable[[], None] | None = None
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
@@ -123,17 +150,17 @@ class FormEditor[F: FormModel](QWidget):
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
 
-        Keep still-active local unparseable text. Never reset state, run domain
-        defaults, poll sources or echo a write. External state publications
-        refresh parsed controls through the subscription. Inactive branch text
-        is discarded. Raises RuntimeError after detach.
+        Keep still-active local unparseable or rejected input. Never reset
+        state, run domain defaults, poll sources or echo a write. External
+        state publications refresh parsed controls through the subscription.
+        Inactive branch text is discarded. Raises RuntimeError after detach.
         """
         self._require_state()
         self._env = env
         self._publish()
 
     def discard_local_text(self) -> None:
-        """Discard unparseable view text and render the current state.
+        """Discard local unparseable or rejected input and render the state.
 
         Call on the GUI thread before detach. This does not reset/write state,
         evaluate defaults, submit, or change the fixed env. Parsed draft changes
@@ -155,10 +182,12 @@ class FormEditor[F: FormModel](QWidget):
         self._publish()
 
     def local_parse_errors(self) -> FormErrors | None:
-        """Return detached local text errors, or None when every input parsed.
+        """Return detached local input errors, or None when state holds all input.
 
-        Paths identify active controls. This query does not parse, write, or
-        imply that the model is valid. Raises RuntimeError after detach.
+        Local input is unparseable text or input the host's write rejected;
+        its message is the parse error or the WriteRejected message. Paths
+        identify active controls. This query does not parse, write, or imply
+        that the model is valid. Raises RuntimeError after detach.
         """
         self._require_state()
         messages: dict[FormPath, str] = {
@@ -217,11 +246,13 @@ class FormEditor[F: FormModel](QWidget):
         fields = project_fields(schema, state.input.data, preview)
         flat = flatten_fields(fields)
         self._state_errors = preview.errors
+        # Text does not survive its path becoming a model section, nor does a
+        # rejected section input (which has no text) its path becoming a leaf.
         self._local = {
             field.path: local
             for field in flat
             if (local := self._local.get(field.path)) is not None
-            and field.kind != "model"
+            and local.section == (field.kind == "model")
         }
         shape = tuple(
             (
@@ -290,7 +321,16 @@ class FormEditor[F: FormModel](QWidget):
     def _write(self, path: FormWritePath, value: JsonValue) -> None:
         state = self._require_state()
         self._local.pop(path, None)
-        state.write({path: value}, self._require_env())
+        batch = {path: value}
+        if self._host_write is None:
+            state.write(batch, self._require_env())
+        else:
+            try:
+                self._host_write(batch)
+            except WriteRejected as exc:
+                # The host installed nothing: keep this input local, like
+                # unparseable text; the publish below redraws state around it.
+                self._local[path] = self._rows[path].rejected_input(exc.message)
         # Unchanged writes do not publish but can clear a local parse error.
         self._publish()
 

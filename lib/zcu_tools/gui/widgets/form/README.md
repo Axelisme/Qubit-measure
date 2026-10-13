@@ -1,8 +1,10 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-13, decimals, hidden rows, fixed Literals and section titles
+**Last updated:** 2026-10-13, host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
+
+A host that checks or rewrites input before it reaches the draft passes `write=`: every parsed batch (one field path to its JSON input) goes to that callable instead of `state.write`, and the editor still reads and subscribes to the same FormState. Without it the editor calls `state.write` itself, as the workflows host does. The callable refuses a batch by raising `gui.form.WriteRejected(message)` before writing: the field keeps the typed text (a checkbox, dropdown, Enabled box or Key/Inline switch shows the state's value again) and shows the host's message. That input is view-local like unparseable text, so local_parse_errors reports it and discard_local_text drops it. The editor catches only WriteRejected; other exceptions propagate.
 
 The view projects the public input schema and read-only FormPreview. It does not import core walkers or evaluate expressions. Core owns evaluation, model validation, choices and branch defaults. The view owns controls, error display and subscription lifetime. Sequences and typed mappings are whole leaves. Detach and close do not reset or submit the caller's state. discard_local_text drops view-local unparseable text and redraws the current state. The host separately resets its draft on Discard; the renderer does not own that policy.
 
@@ -18,4 +20,4 @@ A one-value Literal (schema const, not nullable) has nothing to choose or comput
 
 Rows sit 4 px apart and nested groups use small margins. The labels of one model level share a left-aligned column as wide as its widest label, so that level's controls start at one left edge; each nested group has its own column. The editor has no outer margins; hosts add them. One stretch below the last row takes spare height, so nested groups do not grow.
 
-T1TunablesPanel is the concrete workflow caller. Apply, Discard, Start, revision checks and persistence stay with the host. This tool does not migrate CfgSchema or Measure.
+The workflows host's WorkflowFormPanel (`gui/app/workflows/panel.py`) is the current caller; it does not pass `write`. Apply, Discard, Start, revision checks and persistence stay with the host. This tool does not migrate CfgSchema or Measure.

@@ -134,6 +134,22 @@ class FormChange:
     value: FormValue
 
 
+class WriteRejected(Exception):
+    """A host's write entry point refuses one input batch it will not install.
+
+    message is the human-readable reason, written by the host, that the user
+    sees at the edited field. Raise it before writing any of the batch, so the
+    state is unchanged; for example for an unknown captured key. Values the
+    model would reject belong in state instead, where result reports them.
+    Core FormState never raises this type.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Store message as both the exception text and the message field."""
+        super().__init__(message)
+        self.message = message
+
+
 def field_error(path: FormPath, message: str) -> PydanticCustomError:
     """Return an error to raise in a Pydantic model_validator.
 
