@@ -47,7 +47,11 @@ def notification_resource() -> tuple[TabFormResource, VersionTable]:
     )
     resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     version = VersionTable()
-    resource.subscribe(lambda: version.bump("tab:synthetic:cfg"))
+
+    def cfg_changed() -> None:
+        version.bump("tab:synthetic:cfg")
+
+    resource.subscribe(cfg_changed)
     return resource, version
 
 

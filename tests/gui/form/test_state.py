@@ -12,6 +12,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     FormState,
+    FormValue,
     FormWritePath,
     LinRange,
     field_error,
@@ -825,7 +826,7 @@ def test_callback_failure_is_isolated_after_installation_without_rollback(
 ) -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))
-    received: list[JsonValue] = []
+    received: list[FormValue] = []
 
     def reject_notification() -> None:
         """Represent a host callback failure, not a form validation failure."""

@@ -342,9 +342,7 @@ def test_option_command_guards_busy_lifetime_and_peer_reentry() -> None:
         (("pulse", "module", "freq"), "to_inline"),
     ],
 )
-def test_option_command_rejection_is_atomic(
-    path: tuple[str, ...], name: str
-) -> None:
+def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) -> None:
     resource = TabFormResource(
         Form(ModuleCore, {}),
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
@@ -355,7 +353,9 @@ def test_option_command_rejection_is_atomic(
     notifications: list[str] = []
     resource.subscribe(lambda: notifications.append("changed"))
     assert hasattr(resource, "run_command"), "Missing guarded option command host"
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="Unavailable option command|No current option"
+    ):
         resource.run_command(path, name)
     assert resource.input.data == before
     assert notifications == []
