@@ -22,13 +22,14 @@ from __future__ import annotations
 #     INCLUDING pure-internal logic changes that don't touch the wire.
 # This unpublished interface revision includes identity-only project setup,
 # data_root, spectrum evidence/drafts and fit search_db/render/database_info.
-WIRE_VERSION = 7
+WIRE_VERSION = 8
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-# 10: window shell with Spectra/Fit pages, editing flow and picker columns,
+# 11: window shell with Spectra/Fit pages, editing flow and picker columns,
 # Fit page form/status, shared spectrum row query; two-line spectrum list
 # rows, one dip-depth OneTone background in every view (OneTone PNGs too),
 # constrained Search diagnostic layout; Search disabled while a needed
-# frequency is blank, non-holder Filter tab switches detach only.
-GUI_VERSION = 10
+# frequency is blank, non-holder Filter tab switches detach only; literal
+# spectrum targets and independent global Filter lifetime.
+GUI_VERSION = 11

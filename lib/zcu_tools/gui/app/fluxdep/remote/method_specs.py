@@ -122,18 +122,26 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "interactive.read": MethodSpec(
         30.0,
         "Inspect the live context without opening input or changing display. "
-        "Returns committed state, or null when inactive. name=selection reads Filter.",
+        "Returns committed state, or null when inactive. target is required: "
+        "spectrum requires a literal nonempty name; selection forbids name. "
+        "Optional context_id validates the addressed draft lifetime.",
         params=(
-            ParamSpec("name", JsonType.STRING),
+            ParamSpec("target", JsonType.STRING, enum=("spectrum", "selection")),
+            ParamSpec("name", JsonType.STRING, required=False),
             ParamSpec("context_id", JsonType.INTEGER, required=False),
         ),
         readonly=True,
     ),
     "interactive.render": MethodSpec(
         30.0,
-        "Render a named current context as PNG without editing or switching display. name=selection renders Filter.",
+        "Render a current context as PNG without editing or switching display. "
+        "target is required: spectrum requires a literal nonempty name; "
+        "selection forbids name. Missing drafts are rejected.",
         readonly=True,
-        params=(ParamSpec("name", JsonType.STRING),),
+        params=(
+            ParamSpec("target", JsonType.STRING, enum=("spectrum", "selection")),
+            ParamSpec("name", JsonType.STRING, required=False),
+        ),
     ),
     "spectrum.interactive.open": MethodSpec(
         30.0,

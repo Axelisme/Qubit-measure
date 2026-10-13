@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，published spectrum stages and Filter exclusion counts
+**Last updated:** 2026-10-13，explicit draft targets and literal spectrum names
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -19,10 +19,14 @@ Interactive context IDs bind commands to the owning session and named target.
 picker from the published spectrum type. Unknown names and unaligned sources
 receive native admission errors. The receipt reports onetone/twotone, never
 sample. Explicit line/onetone/twotone requests keep their existing contracts.
-interactive.read(name) is inert; its optional context_id rejects cancelled,
-removed or replaced drafts. Numeric replies contain no figure or command schema.
-interactive.render(name), or name=selection for Filter, returns the current PNG
-without opening input or switching display. Filter finish publishes and closes
+interactive.read(target="spectrum", name=<literal name>) is inert; its optional
+context_id rejects cancelled, removed, replaced or wrong-target drafts. Numeric replies contain no figure or command schema.
+interactive.read/render require target="spectrum" with a nonempty literal name,
+or target="selection" without any name key (including null). Missing/invalid
+target or invalid target/name combinations fail with INVALID_PARAMS; no target
+is inferred from names, display, existing drafts or IDs. The spectrum name
+"selection" is legal and never addresses Filter. interactive.render returns the
+current draft PNG without opening input or switching display. Filter finish publishes and closes
 its global context. selection.render() always draws the published joint cloud
 and per-spectrum masks, even while a draft exists. It does not open a Session.
 Replacing an unfinished same-spectrum

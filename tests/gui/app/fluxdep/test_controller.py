@@ -356,7 +356,7 @@ def test_spectrum_rows_count_only_published_filter_exclusions(cross_controller):
     # A Filter draft opens all-selected; it does not change the published count.
     ctrl.interactive.begin_cross_selection()
     assert excluded() == [("a", 1), ("empty", 0), ("b", 1)]
-    ctrl.interactive.cancel("selection")
+    ctrl.interactive.cancel_selection()
     # min_distance downsampling is not a mask exclusion.
     ctrl.set_selection(np.array([True, True, True, True]), min_distance=0.9)
     assert excluded() == [("a", 0), ("empty", 0), ("b", 0)]

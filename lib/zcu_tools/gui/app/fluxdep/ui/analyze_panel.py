@@ -274,7 +274,7 @@ class AnalyzePanelWidget(QWidget):
                 self._filter_placeholder.setVisible(True)
                 return
             context = live
-        active = self._ctrl.interactive.inspect("selection")
+        active = self._ctrl.interactive.inspect_selection()
         if active is None or active.context is not context:
             raise RuntimeError("selection context changed while attaching its view")
         self._filter_context_id = active.context_id
@@ -536,7 +536,7 @@ class AnalyzePanelWidget(QWidget):
         if index != self._tabs.currentIndex():
             self._tabs.setCurrentIndex(index)
         elif tab == "filter":
-            active = self._ctrl.interactive.inspect("selection")
+            active = self._ctrl.interactive.inspect_selection()
             if (
                 active is None
                 or active.context_id != self._filter_context_id
@@ -608,7 +608,7 @@ class AnalyzePanelWidget(QWidget):
                 self._writable
                 and self._ctrl.interactive.current_cross_selection() is not None
             ):
-                self._ctrl.interactive.cancel("selection")
+                self._ctrl.interactive.cancel_selection()
 
     # --- Search actions --------------------------------------------------
 

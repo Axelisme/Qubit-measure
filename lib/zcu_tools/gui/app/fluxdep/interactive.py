@@ -269,7 +269,8 @@ class FluxDepInteractiveOwner:
         self._publish_points = ports.publish_points
         self._derive_pointcloud = ports.derive_pointcloud
         self._publish_selection = ports.publish_selection
-        self._contexts: dict[str | None, ActiveInteractiveContext] = {}
+        self._contexts: dict[str, ActiveInteractiveContext] = {}
+        self._selection_context: ActiveInteractiveContext | None = None
         self._view_selection = False
         # Leaving Filter cancels its context, so each return would otherwise redo the
         # wavelet normalization of every unchanged spectrum.
@@ -298,35 +299,43 @@ class FluxDepInteractiveOwner:
         if not self._owner.is_owner_thread():
             raise RuntimeError("interactive owner access must run on the owner loop")
 
-    def _target_key(self, name: str | None) -> str | None:
-        if name == "selection":
-            return None
+    def inspect_selection(self) -> ActiveInteractiveContext | None:
+        """Read global Filter identity, never a spectrum or displayed picker.
+
+        Return None when absent, closed or source-invalidated. Invalid input is
+        retired; valid reads do not open input, consume Undo or change display.
+        Owner-loop access is required; off-owner calls raise RuntimeError.
+        """
+        self._require_owner()
         return (
-            name
-            if name is not None
-            else (None if self._view_selection else self._state.active_spectrum)
+            self._selection_context
+            if self.current_cross_selection() is not None
+            else None
         )
 
     def inspect(self, name: str | None = None) -> ActiveInteractiveContext | None:
-        """Read a named live draft without changing display, input or Undo.
+        """Read a literal named draft, or the displayed draft when name is None.
 
-        name="selection" addresses the global Filter. Omitted name reads the
-        displayed picker for GUI callers. IDs are owner-lifetime identities.
-        Invalidated or closed input is retired; reads never establish a draft.
+        Every string, including "selection", addresses only that spectrum.
+        inspect_selection reads global Filter regardless of display. Unknown
+        names and absent drafts return None, without opening a Session.
+        Invalidated or closed input is retired; valid reads do not change input,
+        display, Undo or publication. Off-owner access raises RuntimeError.
         """
         self._require_owner()
-        key = self._target_key(name)
-        active = self._contexts.get(key)
+        if name is None and self._view_selection:
+            return self.inspect_selection()
+        key = self._state.active_spectrum if name is None else name
+        active = self._contexts.get(key) if key is not None else None
         if active is None:
             return None
         context = active.context
         if isinstance(context, CrossSelectionContext):
-            if self.current_cross_selection() is None:
-                return None
-        elif context.spectrum_name not in self._state.spectrums:
+            raise RuntimeError("global Filter stored as a spectrum draft")
+        if context.spectrum_name not in self._state.spectrums:
             self.cancel(context.spectrum_name)
             return None
-        elif isinstance(context, TwoTonePickContext):
+        if isinstance(context, TwoTonePickContext):
             entry = self._state.spectrums[context.spectrum_name]
             if entry.spec_type != "TwoTone" or not entry.aligned:
                 self.cancel(context.spectrum_name)
@@ -334,7 +343,7 @@ class FluxDepInteractiveOwner:
         try:
             context.session.ensure_input_open()
         except FailedPreconditionError:
-            self.cancel("selection" if key is None else key)
+            self.cancel(context.spectrum_name)
             return None
         return active
 
@@ -362,15 +371,21 @@ class FluxDepInteractiveOwner:
         ):
             raise FailedPreconditionError("owner changed during context retirement")
 
-    def _cancel_for_begin(self, checkpoint: _BeginCheckpoint, name: str) -> None:
-        """Retire input, then check the same admission captured before queries."""
-        self.cancel(name)
+    def _cancel_for_begin(self, checkpoint: _BeginCheckpoint, name: str | None) -> None:
+        """Retire the literal spectrum or global Filter, then check admission."""
+        if name is None:
+            self.cancel_selection()
+        else:
+            self.cancel(name)
         self._check_begin_checkpoint(checkpoint)
 
     def _install_context(self, context: InteractiveContext) -> None:
         active = ActiveInteractiveContext(self._next_context_id, context)
         self._next_context_id += 1
-        self._contexts[active.spectrum_name] = active
+        if isinstance(context, CrossSelectionContext):
+            self._selection_context = active
+        else:
+            self._contexts[context.spectrum_name] = active
         self._view_selection = isinstance(context, CrossSelectionContext)
         subscriptions = [
             context.session.subscribe(lambda: self._session_updated(active))
@@ -397,7 +412,12 @@ class FluxDepInteractiveOwner:
         self._updated(active)
 
     def _updated(self, active: ActiveInteractiveContext) -> None:
-        if self._contexts.get(active.spectrum_name) is active:
+        current = (
+            self._selection_context
+            if active.spectrum_name is None
+            else self._contexts.get(active.spectrum_name)
+        )
+        if current is active:
             self._emit_interactive(active, "updated")
 
     def _emit_interactive(
@@ -423,17 +443,17 @@ class FluxDepInteractiveOwner:
         event: SpectrumAddedPayload | SpectrumRemovedPayload | SpectrumChangedPayload,
     ) -> None:
         self.cancel(event.name)
-        self.cancel("selection")
+        self.cancel_selection()
 
     def _on_selection_changed(self, _event: SelectionChangedPayload) -> None:
-        active = self._contexts.get(None)
+        active = self._selection_context
         if active is not None and isinstance(active.context, CrossSelectionContext):
             if self._publishing_selection:
                 active.context.selection_version = self._state.version.get(
                     SELECTION_VERSION_KEY
                 )
             else:
-                self.cancel("selection")
+                self.cancel_selection()
 
     def begin_line_pick(self, name: str) -> LinePickContext:
         """Reuse a named context or open captured-input device-axis picking.
@@ -717,7 +737,7 @@ class FluxDepInteractiveOwner:
         plugin = CrossSelectionPlugin(
             inputs, min_distance=self._state.selection.min_distance
         )
-        self._cancel_for_begin(checkpoint, "selection")
+        self._cancel_for_begin(checkpoint, None)
         context = CrossSelectionContext(
             plugin=plugin,
             session=plugin.open(self._owner),
@@ -796,7 +816,7 @@ class FluxDepInteractiveOwner:
         Off-owner use raises RuntimeError. Reads never consume Undo.
         """
         self._require_owner()
-        active = self._contexts.get(None)
+        active = self._selection_context
         context = active.context if active is not None else None
         if not isinstance(context, CrossSelectionContext):
             return None
@@ -812,12 +832,12 @@ class FluxDepInteractiveOwner:
             or context.selection_version
             != self._state.version.get(SELECTION_VERSION_KEY)
         ):
-            self.cancel("selection")
+            self.cancel_selection()
             return None
         try:
             context.session.ensure_input_open()
         except FailedPreconditionError:
-            self.cancel("selection")
+            self.cancel_selection()
             return None
         return context
 
@@ -844,7 +864,7 @@ class FluxDepInteractiveOwner:
         context = self.current_cross_selection()
         if context is None:
             raise FailedPreconditionError("no valid cross-selection context")
-        active = self._contexts.get(None)
+        active = self._selection_context
         if active is None:
             raise FailedPreconditionError("cross-selection retired")
         result = analyze_cross_selection(
@@ -876,17 +896,39 @@ class FluxDepInteractiveOwner:
         result = self._publish_cross_selection()
         # Publication facts may retire this identity and open a successor.
         if self.current_cross_selection() is context:
-            self.cancel("selection")
+            self.cancel_selection()
         return result
 
-    def cancel(self, name: str | None = None) -> None:
-        """Retire only the addressed draft; no publication or other draft loss."""
+    def cancel_selection(self) -> None:
+        """Retire only global Filter, without publication or named draft loss.
+
+        Idempotent owner-loop command. Closed references remain readable but
+        reject edits. Off-owner use raises RuntimeError.
+        """
         self._require_owner()
-        active = self._contexts.pop(self._target_key(name), None)
-        if active is None:
-            return
-        if isinstance(active.context, CrossSelectionContext):
+        active = self._selection_context
+        self._selection_context = None
+        if active is not None:
             self._view_selection = False
+            self._retire(active)
+
+    def cancel(self, name: str | None = None) -> None:
+        """Retire a literal named draft, or the displayed draft when name is None.
+
+        "selection" is a spectrum name, not Filter. cancel_selection explicitly
+        cancels Filter. No publication or other draft loss; absent input is a
+        no-op. Off-owner use raises RuntimeError.
+        """
+        self._require_owner()
+        if name is None and self._view_selection:
+            self.cancel_selection()
+            return
+        key = self._state.active_spectrum if name is None else name
+        active = self._contexts.pop(key, None) if key is not None else None
+        if active is not None:
+            self._retire(active)
+
+    def _retire(self, active: ActiveInteractiveContext) -> None:
         active.context.session.close_input()
         for unsubscribe in self._context_subscriptions.pop(active.context_id, ()):
             unsubscribe()
@@ -904,8 +946,9 @@ class FluxDepInteractiveOwner:
             return
         self._disposed = True
         try:
-            for key in tuple(self._contexts):
-                self.cancel("selection" if key is None else key)
+            for name in tuple(self._contexts):
+                self.cancel(name)
+            self.cancel_selection()
         finally:
             for unsubscribe in self._subscriptions:
                 unsubscribe()

@@ -220,7 +220,11 @@ def test_sampling_finish_and_image_override_use_native_evidence(
         assert len(reply.images) == 1
         assert reply.images[0].data == data
         assert client.transport.requests[-1]["method"] == render_method
-        assert client.transport.requests[-1]["params"] == {"name": "s"}
+        assert client.transport.requests[-1]["params"] == (
+            {"name": "s"}
+            if command == "finish"
+            else {"target": "spectrum", "name": "s"}
+        )
     else:
         assert not reply.images
         assert len(client.transport.requests) == 2

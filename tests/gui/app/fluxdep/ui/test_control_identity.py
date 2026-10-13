@@ -189,17 +189,17 @@ def test_remote_page_switch_keeps_agent_filter_session(window):
     panel = fit_panel(view)
     assert panel is not None and panel.current_tab == "filter"
     assert panel.findChild(SelectorWidget) is not None
-    active = ctrl.interactive.inspect("selection")
+    active = ctrl.interactive.inspect_selection()
     assert active is not None and active.context is context
     show_page(view, "spectra")
     # Leaving Fit retires the Filter view (deferred Qt deletion) but not its input.
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert panel.findChild(SelectorWidget) is None
-    assert ctrl.interactive.inspect("selection") == active
+    assert ctrl.interactive.inspect_selection() == active
     show_page(view, "fit")
     assert panel.current_tab == "filter"
     assert panel.findChild(SelectorWidget) is not None
-    assert ctrl.interactive.inspect("selection") == active
+    assert ctrl.interactive.inspect_selection() == active
 
 
 def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
@@ -212,7 +212,7 @@ def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     with ctrl.bus.origin(EventOrigin(kind="agent")):
         ctrl.interactive.begin_cross_selection()
-        ctrl.interactive.cancel("selection")
+        ctrl.interactive.cancel_selection()
     indicator(view).click()
     assert ctrl.control_identity.status().holder == "gui"
     show_page(view, "fit")
@@ -378,7 +378,7 @@ def test_remote_viewer_reads_search_while_the_agent_filter_runs(
     assert panel.current_tab == "search"
     freshness = named(panel, QLabel, "fluxdep.fit.freshness")
     assert freshness.text().startswith("Outdated: ")
-    active = ctrl.interactive.inspect("selection")
+    active = ctrl.interactive.inspect_selection()
     assert active is not None and active.context is context
     tabs.setCurrentIndex(2)
     assert panel.current_tab == "show"
@@ -386,10 +386,10 @@ def test_remote_viewer_reads_search_while_the_agent_filter_runs(
     tabs.setCurrentIndex(0)
     assert panel.current_tab == "filter"
     assert _selector_count(panel) == 1
-    assert ctrl.interactive.inspect("selection") == active
+    assert ctrl.interactive.inspect_selection() == active
     tabs.setCurrentIndex(1)
     with ctrl.bus.origin(EventOrigin(kind="agent")):
-        ctrl.interactive.cancel("selection")
+        ctrl.interactive.cancel_selection()
     # Without a live Filter a viewer cannot enter Filter, which would begin one.
     assert not tabs.isTabEnabled(0)
     assert ctrl.interactive.current_cross_selection() is None

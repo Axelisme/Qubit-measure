@@ -126,7 +126,13 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
         reply = ToolReply(summary)
         if arguments.get("image", False):
             return with_png(
-                reply, call_gui(bridge, GuiRpcCall("interactive.render", target, 31.0))
+                reply,
+                call_gui(
+                    bridge,
+                    GuiRpcCall(
+                        "interactive.render", {**target, "target": "spectrum"}, 31.0
+                    ),
+                ),
             )
         return reply
 

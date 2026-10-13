@@ -67,7 +67,7 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
                 reply,
                 call_gui(
                     bridge,
-                    GuiRpcCall("interactive.render", {"name": "selection"}, 31.0),
+                    GuiRpcCall("interactive.render", {"target": "selection"}, 31.0),
                 ),
             )
         return reply

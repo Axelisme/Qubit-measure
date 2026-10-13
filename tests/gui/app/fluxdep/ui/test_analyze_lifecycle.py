@@ -1,5 +1,7 @@
 """Explicit singleton activation and Filter/Search context lifecycle."""
 
+import copy
+
 import numpy as np
 from qtpy import QtWidgets
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
@@ -170,4 +172,83 @@ def test_fit_page_reentry_reactivates_singleton_after_external_change(
         np.testing.assert_array_equal(fresh.plugin.inputs.fluxs, [0.0, 0.5, 1.0, 0.8])
     finally:
         window.close()
+        qapp.processEvents()
+
+
+def add_spectrum_named_selection(ctrl):
+    entry = copy.deepcopy(ctrl.state.spectrums["a"])
+    entry.name = "selection"
+    ctrl.state.put_spectrum(entry)
+
+
+def test_filter_view_attaches_global_filter_beside_spectrum_named_selection(
+    qapp, cross_controller
+):
+    ctrl = cross_controller
+    add_spectrum_named_selection(ctrl)
+    draft = ctrl.interactive.begin_line_pick("selection")
+    panel = AnalyzePanelWidget(ctrl)
+    try:
+        panel.activate()
+        selector = panel.findChild(SelectorWidget)
+        assert selector is not None
+        filter_active = ctrl.interactive.inspect_selection()
+        assert filter_active is not None and filter_active.kind == "selection"
+        panel.show_tab("filter")
+        assert panel.findChild(SelectorWidget) is selector
+        assert ctrl.interactive.inspect_selection() == filter_active
+        named = ctrl.interactive.inspect("selection")
+        assert named is not None and named.context is draft
+    finally:
+        panel.quiesce()
+        panel.detach()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_leaving_filter_cancels_global_filter_not_spectrum_named_selection(
+    qapp, cross_controller
+):
+    ctrl = cross_controller
+    add_spectrum_named_selection(ctrl)
+    draft = ctrl.interactive.begin_line_pick("selection")
+    panel = AnalyzePanelWidget(ctrl)
+    try:
+        ctrl.interactive.begin_cross_selection()
+        panel.show_tab("search")
+        assert panel.current_tab == "search"
+        assert ctrl.interactive.inspect_selection() is None
+        named = ctrl.interactive.inspect("selection")
+        assert named is not None and named.context is draft
+    finally:
+        panel.quiesce()
+        panel.detach()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_agent_filter_reveals_beside_spectrum_named_selection_draft(
+    qapp, cross_controller
+):
+    ctrl = cross_controller
+    add_spectrum_named_selection(ctrl)
+    window = MainWindow(ctrl)
+    window.show()
+    try:
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            draft = ctrl.interactive.begin_line_pick("selection")
+        assert window.findChild(LinePickerWidget) is not None
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_cross_selection()
+        panel = window.findChild(AnalyzePanelWidget)
+        stack = window.findChild(QtWidgets.QStackedWidget)
+        assert panel is not None and stack is not None
+        assert stack.currentWidget() is panel
+        assert panel.current_tab == "filter"
+        assert panel.findChild(SelectorWidget) is not None
+        named = ctrl.interactive.inspect("selection")
+        assert named is not None and named.context is draft
+    finally:
+        window.close()
+        window.deleteLater()
         qapp.processEvents()
