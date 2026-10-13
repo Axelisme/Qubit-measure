@@ -249,3 +249,119 @@ def expect_object(value: JsonValue) -> dict[str, JsonValue]:
     """Narrow a public input observation without altering it."""
     assert isinstance(value, dict)
     return value
+
+
+def test_option_command_copies_fixed_capture_and_publishes_once() -> None:
+    latest = 100.0
+    captures: list[float] = []
+
+    def capture(_aliases: object) -> TabFormSources:
+        captures.append(latest)
+        return TabFormSources(module_env(latest))
+
+    resource = TabFormResource(
+        Form(ModuleCore, {}), capture=capture, mutation_allowed=lambda: True
+    )
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    notifications: list[str] = []
+    state_notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    resource.editor_state.subscribe(lambda: state_notifications.append("changed"))
+    latest = 200.0
+    assert hasattr(resource, "run_command"), "Missing guarded option command host"
+    resource.run_command(("pulse",), "to_inline")
+    module = resource.read_module(("pulse",))
+    assert module.mode == "inline"
+    assert module.source == "pulse"
+    assert module.value["freq"] == 100.0
+    assert notifications == ["changed"]
+    assert state_notifications == ["changed"]
+    assert captures == [100.0]
+    module.value["freq"] = -1.0
+    resource.write({("pulse", "module", "freq"): 125.0})
+    assert resource.read_module(("pulse",)).value["freq"] == 125.0
+    assert resource.accept().values["pulse"] is not None
+    resource.reset()
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    resource.run_command(("pulse",), "to_inline")
+    assert resource.read_module(("pulse",)).value["freq"] == 200.0
+    assert captures == [100.0, 200.0]
+
+
+def test_option_command_guards_busy_lifetime_and_peer_reentry() -> None:
+    from zcu_tools.gui.app.measure.services.tab_form import TabFormResources
+
+    allowed = True
+    pool = TabFormResources(mutation_allowed=lambda _tab: allowed)
+    form = Form(ModuleCore, {})
+
+    def capture(_aliases: object) -> TabFormSources:
+        return TabFormSources(module_env(100.0))
+
+    resource = pool.create("target", form, capture=capture)
+    peer = pool.create("peer", form, capture=capture)
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    assert hasattr(resource, "run_command"), "Missing guarded option command host"
+    before = resource.input.data
+    notifications: list[str] = []
+    failures: list[CfgPreconditionReason] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    allowed = False
+    with pytest.raises(CfgPreconditionError) as busy:
+        resource.run_command(("pulse",), "to_inline")
+    assert busy.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
+    allowed = True
+
+    def reenter() -> None:
+        try:
+            resource.run_command(("pulse",), "to_inline")
+        except CfgPreconditionError as error:
+            failures.append(error.reason)
+
+    peer.subscribe(reenter)
+    peer.write({("amount",): 2.0})
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION]
+    assert resource.input.data == before
+    assert notifications == []
+    resource.subscribe(reenter)
+    resource.run_command(("pulse",), "to_inline")
+    assert failures == [CfgPreconditionReason.REENTRANT_MUTATION] * 2
+    assert notifications == ["changed"]
+    pool.retire("target")
+    with pytest.raises(CfgPreconditionError) as gone:
+        resource.run_command(("pulse",), "to_inline")
+    assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        (("missing",), "to_inline"),
+        (("amount",), "to_inline"),
+        (("pulse",), "missing"),
+        (("pulse", "module", "freq"), "to_inline"),
+    ],
+)
+def test_option_command_rejection_is_atomic(
+    path: tuple[str, ...], name: str
+) -> None:
+    resource = TabFormResource(
+        Form(ModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(module_env(100.0)),
+        mutation_allowed=lambda: True,
+    )
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    before = resource.input.data
+    notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    assert hasattr(resource, "run_command"), "Missing guarded option command host"
+    with pytest.raises(ValueError):
+        resource.run_command(path, name)
+    assert resource.input.data == before
+    assert notifications == []
+    resource.run_command(("pulse",), "to_inline")
+    before = resource.input.data
+    with pytest.raises(ValueError, match="Unavailable"):
+        resource.run_command(("pulse",), "to_inline")
+    assert resource.input.data == before
+    assert notifications == ["changed"]

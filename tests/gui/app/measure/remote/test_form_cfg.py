@@ -375,3 +375,23 @@ def test_module_rpc_rejects_nonmodule_paths_without_mutation(
         assert not rejected["ok"], rejected
         assert rejected["error"]["code"] == "invalid_params", rejected
     assert owner.input.data == before
+
+
+def test_use_inline_rejects_disabled_module_without_fallback(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("module-rpc")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        before = owner.input.data
+        notifications: list[str] = []
+        owner.subscribe(lambda: notifications.append("changed"))
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert not reply["ok"], "Disabled module must not silently become blank inline"
+        assert reply["error"]["reason"] == "not_valid"
+        assert "pulse" in reply["error"]["message"]
+        assert "Inline" in reply["error"]["message"]
+        assert owner.input.data == before
+        assert notifications == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
