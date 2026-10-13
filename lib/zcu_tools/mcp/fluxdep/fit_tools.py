@@ -10,7 +10,7 @@ from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import ToolTable
 
-from .projection import search_summary, with_png
+from .projection import search_summary, with_fit_png
 
 
 class DatabaseArguments(TypedDict):
@@ -101,7 +101,9 @@ def _read_fit_result(bridge: McpBridge, arguments: FitResultArguments) -> ToolRe
     if stale:
         summary.data["note"] = "rerun fluxdep_fit to refresh"
     if data["quality"] is not None and not stale and arguments.get("image", True):
-        return with_png(summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0)))
+        return with_fit_png(
+            summary, call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
+        )
     return summary
 
 
@@ -142,7 +144,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
             return ToolReply(dict(outcome))
         summary = search_summary(recorded)
         rendered = call_gui(bridge, GuiRpcCall("fit.render", {}, 31.0))
-        return with_png(summary, rendered)
+        return with_fit_png(summary, rendered)
 
     def fit_result(arguments: FitResultArguments) -> ToolReply:
         return _read_fit_result(bridge, arguments)
