@@ -193,6 +193,47 @@ def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
     assert isinstance(state.result(env), FormErrors)
 
 
+@pytest.mark.parametrize("mode", ["copy", "fallback"])
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'", "2 * 3"])
+def test_root_slot_expression_overrides_require_input(
+    mode: str,
+    expression: str,
+) -> None:
+    form = registered(
+        Slot("Q.pulses.probe", copy=True, set={"phase": Expr(expression)})
+        if mode == "copy"
+        else Slot(
+            "missing", fallback=Template("pulse"), set={"phase": Expr(expression)}
+        )
+    )
+    env = environment()
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    if expression != "2 * 3":
+        assert isinstance(result, FormErrors), result
+        assert result.messages == {("probe", "module", "phase"): "Field required"}
+        state.write({("probe", "module", "phase"): 4}, env)
+        result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    assert cfg.probe.phase == (6 if expression == "2 * 3" else 4)
+    control = registered(
+        Slot("Q.pulses.probe", copy=True)
+        if mode == "copy"
+        else Slot("missing", fallback=Template("pulse"))
+    )
+    control_result = FormState(control.default_input(env)).result(env)
+    if isinstance(control_result, FormErrors):
+        pytest.fail(str(control_result.messages))
+    control_cfg = control.to_cfg(control_result, env)
+    if isinstance(control_cfg, FormErrors):
+        pytest.fail(str(control_cfg.messages))
+    assert control_cfg.probe.phase == 0
+
+
 class OptionalCore(ConfigBase):
     """Core nullability permits a missing slot to remain intentionally disabled."""
 
