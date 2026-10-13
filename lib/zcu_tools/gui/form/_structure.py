@@ -426,14 +426,19 @@ def _partial_model(
             if child is None:
                 raise ValueError(f"Ambiguous partial model field: {name!r}")
             prior = seed.get(name)
-            seed[name] = _partial_model(
-                child,
-                copy_object(prior)
-                if isinstance(prior, dict)
-                else _branch_defaults(child, env, {}),
-                item,
-                env,
-            )
+            try:
+                seed[name] = _partial_model(
+                    child,
+                    copy_object(prior)
+                    if isinstance(prior, dict)
+                    else _branch_defaults(child, env, {}),
+                    item,
+                    env,
+                )
+            except PydanticCustomError as exc:
+                from ._sources import prefix_error
+
+                raise prefix_error(exc, (name,)) from exc
         else:
             batch[(name,)] = item
     return build_candidate(model, seed, batch, env)

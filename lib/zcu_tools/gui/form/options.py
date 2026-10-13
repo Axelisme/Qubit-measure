@@ -80,16 +80,27 @@ class Option:
         return _matches(self._value, current)
 
 
-def _matches(value: JsonValue, current: JsonValue) -> bool:
+def _matches(
+    value: JsonValue, current: JsonValue, *, partial_objects: bool = True
+) -> bool:
     if isinstance(value, dict):
-        return isinstance(current, dict) and all(
-            key in current and _matches(child, current[key])
-            for key, child in value.items()
+        return (
+            isinstance(current, dict)
+            and (partial_objects or value.keys() == current.keys())
+            and all(
+                key in current
+                and _matches(child, current[key], partial_objects=partial_objects)
+                for key, child in value.items()
+            )
         )
     if isinstance(value, list):
         return (
             isinstance(current, list)
             and len(value) == len(current)
-            and all(_matches(a, b) for a, b in zip(value, current, strict=True))
+            # Arrays are whole leaves, including objects nested inside them.
+            and all(
+                _matches(a, b, partial_objects=False)
+                for a, b in zip(value, current, strict=True)
+            )
         )
     return type(value) is type(current) and value == current

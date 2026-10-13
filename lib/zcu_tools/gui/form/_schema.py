@@ -657,10 +657,11 @@ def _project_option(
 
 @dataclass(frozen=True)
 class _Declarations:
-    """Occurrence-local choices and named options passed to nested models."""
+    """Occurrence-local declarations and active ancestry passed to nested models."""
 
     choices: Mapping[FormPath, tuple[JsonValue, ...]] = field(default_factory=dict)
     options: Mapping[FormPath, tuple[Option, ...]] = field(default_factory=dict)
+    active: bool = True
 
     def child(self, name: str) -> _Declarations:
         return _Declarations(
@@ -674,6 +675,7 @@ class _Declarations:
                 for path, values in self.options.items()
                 if len(path) > 1 and path[0] == name
             },
+            self.active,
         )
 
 
@@ -693,10 +695,7 @@ def _selection_schema(
     if selections is None:
         selections = _automatic_options(info, target, values)
     if selections or (name,) in declarations.options or values is not None:
-        if (
-            projection.active_fields is None
-            or projection.active_fields.get(path) is info
-        ):
+        if declarations.active:
             projection.selections[path] = selections
         target["x-form-options"] = [
             _project_option(item, projection, field_nodes) for item in selections
@@ -711,9 +710,17 @@ def _decorate(
     inherited: _Declarations,
     prefix: FormPath,
 ) -> None:
-    """Decorate model's schema node in place; prefix is model's field path."""
+    """Decorate every schema branch, collecting selections only on active ancestry."""
     if model in seen:
         return
+    # A reused child class cannot make an inactive ancestor active again.
+    active = inherited.active and (
+        projection.active_fields is None
+        or all(
+            projection.active_fields.get((*prefix, name)) is info
+            for name, info in model.model_fields.items()
+        )
+    )
     # Track only this ancestry; reused sibling occurrences have distinct choices.
     seen = seen | {model}
     root = projection.root
@@ -721,6 +728,7 @@ def _decorate(
     declarations = _Declarations(
         {**inherited.choices, **local_choices(model, projection.env)},
         {**inherited.options, **_local_options(model, projection.env)},
+        active,
     )
     props = node.get("properties")
     if not isinstance(props, dict):
