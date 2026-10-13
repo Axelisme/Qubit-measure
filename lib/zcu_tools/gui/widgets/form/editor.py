@@ -37,11 +37,17 @@ class FormEditor[F: FormModel](QWidget):
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
-    form.mode.<path> is a numeric/complex/string QComboBox with data "direct" and "expr".
-    On a choice leaf (Literal, Enum or choices) it is hidden in Direct mode, so
-    the row shows one dropdown: the choices, then a last "Expression…" item
-    without data that switches the mode to "expr". Returning to Direct selects
-    the resolved value when it is a current choice, else the last Direct one.
+    form.mode.<path> is the checkable QAction "Expression" of a numeric,
+    complex or string input, checked in Expression mode. form.input.<path>
+    lists it in actions() and in its right-click menu, after a text field's
+    standard items; the row tooltip says so. Triggering it switches the mode
+    and writes the input again: {"expr": <current text or choice>} in
+    Expression mode, the parsed text or a choice in Direct mode. An
+    Expression-mode input has a light tint of the palette's highlight colour.
+    On a choice leaf (Literal, Enum or choices) form.input.<path> is a
+    dropdown of only the choices in Direct mode and a QLineEdit in Expression
+    mode. Returning to Direct selects the resolved value when it is a current
+    choice, else the last Direct one.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of
@@ -52,7 +58,8 @@ class FormEditor[F: FormModel](QWidget):
     structural tag outside a union) have no controls. Their input is kept,
     and their errors appear at the nearest drawn ancestor row or form.error.
     An untagged str-or-model field (a library key or an inline model) has
-    form.mode.<path> with data "key" and "inline" instead: Key mode shows
+    no Expression action; its form.mode.<path> is a QComboBox with data "key"
+    and "inline": Key mode shows
     form.input.<path> as a QLineEdit, or an editable QComboBox listing the
     captured library keys whose Spec matches; Inline mode shows the model's
     child rows, a tagged union with its selector. Switching writes the new

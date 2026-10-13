@@ -6,7 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic import ConfigDict, JsonValue, TypeAdapter
-from qtpy.QtCore import Qt
+
+# qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
+from PyQt6.QtGui import QAction
+from qtpy.QtCore import QPoint, Qt
+from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,8 +41,12 @@ _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
 ROW_SPACING = 4
 _HEADER_SPACING = 2
 _GROUP_MARGINS = (8, 4, 4, 4)
-# Last item of a Direct-mode choice combo; selecting it switches to Expression.
-EXPRESSION_ENTRY = "Expression…"
+# Tooltip line on rows whose input has the right-click Expression action.
+_MODE_HINT = "Right-click to switch Direct / Expression"
+# Share of the palette's Highlight mixed into an Expression input's Base colour:
+# a light tint of the theme's own colours, so text stays readable in light
+# and dark palettes alike.
+_EXPRESSION_TINT = 0.18
 
 
 @dataclass(frozen=True)
@@ -132,6 +140,26 @@ def _parse(field: FieldView, text: str, *, expression: bool) -> JsonValue:
     return _JSON.validate_json(text) if field.kind == "json" else text
 
 
+def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
+    """base moved toward accent by share (0 keeps base, 1 gives accent)."""
+    return QColor(
+        round(base.red() + (accent.red() - base.red()) * share),
+        round(base.green() + (accent.green() - base.green()) * share),
+        round(base.blue() + (accent.blue() - base.blue()) * share),
+    )
+
+
+def _show_text_menu(widget: QLineEdit, action: QAction, pos: QPoint) -> None:
+    """Open widget's standard context menu at pos with action appended."""
+    menu = widget.createStandardContextMenu()
+    if menu is None:
+        raise RuntimeError("QLineEdit.createStandardContextMenu() returned None")
+    menu.addSeparator()
+    menu.addAction(action)
+    menu.exec(widget.mapToGlobal(pos))
+    menu.deleteLater()
+
+
 def _tight_label(text: str, parent: QWidget) -> QLabel:
     """A header label that never takes spare width, so controls sit beside it."""
     label = QLabel(text, parent)
@@ -146,14 +174,15 @@ class FieldRow:
     the left-aligned name label at the start of the header; its parent sets
     one width for a model level's labels so their controls share a left edge.
     input is its optional scalar control (read-only text for a fixed one-value
-    Literal, which has no mode); mode selects direct/Expr; switch
-    selects Key or Inline on a str-or-model field; enabled toggles
-    nullable models; group hosts model children. value/error are public-named
-    presentation labels, hidden while empty: value shows only an
-    Expression-mode resolved value, error shows below the header. On choice
-    rows mode stays hidden in Direct mode; the choice combo's trailing
-    EXPRESSION_ENTRY switches to Expression. These controls never own or
-    evaluate form state.
+    Literal, which has no mode). mode is the checkable Expression action of a
+    row that offers Expression input, checked in Expression mode; input lists
+    it in actions() and its right-click menu, after a text field's standard
+    items. A choice row's input is a dropdown of only the choices in Direct
+    mode and a text field in Expression mode. switch selects Key or Inline
+    on a str-or-model field; enabled toggles nullable models; group hosts
+    model children. value/error are public-named presentation labels, hidden
+    while empty: value shows only an Expression-mode resolved value, error
+    shows below the header. These controls never own or evaluate form state.
     """
 
     def __init__(
@@ -179,7 +208,7 @@ class FieldRow:
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
-        self.mode: QComboBox | None = None
+        self.mode: QAction | None = None
         self.switch: QComboBox | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
@@ -211,7 +240,8 @@ class FieldRow:
         self.error.setWordWrap(True)
         self.error.hide()
         self.layout.addWidget(self.error)
-        self.widget.setToolTip(field.description)
+        hint = _MODE_HINT if self.mode is not None else ""
+        self.widget.setToolTip("\n".join(filter(None, (field.description, hint))))
 
     def set_error(self, text: str) -> None:
         """Show text under the row's header; empty text hides the error label."""
@@ -245,7 +275,8 @@ class FieldRow:
         self.layout.addWidget(self.group)
 
     def _build_switch(self, header: QHBoxLayout) -> None:
-        # Shares form.mode.<path> with Direct/Expression; data is key/inline.
+        # Named form.mode.<path> like the Expression action of value rows,
+        # but a QComboBox with data key/inline; such a row has no Expression.
         self.switch = QComboBox(self.widget)
         self.switch.setObjectName(self._name("mode"))
         self.switch.addItem("Key", "key")
@@ -316,42 +347,61 @@ class FieldRow:
         if isinstance(widget, QLineEdit):
             widget.setPlaceholderText(self.field.placeholder)
         if self.field.expression:
-            self.mode = QComboBox(self.widget)
+            # Owned by the row, so it outlives a choice row's input swaps.
+            self.mode = QAction("Expression", self.widget)
             self.mode.setObjectName(self._name("mode"))
-            self.mode.addItem("Direct", "direct")
-            self.mode.addItem("Expression", "expr")
-            self.mode.currentIndexChanged.connect(self._mode_changed)
-            header.addWidget(self.mode)
+            self.mode.setCheckable(True)
+            self.mode.triggered.connect(self._mode_changed)
         self._input_layout = header
         header.addWidget(widget)
+        self._offer_mode(widget)
         connect_value_widget(widget, self._input_changed)
+
+    def _offer_mode(self, widget: QWidget) -> None:
+        """List mode on widget and in its right-click menu."""
+        mode = self.mode
+        if mode is None:
+            return
+        widget.addAction(mode)
+        if isinstance(widget, QLineEdit):
+            # Keep the text field's standard menu; mode follows it.
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            widget.customContextMenuRequested.connect(
+                lambda pos: _show_text_menu(widget, mode, pos)
+            )
+        else:
+            # A dropdown has no standard menu: its menu is its actions.
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
 
     def _activate(self) -> None:
         if not self._displaying and self.enabled is not None:
             self._changed(self.field.path, {} if self.enabled.isChecked() else None)
 
-    def _mode_changed(self, _index: int) -> None:
+    def _mode_changed(self) -> None:
         if self._displaying:
             return
-        if self.field.options is not None:
-            # Expression text starts from the direct choice; no choice is "".
-            text = (
-                self.input.text()
-                if isinstance(self.input, QLineEdit)
-                else ("" if self.field.raw is None else str(self.field.raw))
-            )
-            self._displaying = True
-            try:
-                expression = self.mode is not None and self.mode.currentIndex() == 1
+        expression = self._expression_selected()
+        self._displaying = True
+        try:
+            if self.field.options is not None:
+                # Expression text starts from the direct choice; no choice is "".
+                text = (
+                    self.input.text()
+                    if isinstance(self.input, QLineEdit)
+                    else ("" if self.field.raw is None else str(self.field.raw))
+                )
                 self._select_input(expression=expression)
-                self._show_mode(expression=expression)
                 if isinstance(self.input, QLineEdit):
                     self.input.setText(text)
                 else:
                     self._display_choices(self._direct_choice())
-            finally:
-                self._displaying = False
+            self._show_mode(expression=expression)
+        finally:
+            self._displaying = False
         self._input_changed()
+
+    def _expression_selected(self) -> bool:
+        return self.mode is not None and self.mode.isChecked()
 
     def _direct_choice(self) -> object:
         """Choice to select when Expression mode returns to Direct.
@@ -366,10 +416,23 @@ class FieldRow:
         return self._direct_raw
 
     def _show_mode(self, *, expression: bool) -> None:
-        # Choice rows reach Expression through EXPRESSION_ENTRY, so their
-        # mode combo appears only once Expression mode is selected.
-        if self.mode is not None:
-            self.mode.setVisible(expression or self.field.options is None)
+        """Check mode and tint the current input for the given mode."""
+        if self.mode is None or self.input is None:
+            return
+        self.mode.setChecked(expression)
+        # An empty QPalette sets no role, so a Direct input inherits again.
+        palette = QPalette()
+        if expression:
+            shown = self.widget.palette()
+            palette.setColor(
+                QPalette.ColorRole.Base,
+                _mixed(
+                    shown.color(QPalette.ColorRole.Base),
+                    shown.color(QPalette.ColorRole.Highlight),
+                    _EXPRESSION_TINT,
+                ),
+            )
+        self.input.setPalette(palette)
 
     def _select_input(self, *, expression: bool) -> None:
         if self.field.options is None:
@@ -388,6 +451,7 @@ class FieldRow:
             old.setParent(None)
             old.deleteLater()
         self.input = widget
+        self._offer_mode(widget)
         connect_value_widget(widget, self._input_changed)
 
     def _display_choices(self, selected: object) -> None:
@@ -396,8 +460,6 @@ class FieldRow:
             widget.clear()
             for value in self.field.options or ():
                 widget.addItem(str(value), value)
-            if self.mode is not None:
-                widget.addItem(EXPRESSION_ENTRY)
             widget.setCurrentIndex(
                 next(
                     (
@@ -418,13 +480,10 @@ class FieldRow:
         elif isinstance(widget, QComboBox):
             index = widget.currentIndex()
             options = self.field.options or ()
-            if self.mode is not None and index == len(options):
-                # EXPRESSION_ENTRY: the mode change rebuilds input and writes.
-                self.mode.setCurrentIndex(self.mode.findData("expr"))
-            elif 0 <= index < len(options):
+            if 0 <= index < len(options):
                 self._changed(self.field.path, options[index])
         elif isinstance(widget, QLineEdit):
-            expression = self.mode is not None and self.mode.currentIndex() == 1
+            expression = self._expression_selected()
             text = widget.text()
             try:
                 parsed = _parse(self.field, text, expression=expression)
@@ -448,7 +507,7 @@ class FieldRow:
             text = widget.currentText()
         else:
             text = ""
-        expression = self.mode is not None and self.mode.currentIndex() == 1
+        expression = self._expression_selected()
         section = self.field.kind == "model"
         return LocalText(text, message, expression, section=section)
 
@@ -514,10 +573,9 @@ class FieldRow:
             self.enabled.setChecked(field.active)
             self.enabled.setEnabled(editable)
         if self.mode is not None:
-            self.mode.setCurrentIndex(1 if expression else 0)
             self.mode.setEnabled(editable)
-        self._show_mode(expression=expression)
         self._select_input(expression=expression)
+        self._show_mode(expression=expression)
         widget = self.input
         if widget is None:
             return
