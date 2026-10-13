@@ -2,8 +2,7 @@
 
 Only Expr seeds evaluate; ordinary strings, numbers and bools remain literal.
 Slot seeds retain library links. The composition root injects TEMPLATES once
-into its measure Registry; definitions projects that catalog into the library
-creation menu. This module does not register anything at import time.
+into its measure Registry. This module does not register anything at import time.
 """
 
 from __future__ import annotations
