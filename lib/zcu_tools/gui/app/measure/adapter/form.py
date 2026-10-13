@@ -148,7 +148,8 @@ class _Section:
             return {
                 (name,): (
                     (None, *env.devices)
-                    if type(None) in _members(section.core.model_fields[name].annotation)
+                    if type(None)
+                    in _members(section.core.model_fields[name].annotation)
                     else tuple(env.devices)
                 )
                 for name, node in section.tree.items()
@@ -329,16 +330,19 @@ class Form[C: ConfigBase]:
     ) -> None:
         if (extras is None) != (lower is None):
             raise ValueError("extras and lower must be provided together")
-        self.core_cfg = core_cfg
+        self._core_cfg = core_cfg
         self._section = _Section(core_cfg, tree, ())
         self.model: type[FormModel] = self._section.model
-        self._lower: Callable[[BaseModel, C], C] | None = None
+        self._lower: Callable[[BaseModel, ConfigBase], C] | None = None
         if extras is not None and lower is not None:
             if "extras" in core_cfg.model_fields:
                 raise ValueError("Core cfg already declares extras")
 
-            def lower_model(value: BaseModel, cfg: C) -> C:
-                return lower(extras.model_validate(value.model_dump()["extras"]), cfg)
+            def lower_model(value: BaseModel, cfg: ConfigBase) -> C:
+                return lower(
+                    extras.model_validate(value.model_dump()["extras"]),
+                    core_cfg.model_validate(cfg),
+                )
 
             self._lower = lower_model
             parent = self.model
@@ -356,6 +360,11 @@ class Form[C: ConfigBase]:
                 raise TypeError("Generated extras model must implement FormModel")
             self.model = model
             self._section.model = model
+
+    @property
+    def core_cfg(self) -> type[C]:
+        """Return the fixed validated cfg result type; the definition cannot retarget it."""
+        return self._core_cfg
 
     def bind_templates(
         self, templates: Mapping[str, TemplateDef], *, adapter: str

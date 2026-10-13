@@ -9,11 +9,10 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabClosedPayload,
 )
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import SessionCodecError, raw_to_schema, schema_to_raw
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
 from .persistence_types import PersistedSession, PersistedTab
-from .ports import RestoreIssue, RestoreReport, TabSnapshot
+from .ports import RestoreDroppedInputs, RestoreIssue, RestoreReport, TabSnapshot
 
 if TYPE_CHECKING:
     from .ports import TabLifecyclePort
@@ -22,9 +21,9 @@ if TYPE_CHECKING:
 class WorkspaceService:
     """Own tab lifecycle and tab-session capture/apply workflow.
 
-    The shared cfg raw↔live codec is this service's implementation dependency for
-    capturing/applying a session; the PersistenceCaretaker
-    only ever sees the resulting ``PersistedSession`` memento (opaque cfg_raw).
+    Capture preserves authored Form input JSON. Tab resources own compatible
+    restoration against a new source capture; the PersistenceCaretaker only
+    reads/writes the resulting versioned PersistedSession memento.
     """
 
     def __init__(
@@ -65,8 +64,10 @@ class WorkspaceService:
         self._state.reorder_tabs(tab_ids)
 
     def capture_session(self) -> PersistedSession:
-        """Snapshot the live tabs into a serializable session memento (no disk).
-        Lowers each tab's live cfg to raw via the internal codec."""
+        """Snapshot authored Form input, including unfinished expressions, without I/O.
+
+        Sources, alias overrides, result models and figures are not persisted.
+        """
         tabs = list(self._state.tabs.items())
         tab_ids = [tab_id for tab_id, _ in tabs]
         active_tab_index = (
@@ -77,51 +78,42 @@ class WorkspaceService:
         payload_tabs = tuple(
             PersistedTab(
                 adapter_name=tab.adapter_name,
-                cfg_raw=schema_to_raw(tab.cfg.snapshot_inputs()),
+                form_input=tab.cfg.input.data,
             )
             for _, tab in tabs
         )
         return PersistedSession(tabs=payload_tabs, active_tab_index=active_tab_index)
 
     def apply_session(self, session: PersistedSession) -> RestoreReport:
-        """Rebuild tabs from a session memento. Per-tab failures (adapter
-        missing / cfg invalid) are collected into the report; good tabs still
-        restore. Bridges the raw cfg back to live via the internal codec."""
+        """Create fresh resources and overlay saved compatible Form input JSON.
+
+        Per-tab preparation failures are rejected_tabs; other tabs still restore.
+        Successfully restored tabs report incompatible leaves through dropped_inputs.
+        Ordinary unfinished/invalid input remains editable. Old memento versions
+        are rejected by the caretaker codec, not migrated here.
+        """
         restored_by_index: dict[int, str] = {}
         rejected: list[RestoreIssue] = []
+        dropped: list[RestoreDroppedInputs] = []
         for index, persisted_tab in enumerate(session.tabs):
-            try:
-                base_schema = self._tabs.make_default_cfg(persisted_tab.adapter_name)
-            except KeyError as exc:
-                rejected.append(
-                    RestoreIssue(
-                        persisted_tab.adapter_name,
-                        f"adapter unavailable ({exc})",
-                    )
-                )
-                continue
-            except ValueError as exc:
-                rejected.append(
-                    RestoreIssue(
-                        persisted_tab.adapter_name, f"invalid adapter defaults ({exc})"
-                    )
-                )
-                continue
-            try:
-                restored_schema = raw_to_schema(base_schema, persisted_tab.cfg_raw)
-            except SessionCodecError as exc:
-                rejected.append(
-                    RestoreIssue(
-                        persisted_tab.adapter_name,
-                        f"invalid saved configuration ({exc})",
-                    )
-                )
-                continue
             snapshot = TabSnapshot(
                 adapter_name=persisted_tab.adapter_name,
-                cfg_schema=restored_schema,
+                cfg_input=persisted_tab.form_input,
             )
-            tab_id = self._tabs.new_tab(persisted_tab.adapter_name, from_dict=snapshot)
+            try:
+                tab_id = self._tabs.new_tab(
+                    persisted_tab.adapter_name, from_dict=snapshot
+                )
+            except (KeyError, ValueError, TypeError) as exc:
+                rejected.append(
+                    RestoreIssue(
+                        persisted_tab.adapter_name, f"Cannot restore form ({exc})"
+                    )
+                )
+                continue
+            paths = self._tabs.dropped_input_paths(tab_id)
+            if paths:
+                dropped.append(RestoreDroppedInputs(persisted_tab.adapter_name, paths))
             restored_by_index[index] = tab_id
             self._bus.emit(
                 TabAddedPayload(
@@ -137,4 +129,5 @@ class WorkspaceService:
         return RestoreReport(
             restored_tabs=len(restored_by_index),
             rejected_tabs=tuple(rejected),
+            dropped_inputs=tuple(dropped),
         )

@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping
 
-import pytest
 from zcu_tools.cfg_model import ConfigBase, Expr
 from zcu_tools.gui.app.measure.adapter import CfgInputRejected, Form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources

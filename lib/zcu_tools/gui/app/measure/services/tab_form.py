@@ -1,6 +1,8 @@
 """Measure policy for one headless FormState and its fixed source lifetime."""
 
-from collections.abc import Callable, Mapping
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -9,8 +11,8 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-from zcu_tools.gui.app.measure.adapter import Form
-from zcu_tools.gui.cfg import ExpressionCapture
+from zcu_tools.gui.app.measure.adapter import CfgInputRejected, Form
+from zcu_tools.gui.cfg.capture import ExpressionCapture
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -21,6 +23,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
+    FormPath,
     FormPreview,
     FormState,
     FormWritePath,
@@ -36,7 +39,7 @@ _logger = getLogger(__name__)
 class TabFormSources:
     """One owner-captured source used from Open or Reset until the next Reset.
 
-    env borrows fixed parameter/library snapshots and detached native devices.
+    env borrows fixed parameter/library snapshots and detached cached device infos.
     captures contains published dotted value-source cache entries, never live
     providers. source_basis describes their provenance; empty means no revision
     provenance was supplied. Callers must not mutate these captured sources.
@@ -78,6 +81,7 @@ class TabFormResource:
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         mutation_allowed: Callable[[], bool],
         notification_active: Callable[[], bool] = lambda: False,
+        initial: Mapping[str, JsonValue] | None = None,
     ) -> None:
         """Prepare default input using one capture before exposing the resource.
 
@@ -85,17 +89,25 @@ class TabFormResource:
         capture accepts one-shot named alias overrides, or None for global rows.
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
-        hardware I/O. Capture/default failures propagate without a resource.
+        hardware I/O. initial optionally overlays saved compatible input on fresh
+        defaults; dropped_paths reports discarded leaves. Source captures are not
+        restored. Capture/default failures propagate without a resource.
         """
         self._capture = capture
         self._default_input = form.default_input
         self._to_cfg: Callable[[FormModel, FormEnv], ConfigBase | FormErrors] = (
             form.to_cfg
         )
+        self._cfg_input = form.cfg_input
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
         self._state = FormState(form.default_input(self._sources.env))
+        self._dropped_paths = (
+            self._state.write_compatible(initial, self._sources.env)
+            if initial is not None
+            else ()
+        )
         self._open = True
         self._notifying = False
         self._callbacks: list[Callable[[], None]] = []
@@ -105,6 +117,12 @@ class TabFormResource:
         """Return detached current authored input, including unfinished expressions."""
         self._require_open()
         return self._state.input
+
+    @property
+    def dropped_paths(self) -> tuple[FormPath, ...]:
+        """Return paths discarded while overlaying initial saved compatible input."""
+        self._require_open()
+        return self._dropped_paths
 
     @property
     def env(self) -> FormEnv:
@@ -173,6 +191,20 @@ class TabFormResource:
         self._state.write(prepared, self._sources.env)
         self._notify()
 
+    def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
+        """Overlay compatible saved leaves and report discarded input paths.
+
+        Preserve expression text and unfinished input. FormState owns branch/type
+        and source compatibility. Token preparation and mutation guards match
+        write; failures preserve the entire input. No source is recaptured.
+        """
+        self.require_mutation_allowed()
+        capture = ExpressionCapture(self._read_capture, validate_scalar_expr)
+        prepared = {key: _capture_input(value, capture) for key, value in saved.items()}
+        dropped = self._state.write_compatible(prepared, self._sources.env)
+        self._notify()
+        return dropped
+
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
         """Capture sources once and replace input with fresh authored defaults.
 
@@ -187,6 +219,36 @@ class TabFormResource:
         self._sources = sources
         self._state = state
         self._notify()
+
+    def load_cfg(self, cfg: ConfigBase) -> CfgInputRejected | None:
+        """Backfill a native cfg with concrete direct input, without source capture.
+
+        cfg must match the Form core type; wrong types raise TypeError. Form owns
+        module/range conversion and extras roundtrip checks. Missing valid extras,
+        invalid candidates or roundtrip mismatches return CfgInputRejected and
+        preserve input. Success returns None and publishes the complete candidate.
+        Guards reject before preparation; source/author failures propagate without
+        input mutation. Loaded input does not retain expressions or live links.
+        """
+        self.require_mutation_allowed()
+        current = self._state.result(self._sources.env)
+        candidate = self._cfg_input(
+            cfg,
+            current=None if isinstance(current, FormErrors) else current,
+            env=self._sources.env,
+        )
+        if isinstance(candidate, CfgInputRejected):
+            return candidate
+        state = FormState(candidate)
+        result = state.result(self._sources.env)
+        if isinstance(result, FormErrors):
+            return CfgInputRejected(result)
+        converted = self._to_cfg(result, self._sources.env)
+        if isinstance(converted, FormErrors):
+            return CfgInputRejected(converted)
+        self._state = state
+        self._notify()
+        return None
 
     def require_mutation_allowed(self) -> None:
         """Guard related owner operations such as Load before replacing results."""
@@ -232,6 +294,11 @@ class TabFormResource:
                 return item.value
         raise KeyError(key)
 
+    @staticmethod
+    def notifications_active(resources: Sequence[TabFormResource]) -> bool:
+        """Report whether any supplied resource is delivering owner notifications."""
+        return any(resource._notifying for resource in resources)
+
     def _require_open(self) -> None:
         if not self._open:
             raise CfgPreconditionError(
@@ -270,3 +337,72 @@ def _capture_input(value: JsonValue, capture: ExpressionCapture) -> JsonValue:
     if isinstance(value, list):
         return [_capture_input(item, capture) for item in value]
     return value
+
+
+class TabFormResources:
+    """Manage State-owned form identity, busy policy and retained handle revocation.
+
+    Composition owns this pool. Frontends resolve a tab-bound resource and issue
+    its public commands; they do not construct or retire editable state.
+    """
+
+    def __init__(self, *, mutation_allowed: Callable[[str], bool]) -> None:
+        """Inject the application tab busy/control policy, evaluated per command."""
+        self._mutation_allowed = mutation_allowed
+        self._resources: dict[str, TabFormResource] = {}
+
+    def create[C: ConfigBase](
+        self,
+        tab_id: str,
+        form: Form[C],
+        *,
+        capture: Callable[[Mapping[str, str] | None], TabFormSources],
+        initial: Mapping[str, JsonValue] | None = None,
+    ) -> TabFormResource:
+        """Prepare one fixed capture and optional compatible restoration before registration.
+
+        tab_id is a nonempty new app identity. form is the registry-bound adapter
+        definition; capture reads published sources on Open/Reset only. initial
+        is saved Form input JSON, never an old CfgSchema memento. Duplicate/empty
+        identities raise ValueError; preparation failures leave no association.
+        Notifications in any pooled resource forbid lifetime mutation.
+        """
+        self._require_not_notifying()
+        if not tab_id or tab_id in self._resources:
+            raise ValueError(
+                f"Tab form identity is empty or already registered: {tab_id!r}"
+            )
+        resource = TabFormResource(
+            form,
+            capture=capture,
+            initial=initial,
+            mutation_allowed=lambda: self._mutation_allowed(tab_id),
+            notification_active=self._notifications_active,
+        )
+        self._resources[tab_id] = resource
+        return resource
+
+    def lookup(self, tab_id: str) -> TabFormResource:
+        """Resolve the tab's sole form authority; missing identity raises RESOURCE_GONE."""
+        try:
+            return self._resources[tab_id]
+        except KeyError as exc:
+            raise CfgPreconditionError(
+                CfgPreconditionReason.RESOURCE_GONE,
+                f"Tab {tab_id!r} has no form resource",
+            ) from exc
+
+    def retire(self, tab_id: str) -> None:
+        """Revoke old handles before removing identity; the app checks close/busy policy."""
+        self.lookup(tab_id).revoke()
+        del self._resources[tab_id]
+
+    def _notifications_active(self) -> bool:
+        return TabFormResource.notifications_active(tuple(self._resources.values()))
+
+    def _require_not_notifying(self) -> None:
+        if self._notifications_active():
+            raise CfgPreconditionError(
+                CfgPreconditionReason.REENTRANT_MUTATION,
+                "Tab lifetime changes are forbidden during form notification",
+            )

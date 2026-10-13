@@ -6,15 +6,13 @@ are pydantic v2 models (frozen) so ``model_validate`` does the load-time
 validation that used to be hand-written, and ``model_dump`` produces the JSON.
 
 They are pure data — no behaviour, no disk I/O (that is the Caretaker), no cfg
-codec (that is WorkspaceService's internal capture/apply). ``cfg_raw`` is an
-opaque lowered-cfg dict the Caretaker never inspects.
+cfg conversion (that belongs to the Form resource). ``form_input`` preserves
+authored JSON that the caretaker does not interpret.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.services.project_settings import (
@@ -30,16 +28,22 @@ from zcu_tools.gui.session.state import (
 # Single top-level version for the whole app-state snapshot (Phase 126 merged the
 # former startup_v2 + tab_session_v1 files into one). Bump on any incompatible
 # shape change; a mismatch makes the Caretaker fall back to defaults.
-APP_STATE_VERSION = 1
+APP_STATE_VERSION = 2
 
 
 class PersistedTab(BaseModel):
+    """One experiment name and authored Form input, without captured sources.
+
+    adapter_name identifies the registry entry at restore time. form_input is
+    detached JSON input, including expressions; compatible restore reports drops.
+    """
+
     model_config = ConfigDict(frozen=True)
 
     adapter_name: str
-    # Opaque lowered cfg (raw dict) — WorkspaceService owns the raw↔live codec;
-    # the memento and Caretaker never look inside.
-    cfg_raw: dict[str, Any]
+    # Authored Form input JSON, including expression envelopes and missing fields.
+    # Workspace restores compatible leaves; source snapshots are never persisted.
+    form_input: dict[str, JsonValue]
 
 
 class PersistedSession(BaseModel):

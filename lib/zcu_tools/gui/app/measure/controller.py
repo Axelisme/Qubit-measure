@@ -697,7 +697,7 @@ class Controller(SessionControllerMixin):
     def start_run(
         self, tab_id: str, *, aliases: Mapping[str, str] | None = None
     ) -> int:
-        """Start observed cfg inputs with an optional single-Run alias override.
+        """Run displayed cfg values; nonempty aliases require an explicit Reset first.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """

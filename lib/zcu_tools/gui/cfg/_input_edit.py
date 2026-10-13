@@ -6,9 +6,9 @@ from dataclasses import replace
 
 from zcu_tools.gui.expected_error import InvalidInputError
 
-from ._capture import ExpressionCapture
 from ._complete_input import require_complete_input, select_input_shape
 from .binding.range import CenteredSweepEditor, SweepEditor
+from .capture import ExpressionCapture
 from .edit_codec import decode_input, encode_input
 from .inheritance import (
     align_locked_literals,

@@ -17,7 +17,6 @@ from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import (
@@ -89,13 +88,8 @@ def _acquire_to_terminal(
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
-    inputs = GuardService(
-        session.state,
-        captured_parameters=session.capture_parameters,
-        cfg_resolution=lambda parameters: MeasureCfgBindings(
-            MagicMock()
-        ).snapshot_from_state(session.state, captured_values={}, parameters=parameters),
-    ).capture_run_inputs("tab")
+    session.state.get_tab("tab").cfg.reset()
+    inputs = GuardService(session.state).capture_run_inputs("tab")
     loop = QEventLoop()
     timer = QTimer()
     timer.setSingleShot(True)
@@ -230,7 +224,6 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
     birth = services.context.read_context()
-    assert birth is not None
     birth_storage = birth.capture_storage()
     services.setup_control.new_entry(EntryRequest("acquisition"))
     services.context.new_point(
@@ -256,11 +249,8 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
 
     subscription = bus.subscribe(RunFinishedPayload, terminal)
     try:
-        services.run_analyze_control.start_run(
-            tab_id,
-            origin=origin,
-            aliases=None if target is None else {"driver": target},
-        )
+        tab.cfg.reset(aliases=None if target is None else {"driver": target})
+        services.run_analyze_control.start_run(tab_id, origin=origin)
         timer.start(5000)
         if not finished:
             loop.exec()

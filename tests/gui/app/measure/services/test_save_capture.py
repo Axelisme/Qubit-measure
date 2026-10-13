@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseSpec
+from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -31,7 +31,7 @@ from zcu_tools.resources.entry import ResultEntry, RoleSpec
 from zcu_tools.resources.entry.save_layout import ArtifactKey, SaveLayout
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui.app.measure._cfg_fakes import cfg_resolution, cfg_resources
+from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import GUI_ORIGIN, native_save_session
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -196,17 +196,15 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
     with native_save_session(tmp_path, qapp) as native:
         empty_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
         adapter = MagicMock()
-        adapter.make_default_cfg.return_value = CfgSchema(
-            CfgSectionSpec(), CfgSectionValue()
-        )
+        adapter.form = Form(ConfigBase, {})
         registry = MagicMock()
         registry.create.return_value = adapter
         tabs = TabService(
             empty_state,
             registry,
             MagicMock(),
-            cfg_resources(empty_state),
-            cfg_resolution=lambda parameters: cfg_resolution(empty_state, parameters),
+            form_resources(empty_state),
+            form_sources=lambda aliases: form_sources(empty_state, aliases),
             captured_parameters=lambda _aliases: None,
         )
         tab_id = tabs.new_tab("pure")
@@ -218,13 +216,7 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
         empty_state.set_context(native.state.session_env)
         control = SaveControlFacet(
             state=empty_state,
-            guard=GuardService(
-                empty_state,
-                captured_parameters=lambda _aliases: empty_state.session_env.parameters,
-                cfg_resolution=lambda parameters: cfg_resolution(
-                    empty_state, parameters
-                ),
-            ),
+            guard=GuardService(empty_state),
             save=SaveService(empty_state, native.bus),
             context=native.context,
         )

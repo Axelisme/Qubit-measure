@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.cfg.resource import CfgResolution, SourceRevision
+from zcu_tools.gui.cfg.resource import SourceRevision
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.events import (
-    AliasesChangedPayload,
-    ContextSwitchedPayload,
-    DeviceChangedPayload,
-    MdChangedPayload,
-    MlChangedPayload,
-)
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -42,8 +36,8 @@ from .run_analyze_control import RunAnalyzeControlFacet
 from .save import SaveService
 from .save_control import SaveControlFacet
 from .tab import TabService
-from .tab_cfg import TabCfgResources
 from .tab_control import TabControlFacet
+from .tab_form import TabFormResources, TabFormSources
 from .workspace import WorkspaceService
 from .writeback import WritebackService
 from .writeback_control import WritebackControlFacet
@@ -101,7 +95,7 @@ class AppServices:
     context_control: ContextControlPort
     setup_control: SetupControlPort
     tab: TabService
-    tab_cfg: TabCfgResources
+    tab_cfg: TabFormResources
     tab_control: TabControlPort
     run_analyze_control: RunAnalyzeControlPort
     load: LoadService
@@ -183,34 +177,29 @@ def build_app_services(
             return None
         return context.read_context(aliases=aliases)
 
-    def cfg_resolution(parameters: ParameterContext | None) -> CfgResolution:
+    def form_sources(aliases: Mapping[str, str] | None) -> TabFormSources:
+        parameters = captured_parameters(aliases)
         captured = session.value_sources.snapshot()
-        source = bindings.snapshot_from_state(
-            state, captured_values=captured.values, parameters=parameters
-        )
-        return replace(
-            source,
+        return TabFormSources(
+            env=FormEnv(
+                parameters=parameters,
+                library=None if parameters is None else parameters.library,
+                devices={
+                    device.name: device.info.model_copy(deep=True)
+                    for device in state.list_devices()
+                    if device.info is not None
+                },
+            ),
+            captures=captured.values,
             source_basis=(
-                *source.source_basis,
+                *bindings.source_basis(state),
                 SourceRevision("values", int(captured.revision)),
             ),
         )
 
-    tab_cfg = TabCfgResources(
+    tab_cfg = TabFormResources(
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
-
-    def refresh_tab_cfg(_payload: object) -> None:
-        tab_cfg.refresh_all()
-
-    for event_type in (
-        AliasesChangedPayload,
-        ContextSwitchedPayload,
-        DeviceChangedPayload,
-        MdChangedPayload,
-        MlChangedPayload,
-    ):
-        bus.subscribe(event_type, refresh_tab_cfg)
     # Independent library/inspect/writeback drafts never publish tab cfg.
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
@@ -226,16 +215,13 @@ def build_app_services(
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(
-        state, registry, writeback, tab_cfg, cfg_resolution, captured_parameters
+        state, registry, writeback, tab_cfg, form_sources, captured_parameters
     )
     workspace = WorkspaceService(state, tab, bus)
-    guard = GuardService(
-        state, captured_parameters=captured_parameters, cfg_resolution=cfg_resolution
-    )
+    guard = GuardService(state)
     load = LoadService(
         state,
         writeback,
-        provide_options=bindings.provide_options,
         context=ContextControlFacet(context=context),
         captured_parameters=captured_parameters,
     )

@@ -92,7 +92,11 @@ def make_app(*, device: bool = False) -> LoadApp:
         historical_metadata(),
     )
     state.add_tab("tab", Session(adapter_name="test", adapter=adapter, cfg=cfg))
-    cfg.subscribe(lambda: state.version.bump("tab:tab:cfg"))
+
+    def cfg_changed() -> None:
+        state.version.bump("tab:tab:cfg")
+
+    cfg.subscribe(cfg_changed)
     if device:
         cfg.write({("rf_dev",): "stable"})
     service = LoadService(

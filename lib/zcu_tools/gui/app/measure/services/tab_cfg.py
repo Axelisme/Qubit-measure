@@ -20,11 +20,14 @@ from zcu_tools.gui.cfg.resource import (
 )
 
 from .tab_form import TabFormResource as TabFormResource
+from .tab_form import TabFormResources as TabFormResources
 from .tab_form import TabFormSources as TabFormSources
 
 
 class TabCfgLookup(Protocol):
-    def lookup(self, tab_id: str) -> CfgEditing: ...
+    def lookup(self, tab_id: str) -> TabFormResource:
+        """Resolve the tab's fixed form authority, or raise RESOURCE_GONE."""
+        ...
 
 
 class TabCfgResources:

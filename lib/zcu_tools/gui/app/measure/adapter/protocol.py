@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
+
+from .form import Form
 
 if TYPE_CHECKING:
     from zcu_tools.datafile import AnalysisDocument, RunMetadata
@@ -95,8 +98,13 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the static human-facing orientation guide (no instance state)."""
         ...
 
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        """Compose the static spec with context-derived default values."""
+    @property
+    def form(self) -> Form[ConfigBase]:
+        """Return this adapter's registry-bound core-derived form definition.
+
+        The host captures FormEnv only on Open/Reset and owns editable state.
+        Register this same definition explicitly with Registry.register(form=...).
+        """
         ...
 
     def make_save_paths(self, ctx: SessionEnv) -> SavePaths:

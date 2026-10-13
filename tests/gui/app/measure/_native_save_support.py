@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import (

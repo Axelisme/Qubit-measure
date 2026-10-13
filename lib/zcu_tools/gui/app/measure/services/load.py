@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, LoadDataRequest
-from zcu_tools.gui.app.measure.adapter.loaded_cfg import project_loaded_cfg
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    CfgInputRejected,
+    LoadDataRequest,
+)
 from zcu_tools.gui.cfg.resource import CfgInputError, CfgPreconditionError
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -35,6 +38,8 @@ class LoadTabResultOutcome:
     source_kind: str = "loaded"
     cfg_backfill: Literal["applied", "not_applied"] = "not_applied"
     analysis_error: str | None = None
+    # Directed Form-owned diagnostics when a native cfg cannot safely backfill.
+    cfg_rejection: CfgInputRejected | None = None
 
 
 class LoadDataError(FailedPreconditionError):
@@ -66,24 +71,22 @@ class LoadService:
         state: State,
         writeback: WritebackLifecyclePort,
         *,
-        provide_options: Callable[[str], Sequence[object]],
         context: ContextControlPort,
         captured_parameters: Callable[
             [Mapping[str, str] | None], ParameterContext | None
         ],
     ) -> None:
-        """Inject fixed current-source capture and cfg backfill option lookup.
+        """Inject fixed Load-time metadata capture, distinct from the tab form capture.
 
         captured_parameters reads current point/library/storage and global aliases
         on the owner thread; its result must not follow later source changes.
         context reads the file's fixed point/roles in the opened entry without
-        changing selection. provide_options returns cfg backfill choices.
+        changing selection. Cfg backfill uses only the existing tab form snapshot.
         """
         self._context = context
         self._captured_parameters = captured_parameters
         self._state = state
         self._writeback = writeback
-        self._provide_options = provide_options
 
     @staticmethod
     def _supports_load_data(adapter: object) -> bool:
@@ -166,28 +169,27 @@ class LoadService:
             storage=storage,
         )
         self._teardown_retired(retired)
+        cfg_backfill, cfg_rejection = self._backfill_cfg(tab_id, snapshot)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
             result_type=type(result).__name__,
             has_cfg_snapshot=snapshot is not None,
             has_analyze_params=False,
-            cfg_backfill=self._backfill_cfg(tab_id, snapshot),
+            cfg_backfill=cfg_backfill,
+            cfg_rejection=cfg_rejection,
         )
 
     def _backfill_cfg(
         self, tab_id: str, snapshot: object
-    ) -> Literal["applied", "not_applied"]:
+    ) -> tuple[Literal["applied", "not_applied"], CfgInputRejected | None]:
         if not isinstance(snapshot, ExpCfgModel):
-            return "not_applied"
+            return "not_applied", None
         cfg = self._state.get_tab(tab_id).cfg
         try:
-            candidate = project_loaded_cfg(
-                cfg.snapshot_inputs(), snapshot, provide_options=self._provide_options
-            )
-            if candidate is None:
-                return "not_applied"
-            cfg.replace_inputs(candidate, require_valid=True)
+            rejected = cfg.load_cfg(snapshot)
+            if rejected is not None:
+                return "not_applied", rejected
         except (
             CfgInputError,
             CfgPreconditionError,
@@ -196,8 +198,8 @@ class LoadService:
             RuntimeError,
         ):
             logger.exception("loaded config was not applied: tab_id=%r", tab_id)
-            return "not_applied"
-        return "applied"
+            return "not_applied", None
+        return "applied", None
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:
         for draft in retired.writeback_drafts:
