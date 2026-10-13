@@ -670,7 +670,9 @@ def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
         terminal = _context(reply)
         assert terminal["closed"] and terminal["kind"] == "line"
         assert one_route.ctrl.interactive.inspect("one") is None
-        assert one_route.request(link, "interactive.read", name="one")["ok"]
+        assert one_route.request(
+            link, "interactive.read", target="spectrum", name="one"
+        )["ok"]
     finally:
         window.close()
         window.deleteLater()
