@@ -10,6 +10,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    Form,
     LoadDataRequest,
 )
 from zcu_tools.gui.app.measure.app import _make_empty_ctx
@@ -20,11 +21,8 @@ from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -38,24 +36,27 @@ from tests.gui.app.measure.remote._helpers import (
 from tests.gui.app.measure.ui._qt_interactions import modal_action
 
 
-class RuntimeCfg(ExpCfgModel):
-    knob: int = 42
-
-
 @dataclass
 class Result:
     data_path: str
+
+
+class RuntimeCfg(ExpCfgModel):
+    """The experiment cfg a native Load backfills into the tab form."""
+
+    knob: int = 7
 
 
 class LoadAdapter(OldAdapter):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         load_data=True, analysis=AnalysisMode.NONE
     )
+    form = Form(RuntimeCfg, {})
 
     def load(
         self, req: LoadDataRequest
     ) -> tuple[RunRecord[RuntimeCfg, Result], RunMetadata]:
-        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg()
+        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg(knob=42)
         return RunRecord(cfg=cfg, result=Result(req.data_path)), historical_metadata()
 
 
@@ -103,21 +104,17 @@ def flush_form_timers():
 def test_local_load_publishes_to_the_same_resource_and_form(app):
     ctrl, window, state, tab_id = app
     resource = ctrl.cfg_resources.lookup(tab_id)
-    resource.edit((CfgEdit(("knob",), 99),))
+    resource.write({("knob",): 99})
     outcome = ctrl.load_tab_result(tab_id, "result.hdf5")
     assert outcome.cfg_backfill == "applied"
     version = state.version.get(f"tab:{tab_id}:cfg")
-    form = window.findChild(ResourceCfgFormWidget)
-    assert form is not None
-    entry = form.findChild(QLineEdit)
+    entry = window.findChild(QLineEdit, "form.input.knob")
     assert entry is not None and entry.text() == "42"
     flush_form_timers()
     assert state.version.get(f"tab:{tab_id}:cfg") == version
-    resource.edit((CfgEdit(("knob",), 43),))
+    resource.write({("knob",): 43})
     assert entry.text() == "43"
-    assert state.get_tab(tab_id).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(43)
+    assert state.get_tab(tab_id).cfg.input.data["knob"] == 43
 
 
 @pytest.mark.parametrize(
@@ -126,7 +123,7 @@ def test_local_load_publishes_to_the_same_resource_and_form(app):
 def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, disposition):
     ctrl, window, _, tab_id = app
     resource = ctrl.cfg_resources.lookup(tab_id)
-    before = resource.observe()
+    before = resource.input.data
     remote = RemoteControlAdapter(
         controller=ctrl,
         opts=ControlOptions(port=0),
@@ -144,13 +141,11 @@ def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, dispos
             reply = call(client, "tab.load_data", {"tab_id": tab_id, "data_path": path})
             assert reply["ok"], reply
             assert reply["result"]["cfg_backfill"] == disposition
-            form = window.findChild(ResourceCfgFormWidget)
-            assert form is not None
-            entry = form.findChild(QLineEdit)
+            entry = window.findChild(QLineEdit, "form.input.knob")
             assert entry is not None
             assert entry.text() == ("42" if disposition == "applied" else "7")
             if disposition != "applied":
-                assert resource.observe() == before
+                assert resource.input.data == before
     finally:
         remote.stop()
 
@@ -181,9 +176,7 @@ def test_mcp_tab_open_from_file_loads_and_backfills_gui(
         )["tab_id"]
         assert tab != previous
         assert state.active_tab_id == tab
-        assert state.get_tab(tab).cfg.snapshot_inputs().value.fields[
-            "knob"
-        ] == DirectValue(42)
+        assert state.get_tab(tab).cfg.input.data["knob"] == 42
         summary = invoke(
             "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
         )["tabs"][0]
@@ -300,6 +293,4 @@ def test_reload_captures_backfilled_config_not_retired_editor(app):
     restored = ctrl.list_tab_ids()
     assert len(restored) == 1
     assert restored[0] != tab_id
-    assert state.get_tab(restored[0]).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(42)
+    assert state.get_tab(restored[0]).cfg.input.data["knob"] == 42

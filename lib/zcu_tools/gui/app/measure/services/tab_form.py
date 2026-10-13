@@ -140,8 +140,9 @@ class TabFormResource:
         fires on each one. Reset and load_cfg install a new FormState: watch
         this resource through subscribe and re-read the property afterwards.
         All writes, Reset and Load go through the resource's commands. Calling
-        state.write or reset on the lent state bypasses the busy, lifetime and
-        notification guards and the @{key} capture, which breaks this contract.
+        state.write on the lent state bypasses the busy, lifetime and
+        notification guards and the subscriber publication, which breaks this
+        contract.
         Raises CfgPreconditionError(RESOURCE_GONE) after revoke.
         """
         self._require_open()

@@ -1068,7 +1068,7 @@ class ExpTabWidget(QWidget):
             self._editor.deleteLater()
         state = self._cfg.editor_state
         # Writes go to the resource unchanged, so its busy, lifetime and
-        # notification guards and its @{key} capture apply to editor input.
+        # notification guards and its subscriber publication cover editor input.
         editor = FormEditor(state, self._cfg.env, write=self._cfg.write)
         editor.setContentsMargins(4, 4, 4, 4)
         editor.validity_changed.connect(self._on_cfg_validity_changed)
@@ -1080,8 +1080,10 @@ class ExpTabWidget(QWidget):
     def _on_cfg_published(self) -> None:
         if self._cfg.editor_state is not self._editor_state:
             self._mount_editor()
-            if self._actions is not None:
-                self._actions.refresh_interaction(self.tab_id)
+        # Every committed write re-evaluates Run admission, like a snapshot
+        # change: a valid edit must not leave a stale Run gate behind.
+        if self._actions is not None:
+            self._actions.refresh_interaction(self.tab_id)
 
     def _on_cfg_validity_changed(self) -> None:
         if self._actions is not None:

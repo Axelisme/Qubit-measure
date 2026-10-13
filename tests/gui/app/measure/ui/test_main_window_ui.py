@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
-from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QLabel,
@@ -17,12 +16,13 @@ from qtpy.QtWidgets import (
     QPushButton,
     QStackedWidget,
     QTabWidget,
-    QWidget,
 )
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    Form,
     ParameterWriteback,
 )
 from zcu_tools.gui.app.measure.artifact_tracker import (
@@ -30,28 +30,14 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     ArtifactSnapshot,
     SaveStatus,
 )
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services.tab_form import (
+    AcceptedFormConfig,
+    TabFormResource,
+)
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import (
-    CenteredSweepSpec,
-    CenteredSweepValue,
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ScalarSpec,
-    SweepSpec,
-    SweepValue,
-)
-from zcu_tools.gui.cfg.resource import (
-    AcceptedConfig,
-    CfgEdit,
-    CfgResolution,
-    CfgResource,
-)
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.plotting import FigureContainer
@@ -65,8 +51,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._cfg_fakes import PublishedHost
-from tests.gui.app.measure._form_fakes import configure_form_lookup
+from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -486,10 +471,9 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(control_factory, qapp):
         _mock_ctrl(control_factory),
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
     )
-    tab.cfg_form.first_invalid_reason = MagicMock(
-        return_value="modules.readout: invalid"
-    )
-    tab.cfg_form.is_valid = MagicMock(return_value=False)
+    reps = tab.findChild(QLineEdit, "form.input.reps")
+    assert reps is not None
+    reps.setText("many")
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -506,7 +490,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(control_factory, qapp):
     )
 
     assert tab.run_btn.isEnabled() is False
-    assert tab.run_btn.toolTip() == "Config invalid: modules.readout: invalid"
+    assert tab.run_btn.toolTip().startswith("Config invalid: reps: ")
 
 
 def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
@@ -1345,147 +1329,34 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
 
 
 def _editor_wiring_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
-    """A view facade over a real, caller-owned cfg resource."""
-    from tests.gui.app.measure._cfg_fakes import make_cfg
-
+    """A view facade over real, caller-owned tab form resources."""
     ctrl = _mock_ctrl(control_factory)
-    cfg = make_cfg(_pulse_schema())
-    ctrl.cfg_resources.lookup.side_effect = lambda _tab: cfg
     ctrl.active_operation_count.return_value = 0
     return ctrl
 
 
-def _pulse_schema():
-    from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.cfg import (
-        CfgSchema,
-        make_default_value,
-    )
-
-    spec = make_pulse_spec()
-    return CfgSchema(spec=spec, value=make_default_value(spec))
-
-
 def test_exp_tab_attach_projects_existing_resource(control_factory, qapp):
-    from qtpy.QtWidgets import QLineEdit, QWidget
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    cfg.observe()
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
-    cfg.edit((CfgEdit(("gain",), 0.45),))
-    widget = tab.cfg_form.findChild(QWidget, "cfgInput:gain")
-    assert widget is not None
-    entry = widget.findChild(QLineEdit)
+    cfg.write({("gain",): 0.45})
+    entry = tab.findChild(QLineEdit, "form.input.gain")
     assert entry is not None and float(entry.text()) == 0.45
 
 
 def test_exp_tab_detach_preserves_resource_for_later_views(control_factory, qapp):
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
     tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     tab.attach(_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
-    after = cfg.edit((CfgEdit(("gain",), 0.45),))
+    cfg.write({("gain",): 0.45})
     other = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
     other.attach(_snapshot("tab-1"), _RecordingTabActions())
-    assert other.cfg_form.is_valid() == (after.status.value == "Valid")
-
-
-@pytest.fixture
-def library_components():
-    from tests.resources.entry.fakes import (
-        register_fakes,
-        registry_state,
-        restore_registry,
-    )
-
-    before = registry_state()
-    try:
-        register_fakes()
-        installed = registry_state()
-        yield
-        assert registry_state() == installed
-    finally:
-        restore_registry(before)
-
-
-def test_ml_change_refreshes_resource_form_and_run_gate_without_main_loop(
-    qapp, library_components
-):
-
-    from qtpy.QtWidgets import QComboBox, QWidget
-    from zcu_tools.cfg_model import PulseSpec
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-    from zcu_tools.gui.app.measure.specs import make_pulse_spec
-    from zcu_tools.gui.cfg import (
-        CfgSchema,
-        CfgSectionSpec,
-        CfgSectionValue,
-        ReferenceSpec,
-        ReferenceValue,
-    )
-
-    from tests.gui.app.measure._synthetic import SampleAdapter
-    from tests.gui.app.measure.remote._helpers import Fixture
-
-    fx = Fixture(headless=True)
-    fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
-    raw = {
-        "type": "pulse",
-        "waveform": {"style": "const", "length": 1.0},
-        "ch": 0,
-        "nqz": 1,
-        "freq": 5000.0,
-        "gain": 0.2,
-        "phase": 0.0,
-        "pre_delay": 0.0,
-        "post_delay": 0.0,
-        "mixer_freq": None,
-    }
-    _, value = module_cfg_to_value(raw)
-    spec = make_pulse_spec()
-    schema = CfgSchema(
-        CfgSectionSpec(
-            fields={"drive": ReferenceSpec("module", [spec], label="Drive")}
-        ),
-        CfgSectionValue({"drive": ReferenceValue("Q1.pulses.drive", value)}),
-    )
-
-    class LibraryAdapter(SampleAdapter):
-        def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-            return schema
-
-    fx.registry.register("library-ui-test", LibraryAdapter)
-    tab_id = fx.ctrl.tab_control.new_tab("library-ui-test")
-    cfg = fx.state.get_tab(tab_id).cfg
-    tab = ExpTabWidget(tab_id, fx.ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
-    snapshot = _snapshot(tab_id, has_run_result=False)
-
-    class GateActions(_RecordingTabActions):
-        def refresh_interaction(self, tab_id):
-            super().refresh_interaction(tab_id)
-            tab.update_interaction_state(snapshot)
-
-    tab.attach(snapshot, GateActions())
-    assert not tab.cfg_form.is_valid()
-    assert not tab.run_btn.isEnabled()
-    fx.ctrl.context_control.set_module(
-        fx.ctrl.context_control.read_context().target,
-        "Q1.pulses.drive",
-        PulseSpec.model_validate(raw),
-    )
-    widget = tab.cfg_form.findChild(QWidget, "cfgInput:drive")
-    assert widget is not None
-    combo = widget.findChild(QComboBox)
-    assert combo is not None and combo.currentText() == "Lib: Q1.pulses.drive"
-    assert tab.cfg_form.is_valid()
-    assert tab.run_btn.isEnabled()
-    assert cfg.observe().status.value == "Valid"
+    entry = other.findChild(QLineEdit, "form.input.gain")
+    assert entry is not None and float(entry.text()) == 0.45
+    assert other.cfg_invalid_reason() is None
 
 
 def test_exp_tab_buttons_dispatch_public_tab_actions(control_factory, qapp):
@@ -1564,14 +1435,11 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(control_factory, qapp):
 
 
 def test_exp_tab_reset_publishes_defaults_on_same_resource(control_factory, qapp):
-    from zcu_tools.gui.cfg.resource import CfgEdit
-
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    defaults = cfg.snapshot_inputs()
-    cfg.edit((CfgEdit(("gain",), 0.45),))
-    cfg.observe()
+    defaults = cfg.input.data
+    cfg.write({("gain",): 0.45})
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1581,9 +1449,8 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(control_factory, qapp
     actions = _RecordingTabActions()
     tab.attach(_snapshot("tab-1"), actions)
     tab.reset_btn.click()
-    cfg.observe()
 
-    assert cfg.snapshot_inputs() == defaults
+    assert cfg.input.data == defaults
     assert actions.calls[-1] == ("refresh_interaction", "tab-1")
 
 
@@ -1591,7 +1458,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(control_factory, qapp):
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _editor_wiring_ctrl(control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    before = cfg.observe()
+    before = cfg.input.data
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
@@ -1602,7 +1469,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(control_factory, qapp):
     tab.attach(_snapshot("tab-1"), actions)
     actions.calls.clear()
     tab.reset_btn.click()
-    assert cfg.observe() == before
+    assert cfg.input.data == before
     assert actions.calls == []
 
 
@@ -2543,14 +2410,20 @@ def test_programmatic_request_shutdown_bypasses_unsaved_guard(control_factory, q
     ctrl.begin_shutdown.assert_called_once_with(window._perform_close)
 
 
+class ValueCfg(ExpCfgModel):
+    """One float the Run panel edits and Run accepts."""
+
+    value: float = 2.0
+
+
 @dataclass
 class RunFormFixture:
     window: MainWindow
     ctrl: MagicMock
-    owner: CfgResource
+    owner: TabFormResource
     tab: ExpTabWidget
     line: QLineEdit
-    runs: list[AcceptedConfig]
+    runs: list[AcceptedFormConfig]
 
 
 @pytest.fixture
@@ -2568,39 +2441,9 @@ def run_form(
     )
     ctrl.get_tab_snapshot.return_value = snapshot
     sources = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-    bindings = MeasureCfgBindings(PublishedHost(sources))
-
-    def resolution() -> CfgResolution:
-        return bindings.snapshot_from_state(
-            sources, captured_values={}, parameters=None
-        )
-
-    schema = CfgSchema(
-        CfgSectionSpec(fields={"value": ScalarSpec("Value", float)}),
-        CfgSectionValue({"value": DirectValue(2.0)}),
-    )
-    range_mode = getattr(request, "param", None)
-    if range_mode is not None:
-        centered = range_mode == "center-span"
-        schema = CfgSchema(
-            CfgSectionSpec(
-                fields={
-                    "value": ScalarSpec("Value", float),
-                    "range": CenteredSweepSpec() if centered else SweepSpec(),
-                }
-            ),
-            CfgSectionValue(
-                {
-                    "value": DirectValue(2.0),
-                    "range": CenteredSweepValue(1.0, 2.0, 3)
-                    if centered
-                    else SweepValue(0.0, 2.0, 3),
-                }
-            ),
-        )
-    owner = CfgResource(lambda: schema, resolution=resolution)
+    owner = make_form(Form(ValueCfg, {}), state=sources)
     ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
-    runs: list[AcceptedConfig] = []
+    runs: list[AcceptedFormConfig] = []
 
     def start(tab_id: str) -> None:
         runs.append(owner.accept())
@@ -2614,9 +2457,7 @@ def run_form(
     tabs = window.findChildren(ExpTabWidget)
     assert len(tabs) == 1
     tab = tabs[0]
-    widget = tab.cfg_form.findChild(QWidget, "cfgInput:value")
-    assert widget is not None
-    line = widget.findChild(QLineEdit)
+    line = tab.findChild(QLineEdit, "form.input.value")
     assert line is not None
     try:
         yield RunFormFixture(window, ctrl, owner, tab, line, runs)
@@ -2627,51 +2468,20 @@ def run_form(
 
 
 def edit_run_input(fx: RunFormFixture, text: str) -> None:
+    """Replace the Value text; the editor parses each text change."""
     fx.line.setFocus()
-    fx.line.selectAll()
-    for char in text:
-        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-            QApplication.sendEvent(
-                fx.line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
-            )
+    fx.line.setText(text)
 
 
 def test_run_uses_the_input_published_while_typing(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
-    fx.owner.observe()
     edit_run_input(fx, "3.5")
     assert fx.tab.run_btn.isEnabled()
     fx.tab.run_btn.click()
     assert len(fx.runs) == 1
     assert fx.runs[0].values == {"value": 3.5}
-
-
-@pytest.mark.parametrize("run_form", ["endpoints", "center-span"], indirect=True)
-def test_run_uses_the_last_sampling_operation(
-    run_form: RunFormFixture,
-) -> None:
-    fx = run_form
-    widget = fx.tab.cfg_form.findChild(QWidget, "cfgInput:range")
-    assert widget is not None
-    points = widget.findChild(QLineEdit, "expts")
-    step = widget.findChild(QLineEdit, "step")
-    assert points is not None and step is not None
-    for line, text in ((points, "9"), (step, "0.5"), (points, "7")):
-        line.setFocus()
-        line.selectAll()
-        for char in text:
-            for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-                QApplication.sendEvent(
-                    line, QKeyEvent(event_type, 0, Qt.KeyboardModifier.NoModifier, char)
-                )
-    fx.tab.run_btn.click()
-    assert len(fx.runs) == 1
-    assert fx.runs[0].values == {
-        "value": 2.0,
-        "range": {"start": 0.0, "stop": 2.0, "expts": 7, "step": 1 / 3},
-    }
 
 
 @pytest.mark.parametrize("text", ["-", "nan"], ids=["incomplete", "nonfinite"])
@@ -2683,7 +2493,7 @@ def test_run_publishes_invalid_input_but_never_runs_old_values(
     edit_run_input(fx, text)
     fx.window.run_or_stop_tab("pending-tab")
     assert fx.runs == []
-    assert not fx.tab.cfg_form.is_valid()
+    assert fx.tab.cfg_invalid_reason() is not None
     assert fx.line.text() == text
 
 
@@ -2692,7 +2502,7 @@ def test_run_uses_the_external_update_shown_in_the_form(
 ) -> None:
     fx = run_form
     edit_run_input(fx, "3.51")
-    fx.owner.edit((CfgEdit(("value",), DirectValue(8.0)),))
+    fx.owner.write({("value",): 8.0})
     assert fx.line.text() == "8.0"
     fx.window.run_or_stop_tab("pending-tab")
     assert len(fx.runs) == 1
@@ -2703,9 +2513,7 @@ def test_run_can_submit_a_repair_to_invalid_published_config(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
-    fx.owner.edit(
-        (CfgEdit(("value",), DirectValue(None, raw="-")),),
-    )
+    fx.owner.write({("value",): {"expr": "unfinished +"}})
     assert not fx.tab.run_btn.isEnabled()
     edit_run_input(fx, "4.5")
     assert fx.tab.run_btn.isEnabled()
@@ -2739,7 +2547,6 @@ def test_valid_input_does_not_bypass_other_run_gates(
 def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
     fx = run_form
     edit_run_input(fx, "3.5")
-    fx.owner.observe()
     fx.ctrl.get_tab_snapshot.return_value = _snapshot(
         "pending-tab",
         supports_analysis=False,
@@ -2761,19 +2568,11 @@ def test_reset_replaces_published_input_with_defaults(
     fx.window = MainWindow(fx.ctrl, dialog_presenter=dialogs)
     fx.window.add_tab_widget("pending-tab", "fake")
     tab = fx.window.findChildren(ExpTabWidget)[0]
-    line = tab.cfg_form.findChild(QLineEdit)
+    line = tab.findChild(QLineEdit, "form.input.value")
     assert line is not None
-    line.selectAll()
-    for char in "3.5":
-        QApplication.sendEvent(
-            line,
-            QKeyEvent(QEvent.Type.KeyPress, 0, Qt.KeyboardModifier.NoModifier, char),
-        )
-        QApplication.sendEvent(
-            line,
-            QKeyEvent(QEvent.Type.KeyRelease, 0, Qt.KeyboardModifier.NoModifier, char),
-        )
+    line.setText("3.5")
     assert fx.owner.accept().values == {"value": 3.5}
     tab.reset_btn.click()
-    assert line.text() == "2.0"
+    line = tab.findChild(QLineEdit, "form.input.value")
+    assert line is not None and line.text() == "2.0"
     assert fx.owner.accept().values == {"value": 2.0}

@@ -48,9 +48,8 @@ from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
-from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -64,6 +63,7 @@ from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
+from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 from zcu_tools.resources.waveform_assets import FormulaRecipe
@@ -142,6 +142,13 @@ class ControlUi:
         return next(
             w for w in self.window.findChildren(ExpTabWidget) if w.tab_id == self.tab_id
         )
+
+
+def form_editor(tab: ExpTabWidget) -> FormEditor[FormModel]:
+    """The tab's mounted cfg editor."""
+    editor = tab.findChild(FormEditor)
+    assert editor is not None, "the Run panel mounts a FormEditor"
+    return editor
 
 
 def button(widget, text: str) -> QPushButton:
@@ -272,15 +279,15 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
         if w.tab_id == created["result"]["tab_id"]
     )
     assert not new_tab.reset_btn.isEnabled()
-    assert all(
-        not field.isEnabled() for field in new_tab.cfg_form.findChildren(QLineEdit)
+    assert not any(
+        field.isEnabled() for field in form_editor(new_tab).findChildren(QLineEdit)
     )
     assert not button(ui.window, "New Tab ▾").isEnabled()
     assert not button(ui.window, "Reload experiments").isEnabled()
     assert not ui.tab.reset_btn.isEnabled()
     assert not ui.tab.run_btn.isEnabled()
-    assert all(
-        not field.isEnabled() for field in ui.tab.cfg_form.findChildren(QLineEdit)
+    assert not any(
+        field.isEnabled() for field in form_editor(ui.tab).findChildren(QLineEdit)
     )
     ui.window.refresh_context_panel()
     ui.window.refresh_run_lock(None)
@@ -572,7 +579,7 @@ def test_waveform_modal_input_and_cancel(control_ui, qapp, operation, decision):
 def test_reset_confirmation_accept_and_cancel(control_ui, qapp, decision):
     ui = control_ui
     resource = ui.controller.cfg_resources.lookup(ui.tab_id)
-    resource.edit((CfgEdit(("knob",), 99),))
+    resource.write({("knob",): 99})
 
     def choose(prompt: QMessageBox) -> None:
         selected = prompt.button(
@@ -586,9 +593,7 @@ def test_reset_confirmation_accept_and_cancel(control_ui, qapp, decision):
         selected.click()
 
     modal_action(qapp, ui.tab.reset_btn.click, [(QMessageBox, choose)])
-    assert resource.snapshot_inputs().value.fields["knob"] == DirectValue(
-        7 if decision == "local" else 99
-    )
+    assert resource.input.data["knob"] == (7 if decision == "local" else 99)
 
 
 @pytest.mark.parametrize("decision", ["local", "cancel"])

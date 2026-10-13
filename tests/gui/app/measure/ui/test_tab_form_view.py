@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
@@ -112,6 +113,8 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     open_tab: Callable[..., TabView],
 ) -> None:
     view = open_tab()
+    published: list[dict[str, JsonValue]] = []
+    view.resource.subscribe(lambda: published.append(view.resource.input.data))
     assert view.input("gain").text() == "0.1"
     assert view.tab.run_btn.isEnabled()
 
@@ -119,6 +122,7 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
 
     assert view.resource.input.data["gain"] == 0.45
     assert view.resource.result() == LookupCfg(gain=0.45)
+    assert published == [{"reps": 100, "rounds": 10, "gain": 0.45}]
 
     view.input("reps").setText("many")
     view.actions.refresh_interaction.assert_called_with("tab-1")
