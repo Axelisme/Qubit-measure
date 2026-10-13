@@ -1,8 +1,9 @@
 """Form RPC observations and atomic writes on an in-process app connection."""
 
 import json
+import typing
 from collections.abc import Callable, Iterator
-from typing import Any, Literal
+from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
@@ -353,7 +354,7 @@ def test_existing_inline_draft_is_a_guarded_noop(
 
 
 class TaggedExtraInputs(BaseModel):
-    kind: Literal["inline"] = "inline"
+    kind: typing.Literal["inline"] = "inline"
 
 
 def retain_tagged_cfg(extras: TaggedExtraInputs, cfg: ModuleRpcCfg) -> ModuleRpcCfg:
