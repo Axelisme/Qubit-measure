@@ -66,6 +66,20 @@ def default_params_path(result_dir: str) -> str:
 
 
 @dataclass(frozen=True)
+class FitExportReceipt:
+    """Successful native export captured in one owner-thread call.
+
+    savepath is the successful output path. params is (EJ, EC, EL) in GHz,
+    preserving full precision. alignment_from names the actual calibration's
+    first aligned spectrum, including an empty sampled spectrum.
+    """
+
+    savepath: str
+    params: tuple[float, float, float]
+    alignment_from: str
+
+
+@dataclass(frozen=True)
 class SearchInput:
     """Detached numeric input, captured on the State owner before worker use.
 
@@ -238,15 +252,22 @@ class FitService:
     # --- export ----------------------------------------------------------
 
     def export_params(self, savepath: str | None = None) -> str:
-        """Write the fit result to ``params.json`` and return the path.
+        """Return only the successful path from export_params_receipt.
 
-        Fast-fails without a search result. The flux alignment written is taken
-        from the first aligned spectrum (the notebook stores a single
-        flux_half/int/period; in a multi-spectrum session every spectrum is
-        aligned to the same flux coordinate, so the first aligned one is
-        representative). Before file I/O, FailedPreconditionError reports
-        no_fit_result, fit_stale (with root-change reasons) or no_aligned_spectrum.
-        Stale rejection precedes file I/O. Native I/O failures propagate.
+        Same owner-thread, default path, merge and failure contract as
+        export_params_receipt; no separate export or state mutation.
+        """
+        return self.export_params_receipt(savepath).savepath
+
+    def export_params_receipt(self, savepath: str | None = None) -> FitExportReceipt:
+        """Merge the fit into params.json and return its captured output facts.
+
+        Owner-thread command. None uses params.json under project.result_dir.
+        Independent sections are preserved. Calibration comes from the first
+        aligned spectrum, including empty sampled sources. FailedPreconditionError
+        reports no_fit_result, fit_stale (with root-change reasons) or
+        no_aligned_spectrum before I/O. Native I/O failures propagate; no receipt
+        is returned on failure. State and resource observations do not change.
         """
         fit = self._state.fit
         if fit.params is None:
@@ -276,7 +297,8 @@ class FitService:
             else default_params_path(project.result_dir)
         )
 
-        EJ, EC, EL = fit.params
+        receipt = FitExportReceipt(path, fit.params, aligned.name)
+        EJ, EC, EL = receipt.params
         params_file = QubitParams(path)
         params_file.ensure_project(
             ParamsProject(chip_name=project.chip_name, qub_name=project.qub_name)
@@ -292,5 +314,5 @@ class FitService:
                 plot_transitions=fit.transitions,
             )
         )
-        logger.debug("export_params: %r -> %r", fit.params, path)
-        return path
+        logger.debug("export_params: %r -> %r", receipt.params, path)
+        return receipt

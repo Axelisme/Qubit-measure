@@ -466,9 +466,15 @@ class SpectrumsExportedReply(TypedDict):
 
 
 class ParamsExportedReply(TypedDict):
-    """savepath is the native owner's actual merged params JSON output path."""
+    """Successful native merge output, captured by the GUI export owner.
+
+    savepath is the actual output path. params preserves full-precision EJ/EC/EL
+    in GHz. alignment_from is the first aligned spectrum used for calibration.
+    """
 
     savepath: str
+    params: FitParametersReply
+    alignment_from: str
 
 
 class OperationActivityReply(TypedDict):

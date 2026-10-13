@@ -560,7 +560,13 @@ def _h_fit_export_params(
 ) -> ParamsExportedReply:
     savepath = params["savepath"]
     assert savepath is None or isinstance(savepath, str)
-    return {"savepath": adapter.ctrl.export_params(savepath)}
+    receipt = adapter.ctrl.export_params_receipt(savepath)
+    EJ, EC, EL = receipt.params
+    return {
+        "savepath": receipt.savepath,
+        "params": {"EJ": EJ, "EC": EC, "EL": EL},
+        "alignment_from": receipt.alignment_from,
+    }
 
 
 # ---------------------------------------------------------------------------

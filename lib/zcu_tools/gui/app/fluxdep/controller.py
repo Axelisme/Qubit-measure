@@ -38,7 +38,12 @@ from zcu_tools.gui.app.fluxdep.interactive import (
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchOwner, FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
-from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
+from zcu_tools.gui.app.fluxdep.services.fit import (
+    FitExportReceipt,
+    FitService,
+    PbarFactory,
+    SearchInput,
+)
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.services.viz import (
@@ -401,8 +406,20 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Owner-thread command. None uses params.json under project.result_dir.
         Independent sections are preserved. Calibration comes from the first
-        aligned spectrum. FailedPreconditionError reports no_fit_result or
-        no_aligned_spectrum before I/O; native I/O errors propagate. State and
-        resource observations do not change.
+        aligned spectrum. FailedPreconditionError reports no_fit_result,
+        fit_stale (with root-change reasons) or no_aligned_spectrum before I/O;
+        native I/O errors propagate. State and resource observations do not change.
         """
         return self._fit.export_params(savepath)
+
+    def export_params_receipt(self, savepath: str | None = None) -> FitExportReceipt:
+        """Merge the fit into params.json and return captured output facts.
+
+        Owner-thread command. None uses params.json under project.result_dir.
+        Independent sections are preserved. The receipt holds full-precision
+        (EJ, EC, EL) GHz and the first aligned spectrum used for calibration.
+        FailedPreconditionError reports no_fit_result, fit_stale (with root-change
+        reasons) or no_aligned_spectrum before I/O. Native I/O failures propagate;
+        no receipt is returned on failure. State and observations do not change.
+        """
+        return self._fit.export_params_receipt(savepath)
