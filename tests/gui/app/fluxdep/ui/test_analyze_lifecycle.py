@@ -240,10 +240,13 @@ def test_agent_filter_reveals_beside_spectrum_named_selection_draft(
         assert window.findChild(LinePickerWidget) is not None
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             ctrl.interactive.begin_cross_selection()
-        panel = window.findChild(AnalyzePanelWidget)
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert panel is not None and stack is not None
-        assert stack.currentWidget() is panel
+        # The agent's Filter waits on the Fit page; the spectrum's own draft
+        # stays in the Spectra editor.
+        assert current_page(window) == "spectra"
+        assert isinstance(editor(window), LinePickerWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
+        assert panel is not None
         assert panel.current_tab == "filter"
         assert panel.findChild(SelectorWidget) is not None
         named = ctrl.interactive.inspect("selection")
