@@ -333,7 +333,7 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         tab_w = MagicMock()
         tab_w.read_post_analyze_params.return_value = _PostParams(backend="center")
@@ -372,7 +372,7 @@ def test_post_content_refresh_populates_form_and_figure(
         post_analysis_figure=post_fig,
     )
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         tab_w = exp_tab_widget(
             "tab-1",
@@ -419,7 +419,7 @@ def test_post_figure_refresh_clears_invalidated_presentation(
         analysis_figure=None,
     )
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         tab_w = exp_tab_widget(
             "tab-1",
@@ -444,7 +444,7 @@ def test_pane_containers_are_independent_for_post(qapp, make_ctrl, exp_tab_widge
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         tab_w = exp_tab_widget(
             "tab-1",
@@ -475,7 +475,7 @@ def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl, exp_tab_wi
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     try:
         tab_w = exp_tab_widget(
             "tab-1",

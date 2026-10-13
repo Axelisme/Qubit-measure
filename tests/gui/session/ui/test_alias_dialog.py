@@ -153,7 +153,9 @@ def test_toolbar_and_named_dialog_use_the_same_alias_owner(
         progress_transport=DirectProgressTransport(),
         project_root=str(tmp_path),
     )
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     try:
         ctrl.context_control.set_alias_rows((AliasRow("qubit", "Q2"),))
         button = next(

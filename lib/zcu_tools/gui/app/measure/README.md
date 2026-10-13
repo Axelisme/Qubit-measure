@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, library creation uses Registry templates and shared Form entries
+**Last updated:** 2026-10-14, Inspect and ARB waveforms come from the shared session layer
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -772,27 +772,12 @@ caching, raise/show policy, and per-dialog screenshots; `MainWindow` remains the
 remote named-dialog surface delegate reference retention and `finished` /
 `destroyed` cleanup to the shared dialog lifecycle helper.
 
-`InspectDialog` adapts the measure controller into the shared
-`InspectDialogBase` by passing `context_control`; the subclass keeps the concrete
-controller only for measure-only CfgEditor and template-catalog actions. Measure owns
-the Parameters component tree and a separate Modules composition:
-the Modules tree exposes only New/Delete collection actions, while the right pane
-embeds the service-owned `CfgFormWidget` with Name, Saved/Unsaved, Revert, and
-Apply on one row (there is no Raw pane or Modify/Rename action). Selecting an entry
-opens one `gc=False` editor session; field and Name edits stay in that draft.
-Apply calls the replacement write interface, which validates and lowers before the
-single ContextService-owned name+cfg mutation, then reopens a fresh clean draft on
-the resulting selection. Collision, invalid, or lowering failures leave the live
-entry and draft intact. Editor 固定開啟時的 ParameterContext。同 entry 切換 point
-不改 captured SavedPoint 目的地。提交要求目前已選取工作點，跨 entry 拒絕，
-保留 editor draft 供 Revert／Discard。開啟 entry 不自選 point，
-parameters=None、readiness=EMPTY。Entry metadata、point list 與 setup source
-binding 仍可讀。Run、WB 與目前 point 的 Inspect Set 停用並提示先選取或建立
-工作點。SoC、device 與獨立 predictor 保留各自能力。
-Dirty selection transaction 後套用 pending refresh，讓 tree 顯示提交後的名稱。 Revert
-reloads live content, and dirty selection/close requires Apply, Discard, or Cancel.
-New remains a retained non-blocking template catalog dialog; the Modules tree Delete
-key is direct only at the tree focus boundary, while the button confirms.
+Inspect 是 session 的共用 `InspectDialog`。`MainDialogRegistry` 傳入它的全部必填協作者：
+`context_control`、event bus、組合根給的 `registry.templates` 讀取函式（每次開 Inspect 讀一次，
+reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、window 的 DialogPresenter，
+以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot。
+Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
+[session README](../../session/README.md)。Inspect 的唯讀 mode 由 window 在 Remote 查看時設定。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no
 longer depends on the concrete controller façade. The persistent measure
 `PredictorDialog` receives both `predictor_control` and `device_control`, so the
@@ -839,7 +824,7 @@ Esc, focus loss, hide, invalid placement or an external commit drop it.
 
 ### Arbitrary waveform remote contract
 
-`Controller.arb_waveforms` 直接提供既有資產 owner 的窄 port，不再逐項轉接。
+`Controller.arb_waveforms` 直接提供 session bundle 的 `ArbWaveformService`（`gui/session`），不再逐項轉接。
 GUI dialog 只接收此 domain port；cfg source 僅依賴列出 keys 的 read port。
 `arb_waveform.set` 成功只回傳 `success=true` 與 `status=created|overwritten`。
 保存不請求 preview；需要 PNG 時另呼叫 `arb_waveform.preview`，回傳 recipe 與

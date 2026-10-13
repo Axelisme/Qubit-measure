@@ -6,11 +6,11 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.arb_waveform import (
     ArbWaveformPreviewResult,
     ArbWaveformWriteStatus,
 )
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,

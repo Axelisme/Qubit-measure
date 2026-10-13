@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.aliases import AliasRow
+    from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
@@ -86,7 +87,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
 
-    from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from .services import AppServices
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
@@ -926,7 +926,7 @@ class Controller(SessionControllerMixin):
         return self._arb_waveform_svc
 
     # ------------------------------------------------------------------
-    # Templates: one-shot create for Inspect UI and context.ml_create_from_role.
+    # Templates: one-shot create for context.ml_create_from_role.
     # ------------------------------------------------------------------
 
     def get_template(self, template_id: str) -> TemplateDef:

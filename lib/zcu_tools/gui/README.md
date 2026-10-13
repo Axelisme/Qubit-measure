@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-13，Form generator 移到 `form_adapter/`
+**Last updated:** 2026-10-14，共用 Inspect 與 ARB 對話框移到 `session/ui/`
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -217,7 +217,7 @@ fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry 
 
 ## Shared session dialogs (`session/ui/`)
 
-`SetupDialog`、`AliasDialog`、`InspectDialogBase`、`DeviceDialog` 與
+`SetupDialog`、`AliasDialog`、`InspectDialog`、`ArbWaveformDialog`、`DeviceDialog` 與
 `PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
 `session/ui/alias_dialog.py` 的 AliasDialog 編輯元件與 device 共用的有序 alias 表。
 Apply 先驗表，再由 entry owner 原子保存，成功後才安裝 memory 並發布 fact。

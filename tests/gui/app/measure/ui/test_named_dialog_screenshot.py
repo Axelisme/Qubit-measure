@@ -29,7 +29,13 @@ def test_arb_waveform_named_dialog_captures_only_while_open(qapp) -> None:
     ctrl = MagicMock()
     ctrl.arb_waveforms.list_infos.return_value = []
     ctrl.arb_waveforms.list_data_keys.return_value = []
-    registry = MainDialogRegistry(ctrl, parent=parent, dialog_refs=DialogRefStore())
+    registry = MainDialogRegistry(
+        ctrl,
+        parent=parent,
+        dialog_refs=DialogRefStore(),
+        templates=lambda: {},
+        dialog_presenter=RecordingDialogPresenter(),
+    )
 
     with pytest.raises(RuntimeError, match="not currently open"):
         registry.take_screenshot(DialogName.ARB_WAVEFORM)

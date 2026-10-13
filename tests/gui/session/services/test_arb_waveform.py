@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.session.services.arb_waveform import resolve_arb_waveform_root
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.session.services.arb_waveform import resolve_arb_waveform_root
 from zcu_tools.gui.session.types import SessionEnv
 
 

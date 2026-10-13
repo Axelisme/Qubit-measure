@@ -56,7 +56,9 @@ def test_existing_tab_tracks_unselected_and_active_source(
         progress_transport=DirectProgressTransport(),
         project_root=str(tmp_path),
     )
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     try:
         tab_id = ctrl.tab_control.new_tab("fake")
@@ -116,7 +118,9 @@ def test_empty_tab_area_shows_next_step_hint_until_a_tab_opens(
         progress_transport=DirectProgressTransport(),
         project_root=str(tmp_path),
     )
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     window.show()
     qapp.processEvents()

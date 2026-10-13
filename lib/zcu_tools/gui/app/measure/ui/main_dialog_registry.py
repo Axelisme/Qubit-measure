@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QDialog, QWidget  # type: ignore[attr-defined]
@@ -12,7 +12,9 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
 
 if TYPE_CHECKING:
+    from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.widgets import DialogPresenter
 
 
 _PERSISTENT_DIALOGS: frozenset[DialogName] = frozenset({DialogName.PREDICTOR})
@@ -42,11 +44,25 @@ class MainDialogRegistry:
     """
 
     def __init__(
-        self, ctrl: Controller, parent: QWidget, *, dialog_refs: DialogRefStore
+        self,
+        ctrl: Controller,
+        parent: QWidget,
+        *,
+        dialog_refs: DialogRefStore,
+        templates: Callable[[], Mapping[str, TemplateDef]],
+        dialog_presenter: DialogPresenter,
     ) -> None:
+        """Hold the factories for every named dialog.
+
+        templates returns the composition's current template catalog; it is
+        read each time Inspect opens, so a reloaded catalog reaches the next
+        Inspect. dialog_presenter shows Inspect's questions and failures.
+        """
         self._ctrl = ctrl
         self._parent = parent
         self._dialog_refs = dialog_refs
+        self._templates = templates
+        self._dialog_presenter = dialog_presenter
         self._dialog_names: dict[DialogName, None] = {}
 
     def _reclaim_for_stop(self) -> None:
@@ -97,10 +113,17 @@ class MainDialogRegistry:
             dialog.enable_parameter_cache()
             return dialog
         if name is DialogName.INSPECT:
-            from .inspect_dialog import InspectDialog
+            from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 
             dialog = InspectDialog(
-                self._ctrl, bus=self._ctrl.get_bus(), parent=self._parent
+                self._ctrl.context_control,
+                self._ctrl.get_bus(),
+                templates=self._templates(),
+                arb_waveforms=self._ctrl.arb_waveforms,
+                # The named entry keeps the ARB dialog visible to screenshots.
+                open_arb_waveforms=lambda: self.open(DialogName.ARB_WAVEFORM),
+                dialog_presenter=self._dialog_presenter,
+                parent=self._parent,
             )
             dialog.set_read_only(read_only=not writable)
             return dialog

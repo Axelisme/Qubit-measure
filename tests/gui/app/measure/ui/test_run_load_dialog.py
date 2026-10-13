@@ -155,7 +155,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
         False,
     )
     dialogs = RecordingDialogPresenter()
-    window = MainWindow(ctrl, dialog_presenter=dialogs)
+    window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     window.add_tab_widget("tab", "fake")
 
     def choose(dialog: RunLoadDialog) -> int:

@@ -182,6 +182,6 @@ def _build_window(
         alias_preset=alias_preset,
     )
 
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: registry.templates)
     ctrl.add_view(window)
     return ctrl, window

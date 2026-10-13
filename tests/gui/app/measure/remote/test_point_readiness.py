@@ -89,7 +89,9 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
     tab_id = application.controller.new_tab("pointed")
     application.state.update_tab_analyze(tab_id, object(), None)
     window = MainWindow(
-        application.controller, dialog_presenter=RecordingDialogPresenter()
+        application.controller,
+        templates=lambda: {},
+        dialog_presenter=RecordingDialogPresenter(),
     )
     window.add_tab_widget(tab_id, "pointed")
     editor = ComponentTreeWidget(application.controller.context_control)

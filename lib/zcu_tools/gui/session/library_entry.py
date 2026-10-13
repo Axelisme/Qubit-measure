@@ -46,7 +46,7 @@ from zcu_tools.cfg_model import (
     TwoPulseResetSpec,
     WaveformSpec,
 )
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -60,6 +60,30 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.parameters import ParameterContext
 
 type LibraryKind = Literal["module", "waveform"]
+
+# What a rejected put/replace/delete raises through apply_library_change and
+# put/replace: ExpectedError for the target, selection or invalid form input,
+# KeyError/ValueError for a missing, taken or malformed root, OSError for
+# storage. A dialog that reports a rejected write catches exactly these.
+LIBRARY_WRITE_ERRORS = (ExpectedError, KeyError, ValueError, OSError)
+
+_MODULE_SPECS = (
+    PulseSpec,
+    DirectReadoutCfg,
+    PulseReadoutSpec,
+    NoneResetCfg,
+    PulseResetSpec,
+    TwoPulseResetSpec,
+    BathResetSpec,
+)
+_WAVEFORM_SPECS = (
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    GaussWaveformCfg,
+    DragWaveformCfg,
+    ArbWaveformCfg,
+    FlatTopWaveformSpec,
+)
 
 
 class LibraryEntryInvalid(InvalidInputError):
@@ -226,6 +250,22 @@ class WaveformEntryForm(LibraryEntryForm[WaveformSpec]):
         return LibraryChange("waveform", action, path, new_path, waveform=self.spec())
 
 
+def library_entry_kind(spec_type: type[ConfigBase]) -> LibraryKind:
+    """Return the library family that stores entries of spec_type.
+
+    spec_type is a concrete persistent module Spec (pulse, readout or reset)
+    or waveform Spec, such as a TemplateDef's module. Any other class raises
+    TypeError.
+    """
+    if issubclass(spec_type, _MODULE_SPECS):
+        return "module"
+    if issubclass(spec_type, _WAVEFORM_SPECS):
+        return "waveform"
+    raise TypeError(
+        "Template must define a concrete persistent module or waveform Spec"
+    )
+
+
 def new_library_entry(
     parameters: ParameterContext,
     template: Template,
@@ -236,37 +276,17 @@ def new_library_entry(
     """Build an editable library entry from the injected persistent template.
 
     Capture, input lifecycle and arb choices follow from_template. Unknown IDs
-    raise KeyError; invalid definitions propagate without writing any library.
-    The returned entry produces the same Spec put/replace contract as an opened
-    entry. The caller owns its state and commits explicitly.
+    raise KeyError; a definition outside both families raises TypeError (see
+    library_entry_kind); invalid definitions propagate without writing any
+    library. The returned entry produces the same Spec put/replace contract
+    as an opened entry. The caller owns its state and commits explicitly.
     """
     spec_type = catalog[template.id].module
-    if issubclass(
-        spec_type,
-        (
-            PulseSpec,
-            DirectReadoutCfg,
-            PulseReadoutSpec,
-            NoneResetCfg,
-            PulseResetSpec,
-            TwoPulseResetSpec,
-            BathResetSpec,
-        ),
-    ):
+    if issubclass(spec_type, _MODULE_SPECS):
         return ModuleEntryForm.from_template(
             spec_type, template, catalog, parameters, arb_names=arb_names
         )
-    if issubclass(
-        spec_type,
-        (
-            ConstWaveformCfg,
-            CosineWaveformCfg,
-            GaussWaveformCfg,
-            DragWaveformCfg,
-            ArbWaveformCfg,
-            FlatTopWaveformSpec,
-        ),
-    ):
+    if issubclass(spec_type, _WAVEFORM_SPECS):
         return WaveformEntryForm.from_template(
             spec_type, template, catalog, parameters, arb_names=arb_names
         )

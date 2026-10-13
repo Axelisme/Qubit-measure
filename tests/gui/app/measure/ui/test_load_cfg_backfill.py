@@ -83,7 +83,9 @@ def app(qapp, tmp_path):
     ctrl.setup_control.new_point(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     window.show()
     tab_id = ctrl.new_tab("demo")

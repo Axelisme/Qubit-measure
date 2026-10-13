@@ -85,7 +85,7 @@ def hw_fixture(qapp, tmp_path):
         bus=bus,
         project_root=str(tmp_path),
     )
-    window = MainWindow(ctrl)
+    window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
     caretaker = create_persistence_caretaker(ctrl, cache_dir=tmp_path / "cache")
     ctrl.attach_caretaker(caretaker)

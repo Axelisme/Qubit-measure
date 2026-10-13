@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
-from qtpy.QtTest import QTest
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -73,7 +72,10 @@ TEMPLATES: dict[str, TemplateDef] = {
         default_name="Q1.pulses.drive",
     ),
     "flat": TemplateDef(
-        ConstWaveformCfg, "Flat waveform", {"length": 0.3}, default_name="Q1.waveforms.flat"
+        ConstWaveformCfg,
+        "Flat waveform",
+        {"length": 0.3},
+        default_name="Q1.waveforms.flat",
     ),
 }
 
@@ -120,6 +122,9 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
         yield session
     finally:
         for dialog in session.dialogs:
+            # A window-modal New dialog left open would block later owner turns.
+            for child in dialog.findChildren(QDialog):
+                child.close()
             dialog.close()
             dialog.deleteLater()
         qapp.processEvents()
@@ -151,6 +156,20 @@ def _child[W: QWidget](parent: QWidget, kind: type[W], name: str) -> W:
     widget = parent.findChild(kind, name)
     assert widget is not None, f"{name!r} is missing"
     return widget
+
+
+def _type(widget: QWidget, text: str) -> None:
+    """Deliver text to widget as user key presses, one character each."""
+    for char in text:
+        QApplication.sendEvent(
+            widget,
+            QKeyEvent(
+                QEvent.Type.KeyPress,
+                Qt.Key.Key_unknown,
+                Qt.KeyboardModifier.NoModifier,
+                char,
+            ),
+        )
 
 
 def _button(parent: QWidget, text: str) -> QPushButton:
@@ -243,7 +262,7 @@ def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
     _select(dialog, PULSE)
     name = _child(dialog, QLineEdit, "inspect.entry.name")
     before = _library(session).document()
-    QTest.keyClicks(name, "_v2")
+    _type(name, "_v2")
     _child(dialog, QLineEdit, "form.input.gain").setText("0.75")
     # The waveform family is separate; a module name must not reuse a module key.
     session.control.set_module(
@@ -332,7 +351,7 @@ def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     for text in ("New", "Delete", "Arb Waveforms…"):
         assert not _button(dialog, text).isEnabled(), text
     assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
-    QTest.keyClicks(gain, "9")
+    _type(gain, "9")
     assert float(gain.text()) == 0.25
     assert _status(dialog) == "Saved"
 
@@ -393,9 +412,7 @@ def _new_dialog(dialog: InspectDialog) -> QDialog:
 
 def _choose_template(new: QDialog, label: str) -> None:
     combo = _child(new, QComboBox, "inspect.new_entry.template")
-    index = next(
-        i for i in range(combo.count()) if combo.itemText(i).startswith(label)
-    )
+    index = next(i for i in range(combo.count()) if combo.itemText(i).startswith(label))
     combo.setCurrentIndex(index)
 
 
@@ -420,7 +437,7 @@ def test_new_entry_suggests_names_until_the_user_types_one(
     _choose_template(new, "Drive pulse")
     assert name.text() == "Q1.pulses.drive"
     name.clear()
-    QTest.keyClicks(name, "mine")
+    _type(name, "mine")
     _choose_template(new, "Flat waveform")
     assert name.text() == "mine"
 
@@ -435,7 +452,7 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     qapp.processEvents()
     name = _child(new, QLineEdit, "inspect.new_entry.name")
     name.clear()
-    QTest.keyClicks(name, "Q1.pulses.my_pulse")
+    _type(name, "Q1.pulses.my_pulse")
     _child(new, QLineEdit, "form.input.gain").setText("0.9")
     _group_fold(new, "Advanced").click()
     nqz = _child(new, QWidget, "form.input.nqz")
@@ -459,7 +476,9 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     assert isinstance(created, PulseSpec)
     assert (created.ch, created.nqz, created.freq, created.gain) == (2, 2, 200.0, 0.1)
     assert not new.isVisible()
-    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == "Q1.pulses.my_pulse"
+    assert (
+        _child(dialog, QLineEdit, "inspect.entry.name").text() == "Q1.pulses.my_pulse"
+    )
     assert _status(dialog) == "Saved"
     presenter.assert_no_unexpected_messages()
 

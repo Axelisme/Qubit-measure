@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 from zcu_tools.gui.session.services import arb_waveform
 from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
 )
-from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,

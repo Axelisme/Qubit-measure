@@ -17,6 +17,7 @@ from zcu_tools.gui.cfg.resource import (
     SourceBasis,
     SourceRevision,
 )
+from zcu_tools.gui.session.arb_waveform import ArbWaveformKeys
 from zcu_tools.gui.session.expression import evaluate_scalar_expr, validate_scalar_expr
 from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.gui.session.state import DEVICE_SET_VERSION_KEY, SessionState
@@ -33,7 +34,6 @@ from zcu_tools.gui.session.value_lookup import (
 from zcu_tools.resources.context.library import LibrarySnapshot
 from zcu_tools.resources.entry import RoleResolutionError
 
-from zcu_tools.gui.session.arb_waveform import ArbWaveformKeys
 from .cfg_schemas import module_cfg_to_value, waveform_cfg_to_value
 
 _DEVICES_SOURCE = "devices"

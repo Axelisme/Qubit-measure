@@ -1,12 +1,10 @@
-"""Shipped Inspect composes the real parameter owner and component frontend."""
+"""The shared Inspect composes the real parameter owner and component frontend."""
 
 from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QComboBox, QTabWidget, QTreeWidget
-from zcu_tools.gui.app.measure.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -14,10 +12,17 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+
+
+class _NoArbNames:
+    def list_data_keys(self) -> list[str]:
+        return []
 
 
 @pytest.fixture
@@ -44,10 +49,14 @@ def inspector(
         service.install_entry(entry)
         service.use_point(PointUseRequest("working"))
         control = ContextControlFacet(context=service)
-        # Only app-specific Modules/editor collaborators are outside this seam.
-        app = MagicMock()
-        app.context_control = control
-        dialog = InspectDialog(app, bus)
+        dialog = InspectDialog(
+            control,
+            bus,
+            templates={},
+            arb_waveforms=_NoArbNames(),
+            open_arb_waveforms=lambda: None,
+            dialog_presenter=RecordingDialogPresenter(),
+        )
         yield dialog, control
         assert registry_state() == installed
     finally:

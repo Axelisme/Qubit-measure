@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from qtpy.QtWidgets import (
     QMessageBox,
@@ -12,6 +12,10 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.widgets.dialog_lifecycle import DialogRefStore
+
+# The answer to an unsaved-changes question: apply the changes first, drop
+# them, or abandon the action that asked.
+type SaveDiscardCancel = Literal["save", "discard", "cancel"]
 
 
 class DialogPresenter(Protocol):
@@ -41,6 +45,16 @@ class DialogPresenter(Protocol):
         on_decision: Callable[[bool], None],
         default: bool = False,
     ) -> None: ...
+
+    def save_discard_cancel(
+        self, parent: QWidget, title: str, message: str
+    ) -> SaveDiscardCancel:
+        """Ask modally whether to save, discard or keep unsaved changes.
+
+        Blocks until the user answers and returns "save", "discard" or
+        "cancel"; closing the question answers "cancel", the default.
+        """
+        ...
 
     def destructive_confirm(
         self,
@@ -100,6 +114,21 @@ class QtDialogPresenter:
             yes if default else no,
         )
         return answer == yes
+
+    def save_discard_cancel(
+        self, parent: QWidget, title: str, message: str
+    ) -> SaveDiscardCancel:
+        save = QMessageBox.StandardButton.Save
+        discard = QMessageBox.StandardButton.Discard
+        cancel = QMessageBox.StandardButton.Cancel
+        answer = QMessageBox.question(
+            parent, title, message, save | discard | cancel, cancel
+        )
+        if answer == save:
+            return "save"
+        if answer == discard:
+            return "discard"
+        return "cancel"
 
     def confirm_async(
         self,

@@ -487,7 +487,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     application.result("point.new", {"label": "b"})
     context.set_alias_rows((AliasRow("driver", "Q2"),))
     active = context.read_context().target
-    window = MainWindow(controller)
+    window = MainWindow(controller, templates=lambda: {})
     window.add_tab_widget(tab, "pointed")
     try:
         preview = application.result(

@@ -6,7 +6,7 @@ Implements ViewProtocol; all state lives in Controller/State, never here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from qtpy.QtCore import Qt, QTimer
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
+    from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
@@ -100,12 +101,18 @@ class _MainWindowTabActions:
 
 
 class MainWindow(QMainWindow):
-    """Present current session sources and pane-owned historical results."""
+    """Present current session sources and pane-owned historical results.
+
+    templates returns the composition's current template catalog, read
+    whenever Inspect opens. dialog_presenter shows the window's and Inspect's
+    questions and messages; None uses Qt message boxes.
+    """
 
     def __init__(
         self,
         controller: Controller,
         *,
+        templates: Callable[[], Mapping[str, TemplateDef]],
         dialog_presenter: DialogPresenter | None = None,
     ) -> None:
         super().__init__()
@@ -117,7 +124,11 @@ class MainWindow(QMainWindow):
             self._dialog_refs
         )
         self._dialog_registry = MainDialogRegistry(
-            self._ctrl, parent=self, dialog_refs=self._dialog_refs
+            self._ctrl,
+            parent=self,
+            dialog_refs=self._dialog_refs,
+            templates=templates,
+            dialog_presenter=self._dialog_presenter,
         )
         self._events = MainWindowEventCoordinator(self._ctrl, host=self)
         # True once _perform_close has begun the actual teardown, so the second

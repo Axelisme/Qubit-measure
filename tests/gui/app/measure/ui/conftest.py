@@ -46,7 +46,9 @@ def live_ui(
             metadata=session.metadata,
             parameters=original.run.parameters,
         )
-        window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+        window = MainWindow(
+            ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+        )
         window.add_tab_widget(tab_id, "saving")
         try:
             yield session, ctrl, window, tab_id
