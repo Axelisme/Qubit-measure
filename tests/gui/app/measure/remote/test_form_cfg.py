@@ -44,7 +44,10 @@ def form_rpc(qapp) -> Iterator[tuple[Fixture, str, FormRpc]]:
     fixture = Fixture()
     tab_id = fixture.ctrl.new_tab("fake")
     remote = RemoteControlAdapter(
-        fixture.ctrl, ControlOptions(port=0), ImmediateScheduler()
+        fixture.ctrl,
+        ControlOptions(port=0),
+        ImmediateScheduler(),
+        render_view=fixture.view,
     )
     rpc = FormRpc(remote)
     try:
