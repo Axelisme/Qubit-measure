@@ -5,7 +5,7 @@ from typing import Annotated
 import pytest
 from pydantic import JsonValue, PydanticSchemaGenerationError
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec, ResetCfg
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
@@ -82,6 +82,56 @@ def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> N
         fields = expect_object(expect_object(item)["fields"])
         module = expect_object(expect_object(fields["properties"])["module"])
         assert set(expect_object(module["properties"])) == names
+
+
+def test_module_key_command_copies_captured_content_in_one_write() -> None:
+    form = Form(ModuleCore, {})
+    env = stored_env()
+    state = FormState(FormInput(form.model, {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}}))
+    probe = expect_object(expect_object(state.input_schema(env)["properties"])["modules"])
+    options = expect_object(expect_object(probe["properties"])["probe"])["x-form-options"]
+    assert isinstance(options, list)
+    assert expect_object(options[0]).get("commands") == [{"name": "to_inline", "label": "Convert to inline"}]
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+
+    state.run_command(("modules", "probe"), "to_inline", env)
+
+    copied = expect_object(expect_object(state.input.data["modules"])["probe"])
+    assert copied["kind"] == "inline"
+    module = expect_object(copied["module"])
+    assert (module["ch"], module["freq"], module["gain"]) == (1, 100.0, 0.3)
+    assert module["waveform"] == {"style": "const", "length": 0.1}
+    assert notifications == ["changed"]
+    observed = form.read_module(state.input, ("modules", "probe"), FormEnv())
+    assert not isinstance(observed, FormErrors), observed
+    assert observed.mode == "inline" and observed.value["freq"] == 100.0
+    assert env.library is not None
+    assert env.library.module_spec("Q.pulses.probe").desc == "stored"
+    assert observed.value["desc"] is None
+
+
+def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_draft() -> None:
+    from zcu_tools.cfg_model import Slot, Template, TemplateDef
+
+    form = Form(ModuleSection, {"probe": Slot("Q.pulses.probe", fallback=Template("pulse"))})
+    form.bind_templates({"pulse": TemplateDef(PulseSpec, "Pulse", {"ch": 2, "nqz": 1, "freq": 90.0, "gain": 0.2, "waveform.style": "const", "waveform.length": 0.4})}, adapter="synthetic")
+    env = module_env()
+    state = FormState(form.default_input(env))
+    options = form.model.options(env).get(("probe",), ())
+    assert [option.label for option in options] == ["Q.pulses.probe", "Inline"]
+    inline = options[-1]
+    assert inline.fields is not None and issubclass(inline.fields, FormModel)
+    defaults = inline.fields.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
+    assert expect_object(defaults["module"])["freq"] == 90.0
+
+    state.write({("probe",): inline.value}, env)
+    copied = expect_object(expect_object(state.input.data["probe"])["module"])
+    assert (copied["freq"], copied["gain"]) == (90.0, 0.2)
+    state.write({("probe", "module", "freq"): 250.0}, env)
+    state.write({("probe",): options[0].value}, env)
+    state.write({("probe",): inline.value}, env)
+    assert expect_object(expect_object(state.input.data["probe"])["module"])["freq"] == 90.0
 
 
 def module_env() -> FormEnv:

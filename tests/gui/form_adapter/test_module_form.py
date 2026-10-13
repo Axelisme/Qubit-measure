@@ -153,6 +153,58 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
     assert set(expect_object(expect_object(flat["fields"])["properties"])) == {"length", "raise_waveform"}
 
 
+def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    key = next(option for option in form.model.options(env)[("waveform",)] if option.matches("Q.waveforms.flat"))
+    assert [(command.name, command.label) for command in key.commands] == [("to_inline", "Convert to inline")]
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+
+    state.run_command(("waveform",), "to_inline", env)
+
+    assert state.input.data["waveform"] == {"style": "const", "length": 0.1}
+    assert notifications == ["changed"]
+    assert env.library is not None
+    assert env.library.waveform_spec("Q.waveforms.flat").model_dump() == {"style": "const", "length": 0.1}
+    cfg = result_spec(form, state, waveform_env(0.9))
+    assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
+    with pytest.raises(ValueError, match="Unavailable option command"):
+        state.run_command(("waveform",), "to_inline", env)
+    assert notifications == ["changed"]
+
+
+class UnreadableWaveformLibrary(LibrarySnapshot):
+    """A public source fault leaves commands without a usable captured Spec."""
+
+    def waveform_spec(self, key: str) -> WaveformSpec:
+        raise OSError(f"Cannot read captured waveform {key}")
+
+
+def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    key = next(option for option in form.model.options(env)[("waveform",)] if option.matches("Q.waveforms.flat"))
+    assert [command.name for command in key.commands] == ["to_inline"]
+    assert env.library is not None
+    broken = FormEnv(library=UnreadableWaveformLibrary(env.library.document()))
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    before = state.input.data
+
+    with pytest.raises(OSError, match="Cannot read captured waveform"):
+        key.commands[0].run(broken)
+    with pytest.raises(OSError, match="Cannot read captured waveform"):
+        state.run_command(("waveform",), "to_inline", broken)
+
+    assert state.input.data == before
+    assert notifications == []
+
+
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
