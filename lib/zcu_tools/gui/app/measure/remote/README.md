@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-14，guarded 選項指令與 inline no-op
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -175,9 +175,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 101`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 134`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 118`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 102`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 135`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 119`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.
@@ -337,12 +337,17 @@ full-cfg validation, native to_cfg and extras lowering. Busy and observer reads
 are allowed. Reads do not mutate input, publish or refresh sources.
 
 `tab.use_inline(tab_id, field)` requires holder and resource mutation admission.
-The Form owner prepares captured library content or Template/static blank
-fallback when library/key is absent. Locks remain applied. The resource applies
-one public write batch for required or nullable modules and publishes once on
-change. Existing inline input is a no-op. Wrong families, structural/source
-failures and busy/lifetime/reentrant guards reject before mutation. The reply is
-the complete Form observation; blank input may still need leaf edits.
+The handler reads the public input tag at an exact core module path after
+admission, without evaluating the draft or reading sources. Ref runs the
+generated to_inline option command through resource.run_command using the fixed
+Open/Reset library capture. Locks remain applied. One atomic write publishes
+once. Existing inline input, including partial or invalid-expression drafts, is
+a guarded no-op. Disabled, missing or untagged module input returns
+invalid_params/form_errors with the field name and an Inline selection hint.
+Unresolved refs fail without fallback; select an Inline option to use
+template/type defaults.
+Wrong families, structural/source failures and busy/lifetime/reentrant guards
+reject before mutation. The reply is the complete Form observation.
 
 `tab.reset_cfg(aliases=...)` captures sources once and restores fresh adapter
 defaults. The observation may contain errors. Reset keeps results and saved

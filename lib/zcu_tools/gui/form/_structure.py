@@ -15,7 +15,7 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
-from .model import FormEnv, FormModel, FormPath, FormWritePath, ModuleRef
+from .model import FormEnv, FormModel, FormPath, FormWritePath, KeyRef
 
 
 def unwrap(annotation: object) -> object:
@@ -48,11 +48,8 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
     are text values (int, float, complex, str), typed into a text field, or
     picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
     A text field has a text member and no picked member, possibly nullable.
-    A str-or-model key (see key_or_inline) is not a text field: an Expr
-    envelope is an object, and an object selects the inline model. Two
-    leaves this annotation check cannot see are not text fields either: a
-    leaf with declared choices (by path) and a ModuleRef name (see
-    library_key).
+    Two leaves this annotation check cannot see are not text fields: a
+    leaf with declared choices (by path) and a KeyRef name (see library_key).
 
     path is the leaf's field path, used only in the error. A union with both
     text and picked members raises ValueError naming path: the editor has no
@@ -74,16 +71,15 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
         raise ValueError(
             f"{dotted}: a union of text and picked values is not supported"
         )
-    return text and not key_or_inline(annotation)
+    return text
 
 
 def library_key(model: type[BaseModel], name: str) -> bool:
-    """Whether field name of model holds a library key: a ModuleRef's name.
+    """Whether field name of model holds a literal key: a KeyRef's name.
 
-    A library key is a plain string, never an Expr envelope, like the key
-    of a str-or-model field.
+    A library key is a plain string, never an Expr envelope.
     """
-    return issubclass(model, ModuleRef) and name == "name"
+    return issubclass(model, KeyRef) and name == "name"
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -95,21 +91,41 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
-def key_or_inline(annotation: object) -> bool:
-    """Whether annotation is an untagged union of str and model branches.
+def check_form_shape(model: type[BaseModel]) -> None:
+    """Reject retired str-or-model selectors throughout a form's declaration.
 
-    Its JSON type is the structural selector: a string is a library key and
-    an object is the inline model, a sole model or one branch of a tagged union.
+    Inspect all branches, including inactive and nullable sections, before input
+    or source hooks run. Ordinary models and model-only unions remain supported.
     """
-    return str in alternatives(annotation) and bool(model_types(annotation))
+    pending: list[tuple[object, FormPath]] = [(model, ())]
+    seen: set[object] = set()
+    while pending:
+        annotation, path = pending.pop()
+        members = alternatives(annotation)
+        if str in members and model_types(annotation):
+            dotted = ".".join(str(part) for part in path)
+            raise ValueError(
+                f"{dotted}: untagged str | Model input is not supported; "
+                "use a tagged ref/inline union"
+            )
+        for member in members:
+            if isinstance(member, type) and issubclass(member, BaseModel):
+                if member not in seen:
+                    seen.add(member)
+                    pending.extend(
+                        (info.annotation, (*path, name))
+                        for name, info in member.model_fields.items()
+                    )
+            elif (
+                get_origin(member) in (list, tuple, dict, Mapping)
+                and member not in seen
+            ):
+                seen.add(member)
+                pending.extend((item, path) for item in get_args(member))
 
 
 def discriminator(info: FieldInfo) -> str | None:
-    """Read a string tag through aliases/nullable wrappers; absent tags return None.
-
-    A str-or-model union reads the tag of its inline part, so an inline
-    object selects its tagged branch like any tagged model field.
-    """
+    """Read a string tag through aliases/nullable wrappers; absent tags return None."""
     if isinstance(info.discriminator, str):
         return info.discriminator
     return union_tag(info.annotation)
@@ -137,9 +153,6 @@ def union_tag(annotation: object) -> str | None:
             members = tuple(
                 item for item in get_args(annotation) if item is not type(None)
             )
-            if str in members and len(members) > 1:
-                # The key alternative selects no branch; the inline part may.
-                members = tuple(item for item in members if item is not str)
             if len(members) == 1:
                 annotation = members[0]
                 continue
@@ -165,21 +178,30 @@ def _tag(model: type[BaseModel], key: str) -> tuple[object, ...]:
     )
 
 
-def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
-    """Match emitted intrinsic JSON tags to info's declared union model.
+def intrinsic_tags(model: type[BaseModel], key: str) -> tuple[JsonValue, ...]:
+    """Read typed JSON tags from model's Literal declaration, not dynamic choices.
 
-    info must declare a discriminator field name for a model union. tags are its emitted
-    x-form-discriminator-values, not dynamic choice enums. Declared Literal tags
-    may use named aliases, Annotated wrappers or unions of Literals. Match both
-    JSON type and value. Raise ValueError for a missing discriminator or unmatched tags;
-    declared non-JSON/non-finite tags also fail through the shared JSON codec.
+    Named aliases, Annotated wrappers and unions of Literals share the native
+    tag reader. Non-JSON/non-finite values fail through the shared JSON codec.
+    """
+    return tuple(
+        default_json(tag.value if isinstance(tag, Enum) else tag)
+        for tag in _tag(model, key)
+    )
+
+
+def schema_branch_model(info: FieldInfo, tags: list[JsonValue]) -> type[BaseModel]:
+    """Match an undecorated schema branch's tags to its annotation owner.
+
+    info must declare a string discriminator. Match both JSON type and value,
+    before dynamic choices can change the selector schema. Missing or unmatched
+    tags raise ValueError; invalid declared tags fail through the JSON codec.
     """
     key = discriminator(info)
     if key is None:
         raise ValueError("Schema branch requires a string discriminator")
     for model in model_types(info.annotation):
-        for tag in _tag(model, key):
-            value = default_json(tag.value if isinstance(tag, Enum) else tag)
+        for value in intrinsic_tags(model, key):
             if any(
                 type(candidate) is type(value) and candidate == value
                 for candidate in tags
@@ -281,13 +303,11 @@ def _choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, .
     return (info,)
 
 
-def _branch_defaults(
-    model: type[BaseModel], env: FormEnv, previous: Mapping[str, JsonValue]
-) -> dict[str, JsonValue]:
+def _branch_defaults(model: type[BaseModel], env: FormEnv) -> dict[str, JsonValue]:
     if issubclass(model, FormModel):
         from ._evaluate import evaluate_defaults
 
-        return evaluate_defaults(model, model.defaults(env, copy_object(previous)), env)
+        return evaluate_defaults(model, model.defaults(env), env)
     return static_defaults(model)
 
 
@@ -340,69 +360,85 @@ def _switch(
     )
     if branch is None:
         raise ValueError(f"Unknown discriminator at path {path!r}: {value!r}")
-    previous = old if isinstance(old, dict) else {}
     try:
-        new = _branch_defaults(branch, env, previous)
+        new = _branch_defaults(branch, env)
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 
         raise prefix_error(exc, path[:-1]) from exc
-    new.update(
-        {
-            name: previous[name]
-            for name in branch.model_fields
-            if name != tag_key and name in previous
-        }
-    )
     new[tag_key] = value
     parent[key] = new
     return True
 
 
-def _switch_inline(
+def _select_object(
     model: type[BaseModel],
     data: dict[str, JsonValue],
     path: FormWritePath,
     value: JsonValue,
     env: FormEnv,
 ) -> bool:
-    """Treat {} at a str-or-model field as the switch to its inline model.
-
-    A key or unfilled value becomes the inline defaults; an inline object
-    stays unchanged. Other values return False and remain leaf writes.
-    """
-    if value != {}:
+    """Apply a union-position partial object as fresh branch selection plus leaves."""
+    if not isinstance(value, dict):
         return False
     parent, key, info = _field_at(model, data, path)
-    if not key_or_inline(info.annotation):
+    tag = discriminator(info)
+    if tag is None:
         return False
-    if not isinstance(parent.get(key), dict):
-        parent[key] = _inline_defaults(info, env, path)
-    return True
-
-
-def _inline_defaults(
-    info: FieldInfo, env: FormEnv, path: FormWritePath
-) -> dict[str, JsonValue]:
-    """Defaults of a str-or-model field's inline model, never its old key.
-
-    A tagged inline union starts at its first declared branch and tag. An
-    untagged choice between several models has no default branch and raises.
-    """
-    branch, *others = model_types(info.annotation)
-    tag_key = discriminator(info)
-    if others and tag_key is None:
-        raise ValueError(f"Ambiguous untagged inline model at path {path!r}")
+    old = parent.get(key)
+    branch = selected(info, value if tag in value else old)
+    if branch is None:
+        raise ValueError(f"Missing or unknown discriminator at {path!r}")
     try:
-        new = _branch_defaults(branch, env, {})
+        if not isinstance(old, dict) or selected(info, old) is not branch:
+            seed = _branch_defaults(branch, env)
+        else:
+            seed = copy_object(old)
+        parent[key] = _partial_model(branch, seed, value, env)
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 
         raise prefix_error(exc, path) from exc
-    if tag_key is not None:
-        tag = _tag(branch, tag_key)[0]
-        new[tag_key] = default_json(tag.value if isinstance(tag, Enum) else tag)
-    return new
+    return True
+
+
+def _partial_model(
+    model: type[BaseModel],
+    seed: dict[str, JsonValue],
+    value: dict[str, JsonValue],
+    env: FormEnv,
+) -> dict[str, JsonValue]:
+    """Expand partial model children to one candidate; containers remain leaves."""
+    batch: dict[FormWritePath, JsonValue] = {}
+    for name, item in value.items():
+        info = model.model_fields.get(name)
+        if info is None:
+            raise ValueError(f"Unknown field in partial branch object: {name!r}")
+        if (
+            isinstance(item, dict)
+            and model_types(info.annotation)
+            and discriminator(info) is None
+        ):
+            child = selected(info, item)
+            if child is None:
+                raise ValueError(f"Ambiguous partial model field: {name!r}")
+            prior = seed.get(name)
+            try:
+                seed[name] = _partial_model(
+                    child,
+                    copy_object(prior)
+                    if isinstance(prior, dict)
+                    else _branch_defaults(child, env),
+                    item,
+                    env,
+                )
+            except PydanticCustomError as exc:
+                from ._sources import prefix_error
+
+                raise prefix_error(exc, (name,)) from exc
+        else:
+            batch[(name,)] = item
+    return build_candidate(model, seed, batch, env)
 
 
 def build_candidate(
@@ -425,7 +461,7 @@ def build_candidate(
         value = copied[path]
         if not (
             _switch(model, result, path, value, env)
-            or _switch_inline(model, result, path, value, env)
+            or _select_object(model, result, path, value, env)
         ):
             pending[path] = value
     for path, value in pending.items():
@@ -440,7 +476,7 @@ def _require_leaf(info: FieldInfo, value: JsonValue, path: FormWritePath) -> Non
     if model_types(info.annotation):
         if type(None) in types and (value is None or isinstance(value, dict)):
             return
-        # Spec unions also admit scalar reference keys; those remain ordinary leaves.
+        # Other mixed scalar/model annotations retain ordinary scalar leaves.
         if not isinstance(value, dict) and any(
             t is str or t is int or t is float or t is bool or t is complex
             for t in types
@@ -587,7 +623,7 @@ def _restore_branch_seed(
             copy_object(prior) if isinstance(current, dict) else static_defaults(child)
         )
     try:
-        seed = _branch_defaults(child, env, prior)
+        seed = _branch_defaults(child, env)
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 

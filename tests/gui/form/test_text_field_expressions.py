@@ -20,7 +20,6 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     FormWritePath,
-    ModuleInput,
     ModuleRef,
 )
 from zcu_tools.gui.session.aliases import AliasRow
@@ -33,20 +32,14 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from ._module_models import SyntheticModuleInput
+
 
 class Speed(StrEnum):
     """A string Enum: its values are picked from a dropdown."""
 
     FAST = "fast"
     SLOW = "slow"
-
-
-class Tone(BaseModel):
-    """The inline model of a str-or-model field."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ch: int = 0
 
 
 class PickedForm(FormModel):
@@ -59,8 +52,9 @@ class PickedForm(FormModel):
     enabled: bool = True
     gain: float = 1.0
     device: str = "yoko1"
-    tone: str | Tone = "Q1.pulses.pi"
-    drive: ModuleInput = Field(default_factory=lambda: ModuleRef(name="Q1.pulses.pi"))
+    drive: SyntheticModuleInput = Field(
+        default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
+    )
     amount: float = 2.0
     count: int = 3
     phasor: complex = 1j
@@ -132,11 +126,6 @@ def _offers_expr(node: JsonValue) -> bool:
 def _key_node(schema: dict[str, JsonValue], field: str) -> JsonValue:
     """The schema node of a picked leaf; for a key-or-inline field, its key."""
     node = _object(_object(schema["properties"])[field])
-    if field == "tone":
-        variants = node["anyOf"]
-        assert isinstance(variants, list)
-        (key,) = [v for v in variants if _object(v).get("type") == "string"]
-        return key
     if field == "drive":
         branches = node["oneOf"]
         assert isinstance(branches, list)
@@ -144,7 +133,7 @@ def _key_node(schema: dict[str, JsonValue], field: str) -> JsonValue:
             properties = _object(_object(branch)["properties"])
             if "name" in properties:
                 return properties["name"]
-        raise AssertionError("ModuleInput schema lacks its ref branch")
+        raise AssertionError("SyntheticModuleInput schema lacks its ref branch")
     return node
 
 
@@ -158,7 +147,6 @@ def _key_node(schema: dict[str, JsonValue], field: str) -> JsonValue:
         "enabled",
         "gain",
         "device",
-        "tone",
         "drive",
     ],
 )

@@ -12,12 +12,17 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
-    ModuleInput,
-    ModuleRef,
+    Option,
 )
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
+from zcu_lab.workflows.common.calibration_modules import (
+    DRIVE_MODULE_FIELD,
+    READOUT_MODULE_FIELD,
+    DriveModuleInput,
+    ReadoutModuleInput,
+)
 from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunables
 
 
@@ -50,19 +55,17 @@ class OvernightPlanForm(FormModel):
     points: int = Field(
         default=51, ge=5, description="Uniform delay samples per member"
     )
-    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+    qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
         description="Fixed calibrated pi drive"
     )
-    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+    readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Fixed pulse-backed readout"
     )
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Declare flux_dev from $flux_dev, evaluated when input is built; leave monitoring inputs empty."""
-        data = super().defaults(env, previous)
+        data = super().defaults(env)
         data["flux_dev"] = {"expr": "$flux_dev"}
         return data
 
@@ -84,6 +87,14 @@ class OvernightPlanForm(FormModel):
             ),
         }
 
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare generated selections without narrowing inline module families."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("readout",): READOUT_MODULE_FIELD.options(env),
+        }
+
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> OvernightPlan | FormErrors:
         """Resolve fixed modules through the captured native materialization owner.
 
@@ -100,9 +111,7 @@ class OvernightPlanForm(FormModel):
         readout = None
         try:
             core = ModuleCfgFactory.from_raw(
-                self.qub_pulse.name
-                if isinstance(self.qub_pulse, ModuleRef)
-                else self.qub_pulse.module,
+                DRIVE_MODULE_FIELD.to_spec(self.qub_pulse),
                 context=context,
             )
             native = NativeModuleCfgFactory.from_core(core, context=context)
@@ -113,9 +122,7 @@ class OvernightPlanForm(FormModel):
             errors[("qub_pulse",)] = str(exc)
         try:
             core = ModuleCfgFactory.from_raw(
-                self.readout.name
-                if isinstance(self.readout, ModuleRef)
-                else self.readout.module,
+                READOUT_MODULE_FIELD.to_spec(self.readout),
                 context=context,
             )
             native_ro = NativeModuleCfgFactory.from_core(core, context=context)

@@ -232,8 +232,8 @@ class FoldForm(FormModel):
 
 def switch_shape(view: QWidget, tag: str) -> None:
     """Select the shape branch tag, which rebuilds the editor's rows."""
-    selector = child(view, QComboBox, "form.input.shape.kind")
-    selector.setCurrentIndex(selector.findData(tag))
+    selector = child(view, QComboBox, "form.input.shape")
+    selector.setCurrentIndex(selector.findText(tag))
 
 
 def test_user_folds_survive_a_rebuild_of_the_same_editor(build: Build) -> None:
@@ -392,11 +392,20 @@ class Extra(BaseModel):
     note: str = "n"
 
 
-class Tone(BaseModel):
-    """The inline model of a key-or-inline field."""
+class Muted(BaseModel):
+    """A tone branch without editable fields."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["muted"] = "muted"
+
+
+class Tone(BaseModel):
+    """A tone branch whose option draws one field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["tone"] = "tone"
     gain: float = 0.5
 
 
@@ -408,7 +417,9 @@ class ShapeForm(FormModel):
         default_factory=Alpha
     )
     extra: Extra | None = None
-    tone: str | Tone = "Q1.pulses.pi"
+    tone: Annotated[Muted | Tone, Field(discriminator="kind")] = Field(
+        default_factory=Muted
+    )
 
 
 def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
@@ -438,7 +449,7 @@ def test_shape_changes_rebuild_rows_and_keep_folds_with_groups_first(
 
     assert view.findChild(QLineEdit, "form.input.tone.gain") is None
     tone = child(view, QComboBox, "form.input.tone")
-    tone.setCurrentIndex(tone.findText("Inline"))
-    assert isinstance(state.input.data["tone"], dict)
+    tone.setCurrentIndex(tone.findText("tone"))
+    assert state.input.data["tone"] == {"kind": "tone", "gain": 0.5}
     assert view.findChild(QLineEdit, "form.input.tone.gain") is not None
     assert folds_kept()

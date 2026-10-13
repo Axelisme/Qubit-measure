@@ -28,7 +28,7 @@ from zcu_tools.gui.session.state import (
 # Single top-level version for the whole app-state snapshot (Phase 126 merged the
 # former startup_v2 + tab_session_v1 files into one). Bump on any incompatible
 # shape change; a mismatch makes the Caretaker fall back to defaults.
-APP_STATE_VERSION = 2
+APP_STATE_VERSION = 3
 
 
 class PersistedTab(BaseModel):

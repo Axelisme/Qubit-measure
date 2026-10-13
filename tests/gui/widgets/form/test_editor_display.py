@@ -15,8 +15,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     LinRange,
-    ModuleInput,
-    RangeInput,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -91,6 +89,24 @@ class Beta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["beta"] = "beta"
+
+
+class DriveRef(BaseModel):
+    """Key branch of a tagged ref-or-inline selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["ref"] = "ref"
+    name: str = ""
+
+
+class DriveInline(BaseModel):
+    """Inline branch whose module is an ordinary nested model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["inline"] = "inline"
+    module: Section = Field(default_factory=Section)
 
 
 def test_decimals_round_the_shown_number_without_rounding_input(build: Build) -> None:
@@ -170,15 +186,17 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
         )
         alone: Alpha = Field(default_factory=Alpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        fluxes: RangeInput = Field(default_factory=LinRange)
 
     view, _state = build(TagForm, None)
     assert row_names(view, "alone.kind") == []
     assert row_names(view, "sweep.kind") == []
     assert child(view, QLineEdit, "form.input.sweep.start").text() == "0.0"
-    for path, tags in (("choice", ["alpha", "beta"]), ("fluxes", ["linrange", "list"])):
-        selector = child(view, QComboBox, f"form.input.{path}.kind")
-        assert [selector.itemData(i) for i in range(selector.count())] == tags
+    selector = child(view, QComboBox, "form.input.choice")
+    assert [selector.itemData(i) for i in range(selector.count())] == [
+        {"kind": "alpha"},
+        {"kind": "beta"},
+    ]
+    assert row_names(view, "choice.kind") == []
 
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
@@ -187,14 +205,14 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
         labelled: Annotated[Section, Display(label="Readout")] = Field(
             default_factory=Section
         )
-        drive: ModuleInput
+        drive: Annotated[DriveRef | DriveInline, Field(discriminator="kind")]
         choice: Annotated[Alpha | Beta, Field(discriminator="kind")]
 
     view, state = build(
         TitleForm,
         {
-            "drive": {"kind": "inline", "module": {"type": "pulse"}},
-            # Without a tag the editor shows only the placeholder selector.
+            "drive": {"kind": "inline", "module": {"level": 1.0}},
+            # Without a tag no option matches; the row keeps its title.
             "choice": {"x": 3.0},
         },
     )
@@ -202,6 +220,6 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_label(view, "labelled") == "Readout"
     assert row_label(view, "drive") == "Drive"
     assert row_label(view, "drive.module") == "Module"
-    placeholder = row_label(view, "choice.kind")
+    assert row_label(view, "choice") == "Choice"
     state.write({("choice", "kind"): "alpha"}, FormEnv())
-    assert placeholder == row_label(view, "choice.kind")
+    assert row_label(view, "choice") == "Choice"

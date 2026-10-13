@@ -2,3 +2,4 @@
 
 from ._modules import ModuleValues
 from .form import Form, module_form
+from .module_input import ModuleInputField

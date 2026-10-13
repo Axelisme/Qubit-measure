@@ -2,8 +2,11 @@
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 
 import pytest
+from pydantic import Field
+from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -15,10 +18,11 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, ModuleInline
+from zcu_tools.gui.form import FormEnv, FormModel
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
+from zcu_tools.mcp.measure.recipe_form import read_form_field
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -54,21 +58,13 @@ class FormGui(LookbackGui):
             AuthorCfg,
             {
                 "pulse": Slot("$qubit.module.pulse"),
-                "locked_pulse": Slot("$qubit.module.pulse", lock={"freq": 100.0}),
+                "locked_pulse": Slot("Q1.pulses.pi", lock={"freq": 100.0}),
             },
         )
         self.owner = TabFormResource(
             form,
             capture=lambda aliases: TabFormSources(FormEnv(library=library)),
             mutation_allowed=lambda: True,
-        )
-        self.owner.write(
-            {
-                ("locked_pulse",): {
-                    "kind": "inline",
-                    "module": pulse.model_dump(mode="json", exclude_none=True),
-                }
-            }
         )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
@@ -86,7 +82,10 @@ class FormGui(LookbackGui):
                 self.owner.read_module(tuple(str(params["field"]).split(".")))
             )
         if method == "tab.use_inline":
-            self.owner.use_inline(tuple(str(params["field"]).split(".")))
+            path = tuple(str(params["field"]).split("."))
+            self.owner.require_mutation_allowed()
+            if self.owner.read_module(path).mode == "key":
+                self.owner.run_command(path, "to_inline")
             return dict(observe_form(self.owner))
         return super().__call__(method, params)
 
@@ -128,6 +127,7 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert selected.key == "Q1.pulses.pi"
         assert selected.input == {"kind": "ref", "name": "Q1.pulses.pi"}
         assert not selected.locked
+        assert selected.fields == ()
         assert selected.errors == ()
         values = gui.owner.accept().values["pulse"]
         if not isinstance(values, dict):
@@ -135,13 +135,63 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert values["freq"] == 100.0
 
 
+def test_use_library_writes_one_declared_option_value(tmp_path: Path) -> None:
+    with recipe_client(tmp_path, FormGui()) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = len(client.transport.sent)
+        tab.use_library("pulse", "Q1.pulses.pi")
+        assert client.transport.sent[before:] == [
+            (
+                "tab.edit_cfg",
+                {
+                    "tab_id": "t",
+                    "edits": [
+                        {
+                            "path": ["pulse"],
+                            "value": {"kind": "ref", "name": "Q1.pulses.pi"},
+                        }
+                    ],
+                },
+            )
+        ]
+
+
+@pytest.mark.parametrize("captured", [False, True])
+def test_unoffered_library_key_reports_available_options_without_writing(
+    tmp_path: Path, captured: bool
+) -> None:
+    gui = FormGui()
+    if not captured:
+        gui.owner = TabFormResource(
+            Form(AuthorCfg, {}),
+            capture=lambda aliases: TabFormSources(FormEnv()),
+            mutation_allowed=lambda: True,
+        )
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        assert not tab.read_field("pulse").locked
+        before = gui.owner.input.data
+        sent = list(client.transport.sent)
+        with pytest.raises((GuiRpcError, PydanticCustomError)) as failure:
+            tab.use_library("pulse", "Q1.pulses.absent")
+        error = failure.value
+        assert isinstance(error, GuiRpcError), error
+        assert error.reason == "invalid_cfg"
+        assert "pulse" in str(error)
+        assert "Available keys" in str(error)
+        if captured:
+            assert "Q1.pulses.pi" in str(error)
+        assert client.transport.sent == sent
+        assert gui.owner.input.data == before
+
+
 def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -> None:
     gui = FormGui()
     library = gui.owner.env.library
     if library is None:
         raise TypeError("Expected library")
-    module = library.module_spec("Q1.pulses.pi")
-    gui.owner.write({("pulse",): ModuleInline(module=module).model_dump(mode="json")})
+    gui.owner.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    gui.owner.run_command(("pulse",), "to_inline")
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         assert tab.read_field("pulse").mode == "inline"
@@ -156,6 +206,37 @@ def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -
         if cfg.pulse is None:
             raise TypeError("Expected accepted pulse")
         assert cfg.pulse.freq == 100.0
+
+
+class NumericOption(FormModel):
+    kind: Literal[1, 2] = 1
+    amount: float = 7.0
+
+
+class StringOption(FormModel):
+    kind: Literal["1"] = "1"
+    text: str = "sample"
+
+
+class TypedOptionsForm(FormModel):
+    choice: NumericOption | StringOption = Field(discriminator="kind")
+
+
+@pytest.mark.parametrize(
+    "tag, fields", [(1, ("amount",)), (2, ("amount",)), ("1", ("text",))]
+)
+def test_read_field_projects_selected_typed_option_fields(
+    tag: int | str, fields: tuple[str, ...]
+) -> None:
+    publication: dict[str, object] = {
+        "schema": TypedOptionsForm.input_schema(FormEnv()),
+        "input": {"choice": {"kind": tag}},
+        "values": [],
+        "errors": [],
+    }
+    observed = read_form_field(publication, ("choice",))
+    assert observed.fields == fields
+    assert observed.input == {"kind": tag}
 
 
 class RequiredCfg(ConfigBase):
@@ -215,11 +296,26 @@ def test_locked_inline_slot_rejects_library_selection_before_rpc(
         assert locked.mode == "inline"
         assert locked.key is None
         assert locked.locked
-        assert "module" in locked.fields
+        assert locked.fields == ("module",)
         before = list(client.transport.sent)
         with pytest.raises(ValueError, match="locked"):
             tab.use_library("locked_pulse", "Q1.pulses.pi")
         assert client.transport.sent == before
+
+
+@pytest.mark.parametrize("field", ["pulse.kind", "locked_pulse.kind"])
+def test_read_field_does_not_expose_option_selected_tag_leaves(
+    tmp_path: Path, field: str
+) -> None:
+    gui = FormGui()
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        tab.use_library("pulse", "Q1.pulses.pi")
+        before = gui.owner.input.data
+        with pytest.raises(ValueError, match="Unknown cfg field"):
+            tab.read_field(field)
+        assert gui.owner.input.data == before
+        assert tab.read_field("locked_pulse.module.freq").value == 100.0
 
 
 def test_read_module_returns_lowered_values_without_editing_key(tmp_path: Path) -> None:

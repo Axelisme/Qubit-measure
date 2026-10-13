@@ -29,6 +29,8 @@ measure adapter 的表單由 `cfg_definition()` 用 builder 逐欄宣告。core 
 
 ### 表單形狀從 core cfg 推導
 
+生成器以 `FormModel.options(env)` 宣告 module／waveform 的語義選項，核心投影為 `x-form-options`。Widget 與 MCP 只消費 label、value、可選 fields／commands，不解讀 union 或 library。持久 child key 在 input 邊界變成 tagged ref／inline，轉回 cfg 時去 wrapper，保留 key。普通換分支呼叫 `defaults(env)` 建 fresh 範本／型別初值。`to_inline` 指令才複製固定 library 快照，recipe 的 use_inline 共用同一指令，不另寫 measure 複製政策。表單、host guard 與版本邊界見 [Pydantic 表單 draft](pydantic-form-tool.md)。
+
 adapter 對外的 cfg 格式預設等於 core 的 pydantic cfg。lib 的共用 Form 生成器 `gui.form_adapter` 從型別推導 spec，adapter 不重述形狀，只宣告起始值、鎖定、隱藏與偏差。黑盒子仍成立。對外契約仍是 adapter 發布的 spec，只是沒有差異的部分不必再說一次。
 
 使用者 2026-10-12：「adapter內對外是黑盒子，也就是說adapter可以曝露與內部使用不同的cfg格式，但現實是往往內部格式都與外部極其接近」。

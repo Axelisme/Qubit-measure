@@ -148,7 +148,7 @@ def test_template_required_nested_defaults_omit_none() -> None:
     assert cfg.probe.freq == 120 and cfg.probe.waveform.length == 0.4
 
 
-def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
+def test_copy_command_does_not_reapply_initial_set() -> None:
     form = bound_form(Slot("Q.pulses.probe", copy=True, set={"gain": 0.8}))
     env = environment()
     state = FormState(form.default_input(env))
@@ -157,11 +157,11 @@ def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
     initial = form.to_cfg(value, env)
     assert isinstance(initial, Core) and initial.probe.gain == 0.8
     state.write({("probe", "kind"): "ref", ("probe", "name"): "Q.pulses.probe"}, env)
-    state.write({("probe", "kind"): "inline"}, env)
+    state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
-    switched = form.to_cfg(value, env)
-    assert isinstance(switched, Core) and switched.probe.gain == 0.3
+    copied = form.to_cfg(value, env)
+    assert isinstance(copied, Core) and copied.probe.gain == 0.3
 
 
 def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
@@ -174,9 +174,9 @@ def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
     assert isinstance(cfg, Core) and cfg.probe.freq == 0 and cfg.probe.gain == 0.8
     inline = form.model.model_fields["probe"].annotation
     assert isinstance(inline, type) and issubclass(inline, ModuleInline)
-    defaults = inline.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
+    defaults = inline.defaults(env)
     module = defaults["module"]
-    assert isinstance(module, dict) and module["freq"] == 0 and module["gain"] == 0.3
+    assert isinstance(module, dict) and module["freq"] == 0
     state.write({("probe", "kind"): "ref"}, env)
     assert isinstance(state.result(env), FormErrors)
 
@@ -278,7 +278,10 @@ def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -
     reset = state.input.data["reset"]
     assert isinstance(reset, dict)
     module = reset["module"]
-    assert isinstance(module, dict) and module["pi2_cfg"] == "Q.pulses.probe"
+    assert isinstance(module, dict) and module["pi2_cfg"] == {
+        "kind": "ref",
+        "name": "Q.pulses.probe",
+    }
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, ResetCore), cfg
     assert cfg.reset.pi2_cfg.gain == 0.3
@@ -357,14 +360,30 @@ def test_nested_template_expression_failure_requires_input(expression: str) -> N
     assert isinstance(result, FormErrors), result
     assert result.messages == {
         ("readout", "module", "ro_cfg", "trig_offset"): "Field required",
-        ("readout", "module", "pulse_cfg", "phase"): "Field required",
-        ("readout", "module", "pulse_cfg", "waveform", "length"): "Field required",
+        ("readout", "module", "pulse_cfg", "module", "phase"): "Field required",
+        (
+            "readout",
+            "module",
+            "pulse_cfg",
+            "module",
+            "waveform",
+            "module",
+            "length",
+        ): "Field required",
     }
     state.write(
         {
             ("readout", "module", "ro_cfg", "trig_offset"): 0.4,
-            ("readout", "module", "pulse_cfg", "phase"): 0.4,
-            ("readout", "module", "pulse_cfg", "waveform", "length"): 0.4,
+            ("readout", "module", "pulse_cfg", "module", "phase"): 0.4,
+            (
+                "readout",
+                "module",
+                "pulse_cfg",
+                "module",
+                "waveform",
+                "module",
+                "length",
+            ): 0.4,
         },
         env,
     )
@@ -392,9 +411,13 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     module = readout["module"]
     assert isinstance(module, dict)
     ro = module["ro_cfg"]
-    pulse = module["pulse_cfg"]
+    pulse_wrapper = module["pulse_cfg"]
+    assert isinstance(pulse_wrapper, dict)
+    pulse = pulse_wrapper["module"]
     assert isinstance(ro, dict) and isinstance(pulse, dict)
-    waveform = pulse["waveform"]
+    waveform_wrapper = pulse["waveform"]
+    assert isinstance(waveform_wrapper, dict)
+    waveform = waveform_wrapper["module"]
     assert isinstance(waveform, dict)
     expected = 0.0 if expression is None else 0.4
     assert ro["trig_offset"] == pulse["phase"] == expected
@@ -449,7 +472,7 @@ def test_nested_slot_fallback_expression_defaults_require_input(
     if phase == Expr("$unbound.value"):
         assert isinstance(result, FormErrors), result
         assert result.messages == {
-            ("readout", "module", "pulse_cfg", "phase"): "Field required"
+            ("readout", "module", "pulse_cfg", "module", "phase"): "Field required"
         }
     else:
         if isinstance(result, FormErrors):

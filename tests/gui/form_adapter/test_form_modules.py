@@ -4,8 +4,8 @@ from typing import Annotated
 
 import pytest
 from pydantic import JsonValue, PydanticSchemaGenerationError
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec
-from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormState
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseSpec, ResetCfg
+from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
@@ -31,6 +31,280 @@ class ModuleCore(ConfigBase):
     """A synthetic experiment cfg is independent of real experiment modules."""
 
     modules: ModuleSection
+
+
+class ResetCore(ConfigBase):
+    """A required multi-kind module and its nullable counterpart."""
+
+    reset: ResetCfg
+    optional: ResetCfg | None = None
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_generated_module_options_offer_typed_keys_and_single_inline(
+    nullable: bool,
+) -> None:
+    form = Form(NullableModuleCore if nullable else ModuleSection, {})
+    env = module_env()
+    options = form.model.options(env).get(("probe",), ())
+    assert [option.label for option in options] == (
+        (["None"] if nullable else []) + ["Q.pulses.probe", "Inline"]
+    )
+    key = next(option for option in options if option.label == "Q.pulses.probe")
+    assert key.value == {"kind": "ref", "name": "Q.pulses.probe"}
+    assert key.fields is None
+    inline = options[-1]
+    assert inline.value == {"kind": "inline", "module": {"type": "pulse"}}
+    properties = expect_object(form.model.input_schema(env)["properties"])
+    projected = expect_object(properties["probe"])["x-form-options"]
+    assert isinstance(projected, list)
+    fields = expect_object(expect_object(projected[-1])["fields"])
+    module = expect_object(expect_object(fields["properties"])["module"])
+    assert set(expect_object(module["properties"])) >= {
+        "ch",
+        "freq",
+        "gain",
+        "waveform",
+    }
+    assert "type" not in expect_object(module["properties"])
+    assert "kind" not in expect_object(fields["properties"])
+
+
+def test_generated_multi_kind_options_keep_editable_kinds_and_filter_keys() -> None:
+    form = Form(ResetCore, {})
+    env = module_env()
+    expected = ["Inline: reset/pulse", "Inline: reset/two_pulse", "Inline: reset/bath"]
+    options = form.model.options(env)
+    assert [option.label for option in options.get(("reset",), ())] == expected
+    assert [option.label for option in options.get(("optional",), ())] == [
+        "None",
+        *expected,
+    ]
+    assert [option.value for option in options[("reset",)]] == [
+        {"kind": "inline", "module": {"type": kind}}
+        for kind in ("reset/pulse", "reset/two_pulse", "reset/bath")
+    ]
+    schema = form.model.input_schema(env)
+    projected = expect_object(expect_object(schema["properties"])["reset"])[
+        "x-form-options"
+    ]
+    assert isinstance(projected, list)
+    expected_fields = [
+        {"pulse_cfg"},
+        {"pulse1_cfg", "pulse2_cfg"},
+        {"cavity_tone_cfg", "qubit_tone_cfg", "pi2_cfg"},
+    ]
+    for item, names in zip(projected, expected_fields, strict=True):
+        fields = expect_object(expect_object(item)["fields"])
+        module = expect_object(expect_object(fields["properties"])["module"])
+        assert set(expect_object(module["properties"])) == names
+
+
+def test_module_key_command_copies_captured_content_in_one_write() -> None:
+    form = Form(ModuleCore, {})
+    env = stored_env()
+    state = FormState(
+        FormInput(
+            form.model,
+            {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
+        )
+    )
+    probe = expect_object(
+        expect_object(state.input_schema(env)["properties"])["modules"]
+    )
+    options = expect_object(expect_object(probe["properties"])["probe"])[
+        "x-form-options"
+    ]
+    assert isinstance(options, list)
+    assert expect_object(options[0]).get("commands") == [
+        {"name": "to_inline", "label": "Convert to inline"}
+    ]
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+
+    state.run_command(("modules", "probe"), "to_inline", env)
+
+    copied = expect_object(expect_object(state.input.data["modules"])["probe"])
+    assert copied["kind"] == "inline"
+    module = expect_object(copied["module"])
+    assert (module["ch"], module["freq"], module["gain"]) == (1, 100.0, 0.3)
+    assert module["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "const", "length": 0.1},
+    }
+    assert notifications == ["changed"]
+    observed = form.read_module(state.input, ("modules", "probe"), FormEnv())
+    assert not isinstance(observed, FormErrors), observed
+    assert observed.mode == "inline" and observed.value["freq"] == 100.0
+    assert env.library is not None
+    assert env.library.module_spec("Q.pulses.probe").desc == "stored"
+    assert observed.value["desc"] is None
+
+
+def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_draft() -> (
+    None
+):
+    from zcu_tools.cfg_model import Slot, Template, TemplateDef
+
+    form = Form(
+        ModuleSection, {"probe": Slot("Q.pulses.probe", fallback=Template("pulse"))}
+    )
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {
+                    "ch": 2,
+                    "nqz": 1,
+                    "freq": 90.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.4,
+                },
+            )
+        },
+        adapter="synthetic",
+    )
+    env = module_env()
+    state = FormState(form.default_input(env))
+    options = form.model.options(env).get(("probe",), ())
+    assert [option.label for option in options] == ["Q.pulses.probe", "Inline"]
+    inline = options[-1]
+    assert inline.fields is not None and issubclass(inline.fields, FormModel)
+    defaults = inline.fields.defaults(env)
+    assert expect_object(defaults["module"])["freq"] == 90.0
+
+    state.write({("probe",): inline.value}, env)
+    copied = expect_object(expect_object(state.input.data["probe"])["module"])
+    assert (copied["freq"], copied["gain"]) == (90.0, 0.2)
+    state.write({("probe", "module", "freq"): 250.0}, env)
+    state.write({("probe",): options[0].value}, env)
+    state.write({("probe",): inline.value}, env)
+    assert (
+        expect_object(expect_object(state.input.data["probe"])["module"])["freq"]
+        == 90.0
+    )
+
+
+def kind_selection_schema(
+    schema: dict[str, JsonValue], root: str, root_label: str, depth: int
+) -> tuple[tuple[str, ...], list[JsonValue]]:
+    """Read public option fields; return the target path and its selections."""
+    root_schema = expect_object(expect_object(schema["properties"])[root])
+    root_options = root_schema["x-form-options"]
+    assert isinstance(root_options, list)
+    root_option = next(
+        expect_object(item)
+        for item in root_options
+        if expect_object(item)["label"] == root_label
+    )
+    path = (root, "module")
+    options = root_options
+    if depth:
+        fields = expect_object(root_option["fields"])
+        module_schema = expect_object(expect_object(fields["properties"])["module"])
+        if depth == 2:
+            pulse_schema = expect_object(
+                expect_object(module_schema["properties"])["pulse_cfg"]
+            )
+            pulse_options = pulse_schema["x-form-options"]
+            assert isinstance(pulse_options, list)
+            pulse_fields = expect_object(
+                next(
+                    expect_object(item)["fields"]
+                    for item in pulse_options
+                    if expect_object(item)["label"] == "Inline"
+                )
+            )
+            module_schema = expect_object(
+                expect_object(pulse_fields["properties"])["module"]
+            )
+            path = (*path, "pulse_cfg", "module")
+        waveform_options = expect_object(
+            expect_object(module_schema["properties"])["waveform"]
+        )["x-form-options"]
+        assert isinstance(waveform_options, list)
+        options = waveform_options
+        path = (*path, "waveform", "module")
+
+    return path, options
+
+
+@pytest.mark.parametrize(
+    "depth", [0, 1, 2], ids=["module", "waveform", "nested-waveform"]
+)
+@pytest.mark.parametrize("selection", ["option", "tag"])
+def test_template_kind_reselection_at_each_depth_is_fresh(
+    depth: int, selection: str
+) -> None:
+    from zcu_tools.cfg_model import (
+        Expr,
+        PulseResetSpec,
+        Template,
+        TemplateDef,
+        TemplateSeed,
+    )
+
+    pulse_seeds: dict[str, TemplateSeed] = {
+        "ch": 2,
+        "nqz": 1,
+        "freq": Expr("100 - 10"),
+        "gain": 0.2,
+        "waveform.style": "const",
+        "waveform.length": Expr("2 * .2"),
+    }
+    if depth == 1:
+        form = Form(ModuleSection, {"probe": Template("authored")})
+        definition = TemplateDef(PulseSpec, "Pulse", pulse_seeds)
+        root, root_label = "probe", "Inline"
+    else:
+        form = Form(ResetCore, {"reset": Template("authored")})
+        definition = TemplateDef(
+            PulseResetSpec,
+            "Reset",
+            {"pulse_cfg": "Q.pulses.probe"}
+            if depth == 0
+            else {f"pulse_cfg.{path}": value for path, value in pulse_seeds.items()},
+        )
+        root, root_label = "reset", "Inline: reset/pulse"
+    form.bind_templates({"authored": definition}, adapter="synthetic")
+    env = module_env() if depth == 0 else FormEnv()
+    state = FormState(form.default_input(env))
+    path, options = kind_selection_schema(
+        state.input_schema(env), root, root_label, depth
+    )
+
+    def current() -> dict[str, JsonValue]:
+        value = state.input.data
+        for name in path:
+            value = expect_object(value[name])
+        return value
+
+    def choose(label: str) -> None:
+        option = next(
+            expect_object(item)
+            for item in options
+            if expect_object(item)["label"] == label
+        )
+        value = expect_object(option["value"])
+        value = expect_object(value["module"])
+        tag = "style" if depth else "type"
+        state.write(
+            {(*path, tag): value[tag]} if selection == "tag" else {path: value}, env
+        )
+
+    leaf = "length" if depth else "pulse_cfg"
+    expected: JsonValue = 0.4 if depth else {"kind": "ref", "name": "Q.pulses.probe"}
+    assert current()[leaf] == expected
+    state.write({(*path, leaf): 1.7 if depth else {"kind": "inline"}}, env)
+    choose("Inline: cosine" if depth else "Inline: reset/two_pulse")
+    assert current() == ({"style": "cosine"} if depth else {"type": "reset/two_pulse"})
+    # Another non-template kind also starts at type defaults, never the old draft.
+    choose("Inline: gauss" if depth else "Inline: reset/bath")
+    assert current() == ({"style": "gauss"} if depth else {"type": "reset/bath"})
+    choose("Inline: const" if depth else root_label)
+    assert current().get(leaf) == expected
 
 
 def module_env() -> FormEnv:
@@ -61,37 +335,14 @@ def module_env() -> FormEnv:
 
 
 @pytest.mark.parametrize("nullable", [False, True])
-def test_generated_module_schema_merges_key_and_inline(nullable: bool) -> None:
+def test_generated_module_copy_and_nullable_result(nullable: bool) -> None:
     form = Form(NullableModuleCore if nullable else ModuleSection, {})
     env = module_env()
-    schema = form.model.input_schema(env)
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    probe = properties["probe"]
-    assert isinstance(probe, dict)
-    if nullable:
-        variants = probe["anyOf"]
-        assert isinstance(variants, list)
-        assert {"type": "null"} in variants
-        probe = next(v for v in variants if isinstance(v, dict) and "oneOf" in v)
-    assert probe.get("x-form-key-or-inline") is True
-    branches = probe["oneOf"]
-    assert isinstance(branches, list)
-    ref = next(
-        b
-        for b in branches
-        if isinstance(b, dict) and b["x-form-discriminator-values"] == ["ref"]
-    )
-    props = ref["properties"]
-    assert isinstance(props, dict)
-    name = props["name"]
-    assert isinstance(name, dict)
-    assert name["x-form-library-keys"] == ["Q.pulses.probe"]
     state = FormState(
         FormInput(form.model, {"probe": {"kind": "ref", "name": "Q.pulses.probe"}})
     )
     assert not isinstance(state.result(env), FormErrors)
-    state.write(form.module_inline_writes(state.input, ("probe",), env), env)
+    state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
@@ -124,7 +375,10 @@ def test_module_reference_or_inline_materializes_to_native_core(mode: str) -> No
                 "nqz": 1,
                 "freq": 200,
                 "gain": 0.1,
-                "waveform": {"style": "const", "length": 0.2},
+                "waveform": {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.2},
+                },
             },
         }
     )
@@ -157,7 +411,10 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
                 "nqz": 1,
                 "gain": 0.3,
                 "freq": {"expr": "50 * 2"},
-                "waveform": {"style": "const", "length": 0.1},
+                "waveform": {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.1},
+                },
             },
         }
     )
@@ -176,8 +433,11 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
     assert not isinstance(again, FormErrors), again
     assert again.value["freq"] == 100.0
     assert input.data == before
-    inline = form.module_inline_input(input, ("modules", "probe"), env)
-    assert inline["kind"] == "inline"
+    state = FormState(input)
+    if mode == "ref":
+        state.run_command(("modules", "probe"), "to_inline", env)
+    modules = expect_object(state.input.data["modules"])
+    assert expect_object(modules["probe"])["kind"] == "inline"
     assert input.data == before
 
 
@@ -297,14 +557,14 @@ def test_inline_module_rejects_unsupported_field_writes(name: str) -> None:
         state.write({("modules", "probe", "module", name): 1}, env)
 
 
-@pytest.mark.parametrize("path", ["switch", "copy"])
+@pytest.mark.parametrize("path", ["command", "copy"])
 def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
     path: str,
 ) -> None:
     from zcu_tools.cfg_model import Slot
 
     env = stored_env()
-    if path == "switch":
+    if path == "command":
         form = Form(ModuleCore, {})
         state = FormState(
             FormInput(
@@ -312,7 +572,7 @@ def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
                 {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
             )
         )
-        state.write({("modules", "probe", "kind"): "inline"}, env)
+        state.run_command(("modules", "probe"), "to_inline", env)
     else:
         form = Form(
             ModuleCore, {"modules": {"probe": Slot("Q.pulses.probe", copy=True)}}

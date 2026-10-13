@@ -1066,9 +1066,15 @@ class ExpTabWidget(QWidget):
             self._form_scroll.takeWidget()
             self._editor.deleteLater()
         state = self._cfg.editor_state
-        # Writes go to the resource unchanged, so its busy, lifetime and
-        # notification guards and its subscriber publication cover editor input.
-        editor = FormEditor(state, self._cfg.env, write=self._cfg.write)
+        # Writes and option commands go to the resource unchanged, so its busy,
+        # lifetime and notification guards and its subscriber publication
+        # cover editor input; the editor never changes the borrowed state.
+        editor = FormEditor(
+            state,
+            self._cfg.env,
+            write=self._cfg.write,
+            run_command=self._cfg.run_command,
+        )
         editor.setContentsMargins(4, 4, 4, 4)
         editor.validity_changed.connect(self._on_cfg_validity_changed)
         editor.set_editing_enabled(enabled=self._editing_enabled)

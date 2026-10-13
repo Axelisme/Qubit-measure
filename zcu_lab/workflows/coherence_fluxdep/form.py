@@ -13,8 +13,8 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
-    ModuleInput,
-    RangeInput,
+    LinRange,
+    Option,
     field_error,
 )
 from zcu_tools.resources.entry import RoleResolutionError
@@ -30,6 +30,10 @@ from zcu_lab.workflows.coherence_fluxdep.workflow import (
 )
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
+    DRIVE_MODULE_FIELD,
+    READOUT_MODULE_FIELD,
+    DriveModuleInput,
+    ReadoutModuleInput,
     calibration_choices,
     calibration_defaults,
     expand_fluxes,
@@ -61,9 +65,7 @@ class CoherenceTunablesForm(FormModel):
     )
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Fill t1 from T1TunablesForm.defaults, including its initial guess.
 
         t1 has no static default, so this is its only default source; the
@@ -72,11 +74,8 @@ class CoherenceTunablesForm(FormModel):
         and t2echo keep their static defaults. Existing input overlays remain
         the host's responsibility; no source is recaptured.
         """
-        data = super().defaults(env, previous)
-        prior_t1 = previous.get("t1", {})
-        data["t1"] = T1TunablesForm.defaults(
-            env, prior_t1 if isinstance(prior_t1, dict) else {}
-        )
+        data = super().defaults(env)
+        data["t1"] = T1TunablesForm.defaults(env)
         return data
 
     def to_cfg(self) -> CoherenceTunables:
@@ -110,7 +109,7 @@ class CoherencePlanForm(FormModel):
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
         Field(description="Explicit flux coordinate: YOKO A/V, Fake native")
     )
-    fluxes: Annotated[RangeInput, Display(label="Fluxes")] = Field(
+    fluxes: Annotated[LinRange, Display(label="Fluxes")] = Field(
         description="Ordered absolute device setpoints"
     )
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(
@@ -118,10 +117,10 @@ class CoherencePlanForm(FormModel):
         description="Initial pi-duration estimate in µs at the selected drive gain",
     )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
-    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+    qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
         description="Shared spectroscopy/Rabi/pi drive"
     )
-    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+    readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Shared pulse-backed readout"
     )
 
@@ -140,9 +139,7 @@ class CoherencePlanForm(FormModel):
         return self
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Prefill the captured device name and x180 pi estimate.
 
         Resolve $flux_dev only for new defaults and keep the name literal.
@@ -158,8 +155,8 @@ class CoherencePlanForm(FormModel):
         not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
-        data = calibration_defaults(super().defaults(env, previous), env, previous)
-        if env.parameters is None or "flux_dev" in previous:
+        data = calibration_defaults(super().defaults(env), env)
+        if env.parameters is None:
             return data
         try:
             data["flux_dev"] = env.parameters.resolve_path("$flux_dev")
@@ -177,6 +174,14 @@ class CoherencePlanForm(FormModel):
         requires the core ModuleRef source check; no live lookup or fallback.
         """
         return calibration_choices(env)
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare generated module selections against the same fixed capture."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("readout",): READOUT_MODULE_FIELD.options(env),
+        }
 
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> CoherencePlan | FormErrors:
         """Resolve selections and expand setpoints into a static native plan.

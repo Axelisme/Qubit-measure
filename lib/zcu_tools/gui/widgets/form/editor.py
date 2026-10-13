@@ -40,8 +40,8 @@ class FormEditor[F: FormModel](QWidget):
 
     Public child object names use model-field paths joined by dots:
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
-    whole-container input; a QCheckBox for bool; or a QComboBox for choices and
-    discriminators. Combo item data is the ordinary input value.
+    whole-container input; a QCheckBox for bool; or a non-editable QComboBox
+    for a field whose schema lists x-form-options.
     form.mode.<path> is the checkable QAction "Expression" of a field whose
     schema offers an Expr alternative: the core offers it on text fields
     (int, float, complex and str values typed into a QLineEdit). It is
@@ -50,12 +50,7 @@ class FormEditor[F: FormModel](QWidget):
     tooltip says so. Triggering it switches the mode and writes the input
     again: {"expr": <current text>} in Expression mode, the parsed text in
     Direct mode. An Expression-mode input has a light tint of the palette's
-    highlight colour. Dropdown and checkbox fields (Literal, Enum, choices,
-    bool and key-or-inline fields) have no form.mode.<path>: a choice
-    leaf's form.input.<path> is a dropdown of only the choices, and its
-    right-click opens no menu.
-    Discriminators offer only ordinary typed tags and have no expression mode.
-    Empty choices keep the current branch visible without changing its input.
+    highlight colour. Dropdown and checkbox fields have no form.mode.<path>.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of
     its value, without form.mode or a dropdown. A float with Display decimals
     shows its Direct and resolved values rounded to that many digits; text
@@ -63,26 +58,24 @@ class FormEditor[F: FormModel](QWidget):
     Fields the schema marks hidden (Display(hidden=True), or a one-value
     structural tag outside a union) have no controls. Their input is kept,
     and their errors appear at the nearest drawn ancestor row or form.error.
-    A field the schema marks x-form-key-or-inline holds a library key or an
-    inline model: a str-or-model field (str | Model) or a ModuleInput. It has
-    no form.mode.<path>; its form.input.<path> is one non-editable QComboBox.
-    The first item is "Inline" with item data None; then come the schema's
-    x-form-library-keys, each with the key as data (for a str-or-model
-    field the library keys whose Spec matches the model; for a ModuleInput
-    every library module key, or only those among declared choices for its
-    name). While the input holds a key not in that list, a last item shows
-    it as "<key> (missing)" with data "<key>" (an empty or non-string key,
-    such as an expression a wire write left in a ModuleInput name, as its
-    JSON text) and is selected; the state is not changed and the field's
-    errors still show. Without offered keys the list is Inline only, plus
-    that missing item. An unfilled field selects no item. The GUI cannot
-    type a key; wire writes can still hold any key. Choosing a key writes it
-    (a ModuleInput writes {"kind": "ref", "name": <key>} as its kind and
-    name leaves in one batch). Choosing Inline writes {} for a str-or-model
-    field and kind "inline" for a ModuleInput, whose inline defaults copy
-    the referenced library module; it then shows the inline model's child
-    rows below (a tagged union with its selector; a ModuleInput shows its
-    module, without a kind row). Neither choice converts the other's value.
+    Every field whose schema lists x-form-options (Literal, Enum, choices,
+    tagged unions, and the module and waveform selections a Form generator
+    declares) shows one dropdown, form.input.<path>, and nothing else
+    decides its items: each option's label in schema order, with the
+    option's value as item data. The first option matching the input by the
+    core's Option rule is selected. A present input no option matches is
+    kept: a last item shows it, a nonempty string as itself and other JSON
+    as its JSON text, plus " (missing)", with the input as data; it is
+    selected, the state is not changed and the field's errors still show.
+    An unfilled field selects nothing. Choosing an option writes its value
+    at the field as one batch; the core starts a new branch from its own
+    defaults. While the selected option has fields, their rows show below
+    the dropdown (tags its value fixes have no rows); such a row has no
+    Enabled box, since a nullable field lists None as an option. The
+    dropdown's right-click menu lists the selected option's commands as
+    QActions form.command.<path>.<name> with the schema label as text, also
+    in form.input.<path>.actions(); triggering one runs that command (see
+    __init__). An option without commands opens no menu.
     form.enabled.<path> is a nullable-model activation QCheckBox.
     form.group.<path>.<group> (form.group.<group> at the root level) is the
     block of one Display group of the model level at <path>. It holds the
@@ -95,7 +88,7 @@ class FormEditor[F: FormModel](QWidget):
     group stays folded.
     Groups start folded; model rows start as Display(collapsed=...) says.
     Folds the user sets on groups and model rows survive rebuilds of this
-    editor (branch, key-or-inline or activation changes), remembered by path.
+    editor (option or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
     form.error.<path> is a QLabel under its field with current field errors;
@@ -112,8 +105,9 @@ class FormEditor[F: FormModel](QWidget):
     form.mode.<path> listed but disabled. Dropdowns and checkboxes
     (form.input and form.enabled) show the current value in normal colours
     and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
-    a wheel turn over them scrolls an enclosing scroll area instead. Group
-    and model fold buttons still expand and collapse.
+    a wheel turn over them scrolls an enclosing scroll area instead. Option
+    command actions stay listed but disabled. Group and model fold buttons
+    still expand and collapse.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -133,6 +127,7 @@ class FormEditor[F: FormModel](QWidget):
         parent: QWidget | None = None,
         *,
         write: Callable[[Mapping[FormWritePath, JsonValue]], None] | None = None,
+        run_command: Callable[[FormWritePath, str], None] | None = None,
     ) -> None:
         """Build controls for state using env, then subscribe to state changes.
 
@@ -143,9 +138,8 @@ class FormEditor[F: FormModel](QWidget):
         write decides where parsed input goes. When it is None (the default),
         each parsed batch is installed with state.write(batch, env) using the
         current env. When it is a callable, it receives every parsed batch, a
-        mapping from write paths to JSON input: one entry, the edited field's
-        path, except that choosing a ModuleInput key writes its kind and name
-        leaves together. The editor never writes state itself. The callable installs
+        mapping from write paths to JSON input with one entry, the edited
+        field's path. The editor never writes state itself. The callable installs
         accepted input into this same state (for example after its own checks
         or substitutions); the editor still reads and subscribes to state, so
         input the callable does not install is not shown.
@@ -158,7 +152,22 @@ class FormEditor[F: FormModel](QWidget):
         publications, and clears on that field's next accepted write, on
         discard_local_text, or when the field leaves the form. Any other
         exception from the callable propagates.
+
+        run_command decides where a triggered option command goes. When it is
+        None (the default), the editor calls state.run_command(path, name,
+        env) with the current env. When it is a callable, it receives the
+        option field's path and the command name, for example
+        (("modules", "qub_pulse"), "to_inline"), and the editor never runs
+        the command on state; the callable runs it on this same state, for
+        example through the host's guarded entry. It refuses with
+        WriteRejected(message) before changing state, which the field shows
+        like a rejected write; any other exception propagates. write and
+        run_command are passed together or not at all: a host that guards
+        writes must also route commands, so passing only one raises
+        ValueError before any subscription.
         """
+        if (write is None) != (run_command is None):
+            raise ValueError("FormEditor needs both write and run_command, or neither")
         app = QApplication.instance()
         if not isinstance(app, QApplication) or app.thread() != QThread.currentThread():
             raise RuntimeError("FormEditor requires the QApplication GUI thread")
@@ -166,6 +175,7 @@ class FormEditor[F: FormModel](QWidget):
         self._state: FormState[F] | None = state
         self._env: FormEnv | None = env
         self._host_write = write
+        self._host_command = run_command
         self._unsubscribe: Callable[[], None] | None = None
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
@@ -407,6 +417,7 @@ class FormEditor[F: FormModel](QWidget):
             self._write,
             self._unparsed,
             self._model_expanded,
+            self._run_command,
         )
         self._rows[field.path] = row
         layout.addWidget(row.widget)
@@ -431,6 +442,20 @@ class FormEditor[F: FormModel](QWidget):
                 # unparseable text; the publish below redraws state around it.
                 self._local[path] = self._rows[path].rejected_input(exc.message)
         # Unchanged writes do not publish but can clear a local parse error.
+        self._publish()
+
+    def _run_command(self, path: FormWritePath, name: str) -> None:
+        """Run option command name at path, or keep its rejection local."""
+        state = self._require_state()
+        self._local.pop(path, None)
+        if self._host_command is None:
+            state.run_command(path, name, self._require_env())
+        else:
+            try:
+                self._host_command(path, name)
+            except WriteRejected as exc:
+                # The host changed nothing: show its message at the field.
+                self._local[path] = self._rows[path].rejected_input(exc.message)
         self._publish()
 
     def _unparsed(self, path: FormWritePath, local: LocalText) -> None:

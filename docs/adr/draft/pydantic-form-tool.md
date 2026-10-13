@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，文字與選項混合的 union 在 core raise；editor 的唯讀但可讀模式，workflows run 中不再停用面板；expression 只用於文字欄位，workflows `WIRE_VERSION` 3；引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-14，選項清單、tagged ref／inline 與不依 previous 的 defaults
 
 ## 脈絡與範圍
 
@@ -28,7 +28,7 @@ Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed map
 
 ## 輸入與普通值
 
-FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。只有文字欄位接受 `{"expr": "..."}`：以文字框輸入的 int、float、complex 與 str value leaves。以下拉或勾選呈現的欄位沒有 expression：`Literal`、Enum、宣告 choices 的 leaf、bool，以及 library key（`str | Model` 的 key 與 `ModuleRef.name`）。這些值是挑出來的，不是算出來的。同時含文字成員與選項成員的 union（例如 `float | Literal["auto"]`、`bool | int`）沒有一種控制項能同時打字與挑選，core 的 input schema 與求值遇到時 raise ValueError，訊息帶欄位路徑。判斷在 core，只有一條規則：這些欄位的 input schema 沒有 Expr 分支，result 在該欄位報錯且不求值，compatible restore 丟棄它們的 envelope；editor 只依 schema 有沒有 Expr 分支決定給不給右鍵 Expression，不自己推論。這個收窄改變 wire 接受的 input，所以 workflows 的 `WIRE_VERSION` 升到 3。只有顯式 envelope 求值，普通字串包含 `$` 開頭的內容仍是 literal。Preview 與 result 使用共用 evaluator，再遵守 Pydantic 約束。Input schema 與 compatible restore 保留 expression 原文，editor 使用同一 schema 與 preview，不自行求值。Editor 不在欄位旁放模式下拉：文字欄位的右鍵選單在標準項目之後列出 Expression 切換；選項欄位的下拉只列選項，沒有右鍵選單；Expression 模式的輸入框以淺色底色區分。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
+FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。只有文字欄位接受 `{"expr": "..."}`：以文字框輸入的 int、float、complex 與 str value leaves。以下拉或勾選呈現的欄位沒有 expression：`Literal`、Enum、宣告 choices 的 leaf、bool，以及 literal key（`KeyRef.name`，包括 `ModuleRef.name`）。這些值是挑出來的，不是算出來的。同時含文字成員與選項成員的 union（例如 `float | Literal["auto"]`、`bool | int`）沒有一種控制項能同時打字與挑選，core 的 input schema 與求值遇到時 raise ValueError，訊息帶欄位路徑。判斷在 core，只有一條規則：這些欄位的 input schema 沒有 Expr 分支，result 在該欄位報錯且不求值，compatible restore 丟棄它們的 envelope；editor 只依 schema 有沒有 Expr 分支決定給不給右鍵 Expression，不自己推論。Workflows 的 wire 版本涵蓋這個 expression 邊界與目前的 options／tagged input 契約。只有顯式 envelope 求值，普通字串包含 `$` 開頭的內容仍是 literal。Preview 與 result 使用共用 evaluator，再遵守 Pydantic 約束。Input schema 與 compatible restore 保留 expression 原文，editor 使用同一 schema 與 preview，不自行求值。Editor 不在欄位旁放模式下拉：文字欄位的右鍵選單在標準項目之後列出 Expression 切換；選項欄位的下拉只列選項，沒有右鍵選單；Expression 模式的輸入框以淺色底色區分。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
 
 FormState 持有隔離的 input 與 base，不持 Engine revision。
 
@@ -47,15 +47,17 @@ Editor 預設直接呼叫 `FormState.write`。Host 需要在寫入前檢查或�
 
 ## Defaults、分支與 module reference
 
-`defaults(env, previous)` 是唯一 defaults hook。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env, {})`、檢查來源、求值 expression defaults 並建立 FormInput。Defaults 可以包含 complex tags，也可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。Core 用同一個 env 當場求值，input 只存算好的 direct 值，畫面在 Direct 模式顯示這個值；畫面上的初始值就是會跑的值。來源之後改變，要重新建立 default input（Reset、Prepare）才反映。Expression 算不出來（缺 path、alias 未綁定、值不是數字），或算出的值在 result 的該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。不另設初始值錯誤機制。Captured source 本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。Required keys 沒有預設時保持未填。
+`defaults(env)` 是唯一 defaults hook，只依型別與固定來源，不接收 previous。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env)`、檢查來源、求值 expression defaults 並建立 FormInput。Defaults 可以包含 complex tags，也可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。Core 用同一個 env 當場求值，input 只存算好的 direct 值，畫面在 Direct 模式顯示這個值；畫面上的初始值就是會跑的值。來源之後改變，要重新建立 default input（Reset、Prepare）才反映。Expression 算不出來（缺 path、alias 未綁定、值不是數字），或算出的值在 result 的該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。不另設初始值錯誤機制。Captured source 本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。Required keys 沒有預設時保持未填。
 
-Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input，expression defaults 照 `default_input` 的規則算成值。接著沿用同名欄位（使用者寫的 expression 保留原文），明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
+Branch switch 先呼叫新分支的 fresh defaults，expression defaults 照 `default_input` 的規則算成值。它不繼承舊分支的同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
 
-只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core schema 照常輸出 `const`，沒有 Expr 分支。Model 不經 union selector 到達時，例如單一 model 欄位、nullable model 或 `str | Model` 的單一 model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Schema 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
+只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core schema 照常輸出 `const`，沒有 Expr 分支。Model 不經 union selector 到達時，例如單一 model 欄位或 nullable model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Schema 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
 
-未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Core 在這類欄位的 schema 節點標 `x-form-key-or-inline: true`，`ModuleInput` 欄位也標，editor 只依這個標記決定要不要合併下拉，不自己從 schema 形狀判斷，所以規則只在 core。Editor 對這類欄位只畫一個不可編輯的下拉：第一項 Inline，其後是 schema 的 `x-form-library-keys`。`str | Model` 的清單是 Spec 型別相符的 keys；`ModuleInput` 的清單在 ref branch 的 `name`，是全部 library module keys，因為 inline 的 `ModuleSpec` 接受所有 module 型別；Form 用 `choices()` 為該 name 宣告選項時取交集。選 key 寫入引用（`ModuleInput` 一批寫 `kind` 與 `name`），選 Inline 寫入 inline 預設值，不轉換另一邊的值。目前值是清單沒有的 key 時，下拉顯示 `<key> (missing)` 並選中它，不改寫 state，錯誤照常顯示。GUI 下拉不可打字，wire 照舊可寫任意 key；清單只是 GUI 可選的項目，不限制輸入。
+核心在 `default_input`、`input_schema` 與 FormInput 入口全樹拒絕未標 tag 的 `str | Model`，包含 nullable、alias、containers 與 inactive branches。錯誤指名欄位並要求 tagged ref／inline。持久 Spec 仍可保存 child key 字串，生成器在 input 邊界加 wrapper，轉回持久 Spec 時去掉 wrapper。核心不豁免 Spec，也不依賴生成器。
 
-T1TunablesForm 只在 previous 為空、captured point 有 `general.ext.guess_us` leaf 時，以這個 path 的 expression 宣告 lifetime 初始值，開表單時 core 把它算成值。這個 leaf 是 null 或不是正數時算不出合法值，guess_us 留空；guess_us 沒有靜態預設，所以 result 只報它的 `Field required`，不默默落回 20 µs。缺 leaf 或沒有 capture 時，defaults 明確給 20 µs 的普通值。
+Compatible restore 的 model-only union 仍只保留恰好一個相容 member，ambiguous 或 unmatched subtree 丟棄。Tagged restore 改 branch 時呼叫同一個 fresh defaults。舊 ref 複製 hook 已退休，複製只由明確選項指令提供。
+
+T1TunablesForm 在 captured point 有 `general.ext.guess_us` leaf 時，以這個 path 的 expression 宣告 lifetime 初始值，開表單時 core 把它算成值。這個 leaf 是 null 或不是正數時算不出合法值，guess_us 留空；guess_us 沒有靜態預設，所以 result 只報它的 `Field required`，不默默落回 20 µs。缺 leaf 或沒有 capture 時，defaults 明確給 20 µs 的普通值。
 
 `choices(env)` 提供 model-field leaf 的合法值。最深 nested FormModel 的 local choices 優先，包含空選項。Input schema 與 result 共用這些選項。Display 只描述標籤、說明、單位與呈現，順序沿欄位宣告，段落沿 nested model，畫面群組沿 Display 的 `group`。
 
@@ -65,9 +67,43 @@ Display 的 `group` 把欄位歸到同一個 model 層級內的具名群組，�
 
 Host 不允許修改 input 的期間呼叫 editor 的 `set_editing_enabled(enabled=False)`，例如 workflows 的 run 從 Start 到 terminal delivery。表單變成唯讀但可讀：文字欄位可選取與複製；下拉與勾選框顯示目前值，不回應點擊、滾輪與鍵盤；群組與 model 照常展開、折疊與捲動；右鍵選單只留複製類項目，Expression 停用。控制項不停用，所以不變灰。外部 state 更新照常顯示，`enabled=True` 恢復全部編輯。Host 不再停用整個面板，因為停用會讓使用者看不到折疊起來的值。
 
-Module ref 與 inline 使用 tagged 子 model。Ref 保存 library key，inline 保存 ModuleSpec。Ref 切 inline 從固定 library 讀取 Spec，切換後不跟隨 library 改動。Defaults 與 choices 使用 LibrarySnapshot 的公開讀取；具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
+Module ref 與 inline 使用 tagged 子 model。Ref 保存 literal library key，inline 保存生成的支援型別。普通分支切換只用 fresh defaults；`to_inline` 指令才從固定 library 複製 Spec，複製後不跟隨 library 改動。具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
 
-LinRange 與 ExplicitList 保存兩種 flux 輸入。具體 to_cfg 才展開 setpoints。Delay grid 由 workflow 計算。固定值在具體 to_cfg 或 runtime 明寫，不新增通用 sweep 連動、inheritance、`$` capture、refresh、live linking 或 Unavailable publication。
+掃描輸入只使用 LinRange。具體 to_cfg 才展開 setpoints。Delay grid 由 workflow 計算。固定值在具體 to_cfg 或 runtime 明寫，不新增通用 sweep 連動、inheritance、`$` capture、refresh、live linking 或 Unavailable publication。
+
+## 選項清單與分層
+
+2026-10-13 使用者裁決。推導見 [討論紀錄](../../discussions/2026-10-13-form-options-layering.md)。
+
+### 分工
+
+Form 生成器（`gui.form_adapter`）把實驗語義翻成顯示偏好。使用者：「這些資訊應該是由Form生成器負責將帶有實驗語義轉變成有顯示偏好的格式」。表單核心（`gui.form`）只提供通用機制，不知道 module 或 library。Widget 與 MCP 照 input schema 的清單畫、照清單寫，不解讀 union 結構。使用者：「FormInput/FormModel與Widget間是簡單的關係……在不同widget/app中使用，不一定是為了Module/Library」。
+
+### 選項
+
+- 每個挑選欄位在 input schema 有一份有效選項清單 `x-form-options`。每項含 `label`、`value`，可編輯物件值可含 `fields`：內嵌的子表單 schema，不含已由選項決定的 tag。
+- `FormModel.options(env)` 是宣告 hook，預設為空。核心把宣告和自動選項合併成有效清單。自動選項涵蓋 Literal、Enum、`choices(env)` 與 tagged union 的成員。
+- 生成器為 module 與波形欄位宣告以下選項：可留空時的 `None`、kind 符合的 library keys、每個 inline kind 一項 `Inline: <kind>`。只有一個 kind 時顯示 `Inline`，沒有欄位的 kind（例如 `reset/none`）不列。Key 只顯示名稱。
+- 比對規則只有一條：目前 input 在某個選項 `value` 的每個葉都具有相同 JSON 型別與值，就選中它，依清單順序取第一個。沒有選項符合時顯示目前值加 `(missing)`，不改 state。
+- 可留空的 key-or-inline 欄位把 `None` 放進下拉，不畫 Enabled 勾選框。一般可留空的 model 區塊仍用 Enabled 勾選框。
+
+### 換分支
+
+在 union 位置寫入 partial object 就是選分支。新分支用預設值，也就是範本或型別預設，不繼承舊分支的同名欄位，defaults 也不看切換前的值。寫 tag 葉換分支也遵守同一規則。使用者在比較時選「改 kind 時，舊 kind 填過的值不帶過去」。形狀與選項只看型別和捕捉的來源，初值只看型別、範本與來源，因此不需要帶狀態的 factory hook。
+
+### 選項指令
+
+選項可以帶 `commands: [{name, label}]`。Widget 在右鍵選單列出目前選中選項的指令，按下就經 host callback 呼叫 `FormState.run_command(path, name, env)`，結果以一次寫入提交。生成器在每個 key 選項上宣告 `to_inline`（`Convert to inline`）並提供實作：用捕捉的 library 把該 key 的內容複製成 inline，複製後和 library 斷開。呼叫者可以從目前選中的選項知道有哪些指令可用。`run_command` 遇到目前選項沒有帶的指令會報錯，不會靜默略過。Recipe 的 `use_inline` RPC 先讀公開 S2 input tag，不求值或驗證 draft：是 key 才呼叫 `to_inline`，已經是 inline 就直接寫。`use_inline` 包裝這個判斷，對已是 inline 的欄位維持不變。使用者：「recipe需要一種方法知道目前欄位是ref還是inline，進而決定要不要先轉inline」。使用者提議：「對ref下拉按鈕右鍵有轉成inline的選項」；後續追問：「widget層需要有ref/inline的認知嗎？」，答案是不需要。
+
+### 一種 key-or-inline 表示法
+
+生成器把未標 tag 的 `str | Model`（`waveform`、`pulse_cfg`、`pulse1_cfg`、`pulse2_cfg`、`raise_waveform` 等）換成有 tag 的 ref／inline 形狀，`to_cfg` 換回持久 Spec。核心不再支援未標 tag 的 key-or-inline，手寫這種表單時在入口報錯。Ref 選中時下拉只顯示名稱，不顯示被引用 entry 的內容。使用者：「如果實作困難ref就不用支援只讀顯示」、「只顯示選單名就可以」。
+
+### Consumer 與版本邊界
+
+Widget 與 MCP 只讀選項的 value、fields 與 commands，不從 union 猜 branch 或 library。MCP 的 `RecipeFormField.fields` 只列選中項目的可編輯子欄位，不含 tag；ref 沒有 fields。Mode 讀公開 input kind，inline 的顯式 path 仍是 `<field>.module.<leaf>`，tag 葉不提供 `read_field`。Measure 的 editor 成對傳入 resource guarded write／run_command；workflows 不另注入 callback。
+
+Measure wire 102、workflows wire 4 分別涵蓋 options 與 tagged input。Measure memento 3、workflows memento 2 沿各自既有 caretaker／codec 拒絕舊版分頁，沒有 migration 或雙讀。
 
 ## 來源與既有工具
 

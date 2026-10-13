@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from types import MappingProxyType, new_class
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
@@ -33,8 +33,8 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    FormWritePath,
     LinRange,
+    Option,
     static_defaults,
 )
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -42,8 +42,14 @@ from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
 from ._display import field_display
-from ._modules import ModuleField, ModuleValues, editable_spec, module_specs
-from ._seeds import supported_input, template_seed_tree
+from ._modules import (
+    ModuleField,
+    ModuleValues,
+    bind_template_defaults,
+    editable_spec,
+    module_specs,
+)
+from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
@@ -148,7 +154,8 @@ class _SpecSection:
 
     The generated model subclasses both FormModel and the Spec's input model, so
     hosts use it as a FormState root or as a ModuleInline module field. Child
-    library keys stay ordinary strings; nothing is looked up or materialized.
+    library keys use tagged inputs and lower back to strings; nothing is
+    looked up or materialized.
     It has no core sections or module fields, and no authored tree.
     """
 
@@ -158,7 +165,7 @@ class _SpecSection:
         self.editable = editable_spec(spec, {}, {})
         model = new_class(
             f"{spec.__name__}Form",
-            (FormModel, self.editable),
+            (self.editable,),
             exec_body=lambda ns: ns.update({"__module__": __name__}),
         )
         if not issubclass(model, FormModel):
@@ -175,7 +182,12 @@ class _SpecSection:
         self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
     ) -> dict[str, CfgInputValue]:
         del env, errors
-        return value.model_dump(mode="python")
+        return {
+            name: item
+            for name, item in persistent_input(
+                type(value), value.model_dump(mode="json")
+            ).items()
+        }
 
 
 class _Section:
@@ -224,10 +236,8 @@ class _Section:
             namespace[name] = field_info
         section = self
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del cls, previous
+        def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
+            del cls
             return section.default_data(env)
 
         def choices(
@@ -245,10 +255,19 @@ class _Section:
                 if isinstance(node, AliasName) and node.choices_source == "devices"
             }
 
+        def options(
+            cls: type[FormModel], env: FormEnv
+        ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
+            del cls
+            return {
+                (name,): field.options(env) for name, field in section.modules.items()
+            }
+
         namespace.update(
             __annotations__=annotations,
             defaults=classmethod(defaults),
             choices=classmethod(choices),
+            options=classmethod(options),
         )
         model = new_class(
             f"{core.__name__}Form",
@@ -394,6 +413,13 @@ class Form[C: ConfigBase]:
     them (see bind_templates); there is no override. FieldMeta label, unit,
     decimals, description and group become Display metadata; locked fields
     drop decimals because they are single-value Literals.
+    Generated options(env) declares nullable None, family-limited captured keys
+    and every editable Inline kind. Key values use kind=ref/name; inline uses
+    kind=inline/module at every depth. Inline values contain only branch tags
+    and fields names the selected
+    child form. The key option command to_inline (Convert to inline) copies
+    supported captured Spec content in one write. Ordinary selections use fresh
+    Template/type defaults, never copy the key or retain another kind's draft.
     A core_cfg that is a concrete persistent module or waveform Spec builds the
     same Spec form as module_form and requires an empty tree.
     """
@@ -486,51 +512,31 @@ class Form[C: ConfigBase]:
             raise ValueError(f"Not a core module field: {'.'.join(path)}")
         return section.modules[path[-1]]
 
-    def module_inline_input(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[str, JsonValue]:
-        """Prepare inline input for a core module path against fixed env.
+    def module_input_kind(
+        self, input: FormInput[FormModel], path: tuple[str, ...]
+    ) -> Literal["ref", "inline"]:
+        """Read an authored core module's tag without evaluating its draft.
 
-        input must belong to this Form; otherwise raise TypeError. path consists
-        of nonempty core field names, not module descendants; invalid paths raise
-        ValueError. Copy a captured library Spec through ModuleInline.defaults;
-        absent library/key uses Template fallback or editable static blank.
-        Wrong family/source failures propagate. Preserve existing inline values
-        and locks. No mutation, validation of the whole draft, or publication
-        occurs; blank may still require ordinary leaf edits before Run.
+        input must belong to this Form; another model raises TypeError. path
+        contains nonempty core field names, not inline descendants or extras.
+        Unknown/nonmodule paths raise ValueError, even if their input has a
+        kind tag. Return ref or inline from the public tagged input, including
+        partial modules and invalid expressions. Disabled, missing or untagged
+        module input raises ValueError naming the field. No validation,
+        expression evaluation, source read, input change or publication occurs.
         """
         if input.model is not self.model:
-            raise TypeError("module_inline_input requires this Form's input")
-        field = self._module_field(path)
+            raise TypeError("module_input_kind requires this Form's input")
+        self._module_field(path)
         raw: JsonValue = input.data
         for part in path:
             raw = raw.get(part) if isinstance(raw, dict) else None
-        return field.inline_input(raw if isinstance(raw, dict) else {}, env)
-
-    def module_inline_writes(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[FormWritePath, JsonValue]:
-        """Prepare one public leaf batch for required or nullable module input.
-
-        input, path and env follow module_inline_input, with the same failures,
-        locks and captured-library/Template/blank preparation. The generated
-        inline branch defaults use that same preparation during discriminator
-        switching. Return no writes for already-inline input. The resource must
-        apply this batch once through guarded public write; preparation changes
-        no input and publishes nothing. Callers need not know module layout.
-        """
-        if input.model is not self.model:
-            raise TypeError("module_inline_writes requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        previous = raw if isinstance(raw, dict) else {}
-        return (
-            {}
-            if previous.get("kind") == "inline"
-            else field.inline_writes(previous, env)
-        )
+        kind = raw.get("kind") if isinstance(raw, dict) else None
+        if kind == "ref":
+            return "ref"
+        if kind == "inline":
+            return "inline"
+        raise ValueError(f"Module input has no ref/inline tag: {'.'.join(path)}")
 
     def read_module(
         self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
@@ -572,7 +578,10 @@ class Form[C: ConfigBase]:
 
         input.model may be a subclass of this Form's model, specialized for
         this template's Expr requirements and locks. Build a new FormState from
-        the returned input. Recompute the same template's initial values with
+        the returned input. An inline kind switch at any depth uses fresh template
+        values at that path only when its branch ancestry matches; other kinds
+        use type defaults. Switching never reads the previous draft.
+        Recompute the same template's initial values with
         input.model.default_input(env); changing templates requires a new state.
         The original Form.model, template, catalog and sources are not modified.
         The input model retains a detached catalog mapping, not the caller's map.
@@ -590,21 +599,14 @@ class Form[C: ConfigBase]:
             self.model, template.lock, template_seed_tree(template, bound)
         )
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del previous
-            return _template_input(template, bound, (cls,), env)
-
         model = new_class(
             f"{self.model.__name__}Template",
             (editable,),
-            exec_body=lambda ns: ns.update(
-                {"__module__": __name__, "defaults": classmethod(defaults)}
-            ),
+            exec_body=lambda ns: ns.update({"__module__": __name__}),
         )
         if not issubclass(model, FormModel):
             raise TypeError("Template input model must implement FormModel")
+        bind_template_defaults((model,), template, bound)
         return model.default_input(env)
 
     def input_from_spec(self, spec: ConfigBase, env: FormEnv) -> FormInput[FormModel]:
@@ -615,7 +617,9 @@ class Form[C: ConfigBase]:
         covariant in its concrete result type. At runtime spec must be exactly
         core_cfg, not a subclass; otherwise raise
         TypeError. Ordinary values and child library keys are copied, and None
-        values stay absent like static defaults. Values of unsupported module
+        values stay absent like static defaults. Child keys become ref objects
+        with kind=ref/name; inline children become kind=inline/module wrappers.
+        Values of unsupported module
         fields are discarded, so to_cfg restores Spec defaults instead of the
         stored values. env supplies the default input that the projection
         overlays; captured source failures propagate. spec is not modified and
@@ -675,6 +679,8 @@ def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
     FormState root or a ModuleInline module field; hosts add choices through
     their own choices(env). to_cfg returns spec_type and keeps child library
     keys without reading the library, assets or building native cfg. Generated
+    str-or-model children use kind=ref/name or kind=inline/module, including
+    nested waveform kinds; to_cfg reverses those wrappers. Generated
     input omits optional desc, mask, outsel, ro_ch and mux_* fields, whose Spec
     defaults return in to_cfg. Use input_from_spec to edit an existing Spec.
     """
