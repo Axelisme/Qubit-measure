@@ -88,9 +88,12 @@ def selected_model(
 
 
 def complete_input(
-    model: type[BaseModel], authored: Mapping[str, JsonValue]
+    model: type[BaseModel],
+    authored: Mapping[str, JsonValue],
+    *,
+    path: tuple[str, ...] = (),
 ) -> dict[str, JsonValue]:
-    """Overlay seeds only in their existing objects, with public static defaults."""
+    """Overlay seeds with static defaults; report ambiguous inline field paths."""
     unknown = authored.keys() - model.model_fields.keys()
     if unknown:
         raise ValueError(f"Unknown seeds for {model.__name__}: {sorted(unknown)}")
@@ -112,7 +115,15 @@ def complete_input(
                 for member in members(info.annotation)
             )
         ):
-            data[name] = complete_input(selected_model(info.annotation, value), value)
+            child_path = (*path, name)
+            try:
+                child = selected_model(info.annotation, value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{'.'.join(child_path)}: Cannot select inline Spec discriminator; "
+                    "supply a tag when the Spec has no static default"
+                ) from exc
+            data[name] = complete_input(child, value, path=child_path)
     return data
 
 
@@ -129,6 +140,16 @@ def _path_annotation(
     if not isinstance(child, dict):
         raise ValueError(f"Seed path requires inline object: {path!r}")
     return _path_annotation(selected_model(annotation, child), child, rest)
+
+
+def _complete_template_input(
+    model: type[BaseModel], authored: Mapping[str, JsonValue], template_id: str
+) -> dict[str, JsonValue]:
+    """Complete Spec input and identify its template in startup diagnostics."""
+    try:
+        return complete_input(model, authored)
+    except ValueError as exc:
+        raise ValueError(f"Template {template_id!r}: {exc}") from exc
 
 
 def template_input(
@@ -160,7 +181,7 @@ def template_input(
     for path, seed in seeds.items():
         if not isinstance(seed, Slot):
             set_path(data, path, scalar_seed(seed))
-    data = complete_input(model, data)
+    data = _complete_template_input(model, data, template.id)
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
             annotation = _path_annotation(model, data, path)
@@ -188,7 +209,7 @@ def template_input(
     for path, value in template.lock.items():
         _path_annotation(model, data, path)
         set_path(data, path, scalar_seed(value))
-    return complete_input(model, data)
+    return _complete_template_input(model, data, template.id)
 
 
 def nested_slot(

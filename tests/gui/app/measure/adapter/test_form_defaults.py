@@ -325,7 +325,7 @@ def test_missing_discriminator_error_names_template_and_nested_field(
     registry = Registry(
         templates={template_id: TemplateDef(spec, "Partial", {f"{path}.length": 5.1})}
     )
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="synthetic") as caught:
         registry.register("synthetic", CalibrationAdapter, form=form)
     message = str(caught.value)
     assert template_id in message, message
