@@ -1004,7 +1004,9 @@ class RecipeTab:
         """
         label = _source_label(source)
         node = self._node(field)
-        if node.mode is not None:
+        if node.mode is not None or (
+            node.fields and not {"start", "stop", "n"} <= set(node.fields)
+        ):
             raise ValueError(f"Not a scalar or sweep cfg field: {field}")
         self._binding.origins[field] = label
 
