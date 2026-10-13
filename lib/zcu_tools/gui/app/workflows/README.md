@@ -1,6 +1,6 @@
 # gui/app/workflows — Workflow host
 
-**Last updated:** 2026-10-13，run 進行中 Plan 與 Start Tunables 表單唯讀但可讀（不再停用面板）；run 進行中停用 Prepare forms 與 Reload source；terminal 後保存可編輯的 Start knobs；run view 在 terminal 時重設 Start knobs
+**Last updated:** 2026-10-13，session 列只留 Entry chip；Devices… 開共用 DeviceDialog，run 進行中唯讀
 
 ## 註冊與組裝
 
@@ -12,7 +12,7 @@
 
 ## Window 版面
 
-`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session chips。最上面一列是 chips（Entry／Point、`$qubit` 解析出的元件與 kind、已連線裝置、ZCU 狀態）與 Setup…、Aliases…、Prepare forms、Reload source。Chips 只讀 services，收到 context、alias、point 內容、SoC、裝置事件時刷新，Setup／Aliases 關閉與 Prepare forms 後也刷新；過長的診斷截斷，完整文字放在 tooltip，不撐寬視窗。從 Start 到 terminal delivery（pending、running、pausing、paused、stopping），宿主拒絕 Prepare forms 與 Reload source，所以這兩顆停用；Setup… 與 Aliases… 改的是 session，不影響已 capture 的 run，維持可按。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
+`layout.py` 建一次控制項與版面，`session_strip.py` 的 `WorkflowSessionStrip` 顯示 session 列。最上面一列只有一個 Entry chip（`Entry: <entry> / <point>`），之後是 Setup…、Aliases…、Devices…、Prepare forms、Reload source。Qubit、裝置與 ZCU 不在 session 列：框架不認得 qubit，裝置與 ZCU 狀態由 Device 對話框或 workflow 自己的畫面呈現。Chip 只讀 services，收到 context 切換事件時刷新，Setup／Aliases 關閉與 Prepare forms 後也刷新；過長的文字截斷，完整文字放在 tooltip，不撐寬視窗。Devices… 用 measure GUI 同一個共用 `DeviceDialog`，同樣以 window-modal 開啟、關閉即刪除、已開著時只 raise，吃 session 的 device control 與 parameter provider。Workflows 沒有控制權交接，所以不設 `before_stop`。從 Start 到 terminal delivery（pending、running、pausing、paused、stopping），hardware gate 擋住裝置變更，宿主也拒絕 Prepare forms 與 Reload source：這兩顆停用，Device 對話框（不論 run 前或 run 中開啟）切成唯讀，terminal delivery 後恢復可設定。Setup…、Aliases… 與 Devices… 維持可按；Setup 與 Aliases 改的是 session，不影響已 capture 的 run。Reload 另外要有 loader，且沒有要求重啟的 reload 失敗。
 
 下方是可拖動的 QSplitter。左欄依序是 workflow 選單、`Plan`／`Tunables` 兩個分頁與固定在底部的 Start／Pause／Resume／Stop。分頁內容放在 QScrollArea，所以表單展開多少都不影響視窗最小高度；切換 workflow、Prepare 與 Reload 換掉的 panel 放回同一個分頁。右欄依序是 run 狀態列（`run_status.py`）、診斷訊息列 `workflow.run.message` 與 `figure_area.py` 的 `WorkflowFigureArea`。版面只依 widget 結構，不依 workflow 名稱；既有 objectName 保持不變。
 

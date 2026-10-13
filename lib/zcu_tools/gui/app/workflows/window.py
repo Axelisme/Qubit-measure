@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 from qick import QickConfig
-from qtpy.QtCore import QSignalBlocker
+from qtpy.QtCore import QSignalBlocker, Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QWidget
 
@@ -58,6 +58,7 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
+from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -147,6 +148,7 @@ class WorkflowWindow[C](QWidget):
             self.plan_panel,
             self.tunables_panel,
         )
+        self._device_dialog: DeviceDialog | None = None
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
         for button, slot in (
@@ -156,6 +158,7 @@ class WorkflowWindow[C](QWidget):
             (self._controls.stop, self._stop_clicked),
             (self._controls.setup, self.open_setup),
             (self._controls.aliases, self._aliases_clicked),
+            (self._controls.devices, self.open_devices),
             (self._controls.prepare, self._use_source_clicked),
             (self._controls.reload, self._reload_clicked),
         ):
@@ -163,7 +166,7 @@ class WorkflowWindow[C](QWidget):
         self._run_view = WorkflowRunView(
             self._controls, self.controller, self._forms, self
         )
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
@@ -192,21 +195,55 @@ class WorkflowWindow[C](QWidget):
         dialog.finished.connect(dialog.deleteLater)
         dialog.show()
 
-    def _sync_source_buttons(self) -> None:
-        """Disable Prepare forms and Reload source while a run holds Start.
+    def open_devices(self) -> None:
+        """Open the shared Device dialog window-modally on the GUI owner.
 
-        The host rejects both from Start until terminal delivery (pending,
-        running, pausing, paused, stopping). Reload also needs a loader and no
-        restart-required reload failure. Setup and Aliases stay enabled: they
-        change the session, not the run's capture.
+        It lists and sets up this session's devices through device_control and
+        evaluates expressions against the current parameter context. A dialog
+        already open is raised instead of opening a second one; closing deletes
+        it. From Start until terminal delivery the hardware gate rejects device
+        changes, so the dialog is read-only: it still lists, refreshes and
+        polls the selected device, but cannot add, drop, apply or stop. Opening
+        reads no hardware and changes no form capture.
         """
-        idle = not self._run_view.start_locked
+        dialog = self._device_dialog
+        if dialog is not None:
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = DeviceDialog(
+            self._services.device_control,
+            parameter_provider=self._services.context_control.read_context,
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.finished.connect(self._device_dialog_finished)
+        dialog.set_read_only(read_only=self._run_view.start_locked)
+        self._device_dialog = dialog
+        dialog.open()
+
+    def _device_dialog_finished(self, _result: int) -> None:
+        self._device_dialog = None
+
+    def _sync_run_locked_controls(self) -> None:
+        """Apply the run's Start lock to the session row and the Device dialog.
+
+        From Start until terminal delivery (pending, running, pausing, paused,
+        stopping) the host rejects Prepare forms and Reload source, so both are
+        disabled, and the hardware gate rejects device changes, so an open
+        Device dialog is read-only. Reload also needs a loader and no
+        restart-required reload failure. Setup, Aliases and Devices stay
+        enabled: Setup and Aliases change the session, not the run's capture.
+        """
+        locked = self._run_view.start_locked
         error = self._catalog_error
         restart_required = error is not None and error.restart_required
-        self._controls.prepare.setEnabled(idle)
+        self._controls.prepare.setEnabled(not locked)
         self._controls.reload.setEnabled(
-            idle and self._loader is not None and not restart_required
+            not locked and self._loader is not None and not restart_required
         )
+        if self._device_dialog is not None:
+            self._device_dialog.set_read_only(read_only=locked)
 
     def _use_source_clicked(self) -> None:
         try:
@@ -350,7 +387,7 @@ class WorkflowWindow[C](QWidget):
             )
             self._catalog_error = error
             self._controls.start.setEnabled(False)
-            self._sync_source_buttons()
+            self._sync_run_locked_controls()
             self._controls.message.setText(str(error))
             if error is exc:
                 raise
@@ -565,7 +602,7 @@ class WorkflowWindow[C](QWidget):
             editor.refresh(env)
             editor.discard_local_text()
         self._run_view.submitted(attachment.name)
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         return token
 
     def _start_ports(
@@ -771,7 +808,7 @@ class WorkflowWindow[C](QWidget):
             self._run_view.paused()
             return
         self._run_view.ended(status, error)
-        self._sync_source_buttons()
+        self._sync_run_locked_controls()
         self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:
@@ -872,6 +909,8 @@ class WorkflowWindow[C](QWidget):
         if not self._shutdown_on_close(a0):
             return
         self.setup_dialog.close()
+        if self._device_dialog is not None:
+            self._device_dialog.reject()
         self._session.detach()
         self._run_view.close()
         self._figure_views.release()
