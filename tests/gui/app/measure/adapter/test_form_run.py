@@ -4,6 +4,7 @@ import pytest
 from pydantic import Field, ValidationError
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -15,7 +16,6 @@ from zcu_tools.gui.app.measure.services.tab_cfg import TabFormResource, TabFormS
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.utils import StopSignal
 
 
 class MeasurementCfg(ExpCfgModel):
