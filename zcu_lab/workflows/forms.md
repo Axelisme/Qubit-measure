@@ -38,7 +38,7 @@ Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
 `common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
-它經 captured core/native factories materialize ref/inline modules與 assets。
+三個 plan 表單用 `gui.form_adapter.ModuleInputField` 生成 tagged module 欄位，經公開 `to_spec` 取 key 或持久 Spec，再交 captured core/native factories materialize modules 與 assets。Inline 保留全部 module 家族，ref choices 仍依各欄位的原篩選，nullable reset 保 None。生成器只屏蔽已核准的選填硬體欄位，科學檢查仍由 workflows 負責。
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。
 這裡不提供 gain-Rabi、time-scaling、live repository lookup 或 guessed modules。
 

@@ -78,7 +78,10 @@ class FormGui(LookbackGui):
                 self.owner.read_module(tuple(str(params["field"]).split(".")))
             )
         if method == "tab.use_inline":
-            self.owner.use_inline(tuple(str(params["field"]).split(".")))
+            path = tuple(str(params["field"]).split("."))
+            self.owner.require_mutation_allowed()
+            if self.owner.read_module(path).mode == "key":
+                self.owner.run_command(path, "to_inline")
             return dict(observe_form(self.owner))
         return super().__call__(method, params)
 
@@ -133,7 +136,7 @@ def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -
     if library is None:
         raise TypeError("Expected library")
     gui.owner.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
-    gui.owner.use_inline(("pulse",))
+    gui.owner.run_command(("pulse",), "to_inline")
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         assert tab.read_field("pulse").mode == "inline"

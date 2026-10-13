@@ -1,25 +1,53 @@
-"""Shared captured module and seed policy for native calibrated workflows."""
+"""Shared captured module and seed policy for native calibrated workflows.
+
+Module input aliases describe generated ref/inline values, not persistent Specs.
+Always use the owning ModuleInputField.to_spec before native materialization;
+never inspect their module content through the static nominal type view.
+"""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from pydantic import JsonValue
-from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
+from zcu_tools.cfg_model import (
+    ModuleCfgFactory,
+    ModuleSpec,
+    PulseReadoutSpec,
+    PulseSpec,
+)
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
     FormPath,
     LinRange,
     ModuleInput,
-    ModuleRef,
 )
+from zcu_tools.gui.form_adapter import ModuleInputField
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.common.calibration import Calibrated
+
+DRIVE_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseSpec)
+READOUT_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseReadoutSpec)
+MIST_MODULE_FIELD = ModuleInputField(ModuleSpec)
+RESET_MODULE_FIELD = ModuleInputField(ModuleSpec, nullable=True)
+
+# Runtime schemas come from field.annotation; static aliases only view nominal values.
+if TYPE_CHECKING:
+    type DriveModuleInput = ModuleInput
+    type ReadoutModuleInput = ModuleInput
+    type MistModuleInput = ModuleInput
+    type ResetModuleInput = ModuleInput | None
+else:
+    DriveModuleInput = DRIVE_MODULE_FIELD.annotation
+    ReadoutModuleInput = READOUT_MODULE_FIELD.annotation
+    MistModuleInput = MIST_MODULE_FIELD.annotation
+    ResetModuleInput = RESET_MODULE_FIELD.annotation
 
 
 @dataclass(frozen=True)
@@ -36,7 +64,7 @@ class CalibrationModules:
 
 
 def resolve_calibration_modules(
-    *, qub_pulse: ModuleInput, readout: ModuleInput, env: FormEnv
+    *, qub_pulse: DriveModuleInput, readout: ReadoutModuleInput, env: FormEnv
 ) -> CalibrationModules | FormErrors:
     """Resolve shared ref/inline drive and readout in one captured FormEnv.
 
@@ -53,7 +81,7 @@ def resolve_calibration_modules(
     native_readout = None
     try:
         core = ModuleCfgFactory.from_raw(
-            qub_pulse.name if isinstance(qub_pulse, ModuleRef) else qub_pulse.module,
+            DRIVE_MODULE_FIELD.to_spec(qub_pulse),
             context=context,
         )
         native = NativeModuleCfgFactory.from_core(core, context=context)
@@ -68,7 +96,7 @@ def resolve_calibration_modules(
         errors[("qub_pulse",)] = str(exc)
     try:
         core = ModuleCfgFactory.from_raw(
-            readout.name if isinstance(readout, ModuleRef) else readout.module,
+            READOUT_MODULE_FIELD.to_spec(readout),
             context=context,
         )
         native_ro = NativeModuleCfgFactory.from_core(core, context=context)
