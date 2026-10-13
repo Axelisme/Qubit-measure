@@ -852,10 +852,7 @@ class MainWindow(QMainWindow):
             logger.exception("load_tab_data_dialog failed: tab_id=%r", tab_id)
             self.show_error_dialog("Load data failed", str(exc))
             return
-        message = f"Loaded data from {path}"
-        if outcome.cfg_backfill == "not_applied":
-            message += "; Config was not backfilled"
-        self.show_status_message(message)
+        self.show_status_message(f"Loaded data from {path}")
         if outcome.analysis_error is not None:
             self._dialog_presenter.warning(
                 self,

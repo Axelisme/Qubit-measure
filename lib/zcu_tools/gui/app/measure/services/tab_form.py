@@ -137,9 +137,10 @@ class TabFormResource:
 
         This is the same object the resource edits, not a copy or mirror, so an
         editor built over it shows every committed write, and its subscription
-        fires on each one. Reset and load_cfg install a new FormState: watch
-        this resource through subscribe and re-read the property afterwards.
-        All writes, Reset and Load go through the resource's commands. Calling
+        fires on each one. A command that replaces the input, such as Reset,
+        installs a new FormState: watch this resource through subscribe and
+        re-read the property afterwards. All form writes and Reset go through
+        the resource's commands. Calling
         state.write on the lent state bypasses the busy, lifetime and
         notification guards and the subscriber publication, which breaks this
         contract.

@@ -602,8 +602,8 @@ Frontend attach and detach do not own resource lifetime.
 The Qt Run panel mounts the shared `FormEditor` over `resource.editor_state`, the
 same FormState lent for reading and subscribing, and passes `write=resource.write`.
 Editor input therefore takes the resource guards and publishes to resource
-subscribers and the tab cfg version. Reset and Load install a new FormState; the
-panel watches the resource and mounts a new editor on that state. While the tab
+subscribers and the tab cfg version. Reset installs a new FormState; the panel
+watches the resource and mounts a new editor on that state. While the tab
 runs or analyzes, the panel only calls `set_editing_enabled(enabled=False)`: inputs
 lock, but the form still scrolls and its groups still fold. Detach unsubscribes
 and detaches the editor before the tab closes.

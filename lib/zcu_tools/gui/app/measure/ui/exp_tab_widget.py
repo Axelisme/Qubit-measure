@@ -363,8 +363,8 @@ class ExpTabWidget(QWidget):
         run_layout.setContentsMargins(4, 4, 4, 4)
         run_layout.setSpacing(2)
 
-        # The form editor borrows the resource's FormState; Reset and Load
-        # install a new one, so the editor is remounted when the state changes.
+        # The form editor borrows the resource's FormState; Reset installs a
+        # new one, so the editor is remounted when the state changes.
         self._form_scroll = QScrollArea()
         self._form_scroll.setWidgetResizable(True)
         self._editor: FormEditor[FormModel] | None = None
