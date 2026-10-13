@@ -174,8 +174,12 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
     assert row_names(view, "alone.kind") == []
     assert row_names(view, "sweep.kind") == []
     assert child(view, QLineEdit, "form.input.sweep.start").text() == "0.0"
-    selector = child(view, QComboBox, "form.input.choice.kind")
-    assert [selector.itemData(i) for i in range(selector.count())] == ["alpha", "beta"]
+    selector = child(view, QComboBox, "form.input.choice")
+    assert [selector.itemData(i) for i in range(selector.count())] == [
+        {"kind": "alpha"},
+        {"kind": "beta"},
+    ]
+    assert row_names(view, "choice.kind") == []
 
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
@@ -191,7 +195,7 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
         TitleForm,
         {
             "drive": {"kind": "inline", "module": {"type": "pulse"}},
-            # Without a tag the editor shows only the placeholder selector.
+            # Without a tag no option matches; the row keeps its title.
             "choice": {"x": 3.0},
         },
     )
@@ -199,6 +203,6 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_label(view, "labelled") == "Readout"
     assert row_label(view, "drive") == "Drive"
     assert row_label(view, "drive.module") == "Module"
-    placeholder = row_label(view, "choice.kind")
+    assert row_label(view, "choice") == "Choice"
     state.write({("choice", "kind"): "alpha"}, FormEnv())
-    assert placeholder == row_label(view, "choice.kind")
+    assert row_label(view, "choice") == "Choice"
