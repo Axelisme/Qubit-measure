@@ -73,6 +73,18 @@ def test_module_form_rejects_non_persistent_spec_roots(
         form_adapter.module_form(spec_type)
 
 
+def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = FormEnv()
+    properties = form.model.input_schema(env)["properties"]
+    assert isinstance(properties, dict)
+    tag = properties["type"]
+    assert isinstance(tag, dict)
+    assert tag.get("hidden") is True
+    assert tag["const"] == "pulse"
+    assert form.default_input(env).data["type"] == "pulse"
+
+
 def test_spec_form_evaluates_input_and_keeps_child_library_key() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
