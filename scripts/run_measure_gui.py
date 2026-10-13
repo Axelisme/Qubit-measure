@@ -90,6 +90,7 @@ def _build_measure_catalogs():
             "zcu_lab.v2._support.singleshot",
         ),
         catalog_module="zcu_lab.definitions",
+        current_registry=registry,
     )
     return registry, template_catalog, loader
 
