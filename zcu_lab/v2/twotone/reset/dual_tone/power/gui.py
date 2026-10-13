@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
-    ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -21,19 +20,18 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.app.measure.schema_builder import (
     MeasureCfgBuilder,
     MeasureCfgDefinition,
 )
 from zcu_tools.gui.app.measure.seeds import path_seed
 from zcu_tools.gui.cfg import (
-    CfgSchema,
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
+from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
@@ -196,14 +194,15 @@ class DualTonePowerAdapter(
             return items
 
         root = parameters.resolve_path("$qubit.reset.reset_120")
-        spec, value = module_cfg_to_value(cfg.modules.tested_reset)
-        value.with_field("pulse1_cfg.gain", result.gain1)
-        value.with_field("pulse2_cfg.gain", result.gain2)
         items.append(
-            ModuleWriteback(
-                target_name="$qubit.reset.reset_120",
+            module_writeback(
+                cfg.modules.tested_reset,
+                target="$qubit.reset.reset_120",
                 description="Reset with two pulses from 1 to 2 to 0",
-                edit_schema=CfgSchema(spec=spec, value=value),
+                field_updates=(
+                    ("pulse1_cfg.gain", result.gain1),
+                    ("pulse2_cfg.gain", result.gain2),
+                ),
             )
         )
         items.append(

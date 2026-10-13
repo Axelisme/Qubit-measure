@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-13，writeback module edits 用 Form 路徑陣列
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -52,6 +52,12 @@ Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
 before/after, including accepted metadata. Preview exposes unavailable_reasons
 for omitted sample proposals. The existing preview/set/apply/write methods own
 these projections; no sample-specific RPC is added.
+Module previews and receipts use `kind="module"` and `ml-<n>` IDs; current and
+proposed are Spec dictionaries of the same shape. Module `edits` on
+`tab.writeback_set`／`tab.writeback_write` are one Form batch of
+`{path: [field, ...], value}`, as in `tab.edit_cfg`. `writeback_set` replies
+with the item's Form observation; an invalid module form rejects write, apply
+and preview with `invalid_params`, reason `form_errors` and `data.errors`.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.

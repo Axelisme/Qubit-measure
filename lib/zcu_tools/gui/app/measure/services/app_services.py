@@ -194,7 +194,7 @@ def build_app_services(
     tab_cfg = TabFormResources(
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
-    # Independent library/inspect/writeback drafts never publish tab cfg.
+    # Independent library/inspect drafts never publish tab cfg.
     cfg_editor = CfgEditorService(
         cfg_editor_ctrl,
         read_port=cfg_editor_ctrl,
@@ -203,8 +203,8 @@ def build_app_services(
         bus=bus,
     )
     writeback = WritebackService(
-        cfg_editor,
-        write_port=ContextControlFacet(context=context),
+        ContextControlFacet(context=context),
+        arb_names=arb_waveform.list_data_keys,
     )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).

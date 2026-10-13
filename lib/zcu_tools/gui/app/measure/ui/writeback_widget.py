@@ -29,7 +29,6 @@ from qtpy.QtWidgets import (  # type: ignore[attr-defined]
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
-    WaveformWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
@@ -562,8 +561,6 @@ class WritebackWidget(QWidget):
             return _is_scalar_md_value(item.proposed_value)
         if isinstance(item, ModuleWriteback):
             return item.edit_schema is not None
-        if isinstance(item, WaveformWriteback):
-            return item.edit_schema is not None
         return False
 
     def _get_applied_states(self) -> dict[str, bool]:
@@ -637,7 +634,7 @@ class WritebackWidget(QWidget):
         self._refresh_item_applied_presentation(item, checkbox)
 
     def _refresh_cfg_item_preview(
-        self, item: ModuleWriteback | WaveformWriteback, *, valid: bool
+        self, item: ModuleWriteback, *, valid: bool
     ) -> None:
         # Incomplete edits belong to the attached model, not finished lowering.
         if not valid:
@@ -654,7 +651,7 @@ class WritebackWidget(QWidget):
     def _edit_item(self, item: WritebackItem) -> None:
         if isinstance(item, ParameterWriteback):
             self._edit_md_item(item)
-        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+        elif isinstance(item, ModuleWriteback):
             self._edit_cfg_item(item)
 
     def _edit_md_item(self, item: ParameterWriteback) -> None:
@@ -713,7 +710,7 @@ class WritebackWidget(QWidget):
 
     def _edit_cfg_item(
         self,
-        item: ModuleWriteback | WaveformWriteback,
+        item: ModuleWriteback,
     ) -> None:
         assert self._tab_id is not None
         try:

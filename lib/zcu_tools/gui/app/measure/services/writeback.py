@@ -1,47 +1,36 @@
 from __future__ import annotations
 
 import copy
-import logging
-import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
-from zcu_tools.cfg_model import (
-    module_spec_from_raw,
-    waveform_spec_from_raw,
-)
+from pydantic import JsonValue
+
+from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
     SampleWriteback,
-    WaveformWriteback,
     WritebackItem,
 )
-from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import RoleResolutionError, document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
-from .ports import CfgEdit, CfgEditorPort, CfgEditResult
-
-logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
 
-if TYPE_CHECKING:
-    from zcu_tools.gui.cfg.binding import CfgDraft
-
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
-# expose ``param-1`` without sharing any editor session or mutable item state.
+# expose ``param-1`` without sharing any Form or mutable item state.
 _KIND_PREFIX = {
     ParameterWriteback: "param",
     ModuleWriteback: "ml",
-    WaveformWriteback: "wf",
     SampleWriteback: "sample",
 }
 
@@ -84,19 +73,25 @@ def _sample_fields(
 
 @dataclass(frozen=True)
 class WritebackEdit:
-    """One ordered agent edit; omitted values differ from explicit None."""
+    """One ordered agent edit; omitted values differ from explicit None.
+
+    session_id is the draft-local item ID. target_name, when given, retargets
+    the item. proposed_value, when supplied, replaces a parameter proposal.
+    edits, when given, is one Form write batch for a module item: model-field
+    leaf paths mapped to JSON input values, which may be {"expr": text}.
+    """
 
     session_id: str
     target_name: str | None = None
     proposed_value: Any = _UNSET
-    edits: list[dict[str, object]] | None = None
+    edits: Mapping[FormWritePath, JsonValue] | None = None
 
 
 @dataclass(frozen=True)
 class WritebackWritten:
     """Actual destination values around a successful context write.
 
-    id is the draft-local item ID. kind identifies parameter/module/waveform/sample.
+    id is the draft-local item ID. kind identifies parameter/module/sample.
     target is a concrete point path, library key or sample component. before is
     the latest stored value before application, or None when absent. after is the
     value read after successful application. Sample values are complete JSONL
@@ -104,7 +99,7 @@ class WritebackWritten:
     """
 
     id: str
-    kind: Literal["parameter", "module", "waveform", "sample"]
+    kind: Literal["parameter", "module", "sample"]
     target: str
     before: object
     after: object
@@ -124,13 +119,10 @@ def _destination_value(
     if isinstance(item, ParameterWriteback):
         result = parameters.lookup(path)
         return result.value if result.present else None
-    kind = "module" if isinstance(item, ModuleWriteback) else "waveform"
-    keys = (
-        parameters.library.module_keys()
-        if kind == "module"
-        else parameters.library.waveform_keys()
-    )
-    return parameters.library.entry_value(path, kind=kind) if path in keys else None
+    library = parameters.library
+    if path not in library.module_keys():
+        return None
+    return library.entry_value(path, kind="module")
 
 
 @dataclass(frozen=True)
@@ -140,9 +132,11 @@ class WritebackValues:
     actual_path is the captured parameter path, library key or sample component,
     after any draft-local retarget edit. current is the latest stored value at
     that destination, or None if missing. proposed is the complete validated
-    value, lowered against the creation capture for cfg items. unit is the
-    resources-provided static schema label for display only, or None for
-    destinations without one (including ext and cfg items). Values never convert.
+    value; for a module it is the Spec from the item's Form, evaluated against
+    the creation capture and dumped in the same shape as a stored library
+    entry. unit is the resources-provided static schema label for display only,
+    or None for destinations without one (including ext and module items).
+    Values never convert.
     """
 
     actual_path: str
@@ -153,16 +147,17 @@ class WritebackValues:
 
 @dataclass
 class _DraftEntry:
-    """Writeback's private item/session association.
+    """Writeback's private item/Form association.
 
-    ``WritebackItem`` is an adapter proposal and intentionally does not carry a
-    cfg-editor handle or presentation summaries. Handles and S2 display-only
-    baseline summaries stay here, behind ``WritebackDraft`` and
-    ``WritebackService`` (app/service-owned read model, not adapter contract).
+    ``WritebackItem`` is an adapter proposal and intentionally does not carry
+    an editing Form or presentation summaries. A module item's Form (None for
+    other items and without a captured context) and S2 display-only baseline
+    summaries stay here, behind ``WritebackDraft`` and ``WritebackService``
+    (app/service-owned read model, not adapter contract).
     """
 
     item: WritebackItem
-    editor_id: str | None = None
+    form: ModuleEntryForm | None = None
     # S2 display-only baseline — not on WritebackItem, not persisted/wire.
     current_summary: str | None = None
     proposed_summary: str | None = None
@@ -182,15 +177,15 @@ class WritebackDraft:
     """Opaque, service-owned writeback draft.
 
     A draft is the only handle a workflow needs after handing proposal items to
-    :class:`WritebackService`. Its item list is a read-model projection; cfg
-    editor identities and teardown bookkeeping remain private to the service.
+    :class:`WritebackService`. Its item list is a read-model projection; module
+    item Forms remain private to the service and reach viewers through
+    ``WritebackService.get_item_form``.
     Mutations should use the service (or the small forwarding methods below), so
     the same draft is shared by the UI and remote editing surfaces.
     """
 
     __slots__ = (
         "_service",
-        "_identity",
         "_entries",
         "_closed",
         "_parameters",
@@ -201,7 +196,6 @@ class WritebackDraft:
     def __init__(
         self,
         service: WritebackService,
-        identity: str,
         entries: list[_DraftEntry],
         parameters: ParameterContext | None,
         *,
@@ -211,7 +205,6 @@ class WritebackDraft:
         self._run_source = copy.deepcopy(run_source)
         self._unavailable_reasons = unavailable_reasons
         self._service = service
-        self._identity = identity
         self._entries = entries
         self._parameters = parameters
         self._closed = False
@@ -268,9 +261,9 @@ class WritebackDraft:
         selected: bool | None = None,
         target_name: str | None = None,
         proposed_value: Any = _UNSET,
-        edits: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
-        return self._service.edit_draft(
+        edits: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> None:
+        self._service.edit_draft(
             self,
             session_id,
             selected=selected,
@@ -307,7 +300,7 @@ def _entries_to_apply(
 
 
 class WritebackService:
-    """Own opaque transactional drafts and their cfg-editor sessions.
+    """Own opaque transactional drafts and their module item Forms.
 
     The primary interface is ``create_draft`` → ``preview_draft`` / ``edit_draft``
     → ``apply_draft`` / ``teardown_draft``. It accepts already-computed proposal
@@ -317,11 +310,19 @@ class WritebackService:
 
     def __init__(
         self,
-        cfg_editor: CfgEditorPort,
         write_port: ContextControlPort,
+        *,
+        arb_names: Callable[[], Sequence[str]],
     ) -> None:
-        self._cfg_editor = cfg_editor
+        """Write through write_port; read arb data options from arb_names.
+
+        arb_names returns the arb waveform asset keys available to module
+        Forms. It is called once per draft that has a module item, when the
+        draft is created; every arb data field in that draft accepts only
+        those names for its lifetime.
+        """
         self._write = write_port
+        self._arb_names = arb_names
 
     # ------------------------------------------------------------------
     # Opaque draft lifecycle
@@ -336,18 +337,21 @@ class WritebackService:
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
     ) -> WritebackDraft:
-        """Create a draft and all item-local cfg sessions transactionally.
+        """Create a draft with one Form per module item at the creation capture.
 
         The input is a proposal collection, not an adapter or stage. Items are
         shallow-copied so draft-local ``session_id``, selection, target and value
-        edits cannot mutate the adapter's proposal objects. If any editor session
-        fails to open, every session opened for this draft is torn down before the
-        original exception is re-raised; no partially-created draft escapes.
+        edits cannot mutate the adapter's proposal objects. Each module proposal
+        is projected into a library entry Form (ModuleEntryForm): child library
+        keys stay keys, and the optional hardware fields the shared Form
+        generator leaves out return to Spec defaults. A proposal that is not a
+        concrete persistent ModuleSpec raises TypeError and no draft is returned.
 
-        parameters fixes both expression/library resolution and destination
-        target for the draft lifetime. None is valid for an empty/context-free
-        proposal, but nonempty application fails without a destination. Baseline
-        display uses this capture; no live selection provider is retained.
+        parameters fixes expression/library resolution, arb options and the
+        destination target for the draft lifetime. None is valid for an
+        empty/context-free proposal: module items are listed but have no Form,
+        so editing, preview and nonempty application fail. Baseline display
+        uses this capture; no live selection provider is retained.
         experiment_name is the captured experiment name, never a frontend/event kind.
         run_id is the source RunMetadata.run_id, including unsaved Runs and
         historical native Loads; None means no native acquisition evidence.
@@ -361,56 +365,41 @@ class WritebackService:
         """
         if not experiment_name.strip():
             raise InvalidInputError("experiment_name must be nonempty")
-        identity = uuid.uuid4().hex
+        proposals = list(items)
+        arb_names: tuple[str, ...] = ()
+        if parameters is not None and any(
+            isinstance(item, ModuleWriteback) for item in proposals
+        ):
+            arb_names = tuple(self._arb_names())
         entries: list[_DraftEntry] = []
         unavailable_reasons: list[str] = []
-        try:
-            for raw_item in items:
-                item = self._copy_item(raw_item)
-                if isinstance(item, SampleWriteback):
-                    try:
-                        if run_id is None or not run_id.strip():
-                            raise FailedPreconditionError(
-                                "Sample writeback requires a captured run_id"
-                            )
-                        item.proposed_value = _sample_fields(
-                            item.proposed_value, parameters, device_snapshot
+        for raw_item in proposals:
+            item = self._copy_item(raw_item)
+            if isinstance(item, SampleWriteback):
+                try:
+                    if run_id is None or not run_id.strip():
+                        raise FailedPreconditionError(
+                            "Sample writeback requires a captured run_id"
                         )
-                    except FailedPreconditionError as exc:
-                        unavailable_reasons.append(f"{item.target_name}: {exc}")
-                        continue
-                prefix = self._kind_prefix(item)
-                item.session_id = self._next_session_id(entries, prefix)
-                item.selected = True
-                entry = _DraftEntry(item)
-                # Baseline capture — display-only, app/service-owned.
-                self._capture_baseline(entry, parameters)
-                entries.append(entry)
-                if isinstance(item, (ModuleWriteback, WaveformWriteback)):
-                    if item.edit_schema is None:
-                        continue
-                    editor_id, _ = self._cfg_editor.open_seeded(
-                        item.edit_schema,
-                        parameters=parameters,
-                        gc=False,
-                        owner_key=f"writeback:{identity}:{item.session_id}",
+                    item.proposed_value = _sample_fields(
+                        item.proposed_value, parameters, device_snapshot
                     )
-                    entry.editor_id = editor_id
-                    editor_draft = self._cfg_editor.get_draft(editor_id)
-                    editor_draft.on_change.connect(
-                        lambda *_args, draft_entry=entry: self._mark_unapplied(
-                            draft_entry
-                        )
-                    )
-        except BaseException:
-            # Cleanup is best-effort per session so one teardown failure cannot
-            # strand the remaining sessions. The creation failure remains the
-            # observable error and no draft is returned.
-            self._teardown_entries(entries)
-            raise
+                except FailedPreconditionError as exc:
+                    unavailable_reasons.append(f"{item.target_name}: {exc}")
+                    continue
+            prefix = self._kind_prefix(item)
+            item.session_id = self._next_session_id(entries, prefix)
+            item.selected = True
+            entry = _DraftEntry(item)
+            # Baseline capture — display-only, app/service-owned.
+            self._capture_baseline(entry, parameters)
+            if isinstance(item, ModuleWriteback) and parameters is not None:
+                entry.form = self._open_form(
+                    entry, item.proposal, parameters, arb_names
+                )
+            entries.append(entry)
         return WritebackDraft(
             self,
-            identity,
             entries,
             parameters,
             run_source=_RunSource(experiment_name, run_id, device_snapshot),
@@ -426,8 +415,9 @@ class WritebackService:
     ) -> dict[str, WritebackValues]:
         """Read actual current values at the captured target, without selecting it.
 
-        Proposed cfg values lower against the creation capture, never current
-        focus, point, or slot references. Missing destinations have current=None.
+        Proposed module values evaluate against the creation capture, never
+        current focus, point, or slot references. Missing destinations have
+        current=None. An invalid module Form raises LibraryEntryInvalid.
         session_id=None reads every item, including unselected items. A supplied
         session_id reads only that item's facts, without lowering siblings; an
         unknown ID raises KeyError before reading the destination. Empty bulk
@@ -455,10 +445,8 @@ class WritebackService:
                     {"path": path, "value": item.proposed_value}
                 ).value
             else:
-                proposed = schema_to_raw_dict(
-                    self._entry_schema(self._find_draft_entry(draft, item.session_id)),
-                    parameters,
-                )
+                entry = self._find_draft_entry(draft, item.session_id)
+                proposed = self._module_spec(entry).model_dump(mode="python")
             values[item.session_id] = WritebackValues(
                 actual_path=path,
                 current=self._read_destination_value(draft, item, current, path),
@@ -499,9 +487,21 @@ class WritebackService:
         selected: bool | None = None,
         target_name: str | None = None,
         proposed_value: Any = _UNSET,
-        edits: list[dict[str, object]] | None = None,
-    ) -> dict[str, object]:
-        """Apply one draft-local edit; agent cfg changes use aggregate grammar."""
+        edits: Mapping[FormWritePath, JsonValue] | None = None,
+    ) -> None:
+        """Apply one draft-local edit, in the order selection, target, value, edits.
+
+        selected only changes the GUI default apply selection. target_name
+        retargets any item. proposed_value replaces a parameter proposal; other
+        items raise InvalidInputError. edits writes one batch into a module
+        item's Form with FormState.write semantics: the batch installs whole,
+        ordinary invalid values stay in the Form and are reported by preview
+        and apply, and structurally unknown paths raise InvalidInputError
+        naming the item without changing the Form. Edits on a non-module item
+        raise InvalidInputError; on a module item without a captured context,
+        FailedPreconditionError. Earlier changes in this call are kept when a
+        later one fails. Content changes mark the item unapplied.
+        """
         self._require_draft(draft)
         entry = self._find_draft_entry(draft, session_id)
         item = entry.item
@@ -510,16 +510,14 @@ class WritebackService:
         if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
             entry.applied = False
-            # Keep proposed summary in sync for module/waveform retarget (bounded)
-            if isinstance(item, (ModuleWriteback, WaveformWriteback)):
+            # Keep the bounded proposed summary in sync for a module retarget.
+            if isinstance(item, ModuleWriteback):
                 # Preserve original current_summary; recompute proposed_summary
                 # from new target (still bounded, not full cfg).
-                base_current = entry.current_summary
-                is_update = base_current == "present"
+                is_update = entry.current_summary == "present"
                 action = "update" if is_update else "create"
-                role = getattr(item, "role_id", None)
-                if role:
-                    entry.proposed_summary = f"{action} {role}"
+                if item.role_id:
+                    entry.proposed_summary = f"{action} {item.role_id}"
                 else:
                     entry.proposed_summary = f"{action} → {item.target_name}"
         if proposed_value is not _UNSET:
@@ -531,51 +529,40 @@ class WritebackService:
                 item.proposed_value = proposed_value
                 entry.proposed_summary = self._format_value_summary(proposed_value)
                 entry.applied = False
-
-        result = None
         if edits is not None:
-            result = self._edit_cfg_entry(entry, edits)
-        if result is None:
-            return {"valid": True, "removed": [], "added": []}
-        return result.to_wire()
+            self._write_form(entry, edits)
 
-    def _edit_cfg_entry(
-        self, entry: _DraftEntry, edits: list[dict[str, object]]
-    ) -> CfgEditResult:
-        """Validate ordered cfg edits and return the editor's aggregate result.
-
-        Non-cfg items and missing sessions fail before parsing. Missing edit fields
-        fail before calling the editor; otherwise its result or failure propagates.
-        """
+    def _write_form(
+        self, entry: _DraftEntry, edits: Mapping[FormWritePath, JsonValue]
+    ) -> None:
+        """Write one batch into a module item's Form; see edit_draft for errors."""
         session_id = entry.item.session_id
-        if not isinstance(entry.item, (ModuleWriteback, WaveformWriteback)):
+        if not isinstance(entry.item, ModuleWriteback):
             raise InvalidInputError(
-                f"{session_id!r} is not a module/waveform item; edits invalid"
+                f"{session_id!r} is not a module item; edits invalid"
             )
-        if entry.editor_id is None:
-            raise FailedPreconditionError(
-                f"{session_id!r} has no editable cfg model to apply edits to"
-            )
-        typed_edits: list[CfgEdit] = []
-        for i, edit in enumerate(edits):
-            if "path" not in edit or "value" not in edit:
-                raise InvalidInputError(
-                    f"edits[{i}] must be an object with 'path' and 'value'"
-                )
-            typed_edits.append(CfgEdit(str(edit["path"]), edit["value"]))
-        return self._cfg_editor.set_fields(
-            entry.editor_id, typed_edits, agent_edit=True
-        )
+        form = self._require_form(entry)
+        try:
+            form.state.write(edits, form.env)
+        except ValueError as exc:
+            # FormState rejects unknown/overlapping paths and missing sources
+            # before installing anything; report them as the agent's input error.
+            raise InvalidInputError(f"{session_id!r}: {exc}") from exc
 
-    def get_item_draft(self, draft: WritebackDraft, session_id: str) -> CfgDraft:
-        """Return an item model for a viewer without exposing its editor id."""
+    def get_item_form(self, draft: WritebackDraft, session_id: str) -> ModuleEntryForm:
+        """Return the module item's Form that edits, preview and apply all use.
+
+        Viewers write it with form.state.write(batch, form.env) or a FormEditor
+        on (form.state, form.env); writes mark the item unapplied. A non-module
+        item raises InvalidInputError; a module item without a captured
+        context raises FailedPreconditionError. Inactive/foreign drafts and
+        unknown IDs raise as for edit_draft.
+        """
         self._require_draft(draft)
         entry = self._find_draft_entry(draft, session_id)
-        if entry.editor_id is None:
-            raise FailedPreconditionError(
-                f"{session_id!r} has no editable cfg model to attach"
-            )
-        return self._cfg_editor.get_draft(entry.editor_id)
+        if not isinstance(entry.item, ModuleWriteback):
+            raise InvalidInputError(f"{session_id!r} is not a module item; no Form")
+        return self._require_form(entry)
 
     def apply_draft(
         self,
@@ -584,11 +571,13 @@ class WritebackService:
         item_ids: tuple[str, ...] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> dict[str, Any]:
-        """Lower against the draft capture, append accepted, then set in order.
+        """Evaluate against the draft capture, append accepted, then set in order.
 
         Role paths resolve through the creation capture, never current focus.
-        All selected values lower before the ledger append. Append failure writes
-        nothing. On item failure, mark the successful prefix applied and re-raise
+        All selected values, including module Specs from their Forms, are built
+        before the ledger append; an invalid module Form raises
+        LibraryEntryInvalid with its field paths and writes nothing. Append
+        failure writes nothing. On item failure, mark the successful prefix applied and re-raise
         the original cause unchanged, retaining accepted evidence and writes.
         Empty selection is a no-op without context. Nonempty writes require a
         captured SavedPoint in its still-open entry. GUI defaults
@@ -602,7 +591,6 @@ class WritebackService:
         written: dict[str, list[str]] = {
             "parameter": [],
             "ml_modules": [],
-            "ml_waveforms": [],
             "samples": [],
         }
         if not selected_entries:
@@ -627,21 +615,12 @@ class WritebackService:
                 written["parameter"].append(path)
             else:
                 path = parameters.library_key(item.target_name)
-                raw = schema_to_raw_dict(self._entry_schema(entry), parameters)
-                if isinstance(item, ModuleWriteback):
-                    items.append(
-                        concrete.ModuleWriteback(
-                            path, module_spec_from_raw(raw), item.stderr
-                        )
+                items.append(
+                    concrete.ModuleWriteback(
+                        path, self._module_spec(entry), item.stderr
                     )
-                    written["ml_modules"].append(path)
-                else:
-                    items.append(
-                        concrete.WaveformWriteback(
-                            path, waveform_spec_from_raw(raw), item.stderr
-                        )
-                    )
-                    written["ml_waveforms"].append(path)
+                )
+                written["ml_modules"].append(path)
             if path in destinations:
                 raise InvalidInputError(f"duplicate writeback destination: {path!r}")
             destinations.add(path)
@@ -684,8 +663,9 @@ class WritebackService:
         The owner reads the captured destination before and after application;
         no current selection or stale capture substitutes for the receipt.
         Targets in receipts are concrete paths resolved from the creation capture.
-        Empty changes are a no-op. Edit failures retain the successful draft
-        prefix without writes. Read/append/setter failures propagate; accepted
+        Empty changes are a no-op. Edit failures, including a listed module
+        whose Form is invalid (LibraryEntryInvalid), retain the successful
+        draft prefix without writes. Read/append/setter failures propagate; accepted
         evidence and any successful writes remain. MCP supplies
         CommandOrigin("mcp"); GUI uses the default.
         """
@@ -698,18 +678,18 @@ class WritebackService:
             raise InvalidInputError("Repeated writeback IDs")
         items = []
         for change in changes:
-            result = self.edit_draft(
+            self.edit_draft(
                 draft,
                 change.session_id,
                 target_name=change.target_name,
                 proposed_value=change.proposed_value,
                 edits=change.edits,
             )
-            if not result["valid"]:
-                raise FailedPreconditionError(
-                    f"Invalid writeback draft: {change.session_id!r}"
-                )
-            items.append(self._find_draft_entry(draft, change.session_id).item)
+            entry = self._find_draft_entry(draft, change.session_id)
+            if isinstance(entry.item, ModuleWriteback):
+                # Built only to reject invalid input before any context read or write.
+                self._module_spec(entry)
+            items.append(entry.item)
         paths = [_destination_path(item, parameters) for item in items]
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         before = [
@@ -727,8 +707,6 @@ class WritebackService:
                     else "parameter"
                     if isinstance(item, ParameterWriteback)
                     else "module"
-                    if isinstance(item, ModuleWriteback)
-                    else "waveform"
                 ),
                 target=path,
                 before=previous,
@@ -738,24 +716,20 @@ class WritebackService:
         ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:
-        """Tear down a draft at most once; cleanup errors never cause a retry."""
+        """Close a draft; later calls are no-ops and later uses raise.
+
+        Item Forms hold no session or resource, so closing releases nothing.
+        """
         self._require_draft(draft, allow_closed=True)
-        if draft._closed:
-            return
-        # Mark closed before calling driven cleanup. This makes teardown
-        # idempotent even if a cfg editor's close implementation raises.
         draft._closed = True
-        self._teardown_entries(draft._entries)
 
     # Short behavior-oriented aliases for callers that already hold the opaque
     # draft. They keep the public surface independent of stage/subtab vocabulary.
     def preview(self, draft: WritebackDraft) -> list[WritebackItem]:
         return self.preview_draft(draft)
 
-    def edit(
-        self, draft: WritebackDraft, session_id: str, **changes: Any
-    ) -> dict[str, object]:
-        return self.edit_draft(draft, session_id, **changes)
+    def edit(self, draft: WritebackDraft, session_id: str, **changes: Any) -> None:
+        self.edit_draft(draft, session_id, **changes)
 
     def apply(self, draft: WritebackDraft) -> dict[str, Any]:
         return self.apply_draft(draft)
@@ -774,10 +748,6 @@ class WritebackService:
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
         copied = copy.copy(item)
-        # Proposal items never carry cfg-editor identity. Treat a dynamic
-        # attribute as an invalid caller contract instead of silently lowering it.
-        if "editor_id" in vars(item):
-            raise InvalidInputError("writeback proposal must not expose editor_id")
         copied.session_id = ""
         copied.selected = True
         return copied
@@ -802,20 +772,30 @@ class WritebackService:
                 return entry
         raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
 
-    def _entry_schema(self, entry: _DraftEntry) -> CfgSchema:
-        if entry.editor_id is not None:
-            return self._cfg_editor.get_draft(entry.editor_id).snapshot()
-        item = entry.item
-        schema = (
-            item.edit_schema
-            if isinstance(item, (ModuleWriteback, WaveformWriteback))
-            else None
-        )
-        if schema is None:
+    def _open_form(
+        self,
+        entry: _DraftEntry,
+        proposal: ModuleSpec,
+        parameters: ParameterContext,
+        arb_names: Sequence[str],
+    ) -> ModuleEntryForm:
+        form = ModuleEntryForm(proposal, parameters, arb_names=arb_names)
+        # The Form lives exactly as long as its entry, so the subscription is
+        # never removed and its unsubscribe handle is not kept.
+        form.state.subscribe(lambda: self._mark_unapplied(entry))
+        return form
+
+    @staticmethod
+    def _require_form(entry: _DraftEntry) -> ModuleEntryForm:
+        if entry.form is None:
             raise FailedPreconditionError(
-                f"writeback '{entry.item.session_id}' has no editable schema"
+                f"{entry.item.session_id!r} has no Form without a captured context"
             )
-        return schema
+        return entry.form
+
+    def _module_spec(self, entry: _DraftEntry) -> ModuleSpec:
+        """Return the module item's Spec; an invalid Form raises LibraryEntryInvalid."""
+        return self._require_form(entry).spec()
 
     # ------------------------------------------------------------------
     # S2 — display-only baseline capture (read-only, single owner)
@@ -870,16 +850,11 @@ class WritebackService:
                 current.value if current is not None and current.present else None
             )
             entry.proposed_summary = self._format_value_summary(item.proposed_value)
-        elif isinstance(item, (ModuleWriteback, WaveformWriteback)):
+        elif isinstance(item, ModuleWriteback):
             exists = False
             if parameters is not None:
                 path = parameters.library_key(item.target_name)
-                keys = (
-                    parameters.library.module_keys()
-                    if isinstance(item, ModuleWriteback)
-                    else parameters.library.waveform_keys()
-                )
-                exists = path in keys
+                exists = path in parameters.library.module_keys()
             entry.current_summary = "present" if exists else "— not present"
             action = "update" if exists else "create"
             role = item.role_id
@@ -923,16 +898,3 @@ class WritebackService:
     @staticmethod
     def _mark_unapplied(entry: _DraftEntry) -> None:
         entry.applied = False
-
-    def _teardown_entries(self, entries: Iterable[_DraftEntry]) -> None:
-        for entry in reversed(list(entries)):
-            editor_id = entry.editor_id
-            entry.editor_id = None
-            if editor_id is None:
-                continue
-            try:
-                self._cfg_editor.teardown(editor_id)
-            except Exception:
-                logger.exception(
-                    "writeback draft editor teardown failed: %s", editor_id
-                )

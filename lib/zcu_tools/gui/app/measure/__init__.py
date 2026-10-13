@@ -25,7 +25,6 @@ from .adapter import (
     PostWritebackRequest,
     SavePaths,
     SessionEnv,
-    WaveformWriteback,
     WritebackItem,
     reconstruct_params,
 )
@@ -73,7 +72,6 @@ __all__ = [
     "SweepSpec",
     "SweepValue",
     "Session",
-    "WaveformWriteback",
     "WritebackItem",
     "make_default_value",
     "reconstruct_params",

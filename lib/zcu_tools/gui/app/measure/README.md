@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, library entries edit through the shared Form entry
+**Last updated:** 2026-10-13, writeback module proposals edit through the shared Form entry
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -53,7 +53,9 @@ cfg draft（`ml_edit` 的內部 draft 與 seeded draft）；由 UI owner 建立�
 seeded session 由 owner 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
 Tab cfg 由 `Session.cfg` 的 `TabFormResource` 擁有。Open／Reset 捕捉來源，
 preview、result 和 Run 都使用這份來源。Input、來源與 guard 不交給 view 管理。
-`ml_edit` 與 writeback 尚保留獨立 `CfgDraft`，其共用機制見
+Writeback 的 module proposal 是持久 `ModuleSpec`；draft 為每個 module item
+持有一個 session 的 `ModuleEntryForm`，固定在建立時的 capture 與 arb 名稱，
+preview 與 apply 都取它的 Spec。`ml_edit` 尚保留獨立 `CfgDraft`，其共用機制見
 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md) 與
 [GUI cfg README](../../cfg/README.md)。分頁 Form 契約見本頁 Config model。
 
@@ -149,7 +151,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
   draft via `Controller`/`WritebackControl` pane-qualified forwarding, while
   `WritebackService` remains stage-agnostic and fixes each draft's destination
   and role resolution at creation. Its preview returns per-item `WritebackValues`
-  with the actual path, latest stored value and capture-lowered proposal. Both
+  with the actual path, latest stored value and capture-evaluated proposal. Both
   panes obtain these facts through `writeback_control`; Qt does not resolve paths.
   Qt and remote preview also display the proposal's existing stderr. Qt rows use
   resources-provided static unit labels without conversion; ext and fields
