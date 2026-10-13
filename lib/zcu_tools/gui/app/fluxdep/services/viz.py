@@ -20,7 +20,7 @@ render_fit_figure also accepts precomputed energies for numerical callers.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -33,6 +33,7 @@ from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.analysis.fluxdep.search_models import count_max_evals
 from zcu_tools.gui.app.fluxdep.state import (
     FitState,
+    SearchSpectrumBackground,
     SpectrumEntry,
     transitions_with_freqs,
 )
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 class _Background:
     """Spectrum and nonempty axes/signals after dropping all-NaN rows/columns."""
 
-    entry: SpectrumEntry
+    entry: SpectrumEntry | SearchSpectrumBackground
     fluxs: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
@@ -98,7 +99,7 @@ def render_selection_result(
 
 
 def derive_auto_limits(
-    spectrums: dict[str, SpectrumEntry],
+    spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
     r_f: float | None = None,
@@ -167,7 +168,9 @@ def _axis_resolution(axis: NDArray[np.float64]) -> float:
     return (axis.size - 1) / span if span > 0 else 0.0
 
 
-def _usable_background(entry: SpectrumEntry) -> _Background | None:
+def _usable_background(
+    entry: SpectrumEntry | SearchSpectrumBackground,
+) -> _Background | None:
     """Return background without all-NaN rows/columns, or None if empty."""
     spect = entry.raw
     signals = spect["signals"]
@@ -183,7 +186,9 @@ def _usable_background(entry: SpectrumEntry) -> _Background | None:
     )
 
 
-def _plot_background(ax, spectrums: dict[str, SpectrumEntry]) -> None:
+def _plot_background(
+    ax, spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground]
+) -> None:
     """Draw each spectrum's normalised amplitude as a gray_r heatmap.
 
     Spectra paint from low to high resolution, so a fine scan stays visible
@@ -339,10 +344,47 @@ def _fit_simulation(
     return t_fluxs, energies
 
 
+def fit_backgrounds(
+    fit: FitState,
+    spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
+) -> Mapping[str, SpectrumEntry | SearchSpectrumBackground]:
+    """Return the single background/calibration basis for fit visualization.
+
+    A recorded search always uses its detached capture; a missing recorded frame
+    raises RuntimeError rather than mixing current sources with recorded points.
+    Without recorded search attribution, return the supplied live sources for
+    pre-search auto limits and params-only display. Does not mutate either input.
+    """
+    if fit.result is None:
+        return spectrums
+    if fit.render_frame is None:
+        raise RuntimeError("recorded search is missing its render frame")
+    return fit.render_frame.spectrums
+
+
+def derive_fit_auto_limits(
+    fit: FitState,
+    spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
+    s_fluxs: NDArray[np.float64],
+    s_freqs: NDArray[np.float64],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Return normalized-flux/GHz limits on the fit's single visualization basis.
+
+    Recorded search uses captured backgrounds and original search points, even
+    when stale. Otherwise use supplied live backgrounds and selected flux/GHz
+    points, including before any result. Missing recorded frame raises RuntimeError.
+    Frequency references use the published fit inputs. No inputs are mutated.
+    """
+    backgrounds = fit_backgrounds(fit, spectrums)
+    if fit.result is not None:
+        s_fluxs, s_freqs = fit.result_fluxs, fit.result_freqs
+    return derive_auto_limits(backgrounds, s_fluxs, s_freqs, fit.r_f, fit.sample_f)
+
+
 def render_fit_result(
     figure: Figure,
     fit: FitState,
-    spectrums: dict[str, SpectrumEntry],
+    spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
     s_fluxs: NDArray[np.float64],
     s_freqs: NDArray[np.float64],
     display: FitDisplay,
@@ -350,7 +392,8 @@ def render_fit_result(
     """Simulate and draw the current fitted Show overlay into figure.
 
     fit must contain EJ/EC/EL params in GHz; missing params raise ValueError.
-    spectra supply background/calibration; s_fluxs/s_freqs are paired normalized
+    spectra supply live background/calibration only without a recorded search;
+    recorded searches always use their detached capture. s_fluxs/s_freqs are paired normalized
     flux/GHz fit points. Limits and display options follow render_fit_figure.
     The simulation spans the displayed flux range. Does not mutate fit or spectra;
     only replaces figure contents. Recorded original coordinates and kernel
@@ -362,7 +405,8 @@ def render_fit_result(
         raise ValueError("fit params are required for rendering")
     if fit.result is not None:
         s_fluxs, s_freqs = fit.result_fluxs, fit.result_freqs
-    auto_x, _ = derive_auto_limits(spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f)
+    spectrums = fit_backgrounds(fit, spectrums)
+    auto_x, _ = derive_fit_auto_limits(fit, spectrums, s_fluxs, s_freqs)
 
     display_transitions = (
         display.plot_transitions
@@ -403,7 +447,7 @@ def render_fit_result(
 
 def render_fit_figure(
     figure: Figure,
-    spectrums: dict[str, SpectrumEntry],
+    spectrums: Mapping[str, SpectrumEntry | SearchSpectrumBackground],
     t_fluxs: NDArray[np.float64],
     energies: NDArray[np.float64],
     transitions: TransitionDict,

@@ -192,6 +192,7 @@ def test_fit_result_projects_recorded_quality_without_rounding_or_merging(
             transitions={},
             bounds=ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)),
             stages=ctrl.state.pipeline_snapshot(),
+            render_frame=ctrl.state.capture_render_frame(),
         ),
     )
     reply = route_harness.request(client, "fit.result")

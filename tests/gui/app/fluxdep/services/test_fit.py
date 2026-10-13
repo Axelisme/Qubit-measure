@@ -10,11 +10,13 @@ search State refactor) is that ``compute_search`` performs NO State write — on
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 
 import h5py
 import numpy as np
 import pytest
-from matplotlib.collections import PathCollection
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.collections import PathCollection, QuadMesh
 from matplotlib.figure import Figure
 from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
@@ -27,6 +29,7 @@ from zcu_tools.analysis.fluxdep.search import (
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
+from zcu_tools.gui.app.fluxdep.services import viz
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
@@ -39,6 +42,8 @@ from zcu_tools.gui.app.fluxdep.state import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import ProjectInfo
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 # --- fixtures --------------------------------------------------------------
 
@@ -374,6 +379,93 @@ def test_capture_search_fast_fails_without_points(tiny_database):
         svc.capture_search()
     assert caught.value.reason_code == "no_selected_points"
     assert st.version.snapshot() == before
+
+
+@pytest.mark.parametrize("shift", [1.0, 0.37])
+def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
+    monkeypatch, shift
+):
+    def simulate(params, fluxs, *, cutoff, evals_count):
+        return fluxs, np.tile(np.arange(evals_count, dtype=np.float64), (fluxs.size, 1))
+
+    monkeypatch.setattr(viz, "calculate_energy_vs_flux", simulate)
+    state = FluxDepState()
+    entry = SpectrumEntry(
+        name="same-spectrum",
+        spec_type="TwoTone",
+        raw=SpectrumData(
+            dev_values=np.array([0.0, 0.2]),
+            fluxs=np.array([0.0, 0.2]),
+            freqs=np.array([3.0, 4.0]),
+            signals=np.array([[1 + 0j, 1 + 1j], [1 - 1j, -1 + 0j]]),
+        ),
+        points=PointsData(
+            dev_values=np.array([0.1]),
+            fluxs=np.array([0.1]),
+            freqs=np.array([3.5]),
+        ),
+        points_completed=True,
+    )
+    state.put_spectrum(entry)
+    ctrl = Controller(state)
+    service = FitService(state)
+    figure = Figure()
+    canvas = FigureCanvasAgg(figure)
+
+    def record():
+        inputs = service.capture_search()
+        result = perfect_fit_result(inputs.fluxs % 1, inputs.freqs, inputs.bounds)
+        ctrl.record_search_result(result, inputs)
+
+    def expect_frame(centers, point, device_limits, frequency_limits):
+        ctrl.render_fit(figure)
+        canvas.draw()
+        ax = figure.axes[0]
+        mesh = next(c for c in ax.collections if isinstance(c, QuadMesh))
+        scatter = next(c for c in ax.collections if isinstance(c, PathCollection))
+        edges = np.asarray(mesh.get_coordinates(), dtype=np.float64)[0, :, 0]
+        np.testing.assert_allclose((edges[:-1] + edges[1:]) / 2, centers)
+        np.testing.assert_allclose(
+            np.asarray(scatter.get_offsets(), dtype=np.float64), [[point, 3.5]]
+        )
+        np.testing.assert_allclose(ax.get_xlim(), centers)
+        np.testing.assert_allclose(ax.get_ylim(), frequency_limits)
+        np.testing.assert_allclose(
+            ax.child_axes[0].get_xlim(), device_limits, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.asarray(ax.lines[0].get_xdata(), dtype=np.float64)[[0, -1]], centers
+        )
+        return ax.get_title()
+
+    try:
+        ctrl.set_alignment(entry.name, 0.6, -0.4)
+        state.set_fit_params("synthetic", *_WIDE, {"transitions": [(0, 1)]}, None, None)
+        record()
+        assert "Outdated" not in expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
+        ctrl.set_alignment(entry.name, 0.6 + shift, -0.4 + shift)
+        assert "Outdated: same-spectrum re-aligned" in expect_frame(
+            [0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0]
+        )
+        # Source changes cannot rewrite the recorded background or calibration.
+        replacement = deepcopy(state.get_spectrum(entry.name))
+        replacement.raw["freqs"][:] = [7.0, 8.0]
+        replacement.raw["signals"][:] = 0
+        state.put_spectrum(replacement)
+        expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
+        record()
+        new_centers = np.array([0.2, 0.3]) - shift / 2
+        new_point = 0.25 - shift / 2
+        assert "Outdated" not in expect_frame(
+            new_centers, new_point, [0.0, 0.2], [3.5, 8.0]
+        )
+        # Params-only publication retires the old search frame as well as quality.
+        state.set_fit_result((5.0, 1.0, 0.5))
+        ctrl.remove_spectrum(entry.name)
+        ctrl.render_fit(figure)
+        assert not any(isinstance(c, QuadMesh) for c in figure.axes[0].collections)
+    finally:
+        ctrl.interactive.dispose()
 
 
 # --- export_params ---------------------------------------------------------
