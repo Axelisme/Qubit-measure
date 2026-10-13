@@ -63,6 +63,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Schema fields marked hidden hold fixed values and need no input. "
         "x-form-group only groups fields on screen; grouped fields take input "
         "like any other, and the schema says which are required. "
+        "x-form-key-or-inline marks a field that holds either a library key "
+        "(a string, or a ModuleInput's ref name) or inline content (an object); "
+        "x-form-library-keys lists the library keys that branch can name. "
         'Expressions {"expr": text} are input only for text fields (int, float, '
         "complex and str values whose schema offers that alternative); "
         "Literal/enum, choices, bool and library-key fields take plain values.",
