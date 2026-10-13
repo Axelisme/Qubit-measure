@@ -384,6 +384,10 @@ class WorkflowWindow[C](QWidget):
         journal/hardware state are excluded.
         """
         binding = self.controller.binding
+        # start_locked, not knobs_from_run: save the knobs the user edits and
+        # would Start next. After terminal delivery those are the Start knobs,
+        # already reset to the run's accepted input, while remote reads of the
+        # run_id still use the run's binding.
         knobs = (
             binding.state.input.data
             if binding is not None and self._run_view.start_locked
@@ -643,6 +647,9 @@ class WorkflowWindow[C](QWidget):
             self.controller.require_run_id(run_id)
             if binding.engine is None:
                 raise RuntimeError("Form inspection requires native acceptance")
+            # knobs_from_run, not start_locked: run_id names the attached run
+            # until fresh Start panels replace its forms, so reads and previews
+            # use that run's fixed env and knobs state, also after terminal.
             if self._run_view.knobs_from_run:
                 env = binding.env
             revision = binding.engine.tunables(binding.run_id).revision
