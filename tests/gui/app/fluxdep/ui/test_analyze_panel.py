@@ -328,7 +328,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
 
         def labels() -> list[str]:
-            return [line.get_label() for line in shown.axes[0].lines]
+            return [str(line.get_label()) for line in shown.axes[0].lines]
 
         assert labels() == ["0 -> 1"]
         xlim_applied = shown.axes[0].get_xlim()
