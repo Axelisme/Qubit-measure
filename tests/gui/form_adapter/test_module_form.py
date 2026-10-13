@@ -6,10 +6,12 @@ import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
     ConfigBase,
+    DirectReadoutCfg,
     ModuleSpec,
     PulseReadoutSpec,
     PulseSpec,
     WaveformSpec,
+    get_field_meta,
 )
 from zcu_tools.cfg_model import PulseCfg as MaterializedPulseCfg
 from zcu_tools.gui import form_adapter
@@ -259,3 +261,27 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     assert isinstance(accepted, HostInline) and isinstance(accepted.module, FormModel)
     cfg = form.to_cfg(accepted.module, env)
     assert isinstance(cfg, PulseSpec) and cfg.ch == 3 and cfg.waveform == "w"
+
+
+@pytest.mark.parametrize("spec_type", [PulseSpec, DirectReadoutCfg])
+def test_spec_field_meta_reaches_generated_schema(
+    spec_type: type[PulseSpec] | type[DirectReadoutCfg],
+) -> None:
+    properties = form_adapter.module_form(spec_type).model.input_schema(FormEnv())[
+        "properties"
+    ]
+    assert isinstance(properties, dict)
+    observed: dict[str, tuple[JsonValue, ...]] = {}
+    expected: dict[str, tuple[JsonValue, ...]] = {}
+    for name, info in spec_type.model_fields.items():
+        meta = get_field_meta(info)
+        field = properties.get(name)
+        if meta is None or not isinstance(field, dict):
+            continue
+        expected[name] = (meta.unit, meta.decimals, meta.group)
+        observed[name] = (
+            field.get("unit"),
+            field.get("decimals"),
+            field.get("x-form-group"),
+        )
+    assert expected and observed == expected

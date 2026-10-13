@@ -276,3 +276,21 @@ def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
     probe = cfg.modules.probe
     assert (probe.freq, probe.gain) == (100, 0.3)
     assert (probe.desc, probe.mask, probe.outsel, probe.ro_ch) == (None,) * 4
+
+
+def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
+    from zcu_tools.cfg_model import Slot
+
+    form = Form(
+        ModuleCore,
+        {"modules": {"probe": Slot("Q.pulses.probe", lock={"freq": 100.0})}},
+    )
+    env = module_env()
+
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+
+    assert isinstance(form.model.input_schema(env)["properties"], dict)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, ModuleCore) and cfg.modules.probe.freq == 100.0

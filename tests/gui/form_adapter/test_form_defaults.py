@@ -559,3 +559,34 @@ def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None
     form = Form(Core, {"probe": node})
     with pytest.raises(ValueError, match="synthetic.*probe"):
         form.bind_templates(catalog, adapter="synthetic")
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["root", "nested"])
+def test_unsupported_template_seed_names_template_and_seed_path(nested: bool) -> None:
+    pulse = {
+        "ch": 1,
+        "nqz": 1,
+        "freq": 100.0,
+        "gain": 0.3,
+        "waveform.style": "const",
+        "waveform.length": 0.2,
+    }
+    if nested:
+        seeds = {f"pulse_cfg.{path}": value for path, value in pulse.items()}
+        seeds |= {
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_length": 0.2,
+            "pulse_cfg.ro_ch": 2,
+        }
+        definition = TemplateDef(PulseReadoutSpec, "Noisy readout", seeds)
+        form = Form(ReadoutCore, {"readout": Template("noisy")})
+        path = "pulse_cfg.ro_ch"
+    else:
+        definition = TemplateDef(PulseSpec, "Noisy pulse", {**pulse, "desc": "note"})
+        form = Form(Core, {"probe": Template("noisy")})
+        path = "desc"
+
+    with pytest.raises(ValueError, match="noisy") as caught:
+        form.bind_templates({"noisy": definition}, adapter="synthetic")
+
+    assert path in str(caught.value), caught.value
