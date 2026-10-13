@@ -102,6 +102,41 @@ def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) ->
     assert cfg.sweep.freq.expts == 4
 
 
+class PreciseSweepCfg(ConfigBase):
+    """Sweep precision describes endpoint float controls, not the range object."""
+
+    sweep: Annotated[SweepCfg, FieldMeta(label="Flux", unit="A", decimals=4)]
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_sweep_decimals_decorate_only_float_endpoints(authored: bool) -> None:
+    form = form_adapter.Form(
+        PreciseSweepCfg,
+        {"sweep": nodes.Range.between("2 + 1", 9.0, 4)} if authored else {},
+    )
+    try:
+        schema = form.model.input_schema(FormEnv())
+    except ValueError as exc:
+        raise AssertionError("Sweep precision must reach its float endpoints") from exc
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    sweep = properties["sweep"]
+    assert isinstance(sweep, dict)
+    assert sweep.get("decimals") is None
+    assert sweep["title"] == "Flux"
+    assert sweep["unit"] == "A"
+    endpoints = sweep["properties"]
+    assert isinstance(endpoints, dict)
+    for name in ("start", "stop"):
+        endpoint = endpoints[name]
+        assert isinstance(endpoint, dict)
+        assert endpoint["decimals"] == 4
+    count = endpoints["n"]
+    assert isinstance(count, dict)
+    assert count.get("decimals") is None
+    assert count["title"] == "Expts"
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 
