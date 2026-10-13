@@ -232,6 +232,8 @@ class AnalyzePanelWidget(QWidget):
         self._filter_context_id: int | None = None
         self._shown_fit: _ShowKey | None = None
         self._db_chooser: QFileDialog | None = None
+        # True while the entered transitions need a blank r_f / sample_f.
+        self._needs_frequency = False
         # Display choices taken by Apply; the controls may hold pending edits.
         self._applied_display = FitDisplay()
 
@@ -401,7 +403,8 @@ class AnalyzePanelWidget(QWidget):
         """Add the r_f / sample_f fields, each with its hidden required mark.
 
         Both are optional (blank = unset). A field is marked while the entered
-        transitions need it; Search still leaves validation to the Controller.
+        transitions need it, and Search stays disabled until it is filled; a
+        submitted search still leaves validation to the Controller.
         """
         self._r_f = _freq_edit("fluxdep.fit.r_f")
         self._sample_f = _freq_edit("fluxdep.fit.sample_f")
@@ -704,20 +707,32 @@ class AnalyzePanelWidget(QWidget):
         self._preset.setCurrentText(name)
 
     def _refresh_frequency_marks(self) -> None:
-        """Mark r_f / sample_f while the entered transitions need a blank one."""
+        """Mark r_f / sample_f while the entered transitions need a blank one.
+
+        A shown mark also disables Search: that search could only be rejected,
+        and its parameter replacement would clear the recorded result.
+        """
         try:
             transitions = self._transitions_form.get_transitions()
         except ValueError:
             # Malformed pairs are reported when Search parses them; until then
             # no category counts as entered.
             transitions = TransitionDict()
-        self._r_f_required.setHidden(
-            not transitions_need_r_f(transitions) or _parse_freq(self._r_f) is not None
+        needs_r_f = transitions_need_r_f(transitions) and _parse_freq(self._r_f) is None
+        needs_sample_f = (
+            transitions_need_sample_f(transitions)
+            and _parse_freq(self._sample_f) is None
         )
-        self._sample_f_required.setHidden(
-            not transitions_need_sample_f(transitions)
-            or _parse_freq(self._sample_f) is not None
-        )
+        self._r_f_required.setHidden(not needs_r_f)
+        self._sample_f_required.setHidden(not needs_sample_f)
+        self._needs_frequency = needs_r_f or needs_sample_f
+        self._refresh_search_button()
+
+    def _refresh_search_button(self) -> None:
+        """Enable Search unless a search is pending or a needed frequency is blank."""
+        activity = self._ctrl.search.current
+        pending = activity is not None and activity.status == "pending"
+        self._search_btn.setEnabled(not pending and not self._needs_frequency)
 
     def _on_browse_db(self) -> None:
         from .paths import database_dir
@@ -752,8 +767,8 @@ class AnalyzePanelWidget(QWidget):
         if not os.path.isfile(db_path):
             self._status.setText(f"Search DB not found: {db_path}")
             return
-        # A transition missing its r_f / sample_f is marked on the field; the
-        # Controller rejects the search and the status line reports it.
+        # Search is disabled while a needed r_f / sample_f is blank; any other
+        # rejection comes from the Controller and the status line reports it.
         try:
             self._commit_params()
         except ValueError as exc:
@@ -781,7 +796,7 @@ class AnalyzePanelWidget(QWidget):
     def _refresh_search(self) -> None:
         activity = self._ctrl.search.current
         pending = activity is not None and activity.status == "pending"
-        self._search_btn.setEnabled(not pending)
+        self._refresh_search_button()
         self._cancel_btn.setEnabled(pending)
         self._progress.setVisible(pending)
         stale_reasons = self._stale_reasons()

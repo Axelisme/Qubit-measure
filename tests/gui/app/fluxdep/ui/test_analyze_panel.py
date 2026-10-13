@@ -194,6 +194,12 @@ def _preset_names(widget: AnalyzePanelWidget) -> list[str]:
     return [name for name in names if name != "custom"]
 
 
+def _search_without_frequencies(widget: AnalyzePanelWidget) -> None:
+    """Enter transitions that need neither r_f nor sample_f, enabling Search."""
+    form = _search_group(widget).findChildren(TransitionsForm)[0]
+    form.set_transitions(TransitionDict({"transitions": [(0, 1)]}))
+
+
 def _choose_preset(widget: AnalyzePanelWidget, name: str) -> None:
     """Pick a bounds preset the way a user activates a combo entry."""
     combo = named(widget, QComboBox, "fluxdep.fit.bounds_preset")
@@ -538,6 +544,7 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
 
 def test_search_blocked_on_empty_database_path(panel):
     w, ctrl = panel
+    _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("")
     named(w, QPushButton, "fluxdep.fit.search").click()
     assert named(w, QLabel, "fluxdep.fit.status").text()
@@ -547,6 +554,7 @@ def test_search_blocked_on_empty_database_path(panel):
 
 def test_search_blocked_on_missing_database_file(panel):
     w, ctrl = panel
+    _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("/nonexistent/path/to/db.h5")
     named(w, QPushButton, "fluxdep.fit.search").click()
     assert named(w, QLabel, "fluxdep.fit.status").text()
