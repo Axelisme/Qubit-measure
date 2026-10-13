@@ -7,6 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 
 from zcu_tools.cfg_model import (
     AliasName,
@@ -127,6 +128,9 @@ class _Section:
             field_info = _field_info(info)
             if name in self.modules and not self.modules[name].locks:
                 field_info.discriminator = "kind"
+            if isinstance(node, Expr):
+                field_info.default = PydanticUndefined
+                field_info.default_factory = None
             if isinstance(node, Locked):
                 field_info.default = node.value
             annotations[name] = annotation
@@ -291,7 +295,9 @@ class Form[C: ConfigBase]:
     or call bind_templates before resolving Template/fallback nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
-    strings, including $-prefixed strings, remain literal. Module locks remove
+    strings, including $-prefixed strings, remain literal. Expr initial values
+    remove static defaults in this form only; failed evaluation requires input
+    instead of falling back to core defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     """
