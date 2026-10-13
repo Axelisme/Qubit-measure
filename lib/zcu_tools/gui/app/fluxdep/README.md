@@ -288,9 +288,12 @@ Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt re
 在 owner turn 查 active modal，chooser 使用非 native option。Dialog 不接 control，
 chooser 返回與 accepted callback 不重查 holder。
 
-Analyze 的 Search form（含 Cancel）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。
+Analyze 的 Search form（含 Cancel）與 Show 的 Display 群組（x／y limits、Auto limits、reference lines、
+Transitions to show、Apply）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。
+Show 畫布上方的 matplotlib 工具列 `fluxdep.show.toolbar`（Home、Back、Forward、Pan、Zoom）只改本機畫面，所有人都可用；
+不放 Subplots、Customize 與 Save，因為它們會開阻塞對話框。
 Holder 進出 Filter tab 會開啟或取消 Session；非 holder 不開也不取消。非 holder 可進 Fit 頁閱讀結果與
-`Outdated: …`，Search／Show 切換及 Show 的 display controls 保持可用。有 live Filter context（例如 agent 的）時，
+`Outdated: …`，Search／Show 切換保持可用。有 live Filter context（例如 agent 的）時，
 非 holder 可在 Filter 與 Search／Show 之間切換，離開只 detach、回來重新 attach 同一個 Session；沒有 live context 時
 Filter tab 對非 holder 停用，進 Fit 頁落在 Search，不為閱讀開 Filter input。
 Filter view detach 仍只是 teardown，不收回控制權。
@@ -346,7 +349,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
     那次 search 必然被拒，而它的參數替換會清掉既有結果；送出的 search 仍由 Controller 驗證。search 前擋空/不存在 db 路徑。
     DB chooser 用非阻塞 `open()` 的非 native chooser；開著時 owner 取得回 `local_busy`。
     Search 的錯誤（含 search 失敗）寫在 Search 狀態列，不跳 modal；params export 的長路徑不參與 panel 水平最小寬度。
-  - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
+  - **Show**：fit 視覺化（上方是只做框選縮放、平移與復原的工具列，每次重畫後 Home 回到新的圖）+ 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
     繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列，不寫進 Search。
   AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。

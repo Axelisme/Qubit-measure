@@ -19,8 +19,8 @@ problems to the Show status line; neither opens a modal.
 Public Qt seams (objectName): ``fluxdep.fit.search_db``, ``fluxdep.fit.bounds_preset``,
 ``fluxdep.fit.r_f`` / ``fluxdep.fit.sample_f`` with their ``.required`` marks,
 ``fluxdep.fit.search`` / ``cancel`` / ``export_params``, ``fluxdep.fit.status``,
-``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits`` and
-``fluxdep.show.status``.
+``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits``,
+``fluxdep.show.status`` and the Show navigation ``fluxdep.show.toolbar``.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
 from matplotlib.backend_bases import Event
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import Qt
@@ -110,6 +111,20 @@ _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 # Preset combo entry shown while the bounds match no preset; choosing it keeps them.
 _CUSTOM_PRESET = "custom"
+
+
+class _ShowToolbar(NavigationToolbar2QT):
+    """Matplotlib's Qt toolbar with only the view-navigation tools.
+
+    Subplots, Customize and Save open blocking dialogs, which fluxdep dialogs
+    avoid; matplotlib chooses the buttons from this class attribute.
+    """
+
+    toolitems = [
+        item
+        for item in NavigationToolbar2QT.toolitems
+        if item[0] in {"Home", "Back", "Forward", "Pan", "Zoom"}
+    ]
 
 
 def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
@@ -404,6 +419,7 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtWidgets import QSplitter
 
         tools_box = QGroupBox("Display")
+        self._display_box = tools_box
         tools = QFormLayout(tools_box)
 
         self._x_lo, self._x_hi = _bound_spinbox(0.0), _bound_spinbox(1.0)
@@ -436,10 +452,19 @@ class AnalyzePanelWidget(QWidget):
         # Show lays out once per draw; re-fit on resize so the title and axis
         # labels stay inside the canvas Qt actually gives the figure.
         self._fit_canvas.mpl_connect("resize_event", self._fit_show_layout)
+        # View navigation only changes this canvas, so it stays usable for
+        # every viewer; set_writable never gates it.
+        self._fit_toolbar = _ShowToolbar(self._fit_canvas, None)
+        self._fit_toolbar.setObjectName("fluxdep.show.toolbar")
+        plot = QWidget()
+        plot_layout = QVBoxLayout(plot)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addWidget(self._fit_toolbar)
+        plot_layout.addWidget(self._fit_canvas, stretch=1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(_control_column(tools_box, self._show_status))
-        splitter.addWidget(self._fit_canvas)
+        splitter.addWidget(plot)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([360, 640])
@@ -579,9 +604,13 @@ class AnalyzePanelWidget(QWidget):
         self._filter_context_id = None
 
     def set_writable(self, *, writable: bool) -> None:
-        """Gate domain input while preserving Show and canvas viewing."""
+        """Gate domain input and Show's display choices; viewing stays available.
+
+        A non-holder keeps the status lines, the canvases and the Show toolbar.
+        """
         self._writable = writable
         self._search_form.setEnabled(writable)
+        self._display_box.setEnabled(writable)
         self._set_tab_availability(editable=writable)
         if self._filter_widget is not None:
             self._filter_widget.set_editable(editable=writable)
@@ -941,4 +970,6 @@ class AnalyzePanelWidget(QWidget):
             return
         self._show_status.setText(notice or "")
         self._shown_fit = self._show_key()
+        # A new drawing starts a new navigation history: Home returns to it.
+        self._fit_toolbar.update()
         self._fit_canvas.draw_idle()
