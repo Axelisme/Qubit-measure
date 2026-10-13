@@ -16,7 +16,6 @@ from .layout import WorkflowControls
 from .run_status import RunBadge, RunStatusLine
 from .tuning_panel import WorkflowTuningPanel
 
-_TUNABLES_TAB = 1
 _POLL_MS = 50
 _LIVE_LIFECYCLES = frozenset({"running", "pausing", "paused"})
 
@@ -147,7 +146,8 @@ class WorkflowRunView[C]:
     def paused(self) -> None:
         """Show paused delivery: select the live Tunables tab, keep polling."""
         self.refresh()
-        self._controls.forms.setCurrentIndex(_TUNABLES_TAB)
+        controls = self._controls
+        controls.forms.setCurrentIndex(controls.forms.indexOf(controls.tunables_tab))
         self._poll.start()
 
     def ended(self, status: RunStatus | None, error: Exception | None) -> None:
@@ -246,6 +246,6 @@ class WorkflowRunView[C]:
         if self._tuning is not None:
             self._tuning.setVisible(live)
         title = "Tunables (live)" if live else "Tunables"
-        controls.forms.setTabText(_TUNABLES_TAB, title)
+        controls.forms.setTabText(controls.forms.indexOf(controls.tunables_tab), title)
         controls.tunables_note.setVisible(live)
         controls.plan_note.setVisible(self._locked)
