@@ -53,6 +53,35 @@ class SweepRange(LinRange):
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
 
 
+def _sweep_model(node: FormNode) -> type[SweepRange]:
+    """Generate a range whose Expr endpoints require input after failed defaults.
+
+    node is the authored sweep value. Only Expr endpoints lose the inherited
+    LinRange default; literal or unauthored endpoints keep ordinary defaults.
+    No expression is evaluated and the shared SweepRange class is not modified.
+    """
+    if not isinstance(node, Range):
+        return SweepRange
+    required = {
+        name: FieldInfo(annotation=float)
+        for name, value in (("start", node.start), ("stop", node.stop))
+        if isinstance(value, Expr)
+    }
+    if not required:
+        return SweepRange
+    namespace: dict[str, object] = {
+        "__module__": __name__,
+        "__annotations__": {name: float for name in required},
+        **required,
+    }
+    model = new_class(
+        "AuthoredSweepRange", (SweepRange,), exec_body=lambda ns: ns.update(namespace)
+    )
+    if not issubclass(model, SweepRange):
+        raise TypeError("Generated sweep model must implement SweepRange")
+    return model
+
+
 def _section_type(annotation: object) -> type[BaseModel] | None:
     members = tuple(
         member for member in _members(annotation) if member is not type(None)
@@ -233,7 +262,7 @@ class _Section:
                 else field.annotation
             )
         if SweepCfg in _members(info.annotation):
-            return SweepRange
+            return _sweep_model(node)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
