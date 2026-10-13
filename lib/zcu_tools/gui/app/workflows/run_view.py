@@ -81,11 +81,22 @@ class WorkflowRunView[C]:
 
     @property
     def knobs_from_run(self) -> bool:
-        """Return whether the run's binding, not the Start panel, owns knobs.
+        """Return whether tuning and remote form reads target the run's binding.
 
-        True from submitted() until the Start panels are replaced.
+        True from submitted() until the Start panels are replaced, so it stays
+        True after terminal delivery; start_locked says which knobs a user edits.
         """
         return self._knobs_from_run
+
+    @property
+    def start_locked(self) -> bool:
+        """Return whether the attached run holds the Start controls.
+
+        True from submitted() until terminal delivery: pending, running,
+        pausing, paused and stopping. Meanwhile a user edits the run's knobs
+        in its binding; otherwise, including after terminal, the Start knobs.
+        """
+        return self._locked
 
     def release_tuning(self) -> None:
         """Close the previous run's tuning panel before a new Start submits."""

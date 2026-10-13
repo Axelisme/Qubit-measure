@@ -56,7 +56,8 @@ class WorkflowControls:
     tabs. Right: status is the run status bar with its paused banner; message
     shows input/command/run diagnostics under it, above the caller's figures.
     Pause/resume start disabled; all other buttons start enabled. Window
-    sets reload availability, selector items and all signal/admission policy.
+    sets prepare/reload availability, selector items and all signal/admission
+    policy.
     """
 
     selector: QComboBox
