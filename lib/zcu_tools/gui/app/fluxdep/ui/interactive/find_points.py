@@ -30,7 +30,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.plotting.fluxdep.twotone import TwoTonePickPlot
 
-from .base import InteractiveMplWidget
+from .base import InteractiveMplWidget, picker_object_name
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,9 @@ class FindPointsWidget(InteractiveMplWidget):
 
     Session is the sole authoritative state. Worker results are only derived
     views. Finish emits a request to the app owner, which recomputes exact state.
+    The control column holds detector, brush and display settings, then
+    Undo / Clear / Perform on all, then the status, with an optional Re-align
+    switch above Finish.
     """
 
     def __init__(
@@ -56,8 +59,13 @@ class FindPointsWidget(InteractiveMplWidget):
         context: TwoTonePickContext,
         *,
         submit_preview: TwoTonePreviewSubmitter | None = None,
+        on_realign: Callable[[], None] | None = None,
     ) -> None:
         """Attach open context and start an 80ms-debounced derived preview.
+
+        on_realign, when given, adds a Re-align button
+        (``fluxdep.picker.realign``) that calls it; the host uses it to leave
+        sampling for alignment.
 
         None creates an owned BackgroundRunner. An injected submit_preview must
         deliver on owner and its caller owns external worker cleanup. Controls
@@ -92,11 +100,18 @@ class FindPointsWidget(InteractiveMplWidget):
         self._timer.setSingleShot(True)
         self._timer.setInterval(80)
         self._timer.timeout.connect(self._start_preview)
-        self._threshold = self._slider("Threshold", 1000, 20000)
-        self._sigma = self._slider("Smooth", 0, 5000)
-        self._width = self._slider("Brush width", 0, 100)
-        self._method = self._combo("Smooth method", ("Wavelet", "Gaussian"))
-        self._mode = self._combo("Operation", ("Select", "Erase"))
+        self._threshold = self._slider("Threshold", "threshold", 1000, 20000)
+        self._sigma = self._slider("Smooth", "smooth", 0, 5000)
+        self._method = self._combo(
+            "Smooth method", "smooth_method", ("Wavelet", "Gaussian")
+        )
+        self._width = self._slider("Brush width", "brush_width", 0, 100)
+        self._mode = self._combo("Operation", "operation", ("Select", "Erase"))
+        self._show_mask = self._checkbox("Show mask", "show_mask", checked=False)
+        self._show_origin = self._checkbox("Show origin", "show_origin", checked=True)
+        self._show_changes = self._checkbox(
+            "Show changes", "show_changes", checked=True
+        )
         self._threshold.valueChanged.connect(
             lambda value: self._execute(
                 lambda: context.plugin.set_settings.execute(
@@ -136,21 +151,24 @@ class FindPointsWidget(InteractiveMplWidget):
                 )
             )
         )
-        self._undo = self._button("Undo", context.session.undo)
+        self._undo = self._button("Undo", "undo", context.session.undo)
         self._button(
-            "Clear", lambda: context.plugin.clear.execute(context.session, None)
+            "Clear",
+            "clear",
+            lambda: context.plugin.clear.execute(context.session, None),
         )
         self._button(
             "Perform on all",
+            "perform_on_all",
             lambda: context.plugin.perform_on_all.execute(context.session, None),
         )
-        self._show_mask = self._checkbox("Show mask", checked=False)
-        self._show_origin = self._checkbox("Show origin", checked=True)
-        self._show_changes = self._checkbox("Show changes", checked=True)
         self._status = QtWidgets.QLabel()
+        self._status.setObjectName(picker_object_name("status"))
         self._status.setAccessibleName("Status")
         self._status.setWordWrap(True)
         self.controls_layout.addWidget(self._status)
+        if on_realign is not None:
+            self.add_stage_button("Re-align", "realign", on_realign)
         self._finish = self.add_finish_button()
         self._finish.clicked.disconnect()
         self._finish.clicked.connect(self._request_finish)
@@ -265,32 +283,36 @@ class FindPointsWidget(InteractiveMplWidget):
         """Idempotently quiesce presentation without cancelling domain input."""
         self.quiesce()
 
-    def _slider(self, name: str, lower: int, upper: int) -> QtWidgets.QSlider:
-        self.controls_layout.addWidget(QtWidgets.QLabel(name))
+    def _slider(
+        self, name: str, action: str, lower: int, upper: int
+    ) -> QtWidgets.QSlider:
         control = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        control.setAccessibleName(name)
         control.setRange(lower, upper)
-        self.controls_layout.addWidget(control)
+        self.add_labelled(name, action, control)
         return control
 
-    def _combo(self, name: str, choices: tuple[str, ...]) -> QtWidgets.QComboBox:
-        self.controls_layout.addWidget(QtWidgets.QLabel(name))
+    def _combo(
+        self, name: str, action: str, choices: tuple[str, ...]
+    ) -> QtWidgets.QComboBox:
         control = QtWidgets.QComboBox()
-        control.setAccessibleName(name)
         control.addItems(list(choices))
-        self.controls_layout.addWidget(control)
+        self.add_labelled(name, action, control)
         return control
 
     def _button(
-        self, name: str, operation: Callable[[], object]
+        self, name: str, action: str, operation: Callable[[], object]
     ) -> QtWidgets.QPushButton:
         control = QtWidgets.QPushButton(name)
+        control.setObjectName(picker_object_name(action))
         control.clicked.connect(lambda: self._execute(operation))
         self.controls_layout.addWidget(control)
         return control
 
-    def _checkbox(self, name: str, *, checked: bool) -> QtWidgets.QCheckBox:
+    def _checkbox(
+        self, name: str, action: str, *, checked: bool
+    ) -> QtWidgets.QCheckBox:
         control = QtWidgets.QCheckBox(name)
+        control.setObjectName(picker_object_name(action))
         control.setChecked(checked)
         control.toggled.connect(self._render)
         self.controls_layout.addWidget(control)

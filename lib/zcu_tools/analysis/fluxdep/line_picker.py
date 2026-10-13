@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -26,6 +27,12 @@ from zcu_tools.analysis.fluxdep.line_state import (
 from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
 
 _LOSS_REFRESH_MS = 120
+
+
+def _fixed_decimals(dev_values: NDArray[np.float64]) -> int:
+    """Decimal places that still resolve one device-axis step in fixed point."""
+    step = abs(float(dev_values[-1] - dev_values[0])) / (len(dev_values) - 1)
+    return max(0, -math.floor(math.log10(step))) + 1
 
 
 class TwoLinePicker:
@@ -55,6 +62,7 @@ class TwoLinePicker:
             self._signals, use_phase=not self._state.magnitude_only
         )
         self._min_flux_dist = self._inputs.min_distance
+        self._decimals = _fixed_decimals(self._dev_values)
         self._picked: Line2D | None = None
 
         self._init_plots()
@@ -94,10 +102,12 @@ class TwoLinePicker:
         return 2 * abs(self.flux_int - self.flux_half)
 
     def info_text(self) -> str:
+        """Half / integer / period in device units, fixed point at axis resolution."""
+        digits = self._decimals
         return (
-            f"half flux: {self.flux_half:.2e}\n"
-            f"integer flux: {self.flux_int:.2e}\n"
-            f"flux period: {self.period():.2e}"
+            f"half flux: {self.flux_half:.{digits}f}\n"
+            f"integer flux: {self.flux_int:.{digits}f}\n"
+            f"flux period: {self.period():.{digits}f}"
         )
 
     def _init_plots(self) -> None:
@@ -110,6 +120,7 @@ class TwoLinePicker:
             origin="lower",
             interpolation="none",
             extent=self._extent(),
+            cmap="gray_r",
         )
         self._ax_main.set_xlim(self._dev_values[0], self._dev_values[-1])
         self._ax_main.set_ylim(self._freqs[0], self._freqs[-1])
@@ -129,9 +140,10 @@ class TwoLinePicker:
             origin="lower",
             interpolation="none",
             extent=self._extent(),
+            cmap="gray_r",
         )
-        self._ax_loss.set_xticks([])
-        self._ax_loss.set_yticks([])
+        self._ax_loss.set_xlabel("Device value")
+        self._ax_loss.set_ylabel("Frequency (GHz)")
         self._ax_loss.set_title("mirror loss: -")
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
         self._loss_dot = self._ax_loss.plot([self.flux_half], [center_y], "ro")[0]

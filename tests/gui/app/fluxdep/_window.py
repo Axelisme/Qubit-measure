@@ -116,7 +116,7 @@ def picker_button(root: QWidget, action: str) -> QPushButton:
 
 def has_picker_control(root: QWidget, action: str) -> bool:
     """Whether root currently holds a fluxdep.picker.<action> control."""
-    return root.findChild(QWidget, f"fluxdep.picker.{action}") is not None
+    return bool(root.findChildren(QWidget, f"fluxdep.picker.{action}"))
 
 
 def column_tops(root: QWidget, actions: list[str]) -> list[int]:

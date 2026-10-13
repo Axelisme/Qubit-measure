@@ -3,9 +3,11 @@
 A QWidget that owns a matplotlib Figure + FigureCanvasQTAgg and connects the
 canvas mouse events to overridable handlers (``on_press`` / ``on_move`` /
 ``on_release``, all no-ops by default). Subclasses add Qt controls to
-``controls_layout`` and implement ``get_result``; a "Finish" button emits the
-``finished`` signal so the host can collect the result and write it via the
-Controller.
+``controls_layout`` top-down: settings, edit actions (Undo / Clear), then the
+status text. Finish and an optional stage switch stay pinned at the column
+bottom. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
+button emits the ``finished`` signal so the host can collect the result and
+write it via the Controller.
 
 This mirrors the notebook tools' ``fig.canvas.mpl_connect`` interaction, but the
 canvas is a Qt-embedded FigureCanvasQTAgg (not an inline/ipympl canvas) — all
@@ -15,6 +17,7 @@ painting happens on the Qt main thread, so a plain ``draw_idle`` is sufficient
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 from matplotlib.backend_bases import Event, MouseEvent
@@ -23,18 +26,25 @@ from matplotlib.figure import Figure
 from qtpy.QtCore import Signal  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 
+def picker_object_name(action: str) -> str:
+    """objectName of a picker control, ``fluxdep.picker.<action>``."""
+    return f"fluxdep.picker.{action}"
+
+
 class InteractiveMplWidget(QWidget):
     """Base widget: a Qt-embedded mpl canvas + a controls column + Finish.
 
-    Layout: canvas on the left (stretches), a controls column on the right. The
-    ``finished`` signal fires when the user clicks Finish; the host then calls
-    ``get_result()``.
+    Layout: canvas on the left (stretches), a controls column on the right.
+    The column holds ``controls_layout`` on top and a bottom area pinned to
+    the column bottom for the stage switch and Finish. The ``finished`` signal
+    fires when the user clicks Finish; the host then calls ``get_result()``.
     """
 
     finished = Signal()
@@ -49,7 +59,12 @@ class InteractiveMplWidget(QWidget):
         self._editable = True
         controls = QWidget()
         self._controls = controls
-        self.controls_layout = QVBoxLayout(controls)
+        column = QVBoxLayout(controls)
+        self.controls_layout = QVBoxLayout()
+        column.addLayout(self.controls_layout)
+        column.addStretch(1)
+        self._bottom_layout = QVBoxLayout()
+        column.addLayout(self._bottom_layout)
         controls.setFixedWidth(220)
 
         # ``controls_side`` places the control column left or right of the canvas.
@@ -64,8 +79,8 @@ class InteractiveMplWidget(QWidget):
             self._root.addWidget(self.canvas, stretch=1)
             self._root.addWidget(controls)
 
-        # Subclasses populate controls_layout before/after super().__init__;
-        # the Finish button is appended at the bottom by add_finish_button().
+        # Subclasses populate controls_layout after super().__init__;
+        # add_stage_button() and add_finish_button() fill the pinned bottom.
 
         self.canvas.mpl_connect("button_press_event", self._dispatch_press)
         self.canvas.mpl_connect("motion_notify_event", self._dispatch_move)
@@ -81,17 +96,44 @@ class InteractiveMplWidget(QWidget):
     def cancel_pointer_preview(self) -> None:
         """Discard presentation-only input when authority changes mid-gesture."""
 
-    def add_finish_button(self, label: str = "Finish") -> QPushButton:
-        """Append the finish/apply button (call after adding subclass controls).
+    def add_labelled(self, name: str, action: str, control: QWidget) -> None:
+        """Append a visible label for control, then control, to controls_layout.
 
-        ``label`` lets a subclass name it for its semantics (e.g. "Apply" for the
-        non-terminal cross-spectrum filter). Returns the button so callers can
-        give feedback on it.
+        The label names control as its buddy and as its accessibleName; action
+        sets objectName ``fluxdep.picker.<action>``. Use it for every slider and
+        drop-down so none appears without a name.
         """
-        self.controls_layout.addStretch(1)
-        finish = QPushButton(label)
+        label = QLabel(name)
+        label.setBuddy(control)
+        control.setAccessibleName(name)
+        control.setObjectName(picker_object_name(action))
+        self.controls_layout.addWidget(label)
+        self.controls_layout.addWidget(control)
+
+    def add_stage_button(
+        self, text: str, action: str, on_click: Callable[[], None]
+    ) -> QPushButton:
+        """Pin a button that leaves this picker for another stage above Finish.
+
+        on_click runs on every click; the host decides what the switch does.
+        The button is gated with the other controls by set_editable.
+        """
+        button = QPushButton(text)
+        button.setObjectName(picker_object_name(action))
+        button.clicked.connect(on_click)
+        self._bottom_layout.insertWidget(0, button)
+        return button
+
+    def add_finish_button(self) -> QPushButton:
+        """Pin the finish button to the bottom of the control column.
+
+        It emits ``finished`` and carries objectName ``fluxdep.picker.finish``.
+        Returns the button so callers can gate or rewire it.
+        """
+        finish = QPushButton("Finish")
+        finish.setObjectName(picker_object_name("finish"))
         finish.clicked.connect(self.finished.emit)
-        self.controls_layout.addWidget(finish)
+        self._bottom_layout.addWidget(finish)
         return finish
 
     def redraw(self) -> None:

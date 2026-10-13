@@ -362,6 +362,7 @@ def test_rpc_load_updates_the_list_without_opening_a_picker(
         reply = _load_request(route_harness, client, "spectrum.load", spectrum_hdf5[0])
         assert reply["ok"] is True, reply
         name = reply["result"]["name"]
+        assert isinstance(name, str)
         assert any(label.startswith(name) for label in list_labels(window))
         assert ctrl.interactive.inspect(name) is None
         shown = route_harness.request(client, "spectrum.set_active", name=name)

@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，主視窗上方列、Spectra／Fit 兩頁與譜清單列
+**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -126,8 +126,9 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 上方列左邊是 project 標籤（`Project: <chip> / <qubit>`，chip 與 qubit 都是預設值時顯示提示）與控制權燈，
 右邊是 Project…、Add spectrum…、Restore…、Export spectra…。主區是 Spectra 與 Fit 兩頁 tab：
 Spectra 頁是譜清單（Remove 在清單下方）加階段驅動編輯區，Fit 頁承載 AnalyzePanel 單例。
-選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁；切頁由使用者點 tab、
-GUI Add／Restore 後回到 Spectra，或跟隨 agent-origin 的 picker／Filter／search／active 事件。
+選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁。切頁只跟人類意圖：
+使用者點 tab，或 GUI Add／Restore 後回到 Spectra。Agent-origin 的 active、picker、Filter 與
+search pending 只更新所屬頁的內容，不把使用者從目前的頁拉走（見「Interactive context facts 與 GUI 跟隨」）。
 離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
 清單每列取 State 與 interactive owner 的同一份事實（即 `spectrum.list` 的資料）：字面譜名、種類、
 階段（loaded／aligned／sampled）、已發布點數，有才加未完成草稿種類與 Filter 排除點數。
@@ -135,14 +136,27 @@ GUI Add／Restore 後回到 Spectra，或跟隨 agent-origin 的 picker／Filter
 `fluxdep.spectra`、`fluxdep.editor`、`fluxdep.project`、`fluxdep.spectrum.*`、`fluxdep.spectra.*`）。
 
 ### 編輯區階段驅動
-MainWindow 編輯區依 active 譜的 pipeline 階段 swap widget：未定線→LinePicker；
-已定線未完成選點→OneTone/FindPoints(by spec_type)；已完成→ResultPreview(唯讀結果圖)。
+MainWindow 編輯區顯示 active 譜的 live 草稿；沒有草稿時，本機 holder 的人類意圖（點清單、GUI Add）
+經 holder gate 開目前階段的 picker：未定線→LinePicker；已定線未完成選點→OneTone/FindPoints(by spec_type)。
+其餘情況顯示 ResultPreview（已發布狀態的唯讀圖）。GUI Add 成功後直接開新譜的定線 picker；
+RPC 載入與 active 切換只更新顯示，不開 picker。
 空 Finish 也完成選點，清單顯示完成，ResultPreview 顯示零點。
 `points_completed` 表示階段完成；`point_count` 表示可用點數。Analyze／Selector 只使用非空資料。
 widget 的 `finished` → Controller 寫回 → 階段前進 → 重 swap。
-ResultPreview 的 Re-select points 透過 Controller 清空 points／completion 並重開 selector。
-Re-pick lines 重開 alignment，保留 native points／completion；接受新定線時一次重算 raw 與 point fluxs。
+ResultPreview 只列當下可用的下一步：未對齊只有 Align；已對齊有 Re-align 與 Sample。
+三者經同一 holder gate 開該階段的 picker 草稿，已發布的對齊與點保留到 Finish 才換掉；
+TwoTone 重新採樣照舊從空遮罩開始。Sample picker 有 Re-align，重新定線的 LinePicker 有 Sample，
+讓使用者在兩階段間切換。同譜已有另一階段的未 finish 草稿時，GUI 先用非阻塞的確認對話框詢問，
+取消則草稿與畫面不變；確認後 owner 照舊丟掉舊草稿（RPC 的 `discarded` 投影不變）。
 Processed restore 包含零點的完成結果，不新增持久化欄位。
+
+### Picker 控制欄
+定線、OneTone 與 TwoTone 三個 picker 共用 `InteractiveMplWidget` 版面：圖在左、220px 控制欄在右。
+控制欄由上而下是設定、編輯動作（Undo／Clear）、狀態文字；階段切換與 Finish 固定在欄底。
+每個 slider 與下拉都有 buddy label。控制項 objectName 為 `fluxdep.picker.<action>`
+（例如 `finish`、`undo`、`clear`、`auto_align`、`status`、`realign`、`sample`），
+ResultPreview 的下一步為 `fluxdep.preview.<align|realign|sample>`；測試以這些名稱定位，不依按鈕文字。
+定線資訊用固定小數位，位數由 device 軸步長決定；mirror loss 圖有 Device value／Frequency 軸標。
 
 ### 背景計算 + 即時中斷（generation 戳記）
 慢計算經共用 `BackgroundRunner.submit`（per-panel，`enter=None`）off-main，避免拖動卡 UI。
@@ -179,11 +193,13 @@ Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，�
 同一 Session 的 GUI／command Actions 仍依 owner-loop 順序提交。
 
 Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
-MainWindow 依 EventMeta origin 與目前 identity 顯示 agent 開啟／修改的 picker 或 Filter。
+MainWindow 依 EventMeta origin 與目前 identity 在 Spectra 頁編輯區顯示 agent 開啟／修改的 picker，
+active 跟著切到該譜，但不切頁。Agent 的 Filter 與 search pending 只更新 Fit 頁：Fit 頁正顯示時切到
+Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。
 GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
 Closed 只清除旧 view，不開新 Session。純讀取與 user-origin edits 不強制切換畫面。
 AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
-Agent-origin search pending 顯示 lazy Search 面板；terminal 更新結果，不搶回使用者已切換的畫面。
+Search terminal 更新結果，不搶回使用者已切換的畫面。
 
 ### 跨譜篩選：繼承 min_distance 不繼承 select
 App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
@@ -193,7 +209,9 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 
 ### 配色
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
-（vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。
+（vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。定線圖與 mirror loss 圖也用
+`gray_r`；它們的 renderer 是共用的 `analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines
+與 MCP 的定線 PNG 同樣是 `gray_r`。
 
 ### Remote RPC 與 MCP
 

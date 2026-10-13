@@ -92,12 +92,11 @@ class SelectorWidget(InteractiveMplWidget):
         self._timer.setSingleShot(True)
         self._timer.setInterval(80)
         self._timer.timeout.connect(self._start_preview)
-        self._width = self._slider("Brush width")
-        self._distance = self._slider("Min distance")
+        self._width = self._slider("Brush width", "brush_width")
+        self._distance = self._slider("Min distance", "min_distance")
         self._mode = QtWidgets.QComboBox()
-        self._mode.setAccessibleName("Operation")
         self._mode.addItems(["Select", "Erase"])
-        self.controls_layout.addWidget(self._mode)
+        self.add_labelled("Operation", "operation", self._mode)
         self._width.valueChanged.connect(
             lambda value: self._execute(
                 lambda: context.plugin.set_tool.execute(
@@ -232,12 +231,10 @@ class SelectorWidget(InteractiveMplWidget):
         self._unsubscribe()
         self.quiesce()
 
-    def _slider(self, name: str) -> QtWidgets.QSlider:
-        self.controls_layout.addWidget(QtWidgets.QLabel(name))
+    def _slider(self, name: str, action: str) -> QtWidgets.QSlider:
         slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        slider.setAccessibleName(name)
         slider.setRange(0, 100)
-        self.controls_layout.addWidget(slider)
+        self.add_labelled(name, action, slider)
         return slider
 
     def _button(

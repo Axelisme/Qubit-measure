@@ -16,7 +16,7 @@ def configure_flux_pick_axes(figure: Figure) -> None:
     """
     for axes in figure.axes:
         if axes.axison:
-            axes.grid(visible=True, color="white", alpha=0.3, linewidth=0.7)
+            axes.grid(visible=True, color="0.5", alpha=0.35, linewidth=0.7)
 
 
 def make_flux_pick_figure(inputs: FluxPickInputs, state: FluxPickState) -> Figure:
