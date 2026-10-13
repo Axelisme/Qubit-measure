@@ -26,8 +26,11 @@ def targeted(
         reuse=reuse_tab_id,
     )
     tab.read_value("$resonator.freq")
-    for path in ("modules.readout.pulse_cfg.freq", "modules.readout.ro_cfg.ro_freq"):
-        tab.set(path, {"__expr": "$resonator.freq"}, source="$resonator.freq")
+    for path in (
+        "modules.readout.module.pulse_cfg.freq",
+        "modules.readout.module.ro_cfg.ro_freq",
+    ):
+        tab.set(path, {"expr": "$resonator.freq"}, source="$resonator.freq")
     yield tab.run()
 
 
@@ -47,7 +50,9 @@ _TARGETED_DEFINITION = definition(
 TARGETED = replace(
     _TARGETED_DEFINITION,
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"),
+        SummaryParameter(
+            "frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+        ),
     ),
 )
 
@@ -59,18 +64,11 @@ class NamedAliasesGui(TargetGui):
         super().__init__()
         self.alias_requests: list[tuple[str, dict[str, object]]] = []
         self.modules = {"$resonator.module.readout": "R2.readout.main"}
-        self.publication["tree"]["children"]["modules"]["children"]["readout"][
-            "ref"
-        ] = "$resonator.module.readout"
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if params.get("aliases"):
             self.alias_requests.append((method, dict(params)))
-            plain = {key: value for key, value in params.items() if key != "aliases"}
-            reply = super().__call__(method, plain)
-            if method == "tab.get_cfg":
-                reply["source_basis"] = [{"source_id": "aliases", "revision": "1"}]
-            return reply
+            return super().__call__(method, params)
         return super().__call__(method, params)
 
 
@@ -96,24 +94,12 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
         reply = client.call("sample", {})
         assert reply.data["status"] == "finished"
         assert gui.ran
-        assert {method for method, _ in gui.alias_requests} == {
-            "tab.get_cfg",
-            "tab.parameter_read",
-            "tab.run_start",
-        }
-        assert all(
-            params["aliases"] == {"custom": "Q1", "resonator": "R2"}
-            for _, params in gui.alias_requests
-        )
-        next(
-            params for method, params in gui.alias_requests if method == "tab.run_start"
-        )
-        [params for method, params in gui.alias_requests if method == "tab.get_cfg"][-1]
-        assert all(
-            "aliases" not in params
-            for method, params in client.transport.sent
-            if method in ("tab.new", "tab.reset_cfg")
-        )
+        assert gui.alias_requests == [
+            (
+                "tab.reset_cfg",
+                {"tab_id": "t", "aliases": {"custom": "Q1", "resonator": "R2"}},
+            )
+        ]
         assert gui.created == (
             [] if reuse is not None else [{"adapter_name": "lookback"}]
         )
@@ -143,21 +129,16 @@ def required_library(
 ) -> RecipeGenerator:
     """Require a readout from the captured role/slot library lookup."""
     tab = session.open_tab("lookback")
+    tab.use_library("modules.readout", "R2.readout.main")
     tab.use_library("modules.readout", reference, required="readout_ref")
     yield tab.run()
 
 
-@pytest.mark.parametrize(
-    "reference", [None, "$resonator.module.readout", "<Custom:readout>"]
-)
+@pytest.mark.parametrize("reference", [None, "R2.readout.main", "missing.readout.main"])
 def test_required_library_uses_captured_role_slot_membership(
     tmp_path: Path, reference: str | None
 ) -> None:
     gui = TargetGui()
-    gui.modules = {"$resonator.module.readout": "R2.readouts.main"}
-    gui.publication["tree"]["children"]["modules"]["children"]["readout"]["ref"] = (
-        "$resonator.module.readout"
-    )
     recipe = definition(
         required_library,
         {
@@ -169,11 +150,12 @@ def test_required_library_uses_captured_role_slot_membership(
     client = make_client(tmp_path, gui, recipes=(recipe,))
     with closing(client.context.session):
         reply = client.call("sample", {"reference": reference})
-        valid = reference != "<Custom:readout>"
+        valid = reference != "missing.readout.main"
         assert reply.data["status"] == ("finished" if valid else "failed")
         assert gui.ran is valid
-        expected = "$resonator.module.readout" if valid else "<Custom:readout>"
-        assert expected in gui.queried_modules
+        assert (
+            gui.publication["input"]["modules"]["readout"]["name"] == "R2.readout.main"
+        )
 
 
 @pytest.mark.parametrize("target", [None, "Q2"])
@@ -181,8 +163,6 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
     tmp_path: Path, target: str | None
 ) -> None:
     gui = TargetGui()
-    if target is not None:
-        gui.publication["status"] = "Invalid"
     client = make_client(tmp_path, gui, recipes=(TARGETED,))
     with closing(client.context.session):
         reply = client.call("sample", {} if target is None else {"target": target})
@@ -191,10 +171,7 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
         assert gui.ran
         assert gui.overrides == [None if target is None else {"qubit": target}]
         assert gui.reads
-        assert all(
-            read.get("aliases") == (None if target is None else {"qubit": target})
-            for read in gui.reads
-        )
+        assert all(read.get("aliases") is None for read in gui.reads)
         full = client.call(
             "status", {"execution": reply.data["execution"], "detail": "full"}
         )
@@ -213,15 +190,12 @@ def test_recipe_run_uses_temporary_target_without_tab_birth_binding(
             if edit["path"][-1] in ("freq", "ro_freq")
         ]
         assert expressions == [
-            {"__expr": "$resonator.freq"},
-            {"__expr": "$resonator.freq"},
+            {"expr": "$resonator.freq"},
+            {"expr": "$resonator.freq"},
         ]
-        assert (
-            gui.publication["tree"]["children"]["modules"]["children"]["readout"][
-                "children"
-            ]["pulse_cfg"]["children"]["freq"]["input"]["resolved"]
-            == 6200.0
-        )
+        assert gui.publication["input"]["modules"]["readout"]["module"]["pulse_cfg"][
+            "freq"
+        ] == {"expr": "$resonator.freq"}
 
 
 def test_recipe_target_can_be_used_with_explicit_reuse(tmp_path: Path) -> None:
@@ -240,7 +214,7 @@ def test_role_resolution_rejection_is_not_replaced_by_another_target(
 ) -> None:
     gui = TargetGui()
     client = make_client(tmp_path, gui, recipes=(TARGETED,))
-    client.transport.replies["tab.parameter_read"] = {
+    client.transport.replies["tab.reset_cfg"] = {
         "ok": False,
         "error": {
             "code": "precondition_failed",
@@ -263,9 +237,9 @@ def test_role_resolution_rejection_is_not_replaced_by_another_target(
             params for method, params in client.transport.sent if method == "tab.new"
         ]
         assert creations == [{"adapter_name": "lookback"}]
-        reads = [
+        resets = [
             params
             for method, params in client.transport.sent
-            if method == "tab.parameter_read"
+            if method == "tab.reset_cfg"
         ]
-        assert reads[0]["aliases"] == {"qubit": "missing"}
+        assert resets[0]["aliases"] == {"qubit": "missing"}

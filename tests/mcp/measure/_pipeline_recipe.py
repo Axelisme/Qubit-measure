@@ -44,10 +44,10 @@ def pipeline(
             (MissingParameter("frequency_mhz", "Supply a value"),)
         )
     for path, value in (
-        ("modules.readout.pulse_cfg.freq", frequency_mhz),
-        ("modules.readout.ro_cfg.ro_freq", frequency_mhz),
-        ("modules.readout.ro_cfg.ro_length", readout_length_us),
-        ("modules.readout.ro_cfg.trig_offset", trigger_offset_us),
+        ("modules.readout.module.pulse_cfg.freq", frequency_mhz),
+        ("modules.readout.module.ro_cfg.ro_freq", frequency_mhz),
+        ("modules.readout.module.ro_cfg.ro_length", readout_length_us),
+        ("modules.readout.module.ro_cfg.trig_offset", trigger_offset_us),
         ("rounds", rounds),
     ):
         tab.set(path, value)
@@ -99,11 +99,17 @@ PIPELINE = RecipeDefinition(
     pipeline,
     adapter_name="lookback",
     summary_parameters=(
-        SummaryParameter("frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"),
-        SummaryParameter("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", "MHz"),
-        SummaryParameter("readout_length_us", "modules.readout.ro_cfg.ro_length", "us"),
         SummaryParameter(
-            "trigger_offset_us", "modules.readout.ro_cfg.trig_offset", "us"
+            "frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+        ),
+        SummaryParameter(
+            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
+        ),
+        SummaryParameter(
+            "readout_length_us", "modules.readout.module.ro_cfg.ro_length", "us"
+        ),
+        SummaryParameter(
+            "trigger_offset_us", "modules.readout.module.ro_cfg.trig_offset", "us"
         ),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("readout_ref", "modules.readout"),

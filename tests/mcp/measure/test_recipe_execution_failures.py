@@ -107,9 +107,15 @@ def test_pre_run_cfg_failure_retains_prepared_or_requested_locator(tmp_path, reu
         _, _ = yield tab.run()
 
     gui = LookbackGui()
-    gui.publication["status"] = "Invalid"
+
+    def invalid(method, params):
+        reply = gui(method, params)
+        if method == "tab.reset_cfg":
+            reply["errors"] = [{"path": ["rounds"], "message": "invalid input"}]
+        return reply
+
     with (
-        recipe_client(tmp_path, gui) as client,
+        recipe_client(tmp_path, invalid) as client,
         registry(client.context, definition(sample)) as executions,
     ):
         execution = executions.start(client.context, "sample", {})

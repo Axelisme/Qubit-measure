@@ -10,8 +10,9 @@ from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeGenerator, RecipeSession
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from ._recipe_actual_support import cfg_value
 from ._recipe_execution_support import definition
-from ._recipe_support import LookbackGui, recipe_client, scalar
+from ._recipe_support import LookbackGui, recipe_client
 from ._support import make_client
 
 
@@ -21,35 +22,6 @@ class FieldGui(LookbackGui):
     def __init__(self) -> None:
         super().__init__()
         self.md.update({"$custom.low": 10.0, "$custom.high": 20.0})
-        self.publication["tree"]["children"]["range"] = {
-            "kind": "sweep",
-            "valid": True,
-            "inputs": {
-                "start": scalar(1.0)["input"],
-                "stop": scalar(2.0)["input"],
-                "expts": scalar(11)["input"],
-            },
-        }
-
-    def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.edit_cfg":
-            edits = params["edits"]
-            if (
-                isinstance(edits, list)
-                and len(edits) == 1
-                and edits[0]["path"] == ["range"]
-            ):
-                for key, value in edits[0]["value"].items():
-                    state = scalar(value)["input"]
-                    if isinstance(value, dict):
-                        state.update(
-                            mode="expression",
-                            raw=value["__expr"],
-                            resolved=self.md[value["__expr"]],
-                        )
-                    self.publication["tree"]["children"]["range"]["inputs"][key] = state
-                return self.publication
-        return super().__call__(method, params)
 
 
 def test_retain_source_records_scalar_and_sweep_without_cfg_edits(
@@ -109,7 +81,7 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
         tab = RecipeSession(
             client.context,
             summary_parameters=(
-                SummaryParameter("frequency", "modules.readout.pulse_cfg.freq"),
+                SummaryParameter("frequency", "modules.readout.module.pulse_cfg.freq"),
                 SummaryParameter("rounds", "rounds"),
             ),
         ).open_tab("lookback")
@@ -118,12 +90,12 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
             [
                 recipe.RecipeFieldEdit("rounds", None, "ignored"),
                 recipe.RecipeFieldEdit(
-                    "modules.readout.pulse_cfg.freq",
-                    recipe.RecipeExpression(__expr="$custom.low"),
+                    "modules.readout.module.pulse_cfg.freq",
+                    recipe.RecipeExpression(expr="$custom.low"),
                     "caller_low",
                 ),
                 recipe.RecipeFieldEdit(
-                    "modules.readout.ro_cfg.ro_freq", 22.0, "caller_high"
+                    "modules.readout.module.ro_cfg.ro_freq", 22.0, "caller_high"
                 ),
             ]
         )
@@ -134,11 +106,23 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
                     "tab_id": "t",
                     "edits": [
                         {
-                            "path": ["modules", "readout", "pulse_cfg", "freq"],
-                            "value": {"__expr": "$custom.low"},
+                            "path": [
+                                "modules",
+                                "readout",
+                                "module",
+                                "pulse_cfg",
+                                "freq",
+                            ],
+                            "value": {"expr": "$custom.low"},
                         },
                         {
-                            "path": ["modules", "readout", "ro_cfg", "ro_freq"],
+                            "path": [
+                                "modules",
+                                "readout",
+                                "module",
+                                "ro_cfg",
+                                "ro_freq",
+                            ],
                             "value": 22.0,
                         },
                     ],
@@ -146,17 +130,19 @@ def test_set_fields_writes_one_batch_and_keeps_none_default(
             )
         ]
 
-        assert gui.publication["tree"]["children"]["rounds"]["input"]["resolved"] == 3
-        pulse = gui.publication["tree"]["children"]["modules"]["children"]["readout"][
-            "children"
-        ]["pulse_cfg"]["children"]["freq"]["input"]
-        assert pulse["mode"] == "expression"
-        assert pulse["raw"] == "$custom.low"
-        assert pulse["resolved"] == 10.0
+        assert cfg_value(gui.publication, "rounds") == 3
+        assert gui.publication["input"]["modules"]["readout"]["module"]["pulse_cfg"][
+            "freq"
+        ] == {"expr": "$custom.low"}
+        assert (
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq") == 10.0
+        )
         snapshot = tab.run().snapshot()
         assert snapshot is not None
         assert (
-            snapshot.actual["fields"]["modules.readout.pulse_cfg.freq"].get("source")
+            snapshot.actual["fields"]["modules.readout.module.pulse_cfg.freq"].get(
+                "source"
+            )
             == "caller_low"
         )
         assert snapshot.actual["fields"]["rounds"].get("source") == "gui_default"
@@ -198,11 +184,11 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        tab.set("rounds", recipe.RecipeExpression(__expr="$custom.low"), source="input")
+        tab.set("rounds", recipe.RecipeExpression(expr="$custom.low"), source="input")
         tab.set_sweep(
             "range",
-            start=recipe.RecipeExpression(__expr="$custom.low"),
-            stop=recipe.RecipeExpression(__expr="$custom.high"),
+            start=recipe.RecipeExpression(expr="$custom.low"),
+            stop=recipe.RecipeExpression(expr="$custom.high"),
         )
         edits = [
             params
@@ -211,28 +197,19 @@ def test_expression_set_and_sweep_are_forwarded_without_client_evaluation(
         ]
         assert len(edits) == 2
         assert edits[1]["edits"] == [
-            {
-                "path": ["range"],
-                "value": {
-                    "start": {"__expr": "$custom.low"},
-                    "stop": {"__expr": "$custom.high"},
-                },
-            }
+            {"path": ["range", "start"], "value": {"expr": "$custom.low"}},
+            {"path": ["range", "stop"], "value": {"expr": "$custom.high"}},
         ]
-        state = gui.publication["tree"]["children"]["range"]["inputs"]
-        assert state["start"]["resolved"] == 10.0
-        assert state["stop"]["resolved"] == 20.0
-        assert state["expts"]["resolved"] == 11
+        assert cfg_value(gui.publication, "range.start") == 10.0
+        assert cfg_value(gui.publication, "range.stop") == 20.0
+        assert cfg_value(gui.publication, "range.n") == 11
 
 
 def test_batch_invalid_reply_retains_edit_without_rollback(tmp_path: Path) -> None:
     gui = FieldGui()
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
-        gui.publication["tree"]["children"]["rounds"]["valid"] = False
-        gui.publication["tree"]["children"]["rounds"]["input"]["validation_error"] = (
-            "outside range"
-        )
+        gui.publication["errors"] = [{"path": ["rounds"], "message": "outside range"}]
         client.transport.replies["tab.edit_cfg"] = {
             "ok": True,
             "result": gui.publication,
@@ -269,9 +246,7 @@ def test_actual_mixed_sweep_keeps_the_complete_parameter(tmp_path: Path) -> None
         }
         assert initial.data["actual"]["range"] == expected
         before = list(client.transport.sent)
-        gui.publication["tree"]["children"]["range"]["inputs"]["start"] = scalar(99.0)[
-            "input"
-        ]
+        gui.owner.write({("range", "start"): 99.0})
         key = initial.data["execution"]
         for detail in ("summary", "full"):
             assert (

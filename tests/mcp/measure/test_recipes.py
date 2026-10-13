@@ -117,7 +117,7 @@ def test_lookback_initial_wait_returns_while_the_same_execution_continues(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
         assert completed.data["status"] == "awaiting_answer", completed.data
-        assert completed.data["run_op"] == initial["run_op"]
+        assert completed.data["run_op"] == status["run_op"]
         assert completed.data["raw_save"] == asdict(RAW_REPORT)
         assert completed.images[0].data == PNG
         finished = client.call("answer", {"recipe": execution, "decision": "skipped"})
@@ -307,9 +307,11 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
 ):
     gui = LookbackGui()
     stopped = Event()
+    running = Event()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
+            running.set()
             if stopped.is_set():
                 return {"reason": "completed", "status": "cancelled"}
             return {"reason": "timeout"}
@@ -326,10 +328,12 @@ def test_lookback_cancel_latches_one_control_and_stops_after_original_run(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
+        assert running.wait(1)
+        started = client.call("status", {"execution": execution})
         cancelled = client.call("cancel", {"execution": execution})
         assert cancelled.data["cancel_requested"]
         assert cancelled.data["execution"] == execution
-        client.call("cancel", {"op": initial.data["run_op"]})
+        client.call("cancel", {"op": started["run_op"]})
         terminal = full_execution_reply(
             client, client.call("wait", {"execution": execution, "timeout": 2})
         )
@@ -357,9 +361,11 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
 ):
     gui = LookbackGui()
     release_run = Event()
+    running = Event()
 
     def respond(method, params):
         if method == "operation.await" and params["operation_id"] == 71:
+            running.set()
             return (
                 {"reason": "completed", "status": "cancelled"}
                 if release_run.is_set()
@@ -380,11 +386,13 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
             client, client.call("pipeline", {"frequency_mhz": 6020.0})
         )
         execution = initial.data["execution"]
-        early = client.call("finish_early", {"op": initial.data["run_op"]})
+        assert running.wait(1)
+        started = client.call("status", {"execution": execution})
+        early = client.call("finish_early", {"op": started["run_op"]})
         assert early.data == {
             "execution": execution,
-            "op": initial.data["op"],
-            "run_op": initial.data["run_op"],
+            "op": started["op"],
+            "run_op": started["run_op"],
             "status": "running",
             "phase": "run",
             "cancel_requested": False,
@@ -415,15 +423,7 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
         assert (
             client.call("status", {"execution": execution, "detail": "full"}) == frozen
         )
-        if expected == "finished":
-            assert result.data["raw_save"]["run_id"] == "run-a"
-            assert (
-                result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
-            )
-            assert result.data["analysis"]["status"] == "finished"
-        elif expected == "failed":
-            assert result.data["error"]["reason"] == "run_result_unavailable"
-            assert result.data["raw_save"] is None
+        assert_partial_run_products(result, expected)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("operation.cancel") == 1
         assert methods.count("tab.run_start") == 1
@@ -432,6 +432,16 @@ def test_lookback_finish_early_uses_partial_data_unless_cancel_wins(
     finally:
         release_run.set()
         client.context.session.close()
+
+
+def assert_partial_run_products(result: ToolReply, expected: str) -> None:
+    if expected == "finished":
+        assert result.data["raw_save"]["run_id"] == "run-a"
+        assert result.data["raw_save"]["artifacts"]["raw"]["data"]["status"] == "Saved"
+        assert result.data["analysis"]["status"] == "finished"
+    elif expected == "failed":
+        assert result.data["error"]["reason"] == "run_result_unavailable"
+        assert result.data["raw_save"] is None
 
 
 @pytest.fixture(params=[True, False], ids=["saved", "incomplete"])
@@ -1031,17 +1041,17 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
         assert reply.images[0].data == PNG
         assert data["elapsed_s"] >= 0
         for path, value in {
-            "modules.readout.pulse_cfg.freq": 6020.0,
-            "modules.readout.ro_cfg.ro_freq": 6020.0,
-            "modules.readout.ro_cfg.ro_length": expected[0],
-            "modules.readout.ro_cfg.trig_offset": expected[1],
+            "modules.readout.module.pulse_cfg.freq": 6020.0,
+            "modules.readout.module.ro_cfg.ro_freq": 6020.0,
+            "modules.readout.module.ro_cfg.ro_length": expected[0],
+            "modules.readout.module.ro_cfg.trig_offset": expected[1],
             "rounds": 7,
         }.items():
             assert cfg_value(gui.publication, path) == value
             assert type(cfg_value(gui.publication, path)) is type(value)
         methods = [method for method, _ in client.transport.sent]
         assert methods.count("tab.run_start") == 1
-        assert methods.count("tab.reset_cfg") == int(reuse)
+        assert methods.count("tab.reset_cfg") == 1
         assert methods.count("tab.new") == int(not reuse)
         assert methods.count("tab.save_data") == 1
         assert methods.count("tab.analyze") == 1
@@ -1058,11 +1068,11 @@ def test_lookback_saves_original_run_then_analysis_and_delivers_complete_reply(
             for edit in params["edits"]
         ]
         by_path = {tuple(edit["path"]): edit["value"] for edit in edits}
-        assert by_path["modules", "reset"] == {"__ref": None}
-        assert by_path["modules", "init_pulse"] == {"__ref": None}
+        assert by_path["modules", "reset"] is None
+        assert by_path["modules", "init_pulse"] is None
         for key, value in zip(("ro_length", "trig_offset"), expected, strict=True):
-            assert by_path["modules", "readout", "ro_cfg", key] == value
-            assert type(by_path["modules", "readout", "ro_cfg", key]) is float
+            assert by_path["modules", "readout", "module", "ro_cfg", key] == value
+            assert type(by_path["modules", "readout", "module", "ro_cfg", key]) is float
 
 
 @pytest.mark.parametrize("reuse_tab_id", [None, "kept"])
@@ -1071,6 +1081,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
 ):
     tab = reuse_tab_id or "new"
     gui = LookbackGui()
+    gui.reset_form()
     publication = gui.publication
 
     def respond(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1112,7 +1123,7 @@ def test_lookback_missing_frequency_does_not_run_a_blind_default(
         methods = [method for method, _ in client.transport.sent]
         assert "tab.run_start" not in methods
         assert ("tab.new" in methods) is (reuse_tab_id is None)
-        assert ("tab.reset_cfg" in methods) is (reuse_tab_id is not None)
+        assert methods.count("tab.reset_cfg") == 1
 
 
 @pytest.mark.parametrize(

@@ -52,9 +52,7 @@ def test_actual_projection_is_fixed_flat_and_shared_by_every_reply(
         assert initial.data["status"] == "awaiting_answer", initial.data
         key = initial.data["execution"]
         before = list(client.transport.sent)
-        gui.publication["tree"]["children"]["rounds"]["input"].update(
-            raw=99, resolved=99
-        )
+        gui.owner.write({("rounds",): 99})
         for reply in (
             initial.data,
             client.call("status", {"execution": key}),
@@ -484,7 +482,10 @@ def test_summary_status_reports_the_finished_recipe_facts(tmp_path):
         full = client.call("status", {"execution": execution, "detail": "full"})
         assert summary["execution"] == full["execution"] == execution
         assert summary["run_id"] == full["raw_save"]["run_id"] == "run-a"
-        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert (
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq")
+            == 6020.0
+        )
         assert cfg_value(gui.publication, "rounds") == 7
         assert summary["actual"] == full["actual"]
         assert summary["actual"]["use_reset"] == {
@@ -592,7 +593,10 @@ def test_malformed_completion_fails_at_its_owner_without_losing_run_capture(
         assert reply.data["status"] == "failed"
         assert reply.data["error"]["reason"] == "incompatible_wire"
         assert reply.data["error"]["phase"] == phase
-        assert cfg_value(gui.publication, "modules.readout.pulse_cfg.freq") == 6020.0
+        assert (
+            cfg_value(gui.publication, "modules.readout.module.pulse_cfg.freq")
+            == 6020.0
+        )
         assert reply.data["actual"]["rounds"] == {"value": 3, "source": "gui_default"}
         if wire_op == 93:
             assert reply.data["raw_save"]["run_id"] == "run-a"
