@@ -34,6 +34,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.interactive import (
+    ActiveInteractiveContext,
     FluxDepInteractiveOwner,
     FluxDepInteractivePorts,
 )
@@ -67,6 +68,20 @@ logger = logging.getLogger(__name__)
 
 SpectrumStage = Literal["loaded", "aligned", "sampled"]
 PendingKind = Literal["align", "sample"]
+
+
+def pending_kind(active: ActiveInteractiveContext) -> PendingKind | None:
+    """The spectrum draft kind a live interactive context stands for.
+
+    "align" for a line pick, "sample" for OneTone or TwoTone sampling, None
+    for the global Filter, which belongs to no spectrum. SpectrumRow.pending
+    and the GUI's stage-switch confirmation both read it.
+    """
+    if active.kind == "line":
+        return "align"
+    if active.kind == "selection":
+        return None
+    return "sample"
 
 
 @dataclass(frozen=True)
@@ -227,12 +242,11 @@ class Controller(BaseController[FluxDepState, EventBus]):
             )
             active = self._interactive.inspect(entry.name)
             # inspect("selection") addresses the global Filter, not a spectrum.
-            if active is None or active.spectrum_name != entry.name:
-                pending: PendingKind | None = None
-            elif active.kind == "line":
-                pending = "align"
-            else:
-                pending = "sample"
+            pending = (
+                None
+                if active is None or active.spectrum_name != entry.name
+                else pending_kind(active)
+            )
             rows.append(
                 SpectrumRow(
                     name=entry.name,

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
@@ -51,7 +51,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.app.fluxdep.controller import Controller, SpectrumRow
+from zcu_tools.gui.app.fluxdep.controller import (
+    Controller,
+    PendingKind,
+    SpectrumRow,
+    pending_kind,
+)
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
@@ -83,9 +88,6 @@ from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
-
-# A spectrum's editing stage: line alignment, or point sampling.
-Stage = Literal["align", "sample"]
 
 # List item role holding a row's second line (kind · stage · points · ...).
 _DETAILS_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -127,15 +129,6 @@ class _SpectrumRowDelegate(QStyledItemDelegate):
         # Qt lays item text out with QTextLayout, which breaks lines only at
         # U+2028 (QChar.LineSeparator), not at "\n".
         option.text = f"{elided}\u2028{details}"
-
-
-def _draft_stage(active: ActiveInteractiveContext) -> Stage | None:
-    """The stage of a live spectrum draft; None for the joint Filter."""
-    if isinstance(active.context, LinePickContext):
-        return "align"
-    if isinstance(active.context, (OneTonePickContext, TwoTonePickContext)):
-        return "sample"
-    return None
 
 
 class MainWindow(QMainWindow):
@@ -552,7 +545,7 @@ class MainWindow(QMainWindow):
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
-    def _mount_stage(self, name: str, stage: Stage) -> None:
+    def _mount_stage(self, name: str, stage: PendingKind) -> None:
         """Begin (or reuse) name's picker for stage and mount it as the editor."""
         if stage == "align":
             self._mount_picker(self._ctrl.interactive.begin_line_pick(name))
@@ -604,7 +597,7 @@ class MainWindow(QMainWindow):
     def _request_sample(self) -> None:
         self._open_stage("sample")
 
-    def _open_stage(self, stage: Stage) -> None:
+    def _open_stage(self, stage: PendingKind) -> None:
         """Open the active spectrum's align or sample picker on a Local intent.
 
         This is the holder gate for the preview and picker stage buttons: a
@@ -616,7 +609,7 @@ class MainWindow(QMainWindow):
         if not self._writable or name is None:
             return
         draft = self._ctrl.interactive.inspect(name)
-        if draft is None or _draft_stage(draft) == stage:
+        if draft is None or pending_kind(draft) == stage:
             self._switch_stage(name, stage)
             return
         other = "sample" if stage == "align" else "align"
@@ -632,7 +625,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_discard_decision(
-        self, name: str, stage: Stage, draft_id: int, *, confirmed: bool
+        self, name: str, stage: PendingKind, draft_id: int, *, confirmed: bool
     ) -> None:
         if not confirmed:
             return
@@ -647,7 +640,7 @@ class MainWindow(QMainWindow):
             return
         self._switch_stage(name, stage)
 
-    def _switch_stage(self, name: str, stage: Stage) -> None:
+    def _switch_stage(self, name: str, stage: PendingKind) -> None:
         # begin_* emits synchronously; this route already mounts its context.
         self._routing_editor = True
         try:
