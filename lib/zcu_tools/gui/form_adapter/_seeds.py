@@ -118,10 +118,15 @@ def complete_input(
     *,
     path: tuple[str, ...] = (),
 ) -> dict[str, JsonValue]:
-    """Overlay seeds with static defaults; report ambiguous inline field paths."""
+    """Overlay seeds with static defaults; report ambiguous inline field paths.
+
+    Seeds for fields absent from the generated model, including unsupported
+    module fields, raise ValueError with their dotted paths under path.
+    """
     unknown = authored.keys() - model.model_fields.keys()
     if unknown:
-        raise ValueError(f"Unknown seeds for {model.__name__}: {sorted(unknown)}")
+        paths = sorted(".".join((*path, name)) for name in unknown)
+        raise ValueError(f"Unknown or unsupported seeds for {model.__name__}: {paths}")
     data = static_defaults(model)
     data.update(authored)
     for name, value in tuple(data.items()):

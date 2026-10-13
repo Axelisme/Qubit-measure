@@ -12,8 +12,8 @@
 
 生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
 
-- `FieldMeta` 的 label、unit、decimals、description 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。
-- 生成 module 欄位時，選填的 `desc`、`mask`、`outsel`、`ro_ch` 與 `mux_*` 不在 model、input、schema 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位會在註冊時被拒。目前沒有露出覆寫機制。
+- `FieldMeta` 的 label、unit、decimals、description、group 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。被鎖定的欄位是單值 Literal，不帶 decimals。
+- 生成 module 欄位時，選填的 `desc`、`mask`、`outsel`、`ro_ch` 與 `mux_*` 不在 model、input、schema 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，這些欄位的原值被丟棄，所以編輯後會變回預設。必填且沒有預設的欄位，例如 `DirectReadoutCfg.ro_ch`，照常可編輯。範本 seed 這些欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。目前沒有露出覆寫機制。
 
 Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Host 的註冊入口負責呼叫它，例如 measure `Registry.register(form=...)`。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 

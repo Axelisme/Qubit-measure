@@ -86,9 +86,9 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
         return None
 
 
-def _field_info(info: FieldInfo) -> FieldInfo:
+def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
     result = deepcopy(info)
-    if (display := field_display(info)) is not None:
+    if (display := field_display(info, locked=locked)) is not None:
         result.metadata.append(display)
     return result
 
@@ -169,7 +169,7 @@ class _Section:
                     )
                 continue
             annotation = self._annotation(name, info, node)
-            field_info = _field_info(info)
+            field_info = _field_info(info, locked=isinstance(node, Locked))
             if name in self.modules and not self.modules[name].locks:
                 field_info.discriminator = "kind"
             if isinstance(node, Expr):
@@ -347,8 +347,10 @@ class Form[C: ConfigBase]:
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     Generated module input omits optional desc, mask, outsel, ro_ch and mux_*
     fields; conversion restores their Spec defaults, and copying a library
-    entry inline discards its stored values for them. FieldMeta label, unit,
-    decimals and description become Display metadata.
+    entry inline discards its stored values for them. Templates cannot seed
+    them (see bind_templates); there is no override. FieldMeta label, unit,
+    decimals, description and group become Display metadata; locked fields
+    drop decimals because they are single-value Literals.
     A core_cfg that is a concrete persistent module or waveform Spec builds the
     same Spec form as module_form and requires an empty tree.
     """
@@ -410,7 +412,11 @@ class Form[C: ConfigBase]:
 
         The host's registration entry calls this explicitly. adapter is the
         registered definition name, included with the consuming field path in ValueError for unknown IDs,
-        incompatible families or malformed seed trees. No sources are read.
+        incompatible families or malformed seed trees. A template seed for an
+        unsupported module field (optional desc, mask, outsel, ro_ch or mux_*)
+        raises the same ValueError, naming the template id and the dotted seed
+        path; to_cfg fills those fields only from Spec defaults. Seeds for other
+        fields, including $-prefixed strings, stay literal. No sources are read.
         Call before default_input when the tree contains Template/fallback nodes.
         Definitions remain immutable and the caller's mapping is never retained.
         """

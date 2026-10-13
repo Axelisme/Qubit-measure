@@ -171,7 +171,7 @@ def editable_spec(
             derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
-        if (display := field_display(info)) is not None:
+        if (display := field_display(info, locked=name in locks)) is not None:
             derived.metadata.append(display)
         namespace[name] = derived
     result = new_class(
