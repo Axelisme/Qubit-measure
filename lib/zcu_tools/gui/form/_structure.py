@@ -391,11 +391,16 @@ def _select_object(
     branch = selected(info, value if tag in value else old)
     if branch is None:
         raise ValueError(f"Missing or unknown discriminator at {path!r}")
-    if not isinstance(old, dict) or selected(info, old) is not branch:
-        seed = _branch_defaults(branch, env, {})
-    else:
-        seed = copy_object(old)
-    parent[key] = _partial_model(branch, seed, value, env)
+    try:
+        if not isinstance(old, dict) or selected(info, old) is not branch:
+            seed = _branch_defaults(branch, env, {})
+        else:
+            seed = copy_object(old)
+        parent[key] = _partial_model(branch, seed, value, env)
+    except PydanticCustomError as exc:
+        from ._sources import prefix_error
+
+        raise prefix_error(exc, path) from exc
     return True
 
 

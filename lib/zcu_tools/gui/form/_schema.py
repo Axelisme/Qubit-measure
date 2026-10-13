@@ -573,11 +573,11 @@ def _automatic_options(
         if type(None) in alternatives(info.annotation):
             result.insert(0, Option("None", None))
         return tuple(result)
-    values = node.get("enum")
+    values = node.get("enum", [node["const"]] if "const" in node else None)
     if isinstance(values, list):
+        if type(None) in alternatives(info.annotation) and None not in values:
+            values = [None, *values]
         return tuple(Option(str(value), value) for value in values)
-    if "const" in node:
-        return (Option(str(node["const"]), node["const"]),)
     return ()
 
 

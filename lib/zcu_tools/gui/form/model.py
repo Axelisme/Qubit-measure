@@ -217,10 +217,11 @@ class FormModel(BaseModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Return initial or new-branch defaults before input inheritance.
+        """Return initial or new-branch defaults before explicit field writes.
 
         previous is empty for initial input and write branch switches. Explicit
-        callers and compatible restore may supply detached prior JSON. The fallback uses Pydantic static
+        callers and compatible restore may supply detached prior JSON. The
+        fallback uses Pydantic static
         defaults and leaves required keys absent; it does not validate a partial
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
@@ -265,8 +266,8 @@ class FormModel(BaseModel):
         parent or automatic list. Nonoverlapping parent paths remain effective.
         Automatic Literal/Enum, choices and tagged-union selections apply only
         without a declaration for that field. Commands resolve only the current
-        active branch; inactive branch declarations cannot provide an action. They do not add validation:
-        Pydantic and choices remain authoritative. Read env only as a fixed
+        active branch; inactive branch declarations cannot provide an action.
+        Declarations do not add validation: Pydantic and choices remain authoritative. Read env only as a fixed
         borrowed capture, never refresh or mutate it; source failures propagate.
         The default hook is empty. Consumers read input_schema's effective
         x-form-options list, not this declaration hook or union structure.
@@ -666,9 +667,10 @@ class ModuleInline(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Seed inline from previous ref's captured library Spec when switching.
+        """Explicitly seed inline from a prior ref's captured library Spec.
 
-        previous uses {kind: ref, name: actual_key}. Read LibrarySnapshot's public
+        Ordinary branch writes pass empty previous and never copy a ref.
+        Explicit callers may supply previous as {kind: ref, name: actual_key}. Read LibrarySnapshot's public
         module_spec and retain a detached input under module. Missing captured
         library/key or invalid module family fails at the consuming field path;
         it never supplies a dummy Spec. Static defaults apply without a prior ref.
