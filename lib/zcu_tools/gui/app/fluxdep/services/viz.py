@@ -289,9 +289,10 @@ def _add_dev_value_axis(
 def format_stale_reasons(reasons: Sequence[str]) -> str:
     """One outdated-fit line, "Outdated: a; b", shared by the Show title and GUI.
 
-    reasons are State's root-change descriptions in graph order; an empty
-    sequence means the stored fit is fresh and returns an empty string. The
-    text stays ASCII because the figure's default font has no CJK glyphs.
+    reasons are State's root-change descriptions in graph order, joined
+    verbatim; an empty sequence means the stored fit is fresh and returns an
+    empty string. Only the prefix is ASCII, chosen because the figure's default
+    font has no CJK glyphs; a reason carrying a spectrum name keeps that name.
     """
     if not reasons:
         return ""
