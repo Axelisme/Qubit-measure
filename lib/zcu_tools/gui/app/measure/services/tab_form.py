@@ -68,10 +68,11 @@ class TabFormResource:
     """Own a tab's inputs and captured sources independently of any frontend.
 
     Open and explicit Reset capture once. Input/schema/preview/result/accept do
-    not refresh sources. Only current valid input may be accepted. This owner
-    does not expose its mutable FormState; frontends send commands here.
-    Owner-sequence use is required. Mutation guards and notification reentrancy
-    apply before editing; revocation permanently invalidates retained handles.
+    not refresh sources. Only current valid input may be accepted. Frontends
+    send commands here; editor_state lends the current FormState for reading
+    and subscribing only. Owner-sequence use is required. Mutation guards and
+    notification reentrancy apply before editing; revocation permanently
+    invalidates retained handles.
     """
 
     def __init__[C: ConfigBase](
@@ -129,6 +130,22 @@ class TabFormResource:
         """Borrow the fixed environment read-only; only Reset replaces it."""
         self._require_open()
         return self._sources.env
+
+    @property
+    def editor_state(self) -> FormState[FormModel]:
+        """Lend the current FormState to a FormEditor for reading and subscribing.
+
+        This is the same object the resource edits, not a copy or mirror, so an
+        editor built over it shows every committed write, and its subscription
+        fires on each one. Reset and load_cfg install a new FormState: watch
+        this resource through subscribe and re-read the property afterwards.
+        All writes, Reset and Load go through the resource's commands. Calling
+        state.write or reset on the lent state bypasses the busy, lifetime and
+        notification guards and the @{key} capture, which breaks this contract.
+        Raises CfgPreconditionError(RESOURCE_GONE) after revoke.
+        """
+        self._require_open()
+        return self._state
 
     def input_schema(self) -> dict[str, JsonValue]:
         """Return the generated editable schema using this tab's fixed sources."""

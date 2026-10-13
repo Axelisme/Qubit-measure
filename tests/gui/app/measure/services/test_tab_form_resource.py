@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 import pytest
+from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr
 from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.services import tab_cfg as resource_api
@@ -250,16 +251,16 @@ def test_editor_state_borrows_the_same_input_for_reading_and_subscribing() -> No
     )
     state = resource.editor_state
     assert state is resource.editor_state
-    published: list[float] = []
+    published: list[JsonValue] = []
     state.subscribe(lambda: published.append(state.input.data["amount"]))
 
     resource.write({("amount",): 3.0})
 
     assert published == [3.0]
-    assert state.input.data == resource.input.data
-    assert resource.editor_state.result(resource.env) == ScalarCore(amount=3.0)
+    assert state.input.data == resource.input.data == {"amount": 3.0}
+    assert resource.result() == ScalarCore(amount=3.0)
 
     resource.revoke()
     with pytest.raises(CfgPreconditionError) as caught:
-        resource.editor_state
+        _ = resource.editor_state
     assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE

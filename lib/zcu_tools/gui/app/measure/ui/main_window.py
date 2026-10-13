@@ -792,12 +792,9 @@ class MainWindow(QMainWindow):
             self._ctrl.cancel_run()
             return
         logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
-        if not tab_w.cfg_form.is_valid():
-            reason = tab_w.cfg_form.first_invalid_reason()
-            if reason:
-                msg = f"Config invalid: {reason}"
-            else:
-                msg = "Config has unset fields — fill required values before running"
+        reason = tab_w.cfg_invalid_reason()
+        if reason is not None:
+            msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             self.show_status_message(msg)
             return
