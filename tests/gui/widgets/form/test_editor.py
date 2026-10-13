@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Self
 
 import pytest
 from pydantic import Field, JsonValue, model_validator
+from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -151,6 +152,13 @@ def combo[F: FormModel](editor: FormEditor[F], name: str) -> QComboBox:
     return widget
 
 
+def mode[F: FormModel](editor: FormEditor[F], path: str) -> QAction:
+    """Find the documented Expression action of one row's input."""
+    action = editor.findChild(QAction, f"form.mode.{path}")
+    assert isinstance(action, QAction)
+    return action
+
+
 def label(editor: FormEditor[SampleForm], name: str) -> QLabel:
     """Find a documented result/error label by its complete object name."""
     widget = editor.findChild(QLabel, name)
@@ -170,8 +178,7 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
     assert isinstance(result, SampleForm)
     assert result.amount == 3.5
 
-    mode = combo(editor, "form.mode.amount")
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode(editor, "amount").trigger()
     line(editor, "amount").setText("general.ext.seed / 2")
     assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     result = state.result(env)
@@ -241,8 +248,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     assert ("amount",) in errors.messages
     assert label(editor, "form.error.amount").text()
 
-    mode = combo(editor, "form.mode.amount")
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode(editor, "amount").trigger()
     line(editor, "amount").setText("absent_name")
     assert state.input.data["amount"] == {"expr": "absent_name"}
     assert editor.local_parse_errors() is None
@@ -258,8 +264,7 @@ def test_integer_expression_and_direct_complex_keep_their_input_forms(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    mode = combo(editor, "form.mode.count")
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode(editor, "count").trigger()
     line(editor, "count").setText("general.ext.seed + 1")
     line(editor, "amplitude").setText("1+2j")
     assert state.input.data["count"] == {"expr": "general.ext.seed + 1"}
@@ -493,18 +498,17 @@ def test_numeric_choices_switch_between_direct_selection_and_expression(
     editor = FormEditor(state, env)
     views.append(editor)
     direct = editor.findChild(QComboBox, "form.input.amount")
-    mode = editor.findChild(QComboBox, "form.mode.amount")
     assert isinstance(direct, QComboBox)
-    assert isinstance(mode, QComboBox)
     direct.setCurrentIndex(direct.findData(4.0))
     assert state.input.data["amount"] == 4.0
-    mode.setCurrentIndex(mode.findData("expr"))
+    action = mode(editor, "amount")
+    action.trigger()
     text = editor.findChild(QLineEdit, "form.input.amount")
     assert isinstance(text, QLineEdit)
     text.setText("general.ext.seed / 2")
     assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     assert editor.errors() is None
-    mode.setCurrentIndex(mode.findData("direct"))
+    action.trigger()
     assert state.input.data["amount"] == 2.0
     assert isinstance(editor.findChild(QComboBox, "form.input.amount"), QComboBox)
 
@@ -562,12 +566,11 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     editor = FormEditor(state, env)
     views.append(editor)
     text = editor.findChild(QLineEdit, f"form.input.{path}")
-    mode = editor.findChild(QComboBox, f"form.mode.{path}")
     assert isinstance(text, QLineEdit)
-    assert isinstance(mode, QComboBox)
-    assert mode.currentData() == "expr"
+    action = mode(editor, path)
+    assert action.isChecked()
     assert text.text() == "general.ext.seed"
-    mode.setCurrentIndex(mode.findData("direct"))
+    action.trigger()
     text.setText(str(direct))
     assert state.input.data[path] == direct
     assert type(state.input.data[path]) is type(direct)
@@ -578,7 +581,7 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     text.setText("")
     assert state.input.data[path] is None
     assert editor.local_parse_errors() is None
-    mode.setCurrentIndex(mode.findData("expr"))
+    action.trigger()
     text.setText("general.ext.seed + 1")
     assert state.input.data[path] == {"expr": "general.ext.seed + 1"}
     notices: list[int] = []
@@ -634,9 +637,8 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
         for path in ("literal", "text", "number"):
             control = editor.findChild(QComboBox, f"form.input.{path}")
             assert isinstance(control, QComboBox)
-            # Current choices, then the entry that switches to Expression mode.
-            assert control.count() == count + 1
-            assert control.itemText(count) == "Expression…"
+            # Only the current choices; Expression mode is in the right-click menu.
+            assert control.count() == count
             if count == 0:
                 assert control.currentIndex() == -1
         assert state.input.data == before
@@ -646,9 +648,7 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
             assert isinstance(errors, FormErrors)
         else:
             assert errors is None
-    mode = editor.findChild(QComboBox, "form.mode.number")
-    assert isinstance(mode, QComboBox)
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode(editor, "number").trigger()
     text = editor.findChild(QLineEdit, "form.input.number")
     assert isinstance(text, QLineEdit)
     text.setText("general.ext.seed / 2")
@@ -862,7 +862,7 @@ def test_numeric_discriminator_preserves_typed_tags_and_switches_active_fields(
     tags = [selector.itemData(index) for index in range(selector.count())]
     assert tags == [1, 2, 3]
     assert all(type(tag) is int for tag in tags)
-    assert editor.findChild(QComboBox, "form.mode.branch.kind") is None
+    assert editor.findChild(QAction, "form.mode.branch.kind") is None
     active = "b_only" if initial_tag == 3 else "a_only"
     assert isinstance(
         editor.findChild(QLineEdit, f"form.input.branch.{active}"), QLineEdit
@@ -890,4 +890,4 @@ def test_numeric_discriminator_preserves_typed_tags_and_switches_active_fields(
             editor.findChild(QLineEdit, "form.input.branch.a_only"), QLineEdit
         )
         assert editor.findChild(QLineEdit, "form.input.branch.b_only") is None
-        assert editor.findChild(QComboBox, "form.mode.branch.kind") is None
+        assert editor.findChild(QAction, "form.mode.branch.kind") is None

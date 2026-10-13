@@ -1,10 +1,11 @@
-"""Direct rows show no echo, choice rows use one dropdown, and rows stay dense."""
+"""Direct rows show no echo, choice rows list only choices, and rows stay dense."""
 
 from collections.abc import Iterator
 from typing import Literal
 
 import pytest
 from pydantic import Field
+from PyQt6.QtGui import QAction
 from qtpy.QtCore import QPoint, QRect
 from qtpy.QtWidgets import (
     QApplication,
@@ -21,8 +22,6 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
-
-EXPRESSION_ENTRY = "Expression…"
 
 
 class Inner(FormModel):
@@ -111,6 +110,13 @@ def child[W: QWidget](view: QWidget, kind: type[W], name: str) -> W:
     return widget
 
 
+def mode(view: QWidget, path: str) -> QAction:
+    """Find the documented Expression action of one row."""
+    action = view.findChild(QAction, f"form.mode.{path}")
+    assert isinstance(action, QAction), path
+    return action
+
+
 def visible_combos(view: QWidget, path: str) -> list[str]:
     """Object names of the not-hidden combo boxes that belong to one row."""
     return sorted(
@@ -132,13 +138,8 @@ def label_rect(view: QWidget, text: str) -> QRect:
 
 
 def beside_label(view: QWidget, path: str) -> QRect:
-    """Geometry of a leaf row's first control: a shown mode combo, else input."""
-    shown = [
-        mode
-        for mode in view.findChildren(QComboBox, f"form.mode.{path}")
-        if not mode.isHidden()
-    ]
-    return rect(view, shown[0] if shown else child(view, QWidget, f"form.input.{path}"))
+    """Geometry of a leaf row's first control, its input."""
+    return rect(view, child(view, QWidget, f"form.input.{path}"))
 
 
 def lay_out(view: QWidget, qapp: QApplication, extra_height: int = 0) -> None:
@@ -162,8 +163,7 @@ def test_expression_rows_show_the_resolved_value_or_the_error(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
 ) -> None:
     view, state = editor
-    mode = child(view, QComboBox, "form.mode.amount")
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode(view, "amount").trigger()
     text = child(view, QLineEdit, "form.input.amount")
     text.setText("general.ext.seed / 2")
     echo = child(view, QLabel, "form.value.amount")
@@ -178,24 +178,22 @@ def test_expression_rows_show_the_resolved_value_or_the_error(
     assert not error.isHidden()
     assert error.text()
 
-    mode.setCurrentIndex(mode.findData("direct"))
+    mode(view, "amount").trigger()
     child(view, QLineEdit, "form.input.amount").setText("3")
     assert state.input.data["amount"] == 3.0
     assert echo.isHidden()
     assert error.isHidden()
 
 
-def test_choice_rows_show_only_the_value_dropdown_in_direct_mode(
+def test_choice_rows_show_one_dropdown_of_only_the_choices(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
 ) -> None:
     view, _state = editor
     for path, options in (("unit", ["native", "mA"]), ("nqz", [1, 2])):
         assert visible_combos(view, path) == [f"form.input.{path}"]
         direct = child(view, QComboBox, f"form.input.{path}")
-        values = [direct.itemData(index) for index in range(len(options))]
+        values = [direct.itemData(index) for index in range(direct.count())]
         assert values == options
-        assert direct.count() == len(options) + 1
-        assert direct.itemText(len(options)) == EXPRESSION_ENTRY
 
 
 def test_choice_dropdown_switches_to_expression_and_back(
@@ -205,11 +203,10 @@ def test_choice_dropdown_switches_to_expression_and_back(
     direct = child(view, QComboBox, "form.input.unit")
     direct.setCurrentIndex(direct.findData("mA"))
     assert state.input.data["unit"] == "mA"
-    direct.setCurrentIndex(direct.findText(EXPRESSION_ENTRY))
-    mode = child(view, QComboBox, "form.mode.unit")
-    assert not mode.isHidden()
-    assert mode.currentData() == "expr"
-    assert visible_combos(view, "unit") == ["form.mode.unit"]
+    action = mode(view, "unit")
+    action.trigger()
+    assert action.isChecked()
+    assert visible_combos(view, "unit") == []
     text = child(view, QLineEdit, "form.input.unit")
     text.setText("$unit")
     assert state.input.data["unit"] == {"expr": "$unit"}
@@ -217,7 +214,7 @@ def test_choice_dropdown_switches_to_expression_and_back(
     assert not echo.isHidden()
     assert echo.text() == '$unit = "mA"'
 
-    mode.setCurrentIndex(mode.findData("direct"))
+    action.trigger()
     assert state.input.data["unit"] == "mA"
     assert child(view, QComboBox, "form.input.unit").currentData() == "mA"
     assert visible_combos(view, "unit") == ["form.input.unit"]
@@ -233,11 +230,10 @@ def test_choice_round_trip_through_expression_keeps_the_direct_value(
     view, state = editor
     direct = child(view, QComboBox, f"form.input.{path}")
     direct.setCurrentIndex(direct.findData(value))
-    direct.setCurrentIndex(direct.findText(EXPRESSION_ENTRY))
+    mode(view, path).trigger()
     # Expression mode starts from the direct value's text.
     assert state.input.data[path] == {"expr": str(value)}
-    mode = child(view, QComboBox, f"form.mode.{path}")
-    mode.setCurrentIndex(mode.findData("direct"))
+    mode(view, path).trigger()
     assert state.input.data[path] == value
     assert child(view, QComboBox, f"form.input.{path}").currentData() == value
 
@@ -257,7 +253,7 @@ def test_unselected_choice_switches_to_an_empty_expression(
     try:
         direct = child(view, QComboBox, "form.input.unit")
         assert direct.currentIndex() == -1
-        direct.setCurrentIndex(direct.findText(EXPRESSION_ENTRY))
+        mode(view, "unit").trigger()
         assert child(view, QLineEdit, "form.input.unit").text() == ""
         assert state.input.data["unit"] == {"expr": ""}
     finally:

@@ -1,10 +1,11 @@
-"""String mode controls write envelopes and display core-resolved names."""
+"""String Expression actions write envelopes and display core-resolved names."""
 
 from collections.abc import Iterator, Mapping
 
 import pytest
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit
+from PyQt6.QtGui import QAction
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -59,9 +60,9 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     field: str,
 ) -> None:
     editor, state, env = name_editor
-    mode = editor.findChild(QComboBox, f"form.mode.{field}")
-    assert isinstance(mode, QComboBox)
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode = editor.findChild(QAction, f"form.mode.{field}")
+    assert isinstance(mode, QAction)
+    mode.trigger()
     text = editor.findChild(QLineEdit, f"form.input.{field}")
     assert isinstance(text, QLineEdit)
     text.setText("$device")
@@ -78,11 +79,11 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     assert editor.errors() is not None
     # Hydration retains expression mode and never replaces authored input.
     state.reset(FormInput(StringForm, {field: {"expr": "$device"}}))
-    assert mode.currentData() == "expr"
+    assert mode.isChecked()
     assert text.text() == "$device"
     assert state.input.data[field] == {"expr": "$device"}
     if field == "name":
-        mode.setCurrentIndex(mode.findData("direct"))
+        mode.trigger()
         text.setText("$device")
         assert state.input.data[field] == "$device"
         assert state.preview(env).values[(field,)] == "$device"
