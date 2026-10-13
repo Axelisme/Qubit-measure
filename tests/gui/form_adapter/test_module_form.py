@@ -7,6 +7,7 @@ import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
     ConfigBase,
+    ConstWaveformCfg,
     DirectReadoutCfg,
     Expr,
     FlatTopWaveformSpec,
@@ -90,6 +91,48 @@ def test_module_form_rejects_non_persistent_spec_roots(
 ) -> None:
     with pytest.raises(TypeError):
         form_adapter.module_form(spec_type)
+
+
+def waveform_env(length: float = 0.1) -> FormEnv:
+    """A captured waveform is detached from the source library document."""
+    return FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="1.0",
+                components={
+                    "Q": ComponentLibrary(
+                        waveforms={"flat": ConstWaveformCfg(length=length)}
+                    )
+                },
+            )
+        )
+    )
+
+
+def expect_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Read a schema or input object through the public JSON boundary."""
+    assert isinstance(value, dict)
+    return value
+
+
+def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    current = state.input.data["waveform"]
+
+    options = form.model.options(env).get(("waveform",), ())
+    matching = [option for option in options if option.matches(current)]
+    assert [option.label for option in matching] == ["Q.waveforms.flat"]
+    assert matching[0].value == current == "Q.waveforms.flat"
+    schema = expect_object(expect_object(state.input_schema(env)["properties"])["waveform"])
+    projected = schema.get("x-form-options")
+    assert isinstance(projected, list)
+    assert any(expect_object(item)["value"] == current for item in projected)
+    assert result_spec(form, state, env).waveform == "Q.waveforms.flat"
+    assert state.input.data["waveform"] == current
 
 
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
