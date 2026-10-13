@@ -24,7 +24,7 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from ._reload_source import InjectedCatalog
 from ._synthetic import Context, Plan, Tunables
 from ._window_scenarios import install_rpc_pause_workflow
-from ._window_support import RpcRequest
+from ._window_support import RpcRequest, form_editable
 
 
 def test_rpc_pending_status_and_stop(
@@ -46,7 +46,7 @@ def test_rpc_pending_status_and_stop(
     harness.complete_segment()
     assert not harness.gate.snapshot()
     assert not (entry.result_path / "workflows/pending-rpc").exists()
-    assert window.plan_panel.isEnabled()
+    assert form_editable(window.plan_panel)
 
 
 @pytest.mark.parametrize("method", ["workflow.pause", "workflow.resume"])
@@ -146,7 +146,7 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     assert isinstance(resumed, dict)
     assert resumed["run_id"] == "rpc-run"
     assert resumed["operation_id"] == token
-    assert not window.plan_panel.isEnabled()
+    assert not form_editable(window.plan_panel)
     assert (
         tuple((p.kind, p.origin_kind, p.note) for p in harness.gate.snapshot()) == lease
     )
@@ -163,7 +163,7 @@ def test_rpc_pause_resume_retains_token_lease_and_fixed_inputs(
     assert len(attempts) == 2 and attempts[0] == attempts[1]
     assert harness.background.error is None
     assert harness.handles.known_outcome(token) is not None
-    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+    assert not harness.gate.snapshot() and form_editable(window.plan_panel)
 
 
 @pytest.mark.parametrize("phase", ["pending", "paused"])
@@ -235,7 +235,7 @@ def test_rpc_old_target_does_not_change_current_run(
             "invalid_run_state",
             {"action": "resume", "lifecycle": "stopped"},
         )
-    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+    assert not harness.gate.snapshot() and form_editable(window.plan_panel)
 
 
 def test_rpc_running_stop_retains_lease_until_owner_delivery(
@@ -265,7 +265,7 @@ def test_rpc_running_stop_retains_lease_until_owner_delivery(
     catalog_source.install(step, window)
     assert isinstance(window.start("stop-rpc"), int)
     harness.background.execute()
-    assert harness.gate.snapshot() and not window.plan_panel.isEnabled()
+    assert harness.gate.snapshot() and not form_editable(window.plan_panel)
     assert receipts[0]["ok"] is True
     requested = receipts[0]["result"]
     assert isinstance(requested, dict) and isinstance(requested["status"], dict)
@@ -278,4 +278,4 @@ def test_rpc_running_stop_retains_lease_until_owner_delivery(
         terminal["status"]["lifecycle"] == "stopped"
         and terminal["operation_id"] is None
     )
-    assert not harness.gate.snapshot() and window.plan_panel.isEnabled()
+    assert not harness.gate.snapshot() and form_editable(window.plan_panel)

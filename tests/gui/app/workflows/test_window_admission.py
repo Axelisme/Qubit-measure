@@ -170,7 +170,9 @@ def test_replacement_accepted_progress_uses_current_host_and_form_capture(
     assert (
         isinstance(reply.values, dict) and sample_input(reply.values)["value"] == 43.0
     )
-    assert attempts == [20.0, 20.0, 41.0, 43.0]
+    # The default became 20.0 when the form opened; only the agent's
+    # expression reads the new capture's 41.0.
+    assert attempts == [20.0, 20.0, 20.0, 43.0]
     assert old.state.input.data == old_input and old.state.base.data == old_base
     status = window.controller.status()
     assert status is not None and status.lifecycle == "done"

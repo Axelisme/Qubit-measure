@@ -14,9 +14,11 @@ from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 class T1TunablesForm(FormModel):
     """User-facing T1 lifetime knobs; instances hold ordinary values only.
 
-    Fields control T1 generation/acceptance as
-    described in their Fields. defaults read only captured parameters; these
-    knobs need neither library nor device infos. Submission belongs to the host.
+    Fields control T1 generation/acceptance as described in their Fields.
+    guess_us has no static default: construction requires it, and its
+    initial value comes from defaults. defaults read only captured
+    parameters; these knobs need neither library nor device infos.
+    Submission belongs to the host.
     """
 
     reps: Annotated[int, Display(label="Averages")] = Field(
@@ -28,7 +30,7 @@ class T1TunablesForm(FormModel):
     guess_us: Annotated[
         float,
         Display(label="Initial guess", unit="µs", placeholder="general.ext.guess_us"),
-    ] = Field(default=20.0, gt=0, description="Initial lifetime in µs")
+    ] = Field(gt=0, description="Initial lifetime in µs")
     sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=5.0, gt=0, description="Sweep end divided by lifetime guess"
     )
@@ -46,15 +48,17 @@ class T1TunablesForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Build defaults, retaining a captured guess expression for initial input.
+        """Build defaults, deriving the initial guess from the captured point.
 
         When previous is empty and parameters contain general.ext.guess_us
-        (even explicit null),
-        retain that path as an expression rather than copying its value. With
-        no capture or an absent leaf, keep the provisional ordinary 20 us.
-        Invalid referenced values remain result errors, not a fallback. Reads
-        use the fixed point only, never materialization, devices or I/O.
-        Unavailable captured sources propagate their source error.
+        (even explicit null), declare that path as an expression default;
+        default_input evaluates it into a direct value. A null, non-numeric
+        or non-positive leaf leaves guess_us unfilled, so result reports
+        only its "Field required" instead of silently using 20 us. Otherwise
+        (no capture, an absent leaf, or non-empty previous) set an explicit
+        ordinary 20 us. Reads use the fixed point only, never
+        materialization, devices or I/O. Unavailable captured sources
+        propagate their source error.
         """
         data = super().defaults(env, previous)
         if (
@@ -63,6 +67,8 @@ class T1TunablesForm(FormModel):
             and env.parameters.lookup_point("general.ext.guess_us").present
         ):
             data["guess_us"] = {"expr": "general.ext.guess_us"}
+        else:
+            data["guess_us"] = 20.0
         return data
 
     def to_cfg(self) -> T1Tunables:

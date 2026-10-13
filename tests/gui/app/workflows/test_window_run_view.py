@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from time import monotonic
 
 import pytest
-from qtpy.QtCore import QEventLoop, QPoint, QRect, QTimer
+from qtpy.QtCore import QEventLoop, QPoint, QRect, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -26,11 +27,14 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
+from tests.gui._user_input import key_click, type_text
+
 from ._window_support import (
     FigurePoint,
     WindowSession,
     bind_point,
     expand_all,
+    form_editable,
     install_soc,
 )
 
@@ -161,7 +165,7 @@ def see(window: WorkflowWindow[None]) -> Seen:
         pause=button(window, "pause").isEnabled(),
         resume=button(window, "resume").isEnabled(),
         start=button(window, "start").isEnabled(),
-        plan_editable=window.plan_panel.isEnabled(),
+        plan_editable=form_editable(window.plan_panel),
         plan_note=note_shown(window, "plan", PLAN_TAB),
         tunables_title=tabs(window).tabText(TUNABLES_TAB),
         tunables_note=note_shown(window, "tunables", TUNABLES_TAB),
@@ -216,7 +220,7 @@ def assert_start_tunables(window: WorkflowWindow[None]) -> None:
     seen = see(window)
     assert seen.tunables_title == "Tunables"
     assert shown_forms(window, TUNABLES_TAB) == [window.tunables_panel]
-    assert window.tunables_panel.isEnabled() and seen.plan_editable
+    assert form_editable(window.tunables_panel) and seen.plan_editable
     assert not seen.plan_note and not seen.tunables_note and not seen.banner
     assert seen.start and not seen.stop and not seen.pause and not seen.resume
 
@@ -284,6 +288,85 @@ def test_running_counts_commits_and_shows_only_the_live_tunables(
     assert window.tuning_panel is not None and not window.tuning_panel.isVisibleTo(
         window
     )
+
+
+@dataclass(frozen=True)
+class Readable:
+    """How the Start forms answered a user while a run was live."""
+
+    plan_enabled: bool
+    knobs_enabled: bool
+    plan_editable: bool
+    knobs_editable: bool
+    folded_before: bool
+    unfolded: bool
+    input_kept: bool
+
+
+def model_fold(panel: QWidget, path: str) -> QPushButton:
+    """The Expand/Collapse button in the header of the model row at path."""
+    row = child(panel, QLabel, f"form.value.{path}").parentWidget()
+    assert row is not None
+    (fold,) = [
+        button
+        for button in row.findChildren(QPushButton)
+        if button.parentWidget() is row and button.text() in ("Expand", "Collapse")
+    ]
+    return fold
+
+
+def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    window = bound(window_session, qapp)
+    tabs(window).setCurrentIndex(PLAN_TAB)
+    plan, knobs = window.plan_panel, window.tunables_panel
+    seen: list[Readable] = []
+
+    def hook(point: int) -> None:
+        if point != 1:
+            return
+        wait_for(qapp, lambda: badge(window) == "running")
+        before = (plan.state.input.data, knobs.state.input.data)
+        type_text(child(plan, QLineEdit, "form.input.count"), "9")
+        alpha = child(plan, QLineEdit, "form.input.first.alpha")
+        folded_before = not alpha.isVisibleTo(plan)
+        model_fold(plan, "first").click()
+        qapp.processEvents()
+        seen.append(
+            Readable(
+                plan_enabled=plan.isEnabled(),
+                knobs_enabled=knobs.isEnabled(),
+                plan_editable=form_editable(plan),
+                knobs_editable=form_editable(knobs),
+                folded_before=folded_before,
+                unfolded=alpha.isVisibleTo(plan),
+                input_kept=(plan.state.input.data, knobs.state.input.data) == before,
+            )
+        )
+
+    window_session.during_point = hook
+    assert isinstance(window.start(RUN_ID), int)
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+
+    assert seen == [
+        Readable(
+            plan_enabled=True,
+            knobs_enabled=True,
+            plan_editable=False,
+            knobs_editable=False,
+            folded_before=True,
+            unfolded=True,
+            input_kept=True,
+        )
+    ]
+    assert badge(window) == "done"
+    assert form_editable(plan) and form_editable(knobs)
+    count = child(plan, QLineEdit, "form.input.count")
+    key_click(count, Qt.Key.Key_End)
+    type_text(count, "9")
+    assert plan.state.input.data["count"] == int(count.text())
 
 
 def test_pause_switches_to_live_tunables_and_banner_until_resume(

@@ -36,6 +36,19 @@ def copy_object(value: object) -> dict[str, JsonValue]:
     return copied
 
 
+def expr_text(value: JsonValue) -> str | None:
+    """Return the text of an Expr envelope, exactly {"expr": <str>}, else None.
+
+    Any other value, including an object with extra keys or non-string
+    text, is not an Expr envelope and returns None.
+    """
+    if isinstance(value, dict) and set(value) == {"expr"}:
+        text = value["expr"]
+        if isinstance(text, str):
+            return text
+    return None
+
+
 def default_json(value: object) -> JsonValue:
     """Encode an ordinary value as finite JSON, including models, tuples and complex."""
     if isinstance(value, BaseModel):

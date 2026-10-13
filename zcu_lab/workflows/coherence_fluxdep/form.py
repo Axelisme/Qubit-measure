@@ -41,18 +41,18 @@ class CoherenceTunablesForm(FormModel):
     """Ordinary captured policies; expressions remain in the host FormInput.
 
     cal controls shared calibration. t1, t2ramsey and t2echo each supply their
-    own averaging/initial guess/timing/acceptance inputs. Ramsey detune_ratio
-    defaults to .05 fringes/step and is validated even when Ramsey is disabled.
-    Defaults use the existing nested form hooks and fixed source capture.
-    This form does not capture sources, submit revisions or control hardware.
+    own averaging/initial guess/timing/acceptance inputs. t1 has no static
+    default because T1's guess_us has none; defaults supplies it, so direct
+    construction must pass t1. Ramsey detune_ratio defaults to .05
+    fringes/step and is validated even when Ramsey is disabled. Defaults use
+    the existing nested form hooks and fixed source capture. This form does
+    not capture sources, submit revisions or control hardware.
     """
 
     cal: Annotated[
         CalibrationTunablesForm, Display(label="Calibration", collapsed=True)
     ] = Field(default_factory=CalibrationTunablesForm)
-    t1: Annotated[T1TunablesForm, Display(label="T1", collapsed=True)] = Field(
-        default_factory=T1TunablesForm
-    )
+    t1: Annotated[T1TunablesForm, Display(label="T1", collapsed=True)]
     t2ramsey: Annotated[
         T2RamseyTunablesForm, Display(label="Ramsey", collapsed=True)
     ] = Field(default_factory=T2RamseyTunablesForm)
@@ -64,10 +64,13 @@ class CoherenceTunablesForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Retain T1's captured initial-guess expression at its new nested path.
+        """Fill t1 from T1TunablesForm.defaults, including its initial guess.
 
-        Other lifetime defaults remain native ordinary values. Existing input
-        overlays remain the host's responsibility; no source is recaptured.
+        t1 has no static default, so this is its only default source; the
+        T1 initial guess follows T1TunablesForm.defaults (captured leaf
+        evaluated into a value, or 20 us without capture/leaf). cal, t2ramsey
+        and t2echo keep their static defaults. Existing input overlays remain
+        the host's responsibility; no source is recaptured.
         """
         data = super().defaults(env, previous)
         prior_t1 = previous.get("t1", {})
@@ -143,14 +146,16 @@ class CoherencePlanForm(FormModel):
         """Prefill the captured device name and x180 pi estimate.
 
         Resolve $flux_dev only for new defaults and keep the name literal.
-        Missing captures or unbound aliases retain the expression error input
-        for public preview/Start to report Invalid, without a device fallback. Device membership is checked only when used.
+        Missing captures or unbound aliases keep the $flux_dev expression
+        default, which default_input cannot evaluate, so flux_dev stays
+        unfilled and required, without a device fallback. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
-        the fixed alias capture and retain its concrete path as an expression
-        if readable and non-null. No capture, absent/null values or
-        unreadable paths leave the field unfilled for explicit user input. Other
-        modules and simulator constants are never consulted. Invalid readable
-        values produce ordinary field validation errors, not a fallback.
+        the fixed alias capture and declare its concrete path as an expression
+        default if readable and non-null; default_input stores its value. No
+        capture, absent/null values or unreadable paths leave the field
+        unfilled for explicit user input. Other modules and simulator constants
+        are never consulted. Invalid readable values leave it unfilled too,
+        not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
         data = calibration_defaults(super().defaults(env, previous), env, previous)
@@ -161,7 +166,7 @@ class CoherencePlanForm(FormModel):
         except RoleResolutionError as error:
             if error.reason not in {"Alias is not bound", "Unknown alias"}:
                 raise
-            # Keep the existing expression error input; the editor names the alias.
+            # Keep the $flux_dev expression default; flux_dev then stays unfilled.
         return data
 
     @classmethod

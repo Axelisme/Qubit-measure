@@ -177,16 +177,13 @@ def test_cfg_notification_rejects_app_lifetime_and_run(application: Fixture) -> 
     assert application.ctrl.get_running_tab_id() is None
 
 
-@pytest.mark.parametrize("command", ["edit", "reset", "load", "close"])
+@pytest.mark.parametrize("command", ["edit", "reset", "close"])
 def test_run_registration_notification_blocks_tab_mutation(
     application: Fixture, qapp: QApplication, command: str
 ) -> None:
     tab_id = application.ctrl.new_tab("fake")
     cfg = application.ctrl.cfg_resources.lookup(tab_id)
     original = cfg.input.data
-    current = cfg.result()
-    if isinstance(current, FormErrors):
-        pytest.fail(str(current.messages))
     outcomes: list[str] = []
 
     def during_registration(_event: GateChangedPayload) -> None:
@@ -198,8 +195,6 @@ def test_run_registration_notification_blocks_tab_mutation(
                 cfg.write({("reps",): 9})
             elif command == "reset":
                 cfg.reset()
-            elif command == "load":
-                cfg.load_cfg(current)
             else:
                 application.ctrl.close_tab(tab_id)
         except CfgPreconditionError as exc:
@@ -306,12 +301,14 @@ def global_sources(
         assert component_registry.kinds() == before
 
 
-def test_missing_module_slot_keeps_tab_invalid_and_blocks_run(
+def test_authored_missing_module_expression_blocks_run(
     global_sources: tuple[AppServices, State],
 ) -> None:
     services, state = global_sources
     tab_id = services.tab.new_tab("missing-slot")
     cfg = state.get_tab(tab_id).cfg
+    assert "gain" not in cfg.input.data
+    cfg.write({("gain",): {"expr": "$qubit.module.x180.gain"}})
     result = cfg.result()
     assert isinstance(result, FormErrors)
     assert ("gain",) in result.messages
@@ -342,7 +339,8 @@ def test_reset_aliases_capture_once_and_run_rejects_live_override(
     services.workspace.close_tab(tab_id)
     assert services.workspace.apply_session(persisted).restored_tabs == 1
     reopened = state.get_tab(state.list_tab_ids()[0]).cfg
-    assert reopened.accept().values["gain"] == 10.0
+    assert reopened.input.data["gain"] == 20.0
+    assert reopened.accept().values["gain"] == 20.0
 
 
 @pytest.mark.parametrize("aliases", [None, {}], ids=["none", "empty"])
@@ -386,7 +384,7 @@ def test_existing_tab_and_run_keep_point_until_reset(
     assert first.parameters.value("Q1.gain") == 10.0
 
 
-def test_dollar_cfg_keeps_alias_capture_and_authored_input_until_reset(
+def test_dollar_defaults_materialize_fixed_alias_capture_until_reset(
     global_sources: tuple[AppServices, State],
 ) -> None:
     services, state = global_sources
@@ -394,10 +392,10 @@ def test_dollar_cfg_keeps_alias_capture_and_authored_input_until_reset(
     cfg = state.get_tab(tab_id).cfg
     services.context.set_alias_rows((AliasRow("qubit", "Q2"), AliasRow("custom", "Q1")))
     assert cfg.accept().values["gain"] == 10.0
-    assert cfg.input.data["gain"] == {"expr": "$qubit.gain"}
+    assert cfg.input.data["gain"] == 10.0
     cfg.reset()
     assert cfg.accept().values["gain"] == 20.0
-    assert cfg.input.data["gain"] == {"expr": "$qubit.gain"}
+    assert cfg.input.data["gain"] == 20.0
 
 
 @pytest.mark.parametrize("target,qubit", [(None, "Q1"), ("Q2", "Q2")])
@@ -461,7 +459,10 @@ def test_unbound_alias_reports_named_invalid_input(
     services, state = global_sources
     services.context.set_alias_rows((AliasRow("qubit", ""), AliasRow("custom", "Q2")))
     tab_id = services.tab.new_tab("global-source")
-    result = state.get_tab(tab_id).cfg.result()
+    cfg = state.get_tab(tab_id).cfg
+    assert "gain" not in cfg.input.data
+    cfg.write({("gain",): {"expr": "$qubit.gain"}})
+    result = cfg.result()
     assert isinstance(result, FormErrors)
     assert "qubit" in result.messages[("gain",)]
     with pytest.raises(CfgPreconditionError):

@@ -13,15 +13,26 @@ from pydantic_core import PydanticOmit, core_schema
 from ._json import copy_object, default_json
 from ._sources import local_choices
 from ._structure import (
+    accepts_expression,
     alternatives,
     branch_tags,
     discriminator,
     fixed_tag,
     key_or_inline,
+    library_key,
     model_types,
     schema_branch_model,
 )
-from .model import Display, FormEnv, FormModel, FormPath, ModuleInput, RangeInput
+from .model import (
+    Display,
+    FormEnv,
+    FormModel,
+    FormPath,
+    ModuleInline,
+    ModuleInput,
+    ModuleRef,
+    RangeInput,
+)
 
 
 class _InputJsonSchema(GenerateJsonSchema):
@@ -84,6 +95,14 @@ _COMPLEX: dict[str, JsonValue] = {
 
 
 def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Copy schema without required lists, with an Expr alternative per text node.
+
+    A text node is an integer, number or string node without enum or const:
+    Literal and Enum values are picked, not typed. Boolean nodes get none.
+    This places the alternative by node shape only; _decorate then removes
+    it from each field that accepts_expression, the core's one text-field
+    rule, does not accept, and from choice leaves and library keys.
+    """
     node = copy_object(schema)
     node.pop("required", None)
     # Only schema positions are traversed: property names and defaults are data.
@@ -114,26 +133,37 @@ def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
                 _partial(branch) if isinstance(branch, dict) else branch
                 for branch in branches
             ]
-    if node.get("type") in ("integer", "number", "string"):
+    if (
+        node.get("type") in ("integer", "number", "string")
+        and "enum" not in node
+        and "const" not in node
+    ):
         return {"anyOf": [node, copy_object(_EXPR)]}
     return node
 
 
 def _without_expr(node: dict[str, JsonValue]) -> None:
-    """Collapse an {anyOf: [ordinary, Expr]} node to its ordinary branch in place.
+    """Drop the Expr alternatives of node's anyOf in place, nested anyOf included.
 
-    Outer metadata is kept. Other nodes, including ones with several ordinary
-    branches, are left unchanged.
+    When one ordinary alternative remains, node collapses to it and keeps its
+    outer metadata; a nested anyOf, such as the inner node of a nullable
+    leaf, collapses the same way. Model properties and container items are
+    not entered. A node without anyOf is unchanged.
     """
     branches = node.get("anyOf")
     if not isinstance(branches, list):
         return
+    for branch in branches:
+        if isinstance(branch, dict):
+            _without_expr(branch)
     ordinary = [branch for branch in branches if branch != _EXPR]
     if len(ordinary) == 1 and isinstance(ordinary[0], dict):
         metadata = {key: value for key, value in node.items() if key != "anyOf"}
         node.clear()
         node.update(ordinary[0])
         node.update(metadata)
+    else:
+        node["anyOf"] = ordinary
 
 
 def _resolve(
@@ -191,6 +221,8 @@ def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
             # Only declared: forms without hidden fields keep their schema.
             if metadata.hidden:
                 target["hidden"] = True
+            if metadata.group is not None:
+                target["x-form-group"] = metadata.group
     for child_info, child_target in _container_nodes(info, target):
         _field_metadata(child_info, child_target)
 
@@ -344,13 +376,6 @@ def _child_nodes(
             node["oneOf"] = [variant for _, variant in tagged]
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
             for tags, variant in tagged:
-                properties = variant.get("properties")
-                selector = (
-                    properties.get(tag_key) if isinstance(properties, dict) else None
-                )
-                # Selectors determine shape before value evaluation.
-                if isinstance(selector, dict):
-                    _without_expr(selector)
                 children.append((schema_branch_model(info, tags), variant))
             return tuple(children)
         return tuple(
@@ -370,10 +395,12 @@ def _child_nodes(
 def _apply_choices(
     target: dict[str, JsonValue], options: tuple[JsonValue, ...]
 ) -> None:
+    """Restrict a choice leaf's node to options; it takes no Expr envelope."""
+    _without_expr(target)
     variants = target.get("anyOf")
     if isinstance(variants, list):
         for variant in variants:
-            if isinstance(variant, dict) and variant != _EXPR:
+            if isinstance(variant, dict):
                 _apply_choices(variant, options)
     else:
         _enum(target, options)
@@ -416,23 +443,68 @@ def _library_specs(env: FormEnv) -> tuple[tuple[str, BaseModel], ...] | None:
 def _key_branch(
     info: FieldInfo, target: dict[str, JsonValue], projection: _Projection
 ) -> None:
-    """Make a str-or-model field's string branch a plain library key.
+    """List a str-or-model field's offered library keys on its string branch.
 
-    The JSON type selects key or inline, so the key has no Expr envelope: an
-    object selects the inline model. With a captured library, the branch's
-    x-form-library-keys lists the keys whose Spec is one of the field's
-    models, as suggestions; any string remains acceptable input.
+    The branch is already a plain key without Expr (see accepts_expression).
+    With a captured library, the branch's x-form-library-keys lists the keys
+    whose Spec is one of the field's models, as suggestions; any string
+    remains acceptable input.
     """
     variants = target.get("anyOf")
     models = model_types(info.annotation)
     for variant in variants if isinstance(variants, list) else ():
         if isinstance(variant, dict):
-            _without_expr(variant)
             specs = projection.library_specs
             if variant.get("type") == "string" and specs is not None:
                 variant["x-form-library-keys"] = [
                     key for key, spec in specs if isinstance(spec, models)
                 ]
+
+
+def _module_input(info: FieldInfo) -> bool:
+    """Whether info is a ModuleInput field: exactly ModuleRef | ModuleInline.
+
+    Like a str-or-model field it is a library key or an inline model, but its
+    kind tag selects the two: ref with a name key, or inline with a module.
+    A nullable ModuleInput is not included and stays a plain tagged union.
+    """
+    return set(alternatives(info.annotation)) == {ModuleRef, ModuleInline}
+
+
+def _ref_keys(
+    target: dict[str, JsonValue],
+    projection: _Projection,
+    options: tuple[JsonValue, ...] | None,
+) -> None:
+    """List a ModuleRef name's offered library keys in x-form-library-keys.
+
+    target is the name property node. With a captured library the list is
+    every library module key, because an inline ModuleSpec accepts every
+    module type; options, the name's declared choices or None, keeps only
+    the keys among them, so each listed key passes both the choices and the
+    library check. Without a captured library the node gets no list.
+    """
+    library = projection.env.library
+    if library is None:
+        return
+    target["x-form-library-keys"] = [
+        key for key in library.module_keys() if options is None or key in options
+    ]
+
+
+def _expression_rule(
+    info: FieldInfo, target: dict[str, JsonValue], path: FormPath
+) -> None:
+    """Keep target's Expr alternatives only where accepts_expression allows.
+
+    target is info's schema node at field path; whole-container items are
+    checked against their item annotations too. A union of text and picked
+    values raises ValueError naming path.
+    """
+    if not accepts_expression(info.annotation, path):
+        _without_expr(target)
+    for item_info, item_target in _container_nodes(info, target):
+        _expression_rule(item_info, item_target, path)
 
 
 def _decorate(
@@ -441,7 +513,9 @@ def _decorate(
     projection: _Projection,
     seen: set[type[BaseModel]],
     inherited: Mapping[FormPath, tuple[JsonValue, ...]],
+    prefix: FormPath,
 ) -> None:
+    """Decorate model's schema node in place; prefix is model's field path."""
     if model in seen:
         return
     # Track only this ancestry; reused sibling occurrences have distinct choices.
@@ -457,6 +531,8 @@ def _decorate(
         if not isinstance(target, dict):
             continue
         _inline_ref(target, root)
+        path = (*prefix, name)
+        _expression_rule(info, target, path)
         _field_metadata(info, target)
         models = model_types(info.annotation)
         if models and _label(info) is None:
@@ -466,15 +542,21 @@ def _decorate(
             # Core owns the str-or-model rule; views read this marker only.
             target["x-form-key-or-inline"] = True
             _key_branch(info, target, projection)
+        elif _module_input(info):
+            target["x-form-key-or-inline"] = True
+        if library_key(model, name):
+            # A library key is a plain string, like a str-or-model key.
+            _without_expr(target)
+            _ref_keys(target, projection, options.get((name,)))
         child_options = {
-            path[1:]: values
-            for path, values in options.items()
-            if len(path) > 1 and path[0] == name
+            leaf[1:]: values
+            for leaf, values in options.items()
+            if len(leaf) > 1 and leaf[0] == name
         }
         # Without a union selector, a branch model's tag has only one value.
         fixed = bool(models) and discriminator(info) is None
         for child, variant in _child_nodes(info, target, root):
-            _decorate(child, variant, projection, seen, child_options)
+            _decorate(child, variant, projection, seen, child_options, path)
             if fixed:
                 _hide_fixed_tag(child, variant, projection.branch_tags)
         values = options.get((name,))
@@ -488,5 +570,5 @@ def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     root = copy_object(_partial(raw))
     tags = branch_tags((model, ModuleInput, RangeInput))
     projection = _Projection(root, env, _library_specs(env), tags)
-    _decorate(model, root, projection, set(), {})
+    _decorate(model, root, projection, set(), {}, ())
     return root
