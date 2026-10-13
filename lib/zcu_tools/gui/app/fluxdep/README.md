@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，Spectra 階段列
+**Last updated:** 2026-10-14，Spectra 階段列、Show 工具列與色弱配色
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -83,7 +83,8 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   （`ui/interactive/`）、`load_dialog`/`export_dialog`。共用層（與 dispersive）：
   `LoadSpectrumDialog` subclass `gui/widgets/load_dialog.LoadDataDialog`（共用 file
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
-  回 `LoadRequest`）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
+  回 `LoadRequest`；`_draw_preview_overlay` 在選了 Inherit from 時畫被繼承譜的 half／integer 線，
+  線在 transpose 後的 device 軸上，預覽範圍不變）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
   各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；OneTone 背景正規化
   `onetone_background` 在 `analysis.fluxdep.processing`，result_preview 與每個 OneTone 背景
   （定線、採點、PNG）都呼叫它；放在 analysis 層是因為 `TwoLinePicker` 也要用，而 analysis 不能 import
@@ -221,8 +222,11 @@ Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 
 Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
 ### 配色
-互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
-（vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。定線圖的 renderer 是共用的
+互動圖背景一律 `gray_r`（白底、高值=黑），點落在高值共振線上對比最強
+（vs viridis 高值=黃，點不明顯）。點的顏色共用 `plotting.fluxdep.palette`（Okabe–Ito，紅綠色弱也能分辨）：
+Kept／Current 橘、Added 藍色空心圓、Removed 紫色 ×、Dropped 灰；Show 與唯讀 Filter 圖的選中點也用 Kept 色。
+half／integer 線在 picker、ResultPreview、Add spectrum 預覽與譜 PNG 都用定線 picker 的紅／藍。
+選點筆刷在拖曳中與 stroke 預覽都畫成沿整條路徑的半透明帶。對齊 notebook plotly 版的 Greys。定線圖的 renderer 是共用的
 `analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines 與 MCP 的定線 PNG 同樣是 `gray_r`。
 每個 OneTone 背景（採點 picker、ResultPreview、OneTone 定線 picker、MCP 定線／採點／譜 PNG）都用
 `onetone_background`，共振 dip 是白底上的深色線。TwoTone 照舊（定線用對齊投影，譜 PNG 用 `|signals|`）。
@@ -345,7 +349,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   - **Search**：搜尋表單（`Search DB` 是 fit 的 `search_db`，與專案的 Data root 分開；bounds preset 下拉
     `general`/`integer`/`all` 填三組 bound spinbox，下拉永遠顯示與 spinbox 數值完全相符的 preset，數值被改過時顯示 `custom`——
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset，各列以畫出的頻率命名）+
-    右側診斷圖。輸入的 transitions 需要而 r_f／sample_f 留空時，欄位下方直接標示，Search 同時停用：
+    右側診斷圖。r_f／sample_f 留空時顯示半透明的 `(unset)`，不像已填的值。輸入的 transitions 需要而 r_f／sample_f 留空時，欄位下方直接標示，Search 同時停用：
     那次 search 必然被拒，而它的參數替換會清掉既有結果；送出的 search 仍由 Controller 驗證。search 前擋空/不存在 db 路徑。
     DB chooser 用非阻塞 `open()` 的非 native chooser；開著時 owner 取得回 `local_busy`。
     Search 的錯誤（含 search 失敗）寫在 Search 狀態列，不跳 modal；params export 的長路徑不參與 panel 水平最小寬度。

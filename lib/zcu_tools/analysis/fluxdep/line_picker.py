@@ -31,6 +31,11 @@ from zcu_tools.analysis.fluxdep.processing import (
 
 _LOSS_REFRESH_MS = 120
 
+# Half and integer flux line colours. Every fluxdep view that marks these
+# positions (pickers, previews, PNGs) uses them, so the lines read the same.
+HALF_FLUX_COLOR = "red"
+INTEGER_FLUX_COLOR = "blue"
+
 
 def _fixed_decimals(dev_values: NDArray[np.float64]) -> int:
     """Decimal places that still resolve one device-axis step in fixed point."""
@@ -151,10 +156,10 @@ class TwoLinePicker:
         self._ax_main.set_ylabel("Frequency (GHz)")
 
         self._half_line = self._ax_main.axvline(
-            x=self.flux_half, color="r", linestyle="--"
+            x=self.flux_half, color=HALF_FLUX_COLOR, linestyle="--"
         )
         self._int_line = self._ax_main.axvline(
-            x=self.flux_int, color="b", linestyle="--"
+            x=self.flux_int, color=INTEGER_FLUX_COLOR, linestyle="--"
         )
 
         self._loss_im = self._ax_loss.imshow(
@@ -169,7 +174,9 @@ class TwoLinePicker:
         self._ax_loss.set_ylabel("Frequency (GHz)")
         self._ax_loss.set_title("mirror loss: -")
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
-        self._loss_dot = self._ax_loss.plot([self.flux_half], [center_y], "ro")[0]
+        self._loss_dot = self._ax_loss.plot(
+            [self.flux_half], [center_y], "o", color=HALF_FLUX_COLOR
+        )[0]
 
         self._figure.tight_layout()
 
@@ -203,7 +210,9 @@ class TwoLinePicker:
         self._ax_loss.set_title(f"mirror loss: {mean_loss:.4f}")
         self._loss_dot.set_xdata([x])
         self._loss_dot.set_ydata([y])
-        self._loss_dot.set_color("r" if self._picked is self._half_line else "b")
+        self._loss_dot.set_color(
+            HALF_FLUX_COLOR if self._picked is self._half_line else INTEGER_FLUX_COLOR
+        )
 
     def _make_loss_timer(self) -> Any:
         canvas = getattr(self._figure, "canvas", None)

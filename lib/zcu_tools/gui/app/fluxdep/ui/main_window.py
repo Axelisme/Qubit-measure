@@ -744,7 +744,10 @@ class MainWindow(QMainWindow):
         from .paths import raw_spectrum_dir
 
         dialog = LoadSpectrumDialog(
-            self._ctrl.list_spectrums(),
+            {
+                name: (entry.flux_half, entry.flux_int)
+                for name, entry in self._ctrl.state.spectrums.items()
+            },
             parent=self,
             start_dir=raw_spectrum_dir(self._ctrl.state.project),
         )

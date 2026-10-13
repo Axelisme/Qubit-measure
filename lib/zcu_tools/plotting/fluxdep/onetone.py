@@ -6,12 +6,18 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
+from zcu_tools.analysis.fluxdep.line_picker import (
+    HALF_FLUX_COLOR,
+    INTEGER_FLUX_COLOR,
+)
 from zcu_tools.analysis.fluxdep.onetone import (
     OneToneInputs,
     OneTonePickState,
     analyze_onetone_pick,
 )
 from zcu_tools.analysis.fluxdep.processing import onetone_background
+
+from .palette import KEPT_COLOR
 
 
 class OneTonePickPlot:
@@ -72,13 +78,17 @@ class OneTonePickPlot:
             axes.grid(True, which="major", alpha=0.35)
             axes.grid(True, which="minor", alpha=0.15)
             if flux_half is not None:
-                axes.axvline(flux_half, color="red", linestyle="--", linewidth=1)
+                axes.axvline(
+                    flux_half, color=HALF_FLUX_COLOR, linestyle="--", linewidth=1
+                )
             if flux_int is not None:
-                axes.axvline(flux_int, color="blue", linestyle="--", linewidth=1)
+                axes.axvline(
+                    flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1
+                )
         ax_image.set_ylabel("Frequency (GHz)")
         ax_curve.set_ylabel("Normalized amplitude")
-        self._scatter_image = ax_image.scatter([], [], color="red", s=30, zorder=5)
-        self._scatter_curve = ax_curve.scatter([], [], color="red", s=30, zorder=5)
+        self._scatter_image = ax_image.scatter([], [], color=KEPT_COLOR, s=30, zorder=5)
+        self._scatter_curve = ax_curve.scatter([], [], color=KEPT_COLOR, s=30, zorder=5)
         figure.tight_layout()
 
     def show_state(self, state: OneTonePickState) -> None:

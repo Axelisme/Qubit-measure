@@ -84,9 +84,6 @@ class FindPointsWidget(InteractiveMplWidget):
         self._gesture_width = 0.0
         self._gesture_mode: BrushMode = "select"
         self._plot = TwoTonePickPlot(self.figure, context.plugin.inputs)
-        (self._pointer,) = self.figure.axes[0].plot(
-            [], [], linestyle="--", linewidth=1, color="#007e91", zorder=7
-        )
         self._runner = BackgroundRunner(self) if submit_preview is None else None
         self._submit_preview = (
             submit_preview if submit_preview is not None else self._submit_owned
@@ -474,9 +471,7 @@ class FindPointsWidget(InteractiveMplWidget):
         return BrushPoint(float(event.xdata), float(event.ydata))
 
     def _render_pointer(self) -> None:
-        self._pointer.set_data(
-            [p.x for p in self._vertices], [p.y for p in self._vertices]
-        )
+        self._plot.show_pointer(self._vertices, self._gesture_width)
         self.redraw()
 
     def _request_finish(self) -> None:

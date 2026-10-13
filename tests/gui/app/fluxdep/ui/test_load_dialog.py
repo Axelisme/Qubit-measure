@@ -9,7 +9,7 @@ from zcu_tools.gui.app.fluxdep.ui.load_dialog import LoadSpectrumDialog
 
 @pytest.fixture
 def dialog(qapp):
-    d = LoadSpectrumDialog(loaded_names=["existing.hdf5"])
+    d = LoadSpectrumDialog({"existing.hdf5": (0.5, 1.5)})
     yield d
     d.deleteLater()
 

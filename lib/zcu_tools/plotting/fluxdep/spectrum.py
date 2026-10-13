@@ -4,8 +4,14 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
+from zcu_tools.analysis.fluxdep.line_picker import (
+    HALF_FLUX_COLOR,
+    INTEGER_FLUX_COLOR,
+)
 from zcu_tools.analysis.fluxdep.models import PointsData, SpectrumData
 from zcu_tools.analysis.fluxdep.processing import onetone_background
+
+from .palette import KEPT_COLOR
 
 
 def make_spectrum_figure(
@@ -46,11 +52,11 @@ def make_spectrum_figure(
             vmax=vmax,
         )
     if alignment is not None:
-        axes.axvline(alignment[0], color="tab:blue", label="half flux")
-        axes.axvline(alignment[1], color="tab:orange", label="integer flux")
+        axes.axvline(alignment[0], color=HALF_FLUX_COLOR, label="half flux")
+        axes.axvline(alignment[1], color=INTEGER_FLUX_COLOR, label="integer flux")
         axes.legend()
     if points["freqs"].size:
-        axes.scatter(points["dev_values"], points["freqs"], color="red", s=12)
+        axes.scatter(points["dev_values"], points["freqs"], color=KEPT_COLOR, s=12)
     axes.set_xlabel("Device value (native)")
     axes.set_ylabel("Frequency (GHz)")
     figure.tight_layout()

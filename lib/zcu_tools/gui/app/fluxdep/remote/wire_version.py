@@ -35,4 +35,8 @@ WIRE_VERSION = 8
 # alignment preserved on presentation-only draft edits.
 # 13: Spectra stage bar (1 Align -> 2 Sample) replaces the result preview's
 # next-step buttons; a list pick shows the published preview first.
-GUI_VERSION = 13
+# 14: Show display controls follow control authority and a Show zoom toolbar;
+# colour-blind-safe shared point palette, brush band along the whole stroke,
+# picker titles refit on update, faded (unset) frequencies, inherited
+# half/integer lines on the Add spectrum preview.
+GUI_VERSION = 14

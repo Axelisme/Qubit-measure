@@ -16,7 +16,12 @@ from zcu_tools.analysis.fluxdep import (
     contrast_limits,
     onetone_background,
 )
+from zcu_tools.analysis.fluxdep.line_picker import (
+    HALF_FLUX_COLOR,
+    INTEGER_FLUX_COLOR,
+)
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+from zcu_tools.plotting.fluxdep.palette import KEPT_COLOR
 
 from .base import InteractiveMplWidget
 
@@ -48,7 +53,7 @@ class ResultPreviewWidget(InteractiveMplWidget):
             origin="lower",
             interpolation="none",
             extent=(dev[0], dev[-1], freqs[0], freqs[-1]),
-            cmap="gray_r",  # white→black; red points stand out on the dark feature
+            cmap="gray_r",  # white→black; orange points stand out on the dark feature
             vmin=vmin,
             vmax=vmax,
         )
@@ -57,14 +62,18 @@ class ResultPreviewWidget(InteractiveMplWidget):
             ax.scatter(
                 pts["dev_values"],
                 pts["freqs"],
-                color="red",
+                color=KEPT_COLOR,
                 s=18,
                 edgecolors="white",
                 linewidths=0.3,
             )
         if entry.aligned:
-            ax.axvline(entry.flux_half, color="red", linestyle="--", linewidth=1)
-            ax.axvline(entry.flux_int, color="blue", linestyle="--", linewidth=1)
+            ax.axvline(
+                entry.flux_half, color=HALF_FLUX_COLOR, linestyle="--", linewidth=1
+            )
+            ax.axvline(
+                entry.flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1
+            )
         ax.set_xlabel("Device value")
         ax.set_ylabel("Frequency (GHz)")
         ax.set_title(f"{entry.name}  ({pts['dev_values'].size} points)")
