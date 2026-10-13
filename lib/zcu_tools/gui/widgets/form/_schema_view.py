@@ -33,7 +33,9 @@ class FieldView:
     is only a placeholder. key_or_inline marks a field the schema marks
     x-form-key-or-inline (an untagged str-or-model field): its row offers Key
     and Inline modes, kind is key for a string or unfilled value and model
-    for an object. children are current model rows,
+    for an object. group is the schema's x-form-group name: the editor draws
+    the row in that foldable group of its model level, or ungrouped for
+    None. children are current model rows,
     never container keys/indexes. Only kind=model can have children.
     """
 
@@ -55,6 +57,7 @@ class FieldView:
     key_or_inline: bool
     decimals: int | None
     fixed: bool
+    group: str | None
     children: tuple[FieldView, ...] = ()
 
 
@@ -255,6 +258,7 @@ def _field(
         key_or_inline=split is not None,
         decimals=_decimals(metadata),
         fixed=fixed,
+        group=_text(schema, "x-form-group") or None,
     )
     if kind != "model" or not field.active:
         return field

@@ -19,7 +19,7 @@ from zcu_tools.gui.form import (
     WriteRejected,
 )
 
-from ._controls import ROW_SPACING, FieldRow, LocalText
+from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
 
@@ -58,6 +58,18 @@ class FormEditor[F: FormModel](QWidget):
     child rows, a tagged union with its selector. Switching writes the new
     mode's default ("" or {}); the other mode's value is never converted.
     form.enabled.<path> is a nullable-model activation QCheckBox.
+    form.group.<path>.<group> (form.group.<group> at the root level) is the
+    block of one Display group of the model level at <path>. It holds the
+    level's fields of that group, in declaration order, under a header with
+    the group name in the level's label column and an Expand/Collapse
+    QPushButton. Each level shows its ungrouped rows first, then its group
+    blocks in the order of each group's first field. A group whose fields
+    are all hidden has no block. While any of its rows (or their children)
+    shows an error, the header shows a "Contains errors" note; a folded
+    group stays folded.
+    Groups start folded; model rows start as Display(collapsed=...) says.
+    Folds the user sets on groups and model rows survive rebuilds of this
+    editor (branch, Key/Inline or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
     form.error.<path> is a QLabel under its field with current field errors;
@@ -120,6 +132,10 @@ class FormEditor[F: FormModel](QWidget):
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
+        self._groups: list[GroupBlock] = []
+        # User folds by model path, and by (model level path, group name).
+        self._model_expanded: dict[FormWritePath, bool] = {}
+        self._group_expanded: dict[tuple[FormWritePath, str], bool] = {}
         self._state_errors: FormErrors | None = None
         self._valid: bool | None = None
         # Hosts own outer margins; rows keep ROW_SPACING apart.
@@ -261,6 +277,7 @@ class FormEditor[F: FormModel](QWidget):
                 field.options is not None,
                 field.expression,
                 field.fixed,
+                field.group,
             )
             for field in flat
         )
@@ -271,6 +288,7 @@ class FormEditor[F: FormModel](QWidget):
                 row.field.options is not None,
                 row.field.expression,
                 row.field.fixed,
+                row.field.group,
             )
             for row in self._rows.values()
         )
@@ -289,7 +307,8 @@ class FormEditor[F: FormModel](QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ROW_SPACING)
         self._rows = {}
-        self._add_rows(fields, self._content, layout)
+        self._groups = []
+        self._add_level((), fields, self._content, layout)
         # One stretch below the last row takes spare height; a stretch inside a
         # group would make the group grow and spread its rows apart.
         layout.addStretch()
@@ -299,24 +318,63 @@ class FormEditor[F: FormModel](QWidget):
         old.setParent(None)
         old.deleteLater()
 
-    def _add_rows(
-        self, fields: tuple[FieldView, ...], parent: QWidget, layout: QVBoxLayout
+    def _add_level(
+        self,
+        path: FormWritePath,
+        fields: tuple[FieldView, ...],
+        parent: QWidget,
+        layout: QVBoxLayout,
     ) -> None:
-        level: list[FieldRow] = []
+        """Add the rows of the model level at path to layout under parent.
+
+        Ungrouped fields come first, then one GroupBlock per Display group in
+        the order of each group's first field, holding that group's fields.
+        """
+        groups: dict[str, list[FieldView]] = {}
         for field in fields:
-            row = FieldRow(field, parent, self._write, self._unparsed)
-            self._rows[field.path] = row
-            level.append(row)
-            layout.addWidget(row.widget)
-            if row.group is not None:
-                child_layout = row.group.layout()
-                if isinstance(child_layout, QVBoxLayout):
-                    self._add_rows(field.children, row.group, child_layout)
-        # One label column per model level: the widest label sets the width,
-        # so every control of this level starts at the same left edge.
-        width = max((row.label.sizeHint().width() for row in level), default=0)
-        for row in level:
-            row.label.setFixedWidth(width)
+            if field.group is not None:
+                groups.setdefault(field.group, []).append(field)
+        labels = [
+            self._add_row(field, parent, layout)
+            for field in fields
+            if field.group is None
+        ]
+        for name, members in groups.items():
+            block = GroupBlock(
+                path,
+                name,
+                tuple(member.path for member in members),
+                parent,
+                self._group_expanded,
+            )
+            self._groups.append(block)
+            layout.addWidget(block.widget)
+            labels.append(block.label)
+            # Rows in a group block are indented, so they get their own column.
+            _align_labels(
+                [self._add_row(member, block.body, block.rows) for member in members]
+            )
+        _align_labels(labels)
+
+    def _add_row(
+        self, field: FieldView, parent: QWidget, layout: QVBoxLayout
+    ) -> QLabel:
+        """Add field's row, and a model's child level, and return its label."""
+        row = FieldRow(
+            field,
+            parent,
+            self._write,
+            self._unparsed,
+            self._model_expanded,
+        )
+        self._rows[field.path] = row
+        layout.addWidget(row.widget)
+        if row.group is not None:
+            child_layout = row.group.layout()
+            if isinstance(child_layout, QVBoxLayout):
+                # Recursion back into _add_level: a model's children are a level.
+                self._add_level(field.path, field.children, row.group, child_layout)
+        return row.label
 
     def _write(self, path: FormWritePath, value: JsonValue) -> None:
         state = self._require_state()
@@ -355,6 +413,14 @@ class FormEditor[F: FormModel](QWidget):
             row.set_error("\n".join(by_row.get(path, ())))
             if path in self._local:
                 row.clear_value()
+        for block in self._groups:
+            block.set_has_errors(
+                has_errors=any(
+                    path[: len(member)] == member
+                    for path in by_row
+                    for member in block.members
+                )
+            )
         valid = errors is None
         if valid != self._valid:
             self._valid = valid
@@ -367,3 +433,13 @@ class FormEditor[F: FormModel](QWidget):
                 if candidate == prefix:
                     return candidate
         return None
+
+
+def _align_labels(labels: list[QLabel]) -> None:
+    """Give labels one fixed width, the widest label's, as one label column.
+
+    Every control beside these labels then starts at the same left edge.
+    """
+    width = max((label.sizeHint().width() for label in labels), default=0)
+    for label in labels:
+        label.setFixedWidth(width)

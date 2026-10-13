@@ -1,6 +1,6 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-13, Key/Inline rows follow the core's x-form-key-or-inline marker; host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
+**Last updated:** 2026-10-13, foldable Display group blocks and user folds kept across rebuilds; Key/Inline rows follow the core's x-form-key-or-inline marker; host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
 
@@ -18,6 +18,8 @@ The value label shows only an Expression-mode resolved value; Direct input is no
 
 A one-value Literal (schema const, not nullable) has nothing to choose or compute: its row shows the value as frameless read-only text, without a mode combo, dropdown or expression mode. Fields the schema marks hidden have no row: Display(hidden=True) fields and one-value structural tags outside a union, such as a standalone LinRange's kind. Their input stays in state, and their errors go to the nearest drawn ancestor row or the form-wide error label. A float with schema decimals shows Direct and resolved values rounded to that many digits with trailing zeros trimmed, using the spinbox module's trimmed_decimals; typed text with more digits stays as typed and the state keeps every digit. Section titles come from the schema; a placeholder selector (no branch selected yet) takes the tag title of the branches, like a selected one.
 
-Rows sit close together and nested groups use small margins. The labels of one model level share a left-aligned column as wide as its widest label, so that level's controls start at one left edge; each nested group has its own column. The editor has no outer margins; hosts add them. One stretch below the last row takes spare height, so nested groups do not grow.
+Rows sit close together and nested groups use small margins. The labels of one model level share a left-aligned column as wide as its widest label, so that level's controls start at one left edge; each nested group has its own column. The editor has no outer margins; hosts add them.
+
+Fields the schema marks `x-form-group` sit in a foldable group block (`form.group.<path>.<group>`, `form.group.<group>` at the root) of their model level. A level shows its ungrouped rows first, then its group blocks in the order of each group's first field; a group whose fields are all hidden has no block. The group title joins the level's label column and the block's rows get their own column, like a nested model. Groups start folded and model rows follow Display collapsed. The editor remembers the folds the user sets on groups and model rows by path, so a rebuild after a branch, Key/Inline or activation change keeps them. A folded group does not unfold for errors; its header shows a "Contains errors" note while any of its rows shows one. One stretch below the last row takes spare height, so nested groups do not grow.
 
 The workflows host's WorkflowFormPanel (`gui/app/workflows/panel.py`) is the current caller; it does not pass `write`. Apply, Discard, Start, revision checks and persistence stay with the host. This tool does not migrate CfgSchema or Measure.

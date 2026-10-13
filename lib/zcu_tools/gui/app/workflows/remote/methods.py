@@ -55,7 +55,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "workflow.form": MethodSpec(
         5.0,
         "Read schema/input/ordinary values/errors, or preview a batch without committing. "
-        "Schema fields marked hidden hold fixed values and need no input.",
+        "Schema fields marked hidden hold fixed values and need no input. "
+        "x-form-group only groups fields on screen; grouped fields take input "
+        "like any other, and the schema says which are required.",
         params=(
             ParamSpec(
                 "form",

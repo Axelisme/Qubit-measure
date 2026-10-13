@@ -39,6 +39,10 @@ _HEADER_SPACING = 2
 _GROUP_MARGINS = (8, 4, 4, 4)
 # Last item of a Direct-mode choice combo; selecting it switches to Expression.
 EXPRESSION_ENTRY = "Expression…"
+# Shown in a group block's header while any of its rows shows an error, so a
+# folded group still tells the user where Start is blocked.
+GROUP_ERRORS_NOTE = "Contains errors"
+_ERRORS_NOTE_STYLE = "QLabel { color: #b3261e; }"
 
 
 @dataclass(frozen=True)
@@ -139,6 +143,30 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
+def _fold_button[K](
+    body: QWidget, parent: QWidget, folds: dict[K, bool], key: K, *, expanded: bool
+) -> QPushButton:
+    """Return an Expand/Collapse QPushButton under parent that folds body.
+
+    folds records user folds (True is expanded) across rebuilt buttons. body
+    starts shown when folds[key] is True; without that key, when expanded is
+    True. Each click flips body's visibility and the button text and records
+    the new state as folds[key].
+    """
+    shown = folds.get(key, expanded)
+    body.setVisible(shown)
+    button = QPushButton("Collapse" if shown else "Expand", parent)
+
+    def clicked() -> None:
+        now_expanded = body.isHidden()
+        body.setVisible(now_expanded)
+        button.setText("Collapse" if now_expanded else "Expand")
+        folds[key] = now_expanded
+
+    button.clicked.connect(clicked)
+    return button
+
+
 class FieldRow:
     """Keep one schema row stable while publication values change.
 
@@ -162,15 +190,20 @@ class FieldRow:
         parent: QWidget,
         changed: Callable[[FormWritePath, JsonValue], None],
         unparsed: Callable[[FormWritePath, LocalText], None],
+        folds: dict[FormWritePath, bool],
     ) -> None:
         """Build under parent; call changed(path, JSON) or unparsed(path, text).
 
         Callbacks run synchronously for user input, never during display.
         Child-model rows are built by the editor inside group.layout().
+        folds is the editor's record of user folds by model path (True is
+        expanded): a model row starts as folds says, else as the field's
+        collapsed hint, and records each user fold there. Other rows ignore it.
         """
         self.field = field
         self._changed = changed
         self._unparsed = unparsed
+        self._folds = folds
         self._displaying = False
         # Choice shown when Expression mode returns to Direct (see _direct_choice).
         self._direct_raw: JsonValue = None
@@ -236,12 +269,14 @@ class FieldRow:
         rows = QVBoxLayout(self.group)
         rows.setContentsMargins(*_GROUP_MARGINS)
         rows.setSpacing(ROW_SPACING)
-        self.group.setVisible(not self.field.collapsed)
-        fold = QPushButton(
-            "Expand" if self.field.collapsed else "Collapse", self.widget
+        fold = _fold_button(
+            self.group,
+            self.widget,
+            self._folds,
+            self.field.path,
+            expanded=not self.field.collapsed,
         )
         header.addWidget(fold)
-        fold.clicked.connect(lambda: self._fold(fold))
         self.layout.addWidget(self.group)
 
     def _build_switch(self, header: QHBoxLayout) -> None:
@@ -295,12 +330,6 @@ class FieldRow:
     def _key_changed(self, text: str) -> None:
         if not self._displaying:
             self._changed(self.field.path, text)
-
-    def _fold(self, button: QPushButton) -> None:
-        if self.group is not None:
-            expanded = self.group.isHidden()
-            self.group.setVisible(expanded)
-            button.setText("Collapse" if expanded else "Expand")
 
     def _build_input(self, header: QHBoxLayout) -> None:
         # Numeric inputs use raw text, not spinbox ranges/validators: partial
@@ -461,8 +490,8 @@ class FieldRow:
         the text and mode of a text or key input and hides its evaluated label;
         checkboxes, dropdowns and switches still show state. The value label shows
         only a resolved Expression-mode value; Direct input is not echoed.
-        Shape changes require a new row; metadata/folding remain initially
-        declared presentation.
+        Shape changes require a new row; metadata stays as built, and the
+        fold stays as built or as the user last set it.
         """
         self.field = field
         self._displaying = True
@@ -531,3 +560,62 @@ class FieldRow:
                 write_value_widget(widget, text)
         elif isinstance(widget, QCheckBox):
             write_value_widget(widget, field.raw)
+
+
+class GroupBlock:
+    """One foldable display group holding some rows of one model level.
+
+    widget is the block, named form.group.<path>.<name> (form.group.<name>
+    for the root level), where path is the model level's path and name the
+    fields' Display group. Its header holds label, the group name, which the
+    editor puts in the level's label column; the Expand/Collapse fold button;
+    and a GROUP_ERRORS_NOTE label, hidden until set_has_errors(True). body is
+    a QGroupBox, hidden while folded, whose layout rows takes the member
+    rows; members are their paths in order. The block owns no form state.
+    """
+
+    def __init__(
+        self,
+        path: FormWritePath,
+        name: str,
+        members: tuple[FormWritePath, ...],
+        parent: QWidget,
+        folds: dict[tuple[FormWritePath, str], bool],
+    ) -> None:
+        """Build the block under parent; the caller adds widget to its layout.
+
+        folds is the editor's record of user group folds by (path, name),
+        True for expanded: the block starts as folds says, else folded, and
+        records each user fold there. The caller adds member rows to rows.
+        """
+        self.members = members
+        self.widget = QWidget(parent)
+        self.widget.setObjectName("form.group." + ".".join((*path, name)))
+        layout = QVBoxLayout(self.widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(_HEADER_SPACING)
+        header = QHBoxLayout()
+        layout.addLayout(header)
+        self.label = _tight_label(name, self.widget)
+        header.addWidget(self.label)
+        self.body = QGroupBox(self.widget)
+        self.rows = QVBoxLayout(self.body)
+        self.rows.setContentsMargins(*_GROUP_MARGINS)
+        self.rows.setSpacing(ROW_SPACING)
+        header.addWidget(
+            _fold_button(self.body, self.widget, folds, (path, name), expanded=False)
+        )
+        self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
+        self._errors_note.setStyleSheet(_ERRORS_NOTE_STYLE)
+        self._errors_note.hide()
+        header.addWidget(self._errors_note)
+        # Keep the fold button beside its label instead of stretching it.
+        header.addStretch()
+        layout.addWidget(self.body)
+
+    def set_has_errors(self, *, has_errors: bool) -> None:
+        """Show the header's errors note when has_errors, else hide it.
+
+        The fold does not change: a folded group stays folded.
+        """
+        self._errors_note.setVisible(has_errors)
