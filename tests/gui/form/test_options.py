@@ -331,3 +331,44 @@ def test_unknown_declared_option_path_fails_before_state_changes() -> None:
     with pytest.raises(ValueError, match="option.*path"):
         state.run_command(("value",), "unused", env)
     assert state.input.data == before
+
+
+class OuterInline(FormModel):
+    kind: Literal["inline"] = "inline"
+    module: First | Second = Field(discriminator="kind")
+    mode: Literal["fast", "slow"] = "fast"
+
+
+class NestedSelection(FormModel):
+    value: Source | OuterInline = Field(discriminator="kind")
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {
+            ("value",): (
+                api.Option(
+                    "Inline first",
+                    {"kind": "inline", "module": {"kind": "first"}},
+                    fields=OuterInline,
+                ),
+            )
+        }
+
+
+def test_option_fields_project_nested_selected_branch_without_consumer_inference() -> (
+    None
+):
+    assert hasattr(api, "Option"), "core must expose named Option"
+    options = obj(obj(NestedSelection.input_schema(FormEnv())["properties"])["value"])[
+        "x-form-options"
+    ]
+    assert isinstance(options, list)
+    fields = obj(obj(options[0])["fields"])
+    properties = obj(fields["properties"])
+    module = obj(properties["module"])
+    assert set(obj(module.get("properties"))) == {"shared"}
+    assert set(properties) == {"module", "mode"}
+    assert obj(properties["mode"])["x-form-options"] == [
+        {"label": "fast", "value": "fast"},
+        {"label": "slow", "value": "slow"},
+    ]
