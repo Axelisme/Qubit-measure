@@ -123,8 +123,10 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
 
-    tab.set("modules.qub_pulse.gain", gain, source="explicit")
-    tab.set("modules.qub_pulse.waveform.length", pulse_length_us, source="explicit")
+    tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
+    tab.set(
+        "modules.qub_pulse.module.waveform.length", pulse_length_us, source="explicit"
+    )
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
 
@@ -177,8 +179,10 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
-        SummaryParameter("pulse_length_us", "modules.qub_pulse.waveform.length", "us"),
-        SummaryParameter("gain", "modules.qub_pulse.gain"),
+        SummaryParameter(
+            "pulse_length_us", "modules.qub_pulse.module.waveform.length", "us"
+        ),
+        SummaryParameter("gain", "modules.qub_pulse.module.gain"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
     ),
