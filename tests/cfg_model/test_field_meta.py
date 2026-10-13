@@ -39,3 +39,33 @@ def test_unannotated_fields_have_no_field_meta(name: str) -> None:
         other_metadata: Annotated[float, Field(gt=0, description="Not FieldMeta")]
 
     assert get_field_meta(Cfg.model_fields[name]) is None
+
+
+@pytest.mark.parametrize("group", [None, "Advanced"])
+def test_group_is_readable_without_changing_field_values(group: str | None) -> None:
+    from zcu_tools.cfg_model import FieldMeta, get_field_meta
+
+    try:
+        meta = FieldMeta(group=group)
+    except TypeError:
+        pytest.fail("FieldMeta must accept a presentation group")
+
+    class Cfg(BaseModel):
+        frequency: Annotated[float | None, meta] = None
+
+    read_meta = get_field_meta(Cfg.model_fields["frequency"])
+    assert read_meta is not None
+    assert read_meta.group == group
+    assert Cfg(frequency=125.5).model_dump() == {"frequency": 125.5}
+    assert Cfg().model_dump() == {"frequency": None}
+    assert FieldMeta().group is None
+
+
+def test_empty_group_is_rejected_at_construction() -> None:
+    from zcu_tools.cfg_model import FieldMeta
+
+    try:
+        with pytest.raises(ValueError, match="group"):
+            FieldMeta(group="")
+    except TypeError:
+        pytest.fail("An empty group must be rejected with ValueError")

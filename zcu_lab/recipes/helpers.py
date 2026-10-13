@@ -30,36 +30,64 @@ def _points(expts: object) -> None:
 
 
 def _frequency_fields(tab: RecipeTab, field: str) -> tuple[list[str], str | None]:
+    parts = field.split(".")
+    # Find the module before reading a leaf that does not exist in key input.
+    for length in range(1, len(parts)):
+        parent_path = ".".join(parts[:length])
+        parent = tab.read_field(parent_path)
+        if parent.mode in {"key", "inline"}:
+            return [field], parent_path
     node = tab.read_field(field)
-    if node.kind == "reference":
-        if "ro_freq" in node.children:
-            paths = [f"{field}.ro_freq"]
-        elif "pulse_cfg" in node.children and "ro_cfg" in node.children:
-            paths = [f"{field}.pulse_cfg.freq", f"{field}.ro_cfg.ro_freq"]
+    if node.mode in {"key", "inline"}:
+        fields = (
+            tab.read_module(field).value
+            if node.mode == "key"
+            else tab.read_field(f"{field}.module").fields
+        )
+        if "ro_freq" in fields:
+            paths = [f"{field}.module.ro_freq"]
+        elif "pulse_cfg" in fields and "ro_cfg" in fields:
+            paths = [f"{field}.module.pulse_cfg.freq", f"{field}.module.ro_cfg.ro_freq"]
         else:
             raise GuiRpcError("Unsupported readout shape", reason="invalid_cfg")
-        return paths, node.reference
-    if node.kind != "scalar":
+        return paths, field
+    if node.fields:
         raise ValueError(f"Not a frequency field: {field}")
-    ancestors = field.split(".")[:-1]
-    while ancestors:
-        parent = tab.read_field(".".join(ancestors))
-        if parent.kind == "reference":
-            return [field], parent.reference
-        ancestors.pop()
     return [field], None
 
 
-def _usable_frequency(tab: RecipeTab, field: str) -> bool:
+def _module_value_path(module_field: str, field: str) -> tuple[str, ...]:
+    prefix = f"{module_field}.module."
+    if not field.startswith(prefix):
+        raise ValueError(f"Not an inline module frequency field: {field}")
+    return tuple(field.removeprefix(prefix).split("."))
+
+
+def _usable_frequency(tab: RecipeTab, field: str, module_field: str | None) -> bool:
+    if module_field is not None and tab.read_field(module_field).mode == "key":
+        value: object = tab.read_module(module_field).value
+        for part in _module_value_path(module_field, field):
+            if not isinstance(value, dict):
+                return False
+            value = value.get(part)
+        return _finite(value)
     state = tab.read_field(field)
-    value = state.input
-    return bool(
-        state.valid
-        and value is not None
-        and value.error is None
-        and value.validation_error is None
-        and _finite(value.resolved)
-    )
+    return not state.errors and _finite(state.value)
+
+
+def _write_frequency_fields(
+    tab: RecipeTab,
+    module_field: str | None,
+    paths: list[str],
+    edits: list[RecipeFieldEdit],
+) -> None:
+    """Convert only for edits, apply one scalar batch, then verify all frequencies."""
+    if edits and module_field is not None:
+        tab.use_inline(module_field)
+    tab.set_fields(edits)
+    for path in paths:
+        if not _usable_frequency(tab, path, module_field):
+            raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
 
 
 def set_frequency(
@@ -73,7 +101,10 @@ def set_frequency(
 ) -> MissingParameter | None:
     """Select explicit, usable library, or calibrated frequency in MHz.
 
-    tab is opened; field is a dotted scalar frequency or readout reference root.
+    tab is opened; field is a dotted scalar frequency or core readout module root.
+    Inline leaf paths include module, for example modules.qub_pulse.module.freq.
+    Key input stays unchanged when retaining library values; explicit/calibrated
+    writes first ask the owner to convert the whole module to inline.
     Both pulse/readout and single-frequency readout shapes are supported.
     calibration is a caller-owned logical scalar path (not a formula). required
     names the missing tool parameter when no source is usable. Explicit finite
@@ -88,38 +119,40 @@ def set_frequency(
     """
     if frequency_mhz is not None and not _finite(frequency_mhz):
         raise ValueError("frequency_mhz must be finite and not boolean")
-    paths, reference = _frequency_fields(tab, field)
+    paths, module_field = _frequency_fields(tab, field)
+    key = tab.read_field(module_field).key if module_field is not None else None
     library = (
-        tab.read_library_root(reference)
-        if frequency_mhz is None and prefer_library
-        else None
+        tab.read_library_root(key) if frequency_mhz is None and prefer_library else None
     )
     needs_calibration = frequency_mhz is None and any(
-        library is None or not _usable_frequency(tab, path) for path in paths
+        library is None or not _usable_frequency(tab, path, module_field)
+        for path in paths
     )
     calibrated = tab.read_value(calibration) if needs_calibration else None
     edits: list[RecipeFieldEdit] = []
-    retained: dict[str, str] = {}
+    retained: list[str] = []
     for path in paths:
         if frequency_mhz is not None:
             edits.append(RecipeFieldEdit(path, frequency_mhz, "explicit"))
-        elif library is not None and _usable_frequency(tab, path):
-            retained[path] = f"library:{library}"
+        elif library is not None and _usable_frequency(tab, path, module_field):
+            retained.append(path)
         elif _finite(calibrated):
             edits.append(
-                RecipeFieldEdit(path, RecipeExpression(__expr=calibration), calibration)
+                RecipeFieldEdit(path, RecipeExpression(expr=calibration), calibration)
             )
         else:
             return MissingParameter(
                 required,
                 f"Provide an explicit frequency, valid library, or calibrated {calibration}",
             )
-    tab.set_fields(edits)
-    for path in paths:
-        if not _usable_frequency(tab, path):
-            raise GuiRpcError(f"Invalid {path} frequency", reason="invalid_cfg")
-    for path, label in retained.items():
-        tab.retain_source(path, label)
+    _write_frequency_fields(tab, module_field, paths, edits)
+    for path in retained:
+        if module_field is not None:
+            tab.retain_module_source(
+                module_field,
+                summary_field=path,
+                value_path=_module_value_path(module_field, path),
+            )
     return None
 
 
@@ -196,7 +229,7 @@ def set_frequency_sweep(
     """
     _validate_frequency_sweep_inputs(calibration, center_mhz, span_mhz, expts)
     state = tab.read_field(field)
-    if state.kind != "sweep":
+    if not {"start", "stop", "n"}.issubset(state.fields):
         raise ValueError(f"Not a sweep cfg field: {field}")
     missing: list[MissingParameter] = []
     center = (
