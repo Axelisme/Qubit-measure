@@ -38,6 +38,48 @@ class ScalarCfg(ConfigBase):
     text: str = "ordinary"
 
 
+class DefaultedCfg(ConfigBase):
+    """Static defaults belong to core unless a form authors an expression."""
+
+    amount: float = 2.0
+    count: int = Field(default_factory=lambda: 3, ge=1)
+
+
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'"])
+def test_failed_expression_defaults_require_input_without_changing_core(
+    expression: str,
+) -> None:
+    env = FormEnv()
+    form = adapter_api.Form(
+        DefaultedCfg, {"amount": Expr(expression), "count": Expr(expression)}
+    )
+    state = FormState(form.default_input(env))
+    assert state.input.data == {}
+    result = state.result(env)
+    assert isinstance(result, FormErrors), result
+    assert result.messages == {
+        ("amount",): "Field required",
+        ("count",): "Field required",
+    }
+    control = adapter_api.Form(DefaultedCfg, {})
+    assert (
+        control.to_cfg(require_result(FormState(control.default_input(env)), env), env)
+        == DefaultedCfg()
+    )
+    state.write({("amount",): 8.0, ("count",): 4}, env)
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(
+        amount=8, count=4
+    )
+
+
+def test_successful_expression_defaults_are_direct_native_values() -> None:
+    env = FormEnv()
+    form = adapter_api.Form(DefaultedCfg, {"amount": Expr("6 * 2")})
+    state = FormState(form.default_input(env))
+    assert state.input.data == {"amount": 12, "count": 3}
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 
