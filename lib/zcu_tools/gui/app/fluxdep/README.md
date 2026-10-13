@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，決策點介面、fit 依賴、共用渲染與匯出收據
+**Last updated:** 2026-10-13，決策點介面、fit 依賴、共用渲染與匯出收據、Show capture 座標基準
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -295,12 +295,12 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset）+
     右側診斷圖（QSplitter 可拖拉）。search 前擋空/不存在 db 路徑；params export 的長路徑只作
     status/tooltip，不參與 panel 水平最小寬度。
-  - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（預設按 `viz.derive_auto_limits` = notebook
-    `auto_derive_limits`）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
+  - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
+    `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
   AnalyzePanel 是 **MainWindow 持有的單例**（建一次留 stack，切走只隱藏不銷毀），所有 tab 狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
   Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
-  Show 的 display choices 分 applied 與 pending：Apply 取走全部欄位並重畫；自動刷新只用 applied choices，只在結果版本或 `pipeline_snapshot` 的來源版本改變時重畫（同一原因文字的第二次對齊也重畫），不清掉、也不套用尚未 Apply 的欄位。新結果只套用 auto limits 的數值。
+  Show 的 display choices 分 applied 與 pending：Apply 取走全部欄位並重畫；自動刷新只用 applied choices，只在結果版本或 `pipeline_snapshot` 的來源版本改變時重畫（同一原因文字的第二次對齊也重畫，但已記錄 search 的背景維持 capture，fresh search 後才換新背景），不清掉、也不套用尚未 Apply 的欄位。新結果只套用 auto limits 的數值。
   Visualization 的 fallback 使用已發布的 fit transitions，不使用未提交的 Search 表單。
 - Search 診斷图 builder 建立原生 Agg Figure，不登記 pyplot manager。Panel 替換或關閉時 release presentation，不以全域 `plt.close("all")` 管理其他 caller 的圖。
 - `transitions` 沿用 `analysis.fluxdep.models.TransitionDict`（TypedDict + extra_items，混合 r_f/sample_f scalar

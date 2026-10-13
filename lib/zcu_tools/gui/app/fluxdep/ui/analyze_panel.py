@@ -61,11 +61,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
-from zcu_tools.gui.app.fluxdep.services.viz import (
-    FitDisplay,
-    derive_auto_limits,
-    format_stale_reasons,
-)
+from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, format_stale_reasons
 from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY, FitState
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
@@ -752,12 +748,8 @@ class AnalyzePanelWidget(QWidget):
     # --- Show actions ----------------------------------------------------
 
     def _apply_auto_limits(self) -> None:
-        """Set the x/y limit boxes to the auto-derived (notebook) limits."""
-        fit = self._ctrl.state.fit
-        s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
-        (x_lo, x_hi), (y_lo, y_hi) = derive_auto_limits(
-            self._ctrl.state.spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f
-        )
+        """Set the x/y limit boxes to the Controller's Show auto limits."""
+        (x_lo, x_hi), (y_lo, y_hi) = self._ctrl.fit_auto_limits()
         self._x_lo.setValue(x_lo)
         self._x_hi.setValue(x_hi)
         self._y_lo.setValue(y_lo)
