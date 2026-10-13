@@ -14,6 +14,51 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "context.aliases_set",
+        "context:h_context_aliases_set",
+        MethodSpec(
+            10.0,
+            "Apply the entire ordered alias table through the Inspect Apply owner. "
+            "rows is a list of exactly {alias: string, value: string}; [] clears it. "
+            "Values are concrete names, empty strings or backward $alias.field links. "
+            "Syntax/order errors reject the whole table. An opened entry saves "
+            "aliases.yaml atomically before installing/publishing; without an entry "
+            "only memory changes. Storage failure preserves the old file/table. "
+            "Returns {rows: [{alias, value}]} from the installed authored table, "
+            "not proof of resolvability. For resolved rows read "
+            "context.snapshot(path='aliases'); that read still requires a point. "
+            "Requires holder; allowed during Run, whose fixed capture is unchanged. "
+            "No dialog/focus, point, metadata or ledger writes; no hidden read/retry.",
+            (required_json("rows", "Complete ordered list of {alias, value} rows"),),
+        ),
+    ),
+    method_entry(
+        "context.set_parameter",
+        "context:h_context_set_parameter",
+        MethodSpec(
+            10.0,
+            "Set a concrete parameter path at the currently selected point through "
+            "the Inspect Set owner. Requires holder and a selected point; EMPTY "
+            "fails with no_context before writes. value is a required non-null JSON "
+            "YAML value; this method cannot write top-level null. No alias paths, "
+            "library edits, component creation or setup writes. Captures the current "
+            "target and before once without I/O, then submits once with metadata "
+            "preserved. Returns {path, before, value}: before is null for both unset "
+            "and explicit null; value is the submitted value, not readback. Read "
+            "context.snapshot separately to inspect actual stored values. Owner "
+            "schema/conflict/storage failures propagate; no retry or rollback. "
+            "Run permits these direct writes; its fixed capture is unchanged. "
+            "Later source captures see new values; existing tabs need Reset. "
+            "No metadata/ledger, dialog/focus or selection changes.",
+            (
+                required_string("path", "Concrete point/general parameter path"),
+                required_json(
+                    "value", "Submitted YAML value; top-level null is not supported"
+                ),
+            ),
+        ),
+    ),
+    method_entry(
         "context.ml_edit",
         "context:h_context_ml_edit",
         MethodSpec(

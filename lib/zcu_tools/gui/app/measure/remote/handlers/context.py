@@ -10,6 +10,7 @@ import numpy as np
 
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.value_lookup import ValueInfo
 
@@ -17,6 +18,72 @@ from ._wire_values import context_wire_value
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
+
+
+def h_context_aliases_set(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Apply complete ordered authored rows through the context owner.
+
+    Each row has exactly string alias/value fields. The owner validates the
+    whole table, saves an opened entry atomically, then installs/publishes it.
+    Without an entry this is memory-only. Input/storage failures preserve the
+    previous table. Return installed authored rows without resolving them;
+    success does not imply resolvability. No dialog, point or ledger effects.
+    """
+    raw = params["rows"]
+    if not isinstance(raw, list):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "rows must be a list")
+    rows: list[AliasRow] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or set(item) != {"alias", "value"}:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"rows[{index}] must contain exactly alias and value",
+            )
+        alias, value = item["alias"], item["value"]
+        if not isinstance(alias, str) or not isinstance(value, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"rows[{index}].alias and value must be strings",
+            )
+        rows.append(AliasRow(alias, value))
+    adapter.context_control.apply_alias_rows(tuple(rows))
+    return {
+        "rows": [
+            {"alias": row.alias, "value": row.value}
+            for row in adapter.context_control.get_alias_rows()
+        ]
+    }
+
+
+def h_context_set_parameter(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Set one concrete path at the currently selected point, preserving metadata.
+
+    Fix the target and before value with one pre-write capture. Missing/null
+    request values are rejected by the method entry; nested YAML null is valid.
+    Before is null for both unset and explicit null. Return the submitted value,
+    not a post-write readback. No ledger, dialog, selection or retry effects.
+    Owner errors propagate. Run uses its fixed capture, so direct writes during
+    Run are allowed without changing that capture.
+    """
+    path = str(params["path"])
+    if path.startswith("$"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "path must be a concrete parameter path"
+        )
+    try:
+        value = context_wire_value(params["value"])
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, f"invalid parameter value: {exc}"
+        ) from exc
+    capture = adapter.context_control.read_context()
+    before = context_wire_value(capture.lookup_point(path).value)
+    adapter.context_control.set_parameter(capture.target, path, value, metadata=None)
+    return {"path": path, "before": before, "value": value}
 
 
 def h_context_ml_edit(
