@@ -8,6 +8,7 @@ from typing import Literal
 
 import pytest
 from pydantic import BaseModel, Field, JsonValue
+from pydantic_core import PydanticCustomError
 from zcu_tools.gui import form as api
 from zcu_tools.gui.form import (
     FormEnv,
@@ -372,3 +373,61 @@ def test_option_fields_project_nested_selected_branch_without_consumer_inference
         {"label": "fast", "value": "fast"},
         {"label": "slow", "value": "slow"},
     ]
+
+
+class NullablePicks(FormModel):
+    number: Literal[1, 2] | None = None
+    speed: Speed | None = None
+
+
+def test_nullable_literal_and_enum_options_include_typed_null() -> None:
+    props = obj(NullablePicks.input_schema(FormEnv())["properties"])
+    for name, nonnull in (("number", [1, 2]), ("speed", ["slow", "fast"])):
+        options = obj(props[name])["x-form-options"]
+        assert isinstance(options, list)
+        values = [obj(option)["value"] for option in options]
+        assert None in values
+        assert [value for value in values if value is not None] == nonnull
+
+
+class UnavailableBranch(FormModel):
+    kind: Literal["unavailable"] = "unavailable"
+    source: str
+
+    @classmethod
+    def defaults(
+        cls, env: FormEnv, previous: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        del env, previous
+        raise api.field_error(("source",), "Unavailable captured source")
+
+
+class FailureContainer(FormModel):
+    branch: First | UnavailableBranch = Field(
+        default_factory=First, discriminator="kind"
+    )
+
+
+class SourceFailureForm(FormModel):
+    outer: FailureContainer = Field(default_factory=FailureContainer)
+    flag: bool = False
+
+
+def test_partial_branch_source_failure_preserves_parent_path_and_batch_atomicity() -> (
+    None
+):
+    env = FormEnv()
+    state = FormState(SourceFailureForm.default_input(env))
+    before = state.input.data
+    events: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: events.append(state.input.data))
+    with pytest.raises(
+        PydanticCustomError, match="Unavailable captured source"
+    ) as caught:
+        state.write(
+            {("flag",): True, ("outer", "branch"): {"kind": "unavailable"}}, env
+        )
+    assert (caught.value.context or {}).get("path") == ("outer", "branch", "source")
+    assert state.input.data == before
+    assert state.base.data == before
+    assert events == []
