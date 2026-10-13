@@ -1,6 +1,7 @@
 """Persistence and isolation through the public form input envelope."""
 
 import re
+from collections.abc import Callable
 from typing import Annotated, Literal
 
 import pytest
@@ -71,13 +72,15 @@ class InactiveToneForm(FormModel):
 def test_form_entry_rejects_untagged_string_or_model_with_field_path(
     model: type[FormModel], path: str, entry: str
 ) -> None:
+    operation: Callable[[], object]
+    if entry == "schema":
+        operation = lambda: model.input_schema(FormEnv())
+    elif entry == "defaults":
+        operation = lambda: model.default_input(FormEnv())
+    else:
+        operation = lambda: FormState(FormInput(model, {}))
     with pytest.raises(ValueError, match=rf"{re.escape(path)}:.*str.*Model"):
-        if entry == "schema":
-            model.input_schema(FormEnv())
-        elif entry == "defaults":
-            model.default_input(FormEnv())
-        else:
-            FormState(FormInput(model, {}))
+        operation()
 
 
 class InputForm(FormModel):
