@@ -33,4 +33,6 @@ WIRE_VERSION = 8
 # frequency is blank, non-holder Filter tab switches detach only; literal
 # spectrum targets and independent global Filter lifetime; inherited
 # alignment preserved on presentation-only draft edits.
-GUI_VERSION = 12
+# 13: Spectra stage bar (1 Align -> 2 Sample) replaces the result preview's
+# next-step buttons; a list pick shows the published preview first.
+GUI_VERSION = 13

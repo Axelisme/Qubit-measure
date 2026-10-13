@@ -6,14 +6,15 @@
   ├───────────────────────────────────────────────────────────────┤
   │ [Spectra] [Fit]                                               │
   │ ┌────────────┬──────────────────────────────┐                 │
-  │ │ spectra    │ editing area (stacked): the  │  Spectra page   │
-  │ │  • a ...   │ active spectrum's picker or  │                 │
-  │ │  • b ...   │ result preview               │                 │
-  │ │ [Remove]   │                              │                 │
+  │ │ spectra    │ [1 Align ✓] → [2 Sample]     │  Spectra page   │
+  │ │  • a ...   │ editing area (stacked): the  │                 │
+  │ │  • b ...   │ active spectrum's picker or  │                 │
+  │ │ [Remove]   │ result preview               │                 │
   │ └────────────┴──────────────────────────────┘                 │
   └───────────────────────────────────────────────────────────────┘
 
-The Spectra page swaps the editing widget by the active spectrum's stage; a
+The Spectra page shows the active spectrum's published preview or live
+draft under a stage bar; clicking a stage opens that stage's picker. A
 widget's ``finished`` signal writes its result back through the Controller,
 which advances the stage and re-triggers the swap. A GUI Add opens the new
 spectrum's line picker. The Fit page hosts the AnalyzePanel singleton
@@ -79,6 +80,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, StageStatus
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -134,6 +136,15 @@ class _SpectrumRowDelegate(QStyledItemDelegate):
         option.text = f"{elided}\u2028{details}"
 
 
+def _stage_status(*, done: bool, draft: bool, locked: bool) -> StageStatus:
+    """A live draft shows first, then a lock, then a published result."""
+    if draft:
+        return "draft"
+    if locked:
+        return "locked"
+    return "done" if done else "open"
+
+
 class MainWindow(QMainWindow):
     """The fluxdep analysis window shell."""
 
@@ -171,6 +182,8 @@ class MainWindow(QMainWindow):
         self._routing_editor = False
         self._routing_page = False
         self._editor_context_id: int | None = None
+        # The stage whose picker the editing area shows; None for a preview.
+        self._editor_stage: PendingKind | None = None
         # An agent's Filter / Search waits here until the user enters Fit; a
         # waiting Filter is dropped when its context closes.
         self._fit_entry_tab: AnalyzeTab | None = None
@@ -320,6 +333,13 @@ class MainWindow(QMainWindow):
         left_panel.setLayout(left)
         left_panel.setMinimumWidth(180)
 
+        # The stage bar above the editing area marks the active spectrum's
+        # stages; a click opens (holder) or views (non-holder) that stage.
+        self._stage_bar: StageBar[PendingKind] = StageBar(
+            "fluxdep.stage",
+            (("align", "Align"), ("sample", "Sample")),
+            on_click=self._on_stage_clicked,
+        )
         # Editing area (stacked). The active spectrum's pipeline stage decides
         # which interactive widget is shown; _current_editor is the live one
         # (replaced on stage/active change).
@@ -329,11 +349,17 @@ class MainWindow(QMainWindow):
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
         self._current_editor: QWidget | None = None
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.addWidget(self._stage_bar)
+        right.addWidget(self._editor_stack, stretch=1)
+        right_panel = QWidget()
+        right_panel.setLayout(right)
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
-        splitter.addWidget(self._editor_stack)
+        splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 880])
@@ -376,7 +402,10 @@ class MainWindow(QMainWindow):
             if payload.kind == "selection" and self._fit_entry_tab == "filter":
                 # An agent's Filter routes the next Fit entry only while live.
                 self._fit_entry_tab = None
+            self._refresh_stage_bar()  # the closed draft's mark and current stage
             return
+        if payload.phase == "opened":
+            self._refresh_stage_bar()  # an opened draft marks its stage
         if meta.origin.kind != "agent" or self._routing_editor:
             return
         active = (
@@ -405,6 +434,7 @@ class MainWindow(QMainWindow):
                 self._mount_picker(active.context)
         finally:
             self._routing_editor = False
+        self._refresh_stage_bar()
 
     def _on_search_changed(
         self, payload: SearchChangedPayload, meta: EventMeta
@@ -486,11 +516,10 @@ class MainWindow(QMainWindow):
         if current is None:
             return
         name = current.data(Qt.ItemDataRole.UserRole)
+        # Picking only shows the spectrum's draft or published preview; a stage
+        # click is the separate intention to edit it.
         if name and name != self._ctrl.state.active_spectrum:
             self._ctrl.set_active_spectrum(name)
-        # Human picking is a separate write intention, never an active-change effect.
-        if name and self._ctrl.control_identity.status().holder == "gui":
-            self._rebuild_editor(open_picker=True)
 
     def _on_active_changed(self, _payload: ActiveSpectrumChangedPayload) -> None:
         self._refresh_list()  # keep the list selection in sync with the active spectrum
@@ -511,14 +540,16 @@ class MainWindow(QMainWindow):
             self._current_editor.deleteLater()
             self._current_editor = None
         self._editor_context_id = None
+        self._editor_stage = None
         self._editor_stack.setCurrentWidget(self._placeholder)
 
     def _rebuild_editor(self, *, open_picker: bool = False) -> None:
         """Show an existing draft or published data without creating input.
 
-        open_picker marks a separate Local write intention, gated by writable.
-        That intention may open the current stage picker. Display-change events
-        never request it, including observer RPCs while Local holds authority.
+        open_picker marks a separate Local write intention, gated by writable:
+        the window opening, a GUI Add, or a published stage advance. That
+        intention may open the current stage picker. Display-change events,
+        list picks and observer RPCs never request it.
         """
         # begin_* emits synchronously; this stage route already mounts its context.
         self._routing_editor = True
@@ -539,15 +570,11 @@ class MainWindow(QMainWindow):
             elif open_picker and self._writable and not entry.points_completed:
                 self._mount_stage(name, "sample")
             else:
-                self._mount(
-                    ResultPreviewWidget(
-                        entry,
-                        on_align=self._request_align,
-                        on_sample=self._request_sample,
-                    )
-                )
+                self._mount(ResultPreviewWidget(entry))
         finally:
             self._routing_editor = False
+            # The bar follows whatever the editing area now shows.
+            self._refresh_stage_bar()
 
     def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
@@ -595,12 +622,75 @@ class MainWindow(QMainWindow):
         if active is None or active.context is not context:
             raise RuntimeError("picker context changed while attaching its view")
         self._editor_context_id = active.context_id
+        self._editor_stage = (
+            "align" if isinstance(context, LinePickContext) else "sample"
+        )
 
     def _finish_lines(self, name: str) -> None:
         try:
             self._ctrl.interactive.finish_line_pick(name)
         except (FailedPreconditionError, ValueError, RuntimeError) as exc:
             self._show_error("Alignment failed", str(exc))
+
+    def _refresh_stage_bar(self) -> None:
+        """Mark the active spectrum's stages from State and its live draft.
+
+        Align is done once alignment is published; Sample is locked until
+        then and done once points are also published. A live draft of a stage
+        marks it draft. The current stage is the one whose picker is shown.
+        Without an active spectrum the bar is hidden.
+        """
+        name = self._ctrl.state.active_spectrum
+        self._stage_bar.setVisible(name is not None)
+        if name is None:
+            return
+        entry = self._ctrl.state.spectrums[name]
+        draft = self._ctrl.interactive.inspect(name)
+        pending = None if draft is None else pending_kind(draft)
+        self._stage_bar.set_status(
+            "align",
+            _stage_status(done=entry.aligned, draft=pending == "align", locked=False),
+        )
+        self._stage_bar.set_status(
+            "sample",
+            _stage_status(
+                done=entry.aligned and entry.points_completed,
+                draft=pending == "sample",
+                locked=not entry.aligned,
+            ),
+        )
+        self._stage_bar.set_current(self._editor_stage)
+
+    def _on_stage_clicked(self, stage: PendingKind) -> None:
+        """A holder click opens stage's picker; a non-holder click only views."""
+        if self._writable:
+            self._open_stage(stage)
+        else:
+            self._view_stage(stage)
+
+    def _view_stage(self, stage: PendingKind) -> None:
+        """Show stage without creating input.
+
+        A live draft of stage, such as an agent's, is shown as its picker;
+        otherwise the published preview is shown. No draft is opened or
+        discarded.
+        """
+        name = self._ctrl.state.active_spectrum
+        if name is None:
+            return
+        draft = self._ctrl.interactive.inspect(name)
+        if (
+            draft is not None
+            and pending_kind(draft) == stage
+            and not isinstance(draft.context, CrossSelectionContext)
+        ):
+            if draft.context_id != self._editor_context_id:
+                self._clear_editor()
+                self._mount_picker(draft.context)
+        elif not isinstance(self._current_editor, ResultPreviewWidget):
+            self._clear_editor()
+            self._mount(ResultPreviewWidget(self._ctrl.state.spectrums[name]))
+        self._refresh_stage_bar()
 
     def _request_align(self) -> None:
         self._open_stage("align")
@@ -611,10 +701,11 @@ class MainWindow(QMainWindow):
     def _open_stage(self, stage: PendingKind) -> None:
         """Open the active spectrum's align or sample picker on a Local intent.
 
-        This is the holder gate for the preview and picker stage buttons: a
-        non-holder click does nothing. The picker opens as a draft; the
-        published spectrum changes only on Finish. A live draft of the other
-        stage is discarded only after the user confirms; declining keeps it.
+        This is the holder gate for the stage bar and the pickers' stage
+        buttons: a non-holder call does nothing. The picker opens as a draft;
+        the published spectrum changes only on Finish. A live draft of the
+        other stage is discarded only after the user confirms; declining keeps
+        it.
         """
         name = self._ctrl.state.active_spectrum
         if not self._writable or name is None:
@@ -659,6 +750,7 @@ class MainWindow(QMainWindow):
             self._mount_stage(name, stage)
         finally:
             self._routing_editor = False
+        self._refresh_stage_bar()
 
     # --- pages -----------------------------------------------------------
 

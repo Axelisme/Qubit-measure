@@ -5,8 +5,7 @@ canvas mouse events to overridable handlers (``on_press`` / ``on_move`` /
 ``on_release``, all no-ops by default). Subclasses add Qt controls to
 ``controls_layout`` top-down: settings, edit actions (Undo / Clear), then the
 status text. Finish and an optional stage switch stay pinned at the column
-bottom in ``bottom_layout``; the read-only result preview puts its next steps
-there too. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
+bottom in ``bottom_layout``. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
 button emits the ``finished`` signal so the host can collect the result and
 write it via the Controller.
 

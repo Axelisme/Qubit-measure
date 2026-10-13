@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，GUI 改版；named／global draft 明確定址
+**Last updated:** 2026-10-14，Spectra 階段列
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -126,7 +126,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
 
 ### 主視窗外殼
 上方列左邊是目前 project 與控制權燈，右邊是 project、加譜、restore 與 export 命令。主區是 Spectra 與 Fit 兩頁 tab：
-Spectra 頁是譜清單（Remove 在清單下方）加階段驅動編輯區，Fit 頁承載 AnalyzePanel 單例。
+Spectra 頁是譜清單（Remove 在清單下方）加編輯區，編輯區上方是 `1 Align → 2 Sample` 階段列；Fit 頁承載 AnalyzePanel 單例。
 選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁。切頁只跟人類意圖：
 使用者點 tab，或 GUI Add／Restore 後回到 Spectra。Agent-origin 的 active、picker、Filter 與
 search pending 只更新所屬頁的內容，不把使用者從目前的頁拉走（見「Interactive context facts 與 GUI 跟隨」）。
@@ -137,24 +137,31 @@ search pending 只更新所屬頁的內容，不把使用者從目前的頁拉�
 推導，清單列與切階段前的確認共用這一個對應。清單不水平捲動，過長的譜名省略顯示並以 tooltip 給全名。
 查詢經 `interactive.inspect` 讀草稿，可能退休失效草稿並觸發重入，所以清單先算好全部列再填入。
 
-### 編輯區階段驅動
-MainWindow 編輯區顯示 active 譜的 live 草稿；沒有草稿時，本機 holder 的人類意圖（點清單、GUI Add）
-經 holder gate 開目前階段的 picker：未定線→LinePicker；已定線未完成選點→OneTone/FindPoints(by spec_type)。
-其餘情況顯示 ResultPreview（已發布狀態的唯讀圖）。GUI Add 成功後直接開新譜的定線 picker；
-RPC 載入與 active 切換只更新顯示，不開 picker。
+### 編輯區與階段列
+MainWindow 編輯區顯示 active 譜的 live 草稿，沒有草稿時顯示 ResultPreview（已發布狀態的唯讀圖，沒有控制項）。
+點清單選譜、RPC 載入與 active 切換都只更新顯示，不開 picker。編輯區上方的階段列 `1 Align → 2 Sample`
+（共用 Qt 元件 `ui/stage_bar.StageBar`，只畫狀態並回報點擊）標示 active 譜每個階段的狀態，由 State 與
+live context 推導，不新增 State 欄位：
+- Align：有定線草稿為 draft，已發布對齊為 done（✓），否則 open。
+- Sample：有採點草稿為 draft；未對齊時 locked，按鈕停用；已對齊且選點完成為 done，否則 open。
+- 編輯區正顯示的 picker 階段標為 current；ResultPreview 不標。
+
+本機 holder 點階段，經同一 holder gate 開該階段的 picker 草稿，可以點回已完成的階段重做；
+已發布的對齊與點保留到 Finish 才換掉，TwoTone 重新採樣照舊從空遮罩開始。Sample picker 有 Re-align，
+重新定線的 LinePicker 有 Sample，走同一條路徑。同譜已有另一階段的未 finish 草稿時，GUI 先用非阻塞的確認
+對話框詢問，取消則草稿與畫面不變；確認後 owner 照舊丟掉舊草稿（RPC 的 `discarded` 投影不變）。
+非 holder 點階段不開也不丟草稿：該階段有 live 草稿（例如 agent 的）就顯示它，否則顯示已發布預覽。
+
+視窗開啟、GUI Add 與階段發布是另外的本機寫入意圖，經 holder gate 開目前階段的 picker：
+未定線→LinePicker；已定線未完成選點→OneTone/FindPoints(by spec_type)。GUI Add 成功後直接開新譜的定線 picker。
+widget 的 `finished` → Controller 寫回 → 階段前進 → 重 swap。
 空 Finish 也完成選點，清單顯示完成，ResultPreview 顯示零點。
 `points_completed` 表示階段完成；`point_count` 表示可用點數。Analyze／Selector 只使用非空資料。
-widget 的 `finished` → Controller 寫回 → 階段前進 → 重 swap。
-ResultPreview 只列當下可用的下一步：未對齊只有 Align；已對齊有 Re-align 與 Sample。
-三者經同一 holder gate 開該階段的 picker 草稿，已發布的對齊與點保留到 Finish 才換掉；
-TwoTone 重新採樣照舊從空遮罩開始。Sample picker 有 Re-align，重新定線的 LinePicker 有 Sample，
-讓使用者在兩階段間切換。同譜已有另一階段的未 finish 草稿時，GUI 先用非阻塞的確認對話框詢問，
-取消則草稿與畫面不變；確認後 owner 照舊丟掉舊草稿（RPC 的 `discarded` 投影不變）。
 Processed restore 包含零點的完成結果，不新增持久化欄位。
 
 ### Picker 控制欄
 定線、OneTone 與 TwoTone 三個 picker 與 ResultPreview 共用 `InteractiveMplWidget` 版面：圖在左、控制欄在右。
-控制欄由上而下是設定、編輯動作、狀態文字；階段切換與 Finish（ResultPreview 是下一步按鈕）固定在欄底。
+控制欄由上而下是設定、編輯動作、狀態文字；階段切換與 Finish 固定在欄底。ResultPreview 的控制欄是空的，保留版面讓圖不跳動。
 每個輸入都有標籤，定線數值用一般小數而非科學記號。
 
 ### 背景計算 + 即時中斷（generation 戳記）
@@ -197,7 +204,7 @@ Named contexts 與 global Filter 分開保存。
 
 Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
 MainWindow 依 EventMeta origin 與目前 identity 在 Spectra 頁編輯區顯示 agent 開啟／修改的 picker，
-active 跟著切到該譜，但不切頁。Agent 的 Filter 與 search pending 只更新 Fit 頁：Fit 頁正顯示時切到
+active 跟著切到該譜，階段列標示該階段 draft，但不切頁。Agent 的 Filter 與 search pending 只更新 Fit 頁：Fit 頁正顯示時切到
 Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。記住的 Filter 只在 Filter context
 仍 live 時有效，context 結束就清掉，人類下次進 Fit 不會因 agent 已結束的事件落進 Filter 並開 Session。
 GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
@@ -259,7 +266,7 @@ downsample 後 kept count。Finish／cancel receipt 保留退休 identity，即�
 context。Filter finish 發布並關閉全域 context；Apply 仍不關閉有效 joint input。
 readonly selection.render 固定畫已發布點雲與各譜遮罩，interactive.render 只畫 live draft。
 兩者都不建立 Session。publication／rendering 失敗不宣稱 rollback。
-顯示切換不開 Session。Local holder 的人類點譜可另開目前階段 picker，observer RPC 只顯示草稿或已發布資料。
+顯示切換不開 Session。Local holder 的人類點階段可另開該階段 picker，observer RPC 只顯示草稿或已發布資料。
 PNG 不使用 Qt canvas，也不保存為產物。
 
 MCP entrypoint 使用共用 bridge，手寫工具組裝基礎 RPC 並摘要資料，control tools 轉送同一
@@ -273,7 +280,7 @@ Local、Local 鎖定及 Remote label／在線狀態。點燈呼叫 `toggle_local
 鎖定或切換 Local 鎖定；轉移本身不取消 search 或 interactive Session。
 
 MainWindow 的 `set_writable` 停用 collection／project／IO 命令與
-redo controls，spectrum 清單與 Spectra／Fit 切頁仍可用。主視窗推送狀態給 Analyze panel 和目前 picker。新 view 套用當下狀態，
+redo controls，spectrum 清單、階段列（只供檢視）與 Spectra／Fit 切頁仍可用。主視窗推送狀態給 Analyze panel 和目前 picker。新 view 套用當下狀態，
 子元件不訂閱 authority。Picker 停用 controls 與 domain pointer gestures，
 canvas 保持可用，接管時丟棄未提交的 Local pointer preview。
 Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt remote adapter
