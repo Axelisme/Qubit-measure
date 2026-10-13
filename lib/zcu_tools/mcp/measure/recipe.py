@@ -957,10 +957,16 @@ class RecipeTab:
                 raise ValueError("library name must be non-empty")
             if slot == "locked":
                 raise ValueError(f"Cannot select a library key at locked Slot: {field}")
-            value: object = (
-                ModuleRef(name=name).model_dump(mode="json") if slot else name
-            )
-            self._edit([{"path": list(path), "value": value}])
+            if slot:
+                selection = ModuleRef(name=name).model_dump(mode="json")
+                self._edit(
+                    [
+                        {"path": [*path, field_name], "value": value}
+                        for field_name, value in selection.items()
+                    ]
+                )
+            else:
+                self._edit([{"path": list(path), "value": name}])
         selected = self.read_field(field)
         if name is not None and (selected.errors or selected.key != name):
             raise GuiRpcError(f"Invalid {field} reference", reason="invalid_cfg")
