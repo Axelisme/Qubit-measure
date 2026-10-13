@@ -168,7 +168,8 @@ class MainWindow(QMainWindow):
         self._routing_editor = False
         self._routing_page = False
         self._editor_context_id: int | None = None
-        # An agent's Filter / Search waits here until the user enters Fit.
+        # An agent's Filter / Search waits here until the user enters Fit; a
+        # waiting Filter is dropped when its context closes.
         self._fit_entry_tab: AnalyzeTab | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
@@ -369,6 +370,9 @@ class MainWindow(QMainWindow):
         if payload.phase == "closed":
             if payload.context_id == self._editor_context_id:
                 self._clear_editor()
+            if payload.kind == "selection" and self._fit_entry_tab == "filter":
+                # An agent's Filter routes the next Fit entry only while live.
+                self._fit_entry_tab = None
             return
         if meta.origin.kind != "agent" or self._routing_editor:
             return
@@ -668,7 +672,8 @@ class MainWindow(QMainWindow):
         """Follow an agent's Filter or Search on the Fit page, never leaving pages.
 
         A shown Fit page switches to tab now; otherwise tab waits for the
-        user's next entry into Fit.
+        user's next entry into Fit. A waiting Filter lasts only while a Filter
+        context is live, so a finished agent Filter cannot open a new Session.
         """
         if self._pages.currentWidget() is self._fit_page:
             self._show_fit_page(tab)
