@@ -136,7 +136,7 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
         )
         tab.retain_module_source(
             "modules.qub_pulse",
-            summary_field="modules.qub_pulse.module.waveform.length",
+            summary_field="modules.qub_pulse.module.waveform.module.length",
             value_path=("waveform", "length"),
         )
     else:
@@ -144,7 +144,7 @@ def twotone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
             tab.use_inline("modules.qub_pulse")
         tab.set("modules.qub_pulse.module.gain", gain, source="explicit")
         tab.set(
-            "modules.qub_pulse.module.waveform.length",
+            "modules.qub_pulse.module.waveform.module.length",
             pulse_length_us,
             source="explicit",
         )
@@ -203,7 +203,7 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter(
-            "pulse_length_us", "modules.qub_pulse.module.waveform.length", "us"
+            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
         ),
         SummaryParameter("gain", "modules.qub_pulse.module.gain"),
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
