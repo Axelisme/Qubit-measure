@@ -1,10 +1,12 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-12，固定 Run snapshot、workflow Labber 匯出、離線 legacy reader 與 analysis summary 的 numpy scalar 轉換
+**Last updated:** 2026-10-13，facade 按需載入與 path helper 隔離
 
 
 `zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
-facade。caller 優先從 package root import model 與 function。`data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
+facade。caller 優先從 package root import model 與 function。Facade 在 caller 首次選用公開名稱時
+載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
+`data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
 
 - `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.0。
   `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
