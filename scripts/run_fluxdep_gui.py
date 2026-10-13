@@ -38,7 +38,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Use --no-control to disable the socket entirely."
         ),
     )
-    add_analysis_project_cli_options(parser, database_path_help="Raw data root")
+    add_analysis_project_cli_options(parser, data_root_help="Raw data root")
     return parser.parse_args(argv)
 
 

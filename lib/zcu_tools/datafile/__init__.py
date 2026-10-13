@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .analysis_document import AnalysisDocument, encode_analysis_document
     from .comment import LabberComment, decode_labber_comment, encode_labber_comment
+    from .fluxdep_database import FluxdepDatabaseInfo, read_fluxdep_database_info
     from .grouped import load_grouped_labber_data, save_grouped_labber_data
     from .labber import (
         load_labber_data,
@@ -57,6 +58,8 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "FluxdepDatabaseInfo",
+    "read_fluxdep_database_info",
     "AnalysisDocument",
     "encode_analysis_document",
     "LabberComment",
@@ -104,6 +107,8 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "FluxdepDatabaseInfo": ".fluxdep_database",
+    "read_fluxdep_database_info": ".fluxdep_database",
     "AnalysisDocument": ".analysis_document",
     "encode_analysis_document": ".analysis_document",
     "LabberComment": ".comment",

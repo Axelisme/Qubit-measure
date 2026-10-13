@@ -99,6 +99,7 @@ def test_project_info_handler():
     out = _call(_adapter(state), "project.info")
     assert out["chip_name"] == "ChipA"
     assert out["qub_name"] == "Q1"
+    assert out["data_root"] == "Database/ChipA/Q1"
 
 
 def test_fit_inputs_info_none_then_loaded():

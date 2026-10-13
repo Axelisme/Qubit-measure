@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
-import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (
@@ -49,15 +48,21 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     FitChangedPayload,
     InteractiveChangedPayload,
     SearchChangedPayload,
+    SelectionChangedPayload,
+    SpectrumAddedPayload,
+    SpectrumChangedPayload,
+    SpectrumRemovedPayload,
 )
 from zcu_tools.gui.app.fluxdep.search import SEARCH_OWNER_ID
-from zcu_tools.gui.app.fluxdep.services.viz import derive_auto_limits, render_fit_figure
+from zcu_tools.gui.app.fluxdep.services.viz import FitDisplay, format_stale_reasons
+from zcu_tools.gui.app.fluxdep.state import FIT_VERSION_KEY, FitState
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -65,7 +70,6 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .error_messages import friendly_fit_message
 from .transitions_form import TransitionsForm
@@ -75,7 +79,11 @@ logger = logging.getLogger(__name__)
 AnalyzeTab = Literal["filter", "search", "show"]
 _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
-_N_SIM_FLUX = 1000  # simulated flux grid resolution for the visualisation
+# One Show drawing: the fit result version, every published source/graph
+# version the renderer reads (stale reasons derive from them), and the
+# applied display choices. Pending control edits are not part of it.
+_ShowKey = tuple[int, tuple[tuple[str, int], ...], FitDisplay]
+
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
 _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
@@ -120,6 +128,42 @@ def _set_freq(edit: QLineEdit, value: float | None) -> None:
     edit.setText("" if value is None else f"{value:g}")
 
 
+def _message_label(accessible_name: str) -> QLabel:
+    """A wrapping message label that never widens the form (Ignored horizontal)."""
+    label = QLabel("")
+    label.setAccessibleName(accessible_name)
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    label.setWordWrap(True)
+    return label
+
+
+def _published_inputs(
+    fit: FitState,
+) -> tuple[
+    str,
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+    TransitionDict,
+    float | None,
+    float | None,
+]:
+    """The search inputs the forms display, detached from results and captures.
+
+    Result publication changes params, quality, the recorded cloud and the
+    captured graph, none of which is an input the user edits here.
+    """
+    return (
+        fit.search_db,
+        fit.EJb,
+        fit.ECb,
+        fit.ELb,
+        deepcopy(fit.transitions),
+        fit.r_f,
+        fit.sample_f,
+    )
+
+
 class AnalyzePanelWidget(QWidget):
     """Filter / Search / Show tabs over the selected joint point cloud."""
 
@@ -131,6 +175,9 @@ class AnalyzePanelWidget(QWidget):
         self._shown_token: int | None = None
         self._filter_widget: SelectorWidget | None = None
         self._filter_context_id: int | None = None
+        self._shown_fit: _ShowKey | None = None
+        # Display choices taken by Apply; the controls may hold pending edits.
+        self._applied_display = FitDisplay()
 
         self._build_ui()
         self._plot_host = QtPlotHost(self._diag_container, QtOwnerScheduler())
@@ -143,6 +190,14 @@ class AnalyzePanelWidget(QWidget):
         self._bus_subs.subscribe(
             ctrl.bus, InteractiveChangedPayload, self._on_interactive_changed
         )
+        # Every fit upstream: spectrum collection, alignment/points, Filter masks.
+        for upstream in (
+            SpectrumAddedPayload,
+            SpectrumRemovedPayload,
+            SpectrumChangedPayload,
+            SelectionChangedPayload,
+        ):
+            self._bus_subs.subscribe(ctrl.bus, upstream, self._on_upstream_changed)
         progress = ctrl.search.progress_control
         self._progress_dispose = (
             progress.attach_progress(SEARCH_OWNER_ID, self._refresh_progress)
@@ -150,6 +205,10 @@ class AnalyzePanelWidget(QWidget):
             else None
         )
         self._refresh_search()
+        if self._ctrl.state.fit.has_result:
+            self._apply_auto_limits()
+            self._apply_limit_boxes()
+        self._refresh_show()
         self.set_writable(writable=self._writable)
         # MainWindow explicitly activates this singleton on every Analyze click.
 
@@ -195,7 +254,7 @@ class AnalyzePanelWidget(QWidget):
             self._filter_placeholder.setVisible(True)
             return
         context = self._ctrl.interactive.begin_cross_selection()
-        active = self._ctrl.interactive.inspect()
+        active = self._ctrl.interactive.inspect_selection()
         if active is None or active.context is not context:
             raise RuntimeError("selection context changed while attaching its view")
         self._filter_context_id = active.context_id
@@ -289,12 +348,11 @@ class AnalyzePanelWidget(QWidget):
         self._export_btn.setEnabled(False)
         form.addRow(self._export_btn)
 
-        self._status = QLabel("")
-        self._status.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
-        )
-        self._status.setWordWrap(True)
+        self._status = _message_label("Status")
         form.addRow(self._status)
+        # Outdated-fit line with its root-change reasons; blank while fresh.
+        self._freshness = _message_label("Freshness")
+        form.addRow(self._freshness)
 
         return form_box
 
@@ -322,7 +380,7 @@ class AnalyzePanelWidget(QWidget):
         tools.addRow(self._transitions_show)
 
         redraw = QPushButton("Apply")
-        redraw.clicked.connect(self._redraw_show)
+        redraw.clicked.connect(self._apply_display)
         tools.addRow(redraw)
 
         self._fit_figure = Figure(figsize=(6, 4))
@@ -357,7 +415,7 @@ class AnalyzePanelWidget(QWidget):
         # Seed the database path: the prior fit's path, else a bundled default so
         # the user usually doesn't have to browse at all.
         self._db_edit.setText(
-            fit.database_path
+            fit.search_db
             or default_database_file(
                 self._ctrl.state.project, self._ctrl.get_project_root()
             )
@@ -372,17 +430,23 @@ class AnalyzePanelWidget(QWidget):
         _set_freq(self._sample_f, fit.sample_f)
         self._transitions_form.set_transitions(fit.transitions)
         self._transitions_show.set_transitions(fit.transitions)
+        self._applied_display = self._display_from_controls()
         self._export_btn.setEnabled(fit.has_result)
         # Compare published inputs, not results, to preserve local display edits.
-        self._loaded_fit_inputs = replace(
-            fit, transitions=deepcopy(fit.transitions), params=None
-        )
+        self._loaded_fit_inputs = _published_inputs(fit)
 
     def _on_fit_changed(self, payload: FitChangedPayload) -> None:
         del payload
-        if replace(self._ctrl.state.fit, params=None) != self._loaded_fit_inputs:
+        if _published_inputs(self._ctrl.state.fit) != self._loaded_fit_inputs:
             self._load_from_state()
         self._refresh_search()
+        self._refresh_show()
+
+    def _on_upstream_changed(self, payload: object) -> None:
+        """Re-read freshness after any publication the recorded fit depends on."""
+        del payload
+        self._refresh_search()
+        self._refresh_show()
 
     @property
     def current_tab(self) -> AnalyzeTab:
@@ -406,7 +470,7 @@ class AnalyzePanelWidget(QWidget):
         if index != self._tabs.currentIndex():
             self._tabs.setCurrentIndex(index)
         elif tab == "filter":
-            active = self._ctrl.interactive.inspect()
+            active = self._ctrl.interactive.inspect_selection()
             if (
                 active is None
                 or active.context_id != self._filter_context_id
@@ -472,7 +536,7 @@ class AnalyzePanelWidget(QWidget):
         else:
             self.detach()
             if self._ctrl.interactive.current_cross_selection() is not None:
-                self._ctrl.interactive.cancel()
+                self._ctrl.interactive.cancel_selection()
 
     # --- Search actions --------------------------------------------------
 
@@ -500,7 +564,7 @@ class AnalyzePanelWidget(QWidget):
         r_f = _parse_freq(self._r_f)
         sample_f = _parse_freq(self._sample_f)
         self._ctrl.set_fit_params(
-            database_path=self._db_edit.text().strip(),
+            search_db=self._db_edit.text().strip(),
             EJb=(self._ej_lo.value(), self._ej_hi.value()),
             ECb=(self._ec_lo.value(), self._ec_hi.value()),
             ELb=(self._el_lo.value(), self._el_hi.value()),
@@ -591,7 +655,12 @@ class AnalyzePanelWidget(QWidget):
         self._search_btn.setEnabled(not pending)
         self._cancel_btn.setEnabled(pending)
         self._progress.setVisible(pending)
-        self._export_btn.setEnabled(self._ctrl.state.fit.has_result and not pending)
+        stale_reasons = self._stale_reasons()
+        self._freshness.setText(format_stale_reasons(stale_reasons))
+        # Stale params are refused by export; the reasons above say why.
+        self._export_btn.setEnabled(
+            self._ctrl.state.fit.has_result and not pending and not stale_reasons
+        )
         if pending:
             self._status.setText("Searching…")
             self._refresh_progress()
@@ -633,7 +702,8 @@ class AnalyzePanelWidget(QWidget):
                 f"Search result retained; export is available.\n{exc}",
             )
         self._apply_auto_limits()
-        self._redraw_show()
+        self._apply_limit_boxes()
+        self._refresh_show()
         # The Show tab is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
@@ -678,64 +748,86 @@ class AnalyzePanelWidget(QWidget):
     # --- Show actions ----------------------------------------------------
 
     def _apply_auto_limits(self) -> None:
-        """Set the x/y limit boxes to the auto-derived (notebook) limits."""
-        fit = self._ctrl.state.fit
-        s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
-        (x_lo, x_hi), (y_lo, y_hi) = derive_auto_limits(
-            self._ctrl.state.spectrums, s_fluxs, s_freqs, fit.r_f, fit.sample_f
-        )
+        """Set the x/y limit boxes to the Controller's Show auto limits."""
+        (x_lo, x_hi), (y_lo, y_hi) = self._ctrl.fit_auto_limits()
         self._x_lo.setValue(x_lo)
         self._x_hi.setValue(x_hi)
         self._y_lo.setValue(y_lo)
         self._y_hi.setValue(y_hi)
 
+    def _stale_reasons(self) -> tuple[str, ...]:
+        """State's root-change reasons for the stored result; empty while fresh."""
+        return tuple(self._ctrl.state.fit_stale_reasons)
+
+    def _display_from_controls(self) -> FitDisplay:
+        """Snapshot every Show control as detached display choices."""
+        return FitDisplay(
+            xlim=(self._x_lo.value(), self._x_hi.value()),
+            ylim=(self._y_lo.value(), self._y_hi.value()),
+            show_const_freq=self._show_const_freq.isChecked(),
+            plot_transitions=deepcopy(self._transitions_show.get_transitions()),
+        )
+
+    def _apply_display(self) -> None:
+        """Apply: take every pending Show control and redraw with it."""
+        self._applied_display = self._display_from_controls()
+        self._redraw_show()
+
+    def _apply_limit_boxes(self) -> None:
+        """Take only the limit boxes (e.g. auto limits); other edits stay pending."""
+        boxes = self._display_from_controls()
+        self._applied_display = replace(
+            self._applied_display, xlim=boxes.xlim, ylim=boxes.ylim
+        )
+
+    def _show_key(self) -> _ShowKey:
+        state = self._ctrl.state
+        return (
+            state.version.get(FIT_VERSION_KEY),
+            tuple((stage.name, stage.version) for stage in state.pipeline_snapshot()),
+            self._applied_display,
+        )
+
+    def _refresh_show(self) -> None:
+        """Redraw Show with the applied choices when result, sources or they changed.
+
+        Pending control edits (transition subset, reference lines, limits) stay
+        in the controls until Apply.
+        """
+        if self._ctrl.state.fit.params is None:
+            return
+        if self._show_key() != self._shown_fit:
+            self._redraw_show()
+
     def _redraw_show(self) -> None:
-        """Render the fit visualisation with the current display tools."""
+        """Render the fit visualisation with the applied display choices."""
         fit = self._ctrl.state.fit
         if fit.params is None:
             return
-        spectrums = self._ctrl.state.spectrums
-        s_fluxs, s_freqs = self._ctrl.selected_pointcloud()
-        x_lo, x_hi = self._x_lo.value(), self._x_hi.value()
-        flux_lo, flux_hi = (x_lo, x_hi) if x_hi > x_lo else (0.0, 1.0)
-        t_fluxs = np.linspace(flux_lo, flux_hi, _N_SIM_FLUX)
-        _, energies = calculate_energy_vs_flux(
-            fit.params, t_fluxs, cutoff=40, evals_count=15
-        )
-
+        display = self._applied_display
         # The show-transitions subset may need an r_f/sample_f that's unset;
         # check before drawing so it surfaces a friendly message, not a crash.
-        show_transitions = self._transitions_show.get_transitions()
+        show_transitions = (
+            display.plot_transitions
+            if display.plot_transitions is not None
+            else fit.transitions
+        )
         missing = self._missing_freq_message(show_transitions, fit.r_f, fit.sample_f)
         if missing:
             self._status.setText("Show: " + missing.split(".")[0] + ".")
             show_transitions = fit.transitions
 
-        aligned = next((e for e in spectrums.values() if e.aligned), None)
         try:
-            render_fit_figure(
+            self._ctrl.render_fit(
                 self._fit_figure,
-                spectrums,
-                t_fluxs,
-                energies,
-                fit.transitions,
-                s_fluxs,
-                s_freqs,
-                r_f=fit.r_f,
-                sample_f=fit.sample_f,
-                flux_half=aligned.flux_half if aligned else None,
-                flux_period=aligned.flux_period if aligned else None,
-                title=(
-                    f"EJ/EC/EL = ({fit.params[0]:.2f}, {fit.params[1]:.2f}, "
-                    f"{fit.params[2]:.2f})"
-                ),
-                xlim=(self._x_lo.value(), self._x_hi.value()),
-                ylim=(self._y_lo.value(), self._y_hi.value()),
-                show_const_freq=self._show_const_freq.isChecked(),
+                xlim=display.xlim,
+                ylim=display.ylim,
+                show_const_freq=display.show_const_freq,
                 plot_transitions=show_transitions,
             )
         except Exception as exc:
             logger.exception("render_fit_figure failed")
             self._status.setText(f"Could not draw: {exc}")
             return
+        self._shown_fit = self._show_key()
         self._fit_canvas.draw_idle()

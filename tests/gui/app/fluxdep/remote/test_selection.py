@@ -14,7 +14,11 @@ def test_selection_snapshot_reports_native_null_and_full_published_mask(
     client = route_harness.client()
     initial = route_harness.request(client, "selection.snapshot")
     assert initial["ok"] is True
-    assert initial["result"] == {"selected": None, "min_distance": 0.0}
+    assert initial["result"] == {
+        "selected": None,
+        "min_distance": 0.0,
+        "pending": False,
+    }
     state = route_harness.ctrl.state
     state.put_spectrum(
         SpectrumEntry(
@@ -39,7 +43,11 @@ def test_selection_snapshot_reports_native_null_and_full_published_mask(
     before = state.version.snapshot()
     current = route_harness.request(client, "selection.snapshot")
     assert current["ok"] is True
-    assert current["result"] == {"selected": [False, True, False], "min_distance": 0.35}
+    assert current["result"] == {
+        "selected": [False, True, False],
+        "min_distance": 0.35,
+        "pending": False,
+    }
     assert state.version.snapshot() == before
     assert state.selection_mask() is not None
     np.testing.assert_array_equal(state.selection_mask(), [False, True, False])

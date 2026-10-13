@@ -105,7 +105,7 @@ def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window)
     ):
         assert not button(view, text).isEnabled(), text
     spectra = view.findChild(QListWidget)
-    assert spectra is not None and not spectra.isEnabled()
+    assert spectra is not None and spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)
     assert canvas is not None and canvas.isEnabled()
     assert view.centralWidget().isEnabled()
@@ -299,7 +299,7 @@ class DeferredSearch:
 
 
 @pytest.fixture
-def pending_window(qapp, cross_controller, tmp_path):
+def pending_window(qapp, cross_controller, search_database_hdf5):
     background = DeferredSearch()
     ctrl = Controller(
         cross_controller.state,
@@ -307,10 +307,8 @@ def pending_window(qapp, cross_controller, tmp_path):
             background, ProgressService(QtProgressTransport())
         ),
     )
-    path = tmp_path / "db.h5"
-    path.touch()
     ctrl.set_fit_params(
-        str(path),
+        search_database_hdf5,
         (2, 15),
         (0.2, 2),
         (0.1, 2),

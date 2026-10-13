@@ -20,8 +20,10 @@ from __future__ import annotations
 #   GUI_VERSION  — this GUI code's *revision*. Reported, never compared. Bump on
 #     any meaningful GUI change you want to be able to spot a reload of,
 #     INCLUDING pure-internal logic changes that don't touch the wire.
-WIRE_VERSION = 5  # fixed connection identity and holder-gated commands
+# This unpublished interface revision includes identity-only project setup,
+# data_root, spectrum evidence/drafts and fit search_db/render/database_info.
+WIRE_VERSION = 8
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 7  # application-owned control authority shared with the GUI
+GUI_VERSION = 11  # preserve inherited alignment on presentation-only draft edits

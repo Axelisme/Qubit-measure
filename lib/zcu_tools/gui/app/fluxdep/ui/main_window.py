@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._subscribe_events()
         self._refresh_list()
-        self._rebuild_editor()
+        self._rebuild_editor(open_picker=True)
         self._dispose_control = ctrl.control_identity.watch(self._refresh_control)
 
     def _refresh_control(self, status: ControlStatus) -> None:
@@ -249,7 +249,6 @@ class MainWindow(QMainWindow):
             self._project_btn,
             self._add_btn,
             self._remove_btn,
-            self._list,
             self._reload_btn,
             self._export_btn,
             self._analyze_btn,
@@ -280,7 +279,11 @@ class MainWindow(QMainWindow):
             return
         if meta.origin.kind != "agent" or self._routing_editor:
             return
-        active = self._ctrl.interactive.inspect()
+        active = (
+            self._ctrl.interactive.inspect_selection()
+            if payload.spectrum_name is None
+            else self._ctrl.interactive.inspect(payload.spectrum_name)
+        )
         if active is not None and active.context_id == payload.context_id:
             self._present_context(active)
 
@@ -289,6 +292,10 @@ class MainWindow(QMainWindow):
         try:
             if isinstance(active.context, CrossSelectionContext):
                 self._show_analyze("filter")
+            elif active.spectrum_name != self._ctrl.state.active_spectrum:
+                self._ctrl.set_active_spectrum(active.spectrum_name)
+                self._clear_editor()
+                self._mount_picker(active.context)
             elif active.context_id == self._editor_context_id:
                 if self._current_editor is not None:
                     self._editor_stack.setCurrentWidget(self._current_editor)
@@ -318,7 +325,7 @@ class MainWindow(QMainWindow):
         # A stage change (aligned / points_completed) on the active spectrum must
         # advance its editing widget (line-picker → point-selector → done).
         if payload.name == self._ctrl.state.active_spectrum:
-            self._rebuild_editor()
+            self._rebuild_editor(open_picker=True)
 
     # --- list refresh ----------------------------------------------------
 
@@ -353,10 +360,14 @@ class MainWindow(QMainWindow):
         name = current.data(256)
         if name and name != self._ctrl.state.active_spectrum:
             self._ctrl.set_active_spectrum(name)
+        # Human picking is a separate write intention, never an active-change effect.
+        if name and self._ctrl.control_identity.status().holder == "gui":
+            self._rebuild_editor(open_picker=True)
 
     def _on_active_changed(self, _payload: ActiveSpectrumChangedPayload) -> None:
         self._refresh_list()  # keep the list selection in sync with the active spectrum
-        self._rebuild_editor()
+        if not self._routing_editor:
+            self._rebuild_editor()
 
     # --- editing area (stage-driven interactive widget) ------------------
 
@@ -373,14 +384,12 @@ class MainWindow(QMainWindow):
         self._editor_context_id = None
         self._editor_stack.setCurrentWidget(self._placeholder)
 
-    def _rebuild_editor(self) -> None:
-        """Show the interactive widget for the active spectrum's current stage.
+    def _rebuild_editor(self, *, open_picker: bool = False) -> None:
+        """Show an existing draft or published data without creating input.
 
-        Stages: not-aligned → LinePicker; aligned-not-selected → OneTone/FindPoints
-        (by spec_type); selected → a read-only ResultPreview (use Re-pick lines /
-        Re-select points to redo a stage). The widget's ``finished`` signal writes
-        its result back through the Controller, which advances the stage and
-        re-triggers this.
+        open_picker marks a separate Local write intention, gated by writable.
+        That intention may open the current stage picker. Display-change events
+        never request it, including observer RPCs while Local holds authority.
         """
         # begin_* emits synchronously; this stage route already mounts its context.
         self._routing_editor = True
@@ -391,9 +400,14 @@ class MainWindow(QMainWindow):
                 return
             entry = self._ctrl.state.spectrums[name]
 
-            if not entry.aligned:
+            active = self._ctrl.interactive.inspect(name)
+            if active is not None:
+                context = active.context
+                if not isinstance(context, CrossSelectionContext):
+                    self._mount_picker(context)
+            elif open_picker and self._writable and not entry.aligned:
                 self._mount_line_picker(entry)
-            elif not entry.points_completed:
+            elif open_picker and self._writable and not entry.points_completed:
                 self._mount_point_selector(entry)
             else:
                 self._mount(
@@ -432,22 +446,30 @@ class MainWindow(QMainWindow):
         widget: LinePickerWidget | OneToneWidget | FindPointsWidget
         if isinstance(context, LinePickContext):
             widget = LinePickerWidget(context)
-            widget.finished.connect(self._finish_lines)
+            widget.finished.connect(lambda: self._finish_lines(context.spectrum_name))
         elif isinstance(context, OneTonePickContext):
             widget = OneToneWidget(context)
-            widget.finished.connect(self._ctrl.interactive.finish_onetone_pick)
+            widget.finished.connect(
+                lambda: self._ctrl.interactive.finish_onetone_pick(
+                    context.spectrum_name
+                )
+            )
         else:
             widget = FindPointsWidget(context)
-            widget.finished.connect(self._ctrl.interactive.finish_twotone_pick)
+            widget.finished.connect(
+                lambda: self._ctrl.interactive.finish_twotone_pick(
+                    context.spectrum_name
+                )
+            )
         self._mount(widget)
-        active = self._ctrl.interactive.inspect()
+        active = self._ctrl.interactive.inspect(context.spectrum_name)
         if active is None or active.context is not context:
             raise RuntimeError("picker context changed while attaching its view")
         self._editor_context_id = active.context_id
 
-    def _finish_lines(self) -> None:
+    def _finish_lines(self, name: str) -> None:
         try:
-            self._ctrl.interactive.finish_line_pick()
+            self._ctrl.interactive.finish_line_pick(name)
         except (FailedPreconditionError, ValueError, RuntimeError) as exc:
             self._show_error("Alignment failed", str(exc))
 

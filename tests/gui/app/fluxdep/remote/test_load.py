@@ -312,6 +312,7 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     client = route_harness.client()
     _observe_sources(route_harness, client)
     before = state.version.get(f"spectrum:{name}")
+    route_harness.ctrl.remove_spectrum(name)
     put_spectrum = FluxDepState.put_spectrum
 
     def fail_second_publication(target: FluxDepState, entry: SpectrumEntry) -> None:
@@ -332,8 +333,9 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     assert state.get_spectrum(name).points_completed
     assert state.get_spectrum(name).spec_type == "OneTone"
     assert state.version.get(f"spectrum:{name}") == before + 1
-    # Failed handlers do not advance even previously matching observations.
+    # The failed handler retained the committed prefix, not a rollback.
     _observe_sources(route_harness, client)
+    route_harness.ctrl.remove_spectrum(name)
     assert route_harness.request(
         client, "spectrum.load_processed", filepath=processed_hdf5
     )["ok"]

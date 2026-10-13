@@ -16,6 +16,7 @@ import logging
 from collections.abc import Callable
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
@@ -37,12 +38,24 @@ from zcu_tools.gui.app.fluxdep.interactive import (
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchOwner, FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
-from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
+from zcu_tools.gui.app.fluxdep.services.fit import (
+    FitExportReceipt,
+    FitService,
+    PbarFactory,
+    SearchInput,
+)
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
+from zcu_tools.gui.app.fluxdep.services.viz import (
+    FitDisplay,
+    derive_fit_auto_limits,
+    render_fit_result,
+    render_selection_result,
+)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpecType
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.controller_base import BaseController
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive.plugin import BackgroundSubmitter
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -159,9 +172,25 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     # --- alignment / points ---------------------------------------------
 
-    def set_alignment(self, name: str, flux_half: float, flux_int: float) -> None:
-        self._alignment.set_alignment(name, flux_half, flux_int)
+    def set_alignment(
+        self,
+        name: str,
+        flux_half: float,
+        flux_int: float,
+        inherited_from: str | None = None,
+    ) -> list[str]:
+        """Publish native half/integer lines and return downstream invalidated labels.
+
+        The picker passes inherited_from only when finishing an untouched
+        inherited draft. Other callers omit it for manually determined alignment.
+        The owner service maps raw/point flux axes and publishes provenance under
+        the same version bump. Invalid separation/mapped values fail before writes.
+        """
+        before = self.state.pipeline_snapshot()
+        self._alignment.set_alignment(name, flux_half, flux_int, inherited_from)
+        invalidated = self.state.invalidated(before)
         self._emit(SpectrumChangedPayload(name=name))
+        return invalidated
 
     def reset_alignment(self, name: str) -> None:
         """Reopen alignment, keeping points/completion; emit one change on success.
@@ -184,9 +213,18 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_points(
         self, name: str, dev_values: NDArray[np.float64], freqs: NDArray[np.float64]
-    ) -> None:
+    ) -> list[str]:
+        """Publish native device/GHz points and return this publication's invalidated labels.
+
+        PointsService sorts/maps arrays. Validation failures publish nothing.
+        Capture downstream facts before emitting; reentrant subscribers cannot
+        change this receipt. State and events remain committed if an emit fails.
+        """
+        before = self.state.pipeline_snapshot()
         self._points.set_points(name, dev_values, freqs)
+        invalidated = self.state.invalidated(before)
         self._emit(SpectrumChangedPayload(name=name))
+        return invalidated
 
     # --- cross-spectrum selection ---------------------------------------
 
@@ -195,9 +233,18 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_selection(
         self, selected: NDArray[np.bool_], min_distance: float = 0.0
-    ) -> None:
+    ) -> list[str]:
+        """Publish a joint bool mask and return this publication's invalidated labels.
+
+        min_distance is the normalized downsample threshold. Shape errors fail
+        before publication. Capture facts before emitting, independent of
+        synchronous subscriber writes. No rollback is claimed on emit failure.
+        """
+        before = self.state.pipeline_snapshot()
         self._selection.set_selection(selected, min_distance)
+        invalidated = self.state.invalidated(before)
         self._emit(SelectionChangedPayload())
+        return invalidated
 
     # --- export ----------------------------------------------------------
 
@@ -217,7 +264,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     def set_fit_params(
         self,
-        database_path: str,
+        search_db: str,
         EJb: tuple[float, float],
         ECb: tuple[float, float],
         ELb: tuple[float, float],
@@ -227,21 +274,91 @@ class Controller(BaseController[FluxDepState, EventBus]):
     ) -> None:
         """Replace search inputs and clear any result; emit FitChanged once.
 
-        Owner-thread command. database_path is the search database file, not
+        Owner-thread command. search_db is the search database file, not
         the project's raw-data directory. EJb/ECb/ELb are lower/upper bounds
         in GHz. transitions holds native integer level-pair categories and
         optional r_f/sample_f values in GHz; separate frequencies are injected
         by the search kernel according to transitions_with_freqs. None clears
-        a separate frequency. Domain validation happens when searching.
-        This command neither checks the database nor starts a search.
+        a separate frequency. Unknown categories fail before I/O; nonempty
+        pairs or dynamic categories read DB metadata to check level indices.
+        Empty basic choices need no file. Invalid choices raise InvalidInputError;
+        I/O errors propagate before publication. Frequency/bounds validation
+        remains search-owned. This command does not start a search.
         """
-        self._fit.set_params(database_path, EJb, ECb, ELb, transitions, r_f, sample_f)
+        self._fit.set_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
         self._emit(FitChangedPayload(has_result=self._state.fit.has_result))
 
     def selected_pointcloud(
         self,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         return self._fit.selected_pointcloud()
+
+    def render_selection(self, figure: Figure) -> None:
+        """Draw published Filter evidence into caller-owned figure without a Session.
+
+        Uses every spectrum\'s published sampled points and Filter mask. No state,
+        draft or display selection is changed. Stored fit params overlay model
+        curves, including stale/params-only fits, without residual markings;
+        rendering failures propagate.
+        """
+        render_selection_result(figure, self.state.spectrums, fit=self.state.fit)
+
+    def fit_auto_limits(
+        self,
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Return Show's ((flux_min, flux_max), (GHz_min, GHz_max)) on owner.
+
+        Recorded search uses only its detached capture backgrounds/calibration
+        and original search points, even when outdated. Before search or with a
+        params-only result, use current published backgrounds and selected points.
+        Empty sources yield a unit box, expanded by published frequency references.
+        No State or Figure changes. Foreign threads and missing recorded capture
+        raise RuntimeError; a fit result is not required.
+        """
+        self.state.assert_owner_thread()
+        fluxs, freqs = self.selected_pointcloud()
+        return derive_fit_auto_limits(
+            self.state.fit, self.state.spectrums, fluxs, freqs
+        )
+
+    def render_fit(
+        self,
+        figure: Figure,
+        *,
+        xlim: tuple[float, float] | None = None,
+        ylim: tuple[float, float] | None = None,
+        show_const_freq: bool = True,
+        plot_transitions: TransitionDict | None = None,
+    ) -> None:
+        """Draw the native Show overlay into caller-owned figure on owner thread.
+
+        Uses the recorded search's detached backgrounds/calibration and original
+        points, even when stale; params-only results use current published sources
+        and selected points. Does not publish state.
+        Limits are normalized flux and GHz; None derives native auto limits.
+        plot_transitions overrides the displayed lines only; None uses fit choices.
+        show_const_freq toggles reference lines. Figure contents are replaced.
+        Recorded search points keep their original coordinates and attribution;
+        later selection changes cannot shift their colors/outlier markers. The
+        title lists State's stale reasons. Missing result raises
+        FailedPreconditionError(no_fit_result); simulation
+        and render errors propagate. GUI and RPC use this same rendering path.
+        """
+        self.state.assert_owner_thread()
+        fit = self.state.fit
+        if fit.params is None:
+            raise FailedPreconditionError(
+                "no fit result to render", reason_code="no_fit_result"
+            )
+        fluxs, freqs = self.selected_pointcloud()
+        display = FitDisplay(
+            xlim=xlim,
+            ylim=ylim,
+            show_const_freq=show_const_freq,
+            plot_transitions=plot_transitions,
+            stale_reasons=tuple(self.state.fit_stale_reasons),
+        )
+        render_fit_result(figure, fit, self.state.spectrums, fluxs, freqs, display)
 
     def capture_search(self) -> SearchInput:
         """Capture detached search inputs on State's owner; invalid inputs raise."""
@@ -267,9 +384,17 @@ class Controller(BaseController[FluxDepState, EventBus]):
             inputs, pbar_factory=pbar_factory, cancel_requested=cancel_requested
         )
 
-    def record_search_result(self, result: DatabaseSearchResult) -> None:
-        """Write a computed search result onto State (MAIN THREAD only)."""
-        self._fit.record_result(result)
+    def record_search_result(
+        self, result: DatabaseSearchResult, inputs: SearchInput
+    ) -> None:
+        """Publish result with the exact SearchInput used to compute it, on owner.
+
+        inputs carries detached original normalized-flux/GHz coordinates, point
+        order and captured dependency versions. It is not reconstructed from
+        live State. Late direct publication stays stale; search owner rejects
+        changed inputs before delivery. Shape failures raise without a fact.
+        """
+        self._fit.record_result(result, inputs)
         self._emit(FitChangedPayload(has_result=True))
 
     def search_database(
@@ -288,12 +413,13 @@ class Controller(BaseController[FluxDepState, EventBus]):
         fact. None disables cancellation. Other failures propagate. In-flight
         HDF5/Numba work may delay cancellation observation.
         """
+        inputs = self.capture_search()
         result = self._fit.compute_search(
-            self.capture_search(),
+            inputs,
             pbar_factory=pbar_factory,
             cancel_requested=cancel_requested,
         )
-        self.record_search_result(result)
+        self.record_search_result(result, inputs)
         return result
 
     def export_params(self, savepath: str | None = None) -> str:
@@ -301,8 +427,20 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Owner-thread command. None uses params.json under project.result_dir.
         Independent sections are preserved. Calibration comes from the first
-        aligned spectrum. FailedPreconditionError reports no_fit_result or
-        no_aligned_spectrum before I/O; native I/O errors propagate. State and
-        resource observations do not change.
+        aligned spectrum. FailedPreconditionError reports no_fit_result,
+        fit_stale (with root-change reasons) or no_aligned_spectrum before I/O;
+        native I/O errors propagate. State and resource observations do not change.
         """
         return self._fit.export_params(savepath)
+
+    def export_params_receipt(self, savepath: str | None = None) -> FitExportReceipt:
+        """Merge the fit into params.json and return captured output facts.
+
+        Owner-thread command. None uses params.json under project.result_dir.
+        Independent sections are preserved. The receipt holds full-precision
+        (EJ, EC, EL) GHz and the first aligned spectrum used for calibration.
+        FailedPreconditionError reports no_fit_result, fit_stale (with root-change
+        reasons) or no_aligned_spectrum before I/O. Native I/O failures propagate;
+        no receipt is returned on failure. State and observations do not change.
+        """
+        return self._fit.export_params_receipt(savepath)

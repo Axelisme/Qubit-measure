@@ -1,10 +1,21 @@
-"""Shared wire decoding for the existing grid and joint-cloud brush plugins."""
+"""Shared wire decoding for the existing grid and joint-cloud brush plugins.
+
+STROKE_PARAMS declares native x/GHz vertices, normalized brush radius and explicit
+select/erase mode. TOOL_PARAMS is the optional presentation-tool update. Both
+plugins and remote schema consumers reuse these declarations and domain limits.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-from zcu_tools.analysis.fluxdep.stroke import BrushPoint, BrushStroke, BrushTool
+from zcu_tools.analysis.fluxdep.stroke import (
+    BRUSH_WIDTH_MAX,
+    BRUSH_WIDTH_MIN,
+    BrushPoint,
+    BrushStroke,
+    BrushTool,
+)
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import (
@@ -16,12 +27,26 @@ from zcu_tools.gui.remote.param_spec import (
 
 # These declarations accompany the payload decoders; both plugins expose them.
 TOOL_PARAMS = (
-    ParamSpec("width", JsonType.NUMBER, required=False),
+    ParamSpec(
+        "width",
+        JsonType.NUMBER,
+        required=False,
+        minimum=BRUSH_WIDTH_MIN,
+        maximum=BRUSH_WIDTH_MAX,
+    ),
     ParamSpec("mode", JsonType.STRING, required=False, enum=("select", "erase")),
 )
 STROKE_PARAMS = (
-    ParamSpec("vertices", JsonType.NUMBER_PAIRS),
-    ParamSpec("width", JsonType.NUMBER),
+    ParamSpec(
+        "vertices", JsonType.NUMBER_PAIRS, description="Nonempty native x/GHz pairs."
+    ),
+    ParamSpec(
+        "width",
+        JsonType.NUMBER,
+        minimum=BRUSH_WIDTH_MIN,
+        maximum=BRUSH_WIDTH_MAX,
+        description=f"Normalized radius [{BRUSH_WIDTH_MIN:g},{BRUSH_WIDTH_MAX:g}].",
+    ),
     ParamSpec("mode", JsonType.STRING, enum=("select", "erase")),
 )
 

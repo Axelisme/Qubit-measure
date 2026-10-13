@@ -57,7 +57,7 @@ def test_runtime_options_from_args_has_safe_defaults() -> None:
 
 def test_project_info_from_args_preserves_omitted_defaults() -> None:
     parser = argparse.ArgumentParser()
-    add_analysis_project_cli_options(parser, database_path_help="database help")
+    add_analysis_project_cli_options(parser, data_root_help="database help")
 
     default_project = project_info_from_args(
         parser.parse_args([]),
@@ -72,7 +72,7 @@ def test_project_info_from_args_preserves_omitted_defaults() -> None:
                 "Q1",
                 "--result-dir",
                 "result/Q_TEST/Q1",
-                "--database-path",
+                "--data-root",
                 "Database/Q_TEST/Q1",
             ]
         ),
@@ -82,9 +82,9 @@ def test_project_info_from_args_preserves_omitted_defaults() -> None:
     assert default_project.chip_name == "unknown_chip"
     assert default_project.qub_name == "unknown_qubit"
     assert default_project.result_dir == "/repo/result/unknown_chip/unknown_qubit"
-    assert default_project.database_path == "/repo/Database/unknown_chip/unknown_qubit"
+    assert default_project.data_root == "/repo/Database/unknown_chip/unknown_qubit"
 
     assert explicit_project.chip_name == "Q_TEST"
     assert explicit_project.qub_name == "Q1"
     assert explicit_project.result_dir == "result/Q_TEST/Q1"
-    assert explicit_project.database_path == "Database/Q_TEST/Q1"
+    assert explicit_project.data_root == "Database/Q_TEST/Q1"

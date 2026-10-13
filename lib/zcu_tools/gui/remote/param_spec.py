@@ -38,6 +38,7 @@ class SchemaProperty(TypedDict, total=False):
 
     type is the JSON primitive/container kind. items declares array element shape.
     minItems/maxItems are nonnegative array lengths. enum lists allowed strings.
+    minimum/maximum are inclusive numeric limits for schema consumers.
     description is human-readable parameter guidance. Absent fields impose no
     corresponding constraint; defaults remain ParamSpec-owned, not schema fields.
     """
@@ -46,6 +47,8 @@ class SchemaProperty(TypedDict, total=False):
     items: SchemaProperty
     minItems: int
     maxItems: int
+    minimum: float
+    maximum: float
     enum: list[str]
     description: str
 
@@ -158,6 +161,8 @@ class ParamSpec:
     description documents the input. mcp_hidden omits it only from MCP schemas.
     enum restricts STRING membership. array_item_type declares ARRAY schema
     items (string by default, or number), without changing handler validation.
+    minimum/maximum declare inclusive numeric schema limits; None omits a limit.
+    Domain handlers own range validation, including dependent ranges.
     Invalid enum/item declarations raise ValueError during construction.
     """
 
@@ -174,6 +179,8 @@ class ParamSpec:
     # ARRAY schema element kind, not element validation. Other kinds keep string.
     # Domain handlers still own element type, shape, finite values and reasons.
     array_item_type: Literal["string", "number"] = "string"
+    minimum: float | None = None
+    maximum: float | None = None
 
     def __post_init__(self) -> None:
         if self.array_item_type not in ("string", "number"):
@@ -352,6 +359,10 @@ def schema_property(spec: ParamSpec) -> SchemaProperty:
             JsonType.OBJECT: "object",
         }
         prop["type"] = scalar_types[spec.json_type]
+    if spec.minimum is not None:
+        prop["minimum"] = spec.minimum
+    if spec.maximum is not None:
+        prop["maximum"] = spec.maximum
     if spec.enum is not None:
         prop["enum"] = list(spec.enum)
     if spec.description:

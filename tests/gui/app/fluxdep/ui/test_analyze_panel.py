@@ -10,10 +10,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.collections import QuadMesh
+from matplotlib.figure import Figure
 from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
 from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
+from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
@@ -21,6 +23,11 @@ from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
     AnalyzePanelWidget,
 )
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
+
+from tests.gui.app.fluxdep._search_result import (
+    perfect_fit_result,
+    synthetic_search_input,
+)
 
 
 @pytest.fixture
@@ -37,7 +44,7 @@ def panel(qapp):
 @pytest.mark.parametrize("publish_before_panel", [False, True])
 @pytest.mark.parametrize("frequencies", [(None, None), (7.0, 3.0)])
 def test_published_fit_inputs_reach_search_and_show(
-    qapp, publish_before_panel, frequencies
+    qapp, publish_before_panel, frequencies, search_database_hdf5
 ):
     ctrl = Controller(FluxDepState())
     widget = None
@@ -45,7 +52,7 @@ def test_published_fit_inputs_reach_search_and_show(
         widget = AnalyzePanelWidget(ctrl)
     try:
         ctrl.set_fit_params(
-            "/task/database.h5",
+            search_database_hdf5,
             (3.0, 12.0),
             (0.3, 1.5),
             (0.2, 1.2),
@@ -61,7 +68,7 @@ def test_published_fit_inputs_reach_search_and_show(
             if group.title() == "Search parameters"
         )
         assert any(
-            edit.text() == ctrl.state.fit.database_path
+            edit.text() == ctrl.state.fit.search_db
             for edit in search_form.findChildren(QLineEdit)
         ), "Search must display the currently published database"
         assert [box.value() for box in search_form.findChildren(QDoubleSpinBox)] == [
@@ -93,13 +100,13 @@ def test_published_fit_inputs_reach_search_and_show(
 
 @pytest.mark.parametrize("display_edit", ["none", "subset", "missing_frequency"])
 def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
-    panel, monkeypatch, display_edit
+    panel, monkeypatch, display_edit, search_database_hdf5
 ):
-    from zcu_tools.gui.app.fluxdep.ui import analyze_panel
+    from zcu_tools.gui.app.fluxdep.services import viz
 
     widget, ctrl = panel
     ctrl.set_fit_params(
-        "/task/database.h5",
+        search_database_hdf5,
         (3.0, 12.0),
         (0.3, 1.5),
         (0.2, 1.2),
@@ -123,23 +130,14 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
         search_form.set_transitions(TransitionDict({"mirror": [(0, 1)]}))
     display_before_result = show_form.get_transitions()
     bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = np.array([0.0, 0.1]), np.array([1.0, 1.0])
     ctrl.record_search_result(
-        DatabaseSearchResult(
-            params=(5.0, 1.0, 0.5),
-            best_distance=0.1,
-            best_scale=1.0,
-            best_index=0,
-            entry_results=np.array([[0.1, 1.0]]),
-            entry_params=np.array([[5.0, 1.0, 0.5]]),
-            fluxs=np.array([0.0, 0.1]),
-            freqs=np.array([1.0, 1.0]),
-            predicted_freqs=np.array([1.0, 1.0]),
-            bounds=bounds,
-        )
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
     )
     assert show_form.get_transitions() == display_before_result
     monkeypatch.setattr(
-        analyze_panel,
+        viz,
         "calculate_energy_vs_flux",
         lambda params, fluxs, **kwargs: (
             None,
@@ -164,6 +162,299 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     np.testing.assert_allclose(lines[0].get_ydata(), expected_frequency)
     assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
     assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
+
+
+def _show_title(widget: AnalyzePanelWidget) -> str:
+    return widget.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+
+
+def _freshness(widget: AnalyzePanelWidget) -> QLabel:
+    return next(
+        label
+        for label in widget.findChildren(QLabel)
+        if label.accessibleName() == "Freshness"
+    )
+
+
+def _export_button(widget: AnalyzePanelWidget) -> QPushButton:
+    return next(
+        button
+        for button in widget.findChildren(QPushButton)
+        if button.text() == "Export params.json"
+    )
+
+
+def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    ctrl.set_fit_params(
+        search_database_hdf5,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        fluxs, freqs = ctrl.selected_pointcloud()
+        ctrl.record_search_result(
+            perfect_fit_result(fluxs, freqs, bounds),
+            synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+        )
+        widget.show_tab("show")
+        assert _freshness(widget).text() == ""
+        assert "Outdated" not in _show_title(widget)
+        assert _export_button(widget).isEnabled()
+
+        ctrl.set_selection(np.array([True, False, True, True]))
+        assert ctrl.state.fit_stale_reasons == ["filter changed"]
+        assert _freshness(widget).text() == "Outdated: filter changed"
+        assert "Outdated: filter changed" in _show_title(widget)
+        assert not _export_button(widget).isEnabled()
+        # Show keeps the recorded search cloud, not the newer Filter selection.
+        scatter = next(
+            artist
+            for artist in widget.findChildren(FigureCanvasQTAgg)[0]
+            .figure.axes[0]
+            .collections
+            if artist.get_label() == "_points"
+        )
+        np.testing.assert_allclose(
+            np.asarray(scatter.get_offsets(), dtype=np.float64),
+            np.column_stack([fluxs, freqs]),
+        )
+
+        fluxs, freqs = ctrl.selected_pointcloud()
+        ctrl.record_search_result(
+            perfect_fit_result(fluxs, freqs, bounds),
+            synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+        )
+        assert ctrl.state.fit_stale_reasons == []
+        assert _freshness(widget).text() == ""
+        assert "Outdated" not in _show_title(widget)
+        assert _export_button(widget).isEnabled()
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+def _set_joint_fit_inputs(ctrl: Controller, search_db: str) -> ParamBounds:
+    """Publish 0-1 inputs over the joint cloud and return their bounds."""
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    ctrl.set_fit_params(
+        search_db,
+        bounds.EJ,
+        bounds.EC,
+        bounds.EL,
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    return bounds
+
+
+def _record_perfect_fit(ctrl: Controller, bounds: ParamBounds) -> None:
+    """Publish a zero-residual result over the currently selected cloud."""
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+
+
+def _background_grids(figure: Figure) -> list[np.ndarray]:
+    """Every drawn heatmap's normalized-flux/GHz corner grid, in draw order."""
+    return [
+        np.asarray(mesh.get_coordinates(), dtype=np.float64)
+        for mesh in figure.axes[0].collections
+        if isinstance(mesh, QuadMesh)
+    ]
+
+
+def _assert_same_grids(drawn: list[np.ndarray], expected: list[np.ndarray]) -> None:
+    assert expected
+    assert len(drawn) == len(expected)
+    for grid, reference in zip(drawn, expected, strict=True):
+        np.testing.assert_allclose(grid, reference)
+
+
+def _assert_native_background(shown: Figure, ctrl: Controller) -> list[np.ndarray]:
+    """Show's heatmaps equal the shared Controller renderer's; return them."""
+    native = Figure()
+    ctrl.render_fit(native)
+    expected = _background_grids(native)
+    _assert_same_grids(_background_grids(shown), expected)
+    return expected
+
+
+def test_repeated_stale_alignment_keeps_captured_show_background(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        _record_perfect_fit(ctrl, bounds)
+        widget.show_tab("show")
+        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        captured = _assert_native_background(shown, ctrl)
+
+        for flux_half, flux_int in ((0.55, 1.05), (0.60, 1.10)):
+            ctrl.set_alignment("a", flux_half, flux_int)
+            assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+            assert "Outdated: a re-aligned" in shown.axes[0].get_title()
+            _assert_same_grids(_background_grids(shown), captured)
+            _assert_native_background(shown, ctrl)
+
+        _record_perfect_fit(ctrl, bounds)
+        assert ctrl.state.fit_stale_reasons == []
+        assert "Outdated" not in shown.axes[0].get_title()
+        fresh = _assert_native_background(shown, ctrl)
+        assert any(
+            grid.shape != reference.shape or not np.allclose(grid, reference)
+            for grid, reference in zip(fresh, captured, strict=True)
+        ), "a fresh search must draw the newly aligned source background"
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+Limits = tuple[tuple[float, float], tuple[float, float]]
+
+
+def _display_group(widget: AnalyzePanelWidget) -> QGroupBox:
+    return next(
+        group for group in widget.findChildren(QGroupBox) if group.title() == "Display"
+    )
+
+
+def _click_auto_limits(widget: AnalyzePanelWidget) -> Limits:
+    """Click Show's Auto limits and read the x/y limit boxes it filled."""
+    display = _display_group(widget)
+    next(
+        button
+        for button in display.findChildren(QPushButton)
+        if button.text() == "Auto limits"
+    ).click()
+    x_lo, x_hi, y_lo, y_hi = display.findChildren(QDoubleSpinBox)[:4]
+    return (x_lo.value(), x_hi.value()), (y_lo.value(), y_hi.value())
+
+
+def _as_displayed(widget: AnalyzePanelWidget, limits: Limits) -> Limits:
+    """Round normalized-flux/GHz limits to the limit boxes' display precision."""
+    decimals = _display_group(widget).findChildren(QDoubleSpinBox)[0].decimals()
+    (x_lo, x_hi), (y_lo, y_hi) = limits
+    return (
+        (round(x_lo, decimals), round(x_hi, decimals)),
+        (round(y_lo, decimals), round(y_hi, decimals)),
+    )
+
+
+def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        widget.show_tab("show")
+        assert _click_auto_limits(widget) == _as_displayed(
+            widget, ctrl.fit_auto_limits()
+        ), "before search, Auto limits use the published sources"
+
+        _record_perfect_fit(ctrl, bounds)
+        captured = _click_auto_limits(widget)
+        assert captured == _as_displayed(widget, ctrl.fit_auto_limits())
+
+        # A non-integer shift of one source; the recorded search keeps its frame.
+        ctrl.set_alignment("a", 0.685, 1.185)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        assert _click_auto_limits(widget) == captured
+
+        _record_perfect_fit(ctrl, bounds)
+        fresh = _click_auto_limits(widget)
+        assert fresh == _as_displayed(widget, ctrl.fit_auto_limits())
+        assert fresh[0] != captured[0], "a fresh search adopts the new frame"
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+def test_params_only_auto_limits_follow_current_sources(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    ctrl.state.set_fit_result((5.0, 1.0, 0.5))
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        widget.show_tab("show")
+        before = _click_auto_limits(widget)
+        ctrl.set_alignment("a", 0.685, 1.185)
+        moved = _click_auto_limits(widget)
+        assert moved == _as_displayed(widget, ctrl.fit_auto_limits())
+        assert moved[0] != before[0], "params-only display has no recorded frame"
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+def test_upstream_refresh_keeps_unapplied_display_edits_pending(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        _record_perfect_fit(ctrl, bounds)
+        widget.show_tab("show")
+        display = next(
+            group
+            for group in widget.findChildren(QGroupBox)
+            if group.title() == "Display"
+        )
+        show_form = display.findChildren(TransitionsForm)[0]
+        x_hi = display.findChildren(QDoubleSpinBox)[1]
+        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+
+        def labels() -> list[str]:
+            return [str(line.get_label()) for line in shown.axes[0].lines]
+
+        assert labels() == ["0 -> 1"]
+        xlim_applied = shown.axes[0].get_xlim()
+        assert x_hi.value() != pytest.approx(0.9)
+
+        show_form.set_transitions(TransitionDict({"transitions": [(0, 2)]}))
+        x_hi.setValue(0.9)
+        assert labels() == ["0 -> 1"], "editing a field is not Apply"
+
+        ctrl.set_alignment("a", 0.55, 1.05)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        assert "Outdated: a re-aligned" in shown.axes[0].get_title()
+        assert labels() == ["0 -> 1"], "an upstream refresh must not apply edits"
+        assert shown.axes[0].get_xlim() == pytest.approx(xlim_applied)
+        assert show_form.get_transitions() == {"transitions": [(0, 2)]}
+        assert x_hi.value() == pytest.approx(0.9)
+
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Apply"
+        ).click()
+        assert labels() == ["0 -> 2"]
+        assert shown.axes[0].get_xlim()[1] == pytest.approx(0.9)
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
 
 
 def test_three_tabs_filter_search_show(panel):
@@ -196,7 +487,7 @@ def test_search_blocked_on_empty_database_path(panel):
     w._db_edit.setText("")
     w._on_search()
     assert "database" in w._status.text().lower()
-    assert ctrl.state.fit.database_path == ""
+    assert ctrl.state.fit.search_db == ""
 
 
 def test_search_blocked_on_missing_database_file(panel):

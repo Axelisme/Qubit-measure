@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import PointsData
-from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication, FluxDepState
 from zcu_tools.simulate import value2flux
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,20 @@ class AlignmentService:
     def __init__(self, state: FluxDepState) -> None:
         self._state = state
 
-    def set_alignment(self, name: str, flux_half: float, flux_int: float) -> None:
+    def set_alignment(
+        self,
+        name: str,
+        flux_half: float,
+        flux_int: float,
+        inherited_from: str | None = None,
+    ) -> None:
         """Record half/integer flux positions; derive period and re-map fluxs.
 
         ``flux_period = 2 * |flux_int - flux_half|`` (the device-value span of one
         flux quantum). Re-map both raw and selected-point fluxs from native
         device values in one State commit, preserving points and completion.
+        inherited_from is retained only for an unmodified inherited draft;
+        omitted clears provenance for a direct/manual publication.
         Unknown name raises KeyError; a zero period or nonfinite mapped arrays
         raise ValueError without mutation. Must run on the State owner thread.
         """
@@ -52,7 +60,10 @@ class AlignmentService:
             dtype=np.float64,
         )
         self._state.set_alignment(
-            name, flux_half, flux_int, flux_period, new_fluxs, new_point_fluxs
+            name,
+            AlignmentPublication(flux_half, flux_int, flux_period, inherited_from),
+            new_fluxs,
+            new_point_fluxs,
         )
         logger.debug(
             "set_alignment: %r half=%g int=%g period=%g",

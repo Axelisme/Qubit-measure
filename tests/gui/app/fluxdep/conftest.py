@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import h5py
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
@@ -14,6 +17,17 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 @pytest.fixture(autouse=True, name="_drain_qt_events")
 def isolate_non_ui_qt_events() -> None:
     """Keep non-UI Fluxdep tests independent of QApplication."""
+
+
+@pytest.fixture
+def search_database_hdf5(tmp_path: Path) -> str:
+    """Small legal DB for input validation; energy computation can be replaced."""
+    path = tmp_path / "search-inputs.h5"
+    with h5py.File(path, "w") as database:
+        database.create_dataset("fluxs", data=[0.0, 0.5, 1.0])
+        database.create_dataset("params", data=[[5.0, 1.0, 0.5]])
+        database.create_dataset("energies", data=np.zeros((1, 3, 3)))
+    return str(path)
 
 
 @pytest.fixture
@@ -151,6 +165,36 @@ def onetone_controller():
     ctrl = Controller(state)
     ctrl.set_active_spectrum("one")
     ctrl.set_alignment("one", 0.2, 0.7)
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+@pytest.fixture
+def selection_name_controller():
+    """Literal selection spectrum with a synthetic 5x5 image and published point."""
+    axis = np.linspace(0.0, 4.0, 5)
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="selection",
+            spec_type="OneTone",
+            raw={
+                "dev_values": axis.copy(),
+                "fluxs": axis.copy(),
+                "freqs": np.linspace(4.0, 5.0, 5),
+                "signals": np.ones((5, 5), dtype=np.complex128),
+            },
+            points={
+                "dev_values": np.array([0.5]),
+                "fluxs": np.array([0.25]),
+                "freqs": np.array([4.5]),
+            },
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl = Controller(state)
+    ctrl.set_active_spectrum("selection")
     yield ctrl
     ctrl.interactive.dispose()
 

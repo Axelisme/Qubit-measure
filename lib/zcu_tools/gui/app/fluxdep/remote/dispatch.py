@@ -13,13 +13,17 @@ Adding a method:
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+
+from zcu_tools.gui.plotting.figure_export import render_figure_png
 
 if TYPE_CHECKING:
     # Type-only: a runtime import of the adapter would cycle (service.py imports
@@ -27,18 +31,22 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
+from zcu_tools.datafile import read_fluxdep_database_info
 from zcu_tools.gui.project import ProjectInfo, is_real_project, project_info_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
     h_project_info,
-    h_resources_versions,
 )
+from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
 from .dto import (
     ActiveSpectrumReply,
     AxisSnapshot,
+    DatabaseInfoReply,
+    FigureReply,
     FitParametersReply,
+    FitQualityReply,
     FitResultReply,
     FitUpdatedReply,
     NameReply,
@@ -49,6 +57,7 @@ from .dto import (
     OperationStartedReply,
     OperationStatusReply,
     ParamsExportedReply,
+    PngImage,
     PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
@@ -62,6 +71,7 @@ from .dto import (
 )
 from .interactive import (
     h_interactive_read,
+    h_interactive_render,
     h_selection_interactive_command,
     h_selection_interactive_open,
     h_spectrum_interactive_command,
@@ -70,6 +80,14 @@ from .interactive import (
 from .method_specs import METHOD_SPECS
 
 logger = logging.getLogger(__name__)
+
+
+def _h_resources_versions(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    return {"versions": adapter.ctrl.state.resource_versions()}
+
 
 # Precise per-app handler alias (assignable to the shared, unconstrained
 # ``method_spec.Handler``): every handler takes this app's RemoteControlAdapter.
@@ -87,19 +105,13 @@ def _h_project_setup(
 ) -> ProjectSetupReply:
     chip_name = params["chip_name"]
     qub_name = params["qub_name"]
-    result_dir = params["result_dir"]
-    database_path = params["database_path"]
-    # ParamSpec already validated these strings, including optional defaults.
+    # ParamSpec validates identity; the GUI derives paths from its own root.
     assert isinstance(chip_name, str)
     assert isinstance(qub_name, str)
-    assert isinstance(result_dir, str)
-    assert isinstance(database_path, str)
     adapter.ctrl.setup_project(
         ProjectInfo(
             chip_name=chip_name,
             qub_name=qub_name,
-            result_dir=result_dir,
-            database_path=database_path,
             root_dir=adapter.ctrl.get_project_root(),
         )
     )
@@ -119,8 +131,20 @@ def _h_spectrum_list(
                 aligned=entry.aligned,
                 points_completed=entry.points_completed,
                 point_count=entry.point_count,
+                stage="loaded"
+                if not entry.aligned
+                else "sampled"
+                if entry.points_completed
+                else "aligned",
+                filter_excluded_count=0
+                if entry.filter_mask is None
+                else entry.point_count - int(np.count_nonzero(entry.filter_mask)),
+                pending=("align" if active.kind == "line" else "sample")
+                if active is not None and active.spectrum_name == entry.name
+                else None,
             )
             for entry in spectrums.values()
+            for active in (adapter.ctrl.interactive.inspect(entry.name),)
         ]
     }
 
@@ -144,6 +168,7 @@ def _h_spectrum_snapshot(
     entry = adapter.ctrl.state.spectrums.get(name)
     if entry is None:
         return {"name": name, "exists": False}
+    active = adapter.ctrl.interactive.inspect(name)
     return {
         "name": entry.name,
         "exists": True,
@@ -151,6 +176,10 @@ def _h_spectrum_snapshot(
         "aligned": entry.aligned,
         "points_completed": entry.points_completed,
         "alignment_seeded": entry.alignment_seeded,
+        "pending": ("align" if active.kind == "line" else "sample")
+        if active is not None and active.spectrum_name == entry.name
+        else None,
+        "alignment": {"inherited_from": entry.inherited_from},
         "flux_half": entry.flux_half,
         "flux_int": entry.flux_int,
         "flux_period": entry.flux_period,
@@ -166,6 +195,21 @@ def _h_spectrum_snapshot(
             "freqs": entry.points["freqs"].tolist(),
         },
     }
+
+
+def _h_spectrum_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    name = params["name"]
+    assert isinstance(name, str)  # ParamSpec validates literal names.
+    entry = adapter.ctrl.state.get_spectrum(name)
+    figure = make_spectrum_figure(
+        entry.raw,
+        entry.points,
+        alignment=(entry.flux_half, entry.flux_int) if entry.aligned else None,
+    )
+    png = render_figure_png(figure)
+    return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
 
 
 def _h_spectrum_load(
@@ -238,7 +282,18 @@ def _h_selection_snapshot(
     return {
         "selected": mask.tolist() if mask is not None else None,
         "min_distance": selection.min_distance,
+        "pending": adapter.ctrl.interactive.current_cross_selection() is not None,
     }
+
+
+def _h_selection_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> PngImage:
+    del params
+    figure = Figure(figsize=(8, 5))
+    adapter.ctrl.render_selection(figure)
+    png = render_figure_png(figure)
+    return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
 
 
 def _h_selection_pointcloud(
@@ -268,10 +323,31 @@ def _h_fit_result(
             transitions_payload["r_f"] = value
         elif key == "sample_f":
             transitions_payload["sample_f"] = value
+    quality: FitQualityReply | None = None
+    if fit.result is not None:
+        recorded = fit.result.quality
+        quality = {
+            "mean": recorded.mean,
+            "outliers": recorded.outliers,
+            "outlier_threshold": recorded.outlier_threshold,
+            "per_transition": [
+                {
+                    "transition": item.transition,
+                    "points": item.points,
+                    "mean": item.mean,
+                    "max": item.max,
+                }
+                for item in recorded.per_transition
+            ],
+        }
+    reasons = adapter.ctrl.state.fit_stale_reasons
     return {
+        "stale": bool(reasons),
+        "stale_reasons": reasons,
+        "quality": quality,
         "has_result": fit.has_result,
         "params": params_payload,
-        "database_path": fit.database_path,
+        "search_db": fit.search_db,
         "EJb": list(fit.EJb),
         "ECb": list(fit.ECb),
         "ELb": list(fit.ELb),
@@ -344,11 +420,44 @@ def _fit_transitions(value: object) -> TransitionDict:
     return transitions
 
 
+def _h_fit_render(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> FigureReply:
+    del params
+    figure = Figure()
+    adapter.ctrl.render_fit(figure)
+    data = render_figure_png(figure)
+    return {
+        "figure": {
+            "png_b64": base64.b64encode(data).decode("ascii"),
+            "bytes": len(data),
+        }
+    }
+
+
+def _h_fit_database_info(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> DatabaseInfoReply:
+    del adapter
+    path = params["path"]
+    assert isinstance(path, str)
+    info = read_fluxdep_database_info(path)
+    return {
+        "path": info.path,
+        "entries": info.entries,
+        "levels": info.levels,
+        "EJ": list(info.EJ),
+        "EC": list(info.EC),
+        "EL": list(info.EL),
+        "flux": list(info.flux),
+    }
+
+
 def _h_fit_set_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> FitUpdatedReply:
-    database_path = params["database_path"]
-    assert isinstance(database_path, str)  # ParamSpec validated the nonempty path.
+    search_db = params["search_db"]
+    assert isinstance(search_db, str)  # ParamSpec validated the nonempty path.
     # Parse the complete request before publishing. Domain interpretation of
     # bounds/categories and separate frequency precedence stays in the kernel.
     EJb = _fit_bounds(params["EJb"], "EJb")
@@ -361,9 +470,7 @@ def _h_fit_set_params(
         if params["sample_f"] is not None
         else None
     )
-    adapter.ctrl.set_fit_params(
-        database_path, EJb, ECb, ELb, transitions, r_f, sample_f
-    )
+    adapter.ctrl.set_fit_params(search_db, EJb, ECb, ELb, transitions, r_f, sample_f)
     return {"fit": _h_fit_result(adapter, {})}
 
 
@@ -461,7 +568,13 @@ def _h_fit_export_params(
 ) -> ParamsExportedReply:
     savepath = params["savepath"]
     assert savepath is None or isinstance(savepath, str)
-    return {"savepath": adapter.ctrl.export_params(savepath)}
+    receipt = adapter.ctrl.export_params_receipt(savepath)
+    EJ, EC, EL = receipt.params
+    return {
+        "savepath": receipt.savepath,
+        "params": {"EJ": EJ, "EC": EC, "EL": EL},
+        "alignment_from": receipt.alignment_from,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +605,7 @@ _HANDLERS: dict[str, Handler] = {
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "spectrum.snapshot": _h_spectrum_snapshot,
+    "spectrum.render": _h_spectrum_render,
     "spectrum.load": _h_spectrum_load,
     "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.remove": _h_spectrum_remove,
@@ -499,21 +613,25 @@ _HANDLERS: dict[str, Handler] = {
     "spectrum.reset_alignment": _h_spectrum_reset_alignment,
     "spectrum.reset_points": _h_spectrum_reset_points,
     "selection.snapshot": _h_selection_snapshot,
+    "selection.render": _h_selection_render,
     "selection.pointcloud": _h_selection_pointcloud,
     "interactive.read": h_interactive_read,
+    "interactive.render": h_interactive_render,
     "spectrum.interactive.open": h_spectrum_interactive_open,
     "spectrum.interactive.command": h_spectrum_interactive_command,
     "selection.interactive.open": h_selection_interactive_open,
     "selection.interactive.command": h_selection_interactive_command,
     "fit.result": _h_fit_result,
     "fit.set_params": _h_fit_set_params,
+    "fit.database_info": _h_fit_database_info,
+    "fit.render": _h_fit_render,
     "fit.search": _h_fit_search,
     "operation.status": _h_operation_status,
     "operation.cancel": _h_operation_cancel,
     "operation.await": _h_operation_await,
     "export.spectrums": _h_export_spectrums,
     "fit.export_params": _h_fit_export_params,
-    "resources.versions": h_resources_versions,
+    "resources.versions": _h_resources_versions,
     "state.check": _h_state_check,
 }
 

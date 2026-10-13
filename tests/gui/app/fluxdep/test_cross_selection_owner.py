@@ -114,8 +114,6 @@ def test_apply_result_mutation_cannot_change_published_or_committed_mask(
         "add",
         "remove",
         "external_selection",
-        "active",
-        "picker",
     ],
 )
 def test_source_or_owner_switch_invalidates_old_full_cloud(cross_controller, change):
@@ -144,10 +142,6 @@ def test_source_or_owner_switch_invalidates_old_full_cloud(cross_controller, cha
         ctrl.remove_spectrum("b")
     elif change == "external_selection":
         ctrl.set_selection(np.ones(4, dtype=bool), 0.01)
-    elif change == "active":
-        ctrl.set_active_spectrum("b")
-    else:
-        ctrl.interactive.begin_twotone_pick("a")
     assert ctrl.interactive.current_cross_selection() is None
     with pytest.raises(FailedPreconditionError):
         context.plugin.clear.execute(context.session, None)

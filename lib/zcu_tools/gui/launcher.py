@@ -87,15 +87,13 @@ def runtime_options_from_args(
 def add_analysis_project_cli_options(
     parser: argparse.ArgumentParser,
     *,
-    database_path_help: str,
+    data_root_help: str,
 ) -> None:
     """Add common chip/qubit/path flags used by analysis GUIs."""
     parser.add_argument("--chip", type=str, default="", help="Chip name")
     parser.add_argument("--qub", type=str, default="", help="Qubit name")
     parser.add_argument("--result-dir", type=str, default="", help="Result directory")
-    parser.add_argument(
-        "--database-path", type=str, default="", help=database_path_help
-    )
+    parser.add_argument("--data-root", type=str, default="", help=data_root_help)
 
 
 def project_info_from_args(
@@ -112,7 +110,7 @@ def project_info_from_args(
             ("chip_name", getattr(args, "chip", "")),
             ("qub_name", getattr(args, "qub", "")),
             ("result_dir", getattr(args, "result_dir", "")),
-            ("database_path", getattr(args, "database_path", "")),
+            ("data_root", getattr(args, "data_root", "")),
         )
         if value
     }
