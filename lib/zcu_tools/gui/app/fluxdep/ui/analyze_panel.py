@@ -81,8 +81,9 @@ logger = logging.getLogger(__name__)
 AnalyzeTab = Literal["filter", "search", "show"]
 _ANALYZE_TABS: tuple[AnalyzeTab, ...] = ("filter", "search", "show")
 
-# Fit version, stale reasons and x/y axis limits that identify one Show drawing.
-_ShowKey = tuple[int, tuple[str, ...], float, float, float, float]
+# One Show drawing: the fit result version, every published source/graph
+# version the renderer reads (stale reasons derive from them), and x/y limits.
+_ShowKey = tuple[int, tuple[tuple[str, int], ...], float, float, float, float]
 
 
 # (EJb, ECb, ELb) bound presets — the notebook's named fitting ranges (GHz).
@@ -759,9 +760,10 @@ class AnalyzePanelWidget(QWidget):
         return tuple(self._ctrl.state.fit_stale_reasons)
 
     def _show_key(self) -> _ShowKey:
+        state = self._ctrl.state
         return (
-            self._ctrl.state.version.get(FIT_VERSION_KEY),
-            self._stale_reasons(),
+            state.version.get(FIT_VERSION_KEY),
+            tuple((stage.name, stage.version) for stage in state.pipeline_snapshot()),
             self._x_lo.value(),
             self._x_hi.value(),
             self._y_lo.value(),
@@ -769,7 +771,7 @@ class AnalyzePanelWidget(QWidget):
         )
 
     def _refresh_show(self) -> None:
-        """Redraw Show only when the result, its freshness or the limits changed.
+        """Redraw Show only when the result, its sources or the limits changed.
 
         Display edits (transition subset, reference lines) wait for Apply.
         """
