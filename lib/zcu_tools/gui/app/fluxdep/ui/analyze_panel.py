@@ -237,7 +237,6 @@ class AnalyzePanelWidget(QWidget):
             self._apply_limit_boxes()
         self._refresh_show()
         self.set_writable(writable=self._writable)
-        self._refresh_stages()
         # MainWindow routes every Fit page entry through show_tab.
 
     # --- construction ----------------------------------------------------
@@ -279,7 +278,10 @@ class AnalyzePanelWidget(QWidget):
         Filter is done once every sampled spectrum has a published mask
         (upstream changes drop masks, which reopens it); Search is done once
         a search result exists. Search needs a done Filter, Show needs a
-        result, and a live Filter draft locks both.
+        result, and a live Filter draft locks both. A locked stage stays shown
+        if it is current; its form (Search, with Search/Cancel/Export) or
+        display choices (Show) are disabled until it unlocks, and always for
+        a non-holder. Show's toolbar only moves the local view and stays on.
         """
         state = self._ctrl.state
         drafting = self._ctrl.interactive.current_cross_selection() is not None
@@ -297,6 +299,8 @@ class AnalyzePanelWidget(QWidget):
         self._stages.set_status("search", search_status)
         self._stages.set_status("show", show_status)
         self._stages.set_current(self._tab)
+        self._search_form.setEnabled(self._writable and search_status != "locked")
+        self._display_box.setEnabled(self._writable and show_status != "locked")
 
     # --- Search tab ------------------------------------------------------
 
@@ -546,8 +550,9 @@ class AnalyzePanelWidget(QWidget):
     def show_tab(self, tab: AnalyzeTab) -> None:
         """Show and refresh a stage on the State-owner Qt thread.
 
-        Locks gate only the stage bar's clicks; this entry shows any stage, as
-        window routing and agent following need. Filter reattaches a live
+        Locks gate the stage bar's clicks; this entry still shows a locked
+        stage, as window routing and agent following need, with its inputs
+        disabled. Filter reattaches a live
         context's Selector without resetting input/Undo, else shows the
         published masks; it never begins a context. Search/show detach the
         Filter view and never cancel its context. Search forms/progress refresh
@@ -598,11 +603,12 @@ class AnalyzePanelWidget(QWidget):
 
         A non-holder keeps the stage bar, the status lines, the canvases and
         the Show toolbar; Filter's Edit/Discard and Selector controls follow.
+        The holder's Search form and Show display choices also follow the
+        stage locks (see _refresh_stages).
         """
         self._writable = writable
-        self._search_form.setEnabled(writable)
-        self._display_box.setEnabled(writable)
         self._filter.set_writable(writable=writable)
+        self._refresh_stages()
 
     # --- Search actions --------------------------------------------------
 

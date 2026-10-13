@@ -43,5 +43,6 @@ WIRE_VERSION = 9
 # half/integer lines on the Add spectrum preview.
 # 15: Fit stage bar (1 Filter -> 2 Search -> 3 Show) with locks; Filter shows
 # the published masks without a Session, Edit/Discard/Finish own the Session,
-# leaving Filter only detaches; a new Filter starts from the published masks.
+# leaving Filter only detaches; a new Filter starts from the published masks;
+# a locked stage stays shown with its inputs disabled.
 GUI_VERSION = 15

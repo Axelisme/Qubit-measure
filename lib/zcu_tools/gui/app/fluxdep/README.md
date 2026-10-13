@@ -212,7 +212,8 @@ GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 
 Closed 只清除旧 view，不開新 Session。編輯區正顯示的草稿 closed（agent 或人取消）後，等該事件返回再重建，
 顯示該譜的已發布預覽，不開 picker、不切頁；期間已掛上的新 view 保留，關窗中不重建。純讀取與 user-origin edits 不強制切換畫面。
 AnalyzePanel 的 public show_tab／current_tab 管理 Filter／Search／Show 三個階段，外部不存取 Qt 私有 stack。
-show_tab 不受階段鎖住限制，供視窗路由與 agent 跟隨使用；鎖住只停用階段列按鈕。
+鎖住的階段按鈕停用；show_tab 仍可切到鎖住的階段，供視窗路由與 agent 跟隨使用，內容照樣顯示但輸入停用。
+目前所在的階段事後變成鎖住時，畫面停在原階段，不自動退回 Filter。
 Search terminal 更新結果，不搶回使用者已切換的畫面。
 
 ### 跨譜篩選：從已發布遮罩開始，Edit／Discard／Finish 掌管 Session
@@ -304,8 +305,9 @@ Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt re
 chooser 返回與 accepted callback 不重查 holder。
 
 Analyze 的 Search form（含 Cancel）與 Show 的 Display 群組（x／y limits、Auto limits、reference lines、
-Transitions to show、Apply）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。
-Show 畫布上方的 matplotlib 工具列 `fluxdep.show.toolbar`（Home、Back、Forward、Pan、Zoom）只改本機畫面，所有人都可用；
+Transitions to show、Apply）在 Remote 停用，該階段鎖住時對 holder 也停用，解鎖後依控制權恢復；
+Search 與 Show 的狀態列在表單外，非 holder 與鎖住時仍可讀。
+Show 畫布上方的 matplotlib 工具列 `fluxdep.show.toolbar`（Home、Back、Forward、Pan、Zoom）只改本機畫面，所有人都可用，Show 鎖住時也可用；
 不放 Subplots、Customize 與 Save，因為它們會開阻塞對話框。
 Fit 頁的階段列對所有人可點，鎖住規則相同；非 holder 可閱讀已發布遮罩、結果與 `Outdated: …`。
 非 holder 的 Edit、Discard 與 Selector controls 停用：沒有 live context 時看唯讀已發布遮罩，
