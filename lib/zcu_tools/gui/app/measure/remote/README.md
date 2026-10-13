@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-14，直接提交 aliases 與目前 point 的參數
+**Last updated:** 2026-10-14，aliases 對話框名稱退休，Inspect 截圖只擷取目前頁
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -104,48 +104,6 @@ readonly; a new holder can cancel accepted work. Subscription methods only
 change connection-local observation subscriptions and remain available to
 observers. Measure and Fluxdep share this authority; Dispersive stays readonly.
 Cfg commands use current inputs without refs. See ADR-0070 for authority and GUI gates.
-## Direct context writes
-
-`context.aliases_set(rows)` applies the complete ordered authored table through
-Inspect's Apply owner. Each row has exactly string `alias` and `value` fields.
-For example, `{"rows": [{"alias": "driver", "value": "Q1"},
-{"alias": "sense", "value": "$driver.sense"}]}` retains the authored link.
-Empty strings are unbound rows; `[]` clears the table. Syntax, duplicates and
-self/forward links reject the entire submission before storage effects.
-An opened entry saves `aliases.yaml` atomically before memory installation and
-publication, even without a selected point. Without an entry, Apply is memory-only.
-Storage failure preserves the previous table and file.
-
-Success returns `{rows: [{alias, value}, ...]}` from the installed authored table.
-It does not prove that the rows resolve. To inspect resolved rows, separately call
-`context.snapshot(path="aliases")`; this read still returns `no_context` without
-a selected point. Apply does not resolve rows or read a snapshot after writing.
-There are no per-row commands.
-
-`context.set_parameter(path, value)` writes one concrete point/general parameter
-path at the currently selected point through Inspect's Set owner. For example,
-`{"path": "Q1.rate", "value": 25.0}` returns
-`{"path": "Q1.rate", "before": 12.0, "value": 25.0}` when the previous value was 12.
-The method rejects missing or top-level null `value`; it cannot write null.
-Nested nulls in YAML lists/maps remain valid. Alias paths such as `$driver.rate`
-and library paths are not parameter writes. The method does not create components,
-edit setup templates, accept a caller target or change selection.
-
-Set captures the current target and `before` once, without I/O, before submitting
-the write. `before=null` does not distinguish an unset value from explicit null.
-`value` is the submitted value, not a readback of the committed file. There is no
-post-write read, refresh or retry. Use `context.snapshot` separately to inspect
-actual stored values. EMPTY fails with the existing `no_context` precondition
-before writing; owner schema, conflict and storage errors retain their classification.
-Metadata stays unchanged because Set passes `metadata=None`.
-
-Both commands require holder and use the existing owner admission. They can write
-during Run; the accepted Run keeps its fixed parameter/alias capture. Later
-captures see the new values. Existing tab sources require explicit Reset before a
-later Run uses them. Neither command writes ledger records, opens a dialog,
-switches dialog pages or changes focus. Existing tab-following behavior is unchanged.
-Timeout or reply failure may follow a committed write; inspect state before retrying.
-
 ## Device setup
 
 `device.setup(name, cfg)` accepts a complete Info constructor cfg and returns
