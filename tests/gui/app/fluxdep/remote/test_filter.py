@@ -77,9 +77,9 @@ def test_filter_finish_publishes_closes_and_reports_each_spectrum(
     np.testing.assert_array_equal(
         joint_route.ctrl.state.selection_mask(), [True, False, True, False]
     )
-    assert joint_route.ctrl.interactive.inspect("selection") is None
+    assert joint_route.ctrl.interactive.inspect_selection() is None
     assert joint_route.request(link, "selection.render")["ok"]
-    assert joint_route.ctrl.interactive.inspect("selection") is None
+    assert joint_route.ctrl.interactive.inspect_selection() is None
 
 
 def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteHarness):
@@ -108,7 +108,7 @@ def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteH
     with Image.open(io.BytesIO(png)) as image:
         assert image.format == "PNG"
         assert image.width > 100 and image.height > 100
-    assert joint_route.ctrl.interactive.inspect("selection") is None
+    assert joint_route.ctrl.interactive.inspect_selection() is None
     assert joint_route.ctrl.state.version.snapshot() == before
 
 
@@ -140,7 +140,7 @@ def test_published_filter_figure_marks_masks_without_reading_live_draft(
         np.asarray(scatter[1].get_offsets()), [[0.0, 4.0], [1.0, 5.0]]
     )
     np.testing.assert_allclose(np.asarray(scatter[-2].get_offsets()), [[0.5, 4.5]])
-    assert joint_route.ctrl.interactive.inspect("selection") is not None
+    assert joint_route.ctrl.interactive.inspect_selection() is not None
 
 
 def test_filter_finish_retains_receipt_without_closing_reentrant_successor(
@@ -154,7 +154,7 @@ def test_filter_finish_retains_receipt_without_closing_reentrant_successor(
         nonlocal replaced
         if payload.kind == "selection" and payload.phase == "updated" and not replaced:
             replaced = True
-            joint_route.ctrl.interactive.cancel("selection")
+            joint_route.ctrl.interactive.cancel_selection()
             joint_route.ctrl.interactive.begin_cross_selection()
 
     subscription = joint_route.ctrl.bus.subscribe_with_meta(
@@ -165,6 +165,6 @@ def test_filter_finish_retains_receipt_without_closing_reentrant_successor(
     finally:
         subscription.unsubscribe()
     assert _context(finished)["closed"] is True
-    successor = joint_route.ctrl.interactive.inspect("selection")
+    successor = joint_route.ctrl.interactive.inspect_selection()
     assert successor is not None
     assert successor.context_id != context["context_id"]

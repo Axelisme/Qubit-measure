@@ -50,6 +50,86 @@ def controller():
     ctrl.interactive.dispose()
 
 
+@pytest.mark.parametrize("retirement", ["cancel", "replace", "source", "dispose"])
+def test_selection_name_draft_has_independent_global_lifetime(
+    selection_name_controller: Controller, retirement: str
+):
+    ctrl = selection_name_controller
+    owner = ctrl.interactive
+    line = owner.begin_line_pick("selection")
+    named = owner.inspect("selection")
+    assert named is not None, "A literal spectrum name must read its own draft"
+    assert named.context is line
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "half", "position": 0.25}
+    )
+    joint = owner.begin_cross_selection()
+    global_draft = owner.inspect_selection()
+    assert global_draft is not None and global_draft.context is joint
+    assert owner.inspect("selection") == named
+    assert owner.inspect() == global_draft
+    ctrl.set_active_spectrum("selection")
+    assert owner.inspect() == named
+    assert owner.inspect_selection() == global_draft
+    assert line.session.can_undo()
+
+    if retirement == "cancel":
+        owner.cancel_selection()
+        assert owner.inspect_selection() is None
+        assert owner.inspect("selection") == named
+        joint = owner.begin_cross_selection()
+        owner.cancel("selection")
+        assert owner.inspect("selection") is None
+        assert owner.current_cross_selection() is joint
+        joint.session.ensure_input_open()
+    elif retirement == "replace":
+        sample = owner.begin_sample_pick("selection")
+        assert owner.current_onetone_pick("selection") is sample
+        assert owner.current_cross_selection() is joint
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            line.session.ensure_input_open()
+        owner.finish_onetone_pick("selection")
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+    elif retirement == "source":
+        ctrl.set_points("selection", np.array([1.0]), np.array([4.6]))
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            joint.session.ensure_input_open()
+    else:
+        owner.dispose()
+        assert owner.inspect("selection") is None
+        assert owner.inspect_selection() is None
+        with pytest.raises(FailedPreconditionError, match="closed"):
+            joint.session.ensure_input_open()
+        with pytest.raises(FailedPreconditionError, match="disposed"):
+            owner.begin_line_pick("selection")
+    with pytest.raises(FailedPreconditionError, match="closed"):
+        line.session.ensure_input_open()
+
+
+def test_selection_name_line_finish_publishes_literal_source(
+    selection_name_controller: Controller,
+):
+    ctrl = selection_name_controller
+    line = ctrl.interactive.begin_line_pick("selection")
+    draft = ctrl.interactive.inspect("selection")
+    assert draft is not None and draft.context is line
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "half", "position": 0.5}
+    )
+    line.plugin.execute_command(
+        line.session, "move_line", {"role": "integer", "position": 2.5}
+    )
+    ctrl.interactive.begin_cross_selection()
+    receipt = ctrl.interactive.finish_line_pick("selection")
+    assert receipt.result.flux_half == 0.5
+    assert ctrl.state.get_spectrum("selection").flux_half == 0.5
+    assert ctrl.interactive.inspect("selection") is None
+    assert ctrl.interactive.inspect_selection() is None
+
+
 def test_spectrum_drafts_survive_display_switch_and_finish_by_name(
     controller: Controller,
 ):
@@ -261,7 +341,7 @@ def test_selection_and_spectrum_contexts_coexist(controller: Controller):
     line = owner.begin_line_pick("sample")
     selection = owner.begin_cross_selection()
     line_active = owner.inspect("sample")
-    selection_active = owner.inspect("selection")
+    selection_active = owner.inspect_selection()
     assert line_active is not None and line_active.context is line
     assert selection_active is not None and selection_active.context is selection
     assert line_active.context_id != selection_active.context_id
@@ -276,7 +356,7 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
     controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
     old = owner.begin_cross_selection()
-    old_active = owner.inspect("selection")
+    old_active = owner.inspect_selection()
     successors: list[CrossSelectionContext] = []
 
     def reopen(fact: InteractiveChangedPayload) -> None:
@@ -285,8 +365,8 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
 
     subscription = controller.bus.subscribe(InteractiveChangedPayload, reopen)
     try:
-        owner.cancel("selection")
-        active = owner.inspect("selection")
+        owner.cancel_selection()
+        active = owner.inspect_selection()
         assert active is not None and active.context is successors[0]
         assert old_active is not None and active.context_id != old_active.context_id
         with pytest.raises(FailedPreconditionError, match="closed"):
@@ -298,8 +378,8 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
         assert current.session.snapshot().min_distance == 0.01
     finally:
         subscription.unsubscribe()
-    owner.cancel("selection")
-    assert owner.inspect("selection") is None
+    owner.cancel_selection()
+    assert owner.inspect_selection() is None
     with pytest.raises(FailedPreconditionError, match="closed"):
         current.session.ensure_input_open()
 

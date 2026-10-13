@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，published spectrum list 與 Filter 排除數
+**Last updated:** 2026-10-13，named／global draft 明確定址
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -162,7 +162,11 @@ fresh load 用 picker 預設。OneTone 譜的 LinePicker 鎖 magnitude-only（�
 Controller 直接發布手動對齊則清除來源。
 
 ### Interactive context facts 與 GUI 跟隨
-Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，不建立 Session，也不消耗 Undo。
+Owner 的 inspect(name) 用字面譜名讀取，selection 不是保留字。
+inspect_selection() 只讀全域 Filter，inspect() 跟隨目前顯示。
+cancel(name)、cancel_selection() 與 cancel() 使用相同定址分工。
+Named contexts 與 global Filter 分開保存。
+查詢回傳 live context reference 與 owner-lifetime identity，不建立 Session，也不消耗 Undo。
 同一有效 begin 重用 identity；退休後的新 context 使用新 identity。Identity 不代表 edit revision，
 同一 Session 的 GUI／command Actions 仍依 owner-loop 順序提交。
 

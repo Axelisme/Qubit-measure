@@ -16,11 +16,14 @@ from zcu_tools.gui.remote.control_service import (
     ControlOptions,
     RemoteControlServiceBase,
 )
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+from zcu_tools.gui.remote.wire import Request
 
 if TYPE_CHECKING:
     # Type-only: the string annotation keeps the import graph lean and lets
     # pyright check handler/ctrl method names without a runtime import.
     from zcu_tools.gui.app.fluxdep.controller import Controller
+    from zcu_tools.gui.remote.rpc_endpoint import ClientLink
     from zcu_tools.gui.session.ports import OwnerScheduler
 
 from .dispatch import METHOD_REGISTRY
@@ -36,6 +39,18 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     ``start()``. fluxdep's EventBus is reached via the base default
     (``ctrl.bus``) and its serializers are keyed by payload ``type``.
     """
+
+    def _route_extra(self, link: ClientLink, req: Request) -> bool:
+        del link
+        # ParamSpec normalizes absent and null optional names alike. Reject the
+        # forbidden key before that information is lost, without accessing State.
+        if (
+            req.method in ("interactive.read", "interactive.render")
+            and req.params.get("target") == "selection"
+            and "name" in req.params
+        ):
+            raise RemoteError(ErrorCode.INVALID_PARAMS, "selection target forbids name")
+        return False
 
     def _local_modal_open(self) -> bool:
         return QApplication.activeModalWidget() is not None

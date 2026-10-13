@@ -279,7 +279,11 @@ class MainWindow(QMainWindow):
             return
         if meta.origin.kind != "agent" or self._routing_editor:
             return
-        active = self._ctrl.interactive.inspect(payload.spectrum_name or "selection")
+        active = (
+            self._ctrl.interactive.inspect_selection()
+            if payload.spectrum_name is None
+            else self._ctrl.interactive.inspect(payload.spectrum_name)
+        )
         if active is not None and active.context_id == payload.context_id:
             self._present_context(active)
 

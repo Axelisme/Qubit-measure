@@ -136,8 +136,8 @@ def test_auto_align_polls_named_context_to_terminal(client: Client, error: str |
         "interactive.read",
     ]
     assert [r["params"] for r in client.transport.requests[2:]] == [
-        {"name": "one", "context_id": 12},
-        {"name": "one", "context_id": 12},
+        {"target": "spectrum", "name": "one", "context_id": 12},
+        {"target": "spectrum", "name": "one", "context_id": 12},
     ]
 
 
@@ -174,7 +174,11 @@ def test_finish_and_image_override_return_native_evidence(
     assert result.data["discarded"] == "sample"
     assert len(result.images) == 1
     assert client.transport.requests[-1]["method"] == render_method
-    assert client.transport.requests[-1]["params"] == {"name": "one"}
+    assert client.transport.requests[-1]["params"] == (
+        {"name": "one"}
+        if command == "finish"
+        else {"target": "spectrum", "name": "one"}
+    )
 
 
 def test_align_finish_projects_native_invalidated_without_deriving_targets(
@@ -227,4 +231,8 @@ def test_auto_align_reports_guarded_context_interruption(client: Client):
         invoke(client, command="auto_align")
     assert refusal.value.code == "precondition_failed"
     assert refusal.value.reason == "interactive_context_changed"
-    assert client.transport.requests[-1]["params"] == {"name": "one", "context_id": 12}
+    assert client.transport.requests[-1]["params"] == {
+        "target": "spectrum",
+        "name": "one",
+        "context_id": 12,
+    }
