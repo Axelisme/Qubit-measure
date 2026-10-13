@@ -2,7 +2,7 @@
 
 import pytest
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QLineEdit, QPushButton
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Done,
@@ -27,7 +27,7 @@ from tests.gui.app.workflows._synthetic import PlanForm
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables, inline_input
-from ._window_support import RpcRequest, start_plan_batch
+from ._window_support import RpcRequest, form_editable, start_plan_batch
 
 
 def test_window_services_run_and_progress_share_session(
@@ -133,6 +133,9 @@ def test_start_captures_current_values_then_keeps_them_fixed_until_execute(
     context = harness.services.context
     context.set_parameter(context.read_context().target, "general.ext.value", 31.0)
     window.plan_panel.state.write({("scale",): {"expr": "0.06 * 2"}}, FormEnv())
+    window.tunables_panel.state.write(
+        {("sample", "value"): {"expr": "general.ext.value"}}, FormEnv()
+    )
     observed: list[tuple[Context, RunSnapshot, float]] = []
 
     def init(_env: InitEnv[Context], _plan: Plan) -> None:
@@ -252,13 +255,12 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     assert not (entry.result_path / "workflows/partial-rpc").exists()
     for panel in (window.plan_panel, window.tunables_panel):
         assert panel.state.base.data == panel.state.input.data
-        assert not panel.isEnabled()
+        assert not form_editable(panel)
     assert window.plan_panel.state.input.data["scale"] == {"expr": "0.06 * 2"}
-    assert sample_input(window.tunables_panel.state.input.data)["value"] == {
-        "expr": "general.ext.value"
-    }
-    shown = window.tunables_panel.editor.findChild(QLabel, "form.value.sample.value")
-    assert isinstance(shown, QLabel) and float(shown.text()) == 31.0
+    # Fresh Start defaults evaluate the expression default with this capture.
+    assert sample_input(window.tunables_panel.state.input.data)["value"] == 31.0
+    shown = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
+    assert isinstance(shown, QLineEdit) and float(shown.text()) == 31.0
     context.set_parameter(context.read_context().target, "general.ext.value", 88.0)
     assert float(shown.text()) == 31.0
     harness.background.execute()
@@ -403,9 +405,28 @@ def test_window_start_explicit_empty_batch_uses_defaults_not_the_gui_draft(
     token = window.start("default-tunables", tunables_batch={})
     assert isinstance(token, int)
     assert window.plan_panel.state.base.data == original_plan
-    assert sample_input(window.tunables_panel.state.base.data)["value"] == {
-        "expr": "general.ext.value"
-    }
+    assert sample_input(window.tunables_panel.state.base.data)["value"] == 20.0
+
+
+def test_prepare_and_reload_hold_expression_defaults_as_captured_values(
+    attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
+) -> None:
+    window, harness, _entry = attachment
+    context = harness.services.context
+    target = context.read_context().target
+    context.set_parameter(target, "general.ext.value", 31.0)
+    window.prepare_forms()
+    state = window.tunables_panel.state
+    assert sample_input(state.input.data)["value"] == 31.0
+    assert state.base.data == state.input.data
+    edit = window.tunables_panel.findChild(QLineEdit, "form.input.sample.value")
+    assert isinstance(edit, QLineEdit) and float(edit.text()) == 31.0
+    # Reload keeps the prepared value; only a new Prepare reads 45.0.
+    context.set_parameter(target, "general.ext.value", 45.0)
+    window.reload_source()
+    assert sample_input(window.tunables_panel.state.input.data)["value"] == 31.0
+    window.prepare_forms()
+    assert sample_input(window.tunables_panel.state.input.data)["value"] == 45.0
 
 
 @pytest.mark.parametrize("method", ["gui", "rpc"])

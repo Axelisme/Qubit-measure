@@ -3,8 +3,10 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-WIRE_VERSION = 2
-GUI_VERSION = 2
+# v3 narrows accepted input: {"expr": text} only in text fields, and the T1
+# tunables' guess_us has no schema default (the form's defaults fill it).
+WIRE_VERSION = 3
+GUI_VERSION = 3
 
 _RUN_ID = ParamSpec(
     "run_id",
@@ -36,7 +38,10 @@ METHOD_SPECS: dict[str, MethodSpec] = {
             ParamSpec(
                 "tunables",
                 JsonType.JSON,
-                description="Required path/value batch; expressions are allowed. [] uses defaults, not GUI draft.",
+                description=(
+                    "Required path/value batch; text fields allow expressions. "
+                    "[] uses defaults, not GUI draft."
+                ),
             ),
         ),
     ),
@@ -55,7 +60,12 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "workflow.form": MethodSpec(
         5.0,
         "Read schema/input/ordinary values/errors, or preview a batch without committing. "
-        "Schema fields marked hidden hold fixed values and need no input.",
+        "Schema fields marked hidden hold fixed values and need no input. "
+        "x-form-group only groups fields on screen; grouped fields take input "
+        "like any other, and the schema says which are required. "
+        'Expressions {"expr": text} are input only for text fields (int, float, '
+        "complex and str values whose schema offers that alternative); "
+        "Literal/enum, choices, bool and library-key fields take plain values.",
         params=(
             ParamSpec(
                 "form",
