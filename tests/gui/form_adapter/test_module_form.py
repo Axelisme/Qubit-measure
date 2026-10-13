@@ -28,6 +28,7 @@ from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
+    FormInput,
     FormModel,
     FormState,
     FormWritePath,
@@ -398,6 +399,53 @@ def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore(
     restored = FormState(form.input_from_spec(spec, env))
     assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
     assert result_spec(form, restored, env).waveform == "$missing.value"
+
+
+@pytest.mark.parametrize("mode", ["derive", "explicit", "ref", "invalid"])
+def test_tagged_readout_preserves_owner_derivation_and_partial_errors(
+    mode: str,
+) -> None:
+    env = FormEnv()
+    form = form_adapter.module_form(PulseReadoutSpec)
+    spec = PulseReadoutSpec.model_validate(
+        {
+            "pulse_cfg": {
+                "ch": 2,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": {"style": "const", "length": 0.4},
+            },
+            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0},
+        }
+    )
+    data = form.input_from_spec(spec, env).data
+    pulse = expect_object(data["pulse_cfg"])
+    assert pulse.get("kind") == "inline"
+    ro = expect_object(data["ro_cfg"])
+    if mode == "explicit":
+        ro.update({"gen_ch": 3, "ro_freq": 150.0})
+    else:
+        ro.pop("gen_ch", None)
+        ro.pop("ro_freq", None)
+    if mode == "ref":
+        data["pulse_cfg"] = {"kind": "ref", "name": "$unavailable.key"}
+    if mode == "invalid":
+        expect_object(pulse["module"])["gain"] = "bad"
+    result = FormState(FormInput(form.model, data)).result(env)
+    if mode in {"invalid", "ref"}:
+        assert isinstance(result, FormErrors)
+        assert set(result.messages) == (
+            {("pulse_cfg", "module", "gain")}
+            if mode == "invalid"
+            else {("ro_cfg", "ro_freq")}
+        )
+    else:
+        assert not isinstance(result, FormErrors), result
+        cfg = form.to_cfg(result, env)
+        assert isinstance(cfg, PulseReadoutSpec)
+        assert cfg.ro_cfg.gen_ch == (3 if mode == "explicit" else 2)
+        assert cfg.ro_cfg.ro_freq == (150.0 if mode == "explicit" else 100.0)
 
 
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
