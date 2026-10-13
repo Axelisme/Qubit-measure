@@ -147,8 +147,8 @@ live context 推導，不新增 State 欄位：
 - 編輯區正顯示的 picker 階段標為 current；ResultPreview 不標。
 
 本機 holder 點階段，經同一 holder gate 開該階段的 picker 草稿，可以點回已完成的階段重做；
-已發布的對齊與點保留到 Finish 才換掉，TwoTone 重新採樣照舊從空遮罩開始。Sample picker 有 Re-align，
-重新定線的 LinePicker 有 Sample，走同一條路徑。同譜已有另一階段的未 finish 草稿時，GUI 先用非阻塞的確認
+已發布的對齊與點保留到 Finish 才換掉，TwoTone 重新採樣照舊從空遮罩開始。階段切換只走階段列，picker 不另放
+Re-align／Sample 按鈕。同譜已有另一階段的未 finish 草稿時，GUI 先用非阻塞的確認
 對話框詢問，取消則草稿與畫面不變；確認後 owner 照舊丟掉舊草稿（RPC 的 `discarded` 投影不變）。
 非 holder 點階段不開也不丟草稿：該階段有 live 草稿（例如 agent 的）就顯示它，否則顯示已發布預覽。
 
@@ -161,7 +161,7 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 
 ### Picker 控制欄
 定線、OneTone 與 TwoTone 三個 picker 與 ResultPreview 共用 `InteractiveMplWidget` 版面：圖在左、控制欄在右。
-控制欄由上而下是設定、編輯動作、狀態文字；階段切換與 Finish 固定在欄底。ResultPreview 的控制欄是空的，保留版面讓圖不跳動。
+控制欄由上而下是設定、編輯動作、狀態文字；Finish 固定在欄底，階段切換在編輯區上方的階段列。ResultPreview 的控制欄是空的，保留版面讓圖不跳動。
 每個輸入都有標籤，定線數值用一般小數而非科學記號。
 
 ### 背景計算 + 即時中斷（generation 戳記）

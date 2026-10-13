@@ -50,8 +50,8 @@ class FindPointsWidget(InteractiveMplWidget):
     Session is the sole authoritative state. Worker results are only derived
     views. Finish emits a request to the app owner, which recomputes exact state.
     The control column holds detector, brush and display settings, then
-    Undo / Clear / Perform on all, then the status, with an optional Re-align
-    switch above Finish.
+    Undo / Clear / Perform on all, then the status, with Finish pinned at
+    the bottom.
     """
 
     def __init__(
@@ -59,13 +59,8 @@ class FindPointsWidget(InteractiveMplWidget):
         context: TwoTonePickContext,
         *,
         submit_preview: TwoTonePreviewSubmitter | None = None,
-        on_realign: Callable[[], None] | None = None,
     ) -> None:
         """Attach open context and start an 80ms-debounced derived preview.
-
-        on_realign, when given, adds a Re-align button
-        (``fluxdep.picker.realign``) that calls it; the host uses it to leave
-        sampling for alignment.
 
         None creates an owned BackgroundRunner. An injected submit_preview must
         deliver on owner and its caller owns external worker cleanup. Controls
@@ -167,8 +162,6 @@ class FindPointsWidget(InteractiveMplWidget):
         self._status.setAccessibleName("Status")
         self._status.setWordWrap(True)
         self.controls_layout.addWidget(self._status)
-        if on_realign is not None:
-            self.add_stage_button("Re-align", "realign", on_realign)
         self._finish = self.add_finish_button()
         self._finish.clicked.disconnect()
         self._finish.clicked.connect(self._request_finish)

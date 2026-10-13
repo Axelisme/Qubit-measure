@@ -517,22 +517,17 @@ class MainWindow(QMainWindow):
         widget: LinePickerWidget | OneToneWidget | FindPointsWidget
         if isinstance(context, LinePickContext):
             entry = self._ctrl.state.spectrums[context.spectrum_name]
-            # Re-aligning an aligned spectrum may switch to sampling instead.
-            widget = LinePickerWidget(
-                context,
-                onetone=entry.spec_type == "OneTone",
-                on_sample=self._request_sample if entry.aligned else None,
-            )
+            widget = LinePickerWidget(context, onetone=entry.spec_type == "OneTone")
             widget.finished.connect(lambda: self._finish_lines(context.spectrum_name))
         elif isinstance(context, OneTonePickContext):
-            widget = OneToneWidget(context, on_realign=self._request_align)
+            widget = OneToneWidget(context)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_onetone_pick(
                     context.spectrum_name
                 )
             )
         else:
-            widget = FindPointsWidget(context, on_realign=self._request_align)
+            widget = FindPointsWidget(context)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_twotone_pick(
                     context.spectrum_name
@@ -613,17 +608,11 @@ class MainWindow(QMainWindow):
             self._mount(ResultPreviewWidget(self._ctrl.state.spectrums[name]))
         self._refresh_stage_bar()
 
-    def _request_align(self) -> None:
-        self._open_stage("align")
-
-    def _request_sample(self) -> None:
-        self._open_stage("sample")
-
     def _open_stage(self, stage: PendingKind) -> None:
         """Open the active spectrum's align or sample picker on a Local intent.
 
-        This is the holder gate for the stage bar and the pickers' stage
-        buttons: a non-holder call does nothing. The picker opens as a draft;
+        This is the holder gate for the stage bar: a non-holder call does
+        nothing. The picker opens as a draft;
         the published spectrum changes only on Finish. A live draft of the
         other stage is discarded only after the user confirms; declining keeps
         it.

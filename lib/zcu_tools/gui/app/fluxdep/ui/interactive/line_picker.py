@@ -32,7 +32,7 @@ class LinePickerWidget(InteractiveMplWidget):
     signal requests owner Finish; get_result is only a committed-state read.
     Invalid moves restore the snapshot and display their error, not a commit.
     The control column holds Conjugate Line, then Swap / Auto Align / Undo,
-    then the alignment status, with an optional Sample switch above Finish.
+    then the alignment status, with Finish pinned at the bottom.
     """
 
     def __init__(
@@ -40,15 +40,12 @@ class LinePickerWidget(InteractiveMplWidget):
         context: LinePickContext,
         *,
         onetone: bool,
-        on_sample: Callable[[], None] | None = None,
     ) -> None:
         """Attach to an open context and capture its immutable rendering inputs.
 
         onetone is True for a OneTone spectrum: its background is drawn like
         the OneTone sample picker (dip depth, dark on white); a TwoTone
         background is the alignment projection.
-        on_sample, when given, adds a Sample button (``fluxdep.picker.sample``)
-        that calls it; the host uses it to leave alignment for sampling.
         Closing the context rejects input. Teardown detaches only presentation;
         the owner may mount another view of the same session.
         """
@@ -94,8 +91,6 @@ class LinePickerWidget(InteractiveMplWidget):
         self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)
-        if on_sample is not None:
-            self.add_stage_button("Sample", "sample", on_sample)
         self._finish = self.add_finish_button()
         # Replace the base's unguarded signal forwarding with an input-gated request.
         self._finish.clicked.disconnect()
