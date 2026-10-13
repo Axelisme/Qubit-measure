@@ -468,8 +468,11 @@ def _module_input(info: FieldInfo) -> bool:
     ModuleRef branch and one ModuleInline branch, or subclasses of those bases.
     Their kind tag selects a name key or an inline module; schema consumers
     need not infer branch identity from generated class names or properties.
-    Nullable fields keep the ordinary object/null enable control. Only their
-    non-null schema node receives the merged key/inline selector marker.
+    Nullable input schemas keep the null branch. Only their non-null schema
+    node receives the merged key/inline selector marker. The editor contract
+    combines None, library keys and inline kinds in one selector, without an
+    Enabled checkbox. Required fields omit None; ordinary nullable models
+    retain their Enabled control.
     """
     members = tuple(m for m in alternatives(info.annotation) if m is not type(None))
     return (
