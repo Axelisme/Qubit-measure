@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-13，引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -53,7 +53,7 @@ Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 in
 
 只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有下拉與 expression 模式；core schema 不因此改變。Model 不經 union selector 到達時，例如單一 model 欄位、nullable model 或 `str | Model` 的單一 model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Schema 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
 
-未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Core 在這類欄位的 schema 節點標 `x-form-key-or-inline: true`，editor 只依這個標記以 Key／Inline 切換呈現，不自己從 schema 形狀判斷，所以規則只在 core。切換時寫入該模式的預設值，不轉換另一模式的值。Captured library 中 Spec 型別相符的 keys 只是建議，不限制輸入。
+未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Core 在這類欄位的 schema 節點標 `x-form-key-or-inline: true`，`ModuleInput` 欄位也標，editor 只依這個標記決定要不要合併下拉，不自己從 schema 形狀判斷，所以規則只在 core。Editor 對這類欄位只畫一個不可編輯的下拉：第一項 Inline，其後是 schema 的 `x-form-library-keys`。`str | Model` 的清單是 Spec 型別相符的 keys；`ModuleInput` 的清單在 ref branch 的 `name`，是全部 library module keys，因為 inline 的 `ModuleSpec` 接受所有 module 型別；Form 用 `choices()` 為該 name 宣告選項時取交集。選 key 寫入引用（`ModuleInput` 一批寫 `kind` 與 `name`），選 Inline 寫入 inline 預設值，不轉換另一邊的值。目前值是清單沒有的 key 時，下拉顯示 `<key> (missing)` 並選中它，不改寫 state，錯誤照常顯示。GUI 下拉不可打字，wire 照舊可寫任意 key；清單只是 GUI 可選的項目，不限制輸入。
 
 T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured point 的 `general.ext.guess_us` 存在時保留引用，即使它是 null 或無效值。缺 leaf 或沒有 capture 時使用暫定普通值。無效引用在 guess_us 回報錯誤，不降級為 fallback。
 
@@ -61,7 +61,7 @@ T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured po
 
 Display 的 `decimals` 是 float 欄位顯示的小數位數。Editor 四捨五入並去掉尾端的 0，不改 input；非 float 欄位宣告它時 input schema 報錯。`hidden` 讓 editor 不畫欄位：值與預設留在 input，照常驗證，錯誤落在最近的已畫祖先列或表單頂端。Input schema 列出 hidden 欄位並標 `hidden`。MCP 的 `workflow.form` schema 照樣列出它們與 hidden 標記，不過濾，所以 schema 與 model 一致；agent 把 hidden 欄位讀成固定值，不需要填。Schema 的 `decimals` 只出現在宣告它的欄位，`hidden` 只出現在宣告的欄位與固定的結構 tag，其他表單的 schema 不多出這兩個 key。巢狀 model 欄位沒有 Display label 時，段落標題是欄位名：底線換成空白，只有第一個字母大寫，例如 `ro_cfg` 是 `Ro cfg`，`ModuleInline.module` 是 `Module`。Pydantic 帶進來的類別名不當標題。
 
-Display 的 `group` 把欄位歸到同一個 model 層級內的具名群組，例如 `group="Advanced"`；空字串在建構 Display 時報錯。群組只影響呈現，不改驗證、defaults、choices、寫入路徑或 FormValue。Input schema 只在宣告群組的 property 節點標 `x-form-group`，值是群組名稱；未宣告的欄位與表單的 schema 不變，wire 版本不變。Editor 在每個 model 層級先畫未分組欄位，再依群組第一次出現的順序畫群組區塊，區塊內照欄位宣告順序。Nested model 欄位本身可以是群組成員。群組預設折疊；所有成員都 hidden 時不畫區塊。使用者在同一個 editor 裡展開或折疊的群組與 model 以 path 記住，換分支、切 Key／Inline 等重建後保持原狀；沒動過的 model 照 `Display(collapsed=...)`。折疊中的群組有欄位錯誤時，標題顯示有錯誤，不自動展開，避免使用者看不到錯誤而卡在 Start。MCP 的 `workflow.form` 說明告訴 agent：`x-form-group` 只影響畫面分組，組內欄位一樣要填，必填與否看 schema。
+Display 的 `group` 把欄位歸到同一個 model 層級內的具名群組，例如 `group="Advanced"`；空字串在建構 Display 時報錯。群組只影響呈現，不改驗證、defaults、choices、寫入路徑或 FormValue。Input schema 只在宣告群組的 property 節點標 `x-form-group`，值是群組名稱；未宣告的欄位與表單的 schema 不變，wire 版本不變。Editor 在每個 model 層級先畫未分組欄位，再依群組第一次出現的順序畫群組區塊，區塊內照欄位宣告順序。Nested model 欄位本身可以是群組成員。群組預設折疊；所有成員都 hidden 時不畫區塊。使用者在同一個 editor 裡展開或折疊的群組與 model 以 path 記住，換分支、在下拉切換 key 與 Inline 等重建後保持原狀；沒動過的 model 照 `Display(collapsed=...)`。折疊中的群組有欄位錯誤時，標題顯示有錯誤，不自動展開，避免使用者看不到錯誤而卡在 Start。MCP 的 `workflow.form` 說明告訴 agent：`x-form-group` 只影響畫面分組，組內欄位一樣要填，必填與否看 schema。
 
 Module ref 與 inline 使用 tagged 子 model。Ref 保存 library key，inline 保存 ModuleSpec。Ref 切 inline 從固定 library 讀取 Spec，切換後不跟隨 library 改動。Defaults 與 choices 使用 LibrarySnapshot 的公開讀取；具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
 

@@ -21,7 +21,16 @@ from ._structure import (
     model_types,
     schema_branch_model,
 )
-from .model import Display, FormEnv, FormModel, FormPath, ModuleInput, RangeInput
+from .model import (
+    Display,
+    FormEnv,
+    FormModel,
+    FormPath,
+    ModuleInline,
+    ModuleInput,
+    ModuleRef,
+    RangeInput,
+)
 
 
 class _InputJsonSchema(GenerateJsonSchema):
@@ -437,6 +446,37 @@ def _key_branch(
                 ]
 
 
+def _module_input(info: FieldInfo) -> bool:
+    """Whether info is a ModuleInput field: exactly ModuleRef | ModuleInline.
+
+    Like a str-or-model field it is a library key or an inline model, but its
+    kind tag selects the two: ref with a name key, or inline with a module.
+    A nullable ModuleInput is not included and stays a plain tagged union.
+    """
+    return set(alternatives(info.annotation)) == {ModuleRef, ModuleInline}
+
+
+def _ref_keys(
+    target: dict[str, JsonValue],
+    projection: _Projection,
+    options: tuple[JsonValue, ...] | None,
+) -> None:
+    """List a ModuleRef name's offered library keys in x-form-library-keys.
+
+    target is the name property node. With a captured library the list is
+    every library module key, because an inline ModuleSpec accepts every
+    module type; options, the name's declared choices or None, keeps only
+    the keys among them, so each listed key passes both the choices and the
+    library check. Without a captured library the node gets no list.
+    """
+    library = projection.env.library
+    if library is None:
+        return
+    target["x-form-library-keys"] = [
+        key for key in library.module_keys() if options is None or key in options
+    ]
+
+
 def _decorate(
     model: type[BaseModel],
     node: dict[str, JsonValue],
@@ -468,6 +508,10 @@ def _decorate(
             # Core owns the str-or-model rule; views read this marker only.
             target["x-form-key-or-inline"] = True
             _key_branch(info, target, projection)
+        elif _module_input(info):
+            target["x-form-key-or-inline"] = True
+        if issubclass(model, ModuleRef) and name == "name":
+            _ref_keys(target, projection, options.get((name,)))
         child_options = {
             path[1:]: values
             for path, values in options.items()
