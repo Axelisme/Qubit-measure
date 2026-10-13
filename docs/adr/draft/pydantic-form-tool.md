@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-13，editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -59,7 +59,7 @@ T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured po
 
 `choices(env)` 提供 model-field leaf 的合法值。最深 nested FormModel 的 local choices 優先，包含空選項。Input schema 與 result 共用這些選項。Display 只描述標籤、說明、單位與呈現，順序與分組沿欄位宣告及 nested model。
 
-Display 的 `decimals` 是 float 欄位顯示的小數位數。Editor 四捨五入並去掉尾端的 0，不改 input；非 float 欄位宣告它時 input schema 報錯。`hidden` 讓 editor 不畫欄位：值與預設留在 input，照常驗證，錯誤落在最近的已畫祖先列或表單頂端。Input schema 目前仍列出 hidden 欄位並標 `hidden`；MCP 是否列出它們尚未決定。Schema 的 `decimals` 只出現在宣告它的欄位，`hidden` 只出現在宣告的欄位與固定的結構 tag，其他表單的 schema 不多出這兩個 key。巢狀 model 欄位沒有 Display label 時，段落標題是欄位名：底線換成空白，只有第一個字母大寫，例如 `ro_cfg` 是 `Ro cfg`，`ModuleInline.module` 是 `Module`。Pydantic 帶進來的類別名不當標題。
+Display 的 `decimals` 是 float 欄位顯示的小數位數。Editor 四捨五入並去掉尾端的 0，不改 input；非 float 欄位宣告它時 input schema 報錯。`hidden` 讓 editor 不畫欄位：值與預設留在 input，照常驗證，錯誤落在最近的已畫祖先列或表單頂端。Input schema 列出 hidden 欄位並標 `hidden`。MCP 的 `workflow.form` schema 照樣列出它們與 hidden 標記，不過濾，所以 schema 與 model 一致；agent 把 hidden 欄位讀成固定值，不需要填。Schema 的 `decimals` 只出現在宣告它的欄位，`hidden` 只出現在宣告的欄位與固定的結構 tag，其他表單的 schema 不多出這兩個 key。巢狀 model 欄位沒有 Display label 時，段落標題是欄位名：底線換成空白，只有第一個字母大寫，例如 `ro_cfg` 是 `Ro cfg`，`ModuleInline.module` 是 `Module`。Pydantic 帶進來的類別名不當標題。
 
 Module ref 與 inline 使用 tagged 子 model。Ref 保存 library key，inline 保存 ModuleSpec。Ref 切 inline 從固定 library 讀取 Spec，切換後不跟隨 library 改動。Defaults 與 choices 使用 LibrarySnapshot 的公開讀取；具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
 
