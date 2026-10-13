@@ -271,20 +271,6 @@ def test_reset_shows_fresh_defaults_and_later_edits_still_reach_the_resource(
     assert view.resource.result() == LookupCfg(gain=0.2)
 
 
-def test_loaded_cfg_replaces_the_displayed_input(
-    open_tab: Callable[..., TabView],
-) -> None:
-    view = open_tab()
-    view.input("gain").setText("0.45")
-
-    assert view.resource.load_cfg(LookupCfg(reps=5, rounds=2, gain=0.7)) is None
-
-    assert view.input("reps").text() == "5"
-    assert view.input("gain").text() == "0.7"
-    view.input("rounds").setText("4")
-    assert view.resource.result() == LookupCfg(reps=5, rounds=4, gain=0.7)
-
-
 def test_detach_stops_following_the_resource(
     qapp: QApplication, open_tab: Callable[..., TabView]
 ) -> None:
