@@ -462,13 +462,22 @@ def _key_branch(
 
 
 def _module_input(info: FieldInfo) -> bool:
-    """Whether info is a ModuleInput field: exactly ModuleRef | ModuleInline.
+    """Recognize the ref/inline pair by base identity, including generated models.
 
-    Like a str-or-model field it is a library key or an inline model, but its
-    kind tag selects the two: ref with a name key, or inline with a module.
-    A nullable ModuleInput is not included and stays a plain tagged union.
+    info is the field declaration. Its non-null members must be exactly one
+    ModuleRef branch and one ModuleInline branch, or subclasses of those bases.
+    Their kind tag selects a name key or an inline module; schema consumers
+    need not infer branch identity from generated class names or properties.
+    Nullable fields keep the ordinary object/null enable control. Only their
+    non-null schema node receives the merged key/inline selector marker.
     """
-    return set(alternatives(info.annotation)) == {ModuleRef, ModuleInline}
+    members = tuple(m for m in alternatives(info.annotation) if m is not type(None))
+    return (
+        len(members) == 2
+        and all(isinstance(m, type) for m in members)
+        and sum(isinstance(m, type) and issubclass(m, ModuleRef) for m in members) == 1
+        and sum(isinstance(m, type) and issubclass(m, ModuleInline) for m in members) == 1
+    )
 
 
 def _ref_keys(
@@ -543,7 +552,7 @@ def _decorate(
             target["x-form-key-or-inline"] = True
             _key_branch(info, target, projection)
         elif _module_input(info):
-            target["x-form-key-or-inline"] = True
+            _non_null(target)["x-form-key-or-inline"] = True
         if library_key(model, name):
             # A library key is a plain string, like a str-or-model key.
             _without_expr(target)
