@@ -551,19 +551,32 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     assert not cancel.isEnabled() and search.isEnabled()
 
 
-def test_a_filter_draft_disables_a_pending_search_cancel_until_it_ends(
-    pending_window,
-):
-    _view, ctrl, panel, _background, _token, _dialogs = pending_window
+def test_a_pending_search_cancel_ignores_the_search_stage_lock(pending_window):
+    _view, ctrl, panel, background, token, _dialogs = pending_window
     cancel = named(panel, QPushButton, "fluxdep.fit.cancel")
+    search = named(panel, QPushButton, "fluxdep.fit.search")
+    db_edit = named(panel, QLineEdit, "fluxdep.fit.search_db")
     assert cancel.isEnabled()
     # A Filter draft that is not an agent's leaves the user on Search.
     ctrl.interactive.begin_cross_selection()
-    # Search is locked under the draft: it stays shown, its run controls off.
+    # Search is locked under the draft: it stays shown with its form and
+    # Search disabled, while the running search can still be cancelled.
     assert panel.current_tab == "search"
+    assert fit_stage_status(panel, "search") == "locked"
+    assert not db_edit.isEnabled() and not search.isEnabled()
+    assert cancel.isEnabled()
+    # A non-holder still cannot cancel, lock or no lock.
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert not cancel.isEnabled()
+    ctrl.control_identity.reclaim_local()
+    assert cancel.isEnabled()
+    cancel.click()
+    background.complete_cancel()
+    outcome = ctrl.search.outcome(token)
+    assert outcome is not None and outcome.status == "cancelled"
     assert not cancel.isEnabled()
     ctrl.interactive.cancel_selection()
-    assert cancel.isEnabled()
+    assert not cancel.isEnabled() and search.isEnabled()
 
 
 def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(

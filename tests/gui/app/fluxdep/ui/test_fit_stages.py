@@ -135,11 +135,17 @@ def test_search_locks_until_every_sampled_spectrum_has_a_published_mask(
     assert _statuses(widget) == ("done", "done", "open")
     click_fit_stage(widget, "show")
     assert widget.current_tab == "show"
-    # New points for b drop b's mask: Filter is no longer complete. The
-    # recorded (now outdated) result still unlocks Show.
+    # New points for b drop b's mask: Filter is no longer complete, so Search
+    # locks and Show locks with it, though the old result is still recorded.
     ctrl.set_points("b", np.array([0.8]), np.array([4.8]))
-    assert _statuses(widget) == ("open", "locked", "open")
+    assert ctrl.state.fit.has_result
+    assert _statuses(widget) == ("open", "locked", "locked")
     assert not fit_stage_button(widget, "search").isEnabled()
+    assert not fit_stage_button(widget, "show").isEnabled()
+    # Show stays shown: Display is off, the local view toolbar stays on.
+    assert widget.current_tab == "show"
+    assert _show_inputs_enabled(widget) == (False, False)
+    assert named(widget, QToolBar, "fluxdep.show.toolbar").isEnabled()
 
 
 def test_live_filter_draft_locks_search_and_show_until_discard_or_finish(
