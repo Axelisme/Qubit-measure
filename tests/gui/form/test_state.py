@@ -825,7 +825,7 @@ def test_callback_failure_is_isolated_after_installation_without_rollback(
 ) -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))
-    received: list[float] = []
+    received: list[JsonValue] = []
 
     def reject_notification() -> None:
         """Represent a host callback failure, not a form validation failure."""
@@ -833,7 +833,12 @@ def test_callback_failure_is_isolated_after_installation_without_rollback(
 
     unsubscribe = state.subscribe(reject_notification)
     state.subscribe(lambda: received.append(state.preview(env).values[("amount",)]))
-    state.write({("amount",): 3.0}, env)
+    try:
+        state.write({("amount",): 3.0}, env)
+    except RuntimeError as exc:
+        raise AssertionError(
+            "subscriber fault must not reject committed write"
+        ) from exc
     assert state.input.data["amount"] == 3.0
     assert received == [3.0]
     assert "observer failed" in caplog.text

@@ -108,7 +108,12 @@ def test_editor_subscriber_fault_does_not_drop_publication(
     unsubscribe = resource.editor_state.subscribe(fail)
     resource.editor_state.subscribe(lambda: received.append("editor"))
     resource.subscribe(lambda: received.append("resource"))
-    outer_write(resource, outer)
+    try:
+        outer_write(resource, outer)
+    except RuntimeError as exc:
+        raise AssertionError(
+            "subscriber fault must not reject committed write"
+        ) from exc
     assert received == ["editor", "resource"]
     assert resource.input.data["amount"] == (2.0 if outer == "write" else 1.0)
     assert resource.read_module(("pulse",)).mode == (
@@ -120,4 +125,3 @@ def test_editor_subscriber_fault_does_not_drop_publication(
     unsubscribe()
     resource.write({("amount",): 3.0})
     assert version.get("tab:synthetic:cfg") == 2
-
