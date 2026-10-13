@@ -18,6 +18,8 @@ from zcu_tools.cfg_model import (
     Slot,
     Template,
     TemplateDef,
+    TwoPulseResetSpec,
+    BathResetSpec,
     WaveformSpec,
     get_field_meta,
 )
@@ -230,6 +232,172 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
 
     assert state.input.data == before
     assert notifications == []
+
+
+@pytest.mark.parametrize(
+    ("spec_type", "raw", "field", "expected"),
+    [
+        (
+            PulseSpec,
+            {
+                "ch": 0,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": "$unknown.waveform",
+            },
+            "waveform",
+            {"kind": "ref", "name": "$unknown.waveform"},
+        ),
+        (
+            PulseResetSpec,
+            {"pulse_cfg": "unknown.pulse"},
+            "pulse_cfg",
+            {"kind": "ref", "name": "unknown.pulse"},
+        ),
+        (
+            TwoPulseResetSpec,
+            {"pulse1_cfg": "one", "pulse2_cfg": "two"},
+            "pulse1_cfg",
+            {"kind": "ref", "name": "one"},
+        ),
+        (
+            TwoPulseResetSpec,
+            {"pulse1_cfg": "one", "pulse2_cfg": "two"},
+            "pulse2_cfg",
+            {"kind": "ref", "name": "two"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "cavity_tone_cfg",
+            {"kind": "ref", "name": "cavity"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "qubit_tone_cfg",
+            {"kind": "ref", "name": "qubit"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "pi2_cfg",
+            {"kind": "ref", "name": "pi2"},
+        ),
+        (
+            FlatTopWaveformSpec,
+            {"length": 1.0, "raise_waveform": "ramp"},
+            "raise_waveform",
+            {"kind": "ref", "name": "ramp"},
+        ),
+        (
+            PulseSpec,
+            {
+                "ch": 0,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": {
+                    "style": "flat_top",
+                    "length": 1.0,
+                    "raise_waveform": "ramp",
+                },
+            },
+            "waveform",
+            {
+                "kind": "inline",
+                "module": {
+                    "style": "flat_top",
+                    "length": 1.0,
+                    "raise_waveform": {"kind": "ref", "name": "ramp"},
+                },
+            },
+        ),
+        (
+            PulseResetSpec,
+            {
+                "pulse_cfg": {
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                    "gain": 0.25,
+                    "waveform": "flat",
+                }
+            },
+            "pulse_cfg",
+            None,
+        ),
+    ],
+    ids=[
+        "waveform-key",
+        "pulse-key",
+        "pulse1-key",
+        "pulse2-key",
+        "cavity-key",
+        "qubit-key",
+        "pi2-key",
+        "ramp-key",
+        "nested-ramp",
+        "nested-pulse",
+    ],
+)
+def test_tagged_spec_projection_round_trips_without_sources(
+    spec_type: type[ConfigBase],
+    raw: dict[str, JsonValue],
+    field: str,
+    expected: dict[str, JsonValue] | None,
+) -> None:
+    spec = spec_type.model_validate(raw)
+    form = form_adapter.module_form(spec_type)
+    env = FormEnv()
+    state = FormState(form.input_from_spec(spec, env))
+    child = state.input.data[field]
+    if expected is None:
+        child = expect_object(child)
+        assert child.get("kind") == "inline"
+        assert expect_object(child["module"])["waveform"] == {
+            "kind": "ref",
+            "name": "flat",
+        }
+    else:
+        assert child == expected
+    assert result_spec(form, state, env).model_dump() == spec.model_dump()
+
+
+def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore() -> (
+    None
+):
+    form = form_adapter.module_form(PulseSpec)
+    env = FormEnv()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="$missing.value")
+    state = FormState(form.input_from_spec(spec, env))
+    assert state.input.data["waveform"] == {"kind": "ref", "name": "$missing.value"}
+    assert result_spec(form, state, env).waveform == "$missing.value"
+    state.write({("waveform", "name"): {"expr": "1 / 0"}}, env)
+    assert expect_object(state.input.data["waveform"])["name"] == {"expr": "1 / 0"}
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
+    schema = expect_object(
+        expect_object(state.input_schema(env)["properties"])["waveform"]
+    )
+    branches = schema["oneOf"]
+    assert isinstance(branches, list)
+    ref = next(
+        expect_object(branch)
+        for branch in branches
+        if expect_object(
+            expect_object(expect_object(branch)["properties"])["kind"]
+        ).get("const")
+        == "ref"
+    )
+    assert (
+        expect_object(expect_object(ref["properties"])["name"]).get("type") == "string"
+    )
+    restored = FormState(form.input_from_spec(spec, env))
+    assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
+    assert result_spec(form, restored, env).waveform == "$missing.value"
 
 
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
