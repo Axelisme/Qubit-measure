@@ -184,6 +184,114 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     )
 
 
+@pytest.mark.parametrize(
+    "depth", [0, 1, 2], ids=["module", "waveform", "nested-waveform"]
+)
+@pytest.mark.parametrize("selection", ["option", "tag"])
+def test_template_kind_reselection_at_each_depth_is_fresh(
+    depth: int, selection: str
+) -> None:
+    from zcu_tools.cfg_model import (
+        Expr,
+        PulseResetSpec,
+        Template,
+        TemplateDef,
+        TemplateSeed,
+    )
+
+    pulse_seeds: dict[str, TemplateSeed] = {
+        "ch": 2,
+        "nqz": 1,
+        "freq": Expr("100 - 10"),
+        "gain": 0.2,
+        "waveform.style": "const",
+        "waveform.length": Expr("2 * .2"),
+    }
+    if depth == 1:
+        form = Form(ModuleSection, {"probe": Template("authored")})
+        definition = TemplateDef(PulseSpec, "Pulse", pulse_seeds)
+        root, root_label = "probe", "Inline"
+    else:
+        form = Form(ResetCore, {"reset": Template("authored")})
+        definition = TemplateDef(
+            PulseResetSpec,
+            "Reset",
+            {"pulse_cfg": "Q.pulses.probe"}
+            if depth == 0
+            else {f"pulse_cfg.{path}": value for path, value in pulse_seeds.items()},
+        )
+        root, root_label = "reset", "Inline: reset/pulse"
+    form.bind_templates({"authored": definition}, adapter="synthetic")
+    env = module_env() if depth == 0 else FormEnv()
+    state = FormState(form.default_input(env))
+    schema = state.input_schema(env)
+    root_schema = expect_object(expect_object(schema["properties"])[root])
+    root_options = root_schema["x-form-options"]
+    assert isinstance(root_options, list)
+    root_option = next(
+        expect_object(item)
+        for item in root_options
+        if expect_object(item)["label"] == root_label
+    )
+    path = (root, "module")
+    options = root_options
+    if depth:
+        fields = expect_object(root_option["fields"])
+        module_schema = expect_object(expect_object(fields["properties"])["module"])
+        if depth == 2:
+            pulse_schema = expect_object(
+                expect_object(module_schema["properties"])["pulse_cfg"]
+            )
+            pulse_options = pulse_schema["x-form-options"]
+            assert isinstance(pulse_options, list)
+            module_schema = expect_object(
+                next(
+                    expect_object(item)["fields"]
+                    for item in pulse_options
+                    if expect_object(item)["label"] == "Inline"
+                )
+            )
+            path = (*path, "pulse_cfg")
+        waveform_options = expect_object(
+            expect_object(module_schema["properties"])["waveform"]
+        )["x-form-options"]
+        assert isinstance(waveform_options, list)
+        options = waveform_options
+        path = (*path, "waveform")
+
+    def current() -> dict[str, JsonValue]:
+        value = state.input.data
+        for name in path:
+            value = expect_object(value[name])
+        return value
+
+    def choose(label: str) -> None:
+        option = next(
+            expect_object(item)
+            for item in options
+            if expect_object(item)["label"] == label
+        )
+        value = expect_object(option["value"])
+        if depth == 0:
+            value = expect_object(value["module"])
+        tag = "style" if depth else "type"
+        state.write(
+            {(*path, tag): value[tag]} if selection == "tag" else {path: value}, env
+        )
+
+    leaf = "length" if depth else "pulse_cfg"
+    expected = 0.4 if depth else "Q.pulses.probe"
+    assert current()[leaf] == expected
+    state.write({(*path, leaf): 1.7 if depth else {"type": "pulse"}}, env)
+    choose("Inline: cosine" if depth else "Inline: reset/two_pulse")
+    assert current() == ({"style": "cosine"} if depth else {"type": "reset/two_pulse"})
+    # Another non-template kind also starts at type defaults, never the old draft.
+    choose("Inline: gauss" if depth else "Inline: reset/bath")
+    assert current() == ({"style": "gauss"} if depth else {"type": "reset/bath"})
+    choose("Inline: const" if depth else root_label)
+    assert current().get(leaf) == expected
+
+
 def module_env() -> FormEnv:
     """A fixed library contains a usable persistent pulse."""
     return FormEnv(
