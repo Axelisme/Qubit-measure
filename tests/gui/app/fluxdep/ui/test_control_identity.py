@@ -300,7 +300,13 @@ def test_search_db_chooser_is_non_blocking_and_holds_local_while_open(
         harness.close()
 
 
-def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
+def _selector_count(panel) -> int:
+    """Selector views under panel once deferred Qt deletions have run."""
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return len(panel.findChildren(SelectorWidget))
+
+
+def test_remote_filter_switch_detaches_and_cannot_cancel_until_reclaim(window):
     view, ctrl = window
     show_page(view, "fit")
     panel = fit_panel(view)
@@ -309,16 +315,23 @@ def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
     assert active is not None and active.kind == "selection"
     tabs = panel.findChild(QTabWidget)
     assert tabs is not None
-    bar = tabs.tabBar()
-    assert bar is not None
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    assert not bar.isEnabled()
     selector = panel.findChild(SelectorWidget)
     assert selector is not None
     assert not button(selector, "Apply").isEnabled()
+    # A non-holder leaving Filter only retires the view; the Session stays.
+    tabs.setCurrentIndex(1)
+    assert panel.current_tab == "search"
+    assert _selector_count(panel) == 0
+    assert ctrl.interactive.inspect() == active
+    # Coming back reattaches the same Session, still read-only.
+    tabs.setCurrentIndex(0)
+    assert panel.current_tab == "filter"
+    assert _selector_count(panel) == 1
+    selector = panel.findChild(SelectorWidget)
+    assert selector is not None and not button(selector, "Apply").isEnabled()
     assert ctrl.interactive.inspect() == active
     indicator(view).click()
-    assert bar.isEnabled()
     tabs.setCurrentIndex(1)
     assert ctrl.interactive.inspect() is None
 
@@ -333,24 +346,53 @@ def test_remote_filter_keyboard_navigation_cannot_cancel_session(window):
     active = ctrl.interactive.inspect()
     assert active is not None and active.kind == "selection"
     ctrl.control_identity.connect("a", "flux-agent", "owner")
-    QApplication.sendEvent(
-        tabs,
-        QKeyEvent(
-            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
-        ),
+    next_tab = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
     )
-    assert panel.current_tab == "filter"
+    QApplication.sendEvent(tabs, next_tab)
+    assert panel.current_tab == "search"
     assert ctrl.interactive.inspect() == active
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     indicator(view).click()
-    QApplication.sendEvent(
-        tabs,
-        QKeyEvent(
-            QEvent.Type.KeyPress, Qt.Key.Key_Tab, Qt.KeyboardModifier.ControlModifier
-        ),
-    )
+    panel.show_tab("filter")
+    assert ctrl.interactive.inspect() == active
+    QApplication.sendEvent(tabs, next_tab)
     assert panel.current_tab == "search"
     assert ctrl.interactive.inspect() is None
+
+
+def test_remote_viewer_reads_search_while_the_agent_filter_runs(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        context = ctrl.interactive.begin_cross_selection()
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None and panel.current_tab == "filter"
+    tabs = panel.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
+    assert panel.current_tab == "search"
+    freshness = named(panel, QLabel, "fluxdep.fit.freshness")
+    assert freshness.text().startswith("Outdated: ")
+    active = ctrl.interactive.inspect("selection")
+    assert active is not None and active.context is context
+    tabs.setCurrentIndex(2)
+    assert panel.current_tab == "show"
+    assert tabs.isTabEnabled(0), "the live agent Filter can be viewed again"
+    tabs.setCurrentIndex(0)
+    assert panel.current_tab == "filter"
+    assert _selector_count(panel) == 1
+    assert ctrl.interactive.inspect("selection") == active
+    tabs.setCurrentIndex(1)
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.cancel("selection")
+    # Without a live Filter a viewer cannot enter Filter, which would begin one.
+    assert not tabs.isTabEnabled(0)
+    assert ctrl.interactive.current_cross_selection() is None
 
 
 def test_agent_mounts_new_remote_picker_without_enabling_controls_or_pointer(window):
