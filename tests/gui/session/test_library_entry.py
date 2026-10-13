@@ -223,10 +223,10 @@ def test_inline_arb_data_in_a_pulse_uses_the_captured_names(
         ),
     )
     entry = open_library_entry(capture, "module", PULSE, arb_names=("first",))
-    entry.state.write({("waveform", "data"): "missing"}, entry.env)
+    entry.state.write({("waveform", "module", "data"): "missing"}, entry.env)
     with pytest.raises(LibraryEntryInvalid) as error:
         entry.put(PULSE)
-    assert set(error.value.errors.messages) == {("waveform", "data")}
+    assert set(error.value.errors.messages) == {("waveform", "module", "data")}
 
 
 def test_unsupported_fields_return_to_spec_defaults(session: LibrarySession) -> None:
