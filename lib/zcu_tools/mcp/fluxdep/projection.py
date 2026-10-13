@@ -4,7 +4,7 @@ import base64
 from collections.abc import Sequence
 from typing import Literal, NotRequired, TypedDict
 
-from zcu_tools.gui.app.fluxdep.remote.dto import AxisSnapshot
+from zcu_tools.gui.app.fluxdep.remote.dto import AxisSnapshot, PngImage
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import ToolReply
 
@@ -186,6 +186,17 @@ def search_summary(reply: ToolReply) -> ToolReply:
             ],
         }
     )
+
+
+def with_fit_png(summary: ToolReply, rendered: ToolReply) -> ToolReply:
+    """Attach fit.render's native nested figure using the shared PNG delivery path.
+
+    fit.render returns {figure: PngImage}, unlike the other render methods.
+    Missing figure, decode and PNG integrity errors propagate without retrying
+    accepted GUI work. No alternative envelope is accepted.
+    """
+    figure: PngImage = rendered.data["figure"]
+    return with_png(summary, ToolReply(dict(figure)))
 
 
 def with_png(summary: ToolReply, rendered: ToolReply) -> ToolReply:

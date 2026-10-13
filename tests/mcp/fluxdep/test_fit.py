@@ -1,6 +1,8 @@
 """Fit decisions compose native GUI search/query contracts without local state."""
 
 import base64
+import binascii
+import json
 from io import BytesIO
 
 import pytest
@@ -169,44 +171,70 @@ def queue_finished(
     )
 
 
-@pytest.mark.parametrize("stale,image", [(False, True), (False, False), (True, True)])
+@pytest.fixture
+def fit_png() -> bytes:
+    """Small synthetic PNG; no source spectrum or search database is needed."""
+    buffer = BytesIO()
+    with Image.new("RGB", (12, 8), "red") as evidence:
+        evidence.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    "stale,image", [(False, None), (False, True), (False, False), (True, True)]
+)
 def test_fit_result_projects_freshness_and_only_renders_fresh_requested_evidence(
     client: Client,
     recorded_fit: dict[str, object],
+    fit_png: bytes,
     stale: bool,
-    image: bool,
+    image: bool | None,
 ) -> None:
     recorded_fit["stale"] = stale
     recorded_fit["stale_reasons"] = (
         ["one re-aligned", "filter changed"] if stale else []
     )
     client.transport.replies.append(GuiResponse(result=recorded_fit))
-    png = b""
-    if not stale and image:
-        buffer = BytesIO()
-        with Image.new("RGB", (12, 8), "red") as evidence:
-            evidence.save(buffer, format="PNG")
-        png = buffer.getvalue()
+    wants_image = not stale and image is not False
+    if wants_image:
         client.transport.replies.append(
             GuiResponse(
                 result={
-                    "png_b64": base64.b64encode(png).decode("ascii"),
-                    "bytes": len(png),
+                    "figure": {
+                        "png_b64": base64.b64encode(fit_png).decode("ascii"),
+                        "bytes": len(fit_png),
+                    }
                 }
             )
         )
     tool = client.server.tools.get("fluxdep_fit_result")
     if tool is None:
         pytest.fail("missing composed fit_result decision tool")
-    reply = tool_reply(tool["handler"]({"image": image}))
+    try:
+        reply = tool_reply(tool["handler"]({} if image is None else {"image": image}))
+    except KeyError as error:
+        pytest.fail(f"Native fit.render figure must deliver PNG evidence: {error}")
     assert reply.data["stale"] is stale
     assert reply.data["stale_reasons"] == recorded_fit["stale_reasons"]
     assert reply.data["params"] == recorded_fit["params"]
     assert reply.data["residual"]["mean"] == 0.112
     assert reply.data["inputs"]["points"] == 3
-    assert [item.data for item in reply.images] == ([png] if png else [])
-    assert [request["method"] for request in client.transport.requests] == (
-        ["fit.result", "fit.render"] if not stale and image else ["fit.result"]
+    assert [item.data for item in reply.images] == ([fit_png] if wants_image else [])
+    for item in reply.images:
+        with Image.open(BytesIO(item.data)) as evidence:
+            assert evidence.format == "PNG"
+            assert evidence.size == (12, 8)
+            evidence.load()
+    text = json.dumps(reply.data)
+    assert "point_transition_indices" not in text
+    assert "residuals" not in text
+    assert "png_b64" not in text
+    assert base64.b64encode(fit_png).decode("ascii") not in text
+    assert not reply.is_error
+    assert [(r["method"], r["params"]) for r in client.transport.requests] == (
+        [("fit.result", {}), ("fit.render", {})]
+        if wants_image
+        else [("fit.result", {})]
     )
     if stale:
         assert reply.data["note"] == "rerun fluxdep_fit to refresh"
@@ -264,21 +292,28 @@ def test_fit_result_without_recorded_quality_is_observation_data_not_zero_statis
 
 
 def test_finished_fit_returns_bounded_quality_and_native_png(
-    client: Client, fit_inputs: dict[str, object], recorded_fit: dict[str, object]
+    client: Client,
+    fit_inputs: dict[str, object],
+    recorded_fit: dict[str, object],
+    fit_png: bytes,
 ) -> None:
-    buffer = BytesIO()
-    with Image.new("RGB", (12, 8), color="red") as image:
-        image.save(buffer, format="PNG")
-    png = buffer.getvalue()
     queue_finished(client, fit_inputs, recorded_fit)
     client.transport.replies.append(
         GuiResponse(
-            result={"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
+            result={
+                "figure": {
+                    "png_b64": base64.b64encode(fit_png).decode("ascii"),
+                    "bytes": len(fit_png),
+                }
+            }
         )
     )
-    reply = tool_reply(
-        client.server.tools["fluxdep_fit"]["handler"]({"search_db": "/accepted.h5"})
-    )
+    try:
+        reply = tool_reply(
+            client.server.tools["fluxdep_fit"]["handler"]({"search_db": "/accepted.h5"})
+        )
+    except KeyError as error:
+        pytest.fail(f"Finished search must deliver native fit.render figure: {error}")
     assert reply.data == {
         "status": "finished",
         "params": {"EJ": 2.741, "EC": 1.42, "EL": 0.148},
@@ -303,7 +338,11 @@ def test_finished_fit_returns_bounded_quality_and_native_png(
             {"transition": "blue side 0-2", "points": 0, "mean": None, "max": None},
         ],
     }
-    assert [image.data for image in reply.images] == [png]
+    assert [image.data for image in reply.images] == [fit_png]
+    with Image.open(BytesIO(reply.images[0].data)) as evidence:
+        assert evidence.format == "PNG"
+        assert evidence.size == (12, 8)
+        evidence.load()
     assert not reply.is_error
     assert [(r["method"], r["params"]) for r in client.transport.requests] == [
         ("fit.result", {}),
@@ -333,28 +372,79 @@ def test_finished_fit_without_recorded_quality_does_not_invent_statistics(
     ]
 
 
+@pytest.mark.parametrize("tool_name", ["fluxdep_fit", "fluxdep_fit_result"])
 def test_native_render_refusal_propagates_without_replaying_search(
-    client: Client, fit_inputs: dict[str, object], recorded_fit: dict[str, object]
+    client: Client,
+    fit_inputs: dict[str, object],
+    recorded_fit: dict[str, object],
+    tool_name: str,
 ) -> None:
-    queue_finished(client, fit_inputs, recorded_fit)
+    if tool_name == "fluxdep_fit":
+        queue_finished(client, fit_inputs, recorded_fit)
+    else:
+        client.transport.replies.append(GuiResponse(result=recorded_fit))
     client.transport.replies.append(
         GuiResponse(
             error=GuiError("failed_precondition", "GUI refused evidence", "fit_missing")
         )
     )
     with pytest.raises(GuiInvocationError) as error:
-        client.server.tools["fluxdep_fit"]["handler"]({})
+        client.server.tools[tool_name]["handler"]({})
     assert (error.value.code, error.value.message, error.value.reason) == (
         "failed_precondition",
         "GUI refused evidence",
         "fit_missing",
     )
-    assert [r["method"] for r in client.transport.requests] == [
-        "fit.result",
-        "fit.set_params",
-        "fit.search",
-        "operation.await",
-        "operation.await",
-        "fit.result",
-        "fit.render",
-    ]
+    assert [r["method"] for r in client.transport.requests] == (
+        [
+            "fit.result",
+            "fit.set_params",
+            "fit.search",
+            "operation.await",
+            "operation.await",
+            "fit.result",
+            "fit.render",
+        ]
+        if tool_name == "fluxdep_fit"
+        else ["fit.result", "fit.render"]
+    )
+
+
+@pytest.mark.parametrize("tool_name", ["fluxdep_fit", "fluxdep_fit_result"])
+@pytest.mark.parametrize("corruption", ["base64", "trailer", "pixels"])
+def test_native_fit_png_integrity_failure_propagates_without_retry(
+    client: Client,
+    fit_inputs: dict[str, object],
+    recorded_fit: dict[str, object],
+    fit_png: bytes,
+    tool_name: str,
+    corruption: str,
+) -> None:
+    if tool_name == "fluxdep_fit":
+        queue_finished(client, fit_inputs, recorded_fit)
+    else:
+        client.transport.replies.append(GuiResponse(result=recorded_fit))
+    if corruption == "base64":
+        encoded = "not base64!"
+    else:
+        png = fit_png[:-12] if corruption == "trailer" else b"not PNG" + fit_png[-12:]
+        encoded = base64.b64encode(png).decode("ascii")
+    client.transport.replies.append(
+        GuiResponse(result={"figure": {"png_b64": encoded, "bytes": len(fit_png)}})
+    )
+    expected_error = binascii.Error if corruption == "base64" else ValueError
+    with pytest.raises(expected_error):
+        client.server.tools[tool_name]["handler"]({})
+    assert [r["method"] for r in client.transport.requests] == (
+        [
+            "fit.result",
+            "fit.set_params",
+            "fit.search",
+            "operation.await",
+            "operation.await",
+            "fit.result",
+            "fit.render",
+        ]
+        if tool_name == "fluxdep_fit"
+        else ["fit.result", "fit.render"]
+    )
