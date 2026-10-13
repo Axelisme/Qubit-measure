@@ -41,7 +41,9 @@ def open_values[T: BaseModel](path: Path, model: type[T]) -> ParameterView[T]:
         import_module("zcu_tools.resources.parameters"), "open_parameters", None
     )
     assert callable(opener), "Standalone parameters need a single public opener"
-    return opener(path, model)
+    from zcu_tools.resources.parameters import open_parameters
+
+    return open_parameters(path, model)
 
 
 def fields(value: object) -> FieldView:
@@ -125,10 +127,14 @@ def test_opaque_metadata_replacement_clear_and_detached_read(
 def test_invalid_metadata_rejects_whole_edit(path: Path, metadata: object) -> None:
     params = open_values(path, Values)
     before, disk = params.snapshot(), path.read_bytes()
-    with pytest.raises(ValidationError):
+
+    def invalid_edit() -> None:
         with params.edit() as draft:
             draft.set("qubit.t1", 40)
             draft.set_meta("qubit.t1", metadata)
+
+    with pytest.raises(ValidationError):
+        invalid_edit()
     assert params.snapshot() == before
     assert path.read_bytes() == disk
 
@@ -136,14 +142,21 @@ def test_invalid_metadata_rejects_whole_edit(path: Path, metadata: object) -> No
 def test_value_schema_and_body_rejections_do_not_publish(path: Path) -> None:
     params = open_values(path, Values)
     before, disk = params.snapshot(), path.read_bytes()
-    with pytest.raises(ValidationError):
+
+    def invalid_edit() -> None:
         with params.edit() as draft:
             draft.set_meta("qubit.t1", {"stderr": "anything"})
             draft.set("qubit.t1", -1)
-    with pytest.raises(RuntimeError, match="caller abort"):
+
+    def aborted_edit() -> None:
         with params.edit() as draft:
             draft.set("qubit.t1", 99)
             raise RuntimeError("caller abort")
+
+    with pytest.raises(ValidationError):
+        invalid_edit()
+    with pytest.raises(RuntimeError, match="caller abort"):
+        aborted_edit()
     assert params.snapshot() == before
     assert path.read_bytes() == disk
     with params.edit() as draft:
@@ -176,12 +189,16 @@ def test_conflict_rejects_values_and_metadata_together(path: Path) -> None:
     params = open_values(path, Values)
     other = open_values(path, Values)
     before = params.snapshot()
-    with pytest.raises(ConflictError):
+
+    def competing_edits() -> None:
         with params.edit() as draft:
             draft.set("qubit.t1", 50)
             draft.set_meta("qubit.t1", {"stderr": 100})
             with other.edit() as concurrent:
                 concurrent.set("qubit.t1", 60)
+
+    with pytest.raises(ConflictError):
+        competing_edits()
     assert params.snapshot() == before
     disk = open_values(path, Values)
     assert disk.snapshot().qubit.t1 == 60
@@ -214,11 +231,15 @@ def test_metadata_uses_existing_mapping_leaf_merge_and_conflict(path: Path) -> N
         "stderr": 4,
         "cloned_from": {"caller": "original"},
     }
-    with pytest.raises(ConflictError):
+
+    def competing_metadata() -> None:
         with params.edit() as draft:
             draft.set_meta("qubit.t1", {"stderr": 10})
             with other.edit() as concurrent:
                 concurrent.set_meta("qubit.t1", {"stderr": 20})
+
+    with pytest.raises(ConflictError):
+        competing_metadata()
     assert open_values(path, Values).meta("qubit.t1") == {"stderr": 20}
 
 
@@ -234,11 +255,14 @@ def test_replace_failure_preserves_snapshot_and_file(
             raise OSError("synthetic replace failure")
         return original(source, target)
 
-    monkeypatch.setattr(Path, "replace", fail_replace)
-    with pytest.raises(OSError, match="synthetic replace failure"):
+    def update() -> None:
         with params.edit() as draft:
             draft.set("qubit.t1", 55)
             draft.set_meta("qubit.t1", {"caller": "new"})
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="synthetic replace failure"):
+        update()
     assert params.snapshot() == before
     assert path.read_bytes() == disk
 
@@ -340,7 +364,7 @@ def test_old_parameter_format_is_rejected_with_path_and_versions(
     if old_table:
         content += "provenance: {}\n"
     path.write_text(content)
-    with pytest.raises(ValueError) as rejected:
+    with pytest.raises(ValueError, match="2.0") as rejected:
         open_values(path, Values)
     message = str(rejected.value)
     assert str(path) in message
