@@ -565,11 +565,13 @@ class Form[C: ConfigBase]:
             raise TypeError("Template input model must implement FormModel")
         return model.default_input(env)
 
-    def input_from_spec(self, spec: C, env: FormEnv) -> FormInput[FormModel]:
+    def input_from_spec(self, spec: ConfigBase, env: FormEnv) -> FormInput[FormModel]:
         """Project an existing persistent Spec into fresh input for this Spec form.
 
         Only Forms built for a persistent Spec accept this; a core cfg Form raises
-        TypeError. spec must be exactly core_cfg, not a subclass; otherwise raise
+        TypeError. spec accepts the shared ConfigBase boundary so Form remains
+        covariant in its concrete result type. At runtime spec must be exactly
+        core_cfg, not a subclass; otherwise raise
         TypeError. Ordinary values and child library keys are copied, and None
         values stay absent like static defaults. Values of unsupported module
         fields are discarded, so to_cfg restores Spec defaults instead of the
