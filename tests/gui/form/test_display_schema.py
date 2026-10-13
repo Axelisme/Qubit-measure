@@ -179,7 +179,7 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
 
 
 def test_root_fixed_tag_is_hidden_without_changing_defaults_or_validation() -> None:
-    class RangeForm(FormModel, LinRange):
+    class RangeForm(LinRange):
         fixed: Literal[2] = 2
 
     env = FormEnv()
