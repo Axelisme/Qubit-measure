@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, TypeVar
 
 from matplotlib.figure import Figure
-from qtpy.QtCore import QMetaObject, QPoint, Qt, QTimer
+from qtpy.QtCore import QMetaObject, QPoint, QRect, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -23,6 +23,8 @@ from qtpy.QtWidgets import (
     QPushButton,
     QSlider,
     QStackedWidget,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTabWidget,
     QWidget,
 )
@@ -58,6 +60,25 @@ def list_labels(window: QWidget) -> list[str]:
     spectra = spectra_list(window)
     items = [spectra.item(row) for row in range(spectra.count())]
     return [item.text() for item in items if item is not None]
+
+
+def list_tooltips(window: QWidget) -> list[str]:
+    """Tooltips of the spectrum list rows, in display order."""
+    spectra = spectra_list(window)
+    items = [spectra.item(row) for row in range(spectra.count())]
+    return [item.toolTip() for item in items if item is not None]
+
+
+def drawn_row_text(window: QWidget, row: int, width: int) -> str:
+    """The text the spectrum list paints for row in a cell width pixels wide."""
+    spectra = spectra_list(window)
+    option = QStyleOptionViewItem()
+    option.initFrom(spectra)
+    option.rect = QRect(0, 0, width, spectra.sizeHintForRow(row))
+    delegate = spectra.itemDelegateForIndex(spectra.model().index(row, 0))
+    assert isinstance(delegate, QStyledItemDelegate), "missing list delegate"
+    delegate.initStyleOption(option, spectra.model().index(row, 0))
+    return option.text
 
 
 def project_label(window: QWidget) -> QLabel:

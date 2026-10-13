@@ -36,10 +36,12 @@ from tests.gui.app.fluxdep._window import (
     choose_file,
     command,
     current_page,
+    drawn_row_text,
     editor,
     fit_panel,
     has_picker_control,
     list_labels,
+    list_tooltips,
     pages,
     picker_button,
     preview_actions,
@@ -108,12 +110,57 @@ def test_window_close_removes_event_bus_subscriptions(window):
 def test_load_refreshes_list(window, spectrum_hdf5):
     filepath, *_ = spectrum_hdf5
     name = window._ctrl.load_spectrum(filepath, spec_type="OneTone")
-    labels = list_labels(window)
-    assert len(labels) == 1
-    assert name in labels[0]
-    assert "OneTone" in labels[0]
-    assert "loaded" in labels[0]  # not yet aligned
-    assert "0 pts" in labels[0]
+    # The literal name on one line, kind · stage · published points below it.
+    assert list_labels(window) == [f"{name}\nOneTone · loaded · 0 pts"]
+    assert list_tooltips(window) == [name]
+
+
+_LONG_NAME = "a_very_long_spectrum_name_from_a_nested_measurement_run_Q1_flux_1534.hdf5"
+
+
+@pytest.fixture
+def long_name_window(qapp, cross_controller):
+    """A shown 1200x800 window whose list holds a, empty and a long-named b."""
+    ctrl = cross_controller
+    entry = ctrl.state.spectrums["b"]
+    ctrl.remove_spectrum("b")
+    ctrl.state.put_spectrum(replace(entry, name=_LONG_NAME))
+    win = MainWindow(ctrl)
+    win.resize(1200, 800)
+    win.show()
+    qapp.processEvents()
+    yield win
+    win.close()
+    win.deleteLater()
+    qapp.processEvents()
+
+
+def test_list_rows_put_the_name_above_its_details(long_name_window):
+    win = long_name_window
+    ctrl = win._ctrl
+    ctrl.interactive.begin_line_pick(_LONG_NAME)
+    ctrl.set_selection(np.array([True, False, True, True]))
+    assert list_labels(win) == [
+        "a\nTwoTone · sampled · 3 pts · 1 excluded",
+        "empty\nTwoTone · sampled · 0 pts",
+        f"{_LONG_NAME}\nTwoTone · sampled · 1 pts · align draft",
+    ]
+    assert list_tooltips(win) == ["a", "empty", _LONG_NAME]
+    # A name wider than its cell is drawn elided in the middle; details stay whole.
+    first, details = drawn_row_text(win, 2, 220).split("\n")
+    head, ellipsis, tail = first.partition("…")
+    assert ellipsis and head and tail
+    assert _LONG_NAME.startswith(head) and _LONG_NAME.endswith(tail)
+    assert details == "TwoTone · sampled · 1 pts · align draft"
+    assert drawn_row_text(win, 0, 220) == "a\nTwoTone · sampled · 3 pts · 1 excluded"
+
+
+def test_list_never_scrolls_sideways(qapp, long_name_window):
+    spectra = spectra_list(long_name_window)
+    for width in (1200, 700):
+        long_name_window.resize(width, 800)
+        qapp.processEvents()
+        assert not spectra.horizontalScrollBar().isVisible()
 
 
 def test_stage_marker_updates_on_alignment(window, spectrum_hdf5):
@@ -662,6 +709,67 @@ def test_agent_spectrum_work_updates_spectra_page_while_user_stays_on_fit(
         assert "align draft" in list_labels(win)[2]
     finally:
         ctrl.control_identity.reclaim_local()
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def _background(widget) -> tuple[np.ndarray, tuple[float, float]]:
+    """Image array and colour limits of the first axes of an editor's figure."""
+    image = widget.figure.axes[0].get_images()[0]
+    return np.asarray(image.get_array()), image.get_clim()
+
+
+def test_onetone_line_picker_draws_the_sample_picker_background(
+    qapp, onetone_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
+
+    ctrl = onetone_controller
+    win = MainWindow(ctrl)
+    try:
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_sample_pick("one")
+        sample = editor(win)
+        assert isinstance(sample, OneToneWidget)
+        expected, expected_clim = _background(sample)
+        ctrl.interactive.cancel("one")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_line_pick("one")
+        lines = editor(win)
+        assert isinstance(lines, LinePickerWidget)
+        background, clim = _background(lines)
+        np.testing.assert_allclose(background, expected)
+        assert clim == pytest.approx(expected_clim)
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_twotone_line_picker_keeps_the_phase_projection_of_its_preview(
+    qapp, twotone_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = twotone_controller
+    preview = ResultPreviewWidget(ctrl.state.spectrums["two"])
+    expected, _ = _background(preview)
+    preview.deleteLater()
+    win = MainWindow(ctrl)
+    try:
+        ctrl.interactive.cancel("two")  # the window opened the sample picker
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_line_pick("two")
+        lines = editor(win)
+        assert isinstance(lines, LinePickerWidget)
+        background, _ = _background(lines)
+        np.testing.assert_allclose(background, expected)
+    finally:
         win.close()
         win.deleteLater()
         qapp.processEvents()

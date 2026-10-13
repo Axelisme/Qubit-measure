@@ -744,3 +744,97 @@ def test_activate_attaches_selector_when_points_exist(qapp):
         ctrl.interactive.dispose()
         w.deleteLater()
         qapp.processEvents()
+
+
+def _ranked_database(tmp_path) -> str:
+    """Two-candidate DB whose first entry matches the points below exactly."""
+    import h5py
+
+    path = tmp_path / "ranked.h5"
+    grid = np.linspace(0.0, 0.5, 9)
+    energies = np.zeros((2, 9, 3))
+    for i in range(2):
+        energies[i, :, 1] = (i + 1) * (1 + grid)
+        energies[i, :, 2] = (i + 1) * (2 + grid)
+    with h5py.File(path, "w") as database:
+        database.create_dataset("fluxs", data=grid)
+        database.create_dataset("params", data=[[3.0, 0.8, 0.5], [4.0, 1.1, 0.6]])
+        database.create_dataset("energies", data=energies)
+    return str(path)
+
+
+def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
+    qapp, tmp_path
+):
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+
+    runner = BackgroundRunner()
+    ctrl = Controller(
+        FluxDepState(),
+        interactive_owner=QtOwnerScheduler(),
+        search_runtime=FluxDepSearchRuntime(
+            runner, ProgressService(QtProgressTransport())
+        ),
+    )
+    axis = np.array([0.0, 0.2, 0.4, 0.7, 1.0])
+    points = np.array([0.0, 0.2, 0.4])
+    ctrl.state.put_spectrum(
+        SpectrumEntry(
+            name="a",
+            spec_type="TwoTone",
+            raw={
+                "dev_values": axis.copy(),
+                "fluxs": axis,
+                "freqs": np.array([1.0, 1.2, 1.4]),
+                "signals": np.ones((5, 3), dtype=np.complex128),
+            },
+            points={
+                "dev_values": points.copy(),
+                "fluxs": points,
+                "freqs": np.array([1.0, 1.2, 1.4]),
+            },
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=1.0,
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl.set_fit_params(
+        _ranked_database(tmp_path),
+        (0.1, 10.0),
+        (0.1, 10.0),
+        (0.1, 10.0),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    widget = AnalyzePanelWidget(ctrl)
+    widget.resize(1600, 1000)
+    widget.show()
+    try:
+        widget.show_tab("search")
+        named(widget, QPushButton, "fluxdep.fit.search").click()
+        assert runner.quiesce()
+        qapp.processEvents()
+        figure = widget.figures["diagnostic"]
+        qapp.processEvents()
+        widget.resize(1200, 800)
+        qapp.processEvents()
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        by_label = {axes.get_xlabel(): axes for axes in figure.axes}
+        for label, below in (("EJ", "EC"), ("EC", "EL")):
+            box = by_label[label].xaxis.label.get_window_extent(renderer)
+            assert not box.overlaps(by_label[below].get_tightbbox(renderer)), (
+                f"the {label} axis label is covered by the {below} subplot"
+            )
+        last = by_label["EL"].xaxis.label.get_window_extent(renderer)
+        assert last.y0 >= figure.bbox.y0, "the EL axis label is clipped"
+    finally:
+        ctrl.search.begin_close()
+        assert runner.quiesce()
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+        ctrl.interactive.dispose()
