@@ -24,6 +24,12 @@ from zcu_tools.gui.session.events import (
     DeviceSetupFinishedPayload,
     GatePresence,
 )
+from zcu_tools.gui.session.library_entry import (
+    LibraryKind,
+    ModuleEntryForm,
+    WaveformEntryForm,
+    open_library_entry,
+)
 from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
@@ -966,24 +972,51 @@ class Controller(SessionControllerMixin):
         raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
 
     # ------------------------------------------------------------------
-    # CfgEditor sessions (CfgEditorService) — headless ml editing for RPC
+    # Library entry editing through the shared Form entry
     # ------------------------------------------------------------------
 
-    def open_cfg_editor(
-        self,
-        item_kind: str,
-        *,
-        from_name: str,
-        gc: bool = True,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]:
-        """Open a modify-only CfgEditor session for an existing ml entry."""
-        return self._cfg_editor_svc.open(
+    def open_library_entry(
+        self, item_kind: LibraryKind, name: str
+    ) -> ModuleEntryForm | WaveformEntryForm:
+        """Open a selected library root as a Form at one fixed capture.
+
+        The capture is read once from the selected point; the form evaluates
+        expressions against it and submissions target it. Arb waveform data
+        options are the asset keys listed now. Child library keys stay keys.
+        No selection, an unknown kind or a missing root raises an ExpectedError.
+        The caller owns the returned form; writing and discarding it need no
+        controller call.
+        """
+        return open_library_entry(
+            self._context_control.read_context(),
             item_kind,
-            from_name=from_name,
-            gc=gc,
-            owner_key=owner_key,
+            name,
+            arb_names=self._arb_waveform_svc.list_data_keys(),
         )
+
+    def commit_library_entry(
+        self, entry: ModuleEntryForm | WaveformEntryForm, name: str
+    ) -> None:
+        """Put entry's current Spec at root name in its captured library.
+
+        Invalid input raises LibraryEntryInvalid without writing. Target,
+        conflict and I/O failures from apply_library_change propagate.
+        """
+        self.apply_library_change(entry.parameters, entry.put(name))
+
+    def replace_library_entry(
+        self, entry: ModuleEntryForm | WaveformEntryForm, source: str, new_name: str
+    ) -> None:
+        """Atomically replace root source with entry's Spec, renaming to new_name.
+
+        Failures follow commit_library_entry; an occupied different new_name
+        or a missing source is rejected with the library unchanged.
+        """
+        self.apply_library_change(entry.parameters, entry.replace(source, new_name))
+
+    # ------------------------------------------------------------------
+    # CfgEditor sessions (CfgEditorService) — seeded drafts and ml_edit
+    # ------------------------------------------------------------------
 
     def open_seeded_cfg_editor(
         self,
@@ -1054,13 +1087,6 @@ class Controller(SessionControllerMixin):
         return self._cfg_editor_svc.edit_library(
             item_kind, name, edits, save_as=save_as
         )
-
-    def commit_cfg_editor(self, editor_id: str, name: str) -> None:
-        self._cfg_editor_svc.commit(editor_id, name)
-
-    def replace_cfg_editor(self, editor_id: str, old_name: str, new_name: str) -> None:
-        """Atomically replace an existing ModuleLibrary entry from a draft."""
-        self._cfg_editor_svc.replace(editor_id, old_name, new_name)
 
     def discard_cfg_editor(self, editor_id: str) -> None:
         self._cfg_editor_svc.discard(editor_id)
