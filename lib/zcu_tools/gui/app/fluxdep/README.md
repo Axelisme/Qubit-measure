@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，GUI 改版（外殼與兩頁、編輯流程、picker 控制欄、Fit 頁、版面收尾、清單與 spectrum.list 共用的已發布列查詢、兩行清單列與 OneTone 定線背景）；published spectrum list 與 Filter 排除數
+**Last updated:** 2026-10-13，GUI 改版
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -84,9 +84,9 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   `LoadSpectrumDialog` subclass `gui/widgets/load_dialog.LoadDataDialog`（共用 file
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
   回 `LoadRequest`）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
-  各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；背景正規化（`contrast_limits`、
-  `onetone_dip_depth`）在 `analysis.fluxdep.processing`，供 result_preview、三個 OneTone 背景
-  （定線、採點、PNG）共用；放在 analysis 層是因為 `TwoLinePicker` 也要用，而 analysis 不能 import
+  各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；OneTone 背景正規化
+  `onetone_background` 在 `analysis.fluxdep.processing`，result_preview 與每個 OneTone 背景
+  （定線、採點、PNG）都呼叫它；放在 analysis 層是因為 `TwoLinePicker` 也要用，而 analysis 不能 import
   plotting（top-level 無循環）。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
@@ -125,8 +125,7 @@ measure plot_host 的單向顯示流方向相反）。`InteractiveMplWidget`(bas
   Worker 只計算 detached snapshot。Owner 提交有效數值後，panel 才呈現診斷圖。
 
 ### 主視窗外殼
-上方列左邊是 project 標籤（`Project: <chip> / <qubit>`，chip 與 qubit 都是預設值時顯示提示）與控制權燈，
-右邊是 Project…、Add spectrum…、Restore…、Export spectra…。主區是 Spectra 與 Fit 兩頁 tab：
+上方列左邊是目前 project 與控制權燈，右邊是 project、加譜、restore 與 export 命令。主區是 Spectra 與 Fit 兩頁 tab：
 Spectra 頁是譜清單（Remove 在清單下方）加階段驅動編輯區，Fit 頁承載 AnalyzePanel 單例。
 選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁。切頁只跟人類意圖：
 使用者點 tab，或 GUI Add／Restore 後回到 Spectra。Agent-origin 的 active、picker、Filter 與
@@ -134,12 +133,9 @@ search pending 只更新所屬頁的內容，不把使用者從目前的頁拉�
 離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
 清單每列與 `spectrum.list` 都讀 `Controller.spectrum_rows()` 的 `SpectrumRow`：字面譜名、種類、
 已發布階段（loaded／aligned／sampled，零點完成算 sampled）、已發布點數、已發布 Filter 遮罩的排除點數
-與未完成草稿種類（align／sample）；清單有才顯示後兩者。每列兩行：第一行字面譜名，第二行
-`種類 · 階段 · N pts`，有才接草稿種類與排除數。清單不水平捲動；delegate 把超過列寬的譜名在中間省略，
-item tooltip 是全名，過長的第二行由 Qt 在右端省略。查詢經 `interactive.inspect` 讀草稿，
-可能退休失效草稿並觸發重入，所以清單先算好全部列再填入。
-測試以 objectName 定位外殼元件（`fluxdep.session.project`、`fluxdep.pages`、`fluxdep.page.*`、
-`fluxdep.spectra`、`fluxdep.editor`、`fluxdep.project`、`fluxdep.spectrum.*`、`fluxdep.spectra.*`）。
+與未完成草稿種類（align／sample）；清單有才顯示後兩者。草稿種類由 `pending_kind` 從 live context
+推導，清單列與切階段前的確認共用這一個對應。清單不水平捲動，過長的譜名省略顯示並以 tooltip 給全名。
+查詢經 `interactive.inspect` 讀草稿，可能退休失效草稿並觸發重入，所以清單先算好全部列再填入。
 
 ### 編輯區階段驅動
 MainWindow 編輯區顯示 active 譜的 live 草稿；沒有草稿時，本機 holder 的人類意圖（點清單、GUI Add）
@@ -157,14 +153,9 @@ TwoTone 重新採樣照舊從空遮罩開始。Sample picker 有 Re-align，重�
 Processed restore 包含零點的完成結果，不新增持久化欄位。
 
 ### Picker 控制欄
-定線、OneTone 與 TwoTone 三個 picker 共用 `InteractiveMplWidget` 版面：圖在左、220px 控制欄在右。
-控制欄由上而下是設定、編輯動作（Undo／Clear）、狀態文字；階段切換與 Finish 固定在欄底。
-每個 slider 與下拉都有 buddy label。控制項 objectName 為 `fluxdep.picker.<action>`
-（例如 `finish`、`undo`、`clear`、`auto_align`、`status`、`realign`、`sample`），
-ResultPreview 也是 `InteractiveMplWidget`：圖在左，下一步按鈕固定在右欄底部，objectName 為
-`fluxdep.preview.<align|realign|sample>`；測試以這些名稱定位，不依按鈕文字。
-定線資訊用固定小數位，位數由 device 軸步長決定；mirror loss 圖有 Device value／Frequency 軸標。
-canvas 每次 resize 重新 tight layout，軸標不會被窄視窗裁掉。
+定線、OneTone 與 TwoTone 三個 picker 與 ResultPreview 共用 `InteractiveMplWidget` 版面：圖在左、控制欄在右。
+控制欄由上而下是設定、編輯動作、狀態文字；階段切換與 Finish（ResultPreview 是下一步按鈕）固定在欄底。
+每個輸入都有標籤，定線數值用一般小數而非科學記號。
 
 ### 背景計算 + 即時中斷（generation 戳記）
 慢計算經共用 `BackgroundRunner.submit`（per-panel，`enter=None`）off-main，避免拖動卡 UI。
@@ -203,7 +194,8 @@ Owner 的 inspect 回傳 live context reference 與 owner-lifetime identity，�
 Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
 MainWindow 依 EventMeta origin 與目前 identity 在 Spectra 頁編輯區顯示 agent 開啟／修改的 picker，
 active 跟著切到該譜，但不切頁。Agent 的 Filter 與 search pending 只更新 Fit 頁：Fit 頁正顯示時切到
-Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。
+Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。記住的 Filter 只在 Filter context
+仍 live 時有效，context 結束就清掉，人類下次進 Fit 不會因 agent 已結束的事件落進 Filter 並開 Session。
 GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
 Closed 只清除旧 view，不開新 Session。純讀取與 user-origin edits 不強制切換畫面。
 AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
@@ -211,20 +203,19 @@ Search terminal 更新結果，不搶回使用者已切換的畫面。
 
 ### 跨譜篩選：繼承 min_distance 不繼承 select
 App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
-Analyze singleton 每次進入 Fit 頁的 Filter 都重新 attach 有效 context；離開 Filter tab 取消 context，切到 Spectra 頁則只 detach view。
+Analyze singleton 每次進入 Fit 頁的 Filter 都重新 attach 有效 context。Holder 離開 Filter tab 取消 context；
+非 holder 離開 Filter tab 與任何人切到 Spectra 頁都只 detach view，回到 Filter 時重新 attach 同一個 Session。
 Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
 Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
 ### 配色
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
-（vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。定線圖與 mirror loss 圖也用
-`gray_r`；它們的 renderer 是共用的 `analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines
-與 MCP 的定線 PNG 同樣是 `gray_r`。OneTone 採點 picker 與 ResultPreview 的 OneTone 背景用同一種正規化：
-平滑後的 magnitude 取 dip 深度（最大值減 magnitude），再以 2–98 百分位定色階，共振 dip 是白底上的深色線。
-採點 picker 的 renderer 是共用的 `plotting.fluxdep.onetone.OneTonePickPlot`，所以 MCP 的 OneTone 採點 PNG 也跟著改變。
-OneTone 定線 picker（`TwoLinePicker(onetone=True)`）、MCP 定線 PNG 與 MCP 譜 PNG 的 OneTone 背景也用同一種正規化；
-TwoTone 照舊（定線用對齊投影，譜 PNG 用 `|signals|`）。定線背景只改顯示，mirror loss 與 auto align 仍用對齊投影。
-Notebook 的 InteractiveLines 與 measure 的 flux pick 不傳 `onetone`，外觀不變。
+（vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。定線圖的 renderer 是共用的
+`analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines 與 MCP 的定線 PNG 同樣是 `gray_r`。
+每個 OneTone 背景（採點 picker、ResultPreview、OneTone 定線 picker、MCP 定線／採點／譜 PNG）都用
+`onetone_background`，共振 dip 是白底上的深色線。TwoTone 照舊（定線用對齊投影，譜 PNG 用 `|signals|`）。
+定線背景只改顯示，mirror loss 與 auto align 仍用對齊投影。Notebook 的 InteractiveLines 與 measure 的
+flux pick 不傳 `onetone`，外觀不變。
 
 ### Remote RPC 與 MCP
 
@@ -285,10 +276,11 @@ Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt re
 在 owner turn 查 active modal，chooser 使用非 native option。Dialog 不接 control，
 chooser 返回與 accepted callback 不重查 holder。
 
-Analyze 的 Search form（含 Cancel）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。Filter tab 的進出會開啟或
-取消 Session，所以在 Remote 停用；無 Filter input 時 Search／Show 切換及 Show
-的 display controls 保持可用。非 holder 可進 Fit 頁閱讀結果與 `Outdated: …`；沒有 live Filter
-context 時進入 Search tab，不為閱讀開 Filter input，有 live context（例如 agent 的）則 reattach。
+Analyze 的 Search form（含 Cancel）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。
+Holder 進出 Filter tab 會開啟或取消 Session；非 holder 不開也不取消。非 holder 可進 Fit 頁閱讀結果與
+`Outdated: …`，Search／Show 切換及 Show 的 display controls 保持可用。有 live Filter context（例如 agent 的）時，
+非 holder 可在 Filter 與 Search／Show 之間切換，離開只 detach、回來重新 attach 同一個 Session；沒有 live context 時
+Filter tab 對非 holder 停用，進 Fit 頁落在 Search，不為閱讀開 Filter input。
 Filter view detach 仍只是 teardown，不收回控制權。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
@@ -338,17 +330,13 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   - **Search**：搜尋表單（`Search DB` 是 fit 的 `search_db`，與專案的 Data root 分開；bounds preset 下拉
     `general`/`integer`/`all` 填三組 bound spinbox，下拉永遠顯示與 spinbox 數值完全相符的 preset，數值被改過時顯示 `custom`——
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset，各列以畫出的頻率命名）+
-    右側診斷圖（QSplitter 可拖拉，圖佔剩餘寬度；控制欄靠上，表單不拉滿高度）。輸入的 transitions 需要而 r_f／sample_f
-    留空時，欄位下方直接標示；Search 不在面板預檢頻率，由 Controller 拒絕。search 前擋空/不存在 db 路徑。
-    `Browse…` 用非阻塞 `open()` 的非 native chooser，選檔後填入 `Search DB`；開著時 owner 取得回 `local_busy`。
-    Search 的錯誤（含 search 失敗）寫在 Search 狀態列 `fluxdep.fit.status`，不跳 modal；params export 的長路徑只作
-    status/tooltip，不參與 panel 水平最小寬度。按鈕 `Search`、`Cancel`、`Export params…`。
+    右側診斷圖。輸入的 transitions 需要而 r_f／sample_f 留空時，欄位下方直接標示，Search 同時停用：
+    那次 search 必然被拒，而它的參數替換會清掉既有結果；送出的 search 仍由 Controller 驗證。search 前擋空/不存在 db 路徑。
+    DB chooser 用非阻塞 `open()` 的非 native chooser；開著時 owner 取得回 `local_busy`。
+    Search 的錯誤（含 search 失敗）寫在 Search 狀態列，不跳 modal；params export 的長路徑不參與 panel 水平最小寬度。
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
-    繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列 `fluxdep.show.status`，不寫進 Search。
-    Show canvas 每次 resize 重新 tight layout，縮小視窗時標題與軸標留在 canvas 內。
-  - 測試以 objectName 定位 Fit 頁元件：`fluxdep.fit.*`（search_db、bounds_preset、r_f／sample_f 與其 `.required`、
-    search、cancel、export_params、status、freshness）與 `fluxdep.show.*`（apply、auto_limits、status）。
+    繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列，不寫進 Search。
   AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
   Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
