@@ -423,13 +423,17 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
         ax = figure.axes[0]
         mesh = next(c for c in ax.collections if isinstance(c, QuadMesh))
         scatter = next(c for c in ax.collections if isinstance(c, PathCollection))
-        edges = mesh.get_coordinates()[0, :, 0]
+        edges = np.asarray(mesh.get_coordinates(), dtype=np.float64)[0, :, 0]
         np.testing.assert_allclose((edges[:-1] + edges[1:]) / 2, centers)
-        np.testing.assert_allclose(scatter.get_offsets(), [[point, 3.5]])
+        np.testing.assert_allclose(
+            np.asarray(scatter.get_offsets(), dtype=np.float64), [[point, 3.5]]
+        )
         np.testing.assert_allclose(ax.get_xlim(), centers)
         np.testing.assert_allclose(ax.get_ylim(), frequency_limits)
         np.testing.assert_allclose(ax.child_axes[0].get_xlim(), device_limits, atol=1e-12)
-        np.testing.assert_allclose(ax.lines[0].get_xdata()[[0, -1]], centers)
+        np.testing.assert_allclose(
+            np.asarray(ax.lines[0].get_xdata(), dtype=np.float64)[[0, -1]], centers
+        )
         return ax.get_title()
 
     try:
