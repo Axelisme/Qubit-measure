@@ -820,21 +820,28 @@ def test_reset_rejects_a_different_model_without_changing_state() -> None:
     assert state.base.data == before
 
 
-def test_callback_failure_propagates_after_installation_without_rollback() -> None:
+def test_callback_failure_is_isolated_after_installation_without_rollback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))
+    received: list[float] = []
 
     def reject_notification() -> None:
         """Represent a host callback failure, not a form validation failure."""
         raise RuntimeError("observer failed")
 
     unsubscribe = state.subscribe(reject_notification)
-    with pytest.raises(RuntimeError, match="observer failed"):
-        state.write({("amount",): 3.0}, env)
+    state.subscribe(lambda: received.append(state.preview(env).values[("amount",)]))
+    state.write({("amount",): 3.0}, env)
     assert state.input.data["amount"] == 3.0
+    assert received == [3.0]
+    assert "observer failed" in caplog.text
+    assert any(record.exc_info for record in caplog.records)
     unsubscribe()
     state.write({("amount",): 4.0}, env)
     assert state.input.data["amount"] == 4.0
+    assert received == [3.0, 4.0]
 
 
 def test_preview_includes_validated_defaults_without_materializing_input() -> None:
