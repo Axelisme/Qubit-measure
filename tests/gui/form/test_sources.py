@@ -1,7 +1,6 @@
 """Captured source failures and module-reference switching at public seams."""
 
 from collections.abc import Mapping
-from typing import Annotated
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -17,7 +16,6 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     ModuleInline,
-    ModuleInput,
     ModuleRef,
     field_error,
 )
@@ -27,11 +25,13 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 
+from ._module_models import KeyPulseSpec, SyntheticModuleInline, SyntheticModuleInput
+
 
 class ModuleForm(FormModel):
     """A generic library reference, unrelated to a particular workflow role."""
 
-    drive: Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")] = Field(
+    drive: SyntheticModuleInput = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
     )
 
@@ -39,7 +39,7 @@ class ModuleForm(FormModel):
 class RestoreModuleForm(FormModel):
     """Fresh partial input does not require a library until a ref name is supplied."""
 
-    drive: ModuleInput
+    drive: SyntheticModuleInput
     readout: ModuleRef
     averages: int = 1
     delay: float = 0.0
@@ -125,7 +125,7 @@ def library(gain: float = 0.25) -> LibrarySnapshot:
 class NullableModuleForm(FormModel):
     """Keep the public alias metadata inside a nullable field annotation."""
 
-    drive: ModuleInput | None = Field(
+    drive: SyntheticModuleInput | None = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
     )
 
@@ -162,7 +162,7 @@ def test_public_module_alias_projects_reference_choices() -> None:
     class ModuleAliasForm(FormModel):
         """Parent options reach the exported module union reference branch."""
 
-        drive: ModuleInput = Field(
+        drive: SyntheticModuleInput = Field(
             default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
         )
 
@@ -203,8 +203,10 @@ def test_explicit_inline_defaults_copy_a_detached_spec_without_materializing_chi
     state.write({("drive",): copied}, env)
     inline = state.result(env)
     assert isinstance(inline, ModuleForm)
-    assert isinstance(inline.drive, ModuleInline)
-    assert inline.drive.module == source.module_spec("Q1.pulses.pi")
+    assert isinstance(inline.drive, SyntheticModuleInline)
+    assert inline.drive.module.model_dump(mode="json") == source.module_spec(
+        "Q1.pulses.pi"
+    ).model_dump(mode="json")
     assert state.input.data["drive"] == {
         "kind": "inline",
         "module": source.module_spec("Q1.pulses.pi").model_dump(mode="json"),
@@ -214,8 +216,8 @@ def test_explicit_inline_defaults_copy_a_detached_spec_without_materializing_chi
     changed_env = FormEnv(library=library(0.75))
     detached = state.result(changed_env)
     assert isinstance(detached, ModuleForm)
-    assert isinstance(detached.drive, ModuleInline)
-    assert isinstance(detached.drive.module, PulseSpec)
+    assert isinstance(detached.drive, SyntheticModuleInline)
+    assert isinstance(detached.drive.module, KeyPulseSpec)
     assert detached.drive.module.gain == 0.5
     assert detached.drive.module.waveform == "Q1.waveforms.not_materialized"
     assert source.document() == before
@@ -238,8 +240,8 @@ def test_same_batch_explicit_inline_content_follows_branch_selection() -> None:
     )
     result = state.result(env)
     assert isinstance(result, ModuleForm)
-    assert isinstance(result.drive, ModuleInline)
-    assert isinstance(result.drive.module, PulseSpec)
+    assert isinstance(result.drive, SyntheticModuleInline)
+    assert isinstance(result.drive.module, KeyPulseSpec)
     assert result.drive.module.gain == 0.9
 
 

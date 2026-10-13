@@ -13,8 +13,9 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     LinRange,
-    ModuleInput,
 )
+
+from ._module_models import SyntheticModuleInput
 
 
 def node(schema: JsonValue, *names: str) -> dict[str, JsonValue]:
@@ -127,14 +128,12 @@ def test_model_sections_without_a_label_are_titled_by_field_name() -> None:
             default_factory=Section
         )
         optional_cfg: Section | None = None
-        pulse_cfg: str | Section = "Q1.pulses.pi"
-        drive: ModuleInput
+        drive: SyntheticModuleInput
 
     schema = TitledForm.input_schema(FormEnv())
     assert node(schema, "ro_cfg")["title"] == "Ro cfg"
     assert node(schema, "labelled")["title"] == "Readout"
     assert node(schema, "optional_cfg")["title"] == "Optional cfg"
-    assert node(schema, "pulse_cfg")["title"] == "Pulse cfg"
     drive = node(schema, "drive")
     assert drive["title"] == "Drive"
     assert node(branch(drive, "inline"), "module")["title"] == "Module"

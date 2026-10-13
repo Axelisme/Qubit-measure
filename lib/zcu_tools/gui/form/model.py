@@ -185,6 +185,9 @@ class FormModel(BaseModel):
     mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
+    default_input, input_schema and FormInput reject untagged str | Model
+    fields with ValueError naming the field path, even in inactive branches.
+    Use a tagged ref/inline union instead.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -211,7 +214,9 @@ class FormModel(BaseModel):
         """
         from ._evaluate import evaluate_defaults
         from ._sources import check_sources
+        from ._structure import check_form_shape
 
+        check_form_shape(cls)
         data = cls.defaults(env, {})
         check_sources(cls, data, env)
         return FormInput(cls, evaluate_defaults(cls, data, env))
@@ -291,8 +296,7 @@ class FormModel(BaseModel):
         Include an Expr alternative ({"expr": text}) for each text field: an
         int, float, complex or str value leaf. Leaves whose values are picked
         get none: Literal and Enum (schema enum/const), bool, leaves with
-        current choices, the key of a str-or-model field and a ModuleRef
-        name. Include the shared complex tag, Field constraints, Display metadata and current
+        current choices and a KeyRef name. Include the shared complex tag, Field constraints, Display metadata and current
         choices enums. Display decimals and hidden appear only where declared.
         A model field without a Display label is titled by its field name,
         underscores as spaces and only the first letter capitalized. A model
@@ -306,18 +310,13 @@ class FormModel(BaseModel):
         tags as ordinary JSON values, independent of current choices. Each
         branch reachable through model fields is one concrete model; a named
         nested union tagged on the same key expands into its members. An
-        untagged str-or-model field (str | Model, Model possibly a tagged
-        union) uses the JSON type as its structural selector: its string branch
-        is a plain library key without Expr, and its object branch is the
-        inline model. With a captured library, that string branch's
-        x-form-library-keys lists the library keys whose Spec is one of the
-        field's models; they are suggestions, not choices. Its field node
-        is marked x-form-key-or-inline: true. A ModuleInput field (not
-        nullable) has the same marker on its tagged node: its ref branch
-        holds the key in name and its inline branch the module. With a
+        untagged str | Model field raises ValueError naming its path; use a
+        tagged ref/inline union. A union of ModuleRef and a ModuleInline
+        subclass whose module has supported field annotations has the
+        x-form-key-or-inline marker on its non-null tagged node: ref holds
+        the key in name and inline holds the module. With a
         captured library, the ref branch's name property lists in
-        x-form-library-keys every library module key, since the inline
-        ModuleSpec accepts every module type; when choices declare options
+        x-form-library-keys every library module key; when choices declare options
         for that name, only the module keys among them. Without a captured
         library the list is absent. Any string key remains acceptable
         input; a missing key fails the source check at the name. This
@@ -347,7 +346,9 @@ class FormInput[F: FormModel]:
         and invalid values remain input for result/compatible restoration.
         """
         from ._json import copy_object
+        from ._structure import check_form_shape
 
+        check_form_shape(model)
         self._model = model
         self._data = copy_object(data)
 
@@ -423,10 +424,7 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
-        A str-or-model field takes a string key as an ordinary leaf. Writing {}
-        there switches a key or unfilled value to the inline model's defaults
-        (a tagged inline union starts at its first branch and tag) and leaves
-        an inline object unchanged; the old key is never converted. Nonempty
+        Nonempty
         partial union objects write supplied children; ordinary non-nullable
         model replacement outside a union remains rejected.
         Structurally unknown or overlapping paths raise ValueError without

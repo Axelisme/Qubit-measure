@@ -1,8 +1,85 @@
 """Persistence and isolation through the public form input envelope."""
 
+import re
+from collections.abc import Callable
+from typing import Annotated, Literal
+
 import pytest
-from pydantic import JsonValue
-from zcu_tools.gui.form import FormInput, FormModel
+from pydantic import BaseModel, Field, JsonValue
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
+
+
+class InlineTone(BaseModel):
+    frequency: float = 100.0
+
+
+class InlineRamp(BaseModel):
+    style: Literal["ramp"] = "ramp"
+    length: float = 1.0
+
+
+class InlineFlat(BaseModel):
+    style: Literal["flat"] = "flat"
+    length: float = 1.0
+
+
+type InlineShape = Annotated[InlineRamp | InlineFlat, Field(discriminator="style")]
+type UntaggedShape = str | InlineShape
+
+
+class UntaggedToneForm(FormModel):
+    tone: str | InlineTone = "Q1.pulses.pi"
+
+
+class NullableToneForm(FormModel):
+    tone: str | InlineTone | None = None
+
+
+class AliasedShapeForm(FormModel):
+    shape: UntaggedShape
+
+
+class NestedToneForm(FormModel):
+    section: UntaggedToneForm | None = None
+
+
+class SafeBranch(BaseModel):
+    kind: Literal["safe"] = "safe"
+
+
+class UntaggedBranch(BaseModel):
+    kind: Literal["other"] = "other"
+    tone: str | InlineTone
+
+
+class InactiveToneForm(FormModel):
+    section: Annotated[SafeBranch | UntaggedBranch, Field(discriminator="kind")] = (
+        Field(default_factory=SafeBranch)
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "path"),
+    [
+        (UntaggedToneForm, "tone"),
+        (NullableToneForm, "tone"),
+        (AliasedShapeForm, "shape"),
+        (NestedToneForm, "section.tone"),
+        (InactiveToneForm, "section.tone"),
+    ],
+)
+@pytest.mark.parametrize("entry", ["schema", "defaults", "state"])
+def test_form_entry_rejects_untagged_string_or_model_with_field_path(
+    model: type[FormModel], path: str, entry: str
+) -> None:
+    operations: dict[str, Callable[[], object]] = {
+        "schema": lambda: model.input_schema(FormEnv()),
+        "defaults": lambda: model.default_input(FormEnv()),
+        "state": lambda: FormState(FormInput(model, {})),
+    }
+    operation = operations[entry]
+    with pytest.raises(ValueError, match=rf"{re.escape(path)}:.*str.*Model"):
+        operation()
 
 
 class InputForm(FormModel):
