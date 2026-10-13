@@ -1,5 +1,7 @@
 """Generic option selection, projection and commands at public form seams."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Literal
