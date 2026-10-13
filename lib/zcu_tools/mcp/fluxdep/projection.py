@@ -10,12 +10,17 @@ from zcu_tools.mcp.core.reply import ToolReply
 
 
 class SpectrumSummary(TypedDict):
-    """Loaded identity, published stage/count and unfinished draft kind."""
+    """GUI identity, published stage/point count and unfinished draft kind.
+
+    filter_excluded_count is the native published per-spectrum mask exclusion
+    count, independent of pending Filter edits and min_distance downsampling.
+    """
 
     name: str
     type: Literal["OneTone", "TwoTone"]
     stage: Literal["loaded", "aligned", "sampled"]
     point_count: int
+    filter_excluded_count: int
     pending: Literal["align", "sample"] | None
 
 
@@ -76,8 +81,9 @@ def spectrum_summaries(reply: ToolReply) -> list[SpectrumSummary]:
         SpectrumSummary(
             name=row["name"],
             type=row["spec_type"],
-            stage=_stage(aligned=row["aligned"], completed=row["points_completed"]),
+            stage=row["stage"],
             point_count=row["point_count"],
+            filter_excluded_count=row["filter_excluded_count"],
             pending=row["pending"],
         )
         for row in reply.data["spectrums"]

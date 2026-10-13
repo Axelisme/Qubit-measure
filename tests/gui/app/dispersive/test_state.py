@@ -59,16 +59,16 @@ def _inputs(bare_rf: float = 5.3) -> FluxoniumInputs:
 
 def test_project_info_derives_paths_from_chip_qub():
     p = ProjectInfo(chip_name="ChipA", qub_name="Q1")
-    # result_dir = processed outputs / params.json; database_path = raw one-tone root.
+    # result_dir = processed outputs / params.json; data_root = raw one-tone root.
     assert p.result_dir == os.path.join("result", "ChipA", "Q1")
-    assert p.database_path == os.path.join("Database", "ChipA", "Q1")
+    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
 
 
 def test_project_info_explicit_path_overrides_derivation():
     p = ProjectInfo(chip_name="ChipA", qub_name="Q1", result_dir="/custom/dir")
     assert p.result_dir == "/custom/dir"
-    # database_path still derived (independent override).
-    assert p.database_path == os.path.join("Database", "ChipA", "Q1")
+    # data_root still derived (independent override).
+    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
 
 
 def test_project_info_empty_names_fall_back_to_placeholders():
@@ -83,14 +83,14 @@ def test_project_info_root_dir_anchors_derived_defaults():
     root = os.path.join(os.sep, "repo")
     p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir=root)
     assert p.result_dir == os.path.join(root, "result", "ChipA", "Q1")
-    assert p.database_path == os.path.join(root, "Database", "ChipA", "Q1")
+    assert p.data_root == os.path.join(root, "Database", "ChipA", "Q1")
 
 
 def test_project_info_empty_root_dir_keeps_relative_default():
     # No injection → the legacy cwd-relative default, so nothing regresses.
     p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir="")
     assert p.result_dir == os.path.join("result", "ChipA", "Q1")
-    assert p.database_path == os.path.join("Database", "ChipA", "Q1")
+    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
 
 
 # --- VersionTable is the shared mechanism ------------------------------

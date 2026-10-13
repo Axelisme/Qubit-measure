@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，fit freshness, recorded quality and publication receipts
+**Last updated:** 2026-10-13，published spectrum stages and Filter exclusion counts
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
@@ -59,6 +59,10 @@ Authority and connection rules are in
 `data_root` from the controller root. Undeclared request keys follow shared
 parameter handling and cannot override those paths. Spectrum list/snapshot and
 selection snapshot report unfinished drafts separately from published data.
+`spectrum.list` reports each published loaded/aligned/sampled stage and the count
+excluded by that spectrum's published Filter mask. Completed empty spectra remain
+sampled; unaligned spectra with retained points remain loaded. Draft edits and
+min_distance downsampling do not change the exclusion count.
 `spectrum.snapshot` retains complete arrays and the current published alignment
 source. Draft edits do not change that source; finish publishes it with alignment.
 `spectrum.render` is readonly and returns a PNG of published raw data, alignment

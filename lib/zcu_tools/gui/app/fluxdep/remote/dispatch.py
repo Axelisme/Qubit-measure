@@ -131,6 +131,14 @@ def _h_spectrum_list(
                 aligned=entry.aligned,
                 points_completed=entry.points_completed,
                 point_count=entry.point_count,
+                stage="loaded"
+                if not entry.aligned
+                else "sampled"
+                if entry.points_completed
+                else "aligned",
+                filter_excluded_count=0
+                if entry.filter_mask is None
+                else entry.point_count - int(np.count_nonzero(entry.filter_mask)),
                 pending=("align" if active.kind == "line" else "sample")
                 if active is not None and active.spectrum_name == entry.name
                 else None,

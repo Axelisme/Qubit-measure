@@ -127,6 +127,8 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                             "spec_type": "TwoTone",
                             "aligned": True,
                             "points_completed": True,
+                            "stage": "sampled",
+                            "filter_excluded_count": 1 if selected is not None else 0,
                             "point_count": 3,
                             "pending": None,
                         },
@@ -135,6 +137,8 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                             "spec_type": "OneTone",
                             "aligned": True,
                             "points_completed": False,
+                            "stage": "aligned",
+                            "filter_excluded_count": 0,
                             "point_count": 0,
                             "pending": "sample",
                         },
@@ -143,6 +147,8 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                             "spec_type": "TwoTone",
                             "aligned": False,
                             "points_completed": False,
+                            "stage": "loaded",
+                            "filter_excluded_count": 0,
                             "point_count": 0,
                             "pending": "align",
                         },
@@ -171,6 +177,7 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                 "type": "TwoTone",
                 "stage": "sampled",
                 "point_count": 3,
+                "filter_excluded_count": 1 if selected is not None else 0,
                 "pending": None,
             },
             {
@@ -178,6 +185,7 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                 "type": "OneTone",
                 "stage": "aligned",
                 "point_count": 0,
+                "filter_excluded_count": 0,
                 "pending": "sample",
             },
             {
@@ -185,6 +193,7 @@ def test_list_summarizes_stages_filter_and_stale_fit(
                 "type": "TwoTone",
                 "stage": "loaded",
                 "point_count": 0,
+                "filter_excluded_count": 0,
                 "pending": "align",
             },
         ],
@@ -199,6 +208,97 @@ def test_list_summarizes_stages_filter_and_stale_fit(
         "spectrum.list",
         "selection.snapshot",
         "fit.result",
+    ]
+
+
+def test_list_projects_native_stage_and_exclusions_without_inference(
+    client: Client,
+) -> None:
+    # Authoritative fields deliberately differ from legacy booleans and the
+    # joint mask: this tool must not reconstruct native per-source facts.
+    client.transport.replies.extend(
+        [
+            GuiResponse(
+                result={
+                    "spectrums": [
+                        {
+                            "name": "a",
+                            "spec_type": "TwoTone",
+                            "aligned": False,
+                            "points_completed": False,
+                            "stage": "sampled",
+                            "point_count": 3,
+                            "filter_excluded_count": 2,
+                            "pending": "align",
+                        },
+                        {
+                            "name": "b",
+                            "spec_type": "OneTone",
+                            "aligned": True,
+                            "points_completed": True,
+                            "stage": "aligned",
+                            "point_count": 1,
+                            "filter_excluded_count": 1,
+                            "pending": "sample",
+                        },
+                        {
+                            "name": "empty",
+                            "spec_type": "OneTone",
+                            "aligned": True,
+                            "points_completed": True,
+                            "stage": "sampled",
+                            "point_count": 0,
+                            "filter_excluded_count": 0,
+                            "pending": None,
+                        },
+                    ]
+                }
+            ),
+            GuiResponse(
+                result={
+                    "selected": [True, True, True, True],
+                    "min_distance": 0.1,
+                    "pending": True,
+                }
+            ),
+            GuiResponse(result={"has_result": False, "stale": False}),
+        ]
+    )
+    result = tool_reply(client.server.tools["fluxdep_spectrum_list"]["handler"]({}))
+    assert result.data == {
+        "spectrums": [
+            {
+                "name": "a",
+                "type": "TwoTone",
+                "stage": "sampled",
+                "point_count": 3,
+                "filter_excluded_count": 2,
+                "pending": "align",
+            },
+            {
+                "name": "b",
+                "type": "OneTone",
+                "stage": "aligned",
+                "point_count": 1,
+                "filter_excluded_count": 1,
+                "pending": "sample",
+            },
+            {
+                "name": "empty",
+                "type": "OneTone",
+                "stage": "sampled",
+                "point_count": 0,
+                "filter_excluded_count": 0,
+                "pending": None,
+            },
+        ],
+        "filter": {"selected": 4, "total": 4, "pending": True},
+        "fit": {"has_result": False, "stale": False},
+    }
+    assert [(r["method"], r["params"]) for r in client.transport.requests] == [
+        ("spectrum.list", {}),
+        ("selection.snapshot", {}),
+        ("fit.result", {}),
     ]
 
 
