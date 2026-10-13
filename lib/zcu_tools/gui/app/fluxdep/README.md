@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，Spectra 階段列、Show 工具列與色弱配色
+**Last updated:** 2026-10-14，Fit 頁階段化與 Filter 常駐、Spectra 階段列、Show 工具列與色弱配色
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -131,7 +131,7 @@ Spectra 頁是譜清單（Remove 在清單下方）加編輯區，編輯區上�
 選譜、active 切換與 stage 變更只重建 Spectra 頁的編輯區，不蓋掉 Fit 頁。切頁只跟人類意圖：
 使用者點 tab，或 GUI Add／Restore 後回到 Spectra。Agent-origin 的 active、picker、Filter 與
 search pending 只更新所屬頁的內容，不把使用者從目前的頁拉走（見「Interactive context facts 與 GUI 跟隨」）。
-離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
+離開 Fit 頁只 detach Filter view；進入 Fit 頁經 `show_tab` 重新 attach live Filter，或顯示已發布遮罩。
 清單每列與 `spectrum.list` 都讀 `Controller.spectrum_rows()` 的 `SpectrumRow`：字面譜名、種類、
 已發布階段（loaded／aligned／sampled，零點完成算 sampled）、已發布點數、已發布 Filter 遮罩的排除點數
 與未完成草稿種類（align／sample）；清單有才顯示後兩者。草稿種類由 `pending_kind` 從 live context
@@ -141,7 +141,7 @@ search pending 只更新所屬頁的內容，不把使用者從目前的頁拉�
 ### 編輯區與階段列
 MainWindow 編輯區顯示 active 譜的 live 草稿，沒有草稿時顯示 ResultPreview（已發布狀態的唯讀圖，沒有控制項）。
 點清單選譜、RPC 載入與 active 切換都只更新顯示，不開 picker。編輯區上方的階段列 `1 Align → 2 Sample`
-（共用 Qt 元件 `ui/stage_bar.StageBar`，只畫狀態並回報點擊）標示 active 譜每個階段的狀態，由 State 與
+（共用 Qt 元件 `ui/stage_bar.StageBar`，只畫狀態並回報點擊；Fit 頁的階段列也用它）標示 active 譜每個階段的狀態，由 State 與
 live context 推導，不新增 State 欄位：
 - Align：有定線草稿為 draft，已發布對齊為 done（✓），否則 open。
 - Sample：有採點草稿為 draft；未對齊時 locked，按鈕停用；已對齊且選點完成為 done，否則 open。
@@ -206,19 +206,29 @@ Named contexts 與 global Filter 分開保存。
 Owner 發布 opened／updated／closed domain facts，Session commit／undo 與定線 alignment info 都更新同一 context。
 MainWindow 依 EventMeta origin 與目前 identity 在 Spectra 頁編輯區顯示 agent 開啟／修改的 picker，
 active 跟著切到該譜，階段列標示該階段 draft，但不切頁。Agent 的 Filter 與 search pending 只更新 Fit 頁：Fit 頁正顯示時切到
-Filter／Search tab，否則記住該 tab，使用者下次進 Fit 頁時落在那裡。記住的 Filter 只在 Filter context
-仍 live 時有效，context 結束就清掉，人類下次進 Fit 不會因 agent 已結束的事件落進 Filter 並開 Session。
+Filter／Search 階段，否則記住該階段，使用者下次進 Fit 頁時落在那裡。記住的 Filter 只在 Filter context
+仍 live 時有效，context 結束就清掉，人類下次進 Fit 不會因 agent 已結束的事件落進 Filter。
 GUI 依 context kind 掛載，不能用已完成的 pipeline 階段代替目前 context。
 Closed 只清除旧 view，不開新 Session。編輯區正顯示的草稿 closed（agent 或人取消）後，等該事件返回再重建，
 顯示該譜的已發布預覽，不開 picker、不切頁；期間已掛上的新 view 保留，關窗中不重建。純讀取與 user-origin edits 不強制切換畫面。
-AnalyzePanel 的 public show_tab 管理 Filter／Search／Show，外部不存取 Qt 私有 stack 或 tab。
+AnalyzePanel 的 public show_tab／current_tab 管理 Filter／Search／Show 三個階段，外部不存取 Qt 私有 stack。
+show_tab 不受階段鎖住限制，供視窗路由與 agent 跟隨使用；鎖住只停用階段列按鈕。
 Search terminal 更新結果，不搶回使用者已切換的畫面。
 
-### 跨譜篩選：繼承 min_distance 不繼承 select
-App owner 建立新的跨譜 context 時全選，僅繼承已發布的 `SelectionState.min_distance`。
-Analyze singleton 每次進入 Fit 頁的 Filter 都重新 attach 有效 context。Holder 離開 Filter tab 取消 context；
-非 holder 離開 Filter tab 與任何人切到 Spectra 頁都只 detach view，回到 Filter 時重新 attach 同一個 Session。
-Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
+### 跨譜篩選：從已發布遮罩開始，Edit／Discard／Finish 掌管 Session
+App owner 建立新的跨譜 context 時，以已發布遮罩為初始選取（`State.selection_mask()`，沒有遮罩的譜全選），
+並繼承已發布的 `SelectionState.min_distance`；沒有任何已發布遮罩時全選。GUI 的 Edit 與 RPC
+`selection.interactive.open` 走同一個 owner 入口。已發布遮罩是 downsample 後的 kept 遮罩，
+所以 min_distance 大於 0 時，同一份遮罩再 Finish 會在它上面再 downsample 一次。
+
+Fit 頁的 Filter 階段（`ui/filter_stage.FilterStage`）有兩種畫面：
+- 沒有 live context：以 `Controller.render_selection` 唯讀畫出已發布點雲與各譜遮罩（`fluxdep.filter.published`），
+  holder 與非 holder 都看得到，不開 Session。
+- 有 live context（含 agent 的）：嵌 SelectorWidget。
+
+Holder 按 Edit（`fluxdep.filter.edit`）開 Session，按 Discard（`fluxdep.filter.discard`）取消；Selector 的 Finish
+發布並關閉，Apply 發布但不關閉。離開 Filter 階段或 Fit 頁一律只 detach view，回到 Filter 時重新 attach 同一個 Session；
+Session 留到 Finish、Discard 或上游改動使它失效。Selector controls／完整 stroke 透過共用 Actions 修改 Session。Preview 使用 80ms debounce 與 generation guard；
 Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 delivery。
 
 ### 配色
@@ -297,10 +307,9 @@ Analyze 的 Search form（含 Cancel）與 Show 的 Display 群組（x／y limit
 Transitions to show、Apply）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。
 Show 畫布上方的 matplotlib 工具列 `fluxdep.show.toolbar`（Home、Back、Forward、Pan、Zoom）只改本機畫面，所有人都可用；
 不放 Subplots、Customize 與 Save，因為它們會開阻塞對話框。
-Holder 進出 Filter tab 會開啟或取消 Session；非 holder 不開也不取消。非 holder 可進 Fit 頁閱讀結果與
-`Outdated: …`，Search／Show 切換保持可用。有 live Filter context（例如 agent 的）時，
-非 holder 可在 Filter 與 Search／Show 之間切換，離開只 detach、回來重新 attach 同一個 Session；沒有 live context 時
-Filter tab 對非 holder 停用，進 Fit 頁落在 Search，不為閱讀開 Filter input。
+Fit 頁的階段列對所有人可點，鎖住規則相同；非 holder 可閱讀已發布遮罩、結果與 `Outdated: …`。
+非 holder 的 Edit、Discard 與 Selector controls 停用：沒有 live context 時看唯讀已發布遮罩，
+有 live Filter context（例如 agent 的）時只能看，離開只 detach、回來重新 attach 同一個 Session。
 Filter view detach 仍只是 teardown，不收回控制權。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
@@ -345,8 +354,12 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   品質保留完整精度 GHz、編譯順序與重複 labels，無 recorded quality 時為 null。
   四種 picker finish 回 `PublicationReceipt`，包含 accepted 數值與 Controller 在 emit 前捕獲的 invalidated。同步事件 subscriber 開 successor 或再發布都不能改掉本次 receipt。Filter Apply 維持數值回傳。
 - **AnalyzePanel UI**（`ui/analyze_panel.py`）：selection 後的三步分析集中在**主視窗 Fit 頁**承載的
-  單例面板，內含 **QTabWidget: Filter / Search / Show**。
-  - **Filter**：嵌 cross-spectrum `SelectorWidget`（進此 tab 時依當前 spectrums 重建）。
+  單例面板，上方是 `1 Filter → 2 Search → 3 Show` 階段列（共用 `StageBar`，按鈕 `fluxdep.fit.stage.filter`／`search`／`show`），
+  狀態由 State 與 live Filter context 推導，不新增 State 欄位：
+  - Filter：有 live 草稿為 draft；每張有點的譜都有已發布遮罩為 done（上游改動丟掉遮罩後回到 open），否則 open。
+  - Search：Filter 未 done 或有 live Filter 草稿時 locked；有搜尋結果（含過期）為 done，否則 open。
+  - Show：沒有搜尋結果或有 live Filter 草稿時 locked，否則 open。
+  - **Filter**：沒有 Session 時唯讀已發布遮罩，有 Session 時嵌 cross-spectrum `SelectorWidget`（見「跨譜篩選」）。
   - **Search**：搜尋表單（`Search DB` 是 fit 的 `search_db`，與專案的 Data root 分開；bounds preset 下拉
     `general`/`integer`/`all` 填三組 bound spinbox，下拉永遠顯示與 spinbox 數值完全相符的 preset，數值被改過時顯示 `custom`——
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset，各列以畫出的頻率命名）+
@@ -357,7 +370,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   - **Show**：fit 視覺化（上方是只做框選縮放、平移與復原的工具列，每次重畫後 Home 回到新的圖）+ 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
     繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列，不寫進 Search。
-  AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。
+  AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有階段狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
   Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
   Show 的 display choices 分 applied 與 pending：Apply 取走全部欄位並重畫；自動刷新只用 applied choices，只在結果版本或 `pipeline_snapshot` 的來源版本改變時重畫（同一原因文字的第二次對齊也重畫，但已記錄 search 的背景維持 capture，fresh search 後才換新背景），不清掉、也不套用尚未 Apply 的欄位。新結果只套用 auto limits 的數值。

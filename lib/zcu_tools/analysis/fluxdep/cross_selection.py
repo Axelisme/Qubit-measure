@@ -168,20 +168,27 @@ class CrossSelectionView:
 def make_cross_selection_state(
     inputs: CrossSelectionInputs,
     *,
+    selected: NDArray[np.bool_] | None = None,
     min_distance: float = 0.0,
     width: float = 0.05,
     mode: BrushMode = "select",
 ) -> CrossSelectionState:
-    """Make an all-selected seed with finite [0,0.1] distance/radius.
+    """Make a seed with finite [0,0.1] distance/radius and no before-image.
 
-    Reject bool numbers and modes other than select/erase with ValueError.
+    selected is the starting brush mask, one bool per captured cloud point in
+    cloud order; the seed keeps a detached copy. None starts all-selected.
+    Reject a mask of another shape or dtype, bool numbers and modes other than
+    select/erase with ValueError.
     """
     _number(min_distance, "min_distance", MIN_DISTANCE_MIN, MIN_DISTANCE_MAX)
     _number(width, "width")
     _validate_mode(mode)
-    return CrossSelectionState(
-        np.ones(inputs.fluxs.size, dtype=np.bool_), min_distance, width, mode
-    )
+    if selected is None:
+        start = np.ones(inputs.fluxs.size, dtype=np.bool_)
+    else:
+        _validate_mask(selected, inputs.fluxs.size)
+        start = selected.copy()
+    return CrossSelectionState(start, min_distance, width, mode)
 
 
 def set_cross_selection_distance(

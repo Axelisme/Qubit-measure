@@ -196,8 +196,8 @@ class SearchRenderFrame:
 class SelectionState:
     """Stable downsample threshold remembered across selector sessions.
 
-    Filter masks live on each SpectrumEntry. The brush selection in a newly
-    opened selector is all-selected, independent of the published masks.
+    Filter masks live on each SpectrumEntry. A newly opened selector's brush
+    selection starts from those published masks (all-selected without one).
     """
 
     min_distance: float = 0.0

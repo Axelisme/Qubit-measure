@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, native parameter declarations and Filter differences
+**Last updated:** 2026-10-14, Filter drafts start from the published masks
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -122,7 +122,13 @@ for other commands. MCP exposes no brush mode setter or full-mask command.
 
 `filter_tools.py` implements J6 as `fluxdep_filter(command, params?, image?)`.
 It opens/reuses the global GUI Filter and sends stroke, set_min_distance, undo
-or finish. Counts and per-spectrum [selected, total] pairs come from the GUI.
+or finish. A newly opened draft starts from the published Filter masks and
+min_distance, the same seed as the GUI's Edit; spectra without a published mask,
+or a project without any, start all-selected. The open capture's counts, and so
+the first command's [added, removed] point changes, are measured from that seed,
+not from the full cloud. The published masks are kept points after downsampling,
+so finishing an unchanged draft with min_distance above zero downsamples them
+again. Counts and per-spectrum [selected, total] pairs come from the GUI.
 Parameter differences compare the same call's open and command captures; only a
 changed min_distance appears in changes as [before, after], including undo.
 Point changes remain [added, removed].

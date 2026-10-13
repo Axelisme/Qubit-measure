@@ -22,7 +22,9 @@ from __future__ import annotations
 #     INCLUDING pure-internal logic changes that don't touch the wire.
 # This unpublished interface revision includes identity-only project setup,
 # data_root, spectrum evidence/drafts and fit search_db/render/database_info.
-WIRE_VERSION = 8
+# 9: a new Filter context starts from the published masks (all-selected only
+# without one), so selection.interactive.open evidence reports that seed.
+WIRE_VERSION = 9
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -39,4 +41,7 @@ WIRE_VERSION = 8
 # colour-blind-safe shared point palette, brush band along the whole stroke,
 # picker titles refit on update, faded (unset) frequencies, inherited
 # half/integer lines on the Add spectrum preview.
-GUI_VERSION = 14
+# 15: Fit stage bar (1 Filter -> 2 Search -> 3 Show) with locks; Filter shows
+# the published masks without a Session, Edit/Discard/Finish own the Session,
+# leaving Filter only detaches; a new Filter starts from the published masks.
+GUI_VERSION = 15

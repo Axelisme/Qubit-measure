@@ -46,7 +46,9 @@ CrossSelectionPreviewSubmitter = Callable[
 class SelectorWidget(InteractiveMplWidget):
     """View of one context, never a second committed selection/filter mask.
 
-    Controls use shared Actions and Session.undo; Apply calls the app owner.
+    Controls use shared Actions and Session.undo; Apply calls the app owner
+    and keeps input open. Finish (``fluxdep.picker.finish``) only emits
+    ``finished``; the host publishes and closes the context through the owner.
     Canvas press captures width/mode; release commits one complete stroke,
     including an outside-axes release. Move is pointer-only preview.
     """
@@ -135,6 +137,7 @@ class SelectorWidget(InteractiveMplWidget):
         self._status.setWordWrap(True)
         self.controls_layout.addWidget(self._status)
         self.controls_layout.addStretch()
+        self.add_finish_button()
         self._unsubscribe = context.session.subscribe(self._show_committed)
         self._reproject_controls()
         self._schedule_preview()

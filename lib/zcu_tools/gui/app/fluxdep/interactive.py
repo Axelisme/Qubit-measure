@@ -272,8 +272,8 @@ class FluxDepInteractiveOwner:
         self._contexts: dict[str, ActiveInteractiveContext] = {}
         self._selection_context: ActiveInteractiveContext | None = None
         self._view_selection = False
-        # Leaving Filter cancels its context, so each return would otherwise redo the
-        # wavelet normalization of every unchanged spectrum.
+        # Each new Filter context would otherwise redo the wavelet normalization
+        # of every unchanged spectrum.
         self._normalized_backgrounds: dict[str, _NormalizedBackground] = {}
         self._next_context_id = 1
         self._context_subscriptions: dict[int, tuple[Callable[[], None], ...]] = {}
@@ -722,11 +722,13 @@ class FluxDepInteractiveOwner:
         return PublicationReceipt(result, invalidated)
 
     def begin_cross_selection(self) -> CrossSelectionContext:
-        """Reuse valid open cross context or capture an all-selected cloud seed.
+        """Reuse valid open cross context or capture a cloud seeded from publication.
 
         Capture every source version, including zero-point entries, and bounds
-        from the usable spectra's raw axes and points. Only published distance is
-        inherited. Spectrum drafts remain live when Filter opens.
+        from the usable spectra's raw axes and points. The new seed starts from
+        the published Filter masks (State.selection_mask: unmasked spectra
+        all-selected) and the published distance; with no published mask it
+        starts all-selected. Spectrum drafts remain live when Filter opens.
         FailedPreconditionError rejects disposed owner or no usable cloud;
         invalid numeric input raises ValueError. Reentrant retirement that changes
         context or spectrum/selection publications, or disposes the
@@ -743,7 +745,9 @@ class FluxDepInteractiveOwner:
             return current
         inputs = self._capture_cross_selection_inputs()
         plugin = CrossSelectionPlugin(
-            inputs, min_distance=self._state.selection.min_distance
+            inputs,
+            selected=self._state.selection_mask(),
+            min_distance=self._state.selection.min_distance,
         )
         self._cancel_for_begin(checkpoint, None)
         context = CrossSelectionContext(

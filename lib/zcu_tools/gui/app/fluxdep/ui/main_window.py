@@ -18,7 +18,7 @@ draft under a stage bar; clicking a stage opens that stage's picker. A
 widget's ``finished`` signal writes its result back through the Controller,
 which advances the stage and re-triggers the swap. A GUI Add opens the new
 spectrum's line picker. The Fit page hosts the AnalyzePanel singleton
-(Filter / Search / Show). Spectrum work never replaces the Fit page. Pages
+(Filter -> Search -> Show stages). Spectrum work never replaces the Fit page. Pages
 switch only on human intent: a tab click, or a GUI Add / Restore (back to
 Spectra). Agent-origin events update the content of the page they concern.
 """
@@ -138,8 +138,8 @@ class MainWindow(QMainWindow):
         self._editor_context_id: int | None = None
         # The stage whose picker the editing area shows; None for a preview.
         self._editor_stage: PendingKind | None = None
-        # An agent's Filter / Search waits here until the user enters Fit; a
-        # waiting Filter is dropped when its context closes.
+        # The stage an agent's Filter / Search leaves for the user's next Fit
+        # entry; a waiting Filter is dropped when its context closes.
         self._fit_entry_tab: AnalyzeTab | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
@@ -210,7 +210,7 @@ class MainWindow(QMainWindow):
         self._spectra_page = self._build_spectra_page()
         self._pages.addTab(self._spectra_page, "Spectra")
         # The Fit page hosts the AnalyzePanel SINGLETON: built on first use and
-        # kept after, so its tabs / form / paths / figures survive page switches.
+        # kept after, so its stages / form / paths / figures survive page switches.
         self._fit_page = QWidget()
         self._fit_page.setObjectName("fluxdep.page.fit")
         self._fit_layout = QVBoxLayout(self._fit_page)
@@ -696,9 +696,9 @@ class MainWindow(QMainWindow):
     def _follow_fit_tab(self, tab: AnalyzeTab) -> None:
         """Follow an agent's Filter or Search on the Fit page, never leaving pages.
 
-        A shown Fit page switches to tab now; otherwise tab waits for the
+        A shown Fit page switches to stage tab now; otherwise tab waits for the
         user's next entry into Fit. A waiting Filter lasts only while a Filter
-        context is live, so a finished agent Filter cannot open a new Session.
+        context is live, so a finished agent Filter no longer picks the stage.
         """
         if self._pages.currentWidget() is self._fit_page:
             self._show_fit_page(tab)
@@ -706,13 +706,11 @@ class MainWindow(QMainWindow):
             self._fit_entry_tab = tab
 
     def _show_fit_page(self, tab: AnalyzeTab | None) -> None:
-        """Show the Fit page and its singleton panel on tab.
+        """Show the Fit page and its singleton panel on stage tab.
 
-        None takes the tab an agent event left waiting, else keeps the current
-        one. Entering Filter opens its input (show_tab), so a non-holder
-        entering Fit without a live Filter context lands on Search instead:
-        viewing never begins input. A live Filter context, such as an agent's,
-        is reattached.
+        None takes the stage an agent event left waiting, else keeps the
+        current one. Entering Filter never opens input: it reattaches a live
+        Filter context, such as an agent's, or shows the published masks.
         """
         from .analyze_panel import AnalyzePanelWidget
 
@@ -723,12 +721,6 @@ class MainWindow(QMainWindow):
         panel = self._analyze_panel
         if tab is None:
             tab = self._fit_entry_tab or panel.current_tab
-            if (
-                tab == "filter"
-                and not self._writable
-                and self._ctrl.interactive.current_cross_selection() is None
-            ):
-                tab = "search"
         self._fit_entry_tab = None
         self._routing_page = True
         try:
