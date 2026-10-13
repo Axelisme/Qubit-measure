@@ -73,6 +73,17 @@ def test_retain_source_rejects_invalid_fields_and_labels_without_rpc(
         assert client.transport.sent == before
 
 
+def test_retain_source_rejects_ordinary_model_sections_without_rpc(
+    tmp_path: Path,
+) -> None:
+    with recipe_client(tmp_path, FieldGui()) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        before = list(client.transport.sent)
+        with pytest.raises(ValueError, match="scalar or sweep"):
+            tab.retain_source("modules", "caller")
+        assert client.transport.sent == before
+
+
 def test_set_fields_writes_one_batch_and_keeps_none_default(
     tmp_path: Path,
 ) -> None:
