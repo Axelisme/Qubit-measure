@@ -189,11 +189,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Convert one dotted core module field to inline input through guarded "
-            "resource write. Copy captured library content or use Template/static "
-            "blank fallback when absent. Preserve locks. Existing inline is a "
-            "no-op. Busy, revoked and reentrant writes are rejected. One changed "
-            "input publishes once; structural failures have no successful prefix. "
-            "Returns the Form observation; blank input may need leaf edits.",
+            "option command. Copy a key from the fixed captured library. Preserve "
+            "locks. Existing inline is a guarded no-op. Disabled or unresolved "
+            "modules fail; select an Inline option to use template/type defaults. "
+            "Busy, revoked and reentrant calls are rejected. One changed input "
+            "publishes once; failures have no successful prefix. "
+            "Returns the complete Form observation.",
             (
                 required_string("tab_id"),
                 required_string("field", "Dotted core module field"),

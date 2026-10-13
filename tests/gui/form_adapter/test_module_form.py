@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
+    BathResetSpec,
     ConfigBase,
+    ConstWaveformCfg,
     DirectReadoutCfg,
     Expr,
     FlatTopWaveformSpec,
@@ -17,6 +19,7 @@ from zcu_tools.cfg_model import (
     Slot,
     Template,
     TemplateDef,
+    TwoPulseResetSpec,
     WaveformSpec,
     get_field_meta,
 )
@@ -25,6 +28,7 @@ from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
+    FormInput,
     FormModel,
     FormState,
     FormWritePath,
@@ -92,6 +96,362 @@ def test_module_form_rejects_non_persistent_spec_roots(
         form_adapter.module_form(spec_type)
 
 
+def waveform_env(length: float = 0.1) -> FormEnv:
+    """A captured waveform is detached from the source library document."""
+    return FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="1.0",
+                components={
+                    "Q": ComponentLibrary(
+                        waveforms={"flat": ConstWaveformCfg(length=length)}
+                    )
+                },
+            )
+        )
+    )
+
+
+def expect_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Read a schema or input object through the public JSON boundary."""
+    assert isinstance(value, dict)
+    return value
+
+
+def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    current = state.input.data["waveform"]
+
+    options = form.model.options(env).get(("waveform",), ())
+    matching = [option for option in options if option.matches(current)]
+    assert [option.label for option in matching] == ["Q.waveforms.flat"]
+    assert matching[0].value == current == {"kind": "ref", "name": "Q.waveforms.flat"}
+    schema = expect_object(
+        expect_object(state.input_schema(env)["properties"])["waveform"]
+    )
+    projected = schema.get("x-form-options")
+    assert isinstance(projected, list)
+    assert any(expect_object(item)["value"] == current for item in projected)
+    assert result_spec(form, state, env).waveform == "Q.waveforms.flat"
+    assert state.input.data["waveform"] == current
+
+
+def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    options = form.model.options(env).get(("waveform",), ())
+    assert [option.label for option in options] == [
+        "Q.waveforms.flat",
+        "Inline: const",
+        "Inline: cosine",
+        "Inline: gauss",
+        "Inline: drag",
+        "Inline: arb",
+        "Inline: flat_top",
+    ]
+    schema = expect_object(
+        expect_object(form.model.input_schema(env)["properties"])["waveform"]
+    )
+    projected = schema["x-form-options"]
+    assert isinstance(projected, list)
+    const = expect_object(projected[1])
+    assert const["value"] == {"kind": "inline", "module": {"style": "const"}}
+    const_fields = expect_object(
+        expect_object(expect_object(const["fields"])["properties"])["module"]
+    )
+    assert set(expect_object(const_fields["properties"])) == {"length"}
+    flat = expect_object(projected[-1])
+    flat_fields = expect_object(
+        expect_object(expect_object(flat["fields"])["properties"])["module"]
+    )
+    assert set(expect_object(flat_fields["properties"])) == {"length", "raise_waveform"}
+
+
+def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    key = next(
+        option
+        for option in form.model.options(env)[("waveform",)]
+        if option.matches(state.input.data["waveform"])
+    )
+    assert [(command.name, command.label) for command in key.commands] == [
+        ("to_inline", "Convert to inline")
+    ]
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+
+    state.run_command(("waveform",), "to_inline", env)
+
+    assert state.input.data["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "const", "length": 0.1},
+    }
+    assert notifications == ["changed"]
+    assert env.library is not None
+    assert env.library.waveform_spec("Q.waveforms.flat").model_dump() == {
+        "style": "const",
+        "length": 0.1,
+    }
+    cfg = result_spec(form, state, waveform_env(0.9))
+    assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
+    with pytest.raises(ValueError, match="Unavailable option command"):
+        state.run_command(("waveform",), "to_inline", env)
+    assert notifications == ["changed"]
+
+
+class UnreadableWaveformLibrary(LibrarySnapshot):
+    """A public source fault leaves commands without a usable captured Spec."""
+
+    def waveform_spec(self, path: str) -> WaveformSpec:
+        raise OSError(f"Cannot read captured waveform {path}")
+
+
+def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None:
+    form = form_adapter.module_form(PulseSpec)
+    env = waveform_env()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
+    state = FormState(form.input_from_spec(spec, env))
+    key = next(
+        option
+        for option in form.model.options(env)[("waveform",)]
+        if option.matches(state.input.data["waveform"])
+    )
+    assert [command.name for command in key.commands] == ["to_inline"]
+    assert env.library is not None
+    broken = FormEnv(library=UnreadableWaveformLibrary(env.library.document()))
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    before = state.input.data
+
+    with pytest.raises(OSError, match="Cannot read captured waveform"):
+        key.commands[0].run(broken)
+    with pytest.raises(OSError, match="Cannot read captured waveform"):
+        state.run_command(("waveform",), "to_inline", broken)
+
+    assert state.input.data == before
+    assert notifications == []
+
+
+@pytest.mark.parametrize(
+    ("spec_type", "raw", "field", "expected"),
+    [
+        (
+            PulseSpec,
+            {
+                "ch": 0,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": "$unknown.waveform",
+            },
+            "waveform",
+            {"kind": "ref", "name": "$unknown.waveform"},
+        ),
+        (
+            PulseResetSpec,
+            {"pulse_cfg": "unknown.pulse"},
+            "pulse_cfg",
+            {"kind": "ref", "name": "unknown.pulse"},
+        ),
+        (
+            TwoPulseResetSpec,
+            {"pulse1_cfg": "one", "pulse2_cfg": "two"},
+            "pulse1_cfg",
+            {"kind": "ref", "name": "one"},
+        ),
+        (
+            TwoPulseResetSpec,
+            {"pulse1_cfg": "one", "pulse2_cfg": "two"},
+            "pulse2_cfg",
+            {"kind": "ref", "name": "two"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "cavity_tone_cfg",
+            {"kind": "ref", "name": "cavity"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "qubit_tone_cfg",
+            {"kind": "ref", "name": "qubit"},
+        ),
+        (
+            BathResetSpec,
+            {"cavity_tone_cfg": "cavity", "qubit_tone_cfg": "qubit", "pi2_cfg": "pi2"},
+            "pi2_cfg",
+            {"kind": "ref", "name": "pi2"},
+        ),
+        (
+            FlatTopWaveformSpec,
+            {"length": 1.0, "raise_waveform": "ramp"},
+            "raise_waveform",
+            {"kind": "ref", "name": "ramp"},
+        ),
+        (
+            PulseSpec,
+            {
+                "ch": 0,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": {
+                    "style": "flat_top",
+                    "length": 1.0,
+                    "raise_waveform": "ramp",
+                },
+            },
+            "waveform",
+            {
+                "kind": "inline",
+                "module": {
+                    "style": "flat_top",
+                    "length": 1.0,
+                    "raise_waveform": {"kind": "ref", "name": "ramp"},
+                },
+            },
+        ),
+        (
+            PulseResetSpec,
+            {
+                "pulse_cfg": {
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100.0,
+                    "gain": 0.25,
+                    "waveform": "flat",
+                }
+            },
+            "pulse_cfg",
+            None,
+        ),
+    ],
+    ids=[
+        "waveform-key",
+        "pulse-key",
+        "pulse1-key",
+        "pulse2-key",
+        "cavity-key",
+        "qubit-key",
+        "pi2-key",
+        "ramp-key",
+        "nested-ramp",
+        "nested-pulse",
+    ],
+)
+def test_tagged_spec_projection_round_trips_without_sources(
+    spec_type: type[ConfigBase],
+    raw: dict[str, JsonValue],
+    field: str,
+    expected: dict[str, JsonValue] | None,
+) -> None:
+    spec = spec_type.model_validate(raw)
+    form = form_adapter.module_form(spec_type)
+    env = FormEnv()
+    state = FormState(form.input_from_spec(spec, env))
+    child = state.input.data[field]
+    if expected is None:
+        child = expect_object(child)
+        assert child.get("kind") == "inline"
+        assert expect_object(child["module"])["waveform"] == {
+            "kind": "ref",
+            "name": "flat",
+        }
+    else:
+        assert child == expected
+    assert result_spec(form, state, env).model_dump() == spec.model_dump()
+
+
+def test_tagged_waveform_name_is_key_only_in_schema_result_defaults_and_restore() -> (
+    None
+):
+    form = form_adapter.module_form(PulseSpec)
+    env = FormEnv()
+    spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="$missing.value")
+    state = FormState(form.input_from_spec(spec, env))
+    assert state.input.data["waveform"] == {"kind": "ref", "name": "$missing.value"}
+    assert result_spec(form, state, env).waveform == "$missing.value"
+    state.write({("waveform", "name"): {"expr": "1 / 0"}}, env)
+    assert expect_object(state.input.data["waveform"])["name"] == {"expr": "1 / 0"}
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert errors.messages == {("waveform", "name"): "Input should be a valid string"}
+    schema = expect_object(
+        expect_object(state.input_schema(env)["properties"])["waveform"]
+    )
+    branches = schema["oneOf"]
+    assert isinstance(branches, list)
+    ref = next(
+        expect_object(branch)
+        for branch in branches
+        if expect_object(
+            expect_object(expect_object(branch)["properties"])["kind"]
+        ).get("const")
+        == "ref"
+    )
+    assert (
+        expect_object(expect_object(ref["properties"])["name"]).get("type") == "string"
+    )
+    restored = FormState(form.input_from_spec(spec, env))
+    assert restored.write_compatible(state.input.data, env) == (("waveform", "name"),)
+    assert result_spec(form, restored, env).waveform == "$missing.value"
+
+
+@pytest.mark.parametrize("mode", ["derive", "explicit", "ref", "invalid"])
+def test_tagged_readout_preserves_owner_derivation_and_partial_errors(
+    mode: str,
+) -> None:
+    env = FormEnv()
+    form = form_adapter.module_form(PulseReadoutSpec)
+    spec = PulseReadoutSpec.model_validate(
+        {
+            "pulse_cfg": {
+                "ch": 2,
+                "nqz": 1,
+                "freq": 100.0,
+                "gain": 0.25,
+                "waveform": {"style": "const", "length": 0.4},
+            },
+            "ro_cfg": {"ro_ch": 0, "ro_length": 1.0},
+        }
+    )
+    data = form.input_from_spec(spec, env).data
+    pulse = expect_object(data["pulse_cfg"])
+    assert pulse.get("kind") == "inline"
+    ro = expect_object(data["ro_cfg"])
+    if mode == "explicit":
+        ro.update({"gen_ch": 3, "ro_freq": 150.0})
+    else:
+        ro.pop("gen_ch", None)
+        ro.pop("ro_freq", None)
+    if mode == "ref":
+        data["pulse_cfg"] = {"kind": "ref", "name": "$unavailable.key"}
+    if mode == "invalid":
+        expect_object(pulse["module"])["gain"] = "bad"
+    result = FormState(FormInput(form.model, data)).result(env)
+    if mode in {"invalid", "ref"}:
+        assert isinstance(result, FormErrors)
+        assert set(result.messages) == (
+            {("pulse_cfg", "module", "gain")}
+            if mode == "invalid"
+            else {("ro_cfg", "ro_freq")}
+        )
+    else:
+        assert not isinstance(result, FormErrors), result
+        cfg = form.to_cfg(result, env)
+        assert isinstance(cfg, PulseReadoutSpec)
+        assert cfg.ro_cfg.gen_ch == (3 if mode == "explicit" else 2)
+        assert cfg.ro_cfg.ro_freq == (150.0 if mode == "explicit" else 100.0)
+
+
 def test_spec_root_tag_is_hidden_and_remains_in_input() -> None:
     form = form_adapter.module_form(PulseSpec)
     env = FormEnv()
@@ -111,7 +471,7 @@ def test_spec_form_evaluates_input_and_keeps_child_library_key() -> None:
     batch: dict[FormWritePath, JsonValue] = {
         **PULSE_LEAVES,
         ("gain",): {"expr": "0.5 / 2"},
-        ("waveform",): "Q.flat",
+        ("waveform",): {"kind": "ref", "name": "Q.flat"},
     }
     state.write(batch, env)
 
@@ -133,7 +493,10 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
 
     with pytest.raises(ValueError, match="Unknown field path"):
         state.write({(name,): 1}, env)
-    batch: dict[FormWritePath, JsonValue] = {**PULSE_LEAVES, ("waveform",): "Q.flat"}
+    batch: dict[FormWritePath, JsonValue] = {
+        **PULSE_LEAVES,
+        ("waveform",): {"kind": "ref", "name": "Q.flat"},
+    }
     state.write(batch, env)
     cfg = result_spec(form, state, env)
 
@@ -146,12 +509,12 @@ def test_required_direct_readout_channel_stays_settable() -> None:
     env = FormEnv()
     state = FormState(form.default_input(env))
 
-    state.write({("pulse_cfg",): {}}, env)
+    state.write({("pulse_cfg",): {"kind": "inline"}}, env)
     with pytest.raises(ValueError, match="Unknown field path"):
-        state.write({("pulse_cfg", "ro_ch"): 4}, env)
+        state.write({("pulse_cfg", "module", "ro_ch"): 4}, env)
     state.write(
         {
-            ("pulse_cfg",): "Q.probe",
+            ("pulse_cfg",): {"kind": "ref", "name": "Q.probe"},
             ("ro_cfg", "ro_ch"): 3,
             ("ro_cfg", "ro_length"): 1.5,
             ("ro_cfg", "ro_freq"): 6000.0,
@@ -280,7 +643,7 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     batch: dict[FormWritePath, JsonValue] = {
         ("module", *path): value for path, value in PULSE_LEAVES.items()
     }
-    batch |= {("module", "ch"): 7, ("module", "waveform"): "w"}
+    batch |= {("module", "ch"): 7, ("module", "waveform"): {"kind": "ref", "name": "w"}}
 
     state.write(batch, env)
     rejected = state.result(env)
@@ -453,6 +816,57 @@ def test_template_input_failed_expr_requires_input_instead_of_static_default(
     assert form.model.default_input(env).data["phase"] == 0.0
 
 
+@pytest.mark.parametrize(
+    ("spec_type", "template_id", "child", "authored_kind", "other_kind", "length"),
+    [
+        (PulseSpec, "pulse", "waveform", "const", "cosine", 0.4),
+        (FlatTopWaveformSpec, "flat", "raise_waveform", "cosine", "gauss", 0.1),
+    ],
+    ids=["pulse", "flat-top"],
+)
+def test_template_input_nested_kind_reselection_uses_authored_defaults(
+    creation_templates: dict[str, TemplateDef],
+    spec_type: type[PulseSpec] | type[FlatTopWaveformSpec],
+    template_id: str,
+    child: str,
+    authored_kind: str,
+    other_kind: str,
+    length: float,
+) -> None:
+    form = form_adapter.module_form(spec_type)
+    env = creation_env()
+    state = FormState(
+        form.template_input(Template(template_id), creation_templates, env)
+    )
+    node = expect_object(expect_object(state.input_schema(env)["properties"])[child])
+    options = node["x-form-options"]
+    assert isinstance(options, list)
+
+    def choose(kind: str) -> None:
+        value = next(
+            expect_object(item)["value"]
+            for item in options
+            if expect_object(item)["label"] == f"Inline: {kind}"
+        )
+        state.write({(child,): value}, env)
+
+    assert (
+        expect_object(expect_object(state.input.data[child])["module"])["length"]
+        == length
+    )
+    state.write({(child, "module", "length"): 1.7}, env)
+    choose(other_kind)
+    assert expect_object(state.input.data[child]) == {
+        "kind": "inline",
+        "module": {"style": other_kind},
+    }
+    choose(authored_kind)
+    assert (
+        expect_object(expect_object(state.input.data[child])["module"]).get("length")
+        == length
+    )
+
+
 def test_template_input_models_isolate_locks_defaults_and_recomputation(
     creation_templates: dict[str, TemplateDef],
 ) -> None:
@@ -507,7 +921,7 @@ def test_template_input_slot_keeps_bound_key_or_uses_inline_fallback(
     cfg = result_spec(form, FormState(input), env)
 
     if bound:
-        assert input.data["pulse_cfg"] == "Q.pulses.probe"
+        assert input.data["pulse_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
         assert cfg.pulse_cfg == "Q.pulses.probe"
     else:
         assert isinstance(cfg.pulse_cfg, PulseSpec)

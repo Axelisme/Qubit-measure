@@ -6,7 +6,7 @@ also shown to edit the form once editing is enabled again, so a check of
 "nothing changed" cannot pass because the action never reached the control.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal
 
 import pytest
@@ -23,14 +23,16 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
-from zcu_tools.gui.widgets.form import FormEditor
-from zcu_tools.resources.context.library import (
-    ComponentLibrary,
-    LibrarySnapshot,
-    ModuleLibraryDocument,
+from zcu_tools.gui.form import (
+    Display,
+    FormEnv,
+    FormInput,
+    FormModel,
+    FormPath,
+    FormState,
+    Option,
 )
+from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import key_click, mouse_click, type_text
 
@@ -51,6 +53,12 @@ class Extra(BaseModel):
     note: str = "n"
 
 
+DRIVE_OPTIONS = (
+    Option("Q1.pulses.pi", "Q1.pulses.pi"),
+    Option("Q1.pulses.pi2", "Q1.pulses.pi2"),
+)
+
+
 class ReadOnlyForm(FormModel):
     """One row of every control kind the editor draws."""
 
@@ -58,12 +66,17 @@ class ReadOnlyForm(FormModel):
     label: str = "probe"
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
-    drive: str | PulseSpec = "Q1.pulses.pi"
+    drive: str = "Q1.pulses.pi"
     section: Annotated[Section, Display(collapsed=True)] = Field(
         default_factory=Section
     )
     extra: Extra | None = None
     phase: Annotated[float, Display(group="Advanced")] = 0.5
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Offer two declared drive keys in one option dropdown."""
+        return {("drive",): DRIVE_OPTIONS}
 
 
 class GroupFirstForm(FormModel):
@@ -75,11 +88,16 @@ class GroupFirstForm(FormModel):
     label: str = "probe"
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
-    drive: str | PulseSpec = "Q1.pulses.pi"
+    drive: str = "Q1.pulses.pi"
     section: Annotated[Section, Display(collapsed=True)] = Field(
         default_factory=Section
     )
     extra: Extra | None = None
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Offer two declared drive keys in one option dropdown."""
+        return {("drive",): DRIVE_OPTIONS}
 
 
 DATA: dict[str, JsonValue] = {
@@ -96,25 +114,6 @@ TEXT_ROWS = ("amount", "label")
 DROPDOWN_ROWS = ("mode", "drive")
 
 
-def library_env() -> FormEnv:
-    """Two pulse modules under component Q1, so drive offers two keys."""
-    pulse = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.flat")
-    return FormEnv(
-        library=LibrarySnapshot(
-            ModuleLibraryDocument(
-                format="zcu.module-library",
-                format_version="1.0",
-                components={
-                    "Q1": ComponentLibrary(
-                        pulses={"pi": pulse, "pi2": pulse},
-                        waveforms={"flat": ConstWaveformCfg(length=1.0)},
-                    )
-                },
-            )
-        )
-    )
-
-
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 
 
@@ -125,7 +124,7 @@ def view(qapp: QApplication, request: pytest.FixtureRequest) -> Iterator[View]:
     """A shown editor over DATA, with editing disabled, for each field order."""
     model: type[FormModel] = request.param
     state = FormState(FormInput(model, DATA))
-    editor = FormEditor(state, library_env())
+    editor = FormEditor(state, FormEnv())
     editor.resize(520, 600)
     editor.show()
     editor.set_editing_enabled(enabled=False)
@@ -319,7 +318,7 @@ def test_folds_still_expand_and_collapse_without_writing(
 
 def test_external_updates_show_while_read_only(view: View) -> None:
     editor, state = view
-    state.write({("amount",): 6.0, ("mode",): "slow"}, library_env())
+    state.write({("amount",): 6.0, ("mode",): "slow"}, FormEnv())
     assert float(child(editor, QLineEdit, "form.input.amount").text()) == 6.0
     assert child(editor, QComboBox, "form.input.mode").currentText() == "slow"
 

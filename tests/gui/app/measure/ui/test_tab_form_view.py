@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import JsonValue
+from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -16,7 +17,7 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services import TabSnapshot
@@ -26,13 +27,22 @@ from zcu_tools.gui.app.measure.services.ports import (
     RunPaneSnapshot,
     SavePaneSnapshot,
 )
-from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
+from zcu_tools.gui.app.measure.services.tab_form import (
+    TabFormResource,
+    TabFormSources,
+)
 from zcu_tools.gui.app.measure.state import State, TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.widgets.form import FormEditor
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import type_text
@@ -293,3 +303,55 @@ def test_detach_stops_following_the_resource(
     assert view.input("gain").text() == "0.1"
     assert not view.input("gain").isEnabled()
     view.tab.attach(snapshot(), view.actions)
+
+
+class ModuleCore(ConfigBase):
+    """One nullable pulse module the editor offers as library key or inline."""
+
+    pulse: PulseCfg | None = None
+
+
+def module_sources(_aliases: object) -> TabFormSources:
+    """Capture one library pulse module, Q1.pulses.pi, at Open and Reset."""
+    pulse = PulseSpec(
+        ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+    )
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="1.0",
+            components={"Q1": ComponentLibrary(pulses={"pi": pulse})},
+        )
+    )
+    return TabFormSources(FormEnv(library=library))
+
+
+def test_option_command_runs_through_the_resource_and_locks_while_busy(
+    open_tab: Callable[..., TabView],
+) -> None:
+    resource = TabFormResource(
+        Form(ModuleCore, {}), capture=module_sources, mutation_allowed=lambda: True
+    )
+    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    view = open_tab(resource=resource)
+    published: list[str] = []
+    resource.subscribe(lambda: published.append("changed"))
+    convert = view.tab.findChild(QAction, "form.command.pulse.to_inline")
+    assert isinstance(convert, QAction)
+    assert convert.text() == "Convert to inline"
+
+    view.tab.update_interaction_state(snapshot(is_running=True))
+
+    assert not convert.isEnabled()
+    convert.trigger()
+    assert resource.read_module_kind(("pulse",)) == "ref"
+    assert published == []
+
+    view.tab.update_interaction_state(snapshot())
+    convert.trigger()
+
+    # The resource publishes once, so the command used its guarded entry.
+    assert published == ["changed"]
+    assert resource.read_module_kind(("pulse",)) == "inline"
+    assert resource.read_module(("pulse",)).value["freq"] == 100.0
+    assert view.tab.findChild(QAction, "form.command.pulse.to_inline") is None

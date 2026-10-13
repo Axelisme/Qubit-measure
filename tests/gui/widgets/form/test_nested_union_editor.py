@@ -103,7 +103,7 @@ def editor_state(
 
 
 def selector(editor: FormEditor[InlineModuleForm], path: str) -> QComboBox:
-    """Find the discriminator selector of a dotted model-field path."""
+    """Find the option dropdown of a dotted union field path."""
     widget = editor.findChild(QComboBox, f"form.input.{path}")
     assert isinstance(widget, QComboBox), path
     return widget
@@ -116,21 +116,29 @@ def text(editor: FormEditor[InlineModuleForm], path: str) -> QLineEdit:
     return widget
 
 
+def labels(combo: QComboBox) -> list[str]:
+    """The dropdown's item texts in order."""
+    return [combo.itemText(index) for index in range(combo.count())]
+
+
 def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
     editor_state: tuple[FormEditor[InlineModuleForm], FormState[InlineModuleForm]],
 ) -> None:
     editor, state = editor_state
     env = FormEnv()
-    assert selector(editor, "readout.module.type").currentData() == "readout/pulse"
+    for name in ("readout", "qub_pulse"):
+        assert selector(editor, name).currentText() == "inline", name
+        combo = selector(editor, f"{name}.module")
+        # The named nested union expands into its members, one option each.
+        assert labels(combo) == ["pulse", "readout/direct", "readout/pulse"], name
+        for tag in ("kind", "module.type"):
+            assert editor.findChild(QComboBox, f"form.input.{name}.{tag}") is None
+    assert selector(editor, "readout.module").currentText() == "readout/pulse"
     assert text(editor, "readout.module.ro_length").text() == "3.0"
     gain = text(editor, "readout.module.ro_gain")
     assert gain.text() == "0.25"
-    assert selector(editor, "qub_pulse.module.type").currentData() == "pulse"
+    assert selector(editor, "qub_pulse.module").currentText() == "pulse"
     assert text(editor, "qub_pulse.module.gain").text() == "0.4"
-    tags = {"pulse", "readout/direct", "readout/pulse"}
-    for name in ("readout", "qub_pulse"):
-        combo = selector(editor, f"{name}.module.type")
-        assert {combo.itemData(index) for index in range(combo.count())} == tags
 
     gain.setText("0.3")
     assert state.input.data["readout"] == {
@@ -142,12 +150,13 @@ def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
     assert isinstance(result.readout, ModuleInlineChoice)
     assert result.readout.module == PulseReadoutModule(ro_length=3.0, ro_gain=0.3)
 
-    combo = selector(editor, "readout.module.type")
-    combo.setCurrentIndex(combo.findData("readout/direct"))
+    combo = selector(editor, "readout.module")
+    combo.setCurrentIndex(combo.findText("readout/direct"))
     result = state.result(env)
     assert isinstance(result, InlineModuleForm)
     assert isinstance(result.readout, ModuleInlineChoice)
-    assert result.readout.module == DirectReadoutModule(ro_length=3.0)
-    assert selector(editor, "readout.module.type").currentData() == "readout/direct"
-    assert text(editor, "readout.module.ro_length").text() == "3.0"
+    # The new member starts from its own defaults.
+    assert result.readout.module == DirectReadoutModule()
+    assert selector(editor, "readout.module").currentText() == "readout/direct"
+    assert text(editor, "readout.module.ro_length").text() == "1.0"
     assert editor.findChild(QLineEdit, "form.input.readout.module.ro_gain") is None

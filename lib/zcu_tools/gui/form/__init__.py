@@ -3,7 +3,6 @@
 from .defaults import static_defaults
 from .model import (
     Display,
-    ExplicitList,
     FormChange,
     FormEnv,
     FormErrors,
@@ -14,11 +13,12 @@ from .model import (
     FormState,
     FormValue,
     FormWritePath,
+    KeyRef,
     LinRange,
     ModuleInline,
     ModuleInput,
     ModuleRef,
-    RangeInput,
     WriteRejected,
     field_error,
 )
+from .options import Option, OptionCommand

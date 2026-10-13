@@ -36,6 +36,11 @@ type Write = Callable[[Mapping[FormWritePath, JsonValue]], None]
 type Build = Callable[[FormState[HostForm], Write | None], Editor]
 
 
+def no_command(path: FormWritePath, name: str) -> None:
+    """A host command route for a form whose options declare no command."""
+    pytest.fail(f"Unexpected option command {name!r} at {path!r}")
+
+
 @pytest.fixture
 def build(qapp: QApplication) -> Iterator[Build]:
     """Build editors over a state, optionally with a host write; delete them later."""
@@ -45,7 +50,7 @@ def build(qapp: QApplication) -> Iterator[Build]:
         editor = (
             FormEditor(state, FormEnv())
             if write is None
-            else FormEditor(state, FormEnv(), write=write)
+            else FormEditor(state, FormEnv(), write=write, run_command=no_command)
         )
         editors.append(editor)
         return editor

@@ -15,7 +15,6 @@ from zcu_tools.gui.form import (
     FormPath,
     FormState,
     LinRange,
-    RangeInput,
 )
 
 from tests.gui._form_context import captured_ext_env
@@ -135,13 +134,13 @@ def identity_input() -> dict[str, JsonValue]:
 
 
 class SchemaIdentityForm(FormModel):
-    """Tagged schemas occur inside whole leaves and shared alias definitions."""
+    """Tagged schemas occur in whole leaves alongside reused linear ranges."""
 
     sequence: list[NumericChoice]
     fixed: tuple[NumericChoice, NumericChoice]
     mapping: dict[str, NumericChoice]
-    restricted: RangeInput
-    unrestricted: RangeInput
+    restricted: LinRange
+    unrestricted: LinRange
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:
@@ -180,7 +179,7 @@ def identity_values(node: dict[str, JsonValue]) -> list[JsonValue]:
 
 
 def identity_snapshot(schema: dict[str, JsonValue]) -> dict[str, list[JsonValue]]:
-    """Read identities at the eight public positions of SchemaIdentityForm's schema."""
+    """Read identities in container positions and the shared union definition."""
     fields = schema_object(schema["properties"])
     definitions = schema_object(schema["$defs"])
     sequence = schema_object(fields["sequence"])
@@ -196,17 +195,12 @@ def identity_snapshot(schema: dict[str, JsonValue]) -> dict[str, list[JsonValue]
             schema_object(mapping["additionalProperties"])
         ),
         "NumericChoice": identity_values(schema_object(definitions["NumericChoice"])),
-        "RangeInput": identity_values(schema_object(definitions["RangeInput"])),
-        "restricted": identity_values(schema_object(fields["restricted"])),
-        "unrestricted": identity_values(schema_object(fields["unrestricted"])),
     }
 
 
 def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
-    """Read the ordinary n options from the first branch of a RangeInput schema."""
-    branches = node["oneOf"]
-    assert isinstance(branches, list)
-    fields = schema_object(schema_object(branches[0])["properties"])
+    """Read the ordinary n options from a linear range schema."""
+    fields = schema_object(node["properties"])
     # A choice leaf has no Expr alternative, so its node holds the enum.
     count = schema_object(fields["n"])
     assert "anyOf" not in count
@@ -235,9 +229,6 @@ def test_container_discriminator_identity_and_retained_discriminator_identity_re
             "prefix1": [[1, 2], [3]],
             "additionalProperties": [[1, 2], [3]],
             "NumericChoice": [[1, 2], [3]],
-            "RangeInput": [["linrange"], ["list"]],
-            "restricted": [["linrange"], ["list"]],
-            "unrestricted": [["linrange"], ["list"]],
         }
         for location in (
             "items",

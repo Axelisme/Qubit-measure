@@ -6,16 +6,15 @@ from typing import Annotated, Literal, Self
 import pytest
 from pydantic import BaseModel, Field, JsonValue, model_validator
 from zcu_tools.gui.form import (
-    ExplicitList,
     FormEnv,
     FormErrors,
     FormInput,
     FormModel,
     FormPath,
     FormState,
+    FormValue,
     FormWritePath,
     LinRange,
-    RangeInput,
     field_error,
 )
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -196,9 +195,7 @@ class BranchForm(FormModel):
     branch: Annotated[
         StaticBranch | ContextBranch | RequiredBranch, Field(discriminator="kind")
     ] = Field(default_factory=StaticBranch)
-    fluxes: Annotated[LinRange | ExplicitList, Field(discriminator="kind")] = Field(
-        default_factory=LinRange
-    )
+    fluxes: LinRange = Field(default_factory=LinRange)
 
 
 class NullableBranchForm(FormModel):
@@ -537,9 +534,9 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
         ("branch", "kind"),
         ("branch", "context_only"),
         ("branch", "required"),
+        ("branch", "shared"),
     }
     assert by_path[("branch", "kind")].value == "context"
-    assert by_path[("branch", "required")].value == 7.0
 
     nullable = FormState(
         FormInput(NullableForm, {"section": {"start": 2.0, "stop": 4.0}})
@@ -553,7 +550,7 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     assert changes[0].value is None
 
 
-def test_discriminator_first_factory_inheritance_and_explicit_content_order() -> None:
+def test_discriminator_first_factory_and_explicit_content_order() -> None:
     env = environment(8.0)
     state = FormState(BranchForm.default_input(env))
     state.write({("branch", "shared"): 5.0}, env)
@@ -564,9 +561,7 @@ def test_discriminator_first_factory_inheritance_and_explicit_content_order() ->
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
-    assert result.branch.shared == 5.0
     assert result.branch.context_only == 12.0
-    assert result.branch.required == 7.0
     assert len(notifications) == 1
 
     state.write({("branch", "kind"): "static"}, env)
@@ -575,7 +570,6 @@ def test_discriminator_first_factory_inheritance_and_explicit_content_order() ->
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 8.0
-    assert result.branch.shared == 5.0
 
     state.write({("branch", "kind"): "static"}, env)
     state.write({("branch", "kind"): "required"}, env)
@@ -584,7 +578,7 @@ def test_discriminator_first_factory_inheritance_and_explicit_content_order() ->
     assert ("branch", "required") in result.messages
 
 
-def test_range_input_persists_as_range_and_switches_to_whole_explicit_list() -> None:
+def test_linear_range_input_persists_without_expansion() -> None:
     env = environment()
     state = FormState(BranchForm.default_input(env))
     state.write(
@@ -597,16 +591,6 @@ def test_range_input_persists_as_range_and_switches_to_whole_explicit_list() -> 
         "stop": 0.5,
         "n": 3,
     }
-    state.write({("fluxes", "values"): [0.5, 0.3], ("fluxes", "kind"): "list"}, env)
-    result = state.result(env)
-    assert isinstance(result, BranchForm)
-    assert isinstance(result.fluxes, ExplicitList)
-    assert result.fluxes.values == (0.5, 0.3)
-    state.write({("fluxes", "kind"): "linrange"}, env)
-    result = state.result(env)
-    assert isinstance(result, BranchForm)
-    assert isinstance(result.fluxes, LinRange)
-    assert result.fluxes.n == LinRange().n
 
 
 def test_dynamic_choices_revalidate_with_the_supplied_context() -> None:
@@ -635,7 +619,6 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
     dropped = state.write_compatible(
         {
             "branch": {"shared": 6.0, "required": 12.0, "kind": "context"},
-            "fluxes": {"values": [0.3, 0.4], "kind": "list"},
         },
         env,
     )
@@ -643,7 +626,6 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert result.branch == ContextBranch(shared=6.0, required=12.0, context_only=4.0)
-    assert result.fluxes == ExplicitList(values=(0.3, 0.4))
 
 
 @pytest.mark.parametrize("kind", ["static", "context"])
@@ -695,9 +677,9 @@ def test_compatible_restore_cannot_replace_an_unselected_model_object(
 
 
 class NullableRangeAliasForm(FormModel):
-    """Expose the public range alias as a nullable active model section."""
+    """Expose the public linear range as a nullable active model section."""
 
-    fluxes: RangeInput | None = Field(default_factory=LinRange)
+    fluxes: LinRange | None = Field(default_factory=LinRange)
 
 
 def test_nullable_range_alias_evaluates_expressions_and_canonical_errors() -> None:
@@ -839,21 +821,33 @@ def test_reset_rejects_a_different_model_without_changing_state() -> None:
     assert state.base.data == before
 
 
-def test_callback_failure_propagates_after_installation_without_rollback() -> None:
+def test_callback_failure_is_isolated_after_installation_without_rollback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     env = environment()
     state = FormState(DraftForm.default_input(env))
+    received: list[FormValue] = []
 
     def reject_notification() -> None:
         """Represent a host callback failure, not a form validation failure."""
         raise RuntimeError("observer failed")
 
     unsubscribe = state.subscribe(reject_notification)
-    with pytest.raises(RuntimeError, match="observer failed"):
+    state.subscribe(lambda: received.append(state.preview(env).values[("amount",)]))
+    try:
         state.write({("amount",): 3.0}, env)
+    except RuntimeError as exc:
+        raise AssertionError(
+            "subscriber fault must not reject committed write"
+        ) from exc
     assert state.input.data["amount"] == 3.0
+    assert received == [3.0]
+    assert "observer failed" in caplog.text
+    assert any(record.exc_info for record in caplog.records)
     unsubscribe()
     state.write({("amount",): 4.0}, env)
     assert state.input.data["amount"] == 4.0
+    assert received == [3.0, 4.0]
 
 
 def test_preview_includes_validated_defaults_without_materializing_input() -> None:
