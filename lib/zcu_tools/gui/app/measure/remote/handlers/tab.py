@@ -10,6 +10,7 @@ from zcu_tools.gui.cfg import is_custom_reference_key
 from zcu_tools.gui.cfg.resource import (
     CfgInputError,
     CfgPreconditionError,
+    CfgPreconditionReason,
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -353,18 +354,44 @@ def h_tab_read_module(
 def h_tab_use_inline(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Convert a module through guarded resource write and return its Form view."""
+    """Convert one module using the fixed capture and return its complete Form view.
+
+    params supplies tab_id and a dotted core module field. Resource admission
+    runs before the public module-mode read. Key mode invokes to_inline through
+    the guarded command host; inline mode makes no write or publication.
+    Disabled/invalid modules and source failures reject without fallback.
+    Busy, revoked and notification-reentrant calls also reject inline no-ops.
+    Known form failures become directed RemoteError replies; unexpected failures
+    propagate. No source refresh, caller layout construction or retry occurs.
+    """
     from ..cfg_observation import cfg_error_to_remote
     from ..form_observation import observe_form
 
     path = module_path(params["field"])
     try:
         resource = adapter.cfg_lookup(str(params["tab_id"]))
-        resource.use_inline(path)
-    except (CfgInputError, CfgPreconditionError) as exc:
+        resource.require_mutation_allowed()
+        module = resource.read_module(path)
+        if module.mode == "key":
+            resource.run_command(path, "to_inline")
+        # Inline is an explicit no-op after the same admission checks.
+    except CfgPreconditionError as exc:
+        if exc.reason is CfgPreconditionReason.NOT_VALID:
+            raise cfg_error_to_remote(
+                CfgPreconditionError(
+                    exc.reason,
+                    f"Cannot convert {'.'.join(path)!r}: {exc}. "
+                    "Select an Inline option to edit this field.",
+                )
+            ) from exc
+        raise cfg_error_to_remote(exc) from exc
+    except CfgInputError as exc:
         raise cfg_error_to_remote(exc) from exc
     except ValueError as exc:
         raise RemoteError(
-            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+            ErrorCode.INVALID_PARAMS,
+            f"Cannot convert {'.'.join(path)!r}: {exc}. "
+            "Select an Inline option to edit this field.",
+            reason="form_errors",
         ) from exc
     return dict(observe_form(resource))

@@ -1016,15 +1016,17 @@ class RecipeTab:
     def use_inline(self, field: str) -> None:
         """Ask the owner to convert a whole core module to editable inline input.
 
-        field follows read_module. Copy the fixed captured library Spec through
-        ModuleInline defaults; absent library/key uses Template fallback or
-        static blank. Locks remain applied. Existing inline input is unchanged.
+        field follows read_module. The existing tab.use_inline RPC checks
+        holder, busy, lifetime and notification-reentrant admission before
+        reading the owner's module mode. Key mode runs the generated to_inline
+        option command on the fixed captured library. Inline mode is unchanged
+        with no publication, but still takes those guards. Locks remain applied.
+        Disabled or unresolved modules fail with a directed error; select an
+        Inline option explicitly to start from template/type defaults.
         No caller layout construction or full-cfg/extras lowering occurs here.
-        Holder, busy, lifetime and notification-reentrant guards apply before
-        preparation. Rejection has no successful prefix. A changed input uses
-        one public write/publication; this handle retains the returned Form view.
-        Blank input may need ordinary set calls before Run. Source, structural
-        and connection failures propagate without refresh, retry or rollback.
+        A changed input uses one atomic write/publication; this handle retains
+        the returned Form view. Source, structural and connection failures
+        propagate without refresh, retry, fallback or rollback.
         """
         _field_path(field)
         reply = self._binding.tools.send_gui_rpc(

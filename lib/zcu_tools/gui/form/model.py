@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from logging import getLogger
 from typing import TYPE_CHECKING, Annotated, Literal, Self, final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -21,6 +22,8 @@ from zcu_tools.resources.context.library import LibrarySnapshot
 
 if TYPE_CHECKING:
     from .options import Option
+
+_logger = getLogger(__name__)
 
 
 type FormPath = tuple[str | int, ...]
@@ -476,7 +479,10 @@ class FormState[F: FormModel]:
             return
         self._data = candidate
         for callback in tuple(self._callbacks):
-            callback()
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Form state subscriber failed")
 
     def result(self, env: FormEnv) -> F | FormErrors:
         """Evaluate/decode input and validate its model, without editing input.
@@ -555,8 +561,9 @@ class FormState[F: FormModel]:
     def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
         """Register a plain post-write/reset callback and return unsubscribe.
 
-        Unsubscribe is idempotent. Callbacks can observe installed input;
-        callback errors propagate after installation and do not roll it back.
+        Unsubscribe is idempotent. Callbacks run synchronously and can observe
+        installed input. Individual callback failures log a traceback and do not
+        roll back input or prevent later subscribers or host publication.
         No Qt signals, lifecycle controller or owner adapter is created.
         """
         self._callbacks.append(callback)

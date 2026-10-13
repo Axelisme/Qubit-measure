@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
@@ -321,9 +322,9 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         notifications: list[str] = []
         owner.subscribe(lambda: notifications.append("changed"))
-        converted = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
-        assert converted["ok"], converted
-        assert converted["result"]["input"]["pulse"]["kind"] == "inline"
+        # Selecting Inline uses ordinary type defaults, not hidden fallback.
+        owner.write({("pulse", "kind"): "inline"})
+        assert owner.input.data["pulse"]["kind"] == "inline"
         assert notifications == ["changed"]
         owner.write(
             {
@@ -395,3 +396,68 @@ def test_use_inline_rejects_disabled_module_without_fallback(form_rpc) -> None:
         assert notifications == []
     finally:
         fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_inline_noop_takes_busy_reentry_and_lifetime_guards(
+    form_rpc: tuple[Fixture, str, FormRpc],
+) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("module-rpc")
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    try:
+        owner.write(
+            {
+                ("pulse",): {
+                    "kind": "inline",
+                    "module": {
+                        "type": "pulse",
+                        "ch": 0,
+                        "nqz": 1,
+                        "freq": 100.0,
+                        "gain": 0.2,
+                        "waveform": {
+                            "kind": "inline",
+                            "module": {"style": "const", "length": 0.1},
+                        },
+                    },
+                }
+            }
+        )
+        before = owner.input.data
+        version_key = f"tab:{tab}:cfg"
+        version = fixture.state.version.get(version_key)
+        notifications: list[str] = []
+        owner.subscribe(lambda: notifications.append("changed"))
+        successful = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert successful["ok"], successful
+        assert owner.input.data == before
+        assert fixture.state.version.get(version_key) == version
+        assert notifications == []
+
+        fixture.state.set_tab_running(tab, running=True)
+        try:
+            busy = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+            assert not busy["ok"]
+            assert busy["error"]["reason"] == "mutation_blocked"
+        finally:
+            fixture.state.set_tab_running(tab, running=False)
+        reentrant: list[str] = []
+
+        def during_notification() -> None:
+            rejected = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+            assert not rejected["ok"]
+            reentrant.append(rejected["error"]["reason"])
+
+        owner.subscribe(during_notification)
+        owner.write({("gain",): 0.3})
+        assert reentrant == ["reentrant_mutation"]
+        assert notifications == ["changed"]
+        assert fixture.state.version.get(version_key) == version + 1
+        fixture.ctrl.tab_control.close_tab(tab)
+        with pytest.raises(CfgPreconditionError) as gone:
+            owner.require_mutation_allowed()
+        assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
+    finally:
+        if tab in fixture.ctrl.list_tab_ids():
+            fixture.ctrl.tab_control.close_tab(tab)

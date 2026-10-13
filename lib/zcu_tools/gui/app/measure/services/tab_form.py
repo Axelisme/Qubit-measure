@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from logging import getLogger
@@ -94,7 +95,6 @@ class TabFormResource:
             form.to_cfg
         )
         self._read_module = form.read_module
-        self._module_inline_writes = form.module_inline_writes
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
@@ -136,9 +136,9 @@ class TabFormResource:
         installs a new FormState: watch this resource through subscribe and
         re-read the property afterwards. All form writes and Reset go through
         the resource's commands. Calling
-        state.write on the lent state bypasses the busy, lifetime and
-        notification guards and the subscriber publication, which breaks this
-        contract.
+        state.write or state.run_command on the lent state bypasses busy,
+        lifetime and notification guards and subscriber publication, breaking
+        this contract.
         Raises CfgPreconditionError(RESOURCE_GONE) after revoke.
         """
         self._require_open()
@@ -193,9 +193,9 @@ class TabFormResource:
         Ordinary invalid values remain editable and make result return errors.
         Busy, revoked or notification-reentrant calls raise CfgPreconditionError.
         """
-        self.require_mutation_allowed()
-        self._state.write(batch, self._sources.env)
-        self._notify()
+        with self._mutation():
+            self._state.write(batch, self._sources.env)
+            self._notify()
 
     def read_module(self, path: tuple[str, ...]) -> ModuleValues:
         """Read one core module field using the fixed Open/Reset capture.
@@ -217,22 +217,25 @@ class TabFormResource:
             )
         return result
 
-    def use_inline(self, path: tuple[str, ...]) -> None:
-        """Convert one core module field to editable inline input atomically.
+    def run_command(self, path: FormWritePath, name: str) -> None:
+        """Execute a current option's named command against the fixed capture.
 
-        path follows read_module. Copy captured library content, or use authored
-        Template fallback/static blank if library/key is absent. Preserve locks;
-        existing inline input is unchanged with no notification. Wrong families,
-        structural/source failures raise before mutation. Unfilled blank values
-        remain editable and may still be invalid. Busy, revoked and notification
-        reentrant calls raise CfgPreconditionError before preparation. One public
-        write publishes once on change; rejection has no successful prefix.
-        No sources are captured, and no full cfg/extras lowering occurs.
+        path is a tuple of model-field names identifying an option field.
+        name comes from that selected option's schema commands, for example
+        run_command(("modules", "qub_pulse"), "to_inline"). The Form owner
+        computes the replacement; this host never copies or refreshes sources.
+        Success commits one atomic FormState write and publishes once through
+        the same resource subscribers and cfg version authority as write.
+        Unknown paths, unmatched options and unavailable commands raise
+        ValueError. Source/callable/structural failures propagate with no input
+        change or publication. Ordinary invalid results remain editable drafts.
+        Busy, revoked and notification-reentrant calls raise CfgPreconditionError
+        before command resolution, including commands that would do no work.
+        editor_state is read-only to callers; editors must use this entrypoint.
         """
-        self.require_mutation_allowed()
-        batch = self._module_inline_writes(self.input, path, self._sources.env)
-        if batch:
-            self.write(batch)
+        with self._mutation():
+            self._state.run_command(path, name, self._sources.env)
+            self._notify()
 
     def write_compatible(self, saved: Mapping[str, JsonValue]) -> tuple[FormPath, ...]:
         """Overlay compatible saved leaves and report discarded input paths.
@@ -241,10 +244,10 @@ class TabFormResource:
         and source compatibility. Mutation guards match write; failures preserve
         the entire input. No source is recaptured.
         """
-        self.require_mutation_allowed()
-        dropped = self._state.write_compatible(saved, self._sources.env)
-        self._notify()
-        return dropped
+        with self._mutation():
+            dropped = self._state.write_compatible(saved, self._sources.env)
+            self._notify()
+            return dropped
 
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
         """Capture sources once and replace input with fresh authored defaults.
@@ -254,12 +257,12 @@ class TabFormResource:
         Capture/default failures preserve the old input and source. Busy, revoked
         and notification-reentrant calls raise CfgPreconditionError.
         """
-        self.require_mutation_allowed()
-        sources = self._capture(aliases)
-        state = FormState(self._default_input(sources.env))
-        self._sources = sources
-        self._state = state
-        self._notify()
+        with self._mutation():
+            sources = self._capture(aliases)
+            state = FormState(self._default_input(sources.env))
+            self._sources = sources
+            self._state = state
+            self._notify()
 
     def require_mutation_allowed(self) -> None:
         """Guard related owner operations such as Load before replacing results."""
@@ -315,16 +318,22 @@ class TabFormResource:
                 CfgPreconditionReason.MUTATION_BLOCKED, "Tab form editing is blocked"
             )
 
-    def _notify(self) -> None:
+    @contextmanager
+    def _mutation(self) -> Generator[None]:
+        # One guard spans installation, editor callbacks and resource publication.
+        self.require_mutation_allowed()
         self._notifying = True
         try:
-            for callback in tuple(self._callbacks):
-                try:
-                    callback()
-                except Exception:
-                    _logger.exception("Tab form subscriber failed")
+            yield
         finally:
             self._notifying = False
+
+    def _notify(self) -> None:
+        for callback in tuple(self._callbacks):
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Tab form subscriber failed")
 
 
 class TabFormResources:

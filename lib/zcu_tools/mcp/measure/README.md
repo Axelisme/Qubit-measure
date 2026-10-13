@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，MCP 組合根、holder admission、明確工作點選取、完整 device setup 與獨立 predictor 查詢
+**Last updated:** 2026-10-14，recipe inline 轉換共用 guarded 選項指令
 
 # `zcu_tools/mcp/measure/`
 
@@ -34,13 +34,13 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
-`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 保存公開 ModuleRef 的 kind/name，inline 保存 ModuleInline 的 kind/module。Nested key-or-inline 欄位直接保存字串。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕 key selection。
+`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕 key selection。
 
 `read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。locked 與 fields 來自公開 Form schema，errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
 
 `RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
 
-`use_inline(field)` 請 owner 從 captured library 建立 inline input。缺 library／key 用 Template fallback，沒有 Template 則留 editable blank。Resource 保留 locks，先檢查 holder、busy、lifetime 和通知重入 guard，再以一次 public write 發布。已有 inline input 不變。Caller 之後用 set 寫入 module 葉，不自己組 envelope。
+`use_inline(field)` 走既有 tab.use_inline RPC。Server 先檢查 holder、busy、lifetime 與通知重入 guard，再以公開 read_module 判斷模式。Key 模式執行同一個 to_inline 選項指令，從開表單／Reset 的固定 library 複製快照，以一次原子 write 發布。Inline 模式不改 input、不發布，但仍檢查 guards。停用或來源無效的欄位拒絕轉換，不補 fallback；要從範本／型別預設開始，明確選 Inline 選項。Caller 之後用 set 寫入 module 葉，例如 tab.use_inline("modules.qub_pulse") 後呼叫 tab.set("modules.qub_pulse.module.freq", 125.0)，不自己組 envelope。
 
 `retain_module_source(field, summary_field=..., value_path=...)` 記錄通用 scalar projection 及 module source。summary_field 使用 dotted inline 葉路徑；key mode 也用相同身分，即使 input 沒有該葉。value_path 是 module-relative path，不含 inline envelope。Run 讀目前 scalar 值，保留數字而非 library key 或整個 module。無效 projection 不記成功前綴。後續 set 的來源可取代 label，既有 Run capture 不變。Frequency／linewidth policy 仍由 caller 決定。
 
