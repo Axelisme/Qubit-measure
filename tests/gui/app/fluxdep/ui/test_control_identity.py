@@ -58,7 +58,7 @@ from tests.gui.app.fluxdep._window import (
     spectra_list,
     stage_button,
 )
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
+from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
 
 
 def button(widget, text):
@@ -315,9 +315,11 @@ def test_local_chooser_preserves_path_and_cancel_contract(
 
 @pytest.mark.parametrize("cancel", [False, True])
 def test_search_db_chooser_is_non_blocking_and_holds_local_while_open(
-    qapp, tmp_path, search_database_hdf5, cancel
+    qapp, tmp_path, cross_controller, search_database_hdf5, cancel
 ):
-    harness = RouteHarness.create(str(tmp_path))
+    harness = copy_sources(RouteHarness.create(str(tmp_path)), cross_controller)
+    # A published Filter unlocks Search, whose form holds Browse….
+    harness.ctrl.set_selection(np.ones(4, dtype=np.bool_))
     view = MainWindow(harness.ctrl)
     view.show()
     try:
@@ -487,6 +489,8 @@ def pending_window(qapp, cross_controller, search_database_hdf5):
             background, ProgressService(QtProgressTransport())
         ),
     )
+    # A published Filter unlocks Search, so its run controls follow authority.
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
         search_database_hdf5,
         (2, 15),
@@ -545,6 +549,21 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     outcome = ctrl.search.outcome(token)
     assert outcome is not None and outcome.status == "cancelled"
     assert not cancel.isEnabled() and search.isEnabled()
+
+
+def test_a_filter_draft_disables_a_pending_search_cancel_until_it_ends(
+    pending_window,
+):
+    _view, ctrl, panel, _background, _token, _dialogs = pending_window
+    cancel = named(panel, QPushButton, "fluxdep.fit.cancel")
+    assert cancel.isEnabled()
+    # A Filter draft that is not an agent's leaves the user on Search.
+    ctrl.interactive.begin_cross_selection()
+    # Search is locked under the draft: it stays shown, its run controls off.
+    assert panel.current_tab == "search"
+    assert not cancel.isEnabled()
+    ctrl.interactive.cancel_selection()
+    assert cancel.isEnabled()
 
 
 def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(

@@ -222,6 +222,8 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    # A published Filter unlocks Search, whose form holds Export.
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
         search_database_hdf5,
         (3.0, 12.0),
@@ -392,9 +394,8 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
     widget = AnalyzePanelWidget(ctrl)
     try:
         widget.show_tab("show")
-        assert _click_auto_limits(widget) == _as_displayed(
-            widget, ctrl.fit_auto_limits()
-        ), "before search, Auto limits use the published sources"
+        auto_limits = named(widget, QPushButton, "fluxdep.show.auto_limits")
+        assert not auto_limits.isEnabled(), "Show is locked before a search result"
 
         _record_perfect_fit(ctrl, bounds)
         captured = _click_auto_limits(widget)
@@ -552,8 +553,36 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
     assert preset.currentText() == "integer"
 
 
+def _unlock_search(ctrl: Controller) -> None:
+    """Add one sampled spectrum and publish its Filter, which unlocks Search."""
+    from zcu_tools.analysis.fluxdep.models import PointsData
+    from zcu_tools.analysis.spectrum import SpectrumData
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+
+    fx = np.linspace(0.0, 0.5, 6)
+    raw = SpectrumData(
+        dev_values=fx,
+        fluxs=fx,
+        freqs=np.linspace(4.0, 6.0, 5),
+        signals=np.ones((6, 5), complex),
+    )
+    pts = PointsData(dev_values=fx, fluxs=fx, freqs=np.full(6, 5.0))
+    ctrl.state.put_spectrum(
+        SpectrumEntry(
+            name="sampled",
+            spec_type="TwoTone",
+            raw=raw,
+            points=pts,
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl.set_selection(np.ones(6, dtype=np.bool_))
+
+
 def test_search_blocked_on_empty_database_path(panel):
     w, ctrl = panel
+    _unlock_search(ctrl)
     _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("")
     named(w, QPushButton, "fluxdep.fit.search").click()
@@ -564,6 +593,7 @@ def test_search_blocked_on_empty_database_path(panel):
 
 def test_search_blocked_on_missing_database_file(panel):
     w, ctrl = panel
+    _unlock_search(ctrl)
     _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("/nonexistent/path/to/db.h5")
     named(w, QPushButton, "fluxdep.fit.search").click()
@@ -604,8 +634,10 @@ def test_auto_limits_match_visualizer(panel, qapp):
     ctrl.state.put_spectrum(
         SpectrumEntry(name="a", spec_type="TwoTone", raw=raw, points=pts, aligned=True)
     )
-    _x, y = _click_auto_limits(w)
-    # y spans the spectrum's freq range [4, 6]
+    # Show is locked before a search result; its Auto limits come from the
+    # Controller query, which spans the spectrum's freq range [4, 6].
+    assert not named(w, QPushButton, "fluxdep.show.auto_limits").isEnabled()
+    _x, y = ctrl.fit_auto_limits()
     assert y == pytest.approx((4.0, 6.0))
 
 
@@ -649,6 +681,7 @@ def test_search_waits_for_a_needed_frequency_and_keeps_the_result(
     qapp, cross_controller, search_database_hdf5, needing, field
 ):
     ctrl = cross_controller
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     _record_perfect_fit(ctrl, _set_joint_fit_inputs(ctrl, search_database_hdf5))
     recorded = ctrl.state.fit.params
     widget = AnalyzePanelWidget(ctrl)
@@ -816,6 +849,7 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
             points_completed=True,
         )
     )
+    ctrl.set_selection(np.ones(3, dtype=np.bool_))  # a published Filter unlocks Search
     ctrl.set_fit_params(
         _ranked_database(tmp_path),
         (0.1, 10.0),

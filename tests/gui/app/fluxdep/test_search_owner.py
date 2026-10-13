@@ -423,6 +423,7 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         return result
 
     monkeypatch.setattr(fit, "search_database", compute)
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     panel = AnalyzePanelWidget(ctrl)
     panel.show()
     panel.show_tab("search")

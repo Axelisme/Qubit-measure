@@ -8,7 +8,13 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import PathCollection
 from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLineEdit,
+    QPushButton,
+    QToolBar,
+)
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.analysis.fluxdep.stroke import BrushPoint, BrushStroke
@@ -322,3 +328,90 @@ def test_edit_without_points_stays_disabled(qapp):
         widget.dispose()
         widget.deleteLater()
         ctrl.interactive.dispose()
+
+
+def _search_inputs_enabled(panel: AnalyzePanelWidget) -> tuple[bool, bool]:
+    """Whether the Search database field and bounds preset take input."""
+    return (
+        named(panel, QLineEdit, "fluxdep.fit.search_db").isEnabled(),
+        named(panel, QComboBox, "fluxdep.fit.bounds_preset").isEnabled(),
+    )
+
+
+def _show_inputs_enabled(panel: AnalyzePanelWidget) -> tuple[bool, bool]:
+    """Whether Show's Auto limits and Apply take input."""
+    return (
+        named(panel, QPushButton, "fluxdep.show.auto_limits").isEnabled(),
+        named(panel, QPushButton, "fluxdep.show.apply").isEnabled(),
+    )
+
+
+def test_a_locked_search_is_shown_disabled_until_it_unlocks(panel):
+    widget, ctrl = panel
+    widget.show_tab("search")
+    assert widget.current_tab == "search"
+    assert fit_stage_status(widget, "search") == "locked"
+    assert _search_inputs_enabled(widget) == (False, False)
+    ctrl.set_selection(np.array([True, True, True, True]))
+    assert _search_inputs_enabled(widget) == (True, True)
+
+
+def test_search_stays_shown_but_disabled_when_it_locks_later(panel):
+    widget, ctrl = panel
+    ctrl.set_selection(np.array([True, True, True, True]))
+    click_fit_stage(widget, "search")
+    assert _search_inputs_enabled(widget) == (True, True)
+    # An agent's Filter draft locks Search; the user keeps seeing Search.
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.begin_cross_selection()
+    assert widget.current_tab == "search"
+    assert _search_inputs_enabled(widget) == (False, False)
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.cancel_selection()
+    assert _search_inputs_enabled(widget) == (True, True)
+    # New points for b drop its mask: Search locks again, still shown.
+    ctrl.set_points("b", np.array([0.8]), np.array([4.8]))
+    assert widget.current_tab == "search"
+    assert _search_inputs_enabled(widget) == (False, False)
+
+
+def test_show_stays_shown_with_display_disabled_while_locked(
+    panel, search_database_hdf5
+):
+    widget, ctrl = panel
+    widget.show_tab("show")
+    assert fit_stage_status(widget, "show") == "locked"
+    assert _show_inputs_enabled(widget) == (False, False)
+    ctrl.set_selection(np.array([True, True, True, True]))
+    _record_fit(ctrl, search_database_hdf5)
+    assert _show_inputs_enabled(widget) == (True, True)
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.begin_cross_selection()
+    assert widget.current_tab == "show"
+    assert _show_inputs_enabled(widget) == (False, False)
+    # The toolbar only moves this viewer's view of the drawing.
+    assert named(widget, QToolBar, "fluxdep.show.toolbar").isEnabled()
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.cancel_selection()
+    assert _show_inputs_enabled(widget) == (True, True)
+
+
+def test_an_unlocked_stage_still_follows_control_authority(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    ctrl.set_selection(np.array([True, True, True, True]))
+    _record_fit(ctrl, search_database_hdf5)
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    click_fit_stage(panel, "search")
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    assert fit_stage_status(panel, "search") == "done"
+    assert _search_inputs_enabled(panel) == (False, False)
+    click_fit_stage(panel, "show")
+    assert _show_inputs_enabled(panel) == (False, False)
+    ctrl.control_identity.reclaim_local()
+    assert _show_inputs_enabled(panel) == (True, True)
+    click_fit_stage(panel, "search")
+    assert _search_inputs_enabled(panel) == (True, True)
