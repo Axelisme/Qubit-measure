@@ -16,7 +16,6 @@ from .layout import WorkflowControls
 from .run_status import RunBadge, RunStatusLine
 from .tuning_panel import WorkflowTuningPanel
 
-_TUNABLES_TAB = 1
 _POLL_MS = 50
 _LIVE_LIFECYCLES = frozenset({"running", "pausing", "paused"})
 
@@ -81,11 +80,32 @@ class WorkflowRunView[C]:
 
     @property
     def knobs_from_run(self) -> bool:
-        """Return whether the run's binding, not the Start panel, owns knobs.
+        """Return whether the attached run's binding owns the knobs a run_id names.
 
-        True from submitted() until the Start panels are replaced.
+        True from submitted() until forms_replaced(), when Prepare, Reload or a
+        workflow switch publishes fresh Start panels. It stays True after
+        terminal delivery: the run_id still names that run, its hidden tuning
+        panel keeps serving remote form reads and Apply, and ended() resets the
+        Start knobs from its accepted input. Window's form inspection follows
+        this property. Persistence follows start_locked instead, which ends at
+        terminal delivery and says which knobs the user edits now.
         """
         return self._knobs_from_run
+
+    @property
+    def start_locked(self) -> bool:
+        """Return whether the attached run holds the Start controls.
+
+        True from submitted() until terminal delivery: pending, running,
+        pausing, paused and stopping. Meanwhile the user edits the run's knobs
+        in its binding (the live tuning panel). Otherwise, including after
+        terminal delivery, the user edits the Start knobs, which ended() reset
+        to the run's accepted input. Window's persistence and its Prepare and
+        Reload buttons follow this property, because they concern what the
+        user edits and starts next. Remote reads of a named run follow
+        knobs_from_run instead.
+        """
+        return self._locked
 
     def release_tuning(self) -> None:
         """Close the previous run's tuning panel before a new Start submits."""
@@ -126,7 +146,8 @@ class WorkflowRunView[C]:
     def paused(self) -> None:
         """Show paused delivery: select the live Tunables tab, keep polling."""
         self.refresh()
-        self._controls.forms.setCurrentIndex(_TUNABLES_TAB)
+        controls = self._controls
+        controls.forms.setCurrentIndex(controls.forms.indexOf(controls.tunables_tab))
         self._poll.start()
 
     def ended(self, status: RunStatus | None, error: Exception | None) -> None:
@@ -225,6 +246,6 @@ class WorkflowRunView[C]:
         if self._tuning is not None:
             self._tuning.setVisible(live)
         title = "Tunables (live)" if live else "Tunables"
-        controls.forms.setTabText(_TUNABLES_TAB, title)
+        controls.forms.setTabText(controls.forms.indexOf(controls.tunables_tab), title)
         controls.tunables_note.setVisible(live)
         controls.plan_note.setVisible(self._locked)
