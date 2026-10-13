@@ -24,7 +24,14 @@ from zcu_tools.gui.form import Display, FormEnv, ModuleInline, ModuleRef
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
-from ._form_seeds import complete_input, scalar_seed, set_path, slot_key, template_input
+from ._form_seeds import (
+    complete_input,
+    scalar_seed,
+    set_path,
+    slot_key,
+    template_input,
+    template_seed_tree,
+)
 from ._form_types import annotated_type, literal_type, members, type_tag, union_type
 
 _SPEC_BY_TAG = {
@@ -219,7 +226,8 @@ class ModuleField:
             else None
         )
         if template is not None:
-            seeds = template_input(template, catalog, self.editable, None)
+            template_input(template, catalog, self.editable, None)
+            seeds = template_seed_tree(template, catalog)
             self.editable = tuple(
                 _editable_spec(spec, self.locks, seeds) for spec in self.specs
             )
