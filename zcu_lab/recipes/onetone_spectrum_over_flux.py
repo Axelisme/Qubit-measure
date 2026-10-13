@@ -98,7 +98,17 @@ def onetone_spectrum_over_flux(  # noqa: PLR0913 - Preserve typed tool keywords.
     )
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set("modules.readout.module.pulse_cfg.gain", gain)
+    if gain is None and tab.read_field("modules.readout").mode == "key":
+        # Key input has no inline leaves; report the library gain instead.
+        tab.retain_module_source(
+            "modules.readout",
+            summary_field="modules.readout.module.pulse_cfg.gain",
+            value_path=("pulse_cfg", "gain"),
+        )
+    else:
+        if gain is not None:
+            tab.use_inline("modules.readout")
+        tab.set("modules.readout.module.pulse_cfg.gain", gain)
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()
