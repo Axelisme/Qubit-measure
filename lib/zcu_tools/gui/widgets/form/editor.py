@@ -410,11 +410,9 @@ class FormEditor[F: FormModel](QWidget):
         )
         self._rows[field.path] = row
         layout.addWidget(row.widget)
-        if row.group is not None:
-            child_layout = row.group.layout()
-            if isinstance(child_layout, QVBoxLayout):
-                # Recursion back into _add_level: a model's children are a level.
-                self._add_level(field.path, field.children, row.group, child_layout)
+        if row.group is not None and row.rows is not None:
+            # Recursion back into _add_level: a model's children are a level.
+            self._add_level(field.path, field.children, row.group, row.rows)
         return row.label
 
     def _write(

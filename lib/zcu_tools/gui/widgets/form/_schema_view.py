@@ -275,11 +275,19 @@ def _selector_title(schema: dict[str, JsonValue], key: str) -> str:
 
 
 def _library_keys(key: dict[str, JsonValue]) -> tuple[str, ...]:
-    """The string keys of key's x-form-library-keys, or () without that list."""
+    """The keys of key's x-form-library-keys, or () without that list.
+
+    The core lists only string keys; any other item raises ValueError.
+    """
     keys = key.get("x-form-library-keys")
     if not isinstance(keys, list):
         return ()
-    return tuple(item for item in keys if isinstance(item, str))
+    offered: list[str] = []
+    for item in keys:
+        if not isinstance(item, str):
+            raise ValueError(f"x-form-library-keys holds a non-string key: {item!r}")
+        offered.append(item)
+    return tuple(offered)
 
 
 def _kind(variants: tuple[dict[str, JsonValue], ...]) -> _Kind:

@@ -13,7 +13,7 @@ from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
-from ._json import copy_json, copy_object, default_json
+from ._json import copy_json, copy_object, default_json, expr_text
 from .model import FormEnv, FormModel, FormPath, FormWritePath, ModuleRef
 
 
@@ -475,8 +475,8 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
     if value is None:
         return type(None) in types
     if isinstance(value, dict) and accepts_expression(info.annotation):
-        if set(value) == {"expr"}:
-            return isinstance(value["expr"], str)
+        if expr_text(value) is not None:
+            return True
         if set(value) == {"__complex__"} and complex in types:
             from zcu_tools.gui.cfg.codec import decode_complex
 

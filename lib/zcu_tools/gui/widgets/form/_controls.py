@@ -216,16 +216,28 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
     return label
 
 
-def _fold_button[K](
-    body: QWidget, parent: QWidget, folds: dict[K, bool], key: K, *, expanded: bool
-) -> QPushButton:
-    """Return an Expand/Collapse QPushButton under parent that folds body.
+def _foldable_rows[K](
+    parent: QWidget,
+    header: QHBoxLayout,
+    layout: QVBoxLayout,
+    folds: dict[K, bool],
+    key: K,
+    *,
+    expanded: bool,
+) -> tuple[QGroupBox, QVBoxLayout]:
+    """Add a foldable box of rows under parent; return it and its rows layout.
 
-    folds records user folds (True is expanded) across rebuilt buttons. body
-    starts shown when folds[key] is True; without that key, when expanded is
-    True. Each click flips body's visibility and the button text and records
-    the new state as folds[key].
+    The box goes next into layout, below header, and an Expand/Collapse
+    button goes next into header. The rows layout has nested-group margins
+    and ROW_SPACING. folds records user folds (True is expanded) across
+    rebuilds: the box starts shown when folds[key] is True; without that
+    key, when expanded is True. Each click flips the box's visibility and
+    the button text and records the new state as folds[key].
     """
+    body = QGroupBox(parent)
+    rows = QVBoxLayout(body)
+    rows.setContentsMargins(*_GROUP_MARGINS)
+    rows.setSpacing(ROW_SPACING)
     shown = folds.get(key, expanded)
     body.setVisible(shown)
     button = QPushButton("Collapse" if shown else "Expand", parent)
@@ -237,7 +249,9 @@ def _fold_button[K](
         folds[key] = now_expanded
 
     button.clicked.connect(clicked)
-    return button
+    header.addWidget(button)
+    layout.addWidget(body)
+    return body, rows
 
 
 class FieldRow:
@@ -256,7 +270,7 @@ class FieldRow:
     and its right-click menu, after the standard items. A choice row's input
     is a dropdown of only the choices, without mode. enabled toggles nullable
     models; group hosts model children, including a key-or-inline field's
-    inline rows. value/error are public-named presentation labels, hidden
+    inline rows, in its layout rows (both None for other rows). value/error are public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
     shows below the header. These controls never own or evaluate form state.
     While display is called with editable=False the row is read-only: see
@@ -277,7 +291,7 @@ class FieldRow:
         one entry at path, except a tagged key-or-inline field's choices,
         which write its tag and key (see KeyOrInline).
         Callbacks run synchronously for user input, never during display.
-        Child-model rows are built by the editor inside group.layout().
+        Child-model rows are built by the editor inside rows.
         folds is the editor's record of user folds by model path (True is
         expanded): a model row starts as folds says, else as the field's
         collapsed hint, and records each user fold there. Other rows ignore it.
@@ -297,6 +311,7 @@ class FieldRow:
         self.mode: QAction | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
+        self.rows: QVBoxLayout | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
         self.label = _tight_label(field.label, self.widget)
@@ -348,19 +363,14 @@ class FieldRow:
             self.enabled.installEventFilter(self._block)
             header.addWidget(self.enabled)
             self.enabled.toggled.connect(self._activate)
-        self.group = QGroupBox(self.widget)
-        rows = QVBoxLayout(self.group)
-        rows.setContentsMargins(*_GROUP_MARGINS)
-        rows.setSpacing(ROW_SPACING)
-        fold = _fold_button(
-            self.group,
+        self.group, self.rows = _foldable_rows(
             self.widget,
+            header,
+            self.layout,
             self._folds,
             self.field.path,
             expanded=not self.field.collapsed,
         )
-        header.addWidget(fold)
-        self.layout.addWidget(self.group)
 
     def _build_key_choice(self, header: QHBoxLayout) -> None:
         # Not editable: the GUI picks Inline or an offered key, while wire
@@ -659,12 +669,8 @@ class GroupBlock:
         layout.addLayout(header)
         self.label = _tight_label(name, self.widget)
         header.addWidget(self.label)
-        self.body = QGroupBox(self.widget)
-        self.rows = QVBoxLayout(self.body)
-        self.rows.setContentsMargins(*_GROUP_MARGINS)
-        self.rows.setSpacing(ROW_SPACING)
-        header.addWidget(
-            _fold_button(self.body, self.widget, folds, (path, name), expanded=False)
+        self.body, self.rows = _foldable_rows(
+            self.widget, header, layout, folds, (path, name), expanded=False
         )
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
         self._errors_note.setStyleSheet(_ERRORS_NOTE_STYLE)
@@ -672,7 +678,6 @@ class GroupBlock:
         header.addWidget(self._errors_note)
         # Keep the fold button beside its label instead of stretching it.
         header.addStretch()
-        layout.addWidget(self.body)
 
     def set_has_errors(self, *, has_errors: bool) -> None:
         """Show the header's errors note when has_errors, else hide it.
