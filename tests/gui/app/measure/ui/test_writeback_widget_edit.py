@@ -478,3 +478,31 @@ def test_module_dialog_reports_retired_draft_without_opening_form(module_widget,
     )
     assert messages and tab_id in messages[0]
     assert not any(dialog.isVisible() for dialog in widget.findChildren(QDialog))
+
+
+@pytest.mark.parametrize("scenario", ["open-local", "closed-state"])
+def test_module_validity_refresh_uses_current_view_or_repaired_state(
+    module_widget, scenario: str
+):
+    ctrl, widget, tab_id, pane = _populate_module(module_widget)
+    dialog = _module_dialog(widget)
+    if scenario == "open-local":
+        _input(dialog, "gain").setText("not-a-number")
+        _populate_module(module_widget)
+        proposed = widget.findChild(QLabel, "writebackProposed")
+        # Old rows awaiting Qt deletion are not the new rendered preview.
+        assert proposed is not None
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        proposed = widget.findChild(QLabel, "writebackProposed")
+        assert proposed is not None and proposed.text() == "Invalid configuration"
+        assert not _apply(widget).isEnabled()
+    else:
+        mode = dialog.findChild(QAction, "form.mode.gain")
+        assert mode is not None
+        mode.trigger()
+        _input(dialog, "gain").setText("missing.value")
+        dialog.accept()
+        assert not _apply(widget).isEnabled()
+        ctrl.set_writeback_item_for_pane(tab_id, pane, "ml-1", edits={("gain",): 0.5})
+        _populate_module(module_widget)
+        assert _apply(widget).isEnabled()
