@@ -70,7 +70,11 @@ def list_tooltips(window: QWidget) -> list[str]:
 
 
 def drawn_row_text(window: QWidget, row: int, width: int) -> str:
-    """The text the spectrum list paints for row in a cell width pixels wide."""
+    """The text the spectrum list paints for row in a cell width pixels wide.
+
+    Painted line breaks (U+2028, the separator Qt's text layout breaks at)
+    are returned as "\\n".
+    """
     spectra = spectra_list(window)
     model = spectra.model()
     assert model is not None
@@ -82,7 +86,7 @@ def drawn_row_text(window: QWidget, row: int, width: int) -> str:
     delegate = spectra.itemDelegateForIndex(index)
     assert isinstance(delegate, QStyledItemDelegate), "missing list delegate"
     delegate.initStyleOption(option, index)
-    return str(option.text)
+    return str(option.text).replace("\u2028", "\n")
 
 
 def project_label(window: QWidget) -> QLabel:

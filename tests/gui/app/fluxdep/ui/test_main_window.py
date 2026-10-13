@@ -146,6 +146,10 @@ def test_list_rows_put_the_name_above_its_details(long_name_window):
         f"{_LONG_NAME}\nTwoTone · sampled · 1 pts · align draft",
     ]
     assert list_tooltips(win) == ["a", "empty", _LONG_NAME]
+    spectra = spectra_list(win)
+    assert spectra.sizeHintForRow(0) >= 2 * spectra.fontMetrics().lineSpacing(), (
+        "each row must be two text lines tall"
+    )
     # A name wider than its cell is drawn elided in the middle; details stay whole.
     first, details = drawn_row_text(win, 2, 220).split("\n")
     head, ellipsis, tail = first.partition("…")
