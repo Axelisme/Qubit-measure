@@ -147,8 +147,7 @@ def test_two_complete_points_keep_working_units_and_sources(
     a, b = entry.use_point("context_a"), entry.use_point("context_b")
     assert a.C1.frequency == 12.5
     assert b.C1.frequency == 42.0
-    provenance = a.meta("C1.frequency")
-    assert provenance is not None and provenance.stderr == 0.25
+    assert a.meta("C1.frequency") == {"stderr": 0.25}
     unknown = a.general.ext["unknown"]
     assert isinstance(unknown, FieldView)
     assert unknown["legacy"] == 1
@@ -799,6 +798,33 @@ def test_planned_evidence_is_immutable_including_future_fields(
 
 
 @pytest.mark.parametrize(
+    "values",
+    [{"old_error": 0.25}, {"old_error": 0.25, "old_frequency": "${md.other}"}],
+)
+def test_stderr_requires_a_value_accepted_by_this_mapping(
+    request_data: MigrationRequest, mapping: MigrationMapping, values: JsonObject
+) -> None:
+    write_meta(request_data, "context", values)
+    report = migrate_storage(
+        replace(request_data, part="parameters"),
+        mapping=mapping,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    point = ResultEntry.open(
+        request_data.name,
+        result_root=request_data.results_root,
+        database_root=request_data.database_root,
+    ).use_point("context")
+    assert point.C1.frequency == 1.0
+    assert point.meta("C1.frequency") is None
+    pending = [item for item in report.pending if item.location == "old_error"]
+    assert [item.reason for item in pending] == [
+        "No accepted explicit target value for stderr"
+    ]
+
+
+@pytest.mark.parametrize(
     "unit_evidence", [None, "declared-working-unit", "=unresolved"]
 )
 def test_parameter_requires_explicit_unit_evidence(
@@ -864,7 +890,6 @@ def test_wrapped_channel_creates_a_complete_optional_container(
         item for item in report.key_mappings if item.old_key == "old_channel"
     )
     assert decision.new_path == "C1.channel.ch"
-    assert point.meta("C1.channel.ch") is not None
 
 
 def test_module_candidates_keep_destinations_and_declared_reference_priority(

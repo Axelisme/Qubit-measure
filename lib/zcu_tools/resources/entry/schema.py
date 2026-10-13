@@ -16,19 +16,33 @@ from pydantic import (
     field_validator,
 )
 
-from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
+from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.resources.parameter_metadata import (
+    PARAMETER_FORMAT,
+    PARAMETER_VERSION,
+    validate_parameter_header,
+)
 
-PARAMETER_FORMAT = "zcu.parameter-container"
-PARAMETER_VERSION = FormatVersion(1, 0)
+__all__ = (
+    "PARAMETER_FORMAT",
+    "PARAMETER_VERSION",
+    "ComponentSchema",
+    "PointDocument",
+    "PointGeneral",
+    "SetupDocument",
+    "SetupGeneral",
+    "is_forward_minor",
+    "validate_component_name",
+)
 
 
 def is_forward_minor(document: Mapping[str, YamlValue], *, source: Path) -> bool:
-    version = validate_header(
-        document,
-        expected_format=PARAMETER_FORMAT,
-        supported_version=PARAMETER_VERSION,
-        source=source,
-    )
+    """Validate the shared parameter-container 2.x header; report a newer minor.
+
+    Old majors and provenance tables raise with source and versions, exactly as
+    the standalone parameter entry does. No data is changed or migrated.
+    """
+    version = validate_parameter_header(document, source=source)
     return version.minor > PARAMETER_VERSION.minor
 
 
@@ -110,7 +124,7 @@ class _ParameterDocument(BaseModel):
     format: str
     format_version: str
     components: dict[str, ComponentSchema] = Field(default_factory=dict)
-    provenance: dict[str, YamlMap] = Field(default_factory=dict)
+    metadata: dict[str, YamlMap] = Field(default_factory=dict)
 
     @classmethod
     @override
@@ -173,6 +187,11 @@ class _ParameterDocument(BaseModel):
             result[name] = adapter.validate_python({name: deepcopy(fields)})[name]
         return result
 
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def validate_metadata(cls, value: object) -> dict[str, YamlMap]:
+        return TypeAdapter(dict[str, YamlMap]).validate_python(value, strict=True)
+
 
 class SetupDocument(_ParameterDocument):
     """Entry identity and complete component template in working units."""
@@ -183,13 +202,13 @@ class SetupDocument(_ParameterDocument):
 class PointDocument(_ParameterDocument):
     """One complete, independent point document in working units.
 
-    format and format_version are the parameter-container header, initially 1.0.
+    format and format_version are the parameter-container header, written as 2.0.
     The store validates header compatibility. Values remain in working units;
     general is point-local.
     components maps public identifiers to original registered ComponentSchema models,
     including kind; each original model owns validation. Schema loading does not
     reserve view members; binding a view checks those namespace collisions. No value or source falls back to setup.
-    provenance maps logical component-field paths to YAML source metadata.
+    metadata maps logical dotted paths to opaque caller YAML mappings.
     Component and nested models choose extra policy at every minor version:
     forbid rejects unknown fields, ignore discards them, and allow retains them.
     Forward-minor preservation applies only to unknown container fields.

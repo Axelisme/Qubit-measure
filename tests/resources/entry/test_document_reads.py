@@ -116,6 +116,8 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         for name in ("N1", "snapshot", "source_path", "path", "accept_source"):
             entry.setup.add_component(name, kind=kind, values=[2, 3])
         view = entry.setup if owner == "setup" else entry.new_point("working")
+        with view.edit() as draft:
+            draft.set_meta("N1.values", {"source": "kept"})
         expected = (
             results
             / "entry"
@@ -133,9 +135,8 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         component = captured.components["N1"]
         assert isinstance(component, Measured)
         component.values.append(9)
-        captured.provenance["N1.values"]["source"] = "changed"
-        accepted = view.meta("N1.values")
-        assert accepted is not None and accepted.source == "manual"
+        captured.metadata["N1.values"]["source"] = "changed"
+        assert view.meta("N1.values") == {"source": "kept"}
         assert document_value(snapshot(view), "N1.values") == [2, 3]
         captured.components.clear()
         captured.general.ext["new"] = [1]
@@ -154,7 +155,7 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-def test_public_edit_snapshot_isolates_uncommitted_values_and_sources(
+def test_public_edit_snapshot_isolates_uncommitted_values_and_metadata(
     tmp_path: Path, owner: str
 ) -> None:
     class Measured(ComponentSchema):
@@ -169,20 +170,21 @@ def test_public_edit_snapshot_isolates_uncommitted_values_and_sources(
         def abort_edit() -> None:
             with view.edit() as draft:
                 draft.set("N1.freq", 12.0)
+                draft.set_meta("N1.freq", {"stderr": 0.1})
                 captured = snapshot(draft)
                 assert document_value(captured, "N1.freq") == 12.0
                 assert document_value(snapshot(view), "N1.freq") == 10.0
-                accepted = document_meta(captured, "N1.freq")
-                assert accepted is not None and accepted.source == "manual"
+                assert document_meta(captured, "N1.freq") == {"stderr": 0.1}
                 captured.components.clear()
-                captured.provenance.clear()
+                captured.metadata.clear()
                 assert document_value(snapshot(draft), "N1.freq") == 12.0
-                assert document_meta(snapshot(draft), "N1.freq") is not None
+                assert document_meta(snapshot(draft), "N1.freq") == {"stderr": 0.1}
                 raise RuntimeError("abort")
 
         with pytest.raises(RuntimeError, match="abort"):
             abort_edit()
         assert document_value(snapshot(view), "N1.freq") == 10.0
+        assert document_meta(snapshot(view), "N1.freq") is None
         assert source_path(view).read_bytes() == before
 
 
@@ -250,7 +252,7 @@ def test_document_value_reads_logical_fields_extras_and_containers_without_hooks
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-def test_document_fields_preserve_logical_rows_sources_and_literal_keys(
+def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
     tmp_path: Path, owner: str
 ) -> None:
     calls: list[str] = []
@@ -282,6 +284,8 @@ def test_document_fields_preserve_logical_rows_sources_and_literal_keys(
             empty={},
             nullable=None,
         )
+        with entry.setup.edit() as draft:
+            draft.set_meta("N1.freq", {"stderr": 0.25, "note": ["caller"]})
         if owner == "setup":
             view = entry.setup
         else:
@@ -311,11 +315,15 @@ def test_document_fields_preserve_logical_rows_sources_and_literal_keys(
             ("safe", "general.ext.mapping.safe", 3),
         ]
         frequency = next(row for row in rows if row.editable_path == "N1.freq")
-        source = frequency.provenance
-        assert source == document_meta(document, "N1.freq")
-        assert source is not None and source.source == "manual"
-        if owner == "point":
-            assert source.cloned_from == {"entry_id": entry.entry_id, "point": "seed"}
+        metadata = frequency.metadata
+        assert metadata == document_meta(document, "N1.freq")
+        assert metadata == {"stderr": 0.25, "note": ["caller"]}
+        assert metadata is not None
+        metadata["note"] = "mutated row"
+        assert document_meta(document, "N1.freq") == {
+            "stderr": 0.25,
+            "note": ["caller"],
+        }
         values = next(row.value for row in rows if row.editable_path == "N1.values")
         assert isinstance(values, list)
         values.append(9)
@@ -367,7 +375,7 @@ def test_public_document_read_preserves_forward_minor_visibility(
         path = source_path(entry.setup)
         yaml = YAML(typ="rt")
         stored = yaml.load(path)
-        stored["format_version"] = "1.2"
+        stored["format_version"] = "2.2"
         stored["components"]["N1"]["future"] = {"count": 2}
         cached = snapshot(entry.setup)
         yaml.dump(stored, path)
