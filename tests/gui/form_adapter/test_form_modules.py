@@ -21,6 +21,12 @@ class ModuleSection(ConfigBase):
     probe: Annotated[PulseCfg, FieldMeta(label="Probe", description="Drive the qubit.")]
 
 
+class NullableModuleCore(ConfigBase):
+    """Optional native modules retain ordinary enable/disable semantics."""
+
+    probe: PulseCfg | None = None
+
+
 class ModuleCore(ConfigBase):
     """A synthetic experiment cfg is independent of real experiment modules."""
 
@@ -52,6 +58,50 @@ def module_env() -> FormEnv:
             )
         )
     )
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_generated_module_schema_merges_key_and_inline(nullable: bool) -> None:
+    form = Form(NullableModuleCore if nullable else ModuleSection, {})
+    env = module_env()
+    schema = form.model.input_schema(env)
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    probe = properties["probe"]
+    assert isinstance(probe, dict)
+    if nullable:
+        variants = probe["anyOf"]
+        assert isinstance(variants, list)
+        assert {"type": "null"} in variants
+        probe = next(v for v in variants if isinstance(v, dict) and "oneOf" in v)
+    assert probe.get("x-form-key-or-inline") is True
+    branches = probe["oneOf"]
+    assert isinstance(branches, list)
+    ref = next(
+        b
+        for b in branches
+        if isinstance(b, dict) and b["x-form-discriminator-values"] == ["ref"]
+    )
+    props = ref["properties"]
+    assert isinstance(props, dict)
+    name = props["name"]
+    assert isinstance(name, dict)
+    assert name["x-form-library-keys"] == ["Q.pulses.probe"]
+    state = FormState(
+        FormInput(form.model, {"probe": {"kind": "ref", "name": "Q.pulses.probe"}})
+    )
+    assert not isinstance(state.result(env), FormErrors)
+    state.write(form.module_inline_writes(state.input, ("probe",), env), env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, (ModuleSection, NullableModuleCore)), cfg
+    assert cfg.probe is not None
+    assert cfg.probe.freq == 100.0
+    if nullable:
+        state.write({("probe",): None}, env)
+        assert state.input.data["probe"] is None
+        assert not isinstance(state.result(env), FormErrors)
 
 
 @pytest.mark.parametrize("mode", ["ref", "inline"])

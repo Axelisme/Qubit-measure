@@ -178,6 +178,23 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
     assert '"hidden"' not in json.dumps(UnionOnlyForm.input_schema(FormEnv()))
 
 
+def test_root_fixed_tag_is_hidden_without_changing_defaults_or_validation() -> None:
+    class RangeForm(LinRange):
+        fixed: Literal[2] = 2
+
+    env = FormEnv()
+    schema = RangeForm.input_schema(env)
+    assert node(schema, "kind").get("hidden") is True
+    assert node(schema, "kind")["const"] == "linrange"
+    assert "hidden" not in node(schema, "fixed")
+    state = FormState(RangeForm.default_input(env))
+    assert state.input.data["kind"] == "linrange"
+    state.write({("kind",): "other"}, env)
+    errors = state.result(env)
+    assert isinstance(errors, FormErrors)
+    assert set(errors.messages) == {("kind",)}
+
+
 def test_display_group_marks_only_declared_fields_in_the_schema() -> None:
     class GroupedSection(BaseModel):
         model_config = ConfigDict(extra="forbid")
