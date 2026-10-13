@@ -15,7 +15,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, Field, JsonValue, create_model
+from pydantic import BaseModel, Field, JsonValue, create_model, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
@@ -25,6 +25,7 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ModuleCfgFactory,
     ModuleSpec,
+    PulseReadoutSpec,
     Slot,
     Template,
     TemplateDef,
@@ -38,6 +39,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
     FormWritePath,
+    KeyRef,
     ModuleInline,
     ModuleRef,
     Option,
@@ -50,10 +52,13 @@ from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 from ._display import field_display
 from ._seeds import (
     complete_input,
+    inline_wrapper,
+    persistent_input,
     scalar_seed,
     selected_model,
     set_path,
     slot_key,
+    spec_annotation,
     supported_input,
     template_input,
     template_seed_tree,
@@ -94,8 +99,10 @@ _PERSISTENT_SPECS = tuple(
 
 
 def _key_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
-    if str not in members(annotation):
+    wrapper = inline_wrapper(annotation)
+    if wrapper is None:
         return ()
+    annotation = spec_annotation(annotation)
     return tuple(
         spec
         for spec in _PERSISTENT_SPECS
@@ -137,7 +144,10 @@ def _spec_options(
         options = (
             [Option("None", None)] if type(None) in members(info.annotation) else []
         )
-        if env.library is not None:
+        if env.library is not None and any(
+            isinstance(member, type) and issubclass(member, KeyRef)
+            for member in members(info.annotation)
+        ):
             waveform = all(spec in members(WaveformSpec) for spec in specs)
             keys = (
                 env.library.waveform_keys() if waveform else env.library.module_keys()
@@ -146,7 +156,7 @@ def _spec_options(
             options.extend(
                 Option(
                     key,
-                    key,
+                    {"kind": "ref", "name": key},
                     commands=(
                         OptionCommand(
                             "to_inline",
@@ -154,7 +164,7 @@ def _spec_options(
                             partial(
                                 _copy_spec,
                                 key,
-                                _inline_kinds(info.annotation),
+                                _inline_kinds(spec_annotation(info.annotation)),
                                 waveform=waveform,
                             ),
                         ),
@@ -163,14 +173,19 @@ def _spec_options(
                 for key in keys
                 if isinstance(read(key), specs)
             )
-        kinds = _inline_kinds(info.annotation)
+        kinds = _inline_kinds(spec_annotation(info.annotation))
+        wrapper = inline_wrapper(info.annotation)
+        if wrapper is None:
+            raise TypeError("Spec options require a tagged inline wrapper")
         for kind in kinds:
             tag, value = _spec_tag(kind)
             options.append(
                 Option(
                     "Inline" if len(kinds) == 1 else f"Inline: {value}",
-                    {tag: value},
-                    fields=kind,
+                    {"kind": "inline", "module": {tag: value}},
+                    fields=create_model(
+                        f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
+                    ),
                 )
             )
         declared[(name,)] = tuple(options)
@@ -192,7 +207,12 @@ def _copy_spec(
     model = next((model for model in models if issubclass(model, type(spec))), None)
     if model is None:
         raise ValueError(f"Incompatible library family for {key!r}")
-    return supported_input(model, spec.model_dump(mode="json", exclude_none=True))
+    return {
+        "kind": "inline",
+        "module": supported_input(
+            model, spec.model_dump(mode="json", exclude_none=True)
+        ),
+    }
 
 
 _UNSUPPORTED_FIELDS = frozenset({"desc", "mask", "outsel", "ro_ch"})
@@ -214,6 +234,15 @@ def _editable(
     locks: Mapping[str, TemplateLiteral],
     seeds: Mapping[str, JsonValue],
 ) -> object:
+    wrapper = inline_wrapper(annotation)
+    if wrapper is not None or (
+        str in members(annotation)
+        and any(
+            isinstance(member, type) and issubclass(member, BaseModel)
+            for member in members(annotation)
+        )
+    ):
+        return _tagged_annotation(annotation, locks, seeds)
     if isinstance(annotation, TypeAliasType):
         return _editable(annotation.__value__, locks, seeds)
     args = get_args(annotation)
@@ -242,6 +271,45 @@ def _editable(
     return annotation
 
 
+def _tagged_annotation(
+    annotation: object,
+    locks: Mapping[str, TemplateLiteral],
+    seeds: Mapping[str, JsonValue],
+) -> object:
+    """Derive one family-limited tagged selector, retaining nullable/locked shape.
+
+    Re-derivation for a template unwraps the existing input annotation first;
+    the persistent seed and lock paths do not contain wrapper segments.
+    """
+    models = tuple(
+        editable_spec(member, locks, seeds)
+        for member in members(spec_annotation(annotation))
+        if isinstance(member, type) and issubclass(member, BaseModel)
+    )
+    if not models:
+        raise TypeError("Tagged inline input needs a persistent child model")
+    first = next(iter(models))
+    module = union_type(models)
+    if len(models) > 1:
+        module = annotated_type(module, Field(discriminator=_spec_tag(first)[0]))
+    inline = create_model(
+        f"{first.__name__}Inline",
+        __base__=FormModel,
+        kind=(Literal["inline"], "inline"),
+        module=(module, ...),
+    )
+    tagged = (
+        inline
+        if locks
+        else annotated_type(union_type((KeyRef, inline)), Field(discriminator="kind"))
+    )
+    return (
+        union_type((tagged, type(None)))
+        if type(None) in members(annotation)
+        else tagged
+    )
+
+
 def editable_spec(
     model: type[BaseModel],
     locks: Mapping[str, TemplateLiteral],
@@ -252,6 +320,8 @@ def editable_spec(
     locks maps relative leaf paths to single-value Literal fields with that
     default. seeds marks Expr initial values, whose fields lose static defaults.
     QickParam alternatives are removed. FieldMeta becomes Display metadata.
+    str-or-model children become tagged ref/name or inline/module wrappers;
+    persistent seed and lock paths still name Spec fields, without envelopes.
     Optional desc, mask, outsel, ro_ch and mux_* fields are removed, so input,
     schema and writes cannot set them; validating as the Spec restores defaults.
     The Spec's validators are inherited; the Spec class is not modified.
@@ -280,6 +350,15 @@ def editable_spec(
             )
         )
         derived = deepcopy(info)
+        if inline_wrapper(annotations[name]) is not None:
+            derived.discriminator = (
+                "kind"
+                if any(
+                    isinstance(member, type) and issubclass(member, KeyRef)
+                    for member in members(annotations[name])
+                )
+                else None
+            )
         if isinstance(seed, dict) and "expr" in seed:
             derived.default = PydanticUndefined
             derived.default_factory = None
@@ -294,7 +373,18 @@ def editable_spec(
     ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
         return _spec_options(cls, env)
 
+    def defaults(
+        cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
+    ) -> dict[str, JsonValue]:
+        del env, previous
+        return supported_input(cls, complete_input(cls, {}))
+
     namespace["options"] = classmethod(options)
+    namespace["defaults"] = classmethod(defaults)
+    if issubclass(model, PulseReadoutSpec):
+        namespace["_autoderive_ro_fields"] = model_validator(mode="before")(
+            _derive_readout_input
+        )
     bases = (model,) if issubclass(model, FormModel) else (FormModel, model)
     result = new_class(
         f"{model.__name__}Input", bases, exec_body=lambda ns: ns.update(namespace)
@@ -302,6 +392,38 @@ def editable_spec(
     if not issubclass(result, BaseModel):
         raise TypeError("Editable Spec must be a Pydantic model")
     return result
+
+
+def _derive_readout_input(cls: type[BaseModel], data: object) -> object:
+    """Reuse readout owner derivation while retaining malformed generated leaves."""
+    if not isinstance(data, dict):
+        return data
+    raw = persistent_input(cls, data)
+    derived = PulseReadoutSpec.derive_input_fields(raw)
+    # The owner only changes ro_cfg, whose persistent/input shapes are identical.
+    # Overlay those fields without the supported-field filter: invalid extras
+    # and unchanged malformed wrappers must still reach Pydantic for errors.
+    changed = {
+        name: value
+        for name, value in derived.items()
+        if name not in raw or value != raw[name]
+    }
+    return {**data, **changed}
+
+
+def _template_subtree(
+    data: dict[str, JsonValue], ancestry: tuple[tuple[str, str, str], ...]
+) -> dict[str, JsonValue] | None:
+    """Select an authored position only when every persistent branch tag matches."""
+    for name, tag, value in ancestry:
+        if name:
+            child = data.get(name)
+            if not isinstance(child, dict):
+                return None
+            data = child
+        if tag and data.get(tag) != value:
+            return None
+    return data
 
 
 def bind_template_defaults(
@@ -318,7 +440,10 @@ def bind_template_defaults(
     """
 
     def bind(
-        model: type[BaseModel], ancestry: tuple[tuple[str, str, str], ...]
+        model: type[BaseModel],
+        ancestry: tuple[tuple[str, str, str], ...],
+        *,
+        wrapper: bool = False,
     ) -> None:
         if not issubclass(model, FormModel):
             raise TypeError("Template defaults require generated FormModel types")
@@ -328,22 +453,28 @@ def bind_template_defaults(
         ) -> dict[str, JsonValue]:
             del previous
             data = template_input(template, catalog, models, env)
-            for name, tag, value in ancestry:
-                if name:
-                    child = data.get(name)
-                    if not isinstance(child, dict):
-                        return static_defaults(cls)
-                    data = child
-                if data.get(tag) != value:
-                    return static_defaults(cls)
-            return complete_input(cls, data)
+            subtree = _template_subtree(data, ancestry)
+            if subtree is None:
+                return static_defaults(cls)
+            data = subtree
+            if wrapper:
+                content = cls.model_fields["module"].annotation
+                child = selected_model(content, data)
+                return {
+                    "kind": "inline",
+                    "module": supported_input(child, complete_input(child, data)),
+                }
+            return supported_input(cls, complete_input(cls, data))
 
         # Internal kind switches call the child defaults, not the root wrapper.
         # Bind the same path/branch policy on each separately generated child.
         # Install the descriptor, not a bound method; typed assignment expects the latter.
         type.__setattr__(model, "defaults", classmethod(defaults))
-        for name, info in model.model_fields.items():
-            for child in _inline_kinds(info.annotation):
+        for name, info in () if wrapper else model.model_fields.items():
+            inline = inline_wrapper(info.annotation)
+            if inline is not None:
+                bind(inline, (*ancestry, (name, "", "")), wrapper=True)
+            for child in _inline_kinds(spec_annotation(info.annotation)):
                 tag, value = _spec_tag(child)
                 bind(child, (*ancestry, (name, tag, value)))
 
@@ -506,10 +637,15 @@ class ModuleField:
         Child keys remain references. Unsupported fields are discarded and locks
         restored. Missing or incompatible sources fail before any write.
         """
-        module = _copy_spec(key, self.editable, env, waveform=False)
+        copied = _copy_spec(key, self.editable, env, waveform=False)
+        module = copied["module"]
+        if not isinstance(module, dict):
+            raise TypeError("Copied module input must be an object")
+        selected = selected_model(union_type(self.editable), module)
+        raw = persistent_input(selected, module)
         for path, value in self.locks.items():
-            set_path(module, path, scalar_seed(value))
-        return {"kind": "inline", "module": module}
+            set_path(raw, path, scalar_seed(value))
+        return {"kind": "inline", "module": supported_input(selected, raw)}
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
         template = (
@@ -552,7 +688,9 @@ class ModuleField:
         if isinstance(self.node, Template):
             return {
                 "kind": "inline",
-                "module": template_input(self.node, self.catalog, self.editable, env),
+                "module": self._project(
+                    template_input(self.node, self.catalog, self.editable, env)
+                ),
             }
         if self.node is None:
             return None
@@ -565,9 +703,10 @@ class ModuleField:
                 )
             if not self.node.copy and not self.locks:
                 return {"kind": "ref", "name": key}
-            module = supported_input(
-                self._editable_for(spec.type),
-                spec.model_dump(mode="json", exclude_none=True),
+            model = self._editable_for(spec.type)
+            module = persistent_input(
+                model,
+                supported_input(model, spec.model_dump(mode="json", exclude_none=True)),
             )
         elif self.node.fallback is not None:
             module = template_input(
@@ -582,7 +721,15 @@ class ModuleField:
         selected = next(
             model for model in self.editable if type_tag(model) == module.get("type")
         )
-        return {"kind": "inline", "module": complete_input(selected, module)}
+        return {
+            "kind": "inline",
+            "module": supported_input(selected, complete_input(selected, module)),
+        }
+
+    def _project(self, module: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        return supported_input(
+            selected_model(union_type(self.editable), module), module
+        )
 
     def _editable_for(self, tag: str) -> type[BaseModel]:
         return next(model for model in self.editable if type_tag(model) == tag)
@@ -606,7 +753,9 @@ class ModuleField:
         raw_module = (
             item.name
             if isinstance(item, ModuleRef)
-            else item.module.model_dump(mode="python")
+            else persistent_input(
+                type(item.module), item.module.model_dump(mode="json")
+            )
         )
         context = env.library.validation_context() if env.library is not None else None
         try:
@@ -655,7 +804,7 @@ class ModuleField:
             return static_defaults(self.inline)
         for path, value in self.locks.items():
             set_path(module, path, scalar_seed(value))
-        return {"kind": "inline", "module": module}
+        return {"kind": "inline", "module": self._project(module)}
 
     def inline_writes(
         self, previous: Mapping[str, JsonValue], env: FormEnv
@@ -670,7 +819,9 @@ class ModuleField:
         if isinstance(item, ModuleRef):
             raw = item.name
         elif isinstance(item, ModuleInline):
-            raw = item.module.model_dump(mode="python")
+            raw = persistent_input(
+                type(item.module), item.module.model_dump(mode="json")
+            )
         else:
             raise TypeError("Expected a module reference or inline input")
         context = env.library.validation_context() if env.library is not None else None

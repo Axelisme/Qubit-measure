@@ -15,7 +15,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
-from zcu_tools.gui.form import FormEnv, ModuleInline
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.mcp.measure.execution_reply import SummaryParameter
 from zcu_tools.mcp.measure.recipe import RecipeSession
@@ -54,21 +54,13 @@ class FormGui(LookbackGui):
             AuthorCfg,
             {
                 "pulse": Slot("$qubit.module.pulse"),
-                "locked_pulse": Slot("$qubit.module.pulse", lock={"freq": 100.0}),
+                "locked_pulse": Slot("Q1.pulses.pi", lock={"freq": 100.0}),
             },
         )
         self.owner = TabFormResource(
             form,
             capture=lambda aliases: TabFormSources(FormEnv(library=library)),
             mutation_allowed=lambda: True,
-        )
-        self.owner.write(
-            {
-                ("locked_pulse",): {
-                    "kind": "inline",
-                    "module": pulse.model_dump(mode="json", exclude_none=True),
-                }
-            }
         )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
@@ -140,8 +132,8 @@ def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -
     library = gui.owner.env.library
     if library is None:
         raise TypeError("Expected library")
-    module = library.module_spec("Q1.pulses.pi")
-    gui.owner.write({("pulse",): ModuleInline(module=module).model_dump(mode="json")})
+    gui.owner.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
+    gui.owner.use_inline(("pulse",))
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         assert tab.read_field("pulse").mode == "inline"

@@ -128,7 +128,10 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
     assert copied["kind"] == "inline"
     module = expect_object(copied["module"])
     assert (module["ch"], module["freq"], module["gain"]) == (1, 100.0, 0.3)
-    assert module["waveform"] == {"style": "const", "length": 0.1}
+    assert module["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "const", "length": 0.1},
+    }
     assert notifications == ["changed"]
     observed = form.read_module(state.input, ("modules", "probe"), FormEnv())
     assert not isinstance(observed, FormErrors), observed
@@ -207,20 +210,23 @@ def kind_selection_schema(
             )
             pulse_options = pulse_schema["x-form-options"]
             assert isinstance(pulse_options, list)
-            module_schema = expect_object(
+            pulse_fields = expect_object(
                 next(
                     expect_object(item)["fields"]
                     for item in pulse_options
                     if expect_object(item)["label"] == "Inline"
                 )
             )
-            path = (*path, "pulse_cfg")
+            module_schema = expect_object(
+                expect_object(pulse_fields["properties"])["module"]
+            )
+            path = (*path, "pulse_cfg", "module")
         waveform_options = expect_object(
             expect_object(module_schema["properties"])["waveform"]
         )["x-form-options"]
         assert isinstance(waveform_options, list)
         options = waveform_options
-        path = (*path, "waveform")
+        path = (*path, "waveform", "module")
 
     return path, options
 
@@ -282,17 +288,16 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
             if expect_object(item)["label"] == label
         )
         value = expect_object(option["value"])
-        if depth == 0:
-            value = expect_object(value["module"])
+        value = expect_object(value["module"])
         tag = "style" if depth else "type"
         state.write(
             {(*path, tag): value[tag]} if selection == "tag" else {path: value}, env
         )
 
     leaf = "length" if depth else "pulse_cfg"
-    expected = 0.4 if depth else "Q.pulses.probe"
+    expected: JsonValue = 0.4 if depth else {"kind": "ref", "name": "Q.pulses.probe"}
     assert current()[leaf] == expected
-    state.write({(*path, leaf): 1.7 if depth else {"type": "pulse"}}, env)
+    state.write({(*path, leaf): 1.7 if depth else {"kind": "inline"}}, env)
     choose("Inline: cosine" if depth else "Inline: reset/two_pulse")
     assert current() == ({"style": "cosine"} if depth else {"type": "reset/two_pulse"})
     # Another non-template kind also starts at type defaults, never the old draft.
@@ -393,7 +398,10 @@ def test_module_reference_or_inline_materializes_to_native_core(mode: str) -> No
                 "nqz": 1,
                 "freq": 200,
                 "gain": 0.1,
-                "waveform": {"style": "const", "length": 0.2},
+                "waveform": {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.2},
+                },
             },
         }
     )
@@ -426,7 +434,10 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
                 "nqz": 1,
                 "gain": 0.3,
                 "freq": {"expr": "50 * 2"},
-                "waveform": {"style": "const", "length": 0.1},
+                "waveform": {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.1},
+                },
             },
         }
     )

@@ -331,8 +331,9 @@ def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) ->
                 ("pulse", "module", "nqz"): 1,
                 ("pulse", "module", "freq"): {"expr": "50 * 2"},
                 ("pulse", "module", "gain"): 0.2,
-                ("pulse", "module", "waveform", "style"): "const",
-                ("pulse", "module", "waveform", "length"): 0.1,
+                ("pulse", "module", "waveform", "kind"): "inline",
+                ("pulse", "module", "waveform", "module", "style"): "const",
+                ("pulse", "module", "waveform", "module", "length"): 0.1,
                 ("gain",): {"expr": "1 / 0"},
             }
         )

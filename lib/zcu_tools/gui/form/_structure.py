@@ -15,7 +15,7 @@ from pydantic_core import PydanticCustomError
 
 from ._json import copy_json, copy_object, default_json, expr_text
 from .defaults import static_defaults
-from .model import FormEnv, FormModel, FormPath, FormWritePath, ModuleRef
+from .model import FormEnv, FormModel, FormPath, FormWritePath, KeyRef
 
 
 def unwrap(annotation: object) -> object:
@@ -78,12 +78,12 @@ def accepts_expression(annotation: object, path: FormPath) -> bool:
 
 
 def library_key(model: type[BaseModel], name: str) -> bool:
-    """Whether field name of model holds a library key: a ModuleRef's name.
+    """Whether field name of model holds a literal key: a KeyRef's name.
 
     A library key is a plain string, never an Expr envelope, like the key
     of a str-or-model field.
     """
-    return issubclass(model, ModuleRef) and name == "name"
+    return issubclass(model, KeyRef) and name == "name"
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:

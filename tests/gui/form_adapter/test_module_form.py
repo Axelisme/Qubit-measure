@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import JsonValue, create_model
 from zcu_tools.cfg_model import (
+    BathResetSpec,
     ConfigBase,
     ConstWaveformCfg,
     DirectReadoutCfg,
@@ -19,7 +20,6 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
     TwoPulseResetSpec,
-    BathResetSpec,
     WaveformSpec,
     get_field_meta,
 )
@@ -129,7 +129,7 @@ def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> Non
     options = form.model.options(env).get(("waveform",), ())
     matching = [option for option in options if option.matches(current)]
     assert [option.label for option in matching] == ["Q.waveforms.flat"]
-    assert matching[0].value == current == "Q.waveforms.flat"
+    assert matching[0].value == current == {"kind": "ref", "name": "Q.waveforms.flat"}
     schema = expect_object(
         expect_object(state.input_schema(env)["properties"])["waveform"]
     )
@@ -159,15 +159,16 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
     projected = schema["x-form-options"]
     assert isinstance(projected, list)
     const = expect_object(projected[1])
-    assert const["value"] == {"style": "const"}
-    assert set(expect_object(expect_object(const["fields"])["properties"])) == {
-        "length"
-    }
+    assert const["value"] == {"kind": "inline", "module": {"style": "const"}}
+    const_fields = expect_object(
+        expect_object(expect_object(const["fields"])["properties"])["module"]
+    )
+    assert set(expect_object(const_fields["properties"])) == {"length"}
     flat = expect_object(projected[-1])
-    assert set(expect_object(expect_object(flat["fields"])["properties"])) == {
-        "length",
-        "raise_waveform",
-    }
+    flat_fields = expect_object(
+        expect_object(expect_object(flat["fields"])["properties"])["module"]
+    )
+    assert set(expect_object(flat_fields["properties"])) == {"length", "raise_waveform"}
 
 
 def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -> None:
@@ -178,7 +179,7 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     key = next(
         option
         for option in form.model.options(env)[("waveform",)]
-        if option.matches("Q.waveforms.flat")
+        if option.matches(state.input.data["waveform"])
     )
     assert [(command.name, command.label) for command in key.commands] == [
         ("to_inline", "Convert to inline")
@@ -188,7 +189,10 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
 
     state.run_command(("waveform",), "to_inline", env)
 
-    assert state.input.data["waveform"] == {"style": "const", "length": 0.1}
+    assert state.input.data["waveform"] == {
+        "kind": "inline",
+        "module": {"style": "const", "length": 0.1},
+    }
     assert notifications == ["changed"]
     assert env.library is not None
     assert env.library.waveform_spec("Q.waveforms.flat").model_dump() == {
@@ -217,7 +221,7 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     key = next(
         option
         for option in form.model.options(env)[("waveform",)]
-        if option.matches("Q.waveforms.flat")
+        if option.matches(state.input.data["waveform"])
     )
     assert [command.name for command in key.commands] == ["to_inline"]
     assert env.library is not None
@@ -467,7 +471,7 @@ def test_spec_form_evaluates_input_and_keeps_child_library_key() -> None:
     batch: dict[FormWritePath, JsonValue] = {
         **PULSE_LEAVES,
         ("gain",): {"expr": "0.5 / 2"},
-        ("waveform",): "Q.flat",
+        ("waveform",): {"kind": "ref", "name": "Q.flat"},
     }
     state.write(batch, env)
 
@@ -489,7 +493,10 @@ def test_unsupported_pulse_fields_cannot_be_written_and_use_spec_defaults(
 
     with pytest.raises(ValueError, match="Unknown field path"):
         state.write({(name,): 1}, env)
-    batch: dict[FormWritePath, JsonValue] = {**PULSE_LEAVES, ("waveform",): "Q.flat"}
+    batch: dict[FormWritePath, JsonValue] = {
+        **PULSE_LEAVES,
+        ("waveform",): {"kind": "ref", "name": "Q.flat"},
+    }
     state.write(batch, env)
     cfg = result_spec(form, state, env)
 
@@ -502,12 +509,12 @@ def test_required_direct_readout_channel_stays_settable() -> None:
     env = FormEnv()
     state = FormState(form.default_input(env))
 
-    state.write({("pulse_cfg",): {}}, env)
+    state.write({("pulse_cfg",): {"kind": "inline"}}, env)
     with pytest.raises(ValueError, match="Unknown field path"):
-        state.write({("pulse_cfg", "ro_ch"): 4}, env)
+        state.write({("pulse_cfg", "module", "ro_ch"): 4}, env)
     state.write(
         {
-            ("pulse_cfg",): "Q.probe",
+            ("pulse_cfg",): {"kind": "ref", "name": "Q.probe"},
             ("ro_cfg", "ro_ch"): 3,
             ("ro_cfg", "ro_length"): 1.5,
             ("ro_cfg", "ro_freq"): 6000.0,
@@ -636,7 +643,7 @@ def test_generated_model_nests_in_module_inline_with_host_choices() -> None:
     batch: dict[FormWritePath, JsonValue] = {
         ("module", *path): value for path, value in PULSE_LEAVES.items()
     }
-    batch |= {("module", "ch"): 7, ("module", "waveform"): "w"}
+    batch |= {("module", "ch"): 7, ("module", "waveform"): {"kind": "ref", "name": "w"}}
 
     state.write(batch, env)
     rejected = state.result(env)
@@ -843,12 +850,21 @@ def test_template_input_nested_kind_reselection_uses_authored_defaults(
         )
         state.write({(child,): value}, env)
 
-    assert expect_object(state.input.data[child])["length"] == length
-    state.write({(child, "length"): 1.7}, env)
+    assert (
+        expect_object(expect_object(state.input.data[child])["module"])["length"]
+        == length
+    )
+    state.write({(child, "module", "length"): 1.7}, env)
     choose(other_kind)
-    assert expect_object(state.input.data[child]) == {"style": other_kind}
+    assert expect_object(state.input.data[child]) == {
+        "kind": "inline",
+        "module": {"style": other_kind},
+    }
     choose(authored_kind)
-    assert expect_object(state.input.data[child]).get("length") == length
+    assert (
+        expect_object(expect_object(state.input.data[child])["module"]).get("length")
+        == length
+    )
 
 
 def test_template_input_models_isolate_locks_defaults_and_recomputation(
@@ -905,7 +921,7 @@ def test_template_input_slot_keeps_bound_key_or_uses_inline_fallback(
     cfg = result_spec(form, FormState(input), env)
 
     if bound:
-        assert input.data["pulse_cfg"] == "Q.pulses.probe"
+        assert input.data["pulse_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
         assert cfg.pulse_cfg == "Q.pulses.probe"
     else:
         assert isinstance(cfg.pulse_cfg, PulseSpec)

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, JsonValue, model_validator
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
@@ -141,6 +141,19 @@ class _PulseReadoutFields(_ModuleFields):
     def _autoderive_ro_fields(cls, data: object) -> object:
         if not isinstance(data, dict):
             return data
+        return cls.derive_input_fields(data)
+
+    @classmethod
+    def derive_input_fields(cls, data: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        """Copy persistent-space input and fill missing direct readout fields.
+
+        data is an unvalidated Spec JSON mapping. When pulse_cfg and ro_cfg are
+        both inline mappings, pulse ch/freq supply missing gen_ch/ro_freq.
+        Explicit readout values win. A string pulse ref, absent section or
+        non-mapping input section supplies nothing; no library is read.
+        Other leaves, including invalid or incomplete ones, remain unchanged.
+        The returned mapping and nested containers are detached from data.
+        """
         result = deepcopy(data)
         pulse = result.get("pulse_cfg")
         ro = result.get("ro_cfg")

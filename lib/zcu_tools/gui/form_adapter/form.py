@@ -50,7 +50,7 @@ from ._modules import (
     editable_spec,
     module_specs,
 )
-from ._seeds import supported_input, template_seed_tree
+from ._seeds import persistent_input, supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
@@ -155,7 +155,8 @@ class _SpecSection:
 
     The generated model subclasses both FormModel and the Spec's input model, so
     hosts use it as a FormState root or as a ModuleInline module field. Child
-    library keys stay ordinary strings; nothing is looked up or materialized.
+    library keys use tagged inputs and lower back to strings; nothing is
+    looked up or materialized.
     It has no core sections or module fields, and no authored tree.
     """
 
@@ -182,7 +183,12 @@ class _SpecSection:
         self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
     ) -> dict[str, CfgInputValue]:
         del env, errors
-        return value.model_dump(mode="python")
+        return {
+            name: item
+            for name, item in persistent_input(
+                type(value), value.model_dump(mode="json")
+            ).items()
+        }
 
 
 class _Section:
@@ -411,8 +417,9 @@ class Form[C: ConfigBase]:
     decimals, description and group become Display metadata; locked fields
     drop decimals because they are single-value Literals.
     Generated options(env) declares nullable None, family-limited captured keys
-    and every editable Inline kind. Key values keep the existing ref/string
-    shape; Inline values contain only branch tags and fields names the selected
+    and every editable Inline kind. Key values use kind=ref/name; inline uses
+    kind=inline/module at every depth. Inline values contain only branch tags
+    and fields names the selected
     child form. The key option command to_inline (Convert to inline) copies
     supported captured Spec content in one write. Ordinary selections use fresh
     Template/type defaults, never copy the key or retain another kind's draft.
@@ -633,7 +640,9 @@ class Form[C: ConfigBase]:
         covariant in its concrete result type. At runtime spec must be exactly
         core_cfg, not a subclass; otherwise raise
         TypeError. Ordinary values and child library keys are copied, and None
-        values stay absent like static defaults. Values of unsupported module
+        values stay absent like static defaults. Child keys become ref objects
+        with kind=ref/name; inline children become kind=inline/module wrappers.
+        Values of unsupported module
         fields are discarded, so to_cfg restores Spec defaults instead of the
         stored values. env supplies the default input that the projection
         overlays; captured source failures propagate. spec is not modified and
@@ -693,6 +702,8 @@ def module_form[S: ConfigBase](spec_type: type[S]) -> Form[S]:
     FormState root or a ModuleInline module field; hosts add choices through
     their own choices(env). to_cfg returns spec_type and keeps child library
     keys without reading the library, assets or building native cfg. Generated
+    str-or-model children use kind=ref/name or kind=inline/module, including
+    nested waveform kinds; to_cfg reverses those wrappers. Generated
     input omits optional desc, mask, outsel, ro_ch and mux_* fields, whose Spec
     defaults return in to_cfg. Use input_from_spec to edit an existing Spec.
     """

@@ -61,6 +61,74 @@ def set_path(data: dict[str, JsonValue], path: str, value: JsonValue) -> None:
     parent[parts[-1]] = value
 
 
+def inline_wrapper(annotation: object) -> type[BaseModel] | None:
+    """Find the generated tagged inline wrapper, not its persistent child kind."""
+    for model in members(annotation):
+        if isinstance(model, type) and issubclass(model, BaseModel):
+            kind = model.model_fields.get("kind")
+            if (
+                kind is not None
+                and get_args(kind.annotation) == ("inline",)
+                and "module" in model.model_fields
+            ):
+                return model
+    return None
+
+
+def spec_annotation(annotation: object) -> object:
+    """Return the persistent-content annotation behind a generated wrapper."""
+    wrapper = inline_wrapper(annotation)
+    return (
+        wrapper.model_fields["module"].annotation if wrapper is not None else annotation
+    )
+
+
+def persistent_input(
+    model: type[BaseModel], data: Mapping[str, JsonValue]
+) -> dict[str, JsonValue]:
+    """Remove generated ref/inline wrappers from a validated input model dump.
+
+    The result is persistent Spec JSON, with child refs restored to strings.
+    No library, asset or native cfg is read or materialized.
+    """
+    result: dict[str, JsonValue] = {}
+    for name, value in data.items():
+        info = model.model_fields.get(name)
+        if info is None:
+            result[name] = value
+            continue
+        annotation = info.annotation
+        if inline_wrapper(annotation) is not None and isinstance(value, dict):
+            if value.get("kind") == "ref" and "name" in value:
+                result[name] = value["name"]
+                continue
+            if value.get("kind") != "inline" or not isinstance(
+                value.get("module"), dict
+            ):
+                result[name] = value
+                continue
+            value = value["module"]
+            annotation = spec_annotation(annotation)
+        if (
+            isinstance(value, dict)
+            and "expr" not in value
+            and any(
+                isinstance(member, type) and issubclass(member, BaseModel)
+                for member in members(annotation)
+            )
+        ):
+            try:
+                child = selected_model(annotation, value)
+            except ValueError:
+                # Invalid branch selectors stay available to model validation.
+                result[name] = value
+            else:
+                result[name] = persistent_input(child, value)
+        else:
+            result[name] = value
+    return result
+
+
 def selected_model(
     annotation: object, data: Mapping[str, JsonValue]
 ) -> type[BaseModel]:
@@ -73,7 +141,7 @@ def selected_model(
         return models[0]
     matches: list[type[BaseModel]] = []
     for model in models:
-        for tag in ("type", "style"):
+        for tag in ("type", "style", "kind"):
             info = model.model_fields.get(tag)
             if (
                 info is not None
@@ -95,18 +163,28 @@ def supported_input(
     data must dump a Spec of model's family. Fields absent from model are the
     generator's unsupported module fields; their stored values are discarded,
     so conversion restores Spec defaults. Inline children follow their tagged
-    branch; string keys and scalar leaves are copied. data is not modified.
+    branch; string keys become kind=ref/name and inline children become
+    kind=inline/module. Scalar leaves are copied. data is not modified.
     """
     result: dict[str, JsonValue] = {}
     for name, value in data.items():
         if name not in model.model_fields:
             continue
         annotation = model.model_fields[name].annotation
+        wrapper = inline_wrapper(annotation)
+        if wrapper is not None:
+            if isinstance(value, str):
+                result[name] = {"kind": "ref", "name": value}
+                continue
+            annotation = spec_annotation(annotation)
         if isinstance(value, dict) and any(
             isinstance(member, type) and issubclass(member, BaseModel)
             for member in members(annotation)
         ):
-            result[name] = supported_input(selected_model(annotation, value), value)
+            child = supported_input(selected_model(annotation, value), value)
+            result[name] = (
+                {"kind": "inline", "module": child} if wrapper is not None else child
+            )
         else:
             result[name] = value
     return result
@@ -118,16 +196,17 @@ def complete_input(
     *,
     path: tuple[str, ...] = (),
 ) -> dict[str, JsonValue]:
-    """Overlay seeds with static defaults; report ambiguous inline field paths.
+    """Overlay persistent-space seeds with defaults, before tagged projection.
 
-    Seeds for fields absent from the generated model, including unsupported
+    Report ambiguous inline field paths. Wrapper content remains in persistent
+    space so authors keep Spec paths for seeds, locks and Slots. Seeds for fields absent from the generated model, including unsupported
     module fields, raise ValueError with their dotted paths under path.
     """
     unknown = authored.keys() - model.model_fields.keys()
     if unknown:
         paths = sorted(".".join((*path, name)) for name in unknown)
         raise ValueError(f"Unknown or unsupported seeds for {model.__name__}: {paths}")
-    data = static_defaults(model)
+    data = persistent_input(model, static_defaults(model))
     data.update(authored)
     for name, value in tuple(data.items()):
         info = model.model_fields[name]
@@ -142,12 +221,12 @@ def complete_input(
             and "expr" not in value
             and any(
                 isinstance(member, type) and issubclass(member, BaseModel)
-                for member in members(info.annotation)
+                for member in members(spec_annotation(info.annotation))
             )
         ):
             child_path = (*path, name)
             try:
-                child = selected_model(info.annotation, value)
+                child = selected_model(spec_annotation(info.annotation), value)
             except ValueError as exc:
                 raise ValueError(
                     f"{'.'.join(child_path)}: Cannot select inline Spec discriminator; "
@@ -163,7 +242,7 @@ def _path_annotation(
     head, separator, rest = path.partition(".")
     if head not in model.model_fields:
         raise ValueError(f"Unknown seed path {path!r}")
-    annotation = model.model_fields[head].annotation
+    annotation = spec_annotation(model.model_fields[head].annotation)
     if not separator:
         return annotation
     child = data.get(head, {})
@@ -293,8 +372,9 @@ def nested_slot(
         selected = next(
             model for model in expected if type_tag(model) == type_tag(type(spec))
         )
-        data = supported_input(
-            selected, spec.model_dump(mode="json", exclude_none=True)
+        data = persistent_input(
+            selected,
+            supported_input(selected, spec.model_dump(mode="json", exclude_none=True)),
         )
         for path, seed in slot.set.items():
             set_path(data, path, scalar_seed(seed))

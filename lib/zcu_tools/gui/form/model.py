@@ -627,16 +627,25 @@ class LinRange(FormModel):
     n: int = Field(default=3, ge=1)
 
 
-class ModuleRef(FormModel):
+class KeyRef(FormModel):
+    """Tagged key-only input, without source lookup or inline content.
+
+    kind is always ref. name is a literal key string, including strings that
+    look like expressions. Expr envelopes are invalid and never evaluated.
+    Source validation, if required, belongs to a specialized ref subclass.
+    """
+
+    kind: Literal["ref"] = "ref"
+    name: str
+
+
+class ModuleRef(KeyRef):
     """Library module reference; no inline override or cached materialization.
 
     kind selects ref. name is an actual LibrarySnapshot module key, not a role
     or alias. A used ref needs captured library; missing/invalid names fail at
     the consuming path through public library reads, never fall back to defaults.
     """
-
-    kind: Literal["ref"] = "ref"
-    name: str
 
 
 class ModuleInline(FormModel):
