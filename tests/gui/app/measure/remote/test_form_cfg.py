@@ -5,11 +5,41 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, Field
+from zcu_tools.cfg_model import Range
+from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
+
 from ._helpers import Fixture
+
+
+class TupleCfg(SampleCfg):
+    samples: tuple[complex, ...] = (1 + 2j, 3 - 4j)
+
+
+class TupleAdapter(SampleAdapter):
+    form = Form(TupleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+class ExtraInputs(BaseModel):
+    scale: float = Field(default=1.0, ge=0)
+
+
+def retain_cfg(extras: ExtraInputs, cfg: SampleCfg) -> SampleCfg:
+    return cfg
+
+
+class ExtrasAdapter(SampleAdapter):
+    form = Form(
+        SampleCfg,
+        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        extras=ExtraInputs,
+        lower=retain_cfg,
+    )
 
 
 class ImmediateScheduler:
@@ -165,6 +195,45 @@ def test_reset_aliases_fixes_parameter_reads_until_next_reset(form_rpc) -> None:
         }
     finally:
         restore_registry(before)
+
+
+def test_form_tuple_complex_values_have_lossless_json_projection(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("tuple", TupleAdapter)
+    tab = fixture.ctrl.new_tab("tuple")
+    try:
+        reply = rpc.call("tab.get_cfg", {"tab_id": tab})
+        assert reply["ok"], reply
+        observed = reply["result"]
+        leaves = {tuple(item["path"]): item["value"] for item in observed["values"]}
+        assert leaves[("samples",)] == [
+            {"__complex__": [1.0, 2.0]},
+            {"__complex__": [3.0, -4.0]},
+        ]
+        assert observed["input"]["samples"] == leaves[("samples",)]
+        assert observed["errors"] == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_extras_errors_keep_authored_input_and_other_preview_values(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("extras", ExtrasAdapter)
+    tab = fixture.ctrl.new_tab("extras")
+    try:
+        reply = rpc.call(
+            "tab.edit_cfg",
+            {"tab_id": tab, "edits": [{"path": ["extras", "scale"], "value": -1.0}]},
+        )
+        assert reply["ok"], reply
+        assert reply["result"]["input"]["extras"]["scale"] == -1.0
+        assert reply["result"]["errors"][0]["path"] == ["extras", "scale"]
+        leaves = {
+            tuple(item["path"]): item["value"] for item in reply["result"]["values"]
+        }
+        assert leaves[("gain",)] == 0.1
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_run_aliases_rejected_before_view_or_operation_effects(form_rpc) -> None:
