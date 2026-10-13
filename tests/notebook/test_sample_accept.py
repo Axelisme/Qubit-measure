@@ -81,13 +81,6 @@ def test_accept_samples_preserves_fields_and_shares_parameter_event(
     assert datetime.fromisoformat(row["at"]).utcoffset() == timedelta(0)
     point.refresh()
     assert point.description == "accepted"
-    meta = point.meta("general.description")
-    assert meta is not None
-    assert (meta.source, meta.run_id, meta.kind) == (
-        event_id,
-        saved.run_id,
-        "test/saving",
-    )
 
 
 def test_reaccept_appends_history_and_reads_last_whole_row(

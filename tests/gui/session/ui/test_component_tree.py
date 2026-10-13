@@ -46,7 +46,7 @@ from tests.resources.entry.fakes import (
     restore_registry,
 )
 
-FIELD, VALUE, UNIT, SOURCE = range(4)
+FIELD, VALUE, UNIT, METADATA = range(4)
 
 
 class RequiredComponent(ComponentSchema):
@@ -264,8 +264,6 @@ def test_tree_lists_every_schema_field_with_unit_and_description(component_widge
     assert rate.text(UNIT) == "MHz"
     assert "Sample rate." in rate.toolTip(FIELD)
     assert "P1.rate" in rate.toolTip(FIELD)
-    assert label.text(SOURCE) != ""
-    assert rate.text(SOURCE) == ""
 
     nested = _row(widget, "P1", "routing", "main", "ch")
     assert nested.font(VALUE).italic()
@@ -368,6 +366,40 @@ def test_successful_edit_keeps_expansion_and_selection(qapp, component_widget):
         path.insert(0, current.text(FIELD))
         current = current.parent()
     assert path == ["P1", "routing", "bias", "ch"]
+
+
+def test_metadata_column_shows_caller_mapping_and_survives_value_edits(
+    qapp, component_widget
+):
+    widget, control = component_widget
+    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    assert widget.add_component("O1", "test/open", {"custom": 5})
+    header = _tree(widget).headerItem()
+    assert header is not None
+    assert header.text(METADATA) == "Metadata"
+    target = control.read_context().target
+    control.set_parameter(
+        target, "P1.label", "probe", metadata={"stderr": 0.8, "comment": "ok"}
+    )
+    control.set_parameter(target, "O1.custom", 5, metadata={"note": [1, None]})
+    widget.refresh()
+    label = _row(widget, "P1", "label")
+    assert label.text(METADATA) == "{stderr: 0.8, comment: ok}"
+    assert label.toolTip(METADATA) == "stderr: 0.8\ncomment: ok"
+    custom = _row(widget, "O1", "custom")
+    assert custom.text(METADATA) == "{note: [1, null]}"
+    assert custom.toolTip(METADATA) == "note:\n- 1\n- null"
+
+    _edit_text(qapp, widget, label, "renamed", Qt.Key.Key_Return)
+
+    label = _row(widget, "P1", "label")
+    assert label.text(VALUE) == "renamed"
+    assert label.text(METADATA) == "{stderr: 0.8, comment: ok}"
+    control.set_parameter(target, "P1.label", "renamed", metadata={})
+    widget.refresh()
+    label = _row(widget, "P1", "label")
+    assert label.text(METADATA) == ""
+    assert label.toolTip(METADATA) == ""
 
 
 def test_extra_document_data_outside_the_schema_stays_visible_and_editable(
