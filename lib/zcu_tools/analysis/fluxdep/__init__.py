@@ -28,8 +28,10 @@ from .onetone import (
 )
 from .processing import (
     cast2real_and_norm,
+    contrast_limits,
     diff_mirror,
     downsample_points,
+    onetone_dip_depth,
     spectrum2d_findpoint,
 )
 from .selection import (
@@ -47,6 +49,7 @@ __all__ = [
     "TwoLinePicker",
     "align_lines",
     "cast2real_and_norm",
+    "contrast_limits",
     "detect_peaks",
     "diff_mirror",
     "downsample_points",
@@ -55,6 +58,7 @@ __all__ = [
     "max_dispersion_freq_index",
     "mirror_loss_at",
     "move_line",
+    "onetone_dip_depth",
     "onetone_peak_points",
     "points_in_normalized_brush",
     "smoothed_slice",

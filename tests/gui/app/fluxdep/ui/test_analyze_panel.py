@@ -821,12 +821,16 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
         qapp.processEvents()
         widget.resize(1200, 800)
         qapp.processEvents()
-        figure.canvas.draw()
-        renderer = figure.canvas.get_renderer()
+        canvas = figure.canvas
+        assert isinstance(canvas, FigureCanvasQTAgg)
+        canvas.draw()
+        renderer = canvas.get_renderer()
         by_label = {axes.get_xlabel(): axes for axes in figure.axes}
         for label, below in (("EJ", "EC"), ("EC", "EL")):
             box = by_label[label].xaxis.label.get_window_extent(renderer)
-            assert not box.overlaps(by_label[below].get_tightbbox(renderer)), (
+            neighbour = by_label[below].get_tightbbox(renderer)
+            assert neighbour is not None
+            assert not box.overlaps(neighbour), (
                 f"the {label} axis label is covered by the {below} subplot"
             )
         last = by_label["EL"].xaxis.label.get_window_extent(renderer)

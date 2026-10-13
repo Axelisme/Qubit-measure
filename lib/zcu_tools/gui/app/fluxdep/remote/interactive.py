@@ -482,8 +482,11 @@ def h_interactive_render(
         )
     context = active.context
     if isinstance(context, LinePickContext):
+        spec_type = adapter.ctrl.state.get_spectrum(context.spectrum_name).spec_type
         figure = make_flux_pick_figure(
-            context.plugin.inputs, context.session.snapshot()
+            context.plugin.inputs,
+            context.session.snapshot(),
+            onetone=spec_type == "OneTone",
         )
     elif isinstance(context, OneTonePickContext):
         figure = make_onetone_pick_figure(

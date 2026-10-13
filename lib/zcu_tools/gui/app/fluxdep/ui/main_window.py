@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QModelIndex, Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -43,6 +43,9 @@ from qtpy.QtWidgets import (
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -83,6 +86,45 @@ logger = logging.getLogger(__name__)
 
 # A spectrum's editing stage: line alignment, or point sampling.
 Stage = Literal["align", "sample"]
+
+# List item role holding a row's second line (kind · stage · points · ...).
+_DETAILS_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class _SpectrumRowDelegate(QStyledItemDelegate):
+    """Draw a spectrum row as its name over its details, eliding a long name.
+
+    Each item holds the literal name (UserRole) and the details line
+    (_DETAILS_ROLE). A name wider than the cell is elided in the middle so
+    both ends stay readable; the item tooltip carries the full name. Qt
+    right-elides an overlong details line as usual.
+    """
+
+    def initStyleOption(
+        self,
+        option: QStyleOptionViewItem | None,
+        index: QModelIndex,
+    ) -> None:
+        super().initStyleOption(option, index)
+        assert option is not None  # Qt always passes the option it paints with
+        name = index.data(Qt.ItemDataRole.UserRole)
+        details = index.data(_DETAILS_ROLE)
+        assert isinstance(name, str) and isinstance(details, str)  # _refresh_list
+        widget = option.widget
+        style = widget.style()
+        assert style is not None  # a shown QListWidget always has a style
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText, option, widget
+        )
+        # Qt insets item text by the focus-frame margin plus one on each side.
+        margin = (
+            style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
+        )
+        width = max(text_rect.width() - 2 * margin, 0)
+        elided = option.fontMetrics.elidedText(
+            name, Qt.TextElideMode.ElideMiddle, width
+        )
+        option.text = f"{elided}\n{details}"
 
 
 def _draft_stage(active: ActiveInteractiveContext) -> Stage | None:
@@ -266,6 +308,9 @@ class MainWindow(QMainWindow):
         left.setContentsMargins(0, 0, 0, 0)
         self._list = QListWidget()
         self._list.setObjectName("fluxdep.spectra")
+        # Rows elide to the list width instead of scrolling sideways.
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setItemDelegate(_SpectrumRowDelegate(self._list))
         self._list.currentItemChanged.connect(self._on_list_selection)
         left.addWidget(self._list, stretch=1)
         self._remove_btn = self._command_button(
@@ -394,13 +439,13 @@ class MainWindow(QMainWindow):
                 f"Project: {project.chip_name} / {project.qub_name}"
             )
 
-    def _row_text(self, row: SpectrumRow) -> str:
-        """One list row from the Controller query that spectrum.list also reports.
+    def _row_details(self, row: SpectrumRow) -> str:
+        """A list row's second line, from the query that spectrum.list reports.
 
-        Literal name, spec type, stage and published point count always show;
-        an unfinished draft kind and the Filter-excluded count only when present.
+        Spec type, stage and published point count always show; an unfinished
+        draft kind and the Filter-excluded count only when present.
         """
-        parts = [row.name, row.spec_type, row.stage, f"{row.point_count} pts"]
+        parts = [row.spec_type, row.stage, f"{row.point_count} pts"]
         if row.pending is not None:
             parts.append(f"{row.pending} draft")
         if row.filter_excluded_count:
@@ -410,13 +455,18 @@ class MainWindow(QMainWindow):
     def _refresh_list(self) -> None:
         """Rebuild the spectrum list from the Controller's published rows."""
         # Rows first: the query may retire a dead draft and re-enter this refresh.
-        rows = [(row.name, self._row_text(row)) for row in self._ctrl.spectrum_rows()]
+        rows = [
+            (row.name, self._row_details(row)) for row in self._ctrl.spectrum_rows()
+        ]
         active = self._ctrl.state.active_spectrum
         self._list.blockSignals(True)
         self._list.clear()
-        for name, text in rows:
-            item = QListWidgetItem(text)
+        for name, details in rows:
+            # Literal name over its details; the delegate elides a long name.
+            item = QListWidgetItem(f"{name}\n{details}")
             item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setData(_DETAILS_ROLE, details)
+            item.setToolTip(name)
             self._list.addItem(item)
             if name == active:
                 self._list.setCurrentItem(item)
@@ -512,11 +562,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         widget: LinePickerWidget | OneToneWidget | FindPointsWidget
         if isinstance(context, LinePickContext):
-            aligned = self._ctrl.state.spectrums[context.spectrum_name].aligned
+            entry = self._ctrl.state.spectrums[context.spectrum_name]
             # Re-aligning an aligned spectrum may switch to sampling instead.
             widget = LinePickerWidget(
                 context,
-                on_sample=self._request_sample if aligned else None,
+                onetone=entry.spec_type == "OneTone",
+                on_sample=self._request_sample if entry.aligned else None,
             )
             widget.finished.connect(lambda: self._finish_lines(context.spectrum_name))
         elif isinstance(context, OneTonePickContext):

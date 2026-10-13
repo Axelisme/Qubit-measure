@@ -11,8 +11,7 @@ from zcu_tools.analysis.fluxdep.onetone import (
     OneTonePickState,
     analyze_onetone_pick,
 )
-
-from .image import contrast_limits, onetone_dip_depth
+from zcu_tools.analysis.fluxdep.processing import contrast_limits, onetone_dip_depth
 
 
 class OneTonePickPlot:

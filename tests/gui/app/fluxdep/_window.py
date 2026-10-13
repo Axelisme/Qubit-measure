@@ -72,13 +72,17 @@ def list_tooltips(window: QWidget) -> list[str]:
 def drawn_row_text(window: QWidget, row: int, width: int) -> str:
     """The text the spectrum list paints for row in a cell width pixels wide."""
     spectra = spectra_list(window)
+    model = spectra.model()
+    assert model is not None
+    index = model.index(row, 0)
     option = QStyleOptionViewItem()
     option.initFrom(spectra)
+    option.widget = spectra
     option.rect = QRect(0, 0, width, spectra.sizeHintForRow(row))
-    delegate = spectra.itemDelegateForIndex(spectra.model().index(row, 0))
+    delegate = spectra.itemDelegateForIndex(index)
     assert isinstance(delegate, QStyledItemDelegate), "missing list delegate"
-    delegate.initStyleOption(option, spectra.model().index(row, 0))
-    return option.text
+    delegate.initStyleOption(option, index)
+    return str(option.text)
 
 
 def project_label(window: QWidget) -> QLabel:

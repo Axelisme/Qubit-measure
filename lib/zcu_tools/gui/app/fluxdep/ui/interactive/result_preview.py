@@ -14,9 +14,12 @@ from collections.abc import Callable
 
 from qtpy.QtWidgets import QPushButton, QWidget
 
-from zcu_tools.analysis.fluxdep import cast2real_and_norm
+from zcu_tools.analysis.fluxdep import (
+    cast2real_and_norm,
+    contrast_limits,
+    onetone_dip_depth,
+)
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.plotting.fluxdep.image import contrast_limits, onetone_dip_depth
 
 from .base import InteractiveMplWidget
 

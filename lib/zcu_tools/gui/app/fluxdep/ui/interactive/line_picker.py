@@ -39,10 +39,14 @@ class LinePickerWidget(InteractiveMplWidget):
         self,
         context: LinePickContext,
         *,
+        onetone: bool,
         on_sample: Callable[[], None] | None = None,
     ) -> None:
         """Attach to an open context and capture its immutable rendering inputs.
 
+        onetone is True for a OneTone spectrum: its background is drawn like
+        the OneTone sample picker (dip depth, dark on white); a TwoTone
+        background is the alignment projection.
         on_sample, when given, adds a Sample button (``fluxdep.picker.sample``)
         that calls it; the host uses it to leave alignment for sampling.
         Closing the context rejects input. Teardown detaches only presentation;
@@ -62,6 +66,7 @@ class LinePickerWidget(InteractiveMplWidget):
             flux_half=state.flux_half,
             flux_int=state.flux_int,
             force_magnitude=state.magnitude_only,
+            onetone=onetone,
         )
         configure_flux_pick_axes(self.figure)
         self._conjugate = QtWidgets.QCheckBox("Conjugate Line")

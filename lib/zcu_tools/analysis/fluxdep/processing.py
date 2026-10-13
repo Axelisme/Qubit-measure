@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
@@ -19,7 +21,7 @@ def _require_1d_axis(axis: NDArray[np.float64], name: str) -> None:
 
 
 def cast2real_and_norm(
-    signals: NDArray,
+    signals: NDArray[np.complexfloating[Any, Any]],
     use_phase: bool = True,
     sigma: float = 1,
     smooth_method: SmoothMethod = "wavelet",
@@ -45,6 +47,36 @@ def cast2real_and_norm(
         )
 
     return real_signals
+
+
+def onetone_dip_depth(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    """Return how far each OneTone pixel lies below the spectrum's peak magnitude.
+
+    signals is the complex spectrum shaped (device, frequency). The magnitude
+    is smoothed along frequency (``cast2real_and_norm`` without phase), then
+    subtracted from its largest finite value, so a resonator dip becomes the
+    largest value and draws dark on a light background under ``gray_r``. NaN
+    pixels stay NaN. The result has the shape of signals.
+    """
+    magnitude = cast2real_and_norm(signals, use_phase=False)
+    return np.nanmax(magnitude) - magnitude
+
+
+def contrast_limits(values: NDArray[np.float64]) -> tuple[float, float]:
+    """Robust display limits (2nd–98th percentile) to boost feature contrast.
+
+    Clipping the colour range to percentiles (instead of min/max) keeps a few
+    outliers from compressing the dynamic range, so the spectral feature stands
+    out against the background. NaNs are ignored; no finite value gives
+    ``(0, 1)`` and a degenerate range falls back to ``(min, max)``.
+    """
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0, 1.0
+    lo, hi = np.percentile(finite, [2.0, 98.0])
+    if hi <= lo:
+        return float(finite.min()), float(finite.max()) or 1.0
+    return float(lo), float(hi)
 
 
 def spectrum2d_findpoint(
@@ -119,7 +151,7 @@ def downsample_points(
 
 
 def diff_mirror(
-    xs: NDArray[np.float64], data: NDArray, center: float
+    xs: NDArray[np.float64], data: NDArray[np.float64], center: float
 ) -> NDArray[np.float64]:
     """Absolute difference between data and its mirror around ``center``."""
 

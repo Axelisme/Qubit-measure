@@ -200,6 +200,7 @@ def _h_spectrum_render(
         entry.raw,
         entry.points,
         alignment=(entry.flux_half, entry.flux_int) if entry.aligned else None,
+        onetone=entry.spec_type == "OneTone",
     )
     png = render_figure_png(figure)
     return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}

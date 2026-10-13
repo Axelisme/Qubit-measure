@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，GUI 改版（外殼與兩頁、編輯流程、picker 控制欄、Fit 頁、版面收尾、清單與 spectrum.list 共用的已發布列查詢）；published spectrum list 與 Filter 排除數
+**Last updated:** 2026-10-13，GUI 改版（外殼與兩頁、編輯流程、picker 控制欄、Fit 頁、版面收尾、清單與 spectrum.list 共用的已發布列查詢、兩行清單列與 OneTone 定線背景）；published spectrum list 與 Filter 排除數
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -85,7 +85,9 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
   回 `LoadRequest`）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
   各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；背景正規化（`contrast_limits`、
-  `onetone_dip_depth`）在 `plotting.fluxdep.image`，供 result_preview 與 OneTone picker 共用。MainWindow 擁有的 EventBus subscriptions 在 window close
+  `onetone_dip_depth`）在 `analysis.fluxdep.processing`，供 result_preview、三個 OneTone 背景
+  （定線、採點、PNG）共用；放在 analysis 層是因為 `TwoLinePicker` 也要用，而 analysis 不能 import
+  plotting（top-level 無循環）。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`），注入 app methods、serializers 與控制身份。MCP
@@ -132,7 +134,9 @@ search pending 只更新所屬頁的內容，不把使用者從目前的頁拉�
 離開 Fit 頁只 detach Filter view，進入 Fit 頁經 `show_tab` 重新 attach。
 清單每列與 `spectrum.list` 都讀 `Controller.spectrum_rows()` 的 `SpectrumRow`：字面譜名、種類、
 已發布階段（loaded／aligned／sampled，零點完成算 sampled）、已發布點數、已發布 Filter 遮罩的排除點數
-與未完成草稿種類（align／sample）；清單有才顯示後兩者。查詢經 `interactive.inspect` 讀草稿，
+與未完成草稿種類（align／sample）；清單有才顯示後兩者。每列兩行：第一行字面譜名，第二行
+`種類 · 階段 · N pts`，有才接草稿種類與排除數。清單不水平捲動；delegate 把超過列寬的譜名在中間省略，
+item tooltip 是全名，過長的第二行由 Qt 在右端省略。查詢經 `interactive.inspect` 讀草稿，
 可能退休失效草稿並觸發重入，所以清單先算好全部列再填入。
 測試以 objectName 定位外殼元件（`fluxdep.session.project`、`fluxdep.pages`、`fluxdep.page.*`、
 `fluxdep.spectra`、`fluxdep.editor`、`fluxdep.project`、`fluxdep.spectrum.*`、`fluxdep.spectra.*`）。
@@ -218,6 +222,9 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 與 MCP 的定線 PNG 同樣是 `gray_r`。OneTone 採點 picker 與 ResultPreview 的 OneTone 背景用同一種正規化：
 平滑後的 magnitude 取 dip 深度（最大值減 magnitude），再以 2–98 百分位定色階，共振 dip 是白底上的深色線。
 採點 picker 的 renderer 是共用的 `plotting.fluxdep.onetone.OneTonePickPlot`，所以 MCP 的 OneTone 採點 PNG 也跟著改變。
+OneTone 定線 picker（`TwoLinePicker(onetone=True)`）、MCP 定線 PNG 與 MCP 譜 PNG 的 OneTone 背景也用同一種正規化；
+TwoTone 照舊（定線用對齊投影，譜 PNG 用 `|signals|`）。定線背景只改顯示，mirror loss 與 auto align 仍用對齊投影。
+Notebook 的 InteractiveLines 與 measure 的 flux pick 不傳 `onetone`，外觀不變。
 
 ### Remote RPC 與 MCP
 

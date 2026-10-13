@@ -28,7 +28,9 @@ def raw() -> SpectrumData:
     )
 
 
-def _sample_picker_background(raw: SpectrumData) -> tuple[np.ndarray, tuple]:
+def _sample_picker_background(
+    raw: SpectrumData,
+) -> tuple[np.ndarray, tuple[float, float]]:
     """The (frequency, device) background and limits of the OneTone sample picker."""
     inputs = OneToneInputs(
         FluxPickInputs(raw["signals"], raw["dev_values"], raw["freqs"])

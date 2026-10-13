@@ -47,7 +47,7 @@ def context():
 
 @pytest.fixture
 def widget(qapp, context):
-    view = LinePickerWidget(context)
+    view = LinePickerWidget(context, onetone=False)
     yield view
     view.teardown()
     view.deleteLater()

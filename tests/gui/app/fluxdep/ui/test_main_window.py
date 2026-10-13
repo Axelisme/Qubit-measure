@@ -156,11 +156,12 @@ def test_list_rows_put_the_name_above_its_details(long_name_window):
 
 
 def test_list_never_scrolls_sideways(qapp, long_name_window):
-    spectra = spectra_list(long_name_window)
+    scrollbar = spectra_list(long_name_window).horizontalScrollBar()
+    assert scrollbar is not None
     for width in (1200, 700):
         long_name_window.resize(width, 800)
         qapp.processEvents()
-        assert not spectra.horizontalScrollBar().isVisible()
+        assert not scrollbar.isVisible()
 
 
 def test_stage_marker_updates_on_alignment(window, spectrum_hdf5):
