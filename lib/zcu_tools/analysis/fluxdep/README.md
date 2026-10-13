@@ -1,6 +1,6 @@
 # `zcu_tools.analysis.fluxdep` 模塊重點文檔
 
-**Last updated:** 2026-10-13 — transition validation and database metadata
+**Last updated:** 2026-10-13，recorded quality、transition 能階需求與 adapter 分工
 
 本模塊提供 Flux-Dependence Analysis 的 notebook-neutral 數值規則。它承接 notebook
 與 Qt GUI 共用的互動選點、filtering、line selection、one-tone peak detection 規則；adapter
@@ -29,6 +29,8 @@
 OneTone／TwoTone detector、brush radius 與跨譜 distance 的有效範圍由各 domain 模組常數提供，驗證與 GUI command schema 引用同一來源。
 
 ## 邊界
+
+Kernel 的 quality 是同次 search 的數值證據，不是接受／拒絕 fit 的政策。GUI 保存它與原始 search cloud；MCP 只摘要 recorded quality，不另算殘差。Stage freshness、草稿與下游失效屬於 GUI app，不在數值 kernel。
 
 本 kernel 不包含 search 診斷圖、plotly/matplotlib export 圖、params.json export，
 也不負責 GUI/ipywidgets lifecycle。Notebook module 與 Qt interactive widget 透過 re-export 或

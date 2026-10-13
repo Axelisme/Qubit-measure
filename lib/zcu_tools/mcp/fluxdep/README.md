@@ -1,9 +1,31 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, recorded fit observation and native invalidation
+**Last updated:** 2026-10-13, decision points, composed RPCs and recorded evidence
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
-one shared bridge.
+one shared bridge. It is an independent, optional L3 cross-experiment analysis
+app, not part of Measure or Workflows.
+
+## Design
+
+Start from the agent's judgments: data usability (J1), symmetry alignment (J2),
+sampling (J3), transition hypotheses (J4), fit acceptance (J5) and point rejection
+(J6). Steps may repeat and their order is not fixed. RPC exposes basic controls and
+full projections; MCP composes those controls into tools and bounded summaries.
+Sending a stage tool expresses intent. The GUI opens/reuses the named draft and
+owns prerequisites, lifetime, publication and downstream invalidation.
+Commands and domain ranges live in tool descriptions, not reply schemas. Mechanical
+edits return counts and changes; finish returns published evidence. Field changes
+are [before, after], while point/mask changes are [added, removed]. Long operations
+without an agent decision during computation wait until terminal. GUI and MCP
+use the same renderer. Skill supplies the workflow and completion criteria;
+measure_knowledge supplies detailed interpretation, examples and counterexamples.
+These design principles are recorded in
+[Agent interface layers](../../../../docs/adr/draft/agent-interface-layers.md#mcp-設計原則).
+Fluxdep's fit dependency model is app-specific, not a rule for every MCP.
+
+## Authority and lifecycle
+
 The GUI owns control authority, interactive identities and search operations.
 Business calls require holder unless explicitly readonly. Reads return current
 projections, not per-connection mutation baselines. MCP does not maintain another
@@ -27,10 +49,15 @@ forward to the GUI authority. `not_holder`, `control_locked`, `control_held` and
 native code/message/reason/data. MCP never reclassifies these refusals or retries.
 Dispersive's shared readonly lifecycle does not initialize a control identity.
 
+## Data, drafts and publication
+
 `spectrum_tools.py` composes list with Filter/fit reads, and raw load with snapshot
 and render. `projection.py` converts complete RPC point arrays into count/ranges,
 rounds numerical spectrum summaries to three decimals and preserves GUI
-alignment provenance. Load and snapshot attach the native evidence PNG as image
+alignment provenance. Published stages are loaded/aligned/sampled; pending is
+align/sample/null independently of the published stage. Completed zero-point
+sampling is still sampled. Internal stage counters are not agent observations.
+Load and snapshot attach the native evidence PNG as image
 content, not base64 text or an image file. PNG integrity uses the same core
 producer as Measure. MCP retains no spectrum, draft, provenance or fit state.
 
@@ -67,6 +94,8 @@ Spectrum Export/Restore tools report sampled checkpoint summaries, including
 zero-point completed spectra. Export does not save Filter masks. Restore refuses
 all names before publication when any name conflicts and preserves GUI errors.
 
+## Fit and recorded evidence
+
 `fit_tools.py` composes `fluxdep_fit` as a current-input read, caller overlay,
 complete replacement, search, bounded native awaits until terminal, final result
 read and successful-result render. Omitted fields retain the GUI's current choices;
@@ -89,6 +118,8 @@ return status=no_result and params=null. Params-only reads keep native inputs,
 with points/residual/per_transition null, and attach no image. Neither state
 creates zero statistics or reads the current cloud. Stage finish tools project
 native invalidated labels without rebuilding the dependency graph.
+
+## Failures and verification
 
 The stdio entry supplies connection settings and instructions. Server exit only
 disconnects; it does not kill or shut down the GUI. Tools preserve scalar JSON

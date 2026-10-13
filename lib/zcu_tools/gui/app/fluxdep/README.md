@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，search capture、fit freshness、原生 publication receipts 與 Analyze panel 的過期顯示
+**Last updated:** 2026-10-13，決策點介面、草稿與發布、fit 依賴及共用渲染
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -19,7 +19,7 @@ app 自帶（version table、worker 模式等仍 per-app）。
 
 ## Pipeline
 
-一條線性有序、人在迴圈中校驗、可回退重做的 pipeline：
+分析以決策點組織，步驟可反覆執行，順序由人或 agent 決定。資料依賴仍是對齊 → 採樣 → Filter → fit。下圖列出資料流，不是強制操作順序：
 
 ```
 載入 hdf5 spectrum(OneTone/TwoTone)
@@ -43,7 +43,7 @@ scipy fit**（fit_spectrum 留在 notebook，未移植）。
 
 分層 `app → Controller(façade) → services → State`。MainWindow 是人使用的 driving
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
-Controller owners，資源的 per-connection observation 與 guard 由 shared remote 執行。
+Controller owners。Shared remote 在 owner loop 檢查控制權 holder；讀取只回現況，不建立 per-connection mutation baseline。來源版本與互動 lifetime 仍由 app owner 檢查。
 目前支援完整 project／spectrum／selection／fit 查詢、project／spectrum 編輯與載入、
 fit inputs replacement、原生 spectrum／params 匯出、app-owned search／operation，
 以及四種 shared Session 的互動命令與原生 PNG。
@@ -51,7 +51,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
 - **`state.py`** — `FluxDepState`（領域容器）：`project`(ProjectInfo)、
   `spectrums: dict[str, SpectrumEntry]`、`active_spectrum`、`selection`(SelectionState)、
   `version`(shared VersionTable)。Spectrum leaf 移除使用精確 retire，刪除期間版本為 0，
-  同名重建續增，不重用舊 observation；不影響同字首的其他譜。Collection／global keys
+  同名重建續增，供來源 replacement 與 context guards 辨識；不影響同字首的其他譜。Collection／global keys
   保持 State lifetime 的計數。
   **`ProjectInfo`/`default_*` 共用** `gui/project.py`（Qt-free，與 dispersive 同源）；
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
@@ -88,7 +88,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
-  （`gui/remote/control_service`），注入 app observation policies 與 resource versions。MCP
+  （`gui/remote/control_service`），注入 app methods、serializers 與控制身份。MCP
   entrypoint 位於 `zcu_tools/mcp/fluxdep/server.py`；`McpBridge` 在
   `zcu_tools/mcp/core/bridge`。
 
@@ -250,8 +250,8 @@ subscriptions 保留原 lifetime。
 `FitService.capture_search` 在 State owner capture detached `SearchInput`。
 `compute_search(inputs)` 只算數值，不讀 live State、不繪圖。
 `record_result(result, inputs)` 在 owner 寫入同次 `SearchInput` 的原始 normalized-flux／GHz 點雲、點序與版本，Controller 發布 `FitChanged`。Kernel 的 modulo-one flux 不取代背景上的原始座標。
-State 集中定義 alignment → points → Filter → fit 依賴圖。Search delivery、結果過期原因與 publication invalidated 共用此圖。
-Stage counters 留在 GUI 內部；`spectrum:<name>` 仍供 context guards，`fit` 仍記結果 availability，fit-input counter 只記輸入。
+State 集中定義 alignment → points → Filter → fit 依賴圖，另納入 spectrum 集合。Search capture 包含所有來源，零點譜也在內。Search delivery、結果過期原因與 publication invalidated 共用此圖。
+Alignment／points／fit-input stage counters 留在 GUI 內部，不出現在 resources.versions；Filter 與集合重用既有 counters。`spectrum:<name>` 仍供 context guards，`fit` 仍記結果 availability。結果發布不改 fit-input counter。
 上游發布保留結果並標過期，`set_fit_params` 的完整 replacement 則清掉結果。過期 params 匯出在 I/O 前拒絕。
 
 `Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
@@ -316,12 +316,9 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **MCP workflow 尚未驗收**：GUI RPC 已提供 pipeline commands、互動回覆、匯出及搜尋操作。
-  MCP tools workflow、原生圖像辨識與真實資料 e2e 由 fluxdep-mcp-control task 的後續票驗證。
+- **MCP 真實資料 e2e 尚未驗收**：RPC 與 MCP 的 owner／recording transport tests 不取代實際分析驗收。真實資料 workflow 的結果與證據另由授權的 e2e 驗收提供。
 
 ## Entry Points
 
 - `scripts/run_fluxdep_gui.py` — 啟動（`--control-port` 開 RPC 給 agent/MCP）。
-- `.mcp.json` 註冊 `fluxdep-gui` MCP server；skill `run-fluxdep-gui`
-  (`.claude/skills/`，三副本同步 .agent/.codex；`sync_skills.sh` 只同步 SKILL.md) 只含
-  SKILL.md。既有 skill 尚描述 read-only workflow；完整控制 workflow 與 skill 更新留在 MCP tools task。
+- `.mcp.json` 註冊 `fluxdep-gui` MCP server。Agent 流程入口是 `.agents/skills/run-fluxdep-gui/SKILL.md`，工具命令與參數由 MCP descriptions 說明；module README 不擁有操作流程。
