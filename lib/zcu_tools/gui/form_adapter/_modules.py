@@ -304,6 +304,54 @@ def editable_spec(
     return result
 
 
+def bind_template_defaults(
+    models: tuple[type[BaseModel], ...],
+    template: Template,
+    catalog: Mapping[str, TemplateDef],
+) -> None:
+    """Bind existing defaults on this template's dedicated generated model tree.
+
+    Each branch uses fresh template input only at the same relative path and
+    matching ancestry tags; other branches use their static type defaults.
+    Models must be freshly derived input types, never shared persistent Specs.
+    The existing template resolver owns Slot presence and captured-source errors.
+    """
+
+    def bind(
+        model: type[BaseModel], ancestry: tuple[tuple[str, str, str], ...]
+    ) -> None:
+        if not issubclass(model, FormModel):
+            raise TypeError("Template defaults require generated FormModel types")
+
+        def defaults(
+            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            del previous
+            data = template_input(template, catalog, models, env)
+            for name, tag, value in ancestry:
+                if name:
+                    child = data.get(name)
+                    if not isinstance(child, dict):
+                        return static_defaults(cls)
+                    data = child
+                if data.get(tag) != value:
+                    return static_defaults(cls)
+            return complete_input(cls, data)
+
+        # Internal kind switches call the child defaults, not the root wrapper.
+        # Bind the same path/branch policy on each separately generated child.
+        # Install the descriptor, not a bound method; typed assignment expects the latter.
+        type.__setattr__(model, "defaults", classmethod(defaults))
+        for name, info in model.model_fields.items():
+            for child in _inline_kinds(info.annotation):
+                tag, value = _spec_tag(child)
+                bind(child, (*ancestry, (name, tag, value)))
+
+    for model in models:
+        tag, value = _spec_tag(model)
+        bind(model, (("", tag, value),))
+
+
 @dataclass(frozen=True)
 class ModuleValues:
     """Detached execution module and its authored input origin.
@@ -497,6 +545,8 @@ class ModuleField:
             )
             self.inline.model_fields["module"] = parsed.model_fields["module"]
             self.inline.model_rebuild(force=True)
+        if template is not None:
+            bind_template_defaults(self.editable, template, catalog)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
         if isinstance(self.node, Template):

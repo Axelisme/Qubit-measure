@@ -43,7 +43,13 @@ from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
 from ._display import field_display
-from ._modules import ModuleField, ModuleValues, editable_spec, module_specs
+from ._modules import (
+    ModuleField,
+    ModuleValues,
+    bind_template_defaults,
+    editable_spec,
+    module_specs,
+)
 from ._seeds import supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
@@ -588,7 +594,10 @@ class Form[C: ConfigBase]:
 
         input.model may be a subclass of this Form's model, specialized for
         this template's Expr requirements and locks. Build a new FormState from
-        the returned input. Recompute the same template's initial values with
+        the returned input. An inline kind switch at any depth uses fresh template
+        values at that path only when its branch ancestry matches; other kinds
+        use type defaults. Switching never reads the previous draft.
+        Recompute the same template's initial values with
         input.model.default_input(env); changing templates requires a new state.
         The original Form.model, template, catalog and sources are not modified.
         The input model retains a detached catalog mapping, not the caller's map.
@@ -606,21 +615,14 @@ class Form[C: ConfigBase]:
             self.model, template.lock, template_seed_tree(template, bound)
         )
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del previous
-            return _template_input(template, bound, (cls,), env)
-
         model = new_class(
             f"{self.model.__name__}Template",
             (editable,),
-            exec_body=lambda ns: ns.update(
-                {"__module__": __name__, "defaults": classmethod(defaults)}
-            ),
+            exec_body=lambda ns: ns.update({"__module__": __name__}),
         )
         if not issubclass(model, FormModel):
             raise TypeError("Template input model must implement FormModel")
+        bind_template_defaults((model,), template, bound)
         return model.default_input(env)
 
     def input_from_spec(self, spec: ConfigBase, env: FormEnv) -> FormInput[FormModel]:
