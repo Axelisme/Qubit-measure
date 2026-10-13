@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, Inspect and ARB waveforms come from the shared session layer
+**Last updated:** 2026-10-14, shared Inspect and ARB waveforms; writeback module Form dialogs
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -447,15 +447,28 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    terminal callbacks back to the main thread.
 6. RunService uses State directly for busy checks and atomic result/evidence
    publication. AnalyzeService retains its narrow `AnalyzeStatePort`.
-7. Writeback items are generated from analysis results and edited through the same
-   cfg-editor machinery before commit. `WritebackService.create_draft` captures
+7. Writeback items are generated from analysis results. Module proposals are
+   persistent Specs, edited through each draft's shared `ModuleEntryForm` and
+   `FormState`. `WritebackService.create_draft` captures
    the destination ParameterContext and its fixed role names. Preview facts
    expose the actual destination, latest stored current value and complete proposal.
    Scalar parameter rows show values and stderr with static schema unit labels
    from resources; ext and fields without static units show no label. Labels never
    convert values. Draft-local retarget refreshes the destination facts and unit.
-   Module/waveform items show bounded change summaries without units and keep
-   full cfg editing in `Edit`. Primary and post workflows own proposal timing;
+   Module items show bounded change summaries without units. Their `Edit`
+   dialog mounts `FormEditor` directly on the draft's state and captured env;
+   `Apply as:` retargets the same item. Invalid State input survives Close and
+   refuses Apply. Unparseable local text also marks the row Invalid and locks
+   Apply while open; Close drops only that local text and shows the State's
+   result, without writing the library. Field writes go through the existing
+   pane-qualified writeback guard. A refusal keeps the user's text in the open
+   editor and displays the guard's reason without changing the shared state.
+   A host refresh after module validation fails keeps Invalid rows and reads
+   valid items through the service's single-item preview. MainWindow presents
+   expected Apply refusals without discarding the draft; other failures propagate.
+   The existing busy and Remote enable gates remain unchanged.
+   Parameter and sample proposals retain their separate write contracts.
+   Primary and post workflows own proposal timing;
    the Writeback service remains stage-free. Sample proposals name a concrete
    component and producer JSON fields. GUI adds dev_value/dev_unit from the
    Run-fixed $flux_dev binding and device snapshot. Missing binding, device,
@@ -627,7 +640,7 @@ does not come from device info. Core and Notebook cfg require an explicit unit.
 
 ### Independent CfgSchema drafts
 
-Library, Inspect and writeback retain `CfgSchema` and `CfgDraft`; they do not use
+Library and Inspect retain `CfgSchema` and `CfgDraft`; they do not use
 the tab Form resource. Their Spec/Value model, reference materialization and
 codec stay with `gui.cfg` and `experiment.cfg_editing` as described in
 [Cfg ADR](../../../../../docs/adr/0065-cfg-editing.md). Library sessions retain
@@ -635,7 +648,7 @@ the opened ParameterContext and target; a later point selection does not retarge
 Apply. Their fail-fast draft batches retain successful prefixes and are not the
 tab resource's atomic write contract.
 
-以下 `CfgFormWidget` binding 路徑供獨立 library／inspect／writeback draft 使用。
+以下 `CfgFormWidget` binding 路徑供獨立 library／inspect draft 使用。
 每個 `CfgFormWidget` 持有自己的 frozen exact registry；沒有顯式注入時，
 `default_cfg_renderers()` 為五個 non-section exact field types
 （`LiteralField`、`ScalarField`、`SweepField`、`CenteredSweepField`、`ReferenceField`）註冊固定
