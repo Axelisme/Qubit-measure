@@ -44,7 +44,6 @@ def templates() -> dict[str, TemplateDef]:
                 "gain": 0.1,
                 "waveform.style": "const",
                 "waveform.length": Expr("2 * .2"),
-                "desc": "$literal",
             },
         )
     }
@@ -130,9 +129,7 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
         assert probe["name"] == "Q.pulses.probe"
 
 
-def test_template_required_nested_defaults_omit_none_and_preserve_literal_strings() -> (
-    None
-):
+def test_template_required_nested_defaults_omit_none() -> None:
     form = bound_form(Template("pulse"))
     env = environment()
     state = FormState(form.default_input(env))
@@ -149,7 +146,6 @@ def test_template_required_nested_defaults_omit_none_and_preserve_literal_string
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, Core), cfg
     assert cfg.probe.freq == 120 and cfg.probe.waveform.length == 0.4
-    assert cfg.probe.desc == "$literal"
 
 
 def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
@@ -563,3 +559,34 @@ def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None
     form = Form(Core, {"probe": node})
     with pytest.raises(ValueError, match="synthetic.*probe"):
         form.bind_templates(catalog, adapter="synthetic")
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["root", "nested"])
+def test_unsupported_template_seed_names_template_and_seed_path(nested: bool) -> None:
+    pulse = {
+        "ch": 1,
+        "nqz": 1,
+        "freq": 100.0,
+        "gain": 0.3,
+        "waveform.style": "const",
+        "waveform.length": 0.2,
+    }
+    if nested:
+        seeds = {f"pulse_cfg.{path}": value for path, value in pulse.items()}
+        seeds |= {
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_length": 0.2,
+            "pulse_cfg.ro_ch": 2,
+        }
+        definition = TemplateDef(PulseReadoutSpec, "Noisy readout", seeds)
+        form = Form(ReadoutCore, {"readout": Template("noisy")})
+        path = "pulse_cfg.ro_ch"
+    else:
+        definition = TemplateDef(PulseSpec, "Noisy pulse", {**pulse, "desc": "note"})
+        form = Form(Core, {"probe": Template("noisy")})
+        path = "desc"
+
+    with pytest.raises(ValueError, match="noisy") as caught:
+        form.bind_templates({"noisy": definition}, adapter="synthetic")
+
+    assert path in str(caught.value), caught.value

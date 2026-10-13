@@ -196,3 +196,101 @@ def expect_object(value: JsonValue) -> dict[str, JsonValue]:
     """Narrow a public input observation without altering it."""
     assert isinstance(value, dict)
     return value
+
+
+def stored_env() -> FormEnv:
+    """A stored library entry sets fields the generated inline input cannot edit."""
+    return FormEnv(
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(
+                format="zcu.module-library",
+                format_version="1.0",
+                components={
+                    "Q": ComponentLibrary(
+                        pulses={
+                            "probe": PulseSpec.model_validate(
+                                {
+                                    "ch": 1,
+                                    "nqz": 1,
+                                    "freq": 100,
+                                    "gain": 0.3,
+                                    "desc": "stored",
+                                    "mask": [0],
+                                    "outsel": 1,
+                                    "ro_ch": 4,
+                                    "waveform": {"style": "const", "length": 0.1},
+                                }
+                            )
+                        }
+                    )
+                },
+            )
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["desc", "mux_freqs", "mux_gains", "mux_phases", "mask", "outsel", "ro_ch"]
+)
+def test_inline_module_rejects_unsupported_field_writes(name: str) -> None:
+    form = Form(ModuleCore, {})
+    env = module_env()
+    state = FormState(
+        FormInput(
+            form.model,
+            {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
+        )
+    )
+    state.write({("modules", "probe", "kind"): "inline"}, env)
+
+    with pytest.raises(ValueError, match="Unknown field path"):
+        state.write({("modules", "probe", "module", name): 1}, env)
+
+
+@pytest.mark.parametrize("path", ["switch", "copy"])
+def test_inline_copy_of_library_entry_replaces_unsupported_values_with_defaults(
+    path: str,
+) -> None:
+    from zcu_tools.cfg_model import Slot
+
+    env = stored_env()
+    if path == "switch":
+        form = Form(ModuleCore, {})
+        state = FormState(
+            FormInput(
+                form.model,
+                {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}},
+            )
+        )
+        state.write({("modules", "probe", "kind"): "inline"}, env)
+    else:
+        form = Form(
+            ModuleCore, {"modules": {"probe": Slot("Q.pulses.probe", copy=True)}}
+        )
+        state = FormState(form.default_input(env))
+
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, ModuleCore), cfg
+    probe = cfg.modules.probe
+    assert (probe.freq, probe.gain) == (100, 0.3)
+    assert (probe.desc, probe.mask, probe.outsel, probe.ro_ch) == (None,) * 4
+
+
+def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
+    from zcu_tools.cfg_model import Slot
+
+    form = Form(
+        ModuleCore,
+        {"modules": {"probe": Slot("Q.pulses.probe", lock={"freq": 100.0})}},
+    )
+    env = module_env()
+
+    state = FormState(form.default_input(env))
+    value = state.result(env)
+
+    assert isinstance(form.model.input_schema(env)["properties"], dict)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, ModuleCore) and cfg.modules.probe.freq == 100.0

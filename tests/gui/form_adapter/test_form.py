@@ -255,3 +255,48 @@ def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
     required = form_adapter.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
     assert required.model.choices(env)[("flux_dev",)] == ()
     assert isinstance(FormState(required.default_input(env)).result(env), FormErrors)
+
+
+class DisplayedCfg(ConfigBase):
+    amplitude: Annotated[float, FieldMeta(label="Amplitude", unit="V", decimals=3)] = (
+        0.5
+    )
+
+
+def test_field_meta_label_unit_and_decimals_reach_input_schema() -> None:
+    schema = form_adapter.Form(DisplayedCfg, {}).model.input_schema(FormEnv())
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    amplitude = properties["amplitude"]
+    assert isinstance(amplitude, dict)
+    assert (amplitude["title"], amplitude["unit"], amplitude["decimals"]) == (
+        "Amplitude",
+        "V",
+        3,
+    )
+
+
+class GroupedCfg(ConfigBase):
+    amplitude: Annotated[float, FieldMeta(decimals=3, group="Advanced")] = 0.5
+
+
+def test_field_meta_group_reaches_input_schema() -> None:
+    schema = form_adapter.Form(GroupedCfg, {}).model.input_schema(FormEnv())
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    amplitude = properties["amplitude"]
+    assert isinstance(amplitude, dict)
+    assert amplitude["x-form-group"] == "Advanced"
+
+
+def test_locked_field_with_decimals_metadata_has_input_schema() -> None:
+    form = form_adapter.Form(DisplayedCfg, {"amplitude": nodes.Locked(0.25)})
+    env = FormEnv()
+
+    properties = form.model.input_schema(env)["properties"]
+    result = FormState(form.default_input(env)).result(env)
+
+    assert isinstance(properties, dict) and "amplitude" in properties
+    assert not isinstance(result, FormErrors)
+    cfg = form.to_cfg(result, env)
+    assert isinstance(cfg, DisplayedCfg) and cfg.amplitude == 0.25
