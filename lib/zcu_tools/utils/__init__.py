@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping
 from typing import Any, Literal
 
-from qick.asm_v2 import QickParam
-
 from . import math, process, tomography
 
 
@@ -55,8 +53,10 @@ def format_obj(obj: Any) -> Any:
 
     Conversion order is intentional for objects that provide multiple protocols:
     explicit model exporters first, then array/list conversion, then scalar item
-    extraction.
+    extraction. QICK is loaded only when this serialization helper is used.
     """
+    from qick.asm_v2 import QickParam
+
     if hasattr(obj, "to_dict") and callable(obj.to_dict):
         obj = obj.to_dict()  # work for pydantic model
     if hasattr(obj, "model_dump") and callable(obj.model_dump):
