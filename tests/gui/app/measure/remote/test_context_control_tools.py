@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import EntryInfo
@@ -138,7 +139,7 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     first = control.read_context()
     application.result("point.new", {"label": "selected"})
     selected = control.read_context()
-    metadata = {"comment": "manual", "stderr": 0.2}
+    metadata: YamlMap = {"comment": "manual", "stderr": 0.2}
     control.set_parameter(selected.target, "Q1.rate", 12.0, metadata=metadata)
     before = control.read_context()
     assert application.result(
@@ -147,11 +148,11 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     after = control.read_context()
     persisted = snapshot(entry_resource(info).use_point("selected"))
     assert after.target == selected.target
-    assert document_value(persisted, "Q1.rate").value == 25.0
+    assert document_value(persisted, "Q1.rate") == 25.0
     assert document_meta(persisted, "Q1.rate") == metadata
     assert before.lookup_point("Q1.rate").value == 12.0
     assert control.read_target(first.target).lookup_point("Q1.rate").value == 10.0
-    assert document_value(snapshot(entry_resource(info).setup), "Q1.rate").value == 10.0
+    assert document_value(snapshot(entry_resource(info).setup), "Q1.rate") == 10.0
     assert entry_resource(info).ledger.events() == ()
 
 
