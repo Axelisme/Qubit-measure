@@ -3,19 +3,12 @@
 import pytest
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
-    ModuleCfgFactory,
     PulseCfg,
     PulseSpec,
     Range,
     Slot,
-    WaveformCfgFactory,
 )
 from zcu_tools.gui.app.measure.adapter import Form
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.form import ModuleInline
 from zcu_tools.gui.session.context_types import LibraryChange
 
@@ -55,21 +48,15 @@ class WaveformReferenceAdapter(SampleAdapter):
 def reference_library(request):
     kind = request.param
     if kind == "module":
-        cfg = ModuleCfgFactory.from_raw(
-            {
-                "type": "pulse",
-                "ch": 0,
-                "nqz": 1,
-                "freq": 100.0,
-                "gain": 0.5,
-                "waveform": {"style": "const", "length": 0.1},
-            }
+        path = "Q1.pulses.seed"
+        module = PulseSpec(
+            ch=0, nqz=1, freq=100.0, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
         )
-        spec, value = module_cfg_to_value(cfg)
-        return kind, spec, value, "gain", "Q1.pulses.seed", PulseReferenceAdapter
-    cfg = WaveformCfgFactory.from_raw({"style": "const", "length": 0.1})
-    spec, value = waveform_cfg_to_value(cfg)
-    return kind, spec, value, "length", "Q1.waveforms.seed", WaveformReferenceAdapter
+        change = LibraryChange(kind, "put", path, module=module)
+        return kind, change, "gain", path, PulseReferenceAdapter
+    path = "Q1.waveforms.seed"
+    change = LibraryChange(kind, "put", path, waveform=ConstWaveformCfg(length=0.1))
+    return kind, change, "length", path, WaveformReferenceAdapter
 
 
 @pytest.mark.parametrize("action", ["rename", "del"])
@@ -81,13 +68,10 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     point_models,
     point_registry_guard,
 ):
-    kind, spec, value, field, path, adapter_type = reference_library
+    kind, put, field, path, adapter_type = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
     fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
-    fx.ctrl.apply_library_change(
-        fx.ctrl.read_context(),
-        LibraryChange(kind, "put", path, schema=CfgSchema(spec, value)),
-    )
+    fx.ctrl.apply_library_change(fx.ctrl.read_context(), put)
     if kind == "waveform":
         fx.ctrl.context_control.set_module(
             fx.ctrl.read_context().target,

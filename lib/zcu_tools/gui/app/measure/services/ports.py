@@ -206,7 +206,7 @@ class PersistOriginatorPort(Protocol):
 
 @runtime_checkable
 class ContextWritePort(Protocol):
-    """App structure commands, with app schema lowering bound by composition.
+    """App library structure commands carrying persistent Specs.
 
     ParameterContext fixes the destination and expression/reference data.
     ContextService owns the resource transaction and publication; no live
@@ -216,7 +216,7 @@ class ContextWritePort(Protocol):
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
-        """Apply one typed structure command; target/lowering/write errors propagate."""
+        """Apply one typed structure command; target/Spec/write errors propagate."""
         ...
 
 

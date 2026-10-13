@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.services.cfg_editor import (
     CfgEditorError,
     CfgEditorService,
 )
-from zcu_tools.gui.app.measure.services.cfg_lowering import lower_module, lower_waveform
 from zcu_tools.gui.app.measure.services.ports import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -43,9 +42,7 @@ class EditorHost:
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
     ) -> None:
-        self.control.apply_library_change(
-            parameters, change, lower_module=lower_module, lower_waveform=lower_waveform
-        )
+        self.control.apply_library_change(parameters, change)
 
     def list_device_names(self) -> list[str]:
         return []
