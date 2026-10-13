@@ -34,6 +34,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import type_text
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
@@ -170,26 +171,34 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     assert view.tab.run_btn.isEnabled()
 
 
-def test_busy_tab_disables_editing_and_reset_until_idle(
+def test_busy_tab_locks_editing_and_reset_until_idle(
     open_tab: Callable[..., TabView],
 ) -> None:
     view = open_tab()
+    gain = view.input("gain")
+    original = gain.text()
+    original_gain = view.resource.input.data["gain"]
 
     view.tab.update_interaction_state(snapshot(is_running=True))
 
-    assert not view.input("gain").isEnabled()
+    assert gain.isEnabled() and gain.isReadOnly()
+    gain.selectAll()
+    type_text(gain, "0.9")
+    assert gain.selectedText() == original
+    assert gain.text() == original
+    assert view.resource.input.data["gain"] == original_gain
     assert not view.tab.reset_btn.isVisibleTo(view.tab)
 
     view.tab.update_interaction_state(snapshot(is_analyzing=True))
 
-    assert not view.input("gain").isEnabled()
+    assert gain.isEnabled() and gain.isReadOnly()
     assert not view.tab.reset_btn.isEnabled()
 
     view.tab.update_interaction_state(snapshot())
 
-    assert view.input("gain").isEnabled()
+    assert gain.isEnabled() and not gain.isReadOnly()
     assert view.tab.reset_btn.isEnabled()
-    view.input("gain").setText("0.3")
+    gain.setText("0.3")
     assert view.resource.input.data["gain"] == 0.3
 
 
@@ -221,7 +230,8 @@ def test_running_tab_locks_inputs_but_keeps_the_form_readable(
     qapp.processEvents()
 
     for path in ("reps", "rounds", "pulse.gain", "pulse.length"):
-        assert not view.input(path).isEnabled(), path
+        field = view.input(path)
+        assert field.isEnabled() and field.isReadOnly(), path
     scroll = next(
         area
         for area in view.tab.findChildren(QScrollArea)
