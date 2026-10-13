@@ -179,8 +179,8 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
 class UnreadableWaveformLibrary(LibrarySnapshot):
     """A public source fault leaves commands without a usable captured Spec."""
 
-    def waveform_spec(self, key: str) -> WaveformSpec:
-        raise OSError(f"Cannot read captured waveform {key}")
+    def waveform_spec(self, path: str) -> WaveformSpec:
+        raise OSError(f"Cannot read captured waveform {path}")
 
 
 def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None:
