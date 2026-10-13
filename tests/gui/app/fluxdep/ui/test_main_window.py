@@ -40,7 +40,6 @@ from tests.gui.app.fluxdep._window import (
     drawn_row_text,
     editor,
     fit_panel,
-    has_picker_control,
     list_labels,
     list_tooltips,
     pages,
@@ -406,7 +405,7 @@ def test_stage_realign_opens_a_draft_without_unpublishing(window, ctrl, spectrum
     label = list_labels(window)[0]
     assert "sampled" in label and "align draft" in label
     # Re-aligning an aligned spectrum can still move on to sampling.
-    assert has_picker_control(picker, "sample")
+    assert stage_button(window, "sample").isEnabled()
 
 
 def test_stage_sample_opens_sampling_and_keeps_points_until_finish(
@@ -450,7 +449,7 @@ def test_gui_add_opens_line_picker_for_the_loaded_spectrum(qapp, spectrum_hdf5):
         assert active is not None and active.kind == "line"
         assert current_page(win) == "spectra"
         # An unaligned spectrum has no sampling step to switch to yet.
-        assert not has_picker_control(picker, "sample")
+        assert not stage_button(win, "sample").isEnabled()
     finally:
         win.close()
         win.deleteLater()
@@ -473,50 +472,18 @@ def test_realign_from_sample_draft_confirms_and_cancel_keeps_draft(
         assert draft is not None and draft.kind == "onetone"
         draft.context.plugin.set_threshold.execute(draft.context.session, 0.1)
 
-        picker_button(sampler, "realign").click()
+        stage_button(win, "align").click()
         assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
         assert ctrl.interactive.inspect("one") == draft
         assert editor(win) is sampler
         assert draft.context.session.snapshot().threshold == 0.1
 
-        picker_button(sampler, "realign").click()
+        stage_button(win, "align").click()
         assert len(dialogs.calls) == 2
         assert isinstance(editor(win), LinePickerWidget)
         replaced = ctrl.interactive.inspect("one")
         assert replaced is not None and replaced.kind == "line"
         assert ctrl.state.spectrums["one"].aligned
-    finally:
-        win.close()
-        win.deleteLater()
-        qapp.processEvents()
-
-
-def test_sample_from_align_draft_confirms_before_discarding(qapp, cross_controller):
-    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
-    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
-
-    ctrl = cross_controller
-    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
-    win = MainWindow(ctrl, dialog_presenter=dialogs)
-    try:
-        # Opening a stage with no other draft asks nothing.
-        stage_button(win, "align").click()
-        assert dialogs.calls == []
-        aligner = editor(win)
-        assert isinstance(aligner, LinePickerWidget)
-        draft = ctrl.interactive.inspect("a")
-        assert draft is not None and draft.kind == "line"
-
-        picker_button(aligner, "sample").click()
-        assert ctrl.interactive.inspect("a") == draft
-        assert editor(win) is aligner
-
-        picker_button(aligner, "sample").click()
-        assert [call.kind for call in dialogs.calls] == ["destructive_confirm"] * 2
-        assert isinstance(editor(win), FindPointsWidget)
-        replaced = ctrl.interactive.inspect("a")
-        assert replaced is not None and replaced.kind == "twotone"
-        assert ctrl.state.spectrums["a"].point_count == 3
     finally:
         win.close()
         win.deleteLater()
@@ -540,18 +507,20 @@ def test_stage_switch_confirms_and_cancel_keeps_the_other_draft(qapp, cross_cont
         stage_button(win, "align").click()
         assert dialogs.calls == []
         assert ctrl.interactive.inspect("a") == draft
+        aligner = editor(win)
+        assert isinstance(aligner, LinePickerWidget)
 
         # Declining keeps the align draft, its picker and the stage marks.
         stage_button(win, "sample").click()
         assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
         assert ctrl.interactive.inspect("a") == draft
-        assert isinstance(editor(win), LinePickerWidget)
+        assert editor(win) is aligner
         assert stage_status(win, "align") == "draft"
         assert current_stage(win) == "align"
 
         # Confirming discards it and opens sampling; published points remain.
         stage_button(win, "sample").click()
-        assert len(dialogs.calls) == 2
+        assert [call.kind for call in dialogs.calls] == ["destructive_confirm"] * 2
         assert isinstance(editor(win), FindPointsWidget)
         replaced = ctrl.interactive.inspect("a")
         assert replaced is not None and replaced.kind == "twotone"

@@ -150,11 +150,6 @@ def picker_button(root: QWidget, action: str) -> QPushButton:
     return picker_control(root, action, QPushButton)
 
 
-def has_picker_control(root: QWidget, action: str) -> bool:
-    """Whether root currently holds a fluxdep.picker.<action> control."""
-    return bool(root.findChildren(QWidget, f"fluxdep.picker.{action}"))
-
-
 def column_tops(root: QWidget, actions: list[str]) -> list[int]:
     """Top y of each named picker control within a shown root, in given order."""
     return [
