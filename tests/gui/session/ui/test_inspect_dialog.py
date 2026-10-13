@@ -24,9 +24,12 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, TemplateDef
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form import FormErrors
+from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
+from zcu_tools.gui.session.library_entry import open_library_entry
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.services.build import build_session_services
@@ -231,19 +234,49 @@ def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
 
 
 def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
-    # Only the stored key is pinned here; the selector's offered options and
-    # item text belong to the shared Form choices work, not to Inspect.
+    # A is a separate public capture. Inspect's capture/state have no public
+    # read seam; B below observes only the actual host's Qt controls and Apply.
+    capture = session.control.read_context()
+    assert WAVEFORM in capture.library.waveform_keys()
+    opened = open_library_entry(capture, "module", PULSE, arb_names=())
+    try:
+        value = opened.state.result(opened.env)
+    except ValueError as error:
+        pytest.fail(f"A valid captured waveform key must evaluate: {error}")
+    assert not isinstance(value, FormErrors)
+    initial = opened.spec()
+    assert isinstance(initial, PulseSpec)
+    assert initial.waveform == WAVEFORM
+    current = opened.state.input.data["waveform"]
+    assert current == {"kind": "ref", "name": WAVEFORM}
+    options = module_form(PulseSpec).model.options(opened.env)[("waveform",)]
+    selected = next(option for option in options if option.matches(current))
+    assert selected.label == WAVEFORM
+    assert selected.value == current
+
     presenter = RecordingDialogPresenter()
     dialog = _open(session, presenter)
     _select(dialog, PULSE)
     waveform = _child(dialog, QComboBox, "form.input.waveform")
-    assert waveform.currentData() == WAVEFORM
+    assert waveform.currentText() == selected.label
+    assert waveform.currentData() == selected.value
+    assert (selected.label, selected.value) in [
+        (waveform.itemText(index), waveform.itemData(index))
+        for index in range(waveform.count())
+    ]
+    assert not any(
+        "(missing)" in waveform.itemText(index) for index in range(waveform.count())
+    )
     _child(dialog, QLineEdit, "form.input.freq").setText("150")
     _child(dialog, QPushButton, "inspect.entry.apply").click()
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.waveform == WAVEFORM
     assert written.freq == 150.0
+    waveform = _child(dialog, QComboBox, "form.input.waveform")
+    assert waveform.currentText() == selected.label
+    assert waveform.currentData() == selected.value
+    presenter.assert_no_unexpected_messages()
 
 
 def test_root_family_tag_has_no_row(session: _Session) -> None:

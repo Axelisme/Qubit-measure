@@ -11,6 +11,7 @@ from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QLabel,
     QLineEdit,
@@ -27,6 +28,8 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.form import FormErrors
+from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -343,6 +346,30 @@ def _apply(widget: WritebackWidget) -> QPushButton:
 def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     ctrl, widget, tab_id, pane = _populate_module(module_widget)
     dialog = _module_dialog(widget)
+    # This public owner returns the actual module Edit draft and fixed capture.
+    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    assert MODULE_PROPOSAL_WAVEFORM in form.parameters.library.waveform_keys()
+    current = form.state.input.data["waveform"]
+    assert current == {"kind": "ref", "name": MODULE_PROPOSAL_WAVEFORM}
+    options = module_form(PulseSpec).model.options(form.env)[("waveform",)]
+    selected = next(option for option in options if option.matches(current))
+    assert selected.label == MODULE_PROPOSAL_WAVEFORM
+    assert selected.value == current
+    waveform = dialog.findChild(QComboBox, "form.input.waveform")
+    assert waveform is not None
+    assert waveform.currentText() == selected.label
+    assert waveform.currentData() == selected.value
+    assert (selected.label, selected.value) in [
+        (waveform.itemText(index), waveform.itemData(index))
+        for index in range(waveform.count())
+    ]
+    assert not any(
+        "(missing)" in waveform.itemText(index) for index in range(waveform.count())
+    )
+    assert not isinstance(form.state.result(form.env), FormErrors)
+    initial = form.spec()
+    assert isinstance(initial, PulseSpec)
+    assert initial.waveform == MODULE_PROPOSAL_WAVEFORM
     _input(dialog, "freq").setText("5100.125")
     mode = dialog.findChild(QAction, "form.mode.gain")
     assert mode is not None
@@ -361,6 +388,9 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     ].proposed
     assert proposed["freq"] == 5100.125
     assert proposed["gain"] == pytest.approx(0.2)
+    assert selected.matches(form.state.input.data["waveform"])
+    assert not isinstance(form.state.result(form.env), FormErrors)
+    assert proposed["waveform"] == MODULE_PROPOSAL_WAVEFORM
     # Preview and Apply use the opening capture, not subsequently changed values.
     context = ctrl.context_control
     context.set_parameter(context.read_context().target, "general.ext.gain", 0.8)
