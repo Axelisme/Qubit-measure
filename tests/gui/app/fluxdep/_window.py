@@ -1,4 +1,4 @@
-"""Public Qt seams of the fluxdep MainWindow and its pickers, by objectName.
+"""Public Qt seams of the fluxdep MainWindow, its pickers and Fit page, by objectName.
 
 UI tests use these helpers instead of button text or private attributes.
 Each lookup asserts that the seam exists, so a missing seam fails as an
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from matplotlib.figure import Figure
 from qtpy.QtCore import QMetaObject, QPoint, Qt, QTimer
@@ -29,6 +29,14 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 
 Page = Literal["spectra", "fit"]
+W = TypeVar("W", bound=QWidget)
+
+
+def named(root: QWidget, kind: type[W], name: str) -> W:
+    """The descendant of root of type kind whose objectName is name."""
+    found = root.findChild(kind, name)
+    assert found is not None, f"missing {kind.__name__} {name!r}"
+    return found
 
 
 def command(window: QWidget, name: str) -> QPushButton:

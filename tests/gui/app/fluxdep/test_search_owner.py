@@ -27,7 +27,13 @@ from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
-from tests.gui.app.fluxdep._window import current_page, editor, fit_panel, show_page
+from tests.gui.app.fluxdep._window import (
+    command,
+    current_page,
+    editor,
+    fit_panel,
+    show_page,
+)
 
 
 class ControlledBackground:
@@ -340,18 +346,16 @@ def test_progress_notifications_cannot_reenter_start(search_case):
         dispose()
 
 
-def test_failed_publication_releases_admission(search_case, monkeypatch):
-    from zcu_tools.gui.app.fluxdep.services.fit import FitService
-
+def test_failed_publication_releases_admission(search_case):
     ctrl, bg, _owner, _progress, result, _captured = search_case
-
-    def fail_record(self, result, inputs):
-        raise ValueError("commit refused")
-
-    monkeypatch.setattr(FitService, "record_result", fail_record)
+    # A result over fewer points than the capture is refused by publication.
+    bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
+    short = perfect_fit_result(result.fluxs[:-1], result.freqs[:-1], bounds)
     token = ctrl.search.start()
-    bg.deliver(result)
-    assert ctrl.search.outcome(token) == OperationOutcome("failed", "commit refused")
+    bg.deliver(short)
+    assert ctrl.search.outcome(token) == OperationOutcome(
+        "failed", "captured coordinates must match kernel attribution shape"
+    )
     assert ctrl.search.current.status == "failed"
     assert ctrl.search.active_token is None
     assert ctrl.state.fit.params is None
@@ -424,13 +428,12 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
     tabs = panel.findChild(QtWidgets.QTabWidget)
     assert tabs is not None
     tabs.setCurrentIndex(1)
-    buttons = {
-        button.text(): button for button in panel.findChildren(QtWidgets.QPushButton)
-    }
+    search = command(panel, "fluxdep.fit.search")
+    cancel = command(panel, "fluxdep.fit.cancel")
     try:
         token = ctrl.search.start()
-        assert not buttons["Search database"].isEnabled()
-        assert buttons["Cancel search"].isEnabled()
+        assert not search.isEnabled()
+        assert cancel.isEnabled()
         assert bg.compute() is result
         owner.pump_all()
         bar = panel.findChild(QtWidgets.QProgressBar)
@@ -440,13 +443,13 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         assert ctrl.search.active_token == token
         panel.activate()
         panel.show()
-        assert buttons["Cancel search"].isEnabled()
-        buttons["Cancel search"].click()
+        assert cancel.isEnabled()
+        cancel.click()
         assert ctrl.search.outcome(token) is None
         bg.fail(SearchCancelled("requested"))
         assert ctrl.search.outcome(token).status == "cancelled"
-        assert buttons["Search database"].isEnabled()
-        assert not buttons["Cancel search"].isEnabled()
+        assert search.isEnabled()
+        assert not cancel.isEnabled()
         panel.dispose()
         panel.deleteLater()
         panel = AnalyzePanelWidget(ctrl)

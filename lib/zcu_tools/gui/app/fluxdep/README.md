@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁
+**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁；Fit 頁表單、狀態列與 Project 對話框的 Data root
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -54,7 +54,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   同名重建續增，供來源 replacement 與 context guards 辨識；不影響同字首的其他譜。Collection／global keys
   保持 State lifetime 的計數。
   **`ProjectInfo`/`default_*` 共用** `gui/project.py`（Qt-free，與 dispersive 同源）；
-  `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Database path"`），並可從
+  `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Data root"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
   aligned/points_completed/alignment_seeded/filter_mask。Filter 遮罩依點 index 儲存，
@@ -273,7 +273,7 @@ Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt re
 在 owner turn 查 active modal，chooser 使用非 native option。Dialog 不接 control，
 chooser 返回與 accepted callback 不重查 holder。
 
-Analyze 的 Search form（含 Cancel search）在 Remote 停用。Filter tab 的進出會開啟或
+Analyze 的 Search form（含 Cancel）在 Remote 停用；Search 與 Show 的狀態列在表單外，非 holder 仍可讀。Filter tab 的進出會開啟或
 取消 Session，所以在 Remote 停用；無 Filter input 時 Search／Show 切換及 Show
 的 display controls 保持可用。非 holder 可進 Fit 頁閱讀結果與 `Outdated: …`；沒有 live Filter
 context 時進入 Search tab，不為閱讀開 Filter input，有 live context（例如 agent 的）則 reattach。
@@ -323,12 +323,18 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
 - **AnalyzePanel UI**（`ui/analyze_panel.py`）：selection 後的三步分析集中在**主視窗 Fit 頁**承載的
   單例面板，內含 **QTabWidget: Filter / Search / Show**。
   - **Filter**：嵌 cross-spectrum `SelectorWidget`（進此 tab 時依當前 spectrums 重建）。
-  - **Search**：db 搜尋表單（bounds preset 下拉 `general`/`integer`/`all` 填三組 bound spinbox——
-    **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset）+
-    右側診斷圖（QSplitter 可拖拉）。search 前擋空/不存在 db 路徑；params export 的長路徑只作
-    status/tooltip，不參與 panel 水平最小寬度。
+  - **Search**：搜尋表單（`Search DB` 是 fit 的 `search_db`，與專案的 Data root 分開；bounds preset 下拉
+    `general`/`integer`/`all` 填三組 bound spinbox，下拉永遠顯示與 spinbox 數值完全相符的 preset，數值被改過時顯示 `custom`——
+    **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset，各列以畫出的頻率命名）+
+    右側診斷圖（QSplitter 可拖拉，圖佔剩餘寬度；控制欄靠上，表單不拉滿高度）。輸入的 transitions 需要而 r_f／sample_f
+    留空時，欄位下方直接標示；Search 不在面板預檢頻率，由 Controller 拒絕。search 前擋空/不存在 db 路徑。
+    Search 的錯誤（含 search 失敗）寫在 Search 狀態列 `fluxdep.fit.status`，不跳 modal；params export 的長路徑只作
+    status/tooltip，不參與 panel 水平最小寬度。按鈕 `Search`、`Cancel`、`Export params…`。
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
+    繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列 `fluxdep.show.status`，不寫進 Search。
+  - 測試以 objectName 定位 Fit 頁元件：`fluxdep.fit.*`（search_db、bounds_preset、r_f／sample_f 與其 `.required`、
+    search、cancel、export_params、status、freshness）與 `fluxdep.show.*`（apply、auto_limits、status）。
   AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。
   Panel 訂閱已發布的 fit 變更，只比較已發布的 search inputs：inputs 改變才重載 Search 與 Show 表單，結果、品質或捕獲版本改變時保留本地 display edits。
   Panel 也訂閱 spectrum 集合、spectrum 與 selection 事件：Search 的 Freshness 列與 Show 標題寫出 State 的 stale reasons，過期時停用 Export。
