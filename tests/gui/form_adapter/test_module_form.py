@@ -593,6 +593,48 @@ def test_template_input_failed_expr_requires_input_instead_of_static_default(
     assert form.model.default_input(env).data["phase"] == 0.0
 
 
+@pytest.mark.parametrize(
+    ("spec_type", "template_id", "child", "authored_kind", "other_kind", "length"),
+    [
+        (PulseSpec, "pulse", "waveform", "const", "cosine", 0.4),
+        (FlatTopWaveformSpec, "flat", "raise_waveform", "cosine", "const", 0.1),
+    ],
+    ids=["pulse", "flat-top"],
+)
+def test_template_input_nested_kind_reselection_uses_authored_defaults(
+    creation_templates: dict[str, TemplateDef],
+    spec_type: type[PulseSpec] | type[FlatTopWaveformSpec],
+    template_id: str,
+    child: str,
+    authored_kind: str,
+    other_kind: str,
+    length: float,
+) -> None:
+    form = form_adapter.module_form(spec_type)
+    env = creation_env()
+    state = FormState(
+        form.template_input(Template(template_id), creation_templates, env)
+    )
+    node = expect_object(expect_object(state.input_schema(env)["properties"])[child])
+    options = node["x-form-options"]
+    assert isinstance(options, list)
+
+    def choose(kind: str) -> None:
+        value = next(
+            expect_object(item)["value"]
+            for item in options
+            if expect_object(item)["label"] == f"Inline: {kind}"
+        )
+        state.write({(child,): value}, env)
+
+    assert expect_object(state.input.data[child])["length"] == length
+    state.write({(child, "length"): 1.7}, env)
+    choose(other_kind)
+    assert expect_object(state.input.data[child]) == {"style": other_kind}
+    choose(authored_kind)
+    assert expect_object(state.input.data[child]).get("length") == length
+
+
 def test_template_input_models_isolate_locks_defaults_and_recomputation(
     creation_templates: dict[str, TemplateDef],
 ) -> None:
