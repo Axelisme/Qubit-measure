@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import ConfigDict, ValidationError, create_model
 from qtpy.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from qtpy.QtGui import QKeyEvent, QMouseEvent
@@ -20,6 +21,7 @@ from qtpy.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
+from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
@@ -403,6 +405,55 @@ def test_metadata_column_shows_caller_mapping_and_survives_value_edits(
     label = _row(widget, "P1", "label")
     assert label.text(METADATA) == ""
     assert label.toolTip(METADATA) == ""
+
+
+def test_group_and_unset_rows_show_their_path_metadata(component_widget):
+    widget, control = component_widget
+    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    target = control.read_context().target
+    control.set_parameter(target, "P1.routing.main", {"ch": 1})
+    control.set_parameter(target, "P1.routing.main.ch", 1, metadata={"stderr": 0.1})
+    # A null group leaves its channel unset while that path keeps its metadata.
+    control.set_parameter(
+        target, "P1.routing.main", None, metadata={"comment": "parked"}
+    )
+    widget.refresh()
+
+    group = _row(widget, "P1", "routing", "main")
+    unset = _row(widget, "P1", "routing", "main", "ch")
+    assert unset.font(VALUE).italic()
+    shown = [(row.text(METADATA), row.toolTip(METADATA)) for row in (group, unset)]
+    assert shown == [
+        ("{comment: parked}", "comment: parked"),
+        ("{stderr: 0.1}", "stderr: 0.1"),
+    ]
+
+    control.set_parameter(target, "P1.routing.main", None, metadata={})
+    widget.refresh()
+    group = _row(widget, "P1", "routing", "main")
+    assert group.text(METADATA) == ""
+    assert group.toolTip(METADATA) == ""
+
+
+def test_multiline_metadata_summary_is_one_line_and_tooltip_keeps_content(
+    component_widget,
+):
+    widget, control = component_widget
+    assert widget.add_component("P1", "test/profiled", {"label": "probe"})
+    metadata: YamlMap = {
+        "run\nnote": "first line\n\n  indented second\n",
+        "history": ["a\nb", {"why": "x\ny"}],
+        "stderr": 0.25,
+    }
+    target = control.read_context().target
+    control.set_parameter(target, "P1.label", "probe", metadata=metadata)
+    widget.refresh()
+
+    label = _row(widget, "P1", "label")
+    summary = label.text(METADATA)
+    assert "\n" not in summary
+    assert yaml.safe_load(summary) == metadata
+    assert yaml.safe_load(label.toolTip(METADATA)) == metadata
 
 
 def test_extra_document_data_outside_the_schema_stays_visible_and_editable(
