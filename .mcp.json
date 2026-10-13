@@ -8,7 +8,19 @@
         "--extra",
         "gui",
         "python",
-        "scripts/run_measure_mcp.py"
+        "mcp_servers/measure.py"
+      ],
+      "env": {}
+    },
+    "workflows-gui": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--extra",
+        "gui",
+        "python",
+        "mcp_servers/workflows.py"
       ],
       "env": {}
     },

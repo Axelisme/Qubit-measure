@@ -96,7 +96,7 @@ def test_set_selection_bumps_and_stores():
     sel = SelectionService(st)
     sel.set_selection(np.array([True, False, True]))
     assert st.version.get(SELECTION_VERSION_KEY) == 1
-    assert st.selection.selected is not None
+    assert st.selection_mask() is not None
 
 
 def test_set_selection_length_mismatch_raises():

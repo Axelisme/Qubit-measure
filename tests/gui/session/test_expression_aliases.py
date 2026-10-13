@@ -6,7 +6,7 @@ from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry import ComponentSchema, RoleSpec
+from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError, RoleSpec
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
@@ -14,8 +14,8 @@ class NumericComponent(ComponentSchema):
     rate: float
 
 
-def _parameters(*, legacy: bool = False) -> ParameterContext:
-    point = PointDocument.model_construct(
+def _point() -> PointDocument:
+    return PointDocument.model_construct(
         format="zcu.parameter-container",
         format_version="1.0",
         general=PointGeneral(created_at="2026-10-09T00:00:00Z", ext={"offset": 2.0}),
@@ -25,8 +25,11 @@ def _parameters(*, legacy: bool = False) -> ParameterContext:
             "qubit": NumericComponent(kind="expression/test", rate=3.0),
         },
     )
+
+
+def _parameters(*, legacy: bool = False) -> ParameterContext:
     parameters = ParameterContext(
-        point=point,
+        point=_point(),
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
         ),
@@ -62,6 +65,23 @@ def test_missing_alias_does_not_read_a_same_named_component() -> None:
     assert evaluate_scalar_expr("qubit.rate", parameters) == 3.0
     with pytest.raises(ExpressionError):
         evaluate_scalar_expr("$qubit.rate", parameters)
+
+
+def test_capture_without_alias_table_names_the_unbound_alias_path() -> None:
+    parameters = ParameterContext(
+        point=_point(),
+        library=LibrarySnapshot(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="1.0")
+        ),
+        target=SavedPoint(entry_id="entry", point="working"),
+        roles=None,
+    )
+    with pytest.raises(ExpressionError) as raised:
+        evaluate_scalar_expr("$resonator.rate - 1.5", parameters)
+    assert "$resonator.rate" in str(raised.value)
+    assert "not bound" in str(raised.value)
+    assert "focus=None" not in str(raised.value)
+    assert isinstance(raised.value.__cause__, RoleResolutionError)
 
 
 @pytest.mark.parametrize(

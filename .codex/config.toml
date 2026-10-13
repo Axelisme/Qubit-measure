@@ -17,7 +17,26 @@ args = [
   "--extra",
   "gui",
   "python",
-  "scripts/run_measure_mcp.py",
+  "mcp_servers/measure.py",
+]
+env_vars = [
+  "QT_QPA_PLATFORM",
+  "DISPLAY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "XDG_SESSION_TYPE",
+]
+default_tools_approval_mode = "approve"
+
+[mcp_servers.workflows-gui]
+command = "uv"
+args = [
+  "run",
+  "--extra",
+  "gui",
+  "python",
+  "mcp_servers/workflows.py",
 ]
 env_vars = [
   "QT_QPA_PLATFORM",

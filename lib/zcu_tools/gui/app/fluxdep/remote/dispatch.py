@@ -234,10 +234,9 @@ def _h_selection_snapshot(
 ) -> SelectionSnapshotReply:
     del params
     selection = adapter.ctrl.state.selection
+    mask = adapter.ctrl.state.selection_mask()
     return {
-        "selected": selection.selected.tolist()
-        if selection.selected is not None
-        else None,
+        "selected": mask.tolist() if mask is not None else None,
         "min_distance": selection.min_distance,
     }
 

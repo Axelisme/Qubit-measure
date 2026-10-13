@@ -1,6 +1,6 @@
 # tools/
 
-`tools/` 放 repo 內部的品質檢查。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者入口——板端 server、GUI 啟動、資料工具。
+`tools/` 放 repo 內部的品質檢查。review 品質判準由 [程式碼品質](../docs/code-quality.md) 定義，環境與驗證流程依 [AGENTS.md](../AGENTS.md)。`scripts/` 放使用者自己執行的板端 server、GUI 啟動與資料工具。[`mcp_servers/`](../mcp_servers/README.md) 放 agent 的 MCP 組合根。
 離線 Migration CLI 位於 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，不接量測啟動流程。執行 legacy 遷移、處理 pending／resume 或修改 component kind 前，讀 [Agent 離線遷移說明書](../docs/storage-migration.md)。
 
 本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
@@ -68,6 +68,8 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 掃描範圍不能只靠違規計數看見，因此這些差異獨立列出。
 
 格式化排在最前面是有原因的：它會改寫程式碼，先量測再格式化的話，讀到結果時那個狀態已經不存在了。
+
+共用 scanner 與 ratchet 的變更檔選集包含 `mcp_servers/`，和使用者入口 `scripts/` 一樣納入檢查。Pyright 使用同名 root 的執行環境，test path checker 將 `tests/mcp_servers/` 對應 repo root 的組合根。
 
 較耗時的兩項**刻意留在外面**；快速 gate 不替代 collection 與行為測試：
 
