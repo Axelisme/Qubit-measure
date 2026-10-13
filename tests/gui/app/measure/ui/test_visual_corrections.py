@@ -33,8 +33,10 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.widgets.cfg import CfgFormWidget, TreeCfgWidget
+from zcu_tools.gui.widgets.form import FormEditor
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_capture
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -47,7 +49,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl = MagicMock()
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = {}
@@ -88,12 +90,6 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
         writeback_items=(),
         has_writeback_draft=False,
     )
-    spec = CfgSectionSpec(
-        label="root", fields={"reps": ScalarSpec(label="Reps", type=int)}
-    )
-    schema = CfgSchema(
-        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(100)})
-    )
 
     @dataclasses.dataclass
     class P:
@@ -102,7 +98,7 @@ def make_snapshot(tab_id, *, analysis=AnalysisMode.FIT, post=False):
     analysis_snap = dataclasses.replace(analysis_snap, params=P())
     snapshot = TabSnapshot(
         adapter_name="fake",
-        cfg_schema=schema,
+        cfg_input={},
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=False,
@@ -171,7 +167,7 @@ def test_A2_sole_tree_has_no_structure_selector(qapp):
     assert not hasattr(cfg_pkg, "tree_structure")
     # Default construction is tree
     ctrl = MagicMock()
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.read_context.return_value = parameter_capture()
     ctrl.get_current_ml.return_value = MagicMock(modules={}, waveforms={})
@@ -196,8 +192,14 @@ def test_A4_cfg_viewport_expands_with_panel_height(qapp, exp_tab_widget, make_ct
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)
     tab.attach(snap, MagicMock())
     qapp.processEvents()
-    assert tab.cfg_form.maximumHeight() >= 10000
-    assert tab.cfg_form.minimumHeight() <= 50
+    form_scroll = next(
+        scroll
+        for scroll in tab.findChildren(QScrollArea)
+        if isinstance(scroll.widget(), FormEditor)
+    )
+    assert form_scroll.widgetResizable()
+    assert form_scroll.maximumHeight() >= 10000
+    assert form_scroll.minimumHeight() <= 50
 
     ctrl2 = MagicMock()
     ctrl2.get_bus.return_value = EventBus()

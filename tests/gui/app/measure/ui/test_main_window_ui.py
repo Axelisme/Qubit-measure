@@ -65,7 +65,8 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.measure._cfg_fakes import PublishedHost, configure_cfg_lookup
+from tests.gui.app.measure._cfg_fakes import PublishedHost
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
 
 
@@ -92,7 +93,7 @@ def control_factory(qapp: QApplication) -> Iterator[Callable[[], ControlIdentity
 def _mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     ctrl = MagicMock()
     ctrl.control_identity = control_factory()
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"
     return ctrl
@@ -261,7 +262,7 @@ def _snapshot(
             has_figure=has_figure,
             has_post_analyze_result=has_post_analyze_result,
         ),
-        cfg_schema=MagicMock(),
+        cfg_input={},
         capabilities=caps,
         run=run_snap,
         analysis=analysis_snap,
@@ -882,7 +883,7 @@ def test_main_window_run_lock_keeps_new_tab_available(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
@@ -1511,7 +1512,7 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(control_factory, qapp):
             supports_post_analysis=True,
             supports_load_data=True,
         ),
-        cfg_schema=_pulse_schema(),
+        cfg_input={},
     )
     tab.attach(snapshot, actions)
 
@@ -1642,7 +1643,7 @@ def test_main_window_confirms_and_begins_shutdown_when_operations_active(
 
     dialogs = RecordingDialogPresenter(confirm_answers=[True])
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 2
     window = MainWindow(ctrl, dialog_presenter=dialogs)
@@ -1662,7 +1663,7 @@ def test_main_window_declining_confirmation_keeps_window_open(control_factory, q
 
     dialogs = RecordingDialogPresenter(confirm_answers=[False])
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 1
     window = MainWindow(ctrl, dialog_presenter=dialogs)
@@ -1685,7 +1686,7 @@ def test_main_window_persists_session_on_close_when_idle(control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = 0
     # The real coordinator runs on_closed once nothing is pending; here drive it
@@ -1727,7 +1728,7 @@ def test_main_window_close_removes_event_bus_subscriptions(control_factory, qapp
     )
 
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     ctrl.active_operation_count.return_value = 0
@@ -1760,7 +1761,7 @@ def test_new_tab_menu_supports_nested_paths(control_factory, qapp, monkeypatch):
 
     del qapp
     ctrl = _mock_ctrl(control_factory)
-    configure_cfg_lookup(ctrl)
+    configure_form_lookup(ctrl)
     ctrl.get_bus.return_value = EventBus()
     ctrl.get_adapter_names.return_value = [
         "fake",
