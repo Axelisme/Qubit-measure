@@ -119,6 +119,25 @@ def test_open_tab_preserves_named_aliases_for_new_and_reused_recipe_runs(
         )
 
 
+@pytest.mark.parametrize("reuse", [None, "t"], ids=["new", "reuse"])
+def test_recipe_aliases_are_captured_only_by_reset(
+    tmp_path: Path, reuse: str | None
+) -> None:
+    gui = NamedAliasesGui()
+    client = make_client(tmp_path, gui)
+    with closing(client.context.session):
+        aliases = {"resonator": "R2"}
+        tab = RecipeSession(client.context).open_tab(
+            "lookback", aliases=aliases, reuse=reuse
+        )
+        aliases["resonator"] = "missing"
+        tab.read_value("$resonator.freq")
+        tab.run()
+        assert gui.alias_requests == [
+            ("tab.reset_cfg", {"tab_id": "t", "aliases": {"resonator": "R2"}})
+        ]
+
+
 def required_library(
     session: RecipeSession, *, reference: str | None = None
 ) -> RecipeGenerator:
