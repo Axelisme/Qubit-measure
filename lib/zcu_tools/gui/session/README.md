@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，alias 解析錯誤訊息
+**Last updated:** 2026-10-13，元件樹 Metadata 欄
 
 # gui/session/ — 量測 session core
 
@@ -77,7 +77,7 @@ session/
     ├── progress_bar.py   — LightweightProgressBar（native-free QWidget；`setValue` 只更新狀態並排程 repaint，避免高頻 progress 卡在 `QProgressBar.setValue`）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
     ├── alias_dialog.py — shared AliasDialog：編輯有序 authored rows，透過 ContextControlPort 原子提交。Measure 與 workflows 直接 import 此 owner，不留 app-local re-export 或 wrapper
-    ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Source 四欄樹，依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
+    ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
     ├── setup_dialog.py — Result entry、Working points 與 Connection 的 shared dialog。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；per-device panel lazy-import zcu_tools.device.*；host 可切 `set_read_only(True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
     ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.

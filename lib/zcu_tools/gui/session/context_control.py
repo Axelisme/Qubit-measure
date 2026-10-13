@@ -137,12 +137,13 @@ class ContextControlPort(Protocol):
         path: str,
         value: YamlValue,
         *,
-        source: Provenance | None = None,
+        metadata: YamlMap | None = None,
     ) -> None:
         """Write a concrete point/general path using the captured target.
 
-        Runs on the owner thread. Omitted source is manual; explicit Provenance
-        uses this entry's ledger. Cross-entry/missing-selection/schema/source/conflict/
+        Runs on the owner thread. metadata=None keeps the path's opaque
+        metadata; a mapping replaces it in the same point commit ({} clears).
+        Cross-entry/missing-selection/schema/metadata representation/conflict/
         I/O failures propagate. Nonselected SavedPoint writes do not select it.
         Success follows resource validation/commit.
         """
@@ -322,9 +323,9 @@ class ContextControlFacet(ContextControlPort):
         path: str,
         value: YamlValue,
         *,
-        source: Provenance | None = None,
+        metadata: YamlMap | None = None,
     ) -> None:
-        self._context.set_parameter(target, path, value, source=source)
+        self._context.set_parameter(target, path, value, metadata=metadata)
 
     def set_module(
         self,
