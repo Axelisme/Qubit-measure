@@ -35,7 +35,7 @@ def test_document_storage_and_path_helpers_without_hdf5(tmp_path: Path) -> None:
 
         directory = Path(sys.argv[1])
         reserved = reserve_labber_filepath(str(directory / "measurement"))
-        assert Path(reserved) == directory / "measurement.hdf5"
+        assert Path(reserved) == directory / "measurement_1.hdf5"
 
         path = directory / "parameters.yaml"
         path.write_text("format: synthetic\\nformat_version: '1.0'\\nt1: 2.5\\n", encoding="utf-8")
