@@ -62,11 +62,14 @@ def test_failed_expression_defaults_require_input_without_changing_core(
         ("count",): "Field required",
     }
     control = adapter_api.Form(DefaultedCfg, {})
-    assert control.to_cfg(
-        require_result(FormState(control.default_input(env)), env), env
-    ) == DefaultedCfg()
+    assert (
+        control.to_cfg(require_result(FormState(control.default_input(env)), env), env)
+        == DefaultedCfg()
+    )
     state.write({("amount",): 8.0, ("count",): 4}, env)
-    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=8, count=4)
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(
+        amount=8, count=4
+    )
 
 
 def test_successful_expression_defaults_are_direct_native_values() -> None:

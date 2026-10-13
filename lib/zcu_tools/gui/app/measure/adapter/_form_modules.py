@@ -113,7 +113,9 @@ def _editable_spec(
         annotations[name] = (
             literal_type(locks[name])
             if name in locks
-            else _editable(info.annotation, nested, seed if isinstance(seed, dict) else {})
+            else _editable(
+                info.annotation, nested, seed if isinstance(seed, dict) else {}
+            )
         )
         derived = deepcopy(info)
         if isinstance(seed, dict) and "expr" in seed:
@@ -168,7 +170,9 @@ class ModuleField:
         self.node = node
         self.catalog: Mapping[str, TemplateDef] = {}
         self.locks = node.lock if node is not None else {}
-        self.editable = tuple(_editable_spec(spec, self.locks, {}) for spec in self.specs)
+        self.editable = tuple(
+            _editable_spec(spec, self.locks, {}) for spec in self.specs
+        )
         self.native = any(
             isinstance(member, type) and issubclass(member, NativeModuleBase)
             for member in members(annotation)
@@ -225,9 +229,16 @@ class ModuleField:
             if self.node is not None
             else None
         )
+        seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
             seeds = template_seed_tree(template, catalog)
+        if isinstance(self.node, Slot):
+            for path, value in self.node.set.items():
+                set_path(seeds, path, scalar_seed(value))
+            for path, value in self.locks.items():
+                set_path(seeds, path, scalar_seed(value))
+        if seeds:
             self.editable = tuple(
                 _editable_spec(spec, self.locks, seeds) for spec in self.specs
             )
