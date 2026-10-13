@@ -147,11 +147,11 @@ def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
     )
     resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
     assert hasattr(resource, "read_module"), (
-        "Missing lowered execution module observation"
+        "Missing field-local module observation"
     )
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
     resource.use_inline(("pulse",))
-    assert resource.read_module(("pulse",)).value["freq"] == 105.0
+    assert resource.read_module(("pulse",)).value["freq"] == 100.0
 
 
 def test_conversion_guards_and_nonmodule_rejections_preserve_input() -> None:
