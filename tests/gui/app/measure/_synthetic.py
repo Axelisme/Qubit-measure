@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
-    Form,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -30,6 +29,7 @@ from zcu_tools.gui.app.measure.schema_builder import (
     ModuleInit,
 )
 from zcu_tools.gui.cfg import SweepSpec, SweepValue
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg

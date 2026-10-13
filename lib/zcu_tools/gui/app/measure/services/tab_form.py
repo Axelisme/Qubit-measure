@@ -11,7 +11,6 @@ from pydantic import JsonValue
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-from zcu_tools.gui.app.measure.adapter import Form, ModuleValues
 from zcu_tools.gui.cfg.resource import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -27,6 +26,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
 )
+from zcu_tools.gui.form_adapter import Form, ModuleValues
 
 _logger = getLogger(__name__)
 

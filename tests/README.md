@@ -117,7 +117,7 @@ debounce timer 時，用本地 helper 包 `QEventLoop + QTimer.singleShot`，不
 
 `tests/program/v2/` 擁有 QICK compile、IR、macro、module 與 simulator 行為；
 `tests/experiment/v2/` 擁有通用 runtime 與工具，`tests/experiment/workflows/` 擁有泛型 Engine、effects 與共用匯出機制。
-`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、builder 與 seed 框架契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
+`tests/gui/app/workflows/` 使用合成註冊清單驗證宿主；`tests/gui/app/measure/adapter/` 擁有 adapter、builder 與 seed 框架契約，`tests/gui/form_adapter/` 擁有 core cfg 生成 Form 的契約。`tests/gui/` 與各 app GUI 目錄擁有 UI、service、remote
 接縫；`tests/mcp/` 擁有 MCP bridge 與操作契約。`tests/resources/`、`tests/analysis/`、
 `tests/notebook/`、`tests/datafile/` 與 `tests/utils/` 分別擁有其路徑對應模組的測試。`tests/migrations/` 擁有 root `migrations/` 的離線轉換與 legacy reader 測試。
 例如 `tests/program/v2/modules/test_registry.py` 測 `PulseRegistry` 的 pulse 定義 SHA256 去重，

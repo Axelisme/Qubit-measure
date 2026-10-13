@@ -29,7 +29,6 @@ from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
-    Form,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -45,6 +44,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.program.v2 import ProgramV2Cfg
 

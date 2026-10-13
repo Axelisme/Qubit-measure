@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.gui.app.measure.adapter import Form, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.events.tab import TabAddedPayload
 from zcu_tools.gui.app.measure.services.persistence_types import (
     PersistedSession,
@@ -12,6 +12,7 @@ from zcu_tools.gui.app.measure.services.persistence_types import (
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.form_adapter import Form
 
 from tests.gui.app.measure._form_fakes import make_form
 

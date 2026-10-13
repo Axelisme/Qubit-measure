@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 from zcu_tools.cfg_model import PulseCfg, Range
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 

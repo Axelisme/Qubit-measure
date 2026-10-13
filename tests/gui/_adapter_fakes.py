@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    Form,
     LoadDataRequest,
     NoAnalyzeParams,
     ParameterWriteback,
@@ -26,6 +25,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import Plots
 
 

@@ -5,10 +5,10 @@ from collections.abc import Mapping
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, Expr
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.services import tab_cfg as resource_api
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument

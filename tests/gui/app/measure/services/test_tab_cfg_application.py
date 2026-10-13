@@ -13,7 +13,7 @@ from zcu_tools.cfg_model import Expr, Range
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.gui.app.measure.adapter import Form, RunRequest
+from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import (
     AppServices,
@@ -26,6 +26,7 @@ from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReas
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow

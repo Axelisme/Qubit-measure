@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
     ExpAdapterProtocol,
-    Form,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -31,6 +30,7 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import BasePayload
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationRunner,

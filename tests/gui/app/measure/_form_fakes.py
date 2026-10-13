@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasTable
 from zcu_tools.gui.session.types import SessionEnv
 

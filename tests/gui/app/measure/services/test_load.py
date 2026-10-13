@@ -11,7 +11,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    Form,
     LoadDataRequest,
     NoAnalyzeParams,
 )
@@ -23,6 +22,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 

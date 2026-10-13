@@ -16,10 +16,10 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
-from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.types import ParameterContext

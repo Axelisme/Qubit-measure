@@ -6,10 +6,10 @@ from zcu_tools.experiment import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
-    Form,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.experiment._snapshot_support import SnapshotRecordCore

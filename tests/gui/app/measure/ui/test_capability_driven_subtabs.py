@@ -406,8 +406,8 @@ def test_figure_containers_remain_stable_across_tab_switch_and_busy(
     assert tab.get_run_container() is run_c
     assert tab.get_post_container() is post_c
     # Busy tab cannot be closed
-    from zcu_tools.gui.app.measure.adapter import Form
     from zcu_tools.gui.app.measure.state import Session, State
+    from zcu_tools.gui.form_adapter import Form
     from zcu_tools.gui.session.types import SessionEnv
 
     exp_ctx = SessionEnv(

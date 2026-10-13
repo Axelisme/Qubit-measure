@@ -53,6 +53,27 @@ forbidden_modules =
     PySide2
     PySide6
 
+# The shared Form generator is a Qt-free frontend framework below every app host.
+[importlinter:contract:form-adapter-no-host]
+name = Shared Form generator is Qt-free and does not depend on app hosts
+type = forbidden
+source_modules =
+    zcu_tools.gui.form_adapter
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.gui.widgets
+    zcu_tools.gui.remote
+    zcu_tools.gui.session.services
+    zcu_tools.gui.session.ui
+    zcu_tools.gui.session.adapters
+    zcu_tools.experiment
+    zcu_tools.mcp
+    qtpy
+    PyQt5
+    PyQt6
+    PySide2
+    PySide6
+
 # Pydantic form editor may render the draft, never own host or execution policy.
 [importlinter:contract:form-editor-no-host]
 name = Pydantic form editor does not depend on app or execution policy

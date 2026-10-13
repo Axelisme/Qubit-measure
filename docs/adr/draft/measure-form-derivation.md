@@ -29,7 +29,7 @@ measure adapter 的表單由 `cfg_definition()` 用 builder 逐欄宣告。core 
 
 ### 表單形狀從 core cfg 推導
 
-adapter 對外的 cfg 格式預設等於 core 的 pydantic cfg。lib 的 measure adapter 框架從型別推導 spec，adapter 不重述形狀，只宣告起始值、鎖定、隱藏與偏差。黑盒子仍成立。對外契約仍是 adapter 發布的 spec，只是沒有差異的部分不必再說一次。
+adapter 對外的 cfg 格式預設等於 core 的 pydantic cfg。lib 的共用 Form 生成器 `gui.form_adapter` 從型別推導 spec，adapter 不重述形狀，只宣告起始值、鎖定、隱藏與偏差。黑盒子仍成立。對外契約仍是 adapter 發布的 spec，只是沒有差異的部分不必再說一次。
 
 使用者 2026-10-12：「adapter內對外是黑盒子，也就是說adapter可以曝露與內部使用不同的cfg格式，但現實是往往內部格式都與外部極其接近」。
 
@@ -104,7 +104,9 @@ FORM = Form(FreqCfg, tree={
 
 ### 依賴方向
 
-`FieldMeta` 與樹的節點型別只依賴標準庫與 `zcu_tools.cfg_model`，不 import `zcu_tools.gui`；使用者 core import 它們時，既有 contract C15 仍成立（C15 檢查間接 import）。推導器與 `Form` 在 measure adapter 框架；範本目錄的格式在 lib、表在 zcu_lab，C16 不變。本篇不新增 contract。
+`FieldMeta` 與樹的節點型別只依賴標準庫與 `zcu_tools.cfg_model`，不 import `zcu_tools.gui`；使用者 core import 它們時，既有 contract C15 仍成立（C15 檢查間接 import）。推導器與 `Form` 在共用的 Qt-free 前端框架 `zcu_tools.gui.form_adapter`，measure、workflows、library 與 writeback 的表單定義共用，不 import `gui.app` 或 `zcu_lab`；contract `form-adapter-no-host` 執行這條邊界。範本目錄的格式在 lib、表在 zcu_lab，C16 不變。
+
+使用者 2026-10-13 裁決把生成器從 measure adapter 框架移到共用位置，稱它為「gui adapter 工具」，名稱「都行」。
 
 ### 驗收
 

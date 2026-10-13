@@ -14,13 +14,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
     AnalysisMode,
-    Form,
     RunRequest,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.cfg.resource import CfgPreconditionError
+from zcu_tools.gui.form_adapter import Form
 
 from tests.gui.app.measure.remote._helpers import Fixture
 

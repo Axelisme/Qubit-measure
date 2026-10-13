@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_chec
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
-
-from .form import Form
+from zcu_tools.gui.form_adapter import Form
 
 if TYPE_CHECKING:
     from zcu_tools.datafile import AnalysisDocument, RunMetadata
