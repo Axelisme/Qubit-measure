@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from pydantic import Field, JsonValue
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
@@ -157,6 +158,44 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     assert state.version.get(f"tab:{tab_id}:post_analyze") == 1
     assert state.version.get(f"tab:{tab_id}:cfg") == cfg_version
     assert state.version.get(f"tab:{tab_id}:save_path") == save_path_version
+
+
+class RepeatsCfg(ExpCfgModel):
+    """A result snapshot and the editable draft can have different repeats."""
+
+    reps: int = Field(default=20, ge=1)
+
+
+@pytest.mark.parametrize("draft", [7, 0, {"expr": "unfinished +"}])
+def test_load_preserves_authored_input_including_invalid_drafts(
+    draft: JsonValue,
+) -> None:
+    state, tab_id, adapter = _make_state()
+    tab = state.get_tab(tab_id)
+    tab.cfg.revoke()
+    tab.cfg = make_form(Form(RepeatsCfg, {}), state=state)
+    tab.cfg.write({("reps",): draft})
+    before = tab.cfg.input.data
+    env = tab.cfg.env
+    cfg_version = state.version.get(f"tab:{tab_id}:cfg")
+    loaded = RunRecord(RepeatsCfg(reps=40), object())
+    metadata = historical_metadata()
+    adapter.load.return_value = (loaded, metadata)
+    service, _emit, _writeback = _service(state)
+
+    try:
+        outcome = service.load_result(tab_id, "result.h5")
+
+        assert tab.cfg.input.data == before
+        assert tab.cfg.env is env
+        assert state.version.get(f"tab:{tab_id}:cfg") == cfg_version
+        assert tab.run.result is loaded
+        assert tab.run.result.cfg.reps == 40
+        assert tab.run.metadata is metadata
+        assert tab.run.source_path == "result.h5"
+        assert outcome.has_cfg_snapshot
+    finally:
+        tab.cfg.revoke()
 
 
 def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
