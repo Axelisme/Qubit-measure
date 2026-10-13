@@ -36,8 +36,9 @@ class Second(FormModel):
 
     @classmethod
     def defaults(
-        cls, _env: FormEnv, previous: Mapping[str, JsonValue]
+        cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
+        del env
         return (
             {"kind": "second", "shared": 7.0, "required": len(previous), "derived": 1}
             if previous
