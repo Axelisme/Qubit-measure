@@ -31,7 +31,7 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
 from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
@@ -870,11 +870,20 @@ class MainWindow(QMainWindow):
     def apply_tab_writeback(
         self, tab_id: str, pane: WritebackPane = "analysis"
     ) -> None:
+        """Apply this pane's draft, presenting ExpectedError without discarding it.
+
+        An unknown tab is ignored. Expected guard/input refusals use the existing
+        error presenter; the draft stays editable. Other failures propagate.
+        """
         logger.info("apply_tab_writeback: tab_id=%r pane=%r", tab_id, pane)
         if not self._ctrl.has_tab(tab_id):
             logger.warning("apply_tab_writeback: unknown tab_id=%r — ignoring", tab_id)
             return
-        result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        try:
+            result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+        except ExpectedError as error:
+            self.show_error_dialog("Writeback failed", str(error))
+            return
         applied_ids = result.get("applied_ids", [])
         if applied_ids:
             self.show_status_message(f"Writeback applied: {', '.join(applied_ids)}")
