@@ -255,3 +255,22 @@ def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
     required = form_adapter.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
     assert required.model.choices(env)[("flux_dev",)] == ()
     assert isinstance(FormState(required.default_input(env)).result(env), FormErrors)
+
+
+class DisplayedCfg(ConfigBase):
+    amplitude: Annotated[float, FieldMeta(label="Amplitude", unit="V", decimals=3)] = (
+        0.5
+    )
+
+
+def test_field_meta_label_unit_and_decimals_reach_input_schema() -> None:
+    schema = form_adapter.Form(DisplayedCfg, {}).model.input_schema(FormEnv())
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    amplitude = properties["amplitude"]
+    assert isinstance(amplitude, dict)
+    assert (amplitude["title"], amplitude["unit"], amplitude["decimals"]) == (
+        "Amplitude",
+        "V",
+        3,
+    )
