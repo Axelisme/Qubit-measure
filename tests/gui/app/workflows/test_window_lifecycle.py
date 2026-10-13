@@ -28,6 +28,7 @@ from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables
 from ._window_scenarios import install_pause_plot_workflow
+from ._window_support import form_editable
 
 
 def test_close_pending_start_requests_stop_without_destroying_producer_host(
@@ -74,7 +75,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     assert resumed == token
     assert harness.handles.live_count() == 1
     assert harness.progress.bars_for_operation(token) == bars
-    assert not window.plan_panel.isEnabled()
+    assert not form_editable(window.plan_panel)
     harness.complete_segment()
     terminal = controller.status()
     assert (
@@ -84,7 +85,7 @@ def test_window_pause_keeps_plan_plots_and_capture_then_resumes_with_lease(
     )
     assert len(attempts) == 2 and attempts[0] == attempts[1]
     assert len(figures) == 2 and figures[0] == figures[1]
-    assert window.plan_panel.isEnabled()
+    assert form_editable(window.plan_panel)
     assert harness.handles.known_outcome(token) is not None
     assert not harness.gate.snapshot()
 
@@ -132,7 +133,7 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
         else:
             window.stop("register-window")
         observations.append(
-            (window.plan_panel.isEnabled(), active_controller.has_pending_segment)
+            (form_editable(window.plan_panel), active_controller.has_pending_segment)
         )
 
     harness.background.on_submit = during_submit
@@ -141,16 +142,16 @@ def test_resume_submission_stop_or_close_keeps_window_locked_until_delivery(
     assert observations == [(False, True)]
     assert active_controller.has_pending_segment
     assert close_results == ([False] if action == "close" else [])
-    assert not window.plan_panel.isEnabled() and harness.gate.snapshot()
+    assert not form_editable(window.plan_panel) and harness.gate.snapshot()
     harness.background.execute()
-    assert not window.plan_panel.isEnabled() and harness.gate.snapshot()
+    assert not form_editable(window.plan_panel) and harness.gate.snapshot()
     harness.background.deliver()
     controller = window.controller
     assert controller is not None
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
     assert attempts == ["step"]
-    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("workflow") == ()
     assert window.close()
@@ -199,7 +200,7 @@ def test_resume_stop_rejection_unlocks_window_without_a_producer(
     start = window.findChild(QPushButton, "workflow.run.start")
     pause = window.findChild(QPushButton, "workflow.run.pause")
     resume = window.findChild(QPushButton, "workflow.run.resume")
-    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert start is not None and start.isEnabled()
     assert pause is not None and not pause.isEnabled()
     assert resume is not None and not resume.isEnabled()
@@ -239,7 +240,9 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     harness.complete_segment()
     assert harness.background.work is None
     assert harness.progress.bars_for_owner("workflow")
-    assert not window.plan_panel.isEnabled() and not window.tunables_panel.isEnabled()
+    assert not form_editable(window.plan_panel) and not form_editable(
+        window.tunables_panel
+    )
     assert window.tuning_panel is not None and window.tuning_panel.isEnabled()
     start = window.findChild(QPushButton, "workflow.run.start")
     pause = window.findChild(QPushButton, "workflow.run.pause")
@@ -255,7 +258,7 @@ def test_paused_window_stop_or_close_ends_run_without_another_worker(
     else:
         status = window.stop("paused-stop")
         assert status is not None and status.lifecycle == "stopped"
-        assert window.plan_panel.isEnabled() and start.isEnabled()
+        assert form_editable(window.plan_panel) and start.isEnabled()
         assert not pause.isEnabled() and not resume.isEnabled()
     controller = window.controller
     assert controller is not None
@@ -309,7 +312,9 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
             )
         except IsADirectoryError as error:
             native_errors.append(error)
-        observed.append((window.plan_panel.isEnabled(), controller.has_pending_segment))
+        observed.append(
+            (form_editable(window.plan_panel), controller.has_pending_segment)
+        )
 
     harness.background.on_submit = during_submit
     harness.background.fail_submit = True
@@ -325,7 +330,7 @@ def test_resume_failed_tunables_unwind_unlocks_window_and_preserves_error(
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert panel.host.accepted_input.data == panel.panel.state.base.data == accepted
     assert sample_input(panel.panel.state.input.data)["value"] == 45.0
-    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     assert controller.operation_id is None and not controller.has_pending_segment
     assert harness.handles.known_outcome(token) == OperationOutcome(
         "failed", failed.reason
@@ -452,8 +457,8 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
         ) == (gate, bars)
         assert (
             window.tuning_panel,
-            window.plan_panel.isEnabled(),
-            window.tunables_panel.isEnabled(),
+            form_editable(window.plan_panel),
+            form_editable(window.tunables_panel),
         ) == (tuning, False, False)
     assert attempts == ([] if phase == "pending" else ["step"])
     stop_button = window.findChild(QPushButton, "workflow.run.stop")
@@ -466,6 +471,6 @@ def test_old_window_commands_cannot_change_replacement_run_and_gui_stops_current
     else:
         stopped = controller.status()
         assert stopped is not None and stopped.lifecycle == "stopped"
-    assert controller.run_id == "run-B" and window.plan_panel.isEnabled()
+    assert controller.run_id == "run-B" and form_editable(window.plan_panel)
     assert harness.progress.bars_for_owner("workflow") == ()
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0

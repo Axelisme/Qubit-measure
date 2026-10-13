@@ -1,5 +1,9 @@
-"""Only text fields take Expr input; picked values and library keys take none."""
+"""Only text fields take Expr input; picked values and library keys take none.
 
+A union mixing text and picked values has no control, so it is rejected.
+"""
+
+import re
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Literal
@@ -11,6 +15,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
+    FormInput,
     FormModel,
     FormPath,
     FormState,
@@ -235,6 +240,57 @@ def test_compatible_restore_drops_expr_on_picked_leaves_and_library_keys(
     dropped = state.write_compatible(saved, env)
     assert set(dropped) == {("unit",), ("speed",), ("drive", "name")}
     assert state.input.data == {**before, "amount": {"expr": "1 / 4"}}
+
+
+class AutoGainForm(FormModel):
+    """A number or a picked "auto": a union of text and picked values."""
+
+    gain: float | Literal["auto"] = 1.0
+
+
+class FlagCountForm(FormModel):
+    """A checkbox value or a typed integer: bool is picked, int is text."""
+
+    count: bool | int = 1
+
+
+class Level(BaseModel):
+    """A nested section holding a mixed union leaf."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: Speed | str = "fast"
+
+
+class NestedMixedForm(FormModel):
+    """A mixed union leaf one model level down."""
+
+    section: Level = Field(default_factory=Level)
+
+
+MIXED_FORMS: tuple[tuple[type[FormModel], dict[str, JsonValue], str], ...] = (
+    (AutoGainForm, {"gain": 1.0}, "gain"),
+    (FlagCountForm, {"count": 1}, "count"),
+    (NestedMixedForm, {"section": {"level": "fast"}}, "section.level"),
+)
+MIXED_MESSAGE = "a union of text and picked values is not supported"
+
+
+@pytest.mark.parametrize(("form", "data", "path"), MIXED_FORMS)
+def test_input_schema_rejects_a_union_of_text_and_picked_values(
+    env: FormEnv, form: type[FormModel], data: dict[str, JsonValue], path: str
+) -> None:
+    with pytest.raises(ValueError, match=f"^{re.escape(path)}: {MIXED_MESSAGE}$"):
+        form.input_schema(env)
+
+
+@pytest.mark.parametrize(("form", "data", "path"), MIXED_FORMS)
+def test_result_rejects_a_union_of_text_and_picked_values(
+    env: FormEnv, form: type[FormModel], data: dict[str, JsonValue], path: str
+) -> None:
+    state = FormState(FormInput(form, data))
+    with pytest.raises(ValueError, match=f"^{re.escape(path)}: {MIXED_MESSAGE}$"):
+        state.result(env)
 
 
 def _nested(path: FormWritePath, value: JsonValue) -> dict[str, JsonValue]:

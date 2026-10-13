@@ -23,6 +23,10 @@ from zcu_tools.gui.form import (
 from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
+# What decides one row's controls: path, kind, options present, expression,
+# fixed and group. The rows are rebuilt when any field's shape changes.
+type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None]
+
 
 class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
@@ -101,6 +105,16 @@ class FormEditor[F: FormModel](QWidget):
     use JSON text for the whole leaf; they do not expose key/index write paths.
     Complex direct text uses Python complex-number notation, not an expression.
 
+    set_editing_enabled(enabled=False) makes the form read-only but readable;
+    no control is disabled or greyed out. Every form.input QLineEdit is
+    read-only (isReadOnly() is True): its text can be selected and copied,
+    and its right-click menu keeps only the copying items, with
+    form.mode.<path> listed but disabled. Dropdowns and checkboxes
+    (form.input and form.enabled) show the current value in normal colours
+    and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
+    a wheel turn over them scrolls an enclosing scroll area instead. Group
+    and model fold buttons still expand and collapse.
+
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
     After QObject destruction or garbage collection of this view, the next
@@ -156,6 +170,8 @@ class FormEditor[F: FormModel](QWidget):
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
+        # Field shapes in declaration order, as of the last rebuild.
+        self._shape: tuple[_RowShape, ...] = ()
         self._groups: list[GroupBlock] = []
         # User folds by model path, and by (model level path, group name).
         self._model_expanded: dict[FormWritePath, bool] = {}
@@ -216,10 +232,14 @@ class FormEditor[F: FormModel](QWidget):
         self._publish()
 
     def set_editing_enabled(self, *, enabled: bool) -> None:
-        """Enable or disable input controls without changing state or local text.
+        """Allow user edits (enabled=True, the initial mode) or make the form read-only.
 
-        External state changes remain visible while inputs are disabled.
-        Raises RuntimeError after detach.
+        Read-only (enabled=False) keeps every control enabled and readable:
+        text can be selected and copied, folds still work, and no user input
+        changes state or local text (see the class docstring for each
+        control). Neither mode writes state or drops local text. External
+        state changes remain visible while read-only. Raises RuntimeError
+        after detach.
         """
         self._require_state()
         self._editing_enabled = enabled
@@ -309,19 +329,12 @@ class FormEditor[F: FormModel](QWidget):
             )
             for field in flat
         )
-        old_shape = tuple(
-            (
-                row.field.path,
-                row.field.kind,
-                row.field.options is not None,
-                row.field.expression,
-                row.field.fixed,
-                row.field.group,
-            )
-            for row in self._rows.values()
-        )
-        if shape != old_shape:
+        # Compare with the stored shape, not one read from self._rows: rows are
+        # in drawing order (a level's group blocks after its ungrouped rows),
+        # which differs from declaration order when a group comes first.
+        if shape != self._shape:
             self._rebuild(fields)
+            self._shape = shape
         for field in flat:
             self._rows[field.path].display(
                 field, self._local.get(field.path), editable=self._editing_enabled
@@ -397,11 +410,9 @@ class FormEditor[F: FormModel](QWidget):
         )
         self._rows[field.path] = row
         layout.addWidget(row.widget)
-        if row.group is not None:
-            child_layout = row.group.layout()
-            if isinstance(child_layout, QVBoxLayout):
-                # Recursion back into _add_level: a model's children are a level.
-                self._add_level(field.path, field.children, row.group, child_layout)
+        if row.group is not None and row.rows is not None:
+            # Recursion back into _add_level: a model's children are a level.
+            self._add_level(field.path, field.children, row.group, row.rows)
         return row.label
 
     def _write(

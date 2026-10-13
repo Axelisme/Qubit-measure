@@ -27,7 +27,7 @@ from tests.gui.app.workflows._synthetic import PlanForm
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables, inline_input
-from ._window_support import RpcRequest, start_plan_batch
+from ._window_support import RpcRequest, form_editable, start_plan_batch
 
 
 def test_window_services_run_and_progress_share_session(
@@ -255,7 +255,7 @@ def test_rpc_start_partial_input_uses_current_defaults_and_one_fixed_capture(
     assert not (entry.result_path / "workflows/partial-rpc").exists()
     for panel in (window.plan_panel, window.tunables_panel):
         assert panel.state.base.data == panel.state.input.data
-        assert not panel.isEnabled()
+        assert not form_editable(panel)
     assert window.plan_panel.state.input.data["scale"] == {"expr": "0.06 * 2"}
     # Fresh Start defaults evaluate the expression default with this capture.
     assert sample_input(window.tunables_panel.state.input.data)["value"] == 31.0

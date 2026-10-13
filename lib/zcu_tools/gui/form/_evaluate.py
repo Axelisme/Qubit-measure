@@ -11,7 +11,7 @@ from pydantic_core import PydanticCustomError
 from zcu_tools.gui.cfg.codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
-from ._json import copy_object, default_json
+from ._json import copy_object, default_json, expr_text
 from ._sources import check_sources, error_path
 from ._structure import (
     accepts_expression,
@@ -72,6 +72,7 @@ class _Decoding:
 def _decode(
     info: FieldInfo, value: JsonValue, path: FormPath, decoding: _Decoding
 ) -> FormValue:
+    text_field = accepts_expression(info.annotation, path)
     annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
     if isinstance(value, dict) and key_or_inline(info.annotation):
@@ -94,9 +95,7 @@ def _decode(
         return None
     # Only text fields evaluate an Expr envelope; other leaves keep it as
     # ordinary input, which Pydantic rejects with its own type message.
-    if isinstance(value, dict) and (
-        accepts_expression(annotation) if expression else numeric
-    ):
+    if isinstance(value, dict) and (text_field if expression else numeric):
         return _scalar(value, path, decoding, numeric=numeric)
     return _decode_container(annotation, value, path, decoding)
 
@@ -166,10 +165,11 @@ def _scalar(
 ) -> FormValue:
     try:
         if "expr" in value:
-            if set(value) != {"expr"} or not isinstance(value["expr"], str):
+            text = expr_text(value)
+            if text is None:
                 kind = "Numeric" if numeric else "String"
                 raise ValueError(f"{kind} expression requires {{expr: text}}")
-            return evaluate_scalar_expr(value["expr"], decoding.env.parameters)
+            return evaluate_scalar_expr(text, decoding.env.parameters)
         if "__complex__" in value:
             return decode_complex(value)
     except (ExpressionError, ValueError) as exc:
@@ -421,12 +421,9 @@ def _evaluate_section(
         if child is not None and isinstance(value, dict):
             _evaluate_section(child, value, env, path, discriminator(info), substituted)
             continue
-        if not (
-            isinstance(value, dict)
-            and set(value) == {"expr"}
-            and isinstance(text := value["expr"], str)
-            and accepts_expression(info.annotation)
-        ):
+        text_field = accepts_expression(info.annotation, path)
+        text = expr_text(value)
+        if text is None or not text_field:
             continue
         try:
             evaluated = evaluate_scalar_expr(text, env.parameters)
