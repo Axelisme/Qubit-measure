@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, Form generator imported from gui.form_adapter
+**Last updated:** 2026-10-14, editor option commands go through resource.run_command
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -593,12 +593,14 @@ revokes retained handles. Reopening creates a new resource and source capture.
 Frontend attach and detach do not own resource lifetime.
 
 The Qt Run panel mounts the shared `FormEditor` over `resource.editor_state`, the
-same FormState lent for reading and subscribing, and passes `write=resource.write`.
-Editor input therefore takes the resource guards and publishes to resource
-subscribers and the tab cfg version. Reset installs a new FormState; the panel
-watches the resource and mounts a new editor on that state. While the tab
-runs or analyzes, the panel only calls `set_editing_enabled(enabled=False)`: inputs
-lock, but the form still scrolls and its groups still fold. Detach unsubscribes
+same FormState lent for reading and subscribing, and passes `write=resource.write`
+and `run_command=resource.run_command`. Editor input and right-click option
+commands (such as a module key's Convert to inline) therefore take the resource
+guards and publish to resource subscribers and the tab cfg version. Reset
+installs a new FormState; the panel watches the resource and mounts a new
+editor on that state. While the tab runs or analyzes, the panel only calls
+`set_editing_enabled(enabled=False)`: inputs lock, but the form still scrolls
+and its groups still fold. Detach unsubscribes
 and detaches the editor before the tab closes.
 
 Load replaces results, not Form input. Valid, invalid and unfinished drafts
