@@ -309,6 +309,56 @@ def test_repeated_alignment_with_same_reason_redraws_show_background(
         widget.deleteLater()
 
 
+def test_upstream_refresh_keeps_unapplied_display_edits_pending(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        _record_perfect_fit(ctrl, bounds)
+        widget.show_tab("show")
+        display = next(
+            group
+            for group in widget.findChildren(QGroupBox)
+            if group.title() == "Display"
+        )
+        show_form = display.findChildren(TransitionsForm)[0]
+        x_hi = display.findChildren(QDoubleSpinBox)[1]
+        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+
+        def labels() -> list[str]:
+            return [line.get_label() for line in shown.axes[0].lines]
+
+        assert labels() == ["0 -> 1"]
+        xlim_applied = shown.axes[0].get_xlim()
+        assert x_hi.value() != pytest.approx(0.9)
+
+        show_form.set_transitions(TransitionDict({"transitions": [(0, 2)]}))
+        x_hi.setValue(0.9)
+        assert labels() == ["0 -> 1"], "editing a field is not Apply"
+
+        ctrl.set_alignment("a", 0.55, 1.05)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        assert "Outdated: a re-aligned" in shown.axes[0].get_title()
+        assert labels() == ["0 -> 1"], "an upstream refresh must not apply edits"
+        assert shown.axes[0].get_xlim() == pytest.approx(xlim_applied)
+        assert show_form.get_transitions() == {"transitions": [(0, 2)]}
+        assert x_hi.value() == pytest.approx(0.9)
+
+        next(
+            button
+            for button in widget.findChildren(QPushButton)
+            if button.text() == "Apply"
+        ).click()
+        assert labels() == ["0 -> 2"]
+        assert shown.axes[0].get_xlim()[1] == pytest.approx(0.9)
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
 def test_three_tabs_filter_search_show(panel):
     w, _ = panel
     tabs = w.findChildren(QTabWidget)
