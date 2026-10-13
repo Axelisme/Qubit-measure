@@ -17,7 +17,7 @@ from qtpy.QtWidgets import QPushButton, QWidget
 from zcu_tools.analysis.fluxdep import (
     cast2real_and_norm,
     contrast_limits,
-    onetone_dip_depth,
+    onetone_background,
 )
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 
@@ -63,10 +63,11 @@ class ResultPreviewWidget(InteractiveMplWidget):
         # OneTone is locked to magnitude (phase uninformative) and drawn like
         # its sample picker; TwoTone uses phase.
         if entry.spec_type == "OneTone":
-            amp = onetone_dip_depth(signals)
+            shown = onetone_background(signals)
+            amp, vmin, vmax = shown.values, shown.vmin, shown.vmax
         else:
             amp = cast2real_and_norm(signals, use_phase=True)
-        vmin, vmax = contrast_limits(amp)
+            vmin, vmax = contrast_limits(amp)
         ax.imshow(
             amp.T,
             aspect="auto",

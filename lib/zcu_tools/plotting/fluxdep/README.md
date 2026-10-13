@@ -26,12 +26,12 @@ indices onto device/GHz and normalized-amplitude panels. The Qt OneTone view and
 `make_onetone_pick_figure` share its layout and reusable artists. The builder
 returns a separate Agg Figure; projecting onto a supplied GUI Figure does not
 change its canvas. Neither path commits threshold or selection state.
-Its background is `analysis.fluxdep.processing.onetone_dip_depth` (smoothed
-magnitude subtracted from its maximum) clipped by `contrast_limits`, so resonator
-dips draw dark under `gray_r`. The fluxdep GUI result preview, the OneTone line
-picker and both OneTone PNGs (line pick and spectrum) use the same two helpers, so
-every OneTone view shares one background. The helpers live in analysis because
-`TwoLinePicker` needs them and analysis cannot import plotting.
+Its background is `analysis.fluxdep.processing.onetone_background` (smoothed
+magnitude subtracted from its maximum, with percentile colour limits), so
+resonator dips draw dark under `gray_r`. The fluxdep GUI result preview, the
+OneTone line picker and both OneTone PNGs (line pick and spectrum) call the same
+function, so every OneTone view shares one background. It lives in analysis
+because `TwoLinePicker` needs it and analysis cannot import plotting.
 
 `twotone.TwoTonePickPlot` renders a numerical `TwoTonePickView` onto a supplied
 Figure in native device/GHz axes. Current points, optional mask and positional

@@ -11,7 +11,7 @@ from zcu_tools.analysis.fluxdep.onetone import (
     OneTonePickState,
     analyze_onetone_pick,
 )
-from zcu_tools.analysis.fluxdep.processing import contrast_limits, onetone_dip_depth
+from zcu_tools.analysis.fluxdep.processing import onetone_background
 
 
 class OneTonePickPlot:
@@ -46,10 +46,9 @@ class OneTonePickPlot:
         spectrum = inputs.spectrum
         ax_image = figure.add_subplot(2, 1, 1)
         ax_curve = figure.add_subplot(2, 1, 2)
-        background = onetone_dip_depth(spectrum.signals)
-        vmin, vmax = contrast_limits(background)
+        background = onetone_background(spectrum.signals)
         ax_image.imshow(
-            background.T,
+            background.values.T,
             aspect="auto",
             origin="lower",
             extent=(
@@ -59,8 +58,8 @@ class OneTonePickPlot:
                 float(spectrum.freqs[-1]),
             ),
             cmap="gray_r",
-            vmin=vmin,
-            vmax=vmax,
+            vmin=background.vmin,
+            vmax=background.vmax,
         )
         ax_image.axhline(
             spectrum.freqs[inputs.max_freq_index], color="red", linewidth=1

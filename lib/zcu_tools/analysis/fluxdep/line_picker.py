@@ -26,8 +26,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
 )
 from zcu_tools.analysis.fluxdep.processing import (
     cast2real_and_norm,
-    contrast_limits,
-    onetone_dip_depth,
+    onetone_background,
 )
 
 _LOSS_REFRESH_MS = 120
@@ -60,7 +59,7 @@ class TwoLinePicker:
         axes. flux_half / flux_int seed the lines (folded into the axis when
         None or outside it); force_magnitude starts in magnitude-only mode.
         onetone marks a OneTone resonator spectrum: the main image then shows
-        ``onetone_dip_depth`` within ``contrast_limits`` (dark dip on white,
+        ``onetone_background`` (dark dip on white,
         like the OneTone sample picker) and keeps it when the projection
         changes. Otherwise the main image shows the alignment projection.
         Line positions, mirror loss and auto-align always use the projection.
@@ -132,8 +131,8 @@ class TwoLinePicker:
         self._ax_loss = self._figure.add_subplot(2, 1, 2)
 
         if self._onetone:
-            background = onetone_dip_depth(self._signals)
-            vmin, vmax = contrast_limits(background)
+            shown = onetone_background(self._signals)
+            background, vmin, vmax = shown.values, shown.vmin, shown.vmax
         else:
             background, vmin, vmax = self._real_signals, None, None
         self._main_im = self._ax_main.imshow(

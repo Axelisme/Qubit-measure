@@ -5,7 +5,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 from zcu_tools.analysis.fluxdep.models import PointsData, SpectrumData
-from zcu_tools.analysis.fluxdep.processing import contrast_limits, onetone_dip_depth
+from zcu_tools.analysis.fluxdep.processing import onetone_background
 
 
 def make_spectrum_figure(
@@ -20,8 +20,8 @@ def make_spectrum_figure(
     raw contains native device positions, GHz frequencies and complex signals
     shaped (device, frequency). points uses the same units. alignment is the
     committed (half, integer) pair in native device units, or None when unaligned.
-    onetone draws a OneTone spectrum like its sample picker: ``onetone_dip_depth``
-    within ``contrast_limits``, a dark dip on white. Otherwise the background
+    onetone draws a OneTone spectrum like its sample picker:
+    ``onetone_background``, a dark dip on white. Otherwise the background
     is the raw magnitude ``|signals|``.
     Empty axes produce an empty plot. Rendering does not modify inputs, create
     interactive sessions, register pyplot figures, or save files. Matplotlib
@@ -32,8 +32,8 @@ def make_spectrum_figure(
     axes = figure.subplots()
     if raw["dev_values"].size and raw["freqs"].size:
         if onetone:
-            background = onetone_dip_depth(raw["signals"])
-            vmin, vmax = contrast_limits(background)
+            shown = onetone_background(raw["signals"])
+            background, vmin, vmax = shown.values, shown.vmin, shown.vmax
         else:
             background, vmin, vmax = np.abs(raw["signals"]), None, None
         axes.pcolormesh(

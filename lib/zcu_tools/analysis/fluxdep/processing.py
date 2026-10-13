@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -49,17 +50,34 @@ def cast2real_and_norm(
     return real_signals
 
 
-def onetone_dip_depth(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    """Return how far each OneTone pixel lies below the spectrum's peak magnitude.
+@dataclass(frozen=True)
+class OneToneBackground:
+    """A OneTone spectrum's display image and its colour limits.
+
+    values is the dip depth shaped like the spectrum (device, frequency): how
+    far each pixel's smoothed magnitude lies below the largest one, so a
+    resonator dip holds the largest values. NaN pixels stay NaN. vmin and
+    vmax are the ``contrast_limits`` of values, with vmin < vmax.
+    """
+
+    values: NDArray[np.float64]
+    vmin: float
+    vmax: float
+
+
+def onetone_background(signals: NDArray[np.complex128]) -> OneToneBackground:
+    """Return the dip-depth image and colour limits every OneTone view draws.
 
     signals is the complex spectrum shaped (device, frequency). The magnitude
-    is smoothed along frequency (``cast2real_and_norm`` without phase), then
-    subtracted from its largest finite value, so a resonator dip becomes the
-    largest value and draws dark on a light background under ``gray_r``. NaN
-    pixels stay NaN. The result has the shape of signals.
+    is smoothed along frequency (``cast2real_and_norm`` without phase) and
+    subtracted from its largest finite value. Under ``gray_r`` with the
+    returned limits the dip draws dark on a light background. ValueError
+    rejects signals that are not 2D.
     """
     magnitude = cast2real_and_norm(signals, use_phase=False)
-    return np.nanmax(magnitude) - magnitude
+    depth = np.nanmax(magnitude) - magnitude
+    vmin, vmax = contrast_limits(depth)
+    return OneToneBackground(values=depth, vmin=vmin, vmax=vmax)
 
 
 def contrast_limits(values: NDArray[np.float64]) -> tuple[float, float]:
@@ -67,16 +85,23 @@ def contrast_limits(values: NDArray[np.float64]) -> tuple[float, float]:
 
     Clipping the colour range to percentiles (instead of min/max) keeps a few
     outliers from compressing the dynamic range, so the spectral feature stands
-    out against the background. NaNs are ignored; no finite value gives
-    ``(0, 1)`` and a degenerate range falls back to ``(min, max)``.
+    out against the background. NaNs are ignored. The returned lower limit is
+    always below the upper one:
+
+    - no finite value gives ``(0, 1)``;
+    - coinciding percentiles widen to the finite ``(min, max)``;
+    - a constant finite value ``c`` gives ``(c, c + 1)``.
     """
     finite = values[np.isfinite(values)]
     if finite.size == 0:
         return 0.0, 1.0
     lo, hi = np.percentile(finite, [2.0, 98.0])
-    if hi <= lo:
-        return float(finite.min()), float(finite.max()) or 1.0
-    return float(lo), float(hi)
+    if hi > lo:
+        return float(lo), float(hi)
+    lowest, highest = float(finite.min()), float(finite.max())
+    if highest > lowest:
+        return lowest, highest
+    return lowest, lowest + 1.0
 
 
 def spectrum2d_findpoint(
