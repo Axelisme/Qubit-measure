@@ -35,7 +35,9 @@ from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
-from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
+from zcu_tools.gui.session.ui.inspect_dialog import (
+    InspectDialog as InspectDialogBase,
+)
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
 if TYPE_CHECKING:

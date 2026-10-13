@@ -1,4 +1,4 @@
-"""InspectDialogBase — app-agnostic context inspector (components + ModuleLibrary).
+"""InspectDialog — app-agnostic context inspector (components + ModuleLibrary).
 
 The session-core half of the inspect dialog: the component tab (read + edit) and
 the ModuleLibrary tab's *view / rename / delete*. App-specific actions live in
@@ -55,7 +55,7 @@ _MONO_FONT = QFont("Monospace")
 _MONO_FONT.setStyleHint(QFont.StyleHint.Monospace)
 
 
-class InspectDialogBase(QDialog):
+class InspectDialog(QDialog):
     """Non-modal dialog showing components and ModuleLibrary contents."""
 
     def __init__(

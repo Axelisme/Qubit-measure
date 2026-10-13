@@ -16,14 +16,14 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.gui.session.ui.inspect_base import InspectDialogBase
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 @dataclass
 class _Inspector:
-    dialog: InspectDialogBase
+    dialog: InspectDialog
     control: ContextControlFacet
     entry: ResultEntry
 
@@ -50,7 +50,7 @@ def inspector(qapp, tmp_path: Path) -> Generator[_Inspector]:
     service.install_entry(entry)
     control = ContextControlFacet(context=service)
     control.use_point(PointUseRequest("point"))
-    dialog = InspectDialogBase(control, bus)
+    dialog = InspectDialog(control, bus)
     try:
         yield _Inspector(dialog, control, entry)
     finally:
