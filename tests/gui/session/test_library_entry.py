@@ -87,7 +87,7 @@ def _schema_property(
 def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> None:
     capture = _seed(session)
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
-    assert entry.state.input.data["waveform"] == WAVEFORM
+    assert entry.state.input.data["waveform"] == {"kind": "ref", "name": WAVEFORM}
     entry.state.write({("gain",): 0.5}, entry.env)
     session.control.apply_library_change(entry.parameters, entry.put(PULSE))
     written = session.control.read_context().library.module_spec(PULSE)
