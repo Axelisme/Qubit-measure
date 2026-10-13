@@ -222,7 +222,7 @@ def test_mcp_native_controls_keep_capture_lease_and_record_revisions(
         {"form": "tunables", "run_id": "mcp-controls"}
     )
     assert inspected["revision"] == 0
-    assert sample_input(inspected["input"])["value"] == {"expr": "general.ext.value"}
+    assert sample_input(inspected["input"])["value"] == 20.0
     assert {"path": ["sample", "value"], "value": 20.0} in inspected["values"]
     applied = mcp_tools["workflows_workflow_tunables"]["handler"](
         {

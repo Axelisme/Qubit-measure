@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，框架搬遷
+**Last updated:** 2026-10-13，library 範本來源分離
 
 # Measure domain support
 
@@ -17,7 +17,7 @@ helper 留在群組內 `_shared.py`。
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run `ParameterContext` 讀取分類、chi/kappa 和可選分析校準。
 沒有 capture 時明示失敗，不讀目前 alias；可選校準 leaf 缺少或 null 時才交給 core 的既有分析預設。
 MIST `log_scale` 是 typed analysis input，不是儲存參數。`defaults/` 擁有 cfg authoring 的語義角色與 fresh module
-預設值，startup TemplateCatalog 也重用其 shape／blank factories。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
+預設值，仍供未遷移的 adapters 使用。Library 新建選單改由 `zcu_lab.templates.TEMPLATES` 的持久 Spec 範本提供，不再消費角色 factories。這些 module 可以依賴 domain-free `zcu_tools.gui.cfg`，但 generic cfg
 core不得反向 import measure domain。
 
 Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gui.app.measure`。Adapter 從固定 Run capture 讀初始參數，交 FluxPickInputs 與普通數值。Lib 不讀具體 Result 或 ctx_helpers。兩個 adapter 保留各自的 magnitude-only 政策，共用原有 kernel／plugin。

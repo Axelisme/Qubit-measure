@@ -216,16 +216,16 @@ def test_nested_choices_schema_and_result_keep_reused_and_union_fields_isolated(
             result = FormState(FormInput(NestedChoicesForm, invalid)).result(env)
             assert isinstance(result, FormErrors)
             assert (field, "mode") in result.messages
+        # A choice leaf takes a listed value, not an expression.
         expression: dict[str, JsonValue] = {
             **valid,
             "restricted": {"mode": "alpha", "level": {"expr": "2"}},
             "optional": None,
         }
-        assert validator.is_valid(expression)
-        assert isinstance(
-            FormState(FormInput(NestedChoicesForm, expression)).result(env),
-            NestedChoicesForm,
-        )
+        assert not validator.is_valid(expression)
+        result = FormState(FormInput(NestedChoicesForm, expression)).result(env)
+        assert isinstance(result, FormErrors)
+        assert ("restricted", "level") in result.messages
         numeric_invalid: dict[str, JsonValue] = {
             **valid,
             "restricted": {"mode": "alpha", "level": 3.0},
@@ -300,11 +300,7 @@ def test_deepest_local_choices_override_only_overlapping_parent_paths(
     env = captured_ext_env(empty_parent=empty_parent, empty_child=empty_child)
     validator = Draft202012Validator(EnclosingChoicesForm.input_schema(env))
     valid: dict[str, JsonValue] = {
-        "restricted": {
-            "mode": "child",
-            "level": {"expr": "2"},
-            "nested": {"mode": "deep"},
-        },
+        "restricted": {"mode": "child", "level": 2.0, "nested": {"mode": "deep"}},
         "unrestricted": {"mode": "child", "level": 3.0, "nested": {"mode": "deep"}},
     }
     assert validator.is_valid(valid) is not empty_child
@@ -412,19 +408,26 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
 
     env = FormEnv()
     validator = Draft202012Validator(RangeAliasForm.input_schema(env))
-    counts: tuple[JsonValue, ...] = (2, {"expr": "2"})
-    for count in counts:
-        valid: dict[str, JsonValue] = {
-            "restricted": {"kind": "linrange", "n": count},
-            "unrestricted": {"kind": "linrange", "n": 3},
-        }
-        assert validator.is_valid(valid)
-        result = FormState(FormInput(RangeAliasForm, valid)).result(env)
-        assert isinstance(result, RangeAliasForm)
-        assert isinstance(result.restricted, LinRange)
-        assert isinstance(result.unrestricted, LinRange)
-        assert result.restricted.n == 2
-        assert result.unrestricted.n == 3
+    valid: dict[str, JsonValue] = {
+        "restricted": {"kind": "linrange", "n": 2},
+        "unrestricted": {"kind": "linrange", "n": 3},
+    }
+    assert validator.is_valid(valid)
+    result = FormState(FormInput(RangeAliasForm, valid)).result(env)
+    assert isinstance(result, RangeAliasForm)
+    assert isinstance(result.restricted, LinRange)
+    assert isinstance(result.unrestricted, LinRange)
+    assert result.restricted.n == 2
+    assert result.unrestricted.n == 3
+    # Only the unrestricted occurrence is a text field taking an expression.
+    expression: dict[str, JsonValue] = {
+        "restricted": {"kind": "linrange", "n": 2},
+        "unrestricted": {"kind": "linrange", "n": {"expr": "3"}},
+    }
+    assert validator.is_valid(expression)
+    assert not validator.is_valid(
+        {**expression, "restricted": expression["unrestricted"]}
+    )
     invalid: dict[str, JsonValue] = {
         "restricted": {"kind": "linrange", "n": 3},
         "unrestricted": {"kind": "linrange", "n": 3},
@@ -448,11 +451,7 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
 
     env = FormEnv()
     validator = Draft202012Validator(NullableAliasForm.input_schema(env))
-    values: tuple[JsonValue, ...] = (
-        None,
-        {"kind": "linrange", "n": 2},
-        {"kind": "linrange", "n": {"expr": "2"}},
-    )
+    values: tuple[JsonValue, ...] = (None, {"kind": "linrange", "n": 2})
     for value in values:
         valid: dict[str, JsonValue] = {"fluxes": value}
         assert validator.is_valid(valid)

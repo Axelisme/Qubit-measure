@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from PyQt6.QtGui import QAction
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.form import (
@@ -110,8 +111,9 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     state.write({("delay",): 4.0}, FormEnv())
     assert delay.text() == "4.0"
 
-    mode = child(view, QComboBox, "form.mode.delay")
-    mode.setCurrentIndex(mode.findData("expr"))
+    mode = view.findChild(QAction, "form.mode.delay")
+    assert isinstance(mode, QAction)
+    mode.trigger()
     child(view, QLineEdit, "form.input.delay").setText("1 / 3")
     assert child(view, QLabel, "form.value.delay").text() == "0.333"
 
@@ -130,14 +132,15 @@ def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None
             f"form.input.{path}",
             f"form.value.{path}",
         ]
+        assert view.findChild(QAction, f"form.mode.{path}") is None
         fixed = child(view, QLineEdit, f"form.input.{path}")
         assert fixed.isReadOnly()
         assert fixed.text() == text
     assert state.input.data == before
-    # Two legal values keep the dropdown with its Expression entry.
+    # Two legal values keep the dropdown, which has no Expression action.
     nqz = child(view, QComboBox, "form.input.nqz")
-    assert [nqz.itemData(index) for index in range(2)] == [1, 2]
-    assert nqz.count() == 3
+    assert [nqz.itemData(index) for index in range(nqz.count())] == [1, 2]
+    assert view.findChild(QAction, "form.mode.nqz") is None
 
 
 def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:

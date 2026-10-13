@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, tab form writes without token capture
+**Last updated:** 2026-10-13, Load preserves authored Form input
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -463,15 +463,11 @@ integrity 無法確認時要求重啟。Partial restore 保留 skipped cfg，Ret
    persistence. Native Load retains the original identity, and analysis without
    native metadata uses `None`.
 
-- `load_tab_result` 載入 typed RunRecord，以 Record.cfg 作為來源快照。
+- `load_tab_result` 載入 typed RunRecord，保留 Record.cfg 作為結果來源快照，供 Inspect 與分析讀取。
   缺 cfg 時保留可用資料，不捏造設定。WB 不從 Load-time calibration 補 pulse module、改槽或 pi_product。
-  有效 cfg 透過同一個 CfgResource 原子 backfill，保留 resource lifetime。
+  Load 保留表單原輸入與固定來源，不要求 draft 有效。
   Run/Load 先提交 primary result。Analysis preparation 失敗不撤回它，只報 diagnostic。
   Named figures 和各 pane 的 presentation lifecycle 分開管理。
-dynamic selectors must match live options and the new complete draft must be valid
-before publication. A failed lookup or malformed option list rejects the entire
-backfill rather than silently skipping that selector. Module/waveform references
-become custom values rather than guessed library keys.
 The Guard and LoadService both enforce the adapter's import-validated
 `capabilities.load_data` gate.
 
@@ -574,7 +570,7 @@ it never queries a live driver.
 Adapters declare `Form(core_cfg, tree)`. Core annotations define editable shape and
 validation; the tree defines authored starting values, locks, hidden fields and
 module defaults. The Registry binds the Form to its injected template catalog.
-Native cfg conversion and Load backfill belong to the Form, not to the caller.
+Form lowers ordinary input to core cfg, including optional extras through its named lower hook.
 Ordinary strings remain literal; expression input uses an explicit envelope.
 Nullable named device choices include None independently of whether a core field
 has a default. Missing required input remains Invalid.
@@ -605,13 +601,11 @@ runs or analyzes, the panel only calls `set_editing_enabled(enabled=False)`: inp
 lock, but the form still scrolls and its groups still fold. Detach unsubscribes
 and detaches the editor before the tab closes.
 
-Load converts materialized native modules into detached inline Specs and
-`SweepCfg` into editable `LinRange` input. It uses the existing tab capture.
-Without extras, Load may repair an invalid draft. With extras, it requires a
-valid ordinary current result and verifies that lowering the candidate produces
-exactly the loaded native model dump. Rejection reports directed errors or
-loaded/would-run differences and leaves input unchanged. Native Load's historical
-analysis source and Save storage retain their separate Load-time ownership.
+Load replaces results, not Form input. Valid, invalid and unfinished drafts
+keep their authored values and expression text, including extras. Load does not
+validate the current draft or infer input from native cfg. The result retains
+its native cfg for Inspect and analysis. Native Load's historical analysis
+source and Save storage retain their separate Load-time ownership.
 
 Workspace saves authored Form input JSON, including expression text. Restore
 captures new sources and overlays compatible leaves through the resource,

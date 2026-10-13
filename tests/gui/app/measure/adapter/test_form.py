@@ -38,6 +38,48 @@ class ScalarCfg(ConfigBase):
     text: str = "ordinary"
 
 
+class DefaultedCfg(ConfigBase):
+    """Static defaults belong to core unless a form authors an expression."""
+
+    amount: float = 2.0
+    count: int = Field(default_factory=lambda: 3, ge=1)
+
+
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'"])
+def test_failed_expression_defaults_require_input_without_changing_core(
+    expression: str,
+) -> None:
+    env = FormEnv()
+    form = adapter_api.Form(
+        DefaultedCfg, {"amount": Expr(expression), "count": Expr(expression)}
+    )
+    state = FormState(form.default_input(env))
+    assert state.input.data == {}
+    result = state.result(env)
+    assert isinstance(result, FormErrors), result
+    assert result.messages == {
+        ("amount",): "Field required",
+        ("count",): "Field required",
+    }
+    control = adapter_api.Form(DefaultedCfg, {})
+    assert (
+        control.to_cfg(require_result(FormState(control.default_input(env)), env), env)
+        == DefaultedCfg()
+    )
+    state.write({("amount",): 8.0, ("count",): 4}, env)
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(
+        amount=8, count=4
+    )
+
+
+def test_successful_expression_defaults_are_direct_native_values() -> None:
+    env = FormEnv()
+    form = adapter_api.Form(DefaultedCfg, {"amount": Expr("6 * 2")})
+    state = FormState(form.default_input(env))
+    assert state.input.data == {"amount": 12, "count": 3}
+    assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 
@@ -81,7 +123,7 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
         "text",
     ]
     assert "optional" not in base.data
-    assert base.data["amount"] == {"expr": "2 * 3"}
+    assert base.data["amount"] == 6
     state = FormState(base)
     cfg = form.to_cfg(require_result(state, env), env)
     assert cfg == ScalarCfg(
@@ -181,40 +223,6 @@ def test_extras_lower_receives_validated_named_models() -> None:
     cfg = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
     assert isinstance(cfg, ScalarCfg)
     assert cfg.amount == 4
-
-
-def test_loaded_cfg_with_extras_must_roundtrip_before_accepting_input() -> None:
-    form = adapter_api.Form(
-        ScalarCfg,
-        {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
-        extras=Extras,
-        lower=lower_extras,
-    )
-    env = FormEnv()
-    state = FormState(form.default_input(env))
-    current = require_result(state, env)
-    native = form.to_cfg(current, env)
-    if isinstance(native, FormErrors):
-        pytest.fail(str(native.messages))
-    before = state.input.data
-    assert hasattr(adapter_api, "CfgInputRejected"), "Missing directed Load rejection"
-    rejected = form.cfg_input(native, current=current, env=env)
-    assert isinstance(rejected, adapter_api.CfgInputRejected)
-    assert rejected.differences[0].path == ("amount",)
-    assert rejected.differences[0].loaded == 4.0
-    assert rejected.differences[0].would_run == 8.0
-    assert state.input.data == before
-    state.write({("extras", "multiplier"): 1}, env)
-    current = require_result(state, env)
-    native = form.to_cfg(current, env)
-    if isinstance(native, FormErrors):
-        pytest.fail(str(native.messages))
-    restored = form.cfg_input(native, current=current, env=env)
-    if isinstance(restored, adapter_api.CfgInputRejected):
-        pytest.fail(str(restored.errors.messages))
-    restored_state = FormState(restored)
-    assert restored.data["extras"] == {"multiplier": 1}
-    assert form.to_cfg(require_result(restored_state, env), env) == native
 
 
 class NullableDeviceNames(ConfigBase):

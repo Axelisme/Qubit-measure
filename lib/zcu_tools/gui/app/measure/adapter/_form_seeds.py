@@ -212,6 +212,39 @@ def template_input(
     return _complete_template_input(model, data, template.id)
 
 
+def template_seed_tree(
+    template: Template, catalog: Mapping[str, TemplateDef]
+) -> dict[str, JsonValue]:
+    """Describe authored defaults, including nested fallbacks, without reading sources.
+
+    Call after template_input validates IDs, families, paths and recursion.
+    This tree is only for deriving field requirements, never for Slot presence
+    or actual input. Literal overrides and locks replace earlier Expr seeds.
+    """
+    seeds = catalog[template.id].expanded_seeds(
+        qubit=template.qubit, resonator=template.resonator
+    )
+    seeds.update(template.set)
+    data: dict[str, JsonValue] = {}
+    for path, seed in seeds.items():
+        if isinstance(seed, Slot):
+            nested = (
+                template_seed_tree(seed.fallback, catalog)
+                if seed.fallback is not None
+                else {}
+            )
+            for child_path, value in seed.set.items():
+                set_path(nested, child_path, scalar_seed(value))
+            for child_path, value in seed.lock.items():
+                set_path(nested, child_path, scalar_seed(value))
+            set_path(data, path, nested)
+        else:
+            set_path(data, path, scalar_seed(seed))
+    for path, value in template.lock.items():
+        set_path(data, path, scalar_seed(value))
+    return data
+
+
 def nested_slot(
     slot: Slot,
     catalog: Mapping[str, TemplateDef],

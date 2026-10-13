@@ -89,47 +89,110 @@ def test_module_reference_or_inline_materializes_to_native_core(mode: str) -> No
     assert form.model.input_schema(env)
 
 
-def test_native_cfg_backfill_is_detached_inline_and_direct_range() -> None:
-    from zcu_tools.cfg_model import Expr, Hidden
-    from zcu_tools.program.v2.sweep import SweepCfg
+@pytest.mark.parametrize("mode", ["ref", "inline"])
+def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
+    class InvalidDraft(ModuleCore):
+        amount: float
 
-    class LoadedCore(ModuleCore):
-        sweep: SweepCfg
-        amplitude: complex = 1j
-        hidden: float = 7.0
-
-    form = Form(LoadedCore, {"amplitude": Expr("2j"), "hidden": Hidden()})
-    native = LoadedCore(
-        modules=ModuleSection(
-            probe=PulseCfg.model_validate(
-                {
-                    "ch": 2,
-                    "nqz": 1,
-                    "freq": 200,
-                    "gain": 0.1,
-                    "waveform": {"style": "const", "length": 0.2},
-                }
-            )
-        ),
-        sweep=SweepCfg(start=10, stop=14, expts=3, step=2),
-        amplitude=2 + 3j,
+    form = Form(InvalidDraft, {})
+    env = module_env()
+    raw: JsonValue = (
+        {"kind": "ref", "name": "Q.pulses.probe"}
+        if mode == "ref"
+        else {
+            "kind": "inline",
+            "module": {
+                "type": "pulse",
+                "ch": 1,
+                "nqz": 1,
+                "gain": 0.3,
+                "freq": {"expr": "50 * 2"},
+                "waveform": {"style": "const", "length": 0.1},
+            },
+        }
     )
-    assert hasattr(form, "cfg_input"), "Form must own native cfg backfill"
-    backfill = form.cfg_input(native)
-    if not isinstance(backfill, FormInput):
-        pytest.fail(str(backfill.errors.messages))
-    data = backfill.data
-    assert data["sweep"] == {"kind": "linrange", "start": 10.0, "stop": 14.0, "n": 3}
-    assert data["amplitude"] == {"__complex__": [2.0, 3.0]}
-    assert "hidden" not in data
-    env = FormEnv()
-    state = FormState(backfill)
-    result = state.result(env)
-    if isinstance(result, FormErrors):
-        pytest.fail(str(result.messages))
-    cfg = form.to_cfg(result, env)
-    if isinstance(cfg, FormErrors):
-        pytest.fail(str(cfg.messages))
-    assert cfg == native
-    native.modules.probe.gain = 0.7
-    assert cfg.modules.probe.gain == 0.1
+    input = FormInput(form.model, {"modules": {"probe": raw}})
+    before = input.data
+    assert hasattr(form, "read_module"), "Missing public field-local Form module read"
+    observed = form.read_module(input, ("modules", "probe"), env)
+    assert not isinstance(observed, FormErrors), observed
+    assert observed.value["freq"] == 100.0
+    assert observed.mode == ("key" if mode == "ref" else "inline")
+    assert observed.source == (
+        "library:Q.pulses.probe" if mode == "ref" else "modules.probe"
+    )
+    observed.value["freq"] = -1.0
+    again = form.read_module(input, ("modules", "probe"), env)
+    assert not isinstance(again, FormErrors), again
+    assert again.value["freq"] == 100.0
+    assert input.data == before
+    inline = form.module_inline_input(input, ("modules", "probe"), env)
+    assert inline["kind"] == "inline"
+    assert input.data == before
+
+
+@pytest.mark.parametrize("fallback", [True, False], ids=["template", "blank"])
+@pytest.mark.parametrize("missing", ["library", "key"])
+def test_required_module_branch_switch_uses_owner_fallback(
+    fallback: bool, missing: str
+) -> None:
+    from zcu_tools.cfg_model import Slot, Template, TemplateDef
+
+    form = Form(
+        ModuleCore,
+        {
+            "modules": {
+                "probe": Slot(
+                    "$qubit.module.probe",
+                    fallback=Template("pulse") if fallback else None,
+                )
+            }
+        },
+    )
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {
+                    "ch": 1,
+                    "nqz": 1,
+                    "freq": 90.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
+                },
+            )
+        },
+        adapter="synthetic",
+    )
+    env = FormEnv() if missing == "library" else module_env()
+    # FormInput can preserve an invalid draft; ordinary write rejects missing refs.
+    input = FormInput(
+        form.model, {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.missing"}}}
+    )
+    before = input.data
+    state = FormState(input)
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    state.write({("modules", "probe", "kind"): "inline"}, env)
+    assert notifications == ["changed"]
+    assert input.data == before
+    module = expect_object(expect_object(state.input.data["modules"])["probe"])
+    assert module["kind"] == "inline"
+    assert expect_object(module["module"])["type"] == "pulse"
+    if fallback:
+        observed = form.read_module(state.input, ("modules", "probe"), env)
+        assert not isinstance(observed, FormErrors), observed
+        assert observed.value["freq"] == 90.0
+    else:
+        state.write({("modules", "probe", "module", "freq"): 125.0}, env)
+        assert (
+            state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
+        )
+
+
+def expect_object(value: JsonValue) -> dict[str, JsonValue]:
+    """Narrow a public input observation without altering it."""
+    assert isinstance(value, dict)
+    return value

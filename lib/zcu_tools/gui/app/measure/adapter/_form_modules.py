@@ -2,10 +2,20 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from types import UnionType, new_class
-from typing import Annotated, ClassVar, TypeAliasType, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    ClassVar,
+    Literal,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, create_model
+from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import (
@@ -18,13 +28,30 @@ from zcu_tools.cfg_model import (
     TemplateDef,
     TemplateLiteral,
     get_field_meta,
-    module_spec_from_raw,
 )
-from zcu_tools.gui.form import Display, FormEnv, ModuleInline, ModuleRef
+from zcu_tools.gui.form import (
+    Display,
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormState,
+    FormWritePath,
+    ModuleInline,
+    ModuleRef,
+)
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
-from ._form_seeds import complete_input, scalar_seed, set_path, slot_key, template_input
+from ._form_seeds import (
+    complete_input,
+    scalar_seed,
+    selected_model,
+    set_path,
+    slot_key,
+    template_input,
+    template_seed_tree,
+)
 from ._form_types import annotated_type, literal_type, members, type_tag, union_type
 
 _SPEC_BY_TAG = {
@@ -53,19 +80,23 @@ def module_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
     return tuple(specs)
 
 
-def _editable(annotation: object, locks: Mapping[str, TemplateLiteral]) -> object:
+def _editable(
+    annotation: object,
+    locks: Mapping[str, TemplateLiteral],
+    seeds: Mapping[str, JsonValue],
+) -> object:
     if isinstance(annotation, TypeAliasType):
-        return _editable(annotation.__value__, locks)
+        return _editable(annotation.__value__, locks, seeds)
     args = get_args(annotation)
     origin = get_origin(annotation)
     if origin is Annotated:
-        result = _editable(args[0], locks)
+        result = _editable(args[0], locks, seeds)
         for metadata in args[1:]:
             result = annotated_type(result, metadata)
         return result
     if origin in (Union, UnionType):
         items = tuple(
-            _editable(member, locks)
+            _editable(member, locks, seeds)
             for member in args
             if member is not QickParam
             and (
@@ -78,12 +109,14 @@ def _editable(annotation: object, locks: Mapping[str, TemplateLiteral]) -> objec
         )
         return union_type(items)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return _editable_spec(annotation, locks)
+        return _editable_spec(annotation, locks, seeds)
     return annotation
 
 
 def _editable_spec(
-    model: type[BaseModel], locks: Mapping[str, TemplateLiteral]
+    model: type[BaseModel],
+    locks: Mapping[str, TemplateLiteral],
+    seeds: Mapping[str, JsonValue],
 ) -> type[BaseModel]:
     annotations: dict[str, object] = {}
     namespace: dict[str, object] = {
@@ -96,12 +129,18 @@ def _editable_spec(
             for path, value in locks.items()
             if path.partition(".")[0] == name and "." in path
         }
+        seed = seeds.get(name)
         annotations[name] = (
             literal_type(locks[name])
             if name in locks
-            else _editable(info.annotation, nested)
+            else _editable(
+                info.annotation, nested, seed if isinstance(seed, dict) else {}
+            )
         )
         derived = deepcopy(info)
+        if isinstance(seed, dict) and "expr" in seed:
+            derived.default = PydanticUndefined
+            derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
         if (meta := get_field_meta(info)) is not None:
@@ -140,6 +179,28 @@ class LockedInline(ModuleInline):
         return data
 
 
+@dataclass(frozen=True)
+class ModuleValues:
+    """Detached execution module and its authored input origin.
+
+    value contains this field's materialized module JSON, not the full native
+    cfg after to_cfg or extras lowering. mode is key or inline, not a mode for
+    its descendants.
+    source is library:<actual-key> for key mode, otherwise the dotted Form path.
+    No container aliases input or captured library; this is not a preview.
+    """
+
+    value: dict[str, JsonValue]
+    mode: Literal["key", "inline"]
+    source: str
+
+
+class ModuleValueForm(FormModel):
+    """Typed single-field evaluation shell for generated family-limited input."""
+
+    value: ModuleRef | ModuleInline
+
+
 class ModuleField:
     """A core module field's family-limited ref/inline input and lowering policy."""
 
@@ -149,9 +210,12 @@ class ModuleField:
         self.specs = module_specs(annotation)
         self.path = path
         self.node = node
+        self.nullable = type(None) in members(annotation)
         self.catalog: Mapping[str, TemplateDef] = {}
         self.locks = node.lock if node is not None else {}
-        self.editable = tuple(_editable_spec(spec, self.locks) for spec in self.specs)
+        self.editable = tuple(
+            _editable_spec(spec, self.locks, {}) for spec in self.specs
+        )
         self.native = any(
             isinstance(member, type) and issubclass(member, NativeModuleBase)
             for member in members(annotation)
@@ -187,17 +251,42 @@ class ModuleField:
             "__module__": __name__,
             "__annotations__": {"module": module},
         }
+
+        def defaults(
+            cls: type[ModuleInline], env: FormEnv, previous: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            del cls
+            return field.inline_input(previous, env)
+
         namespace["locks"] = self.locks
+        namespace["defaults"] = classmethod(defaults)
         inline = new_class(
             f"{''.join(path)}Inline",
             (LockedInline,),
             exec_body=lambda ns: ns.update(namespace),
         )
+        if not issubclass(inline, LockedInline):
+            raise TypeError("Generated inline model must implement ModuleInline")
+        self.inline = inline
         self.annotation = (
             inline
             if self.locks
             else annotated_type(union_type((ref, inline)), Field(discriminator="kind"))
         )
+        # A single-field form evaluates this module without unrelated draft errors.
+        value_model = new_class(
+            f"{''.join(path)}ValueForm",
+            (ModuleValueForm,),
+            exec_body=lambda ns: ns.update(
+                {
+                    "__module__": __name__,
+                    "__annotations__": {"value": self.annotation},
+                }
+            ),
+        )
+        if not issubclass(value_model, ModuleValueForm):
+            raise TypeError("Module value model must implement FormModel")
+        self.value_model = value_model
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
         template = (
@@ -207,8 +296,32 @@ class ModuleField:
             if self.node is not None
             else None
         )
+        seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
+            seeds = template_seed_tree(template, catalog)
+        if isinstance(self.node, Slot):
+            for path, value in self.node.set.items():
+                set_path(seeds, path, scalar_seed(value))
+            for path, value in self.locks.items():
+                set_path(seeds, path, scalar_seed(value))
+        if seeds:
+            self.editable = tuple(
+                _editable_spec(spec, self.locks, seeds) for spec in self.specs
+            )
+            module = union_type(self.editable)
+            if len(self.specs) > 1:
+                module = annotated_type(module, Field(discriminator="type"))
+            # Parse the annotation without mutating FieldInfo.annotation; keep the
+            # inline class identity borrowed by the section and value form.
+            parsed = create_model(
+                self.inline.__name__,
+                __base__=self.inline,
+                __module__=__name__,
+                module=(module, deepcopy(self.inline.model_fields["module"])),
+            )
+            self.inline.model_fields["module"] = parsed.model_fields["module"]
+            self.inline.model_rebuild(force=True)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
         if isinstance(self.node, Template):
@@ -243,19 +356,92 @@ class ModuleField:
         )
         return {"kind": "inline", "module": complete_input(selected, module)}
 
-    def cfg_input(self, cfg: ConfigBase) -> dict[str, JsonValue]:
-        """Return detached inline input for a materialized module in this family.
+    def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
+        """Evaluate only this module, then materialize against its fixed capture.
 
-        No library/default lookup occurs. Unsupported persistent data and wrong
-        module families raise ValueError. Ordinary scalar values remain direct.
+        Failures return directed errors at this field, not unrelated cfg errors.
+        No full-cfg or extras lower hook runs; source and family checks are the
+        same ones used for ordinary Form module evaluation and materialization.
         """
-        spec = module_spec_from_raw(cfg.to_dict())
-        if not isinstance(spec, self.specs):
-            raise ValueError(f"Incompatible loaded module at {'.'.join(self.path)}")
-        return {
-            "kind": "inline",
-            "module": spec.model_dump(mode="json", exclude_none=True),
-        }
+        result = FormState(FormInput(self.value_model, {"value": raw})).result(env)
+        if isinstance(result, FormErrors):
+            return FormErrors(
+                {
+                    (*self.path, *path[1:]): message
+                    for path, message in result.messages.items()
+                }
+            )
+        item = result.value
+        raw_module = (
+            item.name
+            if isinstance(item, ModuleRef)
+            else item.module.model_dump(mode="python")
+        )
+        context = env.library.validation_context() if env.library is not None else None
+        try:
+            cfg = ModuleCfgFactory.from_raw(raw_module, context=context)
+        except ValueError as exc:
+            return FormErrors({self.path: str(exc)})
+        mode = "key" if isinstance(item, ModuleRef) else "inline"
+        source = (
+            f"library:{item.name}"
+            if isinstance(item, ModuleRef)
+            else ".".join(self.path)
+        )
+        return ModuleValues(cfg.model_dump(mode="json"), mode, source)
+
+    def inline_input(
+        self, previous: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        """Build detached inline input, copying captured refs or authored fallback.
+
+        Already-inline input is retained. Missing captured library/key uses the
+        Slot Template fallback, or static blank when absent. Wrong families and
+        source read failures propagate; locks are reapplied by inline defaults.
+        """
+        if previous.get("kind") == "inline":
+            return deepcopy(dict(previous))
+        name = previous.get("name")
+        if (
+            previous.get("kind") == "ref"
+            and isinstance(name, str)
+            and env.library is not None
+            and name in env.library.module_keys()
+        ):
+            if not isinstance(env.library.module_spec(name), self.specs):
+                raise ValueError(f"Incompatible module family at {'.'.join(self.path)}")
+            # Bypass generated defaults to avoid re-entering this preparation.
+            data = super(LockedInline, self.inline).defaults(env, previous)
+            module = data.get("module")
+            if not isinstance(module, dict):
+                raise TypeError("ModuleInline defaults must produce module input")
+        else:
+            template = (
+                self.node
+                if isinstance(self.node, Template)
+                else self.node.fallback
+                if self.node is not None
+                else None
+            )
+            if template is not None:
+                module = template_input(template, self.catalog, self.editable, env)
+            elif len(self.editable) == 1:
+                module = complete_input(self.editable[0], {})
+            else:
+                # Base defaults create a union blank without recursive preparation.
+                return super(LockedInline, self.inline).defaults(env, {})
+        for path, value in self.locks.items():
+            set_path(module, path, scalar_seed(value))
+        return {"kind": "inline", "module": module}
+
+    def inline_writes(
+        self, previous: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[FormWritePath, JsonValue]:
+        """Prepare one model-aware leaf batch for nullable or required modules."""
+        candidate = self.inline_input(previous, env)
+        if self.nullable:
+            return {self.path: candidate}
+        return _input_writes(self.inline, candidate, self.path)
 
     def materialize(self, item: BaseModel, env: FormEnv) -> ConfigBase:
         if isinstance(item, ModuleRef):
@@ -269,3 +455,22 @@ class ModuleField:
         return (
             NativeModuleFactory.from_core(cfg, context=context) if self.native else cfg
         )
+
+
+def _input_writes(
+    model: type[BaseModel], data: Mapping[str, JsonValue], path: tuple[str, ...]
+) -> dict[FormWritePath, JsonValue]:
+    """Project prepared model input to public leaf writes, preserving containers."""
+    batch: dict[FormWritePath, JsonValue] = {}
+    for name, value in data.items():
+        annotation = model.model_fields[name].annotation
+        if isinstance(value, dict) and any(
+            isinstance(member, type) and issubclass(member, BaseModel)
+            for member in members(annotation)
+        ):
+            batch.update(
+                _input_writes(selected_model(annotation, value), value, (*path, name))
+            )
+        else:
+            batch[(*path, name)] = value
+    return batch

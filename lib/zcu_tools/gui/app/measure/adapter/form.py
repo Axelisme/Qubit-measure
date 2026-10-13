@@ -7,6 +7,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 
 from zcu_tools.cfg_model import (
     AliasName,
@@ -28,7 +29,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInput,
     FormModel,
-    FormState,
+    FormWritePath,
     LinRange,
     static_defaults,
 )
@@ -36,10 +37,9 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._form_modules import ModuleField, module_specs
+from ._form_modules import ModuleField, ModuleValues, module_specs
 from ._form_types import literal_type, union_type
 from ._form_types import members as _members
-from .cfg_input import CfgInputRejected, dump_differences
 
 
 class SweepRange(LinRange):
@@ -129,6 +129,9 @@ class _Section:
             field_info = _field_info(info)
             if name in self.modules and not self.modules[name].locks:
                 field_info.discriminator = "kind"
+            if isinstance(node, Expr):
+                field_info.default = PydanticUndefined
+                field_info.default_factory = None
             if isinstance(node, Locked):
                 field_info.default = node.value
             annotations[name] = annotation
@@ -230,28 +233,6 @@ class _Section:
                 data[name] = child.default_data(env)
         return data
 
-    def cfg_data(self, cfg: BaseModel) -> dict[str, JsonValue]:
-        raw: dict[str, JsonValue] = cfg.model_dump(mode="json")
-        for name in cfg.__class__.model_fields:
-            if name not in self.model.model_fields:
-                raw.pop(name, None)
-                continue
-            item: object = getattr(cfg, name)
-            if name in self.children and isinstance(item, BaseModel):
-                raw[name] = self.children[name].cfg_data(item)
-            elif name in self.modules and isinstance(item, ConfigBase):
-                raw[name] = self.modules[name].cfg_input(item)
-            elif isinstance(item, SweepCfg):
-                raw[name] = {
-                    "kind": "linrange",
-                    "start": item.start,
-                    "stop": item.stop,
-                    "n": item.expts,
-                }
-            elif isinstance(item, complex):
-                raw[name] = _seed_json(item)
-        return raw
-
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         for field in self.modules.values():
             try:
@@ -264,6 +245,7 @@ class _Section:
             child.bind_templates(catalog, adapter)
         for field in self.modules.values():
             field.catalog = catalog
+        self.model.model_rebuild(force=True)
 
     def to_raw(
         self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]
@@ -315,7 +297,9 @@ class Form[C: ConfigBase]:
     or call bind_templates before resolving Template/fallback nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
-    strings, including $-prefixed strings, remain literal. Module locks remove
+    strings, including $-prefixed strings, remain literal. Expr initial values
+    remove static defaults in this form only; failed evaluation requires input
+    instead of falling back to core defaults. Module locks remove
     the ref branch and use single-value Literal fields in inline content. Optional extras adds an 'extras' section and requires
     a named lower(extras, cfg) callable returning the concrete core cfg type.
     """
@@ -383,70 +367,90 @@ class Form[C: ConfigBase]:
         """Build fresh input from captured env; required unresolved names stay absent.
 
         No sources are refreshed or mutated. Source and default factory failures
-        propagate. Expressions remain envelopes until FormState.result evaluates
-        them against this same env.
+        propagate. The shared core evaluates expression defaults once into direct
+        input against this env. Unresolved or invalid defaults stay absent.
         """
         return self.model.default_input(env)
 
-    def cfg_input(
-        self,
-        cfg: ConfigBase,
-        *,
-        current: FormModel | None = None,
-        env: FormEnv | None = None,
-    ) -> FormInput[FormModel] | CfgInputRejected:
-        """Project native cfg into detached direct input, guarding extras lowering.
+    def _module_field(self, path: tuple[str, ...]) -> ModuleField:
+        section = self._section
+        if not path or any(not part for part in path):
+            raise ValueError("Module path must contain nonempty field names")
+        for part in path[:-1]:
+            if part not in section.children:
+                raise ValueError(f"Not a core module field: {'.'.join(path)}")
+            section = section.children[part]
+        if path[-1] not in section.modules:
+            raise ValueError(f"Not a core module field: {'.'.join(path)}")
+        return section.modules[path[-1]]
 
-        cfg must belong to core_cfg; a different type raises TypeError. current
-        is this Form's valid ordinary result, not authored input; a different
-        generated model raises TypeError. Native modules become inline persistent
-        Specs and SweepCfg becomes LinRange. Hidden fields are omitted. No source
-        is captured, defaults executed or expression text retained.
+    def module_inline_input(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        """Prepare inline input for a core module path against fixed env.
 
-        Without extras, current/env may be omitted. With extras lower, both a
-        valid current result and the tab's fixed env are required. Missing current
-        rejects with a repair-extras diagnostic; missing env raises ValueError.
-        Extras become current ordinary values. The candidate must validate and
-        lower to exactly the loaded native JSON-mode model dump. Invalid or
-        mismatching candidates return CfgInputRejected with directed errors and
-        difference paths; no inverse, defaults or tolerance is guessed. Malformed
-        module data raises ValueError from Spec validation. Input/cfg are untouched.
+        input must belong to this Form; otherwise raise TypeError. path consists
+        of nonempty core field names, not module descendants; invalid paths raise
+        ValueError. Copy a captured library Spec through ModuleInline.defaults;
+        absent library/key uses Template fallback or editable static blank.
+        Wrong family/source failures propagate. Preserve existing inline values
+        and locks. No mutation, validation of the whole draft, or publication
+        occurs; blank may still require ordinary leaf edits before Run.
         """
-        if not issubclass(type(cfg), self.core_cfg):
-            raise TypeError("cfg_input requires this form's core cfg type")
-        if current is not None and type(current) is not self.model:
-            raise TypeError("current must be this form's ordinary generated result")
-        data = self._section.cfg_data(cfg)
-        if self._lower is None:
-            return FormInput(self.model, data)
-        if current is None:
-            return CfgInputRejected(
-                FormErrors({("extras",): "Repair extras before loading cfg"})
-            )
-        if env is None:
-            raise ValueError("cfg_input with extras requires the tab's fixed env")
-        data["extras"] = current.model_dump(mode="json")["extras"]
-        candidate = FormInput(self.model, data)
-        result = FormState(candidate).result(env)
-        if isinstance(result, FormErrors):
-            return CfgInputRejected(result)
-        would_run = self.to_cfg(result, env)
-        if isinstance(would_run, FormErrors):
-            return CfgInputRejected(would_run)
-        differences = dump_differences(
-            cfg.model_dump(mode="json"), would_run.model_dump(mode="json")
+        if input.model is not self.model:
+            raise TypeError("module_inline_input requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        return field.inline_input(raw if isinstance(raw, dict) else {}, env)
+
+    def module_inline_writes(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> dict[FormWritePath, JsonValue]:
+        """Prepare one public leaf batch for required or nullable module input.
+
+        input, path and env follow module_inline_input, with the same failures,
+        locks and captured-library/Template/blank preparation. The generated
+        inline branch defaults use that same preparation during discriminator
+        switching. Return no writes for already-inline input. The resource must
+        apply this batch once through guarded public write; preparation changes
+        no input and publishes nothing. Callers need not know module layout.
+        """
+        if input.model is not self.model:
+            raise TypeError("module_inline_writes requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        previous = raw if isinstance(raw, dict) else {}
+        return (
+            {}
+            if previous.get("kind") == "inline"
+            else field.inline_writes(previous, env)
         )
-        if differences:
-            return CfgInputRejected(
-                FormErrors(
-                    {
-                        item.path: f"Loaded {item.loaded!r}; would run {item.would_run!r} ({item.reason})"
-                        for item in differences
-                    }
-                ),
-                differences,
-            )
-        return candidate
+
+    def read_module(
+        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
+    ) -> ModuleValues | FormErrors:
+        """Read this module field's evaluated value without mutation or refresh.
+
+        input must belong to this Form; other models raise TypeError. path uses
+        nonempty core field names; unknown/nonmodule paths raise ValueError.
+        env is the fixed capture used to evaluate input. Key mode materializes
+        its captured library Spec; inline mode evaluates this field's input.
+        Other invalid draft fields do not block this read. Only this module's
+        validation/source failures return FormErrors at the consuming path.
+        Values exclude full-cfg validation and extras lowering: this is not the
+        native cfg after to_cfg. Unexpected source exceptions propagate.
+        """
+        if input.model is not self.model:
+            raise TypeError("read_module requires this Form's input")
+        field = self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        return field.read(raw, env)
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.

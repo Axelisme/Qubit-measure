@@ -33,7 +33,7 @@ class TabControlPort(Protocol):
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
-        """Create/load/focus, cleaning up on failure; cfg backfill is best effort."""
+        """Create/load/focus, cleaning up on failure; Load preserves form input."""
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
