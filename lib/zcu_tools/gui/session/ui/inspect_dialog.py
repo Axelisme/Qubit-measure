@@ -3,6 +3,7 @@
 Parameters edits components through the component tree. Modules lists the
 library and edits one selected entry with the shared FormEditor; it also
 creates entries from templates and opens the host's ARB waveform dialog.
+Aliases edits the ordered global alias table.
 Every collaborator is a required constructor argument, so measure and
 workflows open the same dialog with the same buttons.
 """
@@ -12,7 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent, QFont, QKeyEvent
@@ -47,6 +48,7 @@ from zcu_tools.gui.session.library_entry import (
     WaveformEntryForm,
     open_library_entry,
 )
+from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
 from zcu_tools.gui.widgets.form import FormEditor
@@ -63,6 +65,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 type _EntryKey = tuple[LibraryKind, str]
+
+type InspectPage = Literal["parameters", "modules", "aliases"]
+"""One Inspect tab: Parameters, Modules or Aliases."""
+
+_PAGE_TITLES: tuple[tuple[InspectPage, str], ...] = (
+    ("parameters", "Parameters"),
+    ("modules", "Modules"),
+    ("aliases", "Aliases"),
+)
 
 _GROUPS: tuple[tuple[LibraryKind, str], ...] = (
     ("module", "modules"),
@@ -97,7 +108,8 @@ class InspectDialog(QDialog):
 
     Public child object names (buttons are found by their text):
       - Toolbar: "Arb Waveforms…", "Refresh", "Close".
-      - Tabs "Parameters" (a ComponentTreeWidget) and "Modules".
+      - Tabs "Parameters" (a ComponentTreeWidget), "Modules" and "Aliases"
+        (an AliasPanel; inspect.aliases.* names as AliasPanel documents).
       - inspect.library: the QTreeWidget of library roots, grouped under
         "modules" and "waveforms"; the "New" and "Delete" buttons below it.
       - inspect.entry.name: the Name QLineEdit of the selected entry;
@@ -122,6 +134,11 @@ class InspectDialog(QDialog):
     tree deletes without asking. Both pin the capture before acting. New
     opens a NewEntryDialog over templates and selects the created entry.
     "Arb Waveforms…" calls the host's open_arb_waveforms.
+
+    Aliases loads the installed alias rows when the dialog is built and
+    commits them only through its Apply. Closing with an Unsaved module entry
+    or alias draft asks Save, Discard or Cancel for each in turn; a rejected
+    alias Save keeps the dialog open on the Aliases page with its error.
     """
 
     def __init__(
@@ -184,11 +201,17 @@ class InspectDialog(QDialog):
         toolbar.addWidget(close_btn)
         layout.addLayout(toolbar)
 
-        tabs = QTabWidget()
+        self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
-        tabs.addTab(self._component_tree, "Parameters")
-        tabs.addTab(self._build_modules_tab(), "Modules")
-        layout.addWidget(tabs)
+        self._aliases = AliasPanel(ctrl)
+        self._pages: dict[InspectPage, QWidget] = {
+            "parameters": self._component_tree,
+            "modules": self._build_modules_tab(),
+            "aliases": self._aliases,
+        }
+        for page, title in _PAGE_TITLES:
+            self._tabs.addTab(self._pages[page], title)
+        layout.addWidget(self._tabs)
 
         bus.subscribe(ContextSwitchedPayload, self._on_bus_refresh)
         bus.subscribe(MdChangedPayload, self._on_bus_refresh)
@@ -277,18 +300,24 @@ class InspectDialog(QDialog):
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock every input while keeping the dialog readable.
 
-        Read-only disables New, Delete, Arb Waveforms, Revert, Apply and the
-        component tree's edits; the Name and the entry form stay readable,
-        scrollable and foldable but ignore input. A draft made before
-        locking stays shown. Call again with False to unlock.
+        Read-only disables New, Delete, Arb Waveforms, Revert, Apply, the
+        component tree's edits and the Aliases page's writes; the Name, the
+        entry form and the alias table stay readable, scrollable and foldable
+        but ignore input. A draft made before locking stays shown and closing
+        no longer asks about it. Call again with False to unlock.
         """
         self._read_only = read_only
         self._component_tree.set_read_only(read_only=read_only)
+        self._aliases.set_read_only(read_only=read_only)
         self._new_btn.setEnabled(not read_only)
         self._arb_waveform_btn.setEnabled(not read_only)
         if self._editor is not None:
             self._editor.set_editing_enabled(enabled=not read_only)
         self._update_controls()
+
+    def show_page(self, page: InspectPage) -> None:
+        """Make page the current tab without asking about any draft."""
+        self._tabs.setCurrentWidget(self._pages[page])
 
     def refresh(self) -> None:
         """Reread the component tree and the library from a new capture."""
@@ -624,8 +653,31 @@ class InspectDialog(QDialog):
         self._close_entry()
         self._cleanup_bus_subscriptions()
 
+    def _resolve_unsaved_aliases(self) -> bool:
+        """Settle an Unsaved alias draft; True when closing may continue."""
+        if self._read_only or not self._aliases.is_unsaved():
+            return True
+        answer = self._presenter.save_discard_cancel(
+            self,
+            "Unsaved alias changes",
+            "Apply the alias table before closing?",
+        )
+        if answer == "save":
+            if self._aliases.apply():
+                return True
+            # The rejection is shown inline on the page; bring it into view.
+            self.show_page("aliases")
+            return False
+        if answer == "discard":
+            self._aliases.revert()
+            return True
+        return False
+
+    def _resolve_before_close(self) -> bool:
+        return self._resolve_unsaved() and self._resolve_unsaved_aliases()
+
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        if not self._resolve_unsaved():
+        if not self._resolve_before_close():
             if a0 is not None:
                 a0.ignore()
             return
@@ -633,7 +685,7 @@ class InspectDialog(QDialog):
         super().closeEvent(a0)
 
     def reject(self) -> None:
-        if not self._resolve_unsaved():
+        if not self._resolve_before_close():
             return
         super().reject()
 
@@ -658,4 +710,4 @@ def _find_item(tree: QTreeWidget, key: _EntryKey | None) -> QTreeWidgetItem | No
     return None
 
 
-__all__ = ["InspectDialog"]
+__all__ = ["InspectDialog", "InspectPage"]

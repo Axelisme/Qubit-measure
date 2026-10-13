@@ -1,7 +1,6 @@
 """Session chips above the workflow columns follow the shared session.
 
-Chips refresh on session events, when Setup or Aliases close, and on Prepare
-forms. Their text is read from the shown QLabel and its tooltip.
+Chips refresh on session events, when Setup closes, and on Prepare forms. Their text is read from the shown QLabel and its tooltip.
 """
 
 from dataclasses import replace
@@ -13,7 +12,6 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import ContextSourceFault
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
-from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.program.v2.mocksoc import make_mock_soc
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
@@ -143,7 +141,7 @@ def test_device_and_simulator_events_refresh_their_chips(
     assert chip(window, "workflow.session.zcu").text() == "ZCU: simulator"
 
 
-def test_setup_aliases_close_and_prepare_refresh_without_events(
+def test_setup_close_and_prepare_refresh_without_events(
     window_session: WindowSession, qapp: QApplication
 ) -> None:
     """A caller-owned state write publishes no event; the next refresh shows it."""
@@ -158,20 +156,11 @@ def test_setup_aliases_close_and_prepare_refresh_without_events(
     assert zcu.text() == "ZCU: connected"
 
     harness.state.set_context(replace(harness.state.session_env, soc=None))
-    aliases = window.findChild(QPushButton, "workflow.source.aliases")
-    assert aliases is not None
-    aliases.click()
-    dialog = next(d for d in window.findChildren(AliasDialog) if d.isVisible())
     assert zcu.text() == "ZCU: connected"
-    dialog.reject()
-    qapp.processEvents()
-    assert zcu.text() == "ZCU: not connected"
-
-    install_soc(harness)
     prepare = window.findChild(QPushButton, "workflow.source.use")
     assert prepare is not None
     prepare.click()
-    assert zcu.text() == "ZCU: connected"
+    assert zcu.text() == "ZCU: not connected"
 
 
 def test_closed_window_stops_following_session_events(

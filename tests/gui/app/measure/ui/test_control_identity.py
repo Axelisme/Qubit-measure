@@ -411,7 +411,6 @@ def test_remote_device_stop_reclaims_and_cancels(control_ui, qapp):
     [
         DialogName.SETUP,
         DialogName.PREDICTOR,
-        DialogName.ALIASES,
         DialogName.ARB_WAVEFORM,
         DialogName.INSPECT,
         DialogName.DEVICE,

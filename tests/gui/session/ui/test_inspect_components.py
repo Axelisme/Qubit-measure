@@ -88,7 +88,11 @@ def test_shipped_inspect_refresh_keeps_component_frontend_and_modules_tab(
     assert captured.lookup("Q1.rate").value == 4300.0
     tabs = dialog.findChild(QTabWidget)
     assert tabs is not None
-    assert [tabs.tabText(i) for i in range(tabs.count())] == ["Parameters", "Modules"]
+    assert [tabs.tabText(i) for i in range(tabs.count())] == [
+        "Parameters",
+        "Modules",
+        "Aliases",
+    ]
 
 
 def test_inspect_template_edits_do_not_change_current_point(inspector) -> None:

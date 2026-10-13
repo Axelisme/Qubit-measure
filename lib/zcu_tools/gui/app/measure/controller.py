@@ -86,6 +86,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.setup_control import SetupControlPort
+    from zcu_tools.gui.session.ui.inspect_dialog import InspectPage
 
     from .services import AppServices
     from .services.operation_control import OperationControlPort
@@ -229,6 +230,10 @@ class RenderView(Protocol):
         canonical State figures. Explicit subtab routing avoids visible-tab
         inference.
         """
+        ...
+
+    def select_inspect_page(self, page: InspectPage) -> None:
+        """Show page on the open Inspect; FailedPreconditionError when closed."""
         ...
 
     def take_dialog_screenshot(self, dialog_name: Any) -> bytes: ...

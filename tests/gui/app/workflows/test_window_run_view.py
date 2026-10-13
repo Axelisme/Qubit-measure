@@ -46,10 +46,10 @@ STATUS_PARTS = (
     "workflow.run.workflow",
     "workflow.run.detail",
 )
-# The session row's buttons, left to right: Setup…, Aliases…, Prepare forms
-# ("use") and Reload source.
-SOURCES = ("setup", "aliases", "use", "reload")
-SESSION_ONLY = ("setup", "aliases")
+# The session row's buttons, left to right: Setup…, Prepare forms ("use")
+# and Reload source.
+SOURCES = ("setup", "use", "reload")
+SESSION_ONLY = ("setup",)
 
 
 def child[W: QWidget](window: QWidget, kind: type[W], name: str) -> W:
@@ -631,7 +631,7 @@ def test_reload_without_a_loader_stays_disabled_through_a_run(
     window = unmonitored
     window.show()
     window.select_workflow("synthetic_small")
-    idle = ("setup", "aliases", "use")
+    idle = ("setup", "use")
     assert enabled_sources(window) == idle
     assert isinstance(window.start(RUN_ID), int)
     assert enabled_sources(window) == SESSION_ONLY

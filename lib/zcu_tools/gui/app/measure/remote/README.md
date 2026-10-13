@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-13，library 與 writeback module edits 共用 Form 路徑陣列，editor.* 退休
+**Last updated:** 2026-10-14，dialog.screenshot 的 Inspect tab；aliases 對話框名稱退休
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -177,8 +177,8 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 102`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 135`: GUI process code revision. It is displayed, not compared.
+- `WIRE_VERSION = 103`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 136`: GUI process code revision. It is displayed, not compared.
 - `MCP_VERSION = 118`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
@@ -294,6 +294,7 @@ For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or
 - `operation.*`：live operation indexing, bounded wait, domain-owned cancellation and progress.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
+- `dialog.screenshot`：captures an open named dialog (setup／device／predictor／inspect／arb_waveform). For `inspect`, optional `tab` (`parameters`／`modules`／`aliases`, default `parameters`) shows that page before the capture; other names reject `tab`, and unknown tabs fail as invalid params. Alias editing is Inspect's Aliases page, so there is no `aliases` dialog name.
 
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to

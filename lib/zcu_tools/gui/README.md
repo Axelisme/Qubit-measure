@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-14，共用 Inspect 與 ARB 對話框移到 `session/ui/`
+**Last updated:** 2026-10-14，Alias 編輯成為共用 Inspect 的 Aliases 頁
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -217,13 +217,13 @@ fluxdep／dispersive 保留 typed path 和 Browse。這不是 Measure 的 entry 
 
 ## Shared session dialogs (`session/ui/`)
 
-`SetupDialog`、`AliasDialog`、`InspectDialog`、`ArbWaveformDialog`、`DeviceDialog` 與
+`SetupDialog`、`InspectDialog`、`ArbWaveformDialog`、`DeviceDialog` 與
 `PredictorDialog` 由 shared session UI 擁有，依賴各 domain 的窄 control facet。
-`session/ui/alias_dialog.py` 的 AliasDialog 編輯元件與 device 共用的有序 alias 表。
+`session/ui/alias_panel.py` 的 AliasPanel 是共用 Inspect 的 Aliases 頁，編輯元件與 device
+共用的有序 alias 表；沒有獨立的 Aliases 對話框或入口。
 Apply 先驗表，再由 entry owner 原子保存，成功後才安裝 memory 並發布 fact。
-EMPTY 只改 memory；失敗保舊表、舊檔與 draft。Apply 不關閉，Cancel 不撤已 Apply 的表。
+EMPTY 只改 memory；失敗保舊表、舊檔與 draft。未存 draft 在關閉 Inspect 時走 Save／Discard／Cancel。
 開 entry 載入自己的表，無檔才重設 caller preset；切 point 不換表。
-Measure 與 workflows 直接 import 同一 owner，不留 app-local re-export 或 wrapper。
 App 保留 dialog lifecycle 與呈現政策，shared dialog 不反向 import app。
 
 ## Dialog presentation and lifetime

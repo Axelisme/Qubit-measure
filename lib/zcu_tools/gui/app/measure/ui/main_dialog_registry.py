@@ -14,6 +14,7 @@ from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.session.ui.inspect_dialog import InspectPage
     from zcu_tools.gui.widgets import DialogPresenter
 
 
@@ -127,13 +128,6 @@ class MainDialogRegistry:
             )
             dialog.set_read_only(read_only=not writable)
             return dialog
-        if name is DialogName.ALIASES:
-            from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
-
-            return AliasDialog(
-                self._ctrl.context_control,
-                parent=self._parent,
-            )
         if name is DialogName.ARB_WAVEFORM:
             from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
 
@@ -189,6 +183,20 @@ class MainDialogRegistry:
     def dialog(self, name: DialogName) -> QDialog | None:
         """Return the registered dialog object, visible or hidden."""
         return self._dialog(name)
+
+    def select_inspect_page(self, page: InspectPage) -> None:
+        """Show page on the open Inspect without asking about drafts.
+
+        Raises FailedPreconditionError when Inspect is not currently open.
+        """
+        from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
+
+        dialog = self._dialog(DialogName.INSPECT)
+        if dialog is None or not dialog.isVisible():
+            raise FailedPreconditionError("dialog 'inspect' is not currently open")
+        if not isinstance(dialog, InspectDialog):
+            raise TypeError(f"named Inspect is a {type(dialog).__name__}")
+        dialog.show_page(page)
 
     def take_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""

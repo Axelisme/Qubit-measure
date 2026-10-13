@@ -15,8 +15,12 @@ persistent dialogs can instead hide on close and stay cached in the registry.
 from __future__ import annotations
 
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import InvalidInputError
+
+if TYPE_CHECKING:
+    from zcu_tools.gui.session.ui.inspect_dialog import InspectPage
 
 
 class DialogName(str, Enum):
@@ -26,7 +30,6 @@ class DialogName(str, Enum):
     DEVICE = "device"
     PREDICTOR = "predictor"
     INSPECT = "inspect"
-    ALIASES = "aliases"
     ARB_WAVEFORM = "arb_waveform"
 
 
@@ -54,4 +57,22 @@ def parse_dialog_name(value: object) -> DialogName:
     raise InvalidInputError(f"unknown dialog name: {value!r}")
 
 
-__all__ = ["DialogName", "parse_dialog_name"]
+INSPECT_PAGES: tuple[InspectPage, ...] = ("parameters", "modules", "aliases")
+"""Wire names of the Inspect tabs a dialog.screenshot may select."""
+
+
+def parse_inspect_page(value: object) -> InspectPage:
+    """Return the Inspect page named by the wire string value.
+
+    Raises InvalidInputError for anything outside INSPECT_PAGES; no case
+    folding or fallback page is applied.
+    """
+    for page in INSPECT_PAGES:
+        if value == page:
+            return page
+    raise InvalidInputError(
+        f"unknown Inspect tab: {value!r}; expected one of {list(INSPECT_PAGES)}"
+    )
+
+
+__all__ = ["INSPECT_PAGES", "DialogName", "parse_dialog_name", "parse_inspect_page"]

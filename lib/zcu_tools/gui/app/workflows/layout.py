@@ -46,9 +46,8 @@ _FIGURE_COLUMN_WIDTH = 1040
 class WorkflowControls:
     """Actual Qt controls consumed by Window, without callbacks or run state.
 
-    Top row: the session strip, then setup (opens shared Setup), aliases (opens
-    alias editing), prepare (captures forms) and reload (bounded source
-    replacement). Below it a splitter holds two user-resizable columns.
+    Top row: the session strip, then setup (opens shared Setup), prepare
+    (captures forms) and reload (bounded source replacement). Below it a splitter holds two user-resizable columns.
     Left: selector chooses the workflow above forms, whose tab 0 is Plan and
     tab 1 is Tunables; tunables_tab is the Tunables tab's page widget, so
     forms.indexOf(tunables_tab) locates that tab without assuming its index;
@@ -72,7 +71,6 @@ class WorkflowControls:
     resume: QPushButton
     stop: QPushButton
     setup: QPushButton
-    aliases: QPushButton
     prepare: QPushButton
     reload: QPushButton
     forms: QTabWidget
@@ -174,10 +172,9 @@ def build_workflow_layout(
     strip.addWidget(session)
     strip.addStretch(1)
     setup = _button("Setup…", "workflow.source.setup", parent)
-    aliases = _button("Aliases…", "workflow.source.aliases", parent)
     prepare = _button("Prepare forms", "workflow.source.use", parent)
     reload = _button("Reload source", "workflow.source.reload", parent)
-    for button in (setup, aliases, prepare, reload):
+    for button in (setup, prepare, reload):
         strip.addWidget(button)
     root.addLayout(strip)
 
@@ -223,7 +220,6 @@ def build_workflow_layout(
         resume,
         stop,
         setup,
-        aliases,
         prepare,
         reload,
         forms,

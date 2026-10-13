@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, shared Inspect and ARB waveforms; writeback module Form dialogs
+**Last updated:** 2026-10-14, alias editing is the shared Inspect's Aliases page
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -299,10 +299,10 @@ role registry 的唯一候選填 primary 空列。每次開 entry 有 `aliases.y
 提交表後不再初始化，直到下次開 entry。Preset 的 flux_dev 空列不猜裝置，也不從 cache 填值。
 參數捕捉經 `read_context(aliases=...)` 固定當次 point、library、storage 與有序表。
 GUI adapter 不宣告角色，捕捉不從 GUI focus 或 adapter 的 via 推論 alias。
-Shared `session.ui.alias_dialog.AliasDialog` 是 Measure 與 workflows 的同一 owner。
-Dialog Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
-EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，dialog 保持開啟可 retry。
-Apply 不關閉 dialog，Cancel 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
+Alias 表在共用 Inspect 的 Aliases 頁（`session.ui.alias_panel.AliasPanel`）編輯，工具列沒有獨立 Aliases 按鈕。
+Apply 先驗整表，再由 entry owner 原子保存，成功才安裝 memory 並發布 event。
+EMPTY 時只改 memory。失敗保留舊表、舊檔與 draft，頁面顯錯可 retry。
+關閉 Inspect 時未存 draft 走 Save／Discard／Cancel，Discard 不撤回已 Apply 的內容。`set_alias_rows` 仍只改 memory。
 Tab 不顯示角色列，也不持有自己的 alias 表。
 
 App-local driving-adapter facets mirror the shared session control pattern.
