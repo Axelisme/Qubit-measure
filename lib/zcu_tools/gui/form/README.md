@@ -28,4 +28,4 @@ WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外�
 
 Display 只承載欄位呈現資訊。順序依欄位宣告，段落依 nested model；collapsed 只用於子 model 欄位。`group` 把欄位歸到同一 model 層級內的具名畫面群組（例如 `"Advanced"`），空字串在建構時報錯；schema 只在宣告的 property 節點標 `x-form-group`，不改驗證、defaults、choices 或 input。`decimals` 是 float 欄位顯示的小數位數，只在宣告時進 schema，非 float 欄位宣告就報錯；它不改 input。`hidden=True` 的欄位不畫，值與預設留在 input、照常驗證，schema 仍列出它並標 `hidden`。巢狀 model 欄位沒有 label 時，schema title 是欄位名（底線換空白、只有首字母大寫，`ro_cfg` 是 `Ro cfg`），不是 Pydantic 帶進來的類別名。Model 不經 union selector 到達時，它身為 tagged union branch 的單值 tag 是固定的結構 tag，schema 標 `hidden`；branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，含 branch 的子類別（單獨使用的 `LinRange.kind`、inline readout 的 `ro_cfg.type`）。Union 位置的 tag 仍是 selector。Editor、host 與 MCP 共用 core 行為，但不反向成為 core dependency。
 
-跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是共用表單工具，不改 CfgSchema。Measure 的 core cfg 推導與 module materialization 由上層 adapter 框架組合，不放進本 package。
+跨模組契約見 docs/adr/draft/pydantic-form-tool.md。這是共用表單工具，不改 CfgSchema。Core cfg 推導與 module materialization 由上層 `gui.form_adapter` 組合，不放進本 package。

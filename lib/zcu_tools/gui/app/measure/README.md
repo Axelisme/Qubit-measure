@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, Load preserves authored Form input
+**Last updated:** 2026-10-13, Form generator imported from gui.form_adapter
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -567,7 +567,7 @@ and captures parameters, library and cached device infos on Open and Reset. Prev
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 
-Adapters declare `Form(core_cfg, tree)`. Core annotations define editable shape and
+Adapters declare `Form(core_cfg, tree)` from the shared `zcu_tools.gui.form_adapter`. Core annotations define editable shape and
 validation; the tree defines authored starting values, locks, hidden fields and
 module defaults. The Registry binds the Form to its injected template catalog.
 Form lowers ordinary input to core cfg, including optional extras through its named lower hook.

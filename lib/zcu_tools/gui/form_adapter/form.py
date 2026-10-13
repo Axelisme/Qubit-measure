@@ -293,8 +293,8 @@ class Form[C: ConfigBase]:
     Hidden requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
     default_input resolves names once against the supplied captured FormEnv;
-    hosts use the same env until Reset. Register with Registry.register(form=...)
-    or call bind_templates before resolving Template/fallback nodes. Slot copies
+    hosts use the same env until Reset. The host calls bind_templates with its
+    template catalog before resolving Template/fallback nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
@@ -355,8 +355,8 @@ class Form[C: ConfigBase]:
     ) -> None:
         """Bind a detached catalog and validate authored templates before publication.
 
-        Registry.register calls this explicitly. adapter is the registry name,
-        included with the consuming field path in ValueError for unknown IDs,
+        The host's registration entry calls this explicitly. adapter is the
+        registered definition name, included with the consuming field path in ValueError for unknown IDs,
         incompatible families or malformed seed trees. No sources are read.
         Call before default_input when the tree contains Template/fallback nodes.
         Definitions remain immutable and the caller's mapping is never retained.
