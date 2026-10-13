@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from types import MappingProxyType, new_class
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
     WaveformSpec,
+    get_field_meta,
 )
 from zcu_tools.gui.form import (
     Display,
@@ -53,26 +55,35 @@ class SweepRange(LinRange):
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
 
 
-def _sweep_model(node: FormNode) -> type[SweepRange]:
-    """Generate a range whose Expr endpoints require input after failed defaults.
+def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
+    """Generate endpoint requirements and float precision for one core sweep.
 
-    node is the authored sweep value. Only Expr endpoints lose the inherited
-    LinRange default; literal or unauthored endpoints keep ordinary defaults.
-    No expression is evaluated and the shared SweepRange class is not modified.
+    node is the authored sweep value; info is its core field declaration.
+    Only Expr endpoints lose the inherited LinRange default. FieldMeta decimals
+    decorates start/stop, never n or the outer model. Literal or unauthored
+    endpoints keep ordinary defaults. No expression is evaluated, and neither
+    the core declaration nor the shared SweepRange class is modified.
     """
-    if not isinstance(node, Range):
-        return SweepRange
-    required = {
-        name: FieldInfo(annotation=float)
-        for name, value in (("start", node.start), ("stop", node.stop))
-        if isinstance(value, Expr)
-    }
-    if not required:
+    meta = get_field_meta(info)
+    decimals = meta.decimals if meta is not None else None
+    fields: dict[str, FieldInfo] = {}
+    for name in ("start", "stop"):
+        required = isinstance(node, Range) and isinstance(getattr(node, name), Expr)
+        if not required and decimals is None:
+            continue
+        endpoint = deepcopy(SweepRange.model_fields[name])
+        if required:
+            endpoint.default = PydanticUndefined
+            endpoint.default_factory = None
+        if decimals is not None:
+            endpoint.metadata.append(Display(decimals=decimals))
+        fields[name] = endpoint
+    if not fields:
         return SweepRange
     namespace: dict[str, object] = {
         "__module__": __name__,
-        "__annotations__": {name: float for name in required},
-        **required,
+        "__annotations__": {name: float for name in fields},
+        **fields,
     }
     model = new_class(
         "AuthoredSweepRange", (SweepRange,), exec_body=lambda ns: ns.update(namespace)
@@ -119,6 +130,8 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
 def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
     result = deepcopy(info)
     if (display := field_display(info, locked=locked)) is not None:
+        if SweepCfg in _members(info.annotation):
+            display = replace(display, decimals=None)
         result.metadata.append(display)
     return result
 
@@ -262,7 +275,7 @@ class _Section:
                 else field.annotation
             )
         if SweepCfg in _members(info.annotation):
-            return _sweep_model(node)
+            return _sweep_model(node, info)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
