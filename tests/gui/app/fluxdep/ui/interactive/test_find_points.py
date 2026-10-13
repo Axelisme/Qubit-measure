@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from qtpy.QtCore import QEventLoop, QTimer
-from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QPushButton, QSlider
+from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QSlider
 from zcu_tools.analysis.fluxdep.stroke import BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
     TwoTonePickView,
@@ -23,6 +23,12 @@ from zcu_tools.gui.app.fluxdep.twotone import TwoTonePickPlugin
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+
+from tests.gui.app.fluxdep._window import (
+    column_tops,
+    picker_button,
+    unlabelled_inputs,
+)
 
 
 @dataclass
@@ -63,12 +69,6 @@ def wait_for_requests(queue: PreviewQueue, count: int) -> None:
     assert len(queue.requests) >= count
 
 
-def button(widget: FindPointsWidget, text: str) -> QPushButton:
-    return next(
-        item for item in widget.findChildren(QPushButton) if item.text() == text
-    )
-
-
 def slider(widget: FindPointsWidget, label: str) -> QSlider:
     return next(
         item for item in widget.findChildren(QSlider) if item.accessibleName() == label
@@ -107,7 +107,7 @@ def test_command_controls_undo_and_tool_history_share_session(presented) -> None
     combo(widget, "Operation").setCurrentText("Erase")
     assert context.session.snapshot().width == 0.004
     assert context.session.snapshot().mode == "erase"
-    button(widget, "Undo").click()
+    picker_button(widget, "undo").click()
     state = context.session.snapshot()
     assert state.threshold == before.threshold
     assert state.width == before.width
@@ -174,16 +174,16 @@ def test_perform_all_mode_and_clear_use_same_actions(presented) -> None:
     context = ctrl.interactive.current_twotone_pick()
     assert context is not None
     combo(widget, "Operation").setCurrentText("Erase")
-    button(widget, "Perform on all").click()
+    picker_button(widget, "perform_on_all").click()
     assert not context.session.snapshot().mask.any()
     assert widget.get_result()[0].size == 0
     combo(widget, "Operation").setCurrentText("Select")
-    button(widget, "Perform on all").click()
+    picker_button(widget, "perform_on_all").click()
     assert context.session.snapshot().mask.all()
     assert widget.get_result()[0].size > 0
-    button(widget, "Clear").click()
+    picker_button(widget, "clear").click()
     assert not context.session.snapshot().mask.any()
-    button(widget, "Undo").click()
+    picker_button(widget, "undo").click()
     assert context.session.snapshot().mask.all()
 
 
@@ -341,7 +341,7 @@ def test_undo_invalidates_pending_preview_and_closed_widget_cannot_finish(
     emitted: list[bool] = []
     widget.finished.connect(lambda: emitted.append(True))
     ctrl.interactive.cancel()
-    button(widget, "Finish").click()
+    picker_button(widget, "finish").click()
     assert emitted == []
     assert widget.preview_view() is None
 
@@ -366,7 +366,7 @@ def test_teardown_and_remount_preserve_domain_and_discard_late_delivery(
         assert replacement.get_result()[0].size == 0
         assert ctrl.interactive.begin_twotone_pick("two") is context
         assert context.session.can_undo()
-        button(replacement, "Undo").click()
+        picker_button(replacement, "undo").click()
         assert replacement.get_result()[0].size > 0
     finally:
         replacement.teardown()
@@ -393,7 +393,7 @@ def test_finish_pending_preview_publishes_committed_selection(presented) -> None
     )
     try:
         widget.finished.connect(ctrl.interactive.finish_twotone_pick)
-        button(widget, "Finish").click()
+        picker_button(widget, "finish").click()
         entry = ctrl.state.spectrums["two"]
         assert entry.points_completed
         assert entry.point_count == 0
@@ -412,3 +412,33 @@ def test_finish_pending_preview_publishes_committed_selection(presented) -> None
             context.plugin.clear.execute(context.session, None)
     finally:
         subscription.unsubscribe()
+
+
+def test_control_column_runs_settings_edits_status_then_finish(presented) -> None:
+    widget, _queue, _ctrl = presented
+    widget.resize(1100, 900)
+    widget.show()
+    tops = column_tops(
+        widget,
+        [
+            "threshold",
+            "smooth",
+            "smooth_method",
+            "brush_width",
+            "operation",
+            "show_mask",
+            "show_origin",
+            "show_changes",
+            "undo",
+            "clear",
+            "perform_on_all",
+            "status",
+            "finish",
+        ],
+    )
+    assert tops == sorted(tops) and len(set(tops)) == len(tops)
+    finish = picker_button(widget, "finish")
+    bottom = finish.mapTo(widget, finish.rect().bottomLeft()).y()
+    assert bottom > 0.9 * widget.height()
+    assert widget.canvas.x() < finish.mapTo(widget, finish.rect().topLeft()).x()
+    assert unlabelled_inputs(widget) == []

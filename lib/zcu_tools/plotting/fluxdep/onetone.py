@@ -11,12 +11,15 @@ from zcu_tools.analysis.fluxdep.onetone import (
     OneTonePickState,
     analyze_onetone_pick,
 )
+from zcu_tools.analysis.fluxdep.processing import onetone_background
 
 
 class OneTonePickPlot:
     """Own image/curve artists and project committed peak indices.
 
     Uses Device value/GHz axes and normalized-amplitude curve, ticks and grids.
+    The background is the spectrum's dip depth under gray_r, so resonator
+    dips draw dark on a light background.
     Does not own analysis state, Qt canvas, presentation, or a pyplot manager.
     """
 
@@ -43,8 +46,9 @@ class OneTonePickPlot:
         spectrum = inputs.spectrum
         ax_image = figure.add_subplot(2, 1, 1)
         ax_curve = figure.add_subplot(2, 1, 2)
+        background = onetone_background(spectrum.signals)
         ax_image.imshow(
-            np.abs(spectrum.signals).T,
+            background.values.T,
             aspect="auto",
             origin="lower",
             extent=(
@@ -54,6 +58,8 @@ class OneTonePickPlot:
                 float(spectrum.freqs[-1]),
             ),
             cmap="gray_r",
+            vmin=background.vmin,
+            vmax=background.vmax,
         )
         ax_image.axhline(
             spectrum.freqs[inputs.max_freq_index], color="red", linewidth=1

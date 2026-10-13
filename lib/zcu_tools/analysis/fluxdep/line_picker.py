@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -23,9 +24,18 @@ from zcu_tools.analysis.fluxdep.line_state import (
 from zcu_tools.analysis.fluxdep.line_state import (
     find_best_mirror_position as find_best_mirror_position,
 )
-from zcu_tools.analysis.fluxdep.processing import cast2real_and_norm
+from zcu_tools.analysis.fluxdep.processing import (
+    cast2real_and_norm,
+    onetone_background,
+)
 
 _LOSS_REFRESH_MS = 120
+
+
+def _fixed_decimals(dev_values: NDArray[np.float64]) -> int:
+    """Decimal places that still resolve one device-axis step in fixed point."""
+    step = abs(float(dev_values[-1] - dev_values[0])) / (len(dev_values) - 1)
+    return max(0, -math.floor(math.log10(step))) + 1
 
 
 class TwoLinePicker:
@@ -41,8 +51,21 @@ class TwoLinePicker:
         flux_half: float | None = None,
         flux_int: float | None = None,
         force_magnitude: bool = False,
+        onetone: bool = False,
     ) -> None:
+        """Draw the spectrum and the two lines into the empty figure.
+
+        signals is shaped (device, frequency) over the dev_values and freqs
+        axes. flux_half / flux_int seed the lines (folded into the axis when
+        None or outside it); force_magnitude starts in magnitude-only mode.
+        onetone marks a OneTone resonator spectrum: the main image then shows
+        ``onetone_background`` (dark dip on white,
+        like the OneTone sample picker) and keeps it when the projection
+        changes. Otherwise the main image shows the alignment projection.
+        Line positions, mirror loss and auto-align always use the projection.
+        """
         self._figure = figure
+        self._onetone = onetone
         self._inputs = FluxPickInputs(signals, dev_values, freqs)
         self._signals = self._inputs.signals
         self._dev_values = self._inputs.dev_values
@@ -55,6 +78,7 @@ class TwoLinePicker:
             self._signals, use_phase=not self._state.magnitude_only
         )
         self._min_flux_dist = self._inputs.min_distance
+        self._decimals = _fixed_decimals(self._dev_values)
         self._picked: Line2D | None = None
 
         self._init_plots()
@@ -94,22 +118,32 @@ class TwoLinePicker:
         return 2 * abs(self.flux_int - self.flux_half)
 
     def info_text(self) -> str:
+        """Half / integer / period in device units, fixed point at axis resolution."""
+        digits = self._decimals
         return (
-            f"half flux: {self.flux_half:.2e}\n"
-            f"integer flux: {self.flux_int:.2e}\n"
-            f"flux period: {self.period():.2e}"
+            f"half flux: {self.flux_half:.{digits}f}\n"
+            f"integer flux: {self.flux_int:.{digits}f}\n"
+            f"flux period: {self.period():.{digits}f}"
         )
 
     def _init_plots(self) -> None:
         self._ax_main = self._figure.add_subplot(2, 1, 1)
         self._ax_loss = self._figure.add_subplot(2, 1, 2)
 
+        if self._onetone:
+            shown = onetone_background(self._signals)
+            background, vmin, vmax = shown.values, shown.vmin, shown.vmax
+        else:
+            background, vmin, vmax = self._real_signals, None, None
         self._main_im = self._ax_main.imshow(
-            self._real_signals.T,
+            background.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
             extent=self._extent(),
+            cmap="gray_r",
+            vmin=vmin,
+            vmax=vmax,
         )
         self._ax_main.set_xlim(self._dev_values[0], self._dev_values[-1])
         self._ax_main.set_ylim(self._freqs[0], self._freqs[-1])
@@ -129,9 +163,10 @@ class TwoLinePicker:
             origin="lower",
             interpolation="none",
             extent=self._extent(),
+            cmap="gray_r",
         )
-        self._ax_loss.set_xticks([])
-        self._ax_loss.set_yticks([])
+        self._ax_loss.set_xlabel("Device value")
+        self._ax_loss.set_ylabel("Frequency (GHz)")
         self._ax_loss.set_title("mirror loss: -")
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
         self._loss_dot = self._ax_loss.plot([self.flux_half], [center_y], "ro")[0]
@@ -263,11 +298,7 @@ class TwoLinePicker:
         self._loss_refresh_pending = False
         self.clear_selection()
         if state.magnitude_only != self._state.magnitude_only:
-            self._real_signals = cast2real_and_norm(
-                self._signals, use_phase=not state.magnitude_only
-            )
-            self._main_im.set_data(self._real_signals.T)
-            self._main_im.autoscale()
+            self._project(magnitude_only=state.magnitude_only)
         self._state = state
         self._apply_line_positions()
         center_y = 0.5 * (self._freqs[0] + self._freqs[-1])
@@ -275,11 +306,17 @@ class TwoLinePicker:
 
     def set_magnitude_only(self, on: bool) -> None:
         self.clear_selection()
-        projection = cast2real_and_norm(self._signals, use_phase=not bool(on))
         self._state = replace(self._state, magnitude_only=bool(on))
-        self._real_signals = projection
-        self._main_im.set_data(self._real_signals.T)
-        self._main_im.autoscale()
+        self._project(magnitude_only=bool(on))
+
+    def _project(self, *, magnitude_only: bool) -> None:
+        """Recompute the alignment projection; redraw it unless OneTone."""
+        self._real_signals = cast2real_and_norm(
+            self._signals, use_phase=not magnitude_only
+        )
+        if not self._onetone:
+            self._main_im.set_data(self._real_signals.T)
+            self._main_im.autoscale()
 
     def swap(self) -> None:
         self.clear_selection()

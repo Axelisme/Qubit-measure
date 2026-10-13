@@ -10,6 +10,8 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
+from tests.gui.app.fluxdep._window import current_page, editor, fit_panel, show_page
+
 
 def apply_button(widget):
     return next(
@@ -26,37 +28,34 @@ def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
     window = MainWindow(ctrl)
     window.show()
     try:
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert stack is not None
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         panel.show_tab("search")
 
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context = ctrl.interactive.begin_line_pick("a")
-        picker = stack.currentWidget()
+        # Agent work updates the Spectra page; the user stays on Fit.
+        assert current_page(window) == "fit"
+        assert panel.current_tab == "search"
+        picker = editor(window)
         assert isinstance(picker, LinePickerWidget)
         active = ctrl.interactive.inspect()
         assert active is not None and active.context is context
         assert ctrl.state.spectrums["a"].points_completed
 
-        analyze.click()
-        assert stack.currentWidget() is panel
+        show_page(window, "fit")
+        assert fit_panel(window) is panel
         assert ctrl.interactive.inspect() == active
         context.plugin.actions.swap.execute(context.session, None)
-        assert stack.currentWidget() is panel
+        assert current_page(window) == "fit"
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             assert ctrl.interactive.inspect() == active
-        assert stack.currentWidget() is panel
+        assert current_page(window) == "fit"
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context.plugin.execute_command(context.session, "swap_lines", {})
-        shown = stack.currentWidget()
+        assert current_page(window) == "fit"
+        shown = editor(window)
         assert isinstance(shown, LinePickerWidget)
         assert shown.get_result() == (
             context.session.snapshot().flux_half,
@@ -66,12 +65,12 @@ def test_agent_picker_reveals_same_session_while_reads_and_user_edits_do_not(
         assert context.session.can_undo()
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context.session.undo()
-        assert stack.currentWidget() is shown
+        assert editor(window) is shown
         assert not context.session.can_undo()
 
         ctrl.interactive.cancel()
         assert ctrl.interactive.inspect() is None
-        assert stack.currentWidget() is not shown
+        assert editor(window) is not shown
     finally:
         window.close()
         window.deleteLater()
@@ -86,10 +85,11 @@ def test_agent_selection_updates_reuse_filter_view_and_undo(qapp, cross_controll
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             context = ctrl.interactive.begin_cross_selection()
-        panel = window.findChild(AnalyzePanelWidget)
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert panel is not None and stack is not None
-        assert stack.currentWidget() is panel
+        # The agent's Filter waits on the Fit page until the user enters it.
+        assert current_page(window) == "spectra"
+        show_page(window, "fit")
+        panel = fit_panel(window)
+        assert panel is not None
         assert panel.current_tab == "filter"
         selector = panel.findChild(SelectorWidget)
         assert selector is not None
@@ -151,26 +151,22 @@ def test_activate_detaches_old_view_reuses_context_and_filter_search_resets(
         qapp.processEvents()
 
 
-def test_main_window_analyze_click_reactivates_singleton_after_external_change(
+def test_fit_page_reentry_reactivates_singleton_after_external_change(
     qapp, cross_controller
 ):
     ctrl = cross_controller
     window = MainWindow(ctrl)
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         context = ctrl.interactive.current_cross_selection()
         assert context is not None
         ctrl.set_points("b", np.array([0.8]), np.array([4.8]))
         assert ctrl.interactive.current_cross_selection() is None
-        analyze.click()
-        assert window.findChild(AnalyzePanelWidget) is panel
+        show_page(window, "spectra")
+        show_page(window, "fit")
+        assert fit_panel(window) is panel
         fresh = ctrl.interactive.current_cross_selection()
         assert fresh is not None and fresh is not context
         np.testing.assert_array_equal(fresh.plugin.inputs.fluxs, [0.0, 0.5, 1.0, 0.8])
@@ -244,10 +240,13 @@ def test_agent_filter_reveals_beside_spectrum_named_selection_draft(
         assert window.findChild(LinePickerWidget) is not None
         with ctrl.bus.origin(EventOrigin(kind="agent")):
             ctrl.interactive.begin_cross_selection()
-        panel = window.findChild(AnalyzePanelWidget)
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert panel is not None and stack is not None
-        assert stack.currentWidget() is panel
+        # The agent's Filter waits on the Fit page; the spectrum's own draft
+        # stays in the Spectra editor.
+        assert current_page(window) == "spectra"
+        assert isinstance(editor(window), LinePickerWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
+        assert panel is not None
         assert panel.current_tab == "filter"
         assert panel.findChild(SelectorWidget) is not None
         named = ctrl.interactive.inspect("selection")

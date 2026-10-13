@@ -122,31 +122,24 @@ def _h_spectrum_list(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> SpectrumListReply:
     del params
+    rows = adapter.ctrl.spectrum_rows()
     spectrums = adapter.ctrl.state.spectrums
-    return {
-        "spectrums": [
+    items: list[SpectrumListItem] = []
+    for row in rows:
+        entry = spectrums[row.name]
+        items.append(
             SpectrumListItem(
-                name=entry.name,
-                spec_type=entry.spec_type,
+                name=row.name,
+                spec_type=row.spec_type,
                 aligned=entry.aligned,
                 points_completed=entry.points_completed,
-                point_count=entry.point_count,
-                stage="loaded"
-                if not entry.aligned
-                else "sampled"
-                if entry.points_completed
-                else "aligned",
-                filter_excluded_count=0
-                if entry.filter_mask is None
-                else entry.point_count - int(np.count_nonzero(entry.filter_mask)),
-                pending=("align" if active.kind == "line" else "sample")
-                if active is not None and active.spectrum_name == entry.name
-                else None,
+                point_count=row.point_count,
+                stage=row.stage,
+                filter_excluded_count=row.filter_excluded_count,
+                pending=row.pending,
             )
-            for entry in spectrums.values()
-            for active in (adapter.ctrl.interactive.inspect(entry.name),)
-        ]
-    }
+        )
+    return {"spectrums": items}
 
 
 def _axis_snapshot(
@@ -207,6 +200,7 @@ def _h_spectrum_render(
         entry.raw,
         entry.points,
         alignment=(entry.flux_half, entry.flux_int) if entry.aligned else None,
+        onetone=entry.spec_type == "OneTone",
     )
     png = render_figure_png(figure)
     return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}

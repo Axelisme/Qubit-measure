@@ -1,34 +1,37 @@
 """MainWindow — the fluxdep-gui shell.
 
-Layout (Q2 decision): a left spectrum list + a right single editing area, not
-tabs (spectra are members of one collection — list + single editor reads more
-naturally than parallel tabs).
+  ┌───────────────────────────────────────────────────────────────┐
+  │ Project: chip / qubit  [Local]       Project… Add spectrum…   │
+  │                                      Restore… Export spectra… │
+  ├───────────────────────────────────────────────────────────────┤
+  │ [Spectra] [Fit]                                               │
+  │ ┌────────────┬──────────────────────────────┐                 │
+  │ │ spectra    │ editing area (stacked): the  │  Spectra page   │
+  │ │  • a ...   │ active spectrum's picker or  │                 │
+  │ │  • b ...   │ result preview               │                 │
+  │ │ [Remove]   │                              │                 │
+  │ └────────────┴──────────────────────────────┘                 │
+  └───────────────────────────────────────────────────────────────┘
 
-  ┌────────────┬───────────────────────────┐
-  │ spectra    │  editing area (stacked)   │
-  │  • R1 ...  │   the active spectrum's   │
-  │  • Q1 ...  │   pipeline-stage widget:  │
-  │ [load]     │   not-aligned → LinePicker│
-  │ [remove]   │   aligned → point selector│
-  │ [export]   │   (OneTone / FindPoints)  │
-  └────────────┴───────────────────────────┘
-
-The editing area swaps the interactive widget by the active spectrum's stage; a
-widget's ``finished`` signal writes its result back through the Controller, which
-advances the stage and re-triggers the swap. "Re-align active" reopens the line
-picker; "Cross-spectrum filter…" opens the joint-point-cloud selector over every
-spectrum that has selected points.
+The Spectra page swaps the editing widget by the active spectrum's stage; a
+widget's ``finished`` signal writes its result back through the Controller,
+which advances the stage and re-triggers the swap. A GUI Add opens the new
+spectrum's line picker. The Fit page hosts the AnalyzePanel singleton
+(Filter / Search / Show). Spectrum work never replaces the Fit page. Pages
+switch only on human intent: a tab click, or a GUI Add / Restore (back to
+Spectra). Agent-origin events update the content of the page they concern.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QModelIndex, Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
@@ -40,15 +43,26 @@ from qtpy.QtWidgets import (
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.controller import (
+    Controller,
+    PendingKind,
+    SpectrumRow,
+    pending_kind,
+)
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     InteractiveChangedPayload,
+    ProjectChangedPayload,
     SearchChangedPayload,
+    SelectionChangedPayload,
     SpectrumAddedPayload,
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
@@ -60,7 +74,6 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     OneTonePickContext,
     TwoTonePickContext,
 )
-from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.app.fluxdep.ui.interactive.base import InteractiveMplWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
@@ -69,11 +82,56 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPrevie
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
+
+# List item role holding a row's second line (kind · stage · points · ...).
+_DETAILS_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class _SpectrumRowDelegate(QStyledItemDelegate):
+    """Draw a spectrum row as its name over its details, eliding a long name.
+
+    Each item holds the literal name (UserRole) and the details line
+    (_DETAILS_ROLE). A name wider than the cell is elided in the middle so
+    both ends stay readable; the item tooltip carries the full name. Qt
+    right-elides an overlong details line as usual.
+    """
+
+    def initStyleOption(
+        self,
+        option: QStyleOptionViewItem | None,
+        index: QModelIndex,
+    ) -> None:
+        super().initStyleOption(option, index)
+        if option is None:
+            raise TypeError("initStyleOption needs the option Qt paints with")
+        name = index.data(Qt.ItemDataRole.UserRole)
+        details = index.data(_DETAILS_ROLE)
+        if not isinstance(name, str) or not isinstance(details, str):
+            raise TypeError("spectrum rows hold a str name and str details")
+        widget = option.widget
+        style = widget.style()
+        if style is None:
+            raise RuntimeError("spectrum rows are painted by a styled list widget")
+        text_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemText, option, widget
+        )
+        # Qt insets item text by the focus-frame margin plus one on each side.
+        margin = (
+            style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
+        )
+        width = max(text_rect.width() - 2 * margin, 0)
+        elided = option.fontMetrics.elidedText(
+            name, Qt.TextElideMode.ElideMiddle, width
+        )
+        # Qt lays item text out with QTextLayout, which breaks lines only at
+        # U+2028 (QChar.LineSeparator), not at "\n".
+        option.text = f"{elided}\u2028{details}"
 
 
 class MainWindow(QMainWindow):
@@ -111,12 +169,17 @@ class MainWindow(QMainWindow):
             interactive_runner.setParent(self)
         self._bus_subs = EventSubscriptions()
         self._routing_editor = False
+        self._routing_page = False
         self._editor_context_id: int | None = None
+        # An agent's Filter / Search waits here until the user enters Fit; a
+        # waiting Filter is dropped when its context closes.
+        self._fit_entry_tab: AnalyzeTab | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
 
         self._build_ui()
         self._subscribe_events()
+        self._refresh_project()
         self._refresh_list()
         self._rebuild_editor(open_picker=True)
         self._dispose_control = ctrl.control_identity.watch(self._refresh_control)
@@ -130,9 +193,7 @@ class MainWindow(QMainWindow):
         self._writable = writable
         for control in self._write_controls:
             control.setEnabled(writable)
-        if isinstance(
-            self._current_editor, (InteractiveMplWidget, ResultPreviewWidget)
-        ):
+        if isinstance(self._current_editor, InteractiveMplWidget):
             self._current_editor.set_editable(editable=writable)
         if self._analyze_panel is not None:
             self._analyze_panel.set_writable(writable=writable)
@@ -173,77 +234,24 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget()
-        root = QHBoxLayout(central)
+        root = QVBoxLayout(central)
+        root.addLayout(self._build_top_bar())
 
-        # Left panel: collection management above the list, global actions below.
-        left = QVBoxLayout()
-        self._indicator = ControlIndicator(self._ctrl.control_identity, self)
-        left.addWidget(self._indicator)
-
-        # Above the list: add a raw spectrum / remove this one.
-        # Project (chip / qubit names) — drives the default export layout.
-        self._project_btn = QPushButton("Project…")
-        self._project_btn.clicked.connect(self._on_project_clicked)
-        left.addWidget(self._project_btn)
-
-        manage_row = QHBoxLayout()
-        self._add_btn = QPushButton("Add…")
-        self._add_btn.clicked.connect(self._on_load_clicked)
-        self._remove_btn = QPushButton("Remove")
-        self._remove_btn.clicked.connect(self._on_remove_clicked)
-        manage_row.addWidget(self._add_btn)
-        manage_row.addWidget(self._remove_btn)
-        left.addLayout(manage_row)
-
-        self._list = QListWidget()
-        self._list.currentItemChanged.connect(self._on_list_selection)
-        left.addWidget(self._list, stretch=1)
-
-        # Below the list: load / export the processed spectrums.hdf5 collection,
-        # then the cross-spectrum filter. (Re-do buttons live in the right-side
-        # result preview.)
-        io_row = QHBoxLayout()
-        self._reload_btn = QPushButton("Restore")
-        self._reload_btn.clicked.connect(self._on_reload_clicked)
-        self._export_btn = QPushButton("Export")
-        self._export_btn.clicked.connect(self._on_export_clicked)
-        io_row.addWidget(self._reload_btn)
-        io_row.addWidget(self._export_btn)
-        left.addLayout(io_row)
-
-        # The v2 analysis tail: one panel with Filter / Search / Show tabs over
-        # the selected joint point cloud (cross-spectrum filter → database search
-        # → fit visualisation + display tools → export params.json).
-        self._analyze_btn = QPushButton("Analyze…")
-        self._analyze_btn.clicked.connect(self._on_analyze_clicked)
-        left.addWidget(self._analyze_btn)
-
-        left_panel = QWidget()
-        left_panel.setLayout(left)
-        left_panel.setMinimumWidth(180)
-
-        # Right panel: editing area (stacked). The active spectrum's pipeline
-        # stage decides which interactive widget is shown; _current_editor is
-        # the live one (replaced on stage/active change).
-        self._editor_stack = QStackedWidget()
-        self._placeholder = QLabel("Select or load a spectrum to begin.")
-        self._placeholder.setEnabled(False)
-        self._editor_stack.addWidget(self._placeholder)
-        self._current_editor: QWidget | None = None
-        # The analyze panel is a SINGLETON kept alive in the stack: built once on
-        # first use and only shown/hidden after, so its tabs / form / paths /
-        # figures survive switching away and back (it is not a _current_editor
-        # that _clear_editor would destroy).
+        # Main area: Spectra and Fit pages. Spectrum work never replaces Fit.
+        self._pages = QTabWidget()
+        self._pages.setObjectName("fluxdep.pages")
+        self._spectra_page = self._build_spectra_page()
+        self._pages.addTab(self._spectra_page, "Spectra")
+        # The Fit page hosts the AnalyzePanel SINGLETON: built on first use and
+        # kept after, so its tabs / form / paths / figures survive page switches.
+        self._fit_page = QWidget()
+        self._fit_page.setObjectName("fluxdep.page.fit")
+        self._fit_layout = QVBoxLayout(self._fit_page)
+        self._fit_layout.setContentsMargins(0, 0, 0, 0)
         self._analyze_panel: AnalyzePanelWidget | None = None
-
-        # A draggable splitter lets the user resize the spectrum list vs editor.
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self._editor_stack)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([280, 820])
-        root.addWidget(splitter)
+        self._pages.addTab(self._fit_page, "Fit")
+        self._pages.currentChanged.connect(self._on_page_changed)
+        root.addWidget(self._pages, stretch=1)
         self.setCentralWidget(central)
         self._write_controls = (
             self._project_btn,
@@ -251,8 +259,90 @@ class MainWindow(QMainWindow):
             self._remove_btn,
             self._reload_btn,
             self._export_btn,
-            self._analyze_btn,
         )
+
+    def _build_top_bar(self) -> QHBoxLayout:
+        """Project and control identity on the left, collection commands right."""
+        bar = QHBoxLayout()
+        self._project_label = QLabel()
+        self._project_label.setObjectName("fluxdep.session.project")
+        bar.addWidget(self._project_label)
+        self._indicator = ControlIndicator(self._ctrl.control_identity, self)
+        bar.addWidget(self._indicator)
+        bar.addStretch(1)
+
+        self._project_btn = self._command_button(
+            "fluxdep.project", "Project…", self._on_project_clicked
+        )
+        self._add_btn = self._command_button(
+            "fluxdep.spectrum.add", "Add spectrum…", self._on_load_clicked
+        )
+        self._reload_btn = self._command_button(
+            "fluxdep.spectra.restore", "Restore…", self._on_reload_clicked
+        )
+        self._export_btn = self._command_button(
+            "fluxdep.spectra.export", "Export spectra…", self._on_export_clicked
+        )
+        for button in (
+            self._project_btn,
+            self._add_btn,
+            self._reload_btn,
+            self._export_btn,
+        ):
+            bar.addWidget(button)
+        return bar
+
+    @staticmethod
+    def _command_button(
+        object_name: str, text: str, on_click: Callable[[], None]
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName(object_name)
+        button.clicked.connect(on_click)
+        return button
+
+    def _build_spectra_page(self) -> QWidget:
+        """Spectrum list with Remove below it, beside the stage-driven editor."""
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        self._list = QListWidget()
+        self._list.setObjectName("fluxdep.spectra")
+        # Rows elide to the list width instead of scrolling sideways.
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list.setItemDelegate(_SpectrumRowDelegate(self._list))
+        self._list.currentItemChanged.connect(self._on_list_selection)
+        left.addWidget(self._list, stretch=1)
+        self._remove_btn = self._command_button(
+            "fluxdep.spectrum.remove", "Remove", self._on_remove_clicked
+        )
+        left.addWidget(self._remove_btn)
+        left_panel = QWidget()
+        left_panel.setLayout(left)
+        left_panel.setMinimumWidth(180)
+
+        # Editing area (stacked). The active spectrum's pipeline stage decides
+        # which interactive widget is shown; _current_editor is the live one
+        # (replaced on stage/active change).
+        self._editor_stack = QStackedWidget()
+        self._editor_stack.setObjectName("fluxdep.editor")
+        self._placeholder = QLabel("Select or load a spectrum to begin.")
+        self._placeholder.setEnabled(False)
+        self._editor_stack.addWidget(self._placeholder)
+        self._current_editor: QWidget | None = None
+
+        # A draggable splitter lets the user resize the spectrum list vs editor.
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(self._editor_stack)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 880])
+        page = QWidget()
+        page.setObjectName("fluxdep.page.spectra")
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(splitter)
+        return page
 
     def _subscribe_events(self) -> None:
         bus = self._ctrl.bus
@@ -265,6 +355,11 @@ class MainWindow(QMainWindow):
         self._bus_subs.subscribe_with_meta(
             bus, InteractiveChangedPayload, self._on_interactive_changed
         )
+        self._bus_subs.subscribe(bus, ProjectChangedPayload, self._on_project_changed)
+        # Filter publication changes the per-spectrum excluded counts in the list.
+        self._bus_subs.subscribe(
+            bus, SelectionChangedPayload, self._on_selection_changed
+        )
         self._bus_subs.subscribe_with_meta(
             bus, SearchChangedPayload, self._on_search_changed
         )
@@ -273,9 +368,14 @@ class MainWindow(QMainWindow):
     def _on_interactive_changed(
         self, payload: InteractiveChangedPayload, meta: EventMeta
     ) -> None:
+        if payload.phase != "updated":
+            self._refresh_list()  # a draft opened or closed changes its row
         if payload.phase == "closed":
             if payload.context_id == self._editor_context_id:
                 self._clear_editor()
+            if payload.kind == "selection" and self._fit_entry_tab == "filter":
+                # An agent's Filter routes the next Fit entry only while live.
+                self._fit_entry_tab = None
             return
         if meta.origin.kind != "agent" or self._routing_editor:
             return
@@ -291,8 +391,9 @@ class MainWindow(QMainWindow):
         self._routing_editor = True
         try:
             if isinstance(active.context, CrossSelectionContext):
-                self._show_analyze("filter")
-            elif active.spectrum_name != self._ctrl.state.active_spectrum:
+                self._follow_fit_tab("filter")
+                return
+            if active.spectrum_name != self._ctrl.state.active_spectrum:
                 self._ctrl.set_active_spectrum(active.spectrum_name)
                 self._clear_editor()
                 self._mount_picker(active.context)
@@ -311,7 +412,13 @@ class MainWindow(QMainWindow):
         if meta.origin.kind == "agent" and payload.status == "pending":
             activity = self._ctrl.search.current
             if activity is not None and activity.token == payload.token:
-                self._show_analyze("search")
+                self._follow_fit_tab("search")
+
+    def _on_project_changed(self, _payload: ProjectChangedPayload) -> None:
+        self._refresh_project()
+
+    def _on_selection_changed(self, _payload: SelectionChangedPayload) -> None:
+        self._refresh_list()
 
     def _on_spectrum_added(self, _payload: SpectrumAddedPayload) -> None:
         self._refresh_list()
@@ -327,24 +434,45 @@ class MainWindow(QMainWindow):
         if payload.name == self._ctrl.state.active_spectrum:
             self._rebuild_editor(open_picker=True)
 
-    # --- list refresh ----------------------------------------------------
+    # --- top bar and list refresh ---------------------------------------
+
+    def _refresh_project(self) -> None:
+        project = self._ctrl.state.project
+        if project.chip_name == DEFAULT_CHIP and project.qub_name == DEFAULT_QUBIT:
+            self._project_label.setText("Project: not set (use Project…)")
+        else:
+            self._project_label.setText(
+                f"Project: {project.chip_name} / {project.qub_name}"
+            )
+
+    def _row_details(self, row: SpectrumRow) -> str:
+        """A list row's second line, from the query that spectrum.list reports.
+
+        Spec type, stage and published point count always show; an unfinished
+        draft kind and the Filter-excluded count only when present.
+        """
+        parts = [row.spec_type, row.stage, f"{row.point_count} pts"]
+        if row.pending is not None:
+            parts.append(f"{row.pending} draft")
+        if row.filter_excluded_count:
+            parts.append(f"{row.filter_excluded_count} excluded")
+        return " · ".join(parts)
 
     def _refresh_list(self) -> None:
-        """Rebuild the spectrum list from State (label = name + type + stage)."""
+        """Rebuild the spectrum list from the Controller's published rows."""
+        # Rows first: the query may retire a dead draft and re-enter this refresh.
+        rows = [
+            (row.name, self._row_details(row)) for row in self._ctrl.spectrum_rows()
+        ]
         active = self._ctrl.state.active_spectrum
         self._list.blockSignals(True)
         self._list.clear()
-        for name in self._ctrl.list_spectrums():
-            entry = self._ctrl.state.spectrums[name]
-            stage = (
-                "✓pts"
-                if entry.aligned and entry.points_completed
-                else "✓align"
-                if entry.aligned
-                else "new"
-            )
-            item = QListWidgetItem(f"{name}  [{entry.spec_type}·{stage}]")
-            item.setData(256, name)  # Qt.UserRole == 256; stash the bare name
+        for name, details in rows:
+            # Literal name over its details; the delegate elides a long name.
+            item = QListWidgetItem(f"{name}\n{details}")
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setData(_DETAILS_ROLE, details)
+            item.setToolTip(name)
             self._list.addItem(item)
             if name == active:
                 self._list.setCurrentItem(item)
@@ -357,7 +485,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if current is None:
             return
-        name = current.data(256)
+        name = current.data(Qt.ItemDataRole.UserRole)
         if name and name != self._ctrl.state.active_spectrum:
             self._ctrl.set_active_spectrum(name)
         # Human picking is a separate write intention, never an active-change effect.
@@ -367,6 +495,7 @@ class MainWindow(QMainWindow):
     def _on_active_changed(self, _payload: ActiveSpectrumChangedPayload) -> None:
         self._refresh_list()  # keep the list selection in sync with the active spectrum
         if not self._routing_editor:
+            # Any origin only updates the Spectra page; the shown page stays.
             self._rebuild_editor()
 
     # --- editing area (stage-driven interactive widget) ------------------
@@ -406,56 +535,56 @@ class MainWindow(QMainWindow):
                 if not isinstance(context, CrossSelectionContext):
                     self._mount_picker(context)
             elif open_picker and self._writable and not entry.aligned:
-                self._mount_line_picker(entry)
+                self._mount_stage(name, "align")
             elif open_picker and self._writable and not entry.points_completed:
-                self._mount_point_selector(entry)
+                self._mount_stage(name, "sample")
             else:
                 self._mount(
                     ResultPreviewWidget(
                         entry,
-                        on_repick_lines=self._on_repick_lines,
-                        on_reselect_points=self._on_reselect_points,
+                        on_align=self._request_align,
+                        on_sample=self._request_sample,
                     )
                 )
         finally:
             self._routing_editor = False
 
     def _mount(self, widget: QWidget) -> None:
-        if self._analyze_panel is not None:
-            self._analyze_panel.detach()
         self._current_editor = widget
-        if isinstance(widget, (InteractiveMplWidget, ResultPreviewWidget)):
+        if isinstance(widget, InteractiveMplWidget):
             widget.set_editable(editable=self._writable)
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)
 
-    def _mount_line_picker(self, entry: SpectrumEntry) -> None:
-        self._mount_picker(self._ctrl.interactive.begin_line_pick(entry.name))
-
-    def _mount_point_selector(self, entry: SpectrumEntry) -> None:
-        context = (
-            self._ctrl.interactive.begin_onetone_pick(entry.name)
-            if entry.spec_type == "OneTone"
-            else self._ctrl.interactive.begin_twotone_pick(entry.name)
-        )
-        self._mount_picker(context)
+    def _mount_stage(self, name: str, stage: PendingKind) -> None:
+        """Begin (or reuse) name's picker for stage and mount it as the editor."""
+        if stage == "align":
+            self._mount_picker(self._ctrl.interactive.begin_line_pick(name))
+        else:
+            self._mount_picker(self._ctrl.interactive.begin_sample_pick(name))
 
     def _mount_picker(
         self, context: LinePickContext | OneTonePickContext | TwoTonePickContext
     ) -> None:
         widget: LinePickerWidget | OneToneWidget | FindPointsWidget
         if isinstance(context, LinePickContext):
-            widget = LinePickerWidget(context)
+            entry = self._ctrl.state.spectrums[context.spectrum_name]
+            # Re-aligning an aligned spectrum may switch to sampling instead.
+            widget = LinePickerWidget(
+                context,
+                onetone=entry.spec_type == "OneTone",
+                on_sample=self._request_sample if entry.aligned else None,
+            )
             widget.finished.connect(lambda: self._finish_lines(context.spectrum_name))
         elif isinstance(context, OneTonePickContext):
-            widget = OneToneWidget(context)
+            widget = OneToneWidget(context, on_realign=self._request_align)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_onetone_pick(
                     context.spectrum_name
                 )
             )
         else:
-            widget = FindPointsWidget(context)
+            widget = FindPointsWidget(context, on_realign=self._request_align)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_twotone_pick(
                     context.spectrum_name
@@ -473,54 +602,122 @@ class MainWindow(QMainWindow):
         except (FailedPreconditionError, ValueError, RuntimeError) as exc:
             self._show_error("Alignment failed", str(exc))
 
-    def _on_repick_lines(self) -> None:
-        """Re-open the line picker for the active spectrum (redo alignment)."""
-        name = self._ctrl.state.active_spectrum
-        if name is None:
-            return
-        self._ctrl.reset_alignment(name)
+    def _request_align(self) -> None:
+        self._open_stage("align")
 
-    def _on_reselect_points(self) -> None:
-        """Re-open the point selector for the active spectrum (redo selection).
+    def _request_sample(self) -> None:
+        self._open_stage("sample")
 
-        Requires the spectrum to be aligned (points are placed on its flux axis);
-        warns otherwise.
+    def _open_stage(self, stage: PendingKind) -> None:
+        """Open the active spectrum's align or sample picker on a Local intent.
+
+        This is the holder gate for the preview and picker stage buttons: a
+        non-holder click does nothing. The picker opens as a draft; the
+        published spectrum changes only on Finish. A live draft of the other
+        stage is discarded only after the user confirms; declining keeps it.
         """
         name = self._ctrl.state.active_spectrum
-        if name is None:
+        if not self._writable or name is None:
             return
-        entry = self._ctrl.state.spectrums[name]
-        if not entry.aligned:
-            self._show_error(
-                "Not aligned", "Pick the flux lines first (Re-pick lines)."
-            )
+        draft = self._ctrl.interactive.inspect(name)
+        if draft is None or pending_kind(draft) == stage:
+            self._switch_stage(name, stage)
             return
-        self._ctrl.reset_points(name)
+        other = "sample" if stage == "align" else "align"
+        self._dialogs.destructive_confirm(
+            self,
+            f"Discard the {other} draft?",
+            f"{name} has an unfinished {other} draft. "
+            f"Opening {stage} discards it; the published spectrum stays as it is.",
+            action_text=f"Discard and {stage}",
+            on_decision=lambda confirmed: self._on_discard_decision(
+                name, stage, draft.context_id, confirmed=confirmed
+            ),
+        )
 
-    def _on_analyze_clicked(self) -> None:
-        """Show the analysis panel (Filter / Search / Show tabs) — a singleton.
+    def _on_discard_decision(
+        self, name: str, stage: PendingKind, draft_id: int, *, confirmed: bool
+    ) -> None:
+        if not confirmed:
+            return
+        # Authority, display or the draft may change while the dialog is open;
+        # the confirmation covers only the draft the user saw.
+        current = self._ctrl.interactive.inspect(name)
+        if (
+            not self._writable
+            or self._ctrl.state.active_spectrum != name
+            or (current is not None and current.context_id != draft_id)
+        ):
+            return
+        self._switch_stage(name, stage)
 
-        Built once and kept in the stack; switching to a spectrum clears the
-        stage-driven ``_current_editor`` but leaves this panel alive, so its
-        tabs / form / database path / figures are preserved across switches.
+    def _switch_stage(self, name: str, stage: PendingKind) -> None:
+        # begin_* emits synchronously; this route already mounts its context.
+        self._routing_editor = True
+        try:
+            self._clear_editor()
+            self._mount_stage(name, stage)
+        finally:
+            self._routing_editor = False
+
+    # --- pages -----------------------------------------------------------
+
+    def _on_page_changed(self, _index: int) -> None:
+        """Route a user tab switch: entering Fit activates, leaving detaches."""
+        if self._routing_page:
+            return
+        if self._pages.currentWidget() is self._fit_page:
+            self._show_fit_page(None)
+        elif self._analyze_panel is not None:
+            # Leaving Fit retires the Filter view; the Filter context stays open.
+            self._analyze_panel.detach()
+
+    def _show_spectra_page(self) -> None:
+        self._pages.setCurrentWidget(self._spectra_page)
+
+    def _follow_fit_tab(self, tab: AnalyzeTab) -> None:
+        """Follow an agent's Filter or Search on the Fit page, never leaving pages.
+
+        A shown Fit page switches to tab now; otherwise tab waits for the
+        user's next entry into Fit. A waiting Filter lasts only while a Filter
+        context is live, so a finished agent Filter cannot open a new Session.
         """
-        if not self._writable:
-            return
-        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
-            self._show_error("No points", "Select points on a spectrum first.")
-            return
-        self._show_analyze(None)
+        if self._pages.currentWidget() is self._fit_page:
+            self._show_fit_page(tab)
+        else:
+            self._fit_entry_tab = tab
 
-    def _show_analyze(self, tab: AnalyzeTab | None) -> None:
+    def _show_fit_page(self, tab: AnalyzeTab | None) -> None:
+        """Show the Fit page and its singleton panel on tab.
+
+        None takes the tab an agent event left waiting, else keeps the current
+        one. Entering Filter opens its input (show_tab), so a non-holder
+        entering Fit without a live Filter context lands on Search instead:
+        viewing never begins input. A live Filter context, such as an agent's,
+        is reattached.
+        """
         from .analyze_panel import AnalyzePanelWidget
 
-        self._clear_editor()
         if self._analyze_panel is None:
             self._analyze_panel = AnalyzePanelWidget(self._ctrl)
             self._analyze_panel.set_writable(writable=self._writable)
-            self._editor_stack.addWidget(self._analyze_panel)
-        self._analyze_panel.show_tab(tab or self._analyze_panel.current_tab)
-        self._editor_stack.setCurrentWidget(self._analyze_panel)
+            self._fit_layout.addWidget(self._analyze_panel)
+        panel = self._analyze_panel
+        if tab is None:
+            tab = self._fit_entry_tab or panel.current_tab
+            if (
+                tab == "filter"
+                and not self._writable
+                and self._ctrl.interactive.current_cross_selection() is None
+            ):
+                tab = "search"
+        self._fit_entry_tab = None
+        self._routing_page = True
+        try:
+            self._pages.setCurrentWidget(self._fit_page)
+        finally:
+            self._routing_page = False
+        panel.show_tab(tab)
 
     def _on_load_clicked(self) -> None:
         if not self._writable:
@@ -548,10 +745,14 @@ class MainWindow(QMainWindow):
                     inherit_from=req.inherit_from,
                     transpose_axes=req.transpose_axes,
                 )
-                self._ctrl.set_active_spectrum(name)  # jump straight into line picking
+                self._ctrl.set_active_spectrum(name)
             except Exception as exc:
                 logger.exception("load_spectrum failed")
                 self._show_io_error("Load", req.filepath, exc)
+                return
+            self._show_spectra_page()
+            # Adding is the Local intent to start aligning the new spectrum.
+            self._rebuild_editor(open_picker=True)
 
         dialog.accepted.connect(_on_accepted)
         # Hold a reference so open()'s immediate return doesn't let the dialog be GC'd.
@@ -584,6 +785,7 @@ class MainWindow(QMainWindow):
             return
         if names:
             self._ctrl.set_active_spectrum(names[0])
+        self._show_spectra_page()
 
     def _on_remove_clicked(self) -> None:
         if not self._writable:
@@ -612,7 +814,7 @@ class MainWindow(QMainWindow):
         dialog = ProjectDialog(
             self._ctrl.state.project,
             parent=self,
-            db_label="Database path",
+            db_label="Data root",
             project_root=self._ctrl.get_project_root(),
         )
         # Non-blocking open() keeps the Qt event loop (and the read-only control

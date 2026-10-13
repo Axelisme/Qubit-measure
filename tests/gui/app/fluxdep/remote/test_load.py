@@ -339,3 +339,40 @@ def test_processed_partial_publication_is_not_rolled_back_or_self_refreshed(
     assert route_harness.request(
         client, "spectrum.load_processed", filepath=processed_hdf5
     )["ok"]
+
+
+def test_rpc_load_updates_the_list_without_opening_a_picker(
+    route_harness: RouteHarness, spectrum_hdf5: SpectrumFile, qapp
+) -> None:
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+    from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
+
+    from tests.gui._dialog_fakes import RecordingDialogPresenter
+    from tests.gui.app.fluxdep._window import editor, list_labels, preview_actions
+
+    ctrl = route_harness.ctrl
+    window = MainWindow(
+        ctrl, dialog_presenter=RecordingDialogPresenter(confirm_answers=[True])
+    )
+    try:
+        client = route_harness.client()
+        _observe_sources(route_harness, client)
+        reply = _load_request(route_harness, client, "spectrum.load", spectrum_hdf5[0])
+        assert reply["ok"] is True, reply
+        name = reply["result"]["name"]
+        assert isinstance(name, str)
+        assert any(label.startswith(name) for label in list_labels(window))
+        assert ctrl.interactive.inspect(name) is None
+        shown = route_harness.request(client, "spectrum.set_active", name=name)
+        assert shown["ok"] is True, shown
+        # Active only displays: the agent's spectrum shows its published preview.
+        preview = editor(window)
+        assert isinstance(preview, ResultPreviewWidget)
+        assert preview_actions(preview) == {"align"}
+        assert ctrl.interactive.inspect(name) is None
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()

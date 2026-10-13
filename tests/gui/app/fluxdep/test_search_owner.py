@@ -27,6 +27,13 @@ from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._window import (
+    command,
+    current_page,
+    editor,
+    fit_panel,
+    show_page,
+)
 
 
 class ControlledBackground:
@@ -339,18 +346,16 @@ def test_progress_notifications_cannot_reenter_start(search_case):
         dispose()
 
 
-def test_failed_publication_releases_admission(search_case, monkeypatch):
-    from zcu_tools.gui.app.fluxdep.services.fit import FitService
-
+def test_failed_publication_releases_admission(search_case):
     ctrl, bg, _owner, _progress, result, _captured = search_case
-
-    def fail_record(self, result, inputs):
-        raise ValueError("commit refused")
-
-    monkeypatch.setattr(FitService, "record_result", fail_record)
+    # A result over fewer points than the capture is refused by publication.
+    bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
+    short = perfect_fit_result(result.fluxs[:-1], result.freqs[:-1], bounds)
     token = ctrl.search.start()
-    bg.deliver(result)
-    assert ctrl.search.outcome(token) == OperationOutcome("failed", "commit refused")
+    bg.deliver(short)
+    assert ctrl.search.outcome(token) == OperationOutcome(
+        "failed", "captured coordinates must match kernel attribution shape"
+    )
     assert ctrl.search.current.status == "failed"
     assert ctrl.search.active_token is None
     assert ctrl.state.fit.params is None
@@ -362,7 +367,6 @@ def test_failed_publication_releases_admission(search_case, monkeypatch):
 def test_search_start_reveals_only_agent_pending_without_opening_filter(
     qapp, search_case, origin
 ):
-    from qtpy import QtWidgets
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.event_bus import EventOrigin
@@ -371,28 +375,28 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
     window = MainWindow(ctrl)
     window.show()
     try:
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert stack is not None
-        original = stack.currentWidget()
+        original = current_page(window)
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind=origin)):
             token = ctrl.search.start()
-        panel = window.findChild(AnalyzePanelWidget)
+        # Neither origin moves the user's page; the agent's pending search
+        # waits on the Fit page for the next entry.
+        assert current_page(window) == original
         if origin == "agent":
+            show_page(window, "fit")
+            panel = fit_panel(window)
             assert panel is not None
-            assert stack.currentWidget() is panel
             assert panel.current_tab == "search"
         else:
-            assert panel is None
-            assert stack.currentWidget() is original
+            assert window.findChild(AnalyzePanelWidget) is None
         assert ctrl.interactive.inspect() is None
 
         ctrl.set_active_spectrum("b")
-        user_view = stack.currentWidget()
+        user_page, user_view = current_page(window), editor(window)
         bg.fail(SearchCancelled("requested"))
         outcome = ctrl.search.outcome(token)
         assert outcome is not None and outcome.status == "cancelled"
-        assert stack.currentWidget() is user_view
+        assert current_page(window) == user_page and editor(window) is user_view
         assert ctrl.interactive.inspect() is None
     finally:
         if ctrl.search.active_token is not None:
@@ -424,13 +428,12 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
     tabs = panel.findChild(QtWidgets.QTabWidget)
     assert tabs is not None
     tabs.setCurrentIndex(1)
-    buttons = {
-        button.text(): button for button in panel.findChildren(QtWidgets.QPushButton)
-    }
+    search = command(panel, "fluxdep.fit.search")
+    cancel = command(panel, "fluxdep.fit.cancel")
     try:
         token = ctrl.search.start()
-        assert not buttons["Search database"].isEnabled()
-        assert buttons["Cancel search"].isEnabled()
+        assert not search.isEnabled()
+        assert cancel.isEnabled()
         assert bg.compute() is result
         owner.pump_all()
         bar = panel.findChild(QtWidgets.QProgressBar)
@@ -440,13 +443,13 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         assert ctrl.search.active_token == token
         panel.activate()
         panel.show()
-        assert buttons["Cancel search"].isEnabled()
-        buttons["Cancel search"].click()
+        assert cancel.isEnabled()
+        cancel.click()
         assert ctrl.search.outcome(token) is None
         bg.fail(SearchCancelled("requested"))
         assert ctrl.search.outcome(token).status == "cancelled"
-        assert buttons["Search database"].isEnabled()
-        assert not buttons["Cancel search"].isEnabled()
+        assert search.isEnabled()
+        assert not cancel.isEnabled()
         panel.dispose()
         panel.deleteLater()
         panel = AnalyzePanelWidget(ctrl)
@@ -489,13 +492,8 @@ def test_startup_notification_close_waits_for_search_terminal(
     else:
         dispose = progress.attach_by_owner("fluxdep-search", close_during_startup)
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert close_results == [False]
@@ -542,13 +540,8 @@ def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     window = MainWindow(ctrl, search_runner=runner)
     window.show()
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert not window.close()
