@@ -310,6 +310,70 @@ def test_template_nested_lock_and_none_omission_preserve_spec_derivation() -> No
     assert cfg.readout.ro_cfg.ro_freq == 0
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_missing_discriminator_error_names_template_and_nested_field(
+    nested: bool,
+) -> None:
+    template_id = "partial-readout" if nested else "partial-pulse"
+    spec = PulseReadoutSpec if nested else PulseSpec
+    path = "pulse_cfg.waveform" if nested else "waveform"
+    form = (
+        Form(ReadoutCore, {"readout": Template(template_id)})
+        if nested
+        else Form(Core, {"probe": Template(template_id)})
+    )
+    registry = Registry(
+        templates={template_id: TemplateDef(spec, "Partial", {f"{path}.length": 5.1})}
+    )
+    with pytest.raises(ValueError) as caught:
+        registry.register("synthetic", CalibrationAdapter, form=form)
+    message = str(caught.value)
+    assert template_id in message, message
+    assert path in message, message
+    assert "discriminator" in message.lower(), message
+    assert not registry.has("synthetic")
+
+
+def test_explicit_discriminator_and_partial_seeds_keep_spec_defaults() -> None:
+    catalog = {
+        "synthetic-pulse": TemplateDef(
+            PulseSpec,
+            "Partial pulse",
+            {
+                "ch": 2,
+                "nqz": 1,
+                "freq": Expr("100 + 20"),
+                "gain": 0.1,
+                "waveform.style": "cosine",
+                "waveform.length": 5.1,
+            },
+        )
+    }
+    form = Form(Core, {"probe": Template("synthetic-pulse", set={"gain": 0.7})})
+    Registry(templates=catalog).register("synthetic", CalibrationAdapter, form=form)
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    if isinstance(result, FormErrors):
+        pytest.fail(str(result.messages))
+    cfg = form.to_cfg(result, env)
+    if isinstance(cfg, FormErrors):
+        pytest.fail(str(cfg.messages))
+    expected = Core.model_validate(
+        {
+            "probe": {
+                "ch": 2,
+                "nqz": 1,
+                "freq": 120,
+                "gain": 0.7,
+                "waveform": {"style": "cosine", "length": 5.1},
+            }
+        }
+    )
+    assert cfg.model_dump(mode="json") == expected.model_dump(mode="json")
+    assert cfg.probe.waveform.style == "cosine"
+
+
 @pytest.mark.parametrize("fault", ["unknown", "family", "tag"])
 def test_registration_error_names_adapter_and_field_path(fault: str) -> None:
     assert "form" in signature(Registry.register).parameters, (
