@@ -15,8 +15,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     LinRange,
-    ModuleInput,
-    ModuleRef,
+    Option,
     field_error,
 )
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
@@ -30,6 +29,14 @@ from zcu_tools.program.v2.modules.reset import (
 
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
+    DRIVE_MODULE_FIELD,
+    MIST_MODULE_FIELD,
+    READOUT_MODULE_FIELD,
+    RESET_MODULE_FIELD,
+    DriveModuleInput,
+    MistModuleInput,
+    ReadoutModuleInput,
+    ResetModuleInput,
     calibration_choices,
     calibration_defaults,
     expand_fluxes,
@@ -63,16 +70,16 @@ class MISTPlanForm(FormModel):
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(
         gt=0, description="Initial pi-duration estimate (µs)"
     )
-    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+    qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
         description="Shared spectroscopy/Rabi/pi drive"
     )
-    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+    readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Shared pulse-backed readout"
     )
-    reset: Annotated[ModuleInput | None, Display(label="Reset")] = Field(
+    reset: Annotated[ResetModuleInput, Display(label="Reset")] = Field(
         default=None, description="Native reset selection or explicit omission"
     )
-    mist_pulse: Annotated[ModuleInput, Display(label="MIST pulse")] = Field(
+    mist_pulse: Annotated[MistModuleInput, Display(label="MIST pulse")] = Field(
         description="Required native MIST disturbance pulse"
     )
     gain_start: Annotated[float, Display(label="Gain start", unit="a.u.")] = Field(
@@ -103,6 +110,16 @@ class MISTPlanForm(FormModel):
         """Offer shared captured calibration roots without materialization/live I/O."""
         return calibration_choices(env)
 
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare all four generated module selections, including nullable reset."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("readout",): READOUT_MODULE_FIELD.options(env),
+            ("reset",): RESET_MODULE_FIELD.options(env),
+            ("mist_pulse",): MIST_MODULE_FIELD.options(env),
+        }
+
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> MISTPlan | FormErrors:
         """Resolve four fixed native modules, gain grid and historical snapshot.
 
@@ -123,9 +140,7 @@ class MISTPlanForm(FormModel):
         reset = None
         try:
             core = ModuleCfgFactory.from_raw(
-                self.mist_pulse.name
-                if isinstance(self.mist_pulse, ModuleRef)
-                else self.mist_pulse.module,
+                MIST_MODULE_FIELD.to_spec(self.mist_pulse),
                 context=context,
             )
             native = NativeModuleCfgFactory.from_core(core, context=context)
@@ -137,9 +152,7 @@ class MISTPlanForm(FormModel):
         if self.reset is not None:
             try:
                 core = ModuleCfgFactory.from_raw(
-                    self.reset.name
-                    if isinstance(self.reset, ModuleRef)
-                    else self.reset.module,
+                    RESET_MODULE_FIELD.to_spec(self.reset),
                     context=context,
                 )
                 native_reset = NativeModuleCfgFactory.from_core(core, context=context)

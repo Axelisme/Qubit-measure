@@ -14,7 +14,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormPath,
     LinRange,
-    ModuleInput,
+    Option,
     field_error,
 )
 from zcu_tools.resources.entry import RoleResolutionError
@@ -30,6 +30,10 @@ from zcu_lab.workflows.coherence_fluxdep.workflow import (
 )
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
+    DRIVE_MODULE_FIELD,
+    READOUT_MODULE_FIELD,
+    DriveModuleInput,
+    ReadoutModuleInput,
     calibration_choices,
     calibration_defaults,
     expand_fluxes,
@@ -118,10 +122,10 @@ class CoherencePlanForm(FormModel):
         description="Initial pi-duration estimate in µs at the selected drive gain",
     )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
-    qub_pulse: Annotated[ModuleInput, Display(label="Drive pulse")] = Field(
+    qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
         description="Shared spectroscopy/Rabi/pi drive"
     )
-    readout: Annotated[ModuleInput, Display(label="Readout")] = Field(
+    readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Shared pulse-backed readout"
     )
 
@@ -177,6 +181,14 @@ class CoherencePlanForm(FormModel):
         requires the core ModuleRef source check; no live lookup or fallback.
         """
         return calibration_choices(env)
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare generated module selections against the same fixed capture."""
+        return {
+            ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("readout",): READOUT_MODULE_FIELD.options(env),
+        }
 
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> CoherencePlan | FormErrors:
         """Resolve selections and expand setpoints into a static native plan.

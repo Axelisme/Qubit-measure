@@ -509,9 +509,16 @@ class ModuleField:
     """A core module field's family-limited ref/inline input and lowering policy."""
 
     def __init__(
-        self, annotation: object, path: tuple[str, ...], node: Slot | Template | None
+        self,
+        annotation: object,
+        path: tuple[str, ...],
+        node: Slot | Template | None,
+        *,
+        specs: tuple[type[ConfigBase], ...] | None = None,
+        ref_specs: tuple[type[ConfigBase], ...] | None = None,
     ) -> None:
-        self.specs = module_specs(annotation)
+        self.specs = module_specs(annotation) if specs is None else specs
+        self.ref_specs = self.specs if ref_specs is None else ref_specs
         self.path = path
         self.node = node
         self.nullable = type(None) in members(annotation)
@@ -536,7 +543,7 @@ class ModuleField:
                 else tuple(
                     key
                     for key in env.library.module_keys()
-                    if isinstance(env.library.module_spec(key), field.specs)
+                    if isinstance(env.library.module_spec(key), field.ref_specs)
                 )
             )
             return {("name",): keys}
@@ -548,6 +555,9 @@ class ModuleField:
                 {"__module__": __name__, "choices": classmethod(choices)}
             ),
         )
+        if not issubclass(ref, ModuleRef):
+            raise TypeError("Generated reference model must implement ModuleRef")
+        self.ref = ref
         module = union_type(self.editable)
         if len(self.specs) > 1:
             module = annotated_type(module, Field(discriminator="type"))
@@ -614,7 +624,7 @@ class ModuleField:
                     ),
                 )
                 for key in env.library.module_keys()
-                if isinstance(env.library.module_spec(key), self.specs)
+                if isinstance(env.library.module_spec(key), self.ref_specs)
             )
         kinds = _inline_kinds(union_type(self.editable))
         for kind in kinds:
