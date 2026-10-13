@@ -137,10 +137,10 @@ def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None
         assert fixed.isReadOnly()
         assert fixed.text() == text
     assert state.input.data == before
-    # Two legal values keep the dropdown and the Expression action.
+    # Two legal values keep the dropdown, which has no Expression action.
     nqz = child(view, QComboBox, "form.input.nqz")
     assert [nqz.itemData(index) for index in range(nqz.count())] == [1, 2]
-    assert isinstance(view.findChild(QAction, "form.mode.nqz"), QAction)
+    assert view.findChild(QAction, "form.mode.nqz") is None
 
 
 def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:

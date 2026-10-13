@@ -16,7 +16,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.gui.form import FormEnv, FormModel, FormState
-from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
@@ -72,7 +71,7 @@ INNER_LEAVES = {"inner.gain": "Gain", "inner.phase": "Phase"}
 
 
 def alias_env() -> FormEnv:
-    """Capture general.ext.seed=4 and $unit bound to "mA", memory only."""
+    """Capture general.ext.seed=4, memory only."""
     parameters = ParameterContext(
         point=PointDocument(
             format="zcu.parameter-container",
@@ -85,7 +84,7 @@ def alias_env() -> FormEnv:
         target=SavedPoint(entry_id="entry", point="synthetic"),
         roles=None,
         storage=None,
-    ).bind_aliases((AliasRow("unit", "mA"),), {})
+    )
     return FormEnv(parameters=parameters)
 
 
@@ -194,72 +193,6 @@ def test_choice_rows_show_one_dropdown_of_only_the_choices(
         direct = child(view, QComboBox, f"form.input.{path}")
         values = [direct.itemData(index) for index in range(direct.count())]
         assert values == options
-
-
-def test_choice_dropdown_switches_to_expression_and_back(
-    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
-) -> None:
-    view, state = editor
-    direct = child(view, QComboBox, "form.input.unit")
-    direct.setCurrentIndex(direct.findData("mA"))
-    assert state.input.data["unit"] == "mA"
-    action = mode(view, "unit")
-    action.trigger()
-    assert action.isChecked()
-    assert visible_combos(view, "unit") == []
-    text = child(view, QLineEdit, "form.input.unit")
-    text.setText("$unit")
-    assert state.input.data["unit"] == {"expr": "$unit"}
-    echo = child(view, QLabel, "form.value.unit")
-    assert not echo.isHidden()
-    assert echo.text() == '$unit = "mA"'
-
-    action.trigger()
-    assert state.input.data["unit"] == "mA"
-    assert child(view, QComboBox, "form.input.unit").currentData() == "mA"
-    assert visible_combos(view, "unit") == ["form.input.unit"]
-    assert echo.isHidden()
-
-
-@pytest.mark.parametrize(("path", "value"), [("unit", "mA"), ("nqz", 1)])
-def test_choice_round_trip_through_expression_keeps_the_direct_value(
-    editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
-    path: str,
-    value: str | int,
-) -> None:
-    view, state = editor
-    direct = child(view, QComboBox, f"form.input.{path}")
-    direct.setCurrentIndex(direct.findData(value))
-    mode(view, path).trigger()
-    # Expression mode starts from the direct value's text.
-    assert state.input.data[path] == {"expr": str(value)}
-    mode(view, path).trigger()
-    assert state.input.data[path] == value
-    assert child(view, QComboBox, f"form.input.{path}").currentData() == value
-
-
-class RequiredChoiceForm(FormModel):
-    """A choice without a default starts with nothing selected."""
-
-    unit: Literal["native", "mA"]
-
-
-def test_unselected_choice_switches_to_an_empty_expression(
-    qapp: QApplication,
-) -> None:
-    env = alias_env()
-    state = FormState(RequiredChoiceForm.default_input(env))
-    view = FormEditor(state, env)
-    try:
-        direct = child(view, QComboBox, "form.input.unit")
-        assert direct.currentIndex() == -1
-        mode(view, "unit").trigger()
-        assert child(view, QLineEdit, "form.input.unit").text() == ""
-        assert state.input.data["unit"] == {"expr": ""}
-    finally:
-        view.close()
-        view.deleteLater()
-        qapp.processEvents()
 
 
 def test_rows_and_groups_are_dense_and_do_not_overlap(

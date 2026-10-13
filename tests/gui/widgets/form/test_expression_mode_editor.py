@@ -1,6 +1,6 @@
-"""The right-click Expression action switches a row between Direct and Expression."""
+"""The right-click Expression action switches a text row between Direct and Expression."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Annotated, Literal
 
 import pytest
@@ -8,8 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import QPoint, QTimer
 from qtpy.QtGui import QColor, QContextMenuEvent
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QMenu, QWidget
-from zcu_tools.gui.form import FormEnv, FormModel, FormState
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLineEdit,
+    QMenu,
+    QWidget,
+)
+from zcu_tools.gui.form import FormEnv, FormModel, FormPath, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 
@@ -30,21 +37,34 @@ class Beta(BaseModel):
 
 
 class ModeForm(FormModel):
-    """Every row kind that offers Expression mode, plus two that do not."""
+    """Every text row kind, which offers Expression mode, and rows that do not."""
 
     amount: float = 2.0
     count: int = 3
     amplitude: complex = 1 + 2j
     name: str = "literal"
     unit: Literal["native", "mA"] = "native"
+    nqz: Literal[1, 2] = 2
+    gain: float = 1.0
+    enabled: bool = True
     fixed: Literal["const"] = "const"
     branch: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
         default_factory=Alpha
     )
 
+    @classmethod
+    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
+        """Make gain a choice leaf of a float field."""
+        return {("gain",): (1.0, 2.0)}
+
 
 TEXT_ROWS = ("amount", "count", "amplitude", "name")
-SWITCHABLE = (*TEXT_ROWS, "unit")
+# Dropdown rows and their items' data, in order.
+CHOICE_ROWS: dict[str, list[JsonValue]] = {
+    "unit": ["native", "mA"],
+    "nqz": [1, 2],
+    "gain": [1.0, 2.0],
+}
 
 
 @pytest.fixture
@@ -118,23 +138,21 @@ def background(widget: QWidget) -> QColor:
     return image.pixelColor(image.width() - 6, image.height() // 2)
 
 
-def test_switchable_rows_list_the_expression_action_instead_of_a_mode_dropdown(
+def test_text_rows_list_the_expression_action_instead_of_a_mode_dropdown(
     editor: tuple[FormEditor[ModeForm], FormState[ModeForm]],
 ) -> None:
     view, _state = editor
-    for path in SWITCHABLE:
+    for path in TEXT_ROWS:
         action = mode(view, path)
         assert action.isCheckable(), path
         assert not action.isChecked(), path
         assert view.findChild(QComboBox, f"form.mode.{path}") is None, path
         control = child(view, QWidget, f"form.input.{path}")
         assert action in control.actions(), path
-    for path in TEXT_ROWS:
         assert row_combos(view, path) == [], path
-    assert row_combos(view, "unit") == ["form.input.unit"]
-    # A one-value Literal and a discriminator have no Expression mode.
-    assert view.findChild(QAction, "form.mode.fixed") is None
-    assert view.findChild(QAction, "form.mode.branch.kind") is None
+    # Dropdowns, checkboxes, a one-value Literal and a discriminator have none.
+    for path in (*CHOICE_ROWS, "enabled", "fixed", "branch.kind"):
+        assert view.findChild(QAction, f"form.mode.{path}") is None, path
 
 
 @pytest.mark.parametrize(
@@ -165,32 +183,17 @@ def test_expression_action_starts_from_the_direct_text_and_returns(
     assert child(view, QLineEdit, f"form.input.{path}").text() == text
 
 
-def test_choice_dropdown_lists_only_choices_and_switches_through_the_action(
+def test_choice_dropdowns_list_only_the_choices_and_write_the_picked_one(
     editor: tuple[FormEditor[ModeForm], FormState[ModeForm]],
 ) -> None:
     view, state = editor
-    direct = child(view, QComboBox, "form.input.unit")
-    assert [direct.itemData(index) for index in range(direct.count())] == [
-        "native",
-        "mA",
-    ]
-    direct.setCurrentIndex(direct.findData("mA"))
-    action = mode(view, "unit")
-    action.trigger()
-    assert state.input.data["unit"] == {"expr": "mA"}
-    text = child(view, QLineEdit, "form.input.unit")
-    assert text.text() == "mA"
-    assert row_combos(view, "unit") == []
-    assert action in text.actions()
-
-    # An expression that does not resolve to a choice returns to the last one.
-    text.setText("absent_name")
-    action.trigger()
-    assert state.input.data["unit"] == "mA"
-    shown = child(view, QComboBox, "form.input.unit")
-    assert shown.currentData() == "mA"
-    assert shown.count() == 2
-    assert action in shown.actions()
+    for path, options in CHOICE_ROWS.items():
+        assert row_combos(view, path) == [f"form.input.{path}"], path
+        direct = child(view, QComboBox, f"form.input.{path}")
+        assert [direct.itemData(i) for i in range(direct.count())] == options
+        assert direct.actions() == [], path
+        direct.setCurrentIndex(0)
+        assert state.input.data[path] == options[0], path
 
 
 def test_expression_input_has_its_own_background(
@@ -218,9 +221,10 @@ def test_text_menu_keeps_the_standard_items_then_offers_the_expression_action(
     assert len([item for item in shown[:-2] if item is not None]) >= 2
 
 
-def test_choice_menu_offers_the_expression_action(
+def test_dropdown_and_checkbox_rows_open_no_expression_menu(
     editor: tuple[FormEditor[ModeForm], FormState[ModeForm]],
 ) -> None:
     view, _state = editor
-    shown = context_menu(child(view, QComboBox, "form.input.unit"))
-    assert shown == [mode(view, "unit")]
+    for path in CHOICE_ROWS:
+        assert context_menu(child(view, QComboBox, f"form.input.{path}")) == [], path
+    assert context_menu(child(view, QCheckBox, "form.input.enabled")) == []

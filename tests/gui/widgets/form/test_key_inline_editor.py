@@ -18,12 +18,16 @@ from zcu_tools.gui.form import (
     ModuleInput,
     WriteRejected,
 )
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 class Tone(BaseModel):
@@ -337,6 +341,41 @@ def test_module_input_missing_key_shows_its_error_until_another_choice(
         text for text, _ in items(child(editor, QComboBox, "form.input.readout"))
     ]
     assert error.text() == ""
+
+
+def test_module_input_expression_name_shows_as_missing_with_its_error(
+    build: Build, states: list[FormState[FormModel]]
+) -> None:
+    # A wire write can leave an Expr envelope in the name. A library key takes
+    # none, so $q is not resolved to "Q1" and the name shows its error.
+    library = library_env().library
+    assert library is not None
+    parameters = ParameterContext(
+        point=PointDocument(
+            format="zcu.parameter-container",
+            format_version="1.0",
+            general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
+        ),
+        library=library,
+        target=SavedPoint(entry_id="entry", point="synthetic"),
+        roles=None,
+        storage=None,
+    ).bind_aliases((AliasRow("q", "Q1"),), {})
+    env = FormEnv(parameters=parameters, library=library)
+    envelope: JsonValue = {"expr": "$q"}
+    editor = build(
+        ModuleForm, {"readout": {"kind": "ref", "name": envelope}}, env, None
+    )
+    dropdown = child(editor, QComboBox, "form.input.readout")
+    text = '{"expr": "$q"}'
+    assert items(dropdown)[-1] == (text + " (missing)", text)
+    assert dropdown.currentIndex() == dropdown.count() - 1
+    assert child(editor, QLabel, "form.error.readout").text() != ""
+    assert states[-1].input.data == {"readout": {"kind": "ref", "name": envelope}}
+
+    choose(dropdown, "Q1.pulses.pi")
+    assert states[-1].input.data == ref("Q1.pulses.pi")
+    assert child(editor, QLabel, "form.error.readout").text() == ""
 
 
 def test_module_input_without_library_offers_only_inline(

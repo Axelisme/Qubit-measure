@@ -516,11 +516,11 @@ class NumericChoiceForm(FormModel):
 
     @classmethod
     def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-        """Offer direct values without restricting expression syntax in the view."""
+        """Offer direct values; a choice leaf takes no expression."""
         return {("amount",): (2.0, 4.0)}
 
 
-def test_numeric_choices_switch_between_direct_selection_and_expression(
+def test_numeric_choices_show_a_dropdown_without_expression_mode(
     views: list[QWidget],
 ) -> None:
     env = environment()
@@ -531,16 +531,8 @@ def test_numeric_choices_switch_between_direct_selection_and_expression(
     assert isinstance(direct, QComboBox)
     direct.setCurrentIndex(direct.findData(4.0))
     assert state.input.data["amount"] == 4.0
-    action = mode(editor, "amount")
-    action.trigger()
-    text = editor.findChild(QLineEdit, "form.input.amount")
-    assert isinstance(text, QLineEdit)
-    text.setText("general.ext.seed / 2")
-    assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
+    assert editor.findChild(QAction, "form.mode.amount") is None
     assert editor.errors() is None
-    action.trigger()
-    assert state.input.data["amount"] == 2.0
-    assert isinstance(editor.findChild(QComboBox, "form.input.amount"), QComboBox)
 
 
 def test_invalid_complex_envelope_is_displayed_without_breaking_construction(
@@ -651,7 +643,7 @@ class EmptyChoiceForm(FormModel):
         }
 
 
-def test_empty_choices_refresh_preserves_input_and_numeric_expression(
+def test_empty_choices_refresh_preserves_input(
     views: list[QWidget],
 ) -> None:
     env = environment()
@@ -667,7 +659,7 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
         for path in ("literal", "text", "number"):
             control = editor.findChild(QComboBox, f"form.input.{path}")
             assert isinstance(control, QComboBox)
-            # Only the current choices; Expression mode is in the right-click menu.
+            # Only the current choices.
             assert control.count() == count
             if count == 0:
                 assert control.currentIndex() == -1
@@ -678,18 +670,6 @@ def test_empty_choices_refresh_preserves_input_and_numeric_expression(
             assert isinstance(errors, FormErrors)
         else:
             assert errors is None
-    mode(editor, "number").trigger()
-    text = editor.findChild(QLineEdit, "form.input.number")
-    assert isinstance(text, QLineEdit)
-    text.setText("general.ext.seed / 2")
-    assert state.input.data["number"] == {"expr": "general.ext.seed / 2"}
-    assert editor.local_parse_errors() is None
-    errors = editor.errors()
-    assert isinstance(errors, FormErrors)
-    assert ("number",) in errors.messages
-    editor.refresh(env)
-    assert editor.errors() is None
-    assert text.text() == "general.ext.seed / 2"
 
 
 class MultiTagBranch(FormModel):

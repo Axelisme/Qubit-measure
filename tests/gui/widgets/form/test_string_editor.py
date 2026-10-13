@@ -1,12 +1,11 @@
 """String Expression actions write envelopes and display core-resolved names."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 
 import pytest
-from pydantic import JsonValue
 from PyQt6.QtGui import QAction
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
-from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormPath, FormState
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -16,15 +15,9 @@ from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 class StringForm(FormModel):
-    """Both free text and finite choices can resolve string expressions."""
+    """A free text field resolves string expressions."""
 
     name: str = "literal"
-    choice: str = "yoko1"
-
-    @classmethod
-    def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
-        """Choices constrain ordinary resolved values rather than input text."""
-        return {("choice",): ("yoko1",)}
 
 
 @pytest.fixture
@@ -54,12 +47,11 @@ def name_editor(
     qapp.processEvents()
 
 
-@pytest.mark.parametrize("field", ["name", "choice"])
 def test_string_mode_writes_expression_and_projects_preview_and_errors(
     name_editor: tuple[FormEditor[StringForm], FormState[StringForm], FormEnv],
-    field: str,
 ) -> None:
     editor, state, env = name_editor
+    field = "name"
     mode = editor.findChild(QAction, f"form.mode.{field}")
     assert isinstance(mode, QAction)
     mode.trigger()
@@ -82,8 +74,7 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     assert mode.isChecked()
     assert text.text() == "$device"
     assert state.input.data[field] == {"expr": "$device"}
-    if field == "name":
-        mode.trigger()
-        text.setText("$device")
-        assert state.input.data[field] == "$device"
-        assert state.preview(env).values[(field,)] == "$device"
+    mode.trigger()
+    text.setText("$device")
+    assert state.input.data[field] == "$device"
+    assert state.preview(env).values[(field,)] == "$device"
