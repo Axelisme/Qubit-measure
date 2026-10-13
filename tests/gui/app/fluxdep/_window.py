@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypeVar
 
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtCore import QMetaObject, QPoint, QRect, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -193,6 +194,13 @@ def current_stage(root: QWidget) -> SpectrumStage | None:
     ]
     assert len(shown) <= 1, f"stages {shown} are all marked current"
     return shown[0] if shown else None
+
+
+def show_canvas(root: QWidget) -> FigureCanvasQTAgg:
+    """The Show stage's figure canvas, fluxdep.show.canvas."""
+    found = root.findChild(FigureCanvasQTAgg, "fluxdep.show.canvas")
+    assert found is not None, "missing Show canvas"
+    return found
 
 
 def choose_file(path: Path | str, activate: Callable[[], None], *, cancel=False):

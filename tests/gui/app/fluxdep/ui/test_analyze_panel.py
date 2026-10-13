@@ -43,7 +43,7 @@ from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
 )
-from tests.gui.app.fluxdep._window import named
+from tests.gui.app.fluxdep._window import named, show_canvas
 
 
 @pytest.fixture
@@ -154,18 +154,20 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     assert named(widget, QLabel, "fluxdep.fit.status").text() == search_status
     show_status = named(widget, QLabel, "fluxdep.show.status").text()
     assert bool(show_status) == (display_edit == "missing_frequency")
-    canvas = widget.findChildren(FigureCanvasQTAgg)[0]
+    canvas = show_canvas(widget)
     assert len(canvas.figure.axes) == 1
     lines = canvas.figure.axes[0].lines
     assert len(lines) == 1
     expected_frequency = 2.0 if display_edit == "subset" else 1.0
-    np.testing.assert_allclose(lines[0].get_ydata(), expected_frequency)
+    np.testing.assert_allclose(
+        np.asarray(lines[0].get_ydata(), dtype=float), expected_frequency
+    )
     assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
     assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
 
 
 def _show_title(widget: AnalyzePanelWidget) -> str:
-    return widget.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+    return show_canvas(widget).figure.axes[0].get_title()
 
 
 def _freshness(widget: AnalyzePanelWidget) -> QLabel:
@@ -245,9 +247,7 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
         # Show keeps the recorded search cloud, not the newer Filter selection.
         scatter = next(
             artist
-            for artist in widget.findChildren(FigureCanvasQTAgg)[0]
-            .figure.axes[0]
-            .collections
+            for artist in show_canvas(widget).figure.axes[0].collections
             if artist.get_label() == "_points"
         )
         np.testing.assert_allclose(
@@ -328,7 +328,7 @@ def test_repeated_stale_alignment_keeps_captured_show_background(
     try:
         _record_perfect_fit(ctrl, bounds)
         widget.show_tab("show")
-        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        shown = show_canvas(widget).figure
         captured = _assert_native_background(shown, ctrl)
 
         for flux_half, flux_int in ((0.55, 1.05), (0.60, 1.10)):
@@ -446,7 +446,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         )
         show_form = display.findChildren(TransitionsForm)[0]
         x_hi = display.findChildren(QDoubleSpinBox)[1]
-        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        shown = show_canvas(widget).figure
 
         def labels() -> list[str]:
             return [str(line.get_label()) for line in shown.axes[0].lines]
@@ -886,7 +886,7 @@ def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
         tools = {action.text(): action for action in toolbar.actions() if action.text()}
         # Only view navigation: no tool that opens a blocking dialog.
         assert set(tools) == {"Home", "Back", "Forward", "Pan", "Zoom"}
-        canvas = widget.findChildren(FigureCanvasQTAgg)[0]
+        canvas = show_canvas(widget)
         canvas.draw()
         axes = canvas.figure.axes[0]
         drawn = (axes.get_xlim(), axes.get_ylim())

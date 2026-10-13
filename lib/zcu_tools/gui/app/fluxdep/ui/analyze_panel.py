@@ -20,7 +20,8 @@ Public Qt seams (objectName): ``fluxdep.fit.search_db``, ``fluxdep.fit.bounds_pr
 ``fluxdep.fit.r_f`` / ``fluxdep.fit.sample_f`` with their ``.required`` marks,
 ``fluxdep.fit.search`` / ``cancel`` / ``export_params``, ``fluxdep.fit.status``,
 ``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits``,
-``fluxdep.show.status`` and the Show navigation ``fluxdep.show.toolbar``.
+``fluxdep.show.status``, the Show canvas ``fluxdep.show.canvas`` and its
+navigation ``fluxdep.show.toolbar``.
 """
 
 from __future__ import annotations
@@ -449,6 +450,7 @@ class AnalyzePanelWidget(QWidget):
 
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
+        self._fit_canvas.setObjectName("fluxdep.show.canvas")
         # Show lays out once per draw; re-fit on resize so the title and axis
         # labels stay inside the canvas Qt actually gives the figure.
         self._fit_canvas.mpl_connect("resize_event", self._fit_show_layout)

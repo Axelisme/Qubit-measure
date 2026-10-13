@@ -51,6 +51,7 @@ from tests.gui.app.fluxdep._window import (
     named,
     open_chooser,
     picker_button,
+    show_canvas,
     show_page,
     spectra_list,
     stage_button,
@@ -178,7 +179,7 @@ def test_remote_viewer_reads_fit_page_without_opening_filter(
     tabs = panel.findChild(QTabWidget)
     assert tabs is not None and not tabs.isTabEnabled(0)
     panel.show_tab("show")
-    title = panel.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+    title = show_canvas(panel).figure.axes[0].get_title()
     assert "Outdated: filter changed" in title
     assert ctrl.interactive.current_cross_selection() is None
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
