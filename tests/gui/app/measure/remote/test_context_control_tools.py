@@ -54,13 +54,13 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     control = application.controller.context_control
     rows = [
         {"alias": "driver", "value": "missing"},
-        {"alias": "control", "value": "$driver"},
+        {"alias": "control", "value": "$driver.sense"},
         {"alias": "empty", "value": ""},
     ]
     assert application.result("context.aliases_set", {"rows": rows}) == {"rows": rows}
     assert control.get_alias_rows() == (
         AliasRow("driver", "missing"),
-        AliasRow("control", "$driver"),
+        AliasRow("control", "$driver.sense"),
         AliasRow("empty", ""),
     )
     if info is not None:
@@ -69,7 +69,7 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         assert stored is not None
         assert list(stored.aliases.items()) == [
             ("driver", "missing"),
-            ("control", "$driver"),
+            ("control", "$driver.sense"),
             ("empty", ""),
         ]
         assert entry.ledger.events() == ()
@@ -206,7 +206,9 @@ def test_parameter_set_rejects_nonconcrete_parameter_path(
     )
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")) == before.document()
+    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+        mode="python"
+    ) == before.document().model_dump(mode="python")
 
 
 @pytest.mark.parametrize(
@@ -392,7 +394,9 @@ def test_parameter_set_rejects_malformed_payload_before_effects(
     before = application.controller.context_control.read_context()
     error = rpc_error(application, "context.set_parameter", params)
     assert error["code"] == ErrorCode.INVALID_PARAMS
-    assert snapshot(entry_resource(info).use_point("base")) == before.document()
+    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+        mode="python"
+    ) == before.document().model_dump(mode="python")
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -410,7 +414,9 @@ def test_parameter_set_preserves_schema_failure_and_old_point(
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
     assert "validation error" in str(error["message"])
     assert control.read_context().document() == before.document()
-    assert snapshot(entry_resource(info).use_point("base")) == before.document()
+    assert snapshot(entry_resource(info).use_point("base")).model_dump(
+        mode="python"
+    ) == before.document().model_dump(mode="python")
 
 
 @pytest.mark.parametrize(
