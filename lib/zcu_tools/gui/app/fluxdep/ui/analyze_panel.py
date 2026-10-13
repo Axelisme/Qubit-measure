@@ -747,10 +747,10 @@ class AnalyzePanelWidget(QWidget):
     def _on_search(self) -> None:
         db_path = self._db_edit.text().strip()
         if not db_path:
-            self._status.setText("Select a database first.")
+            self._status.setText("Select a search DB first.")
             return
         if not os.path.isfile(db_path):
-            self._status.setText(f"Database not found: {db_path}")
+            self._status.setText(f"Search DB not found: {db_path}")
             return
         # A transition missing its r_f / sample_f is marked on the field; the
         # Controller rejects the search and the status line reports it.
