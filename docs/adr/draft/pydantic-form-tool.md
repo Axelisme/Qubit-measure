@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，文字與選項混合的 union 在 core raise；editor 的唯讀但可讀模式，workflows run 中不再停用面板；expression 只用於文字欄位，workflows `WIRE_VERSION` 3；引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-13，選項清單與分層的決策（實作中）；文字與選項混合的 union 在 core raise；editor 的唯讀但可讀模式，workflows run 中不再停用面板；expression 只用於文字欄位，workflows `WIRE_VERSION` 3；引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -68,6 +68,51 @@ Host 不允許修改 input 的期間呼叫 editor 的 `set_editing_enabled(enabl
 Module ref 與 inline 使用 tagged 子 model。Ref 保存 library key，inline 保存 ModuleSpec。Ref 切 inline 從固定 library 讀取 Spec，切換後不跟隨 library 改動。Defaults 與 choices 使用 LibrarySnapshot 的公開讀取；具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
 
 LinRange 與 ExplicitList 保存兩種 flux 輸入。具體 to_cfg 才展開 setpoints。Delay grid 由 workflow 計算。固定值在具體 to_cfg 或 runtime 明寫，不新增通用 sweep 連動、inheritance、`$` capture、refresh、live linking 或 Unavailable publication。
+
+## 選項清單與分層
+
+2026-10-13 使用者裁決。推導見 [討論紀錄](../../discussions/2026-10-13-form-options-layering.md)。
+
+### 分工
+
+Form 生成器（`gui.form_adapter`）把實驗語義翻成顯示偏好。使用者：「這些資訊應該是由Form生成器負責將帶有實驗語義轉變成有顯示偏好的格式」。表單核心（`gui.form`）只提供通用機制，不知道 module 或 library。Widget 與 MCP 照 input schema 的清單畫、照清單寫，不解讀 union 結構。使用者：「FormInput/FormModel與Widget間是簡單的關係……在不同widget/app中使用，不一定是為了Module/Library」。
+
+### 選項
+
+- 每個挑選欄位在 input schema 有一份有效選項清單 `x-form-options`。每項含 `label`、`value`，物件值另含 `fields`：內嵌的子表單 schema，不含已由選項決定的 tag。
+- `FormModel.options(env)` 是宣告 hook，預設為空。核心把宣告和自動選項合併成有效清單。自動選項涵蓋 Literal、Enum、`choices(env)` 與 tagged union 的成員。
+- 生成器為 module 與波形欄位宣告以下選項：可留空時的 `None`、kind 符合的 library keys、每個 inline kind 一項 `Inline: <kind>`。只有一個 kind 時顯示 `Inline`，沒有欄位的 kind（例如 `reset/none`）不列。Key 只顯示名稱。
+- 比對規則只有一條：目前 input 在某個選項 `value` 的每個葉都相同，就選中它，依清單順序取第一個。沒有選項符合時顯示目前值加 `(missing)`，不改 state。
+- 可留空的 key-or-inline 欄位把 `None` 放進下拉，不畫 Enabled 勾選框。一般可留空的 model 區塊仍用 Enabled 勾選框。
+
+### 換分支
+
+在 union 位置寫入 partial object 就是選分支。新分支用預設值，也就是範本或型別預設，不繼承舊分支的同名欄位，defaults 也不看切換前的值。寫 tag 葉換分支也遵守同一規則。使用者在比較時選「改 kind 時，舊 kind 填過的值不帶過去」。形狀與選項只看型別和捕捉的來源，初值只看型別、範本與來源，因此不需要帶狀態的 factory hook。
+
+### 選項指令
+
+選項可以帶 `commands: [{name, label}]`。Widget 在右鍵選單列出目前選中選項的指令，按下就呼叫 `FormState.run_command(path, name)`，結果以一次寫入提交。生成器在每個 key 選項上宣告 `to_inline`（`Convert to inline`）並提供實作：用捕捉的 library 把該 key 的內容複製成 inline，複製後和 library 斷開。呼叫者可以從目前選中的選項知道有哪些指令可用。`run_command` 遇到目前選項沒有帶的指令會報錯，不會靜默略過。Recipe 先用 `read_module` 讀出目前是 key 還是 inline：是 key 才呼叫 `to_inline`，已經是 inline 就直接寫。`use_inline` 包裝這個判斷，對已是 inline 的欄位維持不變。使用者：「recipe需要一種方法知道目前欄位是ref還是inline，進而決定要不要先轉inline」。使用者提議：「對ref下拉按鈕右鍵有轉成inline的選項」；後續追問：「widget層需要有ref/inline的認知嗎？」，答案是不需要。
+
+### 一種 key-or-inline 表示法
+
+生成器把未標 tag 的 `str | Model`（`waveform`、`pulse_cfg`、`pulse1_cfg`、`pulse2_cfg`、`raise_waveform` 等）換成有 tag 的 ref／inline 形狀，`to_cfg` 換回持久 Spec。核心不再支援未標 tag 的 key-or-inline，手寫這種表單時在入口報錯。Ref 選中時下拉只顯示名稱，不顯示被引用 entry 的內容。使用者：「如果實作困難ref就不用支援只讀顯示」、「只顯示選單名就可以」。
+
+### 刪除
+
+- `x-form-key-or-inline`、`x-form-library-keys`、`x-form-discriminator-values`。
+- Widget 對 union 的解讀。
+- `ExplicitList` 與 `RangeInput`。掃描只用 `LinRange`。使用者：「我目前也沒有要用list的實驗與workflow」。
+- Measure 與 workflows 的 wire 各升一次版本。Memento 也升版，舊分頁依既有規則不還原。
+
+### 被取代的現行規則（實作前現況）
+
+本段之前的正文仍描述實作前的現況，下列規則收進後即失效：
+
+- Branch switch 沿用同名欄位、`defaults(env, previous)` 收到舊分支 input。
+- 未標 tag 的 `str | Model` 以 JSON 型別當 selector。
+- `x-form-key-or-inline` 與 `x-form-library-keys`。
+- 「Ref 切 inline 從固定 library 讀取 Spec」改由 `to_inline` 指令承擔。
+- LinRange 與 ExplicitList 兩種 flux 輸入。
 
 ## 來源與既有工具
 
