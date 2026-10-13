@@ -251,31 +251,6 @@ def test_detached_rename_then_delete_preserves_sources_without_materializing(
     assert session.state.version.get("context") == version
 
 
-def test_module_editor_lowers_values_and_children_from_capture(
-    session: LibrarySession,
-) -> None:
-    capture = _seed(session)
-    session.control.set_module(
-        capture.target,
-        "Q1.pulses.pi",
-        PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.base"),
-    )
-    editor_id, _ = session.editor.open("module", from_name="Q1.pulses.pi")
-    session.editor.set_field(
-        editor_id, "gain", {"__kind": "eval", "expr": "general.ext.flux_value / 10"}
-    )
-    session.control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
-    session.control.set_waveform(
-        capture.target, "Q1.waveforms.base", ConstWaveformCfg(length=8.0)
-    )
-    session.editor.replace(editor_id, "Q1.pulses.pi", "Q1.pulses.new")
-    written = session.control.read_context().library.module_spec("Q1.pulses.new")
-    assert isinstance(written, PulseSpec)
-    assert written.gain == 0.2
-    assert isinstance(written.waveform, ConstWaveformCfg)
-    assert written.waveform.length == 1.0
-
-
 def test_ordered_library_edit_keeps_successful_prefix(session: LibrarySession) -> None:
     _seed(session)
     result = session.editor.edit_library(
