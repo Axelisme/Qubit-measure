@@ -240,8 +240,7 @@ def h_context_ml_list_roles(
 ) -> Mapping[str, object]:
     """Project template metadata through the unchanged context.ml_list_roles RPC."""
     del params
-    catalog = adapter.ctrl.get_template_catalog()
-    return {"roles": list(catalog.list_meta())}
+    return {"roles": adapter.ctrl.list_templates()}
 
 
 def h_context_ml_create_from_role(
@@ -249,17 +248,16 @@ def h_context_ml_create_from_role(
 ) -> Mapping[str, object]:
     """Create a ModuleLibrary entry from the template ID in wire role_id.
 
-    One-shot: seeds md-linked defaults (lowered against the live md), writes ml.
+    One-shot: validates captured template Form input and writes its Spec.
     Edit afterwards via context.ml_edit.
     """
     template_id = str(params["role_id"])
     name = str(params["name"])
     # The item kind is a property of the template, not an independent agent input —
     # derive it from role_id so the agent cannot pass a mismatching pair. An
-    # unknown role_id fails fast as invalid_params; a missing catalog (no project)
-    # surfaces as precondition_failed (mirror h_context_ml_list_roles).
+    # unknown role_id fails fast as invalid_params.
     try:
-        item_kind = adapter.ctrl.get_template_catalog().get(template_id).item_kind
+        item_kind = adapter.ctrl.template_kind(template_id)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     try:

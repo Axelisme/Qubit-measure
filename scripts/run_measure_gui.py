@@ -66,7 +66,6 @@ def _build_measure_catalogs():
     # into the GUI framework. The behavior receives a factory, so these imports
     # happen after runtime logging and matplotlib policy setup.
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.catalog_loader import SourcePackage
     from zcu_tools.resources.entry.registry import component_registry
 
@@ -74,10 +73,7 @@ def _build_measure_catalogs():
     from zcu_lab.templates import TEMPLATES
 
     registry = Registry(templates=TEMPLATES)
-    template_catalog = TemplateCatalog()
-    register_all(
-        registry, template_catalog=template_catalog, components=component_registry
-    )
+    register_all(registry, components=component_registry)
     loader = SourceExperimentCatalogLoader(
         sources=(
             SourcePackage("zcu_tools", PROJECT_ROOT / "lib" / "zcu_tools"),
@@ -92,7 +88,7 @@ def _build_measure_catalogs():
         catalog_module="zcu_lab.definitions",
         current_registry=registry,
     )
-    return registry, template_catalog, loader
+    return registry, loader
 
 
 def main(argv: list[str] | None = None) -> int:

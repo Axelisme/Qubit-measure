@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from pydantic import JsonValue
 
+from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.services.experiment_reload import (
     ReloadPreview,
@@ -32,6 +32,7 @@ from zcu_tools.gui.session.library_entry import (
     LibraryKind,
     ModuleEntryForm,
     WaveformEntryForm,
+    new_library_entry,
     open_library_entry,
 )
 from zcu_tools.gui.session.operation_handles import AwaitResult
@@ -66,9 +67,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
-from .services.cfg_lowering import lowered_library_change
 from .state import State
-from .template_catalog import TemplateCatalog
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
@@ -98,6 +97,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class TemplateMetadata(TypedDict):
+    """Discovery fields: unique role_id, dropdown label, family and name suggestion.
+
+    item_kind is module or waveform. default_name is an authored suggestion,
+    potentially containing component placeholders, or empty for no suggestion.
+    """
+
+    role_id: str
+    label: str
+    item_kind: LibraryKind
+    default_name: str
 
 
 # A View has two distinct down-channels from the Controller (ADR-0068):
@@ -259,7 +271,6 @@ class Controller(SessionControllerMixin):
         registry: Registry,
         view: ViewProtocol | None,
         bus: EventBus,
-        template_catalog: TemplateCatalog | None = None,
         progress_transport: ProgressTransport | None = None,
         project_root: str | None = None,
         catalog_loader: ExperimentCatalogLoader | None = None,
@@ -296,9 +307,7 @@ class Controller(SessionControllerMixin):
         if view is not None:
             self.add_view(view)
         self._bus = bus
-        # User composition injects templates at startup. Bare controllers omit
-        # them; create_from_template fails fast when the catalog is absent.
-        self._template_catalog = template_catalog
+        self._registry = registry
 
         # Construct and wire every domain service into an immutable bundle, then
         # alias them onto self for the façade's call sites.
@@ -920,11 +929,31 @@ class Controller(SessionControllerMixin):
     # Templates: one-shot create for Inspect UI and context.ml_create_from_role.
     # ------------------------------------------------------------------
 
-    def get_template_catalog(self) -> TemplateCatalog:
-        """Return the injected catalog; raise FailedPreconditionError if absent."""
-        if self._template_catalog is None:
-            raise FailedPreconditionError("No template catalog is wired up.")
-        return self._template_catalog
+    def get_template(self, template_id: str) -> TemplateDef:
+        """Return the Registry definition; an unknown ID raises KeyError."""
+        return self._registry.templates[template_id]
+
+    def template_kind(self, template_id: str) -> LibraryKind:
+        """Return the definition's library family; an unknown ID raises KeyError."""
+        definition = self.get_template(template_id)
+        return "module" if "type" in definition.module.model_fields else "waveform"
+
+    def list_templates(self) -> list[TemplateMetadata]:
+        """Return ordered discovery metadata with unchanged wire field names.
+
+        default_name is the authored suggestion, including component
+        placeholders; UI callers expand it against their selected capture.
+        An empty Registry catalog returns an empty list.
+        """
+        return [
+            {
+                "role_id": template_id,
+                "label": definition.label,
+                "item_kind": self.template_kind(template_id),
+                "default_name": definition.default_name,
+            }
+            for template_id, definition in self._registry.templates.items()
+        ]
 
     def get_session_env(self) -> SessionEnv:
         return self._ctx_svc.get_session_env()
@@ -933,19 +962,19 @@ class Controller(SessionControllerMixin):
         """Create a library root from a template using one fixed parameter capture.
 
         Kind must match the template; the concrete name must be nonempty and
-        unused in its library family. Factory, capture, schema, conflict and I/O
-        failures propagate without a write. Factory SessionEnv.parameters and
-        lowering use the same fixed alias-aware capture, with no consumer kind
-        checks or later current-source lookup.
+        unused in its library family. Template, capture, Form validation,
+        conflict and I/O failures propagate without a write. Expr seeds use
+        the fixed alias-aware capture, and bound Slots keep child library keys.
+        The new state uses template_input's specialized model.
         """
         if not name:
             raise FailedPreconditionError("Entry name must not be empty.")
-        entry = self.get_template_catalog().get(template_id)
+        template_kind = self.template_kind(template_id)
         if item_kind != "module" and item_kind != "waveform":
             raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
-        if entry.item_kind != item_kind:
+        if template_kind != item_kind:
             raise FailedPreconditionError(
-                f"Template {template_id!r} is a {entry.item_kind}, not a {item_kind}."
+                f"Template {template_id!r} is a {template_kind}, not a {item_kind}."
             )
         parameters = self._context_control.read_context()
         keys = (
@@ -957,13 +986,13 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
-        ctx = replace(self.get_session_env(), parameters=parameters)
-        ref = entry.make_value(ctx)
-        schema = CfgSchema(spec=entry.shape(), value=ref.value)
-        self.apply_library_change(
+        entry = new_library_entry(
             parameters,
-            lowered_library_change(parameters, item_kind, "put", name, schema),
+            Template(template_id),
+            self._registry.templates,
+            arb_names=self._arb_waveform_svc.list_data_keys(),
         )
+        self.apply_library_change(parameters, entry.put(name))
 
     def has_ml_entry(self, item_kind: str, name: str) -> bool:
         """Query a concrete root in the selected library; invalid kind raises."""

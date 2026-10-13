@@ -1,8 +1,8 @@
 """GUI composition root — assembles all components for the shared runtime.
 
 This module depends only on ``zcu_tools.gui.app.measure``; it does not know which concrete
-experiments exist. The entry script wires a populated ``Registry`` /
-``TemplateCatalog`` (built from caller-owned definitions) and passes them in — so the
+experiments exist. The entry script wires a populated ``Registry`` with its injected templates
+(built from caller-owned definitions) and passes it in — so the
 GUI framework never imports the experiment-adapter layer.
 """
 
@@ -24,14 +24,11 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
     from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.services.predictor import ParamsFor
 
-RegistryFactory = Callable[
-    [], tuple["Registry", "TemplateCatalog", "ExperimentCatalogLoader"]
-]
+RegistryFactory = Callable[[], tuple["Registry", "ExperimentCatalogLoader"]]
 
 
 def _make_empty_ctx() -> SessionEnv:
@@ -66,7 +63,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
     ) -> None:
         """Build caller catalogs now and retain initial session rows for assemble.
 
-        ``registry_factory`` returns the registry, templates and reload loader
+        ``registry_factory`` returns the registry (including templates) and reload loader
         after runtime setup. ``clean`` skips restoring persisted preferences;
         ``project_root`` anchors default paths, or uses the working directory.
         ``alias_preset`` is an ordered caller-owned table; omitted or empty means
@@ -81,9 +78,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         )
 
         install_global_exception_hook(show_error_dialog)
-        self._registry, self._template_catalog, self._catalog_loader = (
-            registry_factory()
-        )
+        self._registry, self._catalog_loader = registry_factory()
         self._clean = clean
         self._project_root = project_root
         self._params_for = params_for
@@ -96,7 +91,6 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         ctrl, window = _build_window(
             state,
             self._registry,
-            self._template_catalog,
             self._project_root,
             catalog_loader=self._catalog_loader,
             params_for=self._params_for,
@@ -163,7 +157,6 @@ def _is_main_window(value: object) -> TypeGuard[MainWindow]:
 def _build_window(
     state: State,
     registry: Registry,
-    template_catalog: TemplateCatalog,
     project_root: str | None = None,
     *,
     catalog_loader: ExperimentCatalogLoader | None = None,
@@ -181,7 +174,6 @@ def _build_window(
     ctrl = Controller(
         state=state,
         registry=registry,
-        template_catalog=template_catalog,
         view=None,
         bus=bus,
         project_root=project_root,

@@ -4,26 +4,22 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 
-from tests.gui.app.measure._templates import register_all_templates
+from tests.gui.app.measure._templates import TEMPLATES
 
 from ._helpers import Fixture, mcp_client
 
 
 @pytest.fixture()
-def library_client(qapp, tmp_path, monkeypatch):
-    catalog = TemplateCatalog()
-    register_all_templates(catalog)
-    fx = Fixture(active_label="ctx001", template_catalog=catalog)
+def library_client(qapp, tmp_path):
+    fx = Fixture(active_label="ctx001", templates=TEMPLATES)
     context = fx.ctrl.context_control
     context.set_waveform(
         context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)
     )
     fx.start()
-    monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
         invoke("connect", {"port": fx.service.port})
