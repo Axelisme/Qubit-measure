@@ -1,6 +1,6 @@
 # Workflow form attachments
 
-**Last updated:** 2026-10-13，defaults 的 expression 開表單時算成值
+**Last updated:** 2026-10-13，defaults 的 expression 開表單時算成值；T1 guess_us 不靠靜態預設
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
 Native science 不依賴 GUI。宿主、catalog、泛型 attachment、表單協調、presentation、input 保存、RPC 與 MCP 組裝由 lib 擁有，見 [host README](../../lib/zcu_tools/gui/app/workflows/README.md)。
@@ -20,8 +20,9 @@ Plan 透過通用 WorkflowPlanPanel preview；local parse errors 先阻擋 previ
 `CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 paused tunables。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
-T1 guess 初次輸入以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時用 native ordinary default。
-Null 或不合法的 referenced value 讓 guess_us 留空，驗證時用宣告的 native ordinary default。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
+T1 guess 初次輸入以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
+`guess_us` 沒有 Pydantic 靜態預設，`t1` 也因此沒有靜態預設，只由 `CoherenceTunablesForm.defaults` 提供。
+Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只報 `t1.guess_us` 的 Field required，不落回 20。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。

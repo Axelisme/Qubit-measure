@@ -55,7 +55,7 @@ Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 in
 
 未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Core 在這類欄位的 schema 節點標 `x-form-key-or-inline: true`，editor 只依這個標記以 Key／Inline 切換呈現，不自己從 schema 形狀判斷，所以規則只在 core。切換時寫入該模式的預設值，不轉換另一模式的值。Captured library 中 Spec 型別相符的 keys 只是建議，不限制輸入。
 
-T1TunablesForm 只在 previous 為空、captured point 有 `general.ext.guess_us` leaf 時，以這個 path 的 expression 宣告 lifetime 初始值，開表單時 core 把它算成值。這個 leaf 是 null 或不是正數時算不出合法值，guess_us 留空；guess_us 有 20 µs 的靜態預設，所以驗證時用這個預設。缺 leaf 或沒有 capture 時同樣使用這個暫定普通值。
+T1TunablesForm 只在 previous 為空、captured point 有 `general.ext.guess_us` leaf 時，以這個 path 的 expression 宣告 lifetime 初始值，開表單時 core 把它算成值。這個 leaf 是 null 或不是正數時算不出合法值，guess_us 留空；guess_us 沒有靜態預設，所以 result 只報它的 `Field required`，不默默落回 20 µs。缺 leaf 或沒有 capture 時，defaults 明確給 20 µs 的普通值。
 
 `choices(env)` 提供 model-field leaf 的合法值。最深 nested FormModel 的 local choices 優先，包含空選項。Input schema 與 result 共用這些選項。Display 只描述標籤、說明、單位與呈現，順序沿欄位宣告，段落沿 nested model，畫面群組沿 Display 的 `group`。
 
