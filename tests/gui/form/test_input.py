@@ -72,13 +72,12 @@ class InactiveToneForm(FormModel):
 def test_form_entry_rejects_untagged_string_or_model_with_field_path(
     model: type[FormModel], path: str, entry: str
 ) -> None:
-    operation: Callable[[], object]
-    if entry == "schema":
-        operation = lambda: model.input_schema(FormEnv())
-    elif entry == "defaults":
-        operation = lambda: model.default_input(FormEnv())
-    else:
-        operation = lambda: FormState(FormInput(model, {}))
+    operations: dict[str, Callable[[], object]] = {
+        "schema": lambda: model.input_schema(FormEnv()),
+        "defaults": lambda: model.default_input(FormEnv()),
+        "state": lambda: FormState(FormInput(model, {})),
+    }
+    operation = operations[entry]
     with pytest.raises(ValueError, match=rf"{re.escape(path)}:.*str.*Model"):
         operation()
 
