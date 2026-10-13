@@ -123,21 +123,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_get_cfg",
         MethodSpec(
             5.0,
-            "Return a complete cached resource publication: status, tree, "
-            "source_basis and diagnostics. Ordinary reads do not query sources. "
-            "Nonempty aliases resolves current inputs against named overrides "
-            "without publication. None and {} read cached cfg. Paths are arrays of field "
-            "segments; writes use the closed __expr/__text/__complex/__ref codec. "
-            "Library editor observations use their own independent interface.",
-            (
-                required_string("tab_id"),
-                ParamSpec(
-                    "aliases",
-                    JsonType.OBJECT,
-                    required=False,
-                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
-                ),
-            ),
+            "Read Form schema, input, ordinary leaf values and errors from the "
+            "tab's fixed source snapshot. Reads do not refresh sources. "
+            "Expressions use {expr: text}; library keys are ordinary strings. "
+            "Use Reset to capture new sources. Independent library editors retain "
+            "their own interface.",
+            (required_string("tab_id"),),
             readonly=True,
         ),
     ),
@@ -157,12 +148,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_edit_cfg",
         MethodSpec(
             5.0,
-            "Atomically apply an ordered edit batch to current inputs. Paths are "
-            "arrays of field-name segments. Scalars use __expr/__text/__complex; "
-            "reference inputs use __ref and complete children; range inputs are "
-            "complete objects. All edits publish together or none do. Valid "
-            "incomplete input may publish Invalid. Busy and notification-reentrant "
-            "edits are rejected. Returns the complete new observation.",
+            "Atomically write unique model-field leaf paths against fixed sources. "
+            "Each edit has path: [segments] and value: Form input JSON. "
+            "Expressions use {expr: text}, complex literals use __complex__, "
+            "and library keys are plain strings. Edit range leaves separately. "
+            "Invalid values stay editable with errors; structural failures preserve "
+            "the entire input. Returns schema, input, values and errors.",
             (
                 required_string("tab_id"),
                 required_json(

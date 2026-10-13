@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -33,7 +34,7 @@ class FormRpc:
         remote.on_client_open(self.link)
         self.call("control.connect", {})
 
-    def call(self, method: str, params: dict[str, object]) -> dict:
+    def call(self, method: str, params: dict[str, object]) -> dict[str, Any]:
         self.remote.route(self.link, Request("form-request", method, params))
         return json.loads(self.link.outbound.get_nowait())
 
@@ -73,16 +74,27 @@ def test_edit_cfg_commits_leaf_batch_and_returns_invalid_input_errors(form_rpc) 
     fixture, tab, rpc = form_rpc
     reply = rpc.call(
         "tab.edit_cfg",
-        {"tab_id": tab, "edits": [
-            {"path": ["gain"], "value": {"expr": "2 / 5"}},
-            {"path": ["sweep", "start"], "value": 8.0},
-        ]},
+        {
+            "tab_id": tab,
+            "edits": [
+                {"path": ["gain"], "value": {"expr": "2 / 5"}},
+                {"path": ["sweep", "start"], "value": 8.0},
+            ],
+        },
     )
     assert reply["ok"], reply
-    assert fixture.ctrl.cfg_resources.lookup(tab).input.data["gain"] == {"expr": "2 / 5"}
-    invalid = rpc.call("tab.edit_cfg", {"tab_id": tab, "edits": [
-        {"path": ["gain"], "value": {"expr": "1 / 0"}},
-    ]})
+    assert fixture.ctrl.cfg_resources.lookup(tab).input.data["gain"] == {
+        "expr": "2 / 5"
+    }
+    invalid = rpc.call(
+        "tab.edit_cfg",
+        {
+            "tab_id": tab,
+            "edits": [
+                {"path": ["gain"], "value": {"expr": "1 / 0"}},
+            ],
+        },
+    )
     assert invalid["ok"], invalid
     assert invalid["result"]["input"]["gain"] == {"expr": "1 / 0"}
     assert invalid["result"]["errors"][0]["path"] == ["gain"]
@@ -104,10 +116,16 @@ def test_edit_structural_error_rejects_the_entire_batch(form_rpc) -> None:
     fixture, tab, rpc = form_rpc
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     initial = owner.input.data
-    reply = rpc.call("tab.edit_cfg", {"tab_id": tab, "edits": [
-        {"path": ["gain"], "value": 0.75},
-        {"path": ["missing"], "value": 2},
-    ]})
+    reply = rpc.call(
+        "tab.edit_cfg",
+        {
+            "tab_id": tab,
+            "edits": [
+                {"path": ["gain"], "value": 0.75},
+                {"path": ["missing"], "value": 2},
+            ],
+        },
+    )
     assert reply["ok"] is False
     assert reply["error"]["code"] == "invalid_params", reply
     assert owner.input.data == initial

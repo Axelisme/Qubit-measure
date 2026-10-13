@@ -84,8 +84,8 @@ if TYPE_CHECKING:
     from .services.operation_control import OperationControlPort
     from .services.run_analyze_control import RunAnalyzeControlPort
     from .services.save_control import SaveControlPort
-    from .services.tab_cfg import TabCfgLookup
     from .services.tab_control import TabControlPort
+    from .services.tab_form import TabFormResources
     from .services.writeback_control import WritebackControlPort, WritebackPane
 
 
@@ -556,7 +556,8 @@ class Controller(SessionControllerMixin):
         return self._setup_control
 
     @property
-    def cfg_resources(self) -> TabCfgLookup:
+    def cfg_resources(self) -> TabFormResources:
+        """Return the tab Form owner pool; lookup rejects retired tab identities."""
         return self._tab_cfg
 
     @property
