@@ -244,6 +244,7 @@ class _Section:
             child.bind_templates(catalog, adapter)
         for field in self.modules.values():
             field.catalog = catalog
+        self.model.model_rebuild(force=True)
 
     def to_raw(
         self, value: BaseModel, env: FormEnv, errors: dict[tuple[str | int, ...], str]

@@ -6,6 +6,7 @@ from types import UnionType, new_class
 from typing import Annotated, ClassVar, TypeAliasType, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field, JsonValue
+from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import (
@@ -52,19 +53,23 @@ def module_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
     return tuple(specs)
 
 
-def _editable(annotation: object, locks: Mapping[str, TemplateLiteral]) -> object:
+def _editable(
+    annotation: object,
+    locks: Mapping[str, TemplateLiteral],
+    seeds: Mapping[str, JsonValue],
+) -> object:
     if isinstance(annotation, TypeAliasType):
-        return _editable(annotation.__value__, locks)
+        return _editable(annotation.__value__, locks, seeds)
     args = get_args(annotation)
     origin = get_origin(annotation)
     if origin is Annotated:
-        result = _editable(args[0], locks)
+        result = _editable(args[0], locks, seeds)
         for metadata in args[1:]:
             result = annotated_type(result, metadata)
         return result
     if origin in (Union, UnionType):
         items = tuple(
-            _editable(member, locks)
+            _editable(member, locks, seeds)
             for member in args
             if member is not QickParam
             and (
@@ -77,12 +82,14 @@ def _editable(annotation: object, locks: Mapping[str, TemplateLiteral]) -> objec
         )
         return union_type(items)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return _editable_spec(annotation, locks)
+        return _editable_spec(annotation, locks, seeds)
     return annotation
 
 
 def _editable_spec(
-    model: type[BaseModel], locks: Mapping[str, TemplateLiteral]
+    model: type[BaseModel],
+    locks: Mapping[str, TemplateLiteral],
+    seeds: Mapping[str, JsonValue],
 ) -> type[BaseModel]:
     annotations: dict[str, object] = {}
     namespace: dict[str, object] = {
@@ -95,12 +102,16 @@ def _editable_spec(
             for path, value in locks.items()
             if path.partition(".")[0] == name and "." in path
         }
+        seed = seeds.get(name)
         annotations[name] = (
             literal_type(locks[name])
             if name in locks
-            else _editable(info.annotation, nested)
+            else _editable(info.annotation, nested, seed if isinstance(seed, dict) else {})
         )
         derived = deepcopy(info)
+        if isinstance(seed, dict) and "expr" in seed:
+            derived.default = PydanticUndefined
+            derived.default_factory = None
         if name in locks:
             derived.default = locks[name]
         if (meta := get_field_meta(info)) is not None:
@@ -150,7 +161,7 @@ class ModuleField:
         self.node = node
         self.catalog: Mapping[str, TemplateDef] = {}
         self.locks = node.lock if node is not None else {}
-        self.editable = tuple(_editable_spec(spec, self.locks) for spec in self.specs)
+        self.editable = tuple(_editable_spec(spec, self.locks, {}) for spec in self.specs)
         self.native = any(
             isinstance(member, type) and issubclass(member, NativeModuleBase)
             for member in members(annotation)
@@ -192,6 +203,7 @@ class ModuleField:
             (LockedInline,),
             exec_body=lambda ns: ns.update(namespace),
         )
+        self.inline = inline
         self.annotation = (
             inline
             if self.locks
@@ -207,7 +219,16 @@ class ModuleField:
             else None
         )
         if template is not None:
-            template_input(template, catalog, self.editable, None)
+            seeds = template_input(template, catalog, self.editable, None)
+            self.editable = tuple(
+                _editable_spec(spec, self.locks, seeds) for spec in self.specs
+            )
+            module = union_type(self.editable)
+            if len(self.specs) > 1:
+                module = annotated_type(module, Field(discriminator="type"))
+            # Rebuild only this field's generated classes, never the shared Specs.
+            self.inline.model_fields["module"].annotation = module
+            self.inline.model_rebuild(force=True)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
         if isinstance(self.node, Template):
