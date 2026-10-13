@@ -1,8 +1,10 @@
 # gui/widgets/form — Form draft view
 
-**Last updated:** 2026-10-13，Key/Inline switch for str-or-model fields
+**Last updated:** 2026-10-13, host write callable and WriteRejected; decimals, hidden rows, fixed Literals and section titles
 
 FormEditor renders caller-owned FormState using a host-captured FormEnv. Parsed input writes the draft. Incomplete text and parse errors stay in the Qt view. The generic local_parse_errors query lets hosts reject submission while state still holds an earlier valid value.
+
+A host that checks or rewrites input before it reaches the draft passes `write=`: every parsed batch (one field path to its JSON input) goes to that callable instead of `state.write`, and the editor still reads and subscribes to the same FormState. Without it the editor calls `state.write` itself, as the workflows host does. The callable refuses a batch by raising `gui.form.WriteRejected(message)` before writing: the field keeps the typed text (a checkbox, dropdown, Enabled box or Key/Inline switch shows the state's value again) and shows the host's message. That input is view-local like unparseable text, so local_parse_errors reports it and discard_local_text drops it. The editor catches only WriteRejected; other exceptions propagate.
 
 The view projects the public input schema and read-only FormPreview. It does not import core walkers or evaluate expressions. Core owns evaluation, model validation, choices and branch defaults. The view owns controls, error display and subscription lifetime. Sequences and typed mappings are whole leaves. Detach and close do not reset or submit the caller's state. discard_local_text drops view-local unparseable text and redraws the current state. The host separately resets its draft on Discard; the renderer does not own that policy.
 
@@ -14,6 +16,8 @@ An untagged str-or-model field (`str | Model`, such as a pulse's waveform or a r
 
 The value label shows only an Expression-mode resolved value; Direct input is not echoed. Empty value and error labels are hidden and take no space; field errors appear under their row. A choice leaf with expression support (Literal, string Enum or a choices entry) shows one dropdown in Direct mode: the current choices, then an `Expression…` entry. Its mode combo appears only in Expression mode. Returning to Direct selects the resolved value when it is a current choice, otherwise the last Direct choice. Discriminators keep their plain tag dropdown.
 
+A one-value Literal (schema const, not nullable) has nothing to choose or compute: its row shows the value as frameless read-only text, without a mode combo, dropdown or expression mode. Fields the schema marks hidden have no row: Display(hidden=True) fields and one-value structural tags outside a union, such as a standalone LinRange's kind. Their input stays in state, and their errors go to the nearest drawn ancestor row or the form-wide error label. A float with schema decimals shows Direct and resolved values rounded to that many digits with trailing zeros trimmed, using the spinbox module's trimmed_decimals; typed text with more digits stays as typed and the state keeps every digit. Section titles come from the schema; a placeholder selector (no branch selected yet) takes the tag title of the branches, like a selected one.
+
 Rows sit 4 px apart and nested groups use small margins. The labels of one model level share a left-aligned column as wide as its widest label, so that level's controls start at one left edge; each nested group has its own column. The editor has no outer margins; hosts add them. One stretch below the last row takes spare height, so nested groups do not grow.
 
-T1TunablesPanel is the concrete workflow caller. Apply, Discard, Start, revision checks and persistence stay with the host. This tool does not migrate CfgSchema or Measure.
+The workflows host's WorkflowFormPanel (`gui/app/workflows/panel.py`) is the current caller; it does not pass `write`. Apply, Discard, Start, revision checks and persistence stay with the host. This tool does not migrate CfgSchema or Measure.

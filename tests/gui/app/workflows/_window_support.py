@@ -299,8 +299,11 @@ class WindowSession:
 
     The catalog lists synthetic_wide (default), synthetic_small, then
     synthetic_figures; source.catalog is what the next Reload publishes.
-    pause_at is the wide workflow's point index at which its own worker
-    requests Pause; None lets it run to Done. figure_points is the figures
+    during_point, when set, receives each wide point's index on its worker
+    before that point's pause check, so a test can observe the Window while
+    the run is live or end the run there. pause_at is the wide workflow's
+    point index at which its own worker requests Pause; None lets it run to
+    Done. figure_points is the figures
     workflow's script; each index in figure_pauses requests Pause once, so
     Resume reruns that point and continues. close drains pending work before
     closing Qt.
@@ -309,6 +312,7 @@ class WindowSession:
     def __init__(self, root: Path) -> None:
         self.harness = StartHarness()
         self.root = root
+        self.during_point: Callable[[int], None] | None = None
         self.pause_at: int | None = None
         self.figure_points: Sequence[FigurePoint] = ()
         self.figure_pauses: set[int] = set()
@@ -334,6 +338,8 @@ class WindowSession:
         )
 
     def _on_point(self, index: int) -> None:
+        if self.during_point is not None:
+            self.during_point(index)
         if index != self.pause_at:
             return
         self._pause_run()

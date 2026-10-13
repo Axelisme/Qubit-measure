@@ -15,6 +15,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from .run_status import WorkflowRunStatus
+
 # Start is the primary action; Stop reads as destructive. Disabled states are
 # visibly grey so an unavailable action does not look clickable.
 _START_STYLE = (
@@ -28,6 +30,12 @@ _STOP_STYLE = (
     "QPushButton { color: #b91c1c; font-weight: 600; }"
     "QPushButton:disabled { color: #a3a8b0; font-weight: normal; }"
 )
+_NOTE_STYLE = (
+    "QLabel { background: #eef4fc; border: 1px solid #c9daf2; border-radius: 3px;"
+    " padding: 4px 8px; color: #1f2d44; }"
+)
+_PLAN_NOTE = "Plan is fixed for this run. Edit it after the run ends."
+_TUNABLES_NOTE = "Live tunables: Apply changes the points not yet committed."
 _FORM_COLUMN_WIDTH = 560
 _FIGURE_COLUMN_WIDTH = 1040
 
@@ -39,16 +47,20 @@ class WorkflowControls:
     Top row: the session strip, then setup (opens shared Setup), aliases (opens
     alias editing), prepare (captures forms) and reload (bounded source
     replacement). Below it a splitter holds two user-resizable columns.
-    Left: selector chooses the workflow above the Plan and Tunables tabs;
-    plan_page and tunables_page are the layouts inside each tab's scroll area
-    that hold the current Start panels; start/pause/resume/stop are the native
-    run buttons fixed under the tabs. Right: message shows run/input/view
-    diagnostics above the caller's figure area.
+    Left: selector chooses the workflow above forms, whose tab 0 is Plan and
+    tab 1 is Tunables; plan_page and tunables_page are the layouts inside each
+    tab's scroll area that hold the current Start panels (and the live tuning
+    panel); plan_note and tunables_note sit above each scroll area, hidden,
+    reading that the plan is fixed and that live Apply changes uncommitted
+    points; start/pause/resume/stop are the native run buttons fixed under the
+    tabs. Right: status is the run status bar with its paused banner; message
+    shows input/command/run diagnostics under it, above the caller's figures.
     Pause/resume start disabled; all other buttons start enabled. Window
     sets reload availability, selector items and all signal/admission policy.
     """
 
     selector: QComboBox
+    status: WorkflowRunStatus
     message: QLabel
     start: QPushButton
     pause: QPushButton
@@ -58,8 +70,11 @@ class WorkflowControls:
     aliases: QPushButton
     prepare: QPushButton
     reload: QPushButton
+    forms: QTabWidget
     plan_page: QVBoxLayout
     tunables_page: QVBoxLayout
+    plan_note: QLabel
+    tunables_note: QLabel
 
 
 def _button(text: str, name: str, parent: QWidget) -> QPushButton:
@@ -68,10 +83,25 @@ def _button(text: str, name: str, parent: QWidget) -> QPushButton:
     return button
 
 
-def _scroll_tab(forms: QTabWidget, title: str, panel: QWidget) -> QVBoxLayout:
-    """Add a tab whose content scrolls; return the layout holding panel."""
-    scroll = QScrollArea(forms)
-    scroll.setObjectName(f"workflow.forms.{title.lower()}")
+def _scroll_tab(
+    forms: QTabWidget, title: str, panel: QWidget, note_text: str
+) -> tuple[QVBoxLayout, QLabel]:
+    """Add a tab: a hidden note above content that scrolls.
+
+    Return the layout holding panel and the note.
+    """
+    tab = QWidget(forms)
+    tab_layout = QVBoxLayout(tab)
+    tab_layout.setContentsMargins(0, 0, 0, 0)
+    name = f"workflow.forms.{title.lower()}"
+    note = QLabel(note_text, tab)
+    note.setObjectName(f"{name}.note")
+    note.setWordWrap(True)
+    note.setStyleSheet(_NOTE_STYLE)
+    note.hide()
+    tab_layout.addWidget(note)
+    scroll = QScrollArea(tab)
+    scroll.setObjectName(name)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.Shape.NoFrame)
     page = QWidget(scroll)
@@ -80,8 +110,9 @@ def _scroll_tab(forms: QTabWidget, title: str, panel: QWidget) -> QVBoxLayout:
     layout.addWidget(panel)
     layout.addStretch(1)
     scroll.setWidget(page)
-    forms.addTab(scroll, title)
-    return layout
+    tab_layout.addWidget(scroll, 1)
+    forms.addTab(tab, title)
+    return layout, note
 
 
 def _run_buttons(
@@ -99,17 +130,21 @@ def _run_buttons(
     return start, pause, resume, stop
 
 
-def _figure_column(splitter: QSplitter, figures: QWidget) -> tuple[QWidget, QLabel]:
-    """Return the right column and its run message above the figure area."""
+def _figure_column(
+    splitter: QSplitter, figures: QWidget
+) -> tuple[QWidget, WorkflowRunStatus, QLabel]:
+    """Return the right column: run status, then diagnostics, then figures."""
     column = QWidget(splitter)
     layout = QVBoxLayout(column)
     layout.setContentsMargins(4, 0, 0, 0)
+    status = WorkflowRunStatus(column)
+    layout.addWidget(status)
     message = QLabel(column)
     message.setObjectName("workflow.run.message")
     message.setWordWrap(True)
     layout.addWidget(message)
     layout.addWidget(figures, 1)
-    return column, message
+    return column, status, message
 
 
 def build_workflow_layout(
@@ -123,7 +158,7 @@ def build_workflow_layout(
 
     parent is their Window. session is its already built strip of read-only
     session chips; figures is its already built figure area, placed under the
-    run message. plan_panel/tunables_panel are the selected Start panels,
+    run status and diagnostics. plan_panel/tunables_panel are the selected Start panels,
     placed in the Plan and Tunables tabs. Keeps every existing objectName and initial
     flag. Connects no signals and reads no state/source/hardware.
     Returned controls belong to parent; Window wires and applies admission policy.
@@ -154,15 +189,17 @@ def build_workflow_layout(
     left_layout.addLayout(choose)
     forms = QTabWidget(left)
     forms.setObjectName("workflow.forms")
-    plan_page = _scroll_tab(forms, "Plan", plan_panel)
-    tunables_page = _scroll_tab(forms, "Tunables", tunables_panel)
+    plan_page, plan_note = _scroll_tab(forms, "Plan", plan_panel, _PLAN_NOTE)
+    tunables_page, tunables_note = _scroll_tab(
+        forms, "Tunables", tunables_panel, _TUNABLES_NOTE
+    )
     left_layout.addWidget(forms, 1)
     run_row = QHBoxLayout()
     start, pause, resume, stop = _run_buttons(left)
     for button in (start, pause, resume, stop):
         run_row.addWidget(button)
     left_layout.addLayout(run_row)
-    right, message = _figure_column(splitter, figures)
+    right, status, message = _figure_column(splitter, figures)
 
     splitter.addWidget(left)
     splitter.addWidget(right)
@@ -172,6 +209,7 @@ def build_workflow_layout(
     root.addWidget(splitter, 1)
     return WorkflowControls(
         selector,
+        status,
         message,
         start,
         pause,
@@ -181,6 +219,9 @@ def build_workflow_layout(
         aliases,
         prepare,
         reload,
+        forms,
         plan_page,
         tunables_page,
+        plan_note,
+        tunables_note,
     )
