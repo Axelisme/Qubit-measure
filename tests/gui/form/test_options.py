@@ -314,6 +314,70 @@ def test_commands_only_use_the_active_branch_declaration() -> None:
     assert state.input.data == {"branch": {"kind": "inactive", "value": 3}}
 
 
+class SharedCommandChild(FormModel):
+    value: int = 1
+
+
+class ActiveSharedBranch(FormModel):
+    kind: Literal["active"] = "active"
+    child: SharedCommandChild = Field(default_factory=SharedCommandChild)
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {("child", "value"): ActiveBranch.options(env)[("value",)]}
+
+
+class InactiveSharedBranch(FormModel):
+    kind: Literal["inactive"] = "inactive"
+    child: SharedCommandChild = Field(default_factory=SharedCommandChild)
+
+    @classmethod
+    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {("child", "value"): InactiveBranch.options(env)[("value",)]}
+
+
+class SharedBranchCommands(FormModel):
+    branch: ActiveSharedBranch | InactiveSharedBranch = Field(
+        default_factory=ActiveSharedBranch, discriminator="kind"
+    )
+
+
+def test_shared_child_commands_follow_active_ancestor_branch() -> None:
+    env = FormEnv()
+    state = FormState(SharedBranchCommands.default_input(env))
+    before = state.input.data
+    events: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: events.append(state.input.data))
+    with pytest.raises(ValueError, match="command"):
+        state.run_command(("branch", "child", "value"), "inactive", env)
+    assert state.input.data == before
+    assert state.base.data == before
+    assert events == []
+    state.run_command(("branch", "child", "value"), "active", env)
+    assert state.input.data == {"branch": {"kind": "active", "child": {"value": 2}}}
+    assert events == [state.input.data]
+    state.write({("branch", "kind"): "inactive"}, env)
+    with pytest.raises(ValueError, match="command"):
+        state.run_command(("branch", "child", "value"), "active", env)
+    state.run_command(("branch", "child", "value"), "inactive", env)
+    assert state.input.data == {"branch": {"kind": "inactive", "child": {"value": 3}}}
+    assert len(events) == 3
+
+
+def test_array_options_match_whole_typed_leaves_not_partial_objects() -> None:
+    array = api.Option("Array", [{"id": 1}])
+    assert array.matches([{"id": 1}])
+    assert not array.matches([{"id": 1, "extra": 2}])
+    assert not array.matches([{"id": True}])
+    assert not array.matches([{"id": 1.0}])
+    assert not array.matches([{"id": 1}, {"id": 2}])
+    assert not array.matches({"id": 1})
+    assert api.Option("Partial object", {"id": 1}).matches({"id": 1, "extra": 2})
+    nested = api.Option("Nested array", {"items": [{"id": 1}]})
+    assert nested.matches({"items": [{"id": 1}], "extra": 2})
+    assert not nested.matches({"items": [{"id": 1, "extra": 2}]})
+
+
 class UnknownOptionPath(FormModel):
     value: int = 1
 
@@ -406,6 +470,54 @@ class FailureContainer(FormModel):
     branch: First | UnavailableBranch = Field(
         default_factory=First, discriminator="kind"
     )
+
+
+class OrdinaryChildInline(FormModel):
+    kind: Literal["inline"] = "inline"
+    child: UnavailableBranch
+
+
+class OrdinaryChildContainer(FormModel):
+    branch: First | OrdinaryChildInline = Field(
+        default_factory=First, discriminator="kind"
+    )
+
+
+class OrdinaryChildFailureForm(FormModel):
+    outer: OrdinaryChildContainer = Field(default_factory=OrdinaryChildContainer)
+    flag: bool = False
+
+
+def test_partial_branch_ordinary_child_source_failure_keeps_full_path_and_atomicity() -> (
+    None
+):
+    env = FormEnv()
+    state = FormState(OrdinaryChildFailureForm.default_input(env))
+    before = state.input.data
+    events: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: events.append(state.input.data))
+    with pytest.raises(
+        PydanticCustomError, match="Unavailable captured source"
+    ) as caught:
+        state.write(
+            {
+                ("flag",): True,
+                ("outer", "branch"): {
+                    "kind": "inline",
+                    "child": {"source": "explicit"},
+                },
+            },
+            env,
+        )
+    assert (caught.value.context or {}).get("path") == (
+        "outer",
+        "branch",
+        "child",
+        "source",
+    )
+    assert state.input.data == before
+    assert state.base.data == before
+    assert events == []
 
 
 class SourceFailureForm(FormModel):
