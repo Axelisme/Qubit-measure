@@ -14,7 +14,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, create_model
 from pydantic_core import PydanticUndefined
 from qick.asm_v2 import QickParam
 
@@ -312,8 +312,15 @@ class ModuleField:
             module = union_type(self.editable)
             if len(self.specs) > 1:
                 module = annotated_type(module, Field(discriminator="type"))
-            # Rebuild only this field's generated classes, never the shared Specs.
-            self.inline.model_fields["module"].annotation = module
+            # Parse the annotation without mutating FieldInfo.annotation; keep the
+            # inline class identity borrowed by the section and value form.
+            parsed = create_model(
+                self.inline.__name__,
+                __base__=self.inline,
+                __module__=__name__,
+                module=(module, deepcopy(self.inline.model_fields["module"])),
+            )
+            self.inline.model_fields["module"] = parsed.model_fields["module"]
             self.inline.model_rebuild(force=True)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
