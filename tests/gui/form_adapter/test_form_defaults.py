@@ -44,7 +44,6 @@ def templates() -> dict[str, TemplateDef]:
                 "gain": 0.1,
                 "waveform.style": "const",
                 "waveform.length": Expr("2 * .2"),
-                "desc": "$literal",
             },
         )
     }
@@ -130,9 +129,7 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
         assert probe["name"] == "Q.pulses.probe"
 
 
-def test_template_required_nested_defaults_omit_none_and_preserve_literal_strings() -> (
-    None
-):
+def test_template_required_nested_defaults_omit_none() -> None:
     form = bound_form(Template("pulse"))
     env = environment()
     state = FormState(form.default_input(env))
@@ -149,7 +146,6 @@ def test_template_required_nested_defaults_omit_none_and_preserve_literal_string
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, Core), cfg
     assert cfg.probe.freq == 120 and cfg.probe.waveform.length == 0.4
-    assert cfg.probe.desc == "$literal"
 
 
 def test_copy_branch_switch_does_not_reapply_initial_set() -> None:

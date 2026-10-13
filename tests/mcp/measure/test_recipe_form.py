@@ -63,7 +63,12 @@ class FormGui(LookbackGui):
             mutation_allowed=lambda: True,
         )
         self.owner.write(
-            {("locked_pulse",): ModuleInline(module=pulse).model_dump(mode="json")}
+            {
+                ("locked_pulse",): {
+                    "kind": "inline",
+                    "module": pulse.model_dump(mode="json", exclude_none=True),
+                }
+            }
         )
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
