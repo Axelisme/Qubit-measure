@@ -18,10 +18,20 @@ from ._structure import (
     discriminator,
     fixed_tag,
     key_or_inline,
+    library_key,
     model_types,
     schema_branch_model,
 )
-from .model import Display, FormEnv, FormModel, FormPath, ModuleInput, RangeInput
+from .model import (
+    Display,
+    FormEnv,
+    FormModel,
+    FormPath,
+    ModuleInline,
+    ModuleInput,
+    ModuleRef,
+    RangeInput,
+)
 
 
 class _InputJsonSchema(GenerateJsonSchema):
@@ -84,6 +94,13 @@ _COMPLEX: dict[str, JsonValue] = {
 
 
 def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """Copy schema without required lists, with an Expr alternative per text leaf.
+
+    A text leaf is an integer, number or string node without enum or const:
+    Literal and Enum values are picked, not typed. Boolean nodes get none.
+    Leaves this shape cannot tell apart, such as choice leaves, lose the
+    alternative in _decorate.
+    """
     node = copy_object(schema)
     node.pop("required", None)
     # Only schema positions are traversed: property names and defaults are data.
@@ -114,16 +131,21 @@ def _partial(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
                 _partial(branch) if isinstance(branch, dict) else branch
                 for branch in branches
             ]
-    if node.get("type") in ("integer", "number", "string"):
+    if (
+        node.get("type") in ("integer", "number", "string")
+        and "enum" not in node
+        and "const" not in node
+    ):
         return {"anyOf": [node, copy_object(_EXPR)]}
     return node
 
 
 def _without_expr(node: dict[str, JsonValue]) -> None:
-    """Collapse an {anyOf: [ordinary, Expr]} node to its ordinary branch in place.
+    """Drop the Expr alternatives of node's anyOf in place.
 
-    Outer metadata is kept. Other nodes, including ones with several ordinary
-    branches, are left unchanged.
+    When one ordinary alternative remains, node collapses to it and keeps its
+    outer metadata. Nested anyOf alternatives, such as the inner node of a
+    nullable leaf, are left to the caller. A node without anyOf is unchanged.
     """
     branches = node.get("anyOf")
     if not isinstance(branches, list):
@@ -134,6 +156,8 @@ def _without_expr(node: dict[str, JsonValue]) -> None:
         node.clear()
         node.update(ordinary[0])
         node.update(metadata)
+    else:
+        node["anyOf"] = ordinary
 
 
 def _resolve(
@@ -191,6 +215,8 @@ def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
             # Only declared: forms without hidden fields keep their schema.
             if metadata.hidden:
                 target["hidden"] = True
+            if metadata.group is not None:
+                target["x-form-group"] = metadata.group
     for child_info, child_target in _container_nodes(info, target):
         _field_metadata(child_info, child_target)
 
@@ -344,13 +370,6 @@ def _child_nodes(
             node["oneOf"] = [variant for _, variant in tagged]
             children: list[tuple[type[BaseModel], dict[str, JsonValue]]] = []
             for tags, variant in tagged:
-                properties = variant.get("properties")
-                selector = (
-                    properties.get(tag_key) if isinstance(properties, dict) else None
-                )
-                # Selectors determine shape before value evaluation.
-                if isinstance(selector, dict):
-                    _without_expr(selector)
                 children.append((schema_branch_model(info, tags), variant))
             return tuple(children)
         return tuple(
@@ -370,10 +389,12 @@ def _child_nodes(
 def _apply_choices(
     target: dict[str, JsonValue], options: tuple[JsonValue, ...]
 ) -> None:
+    """Restrict a choice leaf's node to options; it takes no Expr envelope."""
+    _without_expr(target)
     variants = target.get("anyOf")
     if isinstance(variants, list):
         for variant in variants:
-            if isinstance(variant, dict) and variant != _EXPR:
+            if isinstance(variant, dict):
                 _apply_choices(variant, options)
     else:
         _enum(target, options)
@@ -435,6 +456,37 @@ def _key_branch(
                 ]
 
 
+def _module_input(info: FieldInfo) -> bool:
+    """Whether info is a ModuleInput field: exactly ModuleRef | ModuleInline.
+
+    Like a str-or-model field it is a library key or an inline model, but its
+    kind tag selects the two: ref with a name key, or inline with a module.
+    A nullable ModuleInput is not included and stays a plain tagged union.
+    """
+    return set(alternatives(info.annotation)) == {ModuleRef, ModuleInline}
+
+
+def _ref_keys(
+    target: dict[str, JsonValue],
+    projection: _Projection,
+    options: tuple[JsonValue, ...] | None,
+) -> None:
+    """List a ModuleRef name's offered library keys in x-form-library-keys.
+
+    target is the name property node. With a captured library the list is
+    every library module key, because an inline ModuleSpec accepts every
+    module type; options, the name's declared choices or None, keeps only
+    the keys among them, so each listed key passes both the choices and the
+    library check. Without a captured library the node gets no list.
+    """
+    library = projection.env.library
+    if library is None:
+        return
+    target["x-form-library-keys"] = [
+        key for key in library.module_keys() if options is None or key in options
+    ]
+
+
 def _decorate(
     model: type[BaseModel],
     node: dict[str, JsonValue],
@@ -466,6 +518,12 @@ def _decorate(
             # Core owns the str-or-model rule; views read this marker only.
             target["x-form-key-or-inline"] = True
             _key_branch(info, target, projection)
+        elif _module_input(info):
+            target["x-form-key-or-inline"] = True
+        if library_key(model, name):
+            # A library key is a plain string, like a str-or-model key.
+            _without_expr(target)
+            _ref_keys(target, projection, options.get((name,)))
         child_options = {
             path[1:]: values
             for path, values in options.items()

@@ -207,10 +207,10 @@ def range_count_options(node: dict[str, JsonValue]) -> JsonValue:
     branches = node["oneOf"]
     assert isinstance(branches, list)
     fields = schema_object(schema_object(branches[0])["properties"])
+    # A choice leaf has no Expr alternative, so its node holds the enum.
     count = schema_object(fields["n"])
-    alternatives = count["anyOf"]
-    assert isinstance(alternatives, list)
-    return schema_object(alternatives[0])["enum"]
+    assert "anyOf" not in count
+    return count["enum"]
 
 
 def test_container_discriminator_identity_and_retained_discriminator_identity_refresh() -> (

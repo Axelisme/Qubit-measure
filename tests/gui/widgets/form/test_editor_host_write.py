@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterator, Mapping
 
 import pytest
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import JsonValue
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.form import (
     FormEnv,
@@ -16,14 +16,6 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 
-class Tone(BaseModel):
-    """The inline model of a key-or-inline field."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    gain: float = 0.5
-
-
 class Section(FormModel):
     """An optional nested section toggled by its Enabled box."""
 
@@ -31,10 +23,9 @@ class Section(FormModel):
 
 
 class HostForm(FormModel):
-    """Text, key, numeric, bool and optional-section inputs a host can see."""
+    """Text, numeric, bool and optional-section inputs a host can see."""
 
     note: str = ""
-    tone: str | Tone = ""
     amount: float = 1.0
     flag: bool = False
     section: Section | None = None
@@ -106,10 +97,11 @@ def test_write_receives_every_parsed_batch_and_the_editor_still_shows_state(
     assert editor.errors() is None
 
 
-@pytest.mark.parametrize("path", ["note", "tone"])
 def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
-    build: Build, path: str
+    build: Build,
 ) -> None:
+    # A key-or-inline dropdown's rejection is covered with the dropdown itself.
+    path = "note"
     state = new_state()
 
     def write(batch: Mapping[FormWritePath, JsonValue]) -> None:

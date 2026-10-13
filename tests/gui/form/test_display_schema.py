@@ -176,3 +176,54 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         fluxes: RangeInput = Field(default_factory=LinRange)
 
     assert '"hidden"' not in json.dumps(UnionOnlyForm.input_schema(FormEnv()))
+
+
+def test_display_group_marks_only_declared_fields_in_the_schema() -> None:
+    class GroupedSection(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        level: float = 1.0
+        phase: Annotated[float, Display(unit="deg", group="Advanced")] = 0.0
+
+    class PlainSection(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        level: float = 1.0
+        phase: Annotated[float, Display(unit="deg")] = 0.0
+
+    class GroupedForm(FormModel):
+        freq: float = 1.0
+        nqz: Annotated[Literal[1, 2], Display(label="NQZ", group="Advanced")] = 1
+        section: GroupedSection = Field(default_factory=GroupedSection)
+        extra: Annotated[Section, Display(group="Timing")] = Field(
+            default_factory=Section
+        )
+
+    class PlainForm(FormModel):
+        freq: float = 1.0
+        nqz: Annotated[Literal[1, 2], Display(label="NQZ")] = 1
+        section: PlainSection = Field(default_factory=PlainSection)
+        extra: Annotated[Section, Display()] = Field(default_factory=Section)
+
+    env = FormEnv()
+    grouped = GroupedForm.input_schema(env)
+    assert node(grouped, "nqz")["x-form-group"] == "Advanced"
+    assert node(grouped, "section", "phase")["x-form-group"] == "Advanced"
+    # A whole nested model field can be a group member.
+    assert node(grouped, "extra")["x-form-group"] == "Timing"
+    for path in (("freq",), ("section",), ("section", "level"), ("extra", "level")):
+        assert "x-form-group" not in node(grouped, *path), path
+
+    # Removing the marker leaves exactly the schema of the same form without
+    # groups: validation, defaults and choices do not see groups.
+    plain = PlainForm.input_schema(env)
+    for path in (("nqz",), ("section", "phase"), ("extra",)):
+        del node(grouped, *path)["x-form-group"]
+        assert node(grouped, *path) == node(plain, *path), path
+    assert '"x-form-group"' not in json.dumps(plain)
+    assert GroupedForm.default_input(env).data == PlainForm.default_input(env).data
+
+
+def test_display_group_rejects_an_empty_name() -> None:
+    with pytest.raises(ValueError, match="group"):
+        Display(group="")

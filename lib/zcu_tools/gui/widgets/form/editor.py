@@ -20,7 +20,7 @@ from zcu_tools.gui.form import (
     WriteRejected,
 )
 
-from ._controls import ROW_SPACING, FieldRow, LocalText
+from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
 
@@ -38,11 +38,18 @@ class FormEditor[F: FormModel](QWidget):
     form.input.<path> is a QLineEdit for text, numeric, complex, expression or
     whole-container input; a QCheckBox for bool; or a QComboBox for choices and
     discriminators. Combo item data is the ordinary input value.
-    form.mode.<path> is a numeric/complex/string QComboBox with data "direct" and "expr".
-    On a choice leaf (Literal, Enum or choices) it is hidden in Direct mode, so
-    the row shows one dropdown: the choices, then a last "Expression…" item
-    without data that switches the mode to "expr". Returning to Direct selects
-    the resolved value when it is a current choice, else the last Direct one.
+    form.mode.<path> is the checkable QAction "Expression" of a field whose
+    schema offers an Expr alternative: the core offers it on text fields
+    (int, float, complex and str values typed into a QLineEdit). It is
+    checked in Expression mode. form.input.<path> lists it in actions() and
+    in its right-click menu, after the text field's standard items; the row
+    tooltip says so. Triggering it switches the mode and writes the input
+    again: {"expr": <current text>} in Expression mode, the parsed text in
+    Direct mode. An Expression-mode input has a light tint of the palette's
+    highlight colour. Dropdown and checkbox fields (Literal, Enum, choices,
+    bool and key-or-inline fields) have no form.mode.<path>: a choice
+    leaf's form.input.<path> is a dropdown of only the choices, and its
+    right-click opens no menu.
     Discriminators offer only ordinary typed tags and have no expression mode.
     Empty choices keep the current branch visible without changing its input.
     A one-value Literal has form.input.<path> as read-only QLineEdit text of
@@ -52,13 +59,39 @@ class FormEditor[F: FormModel](QWidget):
     Fields the schema marks hidden (Display(hidden=True), or a one-value
     structural tag outside a union) have no controls. Their input is kept,
     and their errors appear at the nearest drawn ancestor row or form.error.
-    An untagged str-or-model field (a library key or an inline model) has
-    form.mode.<path> with data "key" and "inline" instead: Key mode shows
-    form.input.<path> as a QLineEdit, or an editable QComboBox listing the
-    captured library keys whose Spec matches; Inline mode shows the model's
-    child rows, a tagged union with its selector. Switching writes the new
-    mode's default ("" or {}); the other mode's value is never converted.
+    A field the schema marks x-form-key-or-inline holds a library key or an
+    inline model: a str-or-model field (str | Model) or a ModuleInput. It has
+    no form.mode.<path>; its form.input.<path> is one non-editable QComboBox.
+    The first item is "Inline" with item data None; then come the schema's
+    x-form-library-keys, each with the key as data (for a str-or-model
+    field the library keys whose Spec matches the model; for a ModuleInput
+    every library module key, or only those among declared choices for its
+    name). While the input holds a key not in that list, a last item shows
+    it as "<key> (missing)" with data "<key>" (an empty or non-string key,
+    such as an expression a wire write left in a ModuleInput name, as its
+    JSON text) and is selected; the state is not changed and the field's
+    errors still show. Without offered keys the list is Inline only, plus
+    that missing item. An unfilled field selects no item. The GUI cannot
+    type a key; wire writes can still hold any key. Choosing a key writes it
+    (a ModuleInput writes {"kind": "ref", "name": <key>} as its kind and
+    name leaves in one batch). Choosing Inline writes {} for a str-or-model
+    field and kind "inline" for a ModuleInput, whose inline defaults copy
+    the referenced library module; it then shows the inline model's child
+    rows below (a tagged union with its selector; a ModuleInput shows its
+    module, without a kind row). Neither choice converts the other's value.
     form.enabled.<path> is a nullable-model activation QCheckBox.
+    form.group.<path>.<group> (form.group.<group> at the root level) is the
+    block of one Display group of the model level at <path>. It holds the
+    level's fields of that group, in declaration order, under a header with
+    the group name in the level's label column and an Expand/Collapse
+    QPushButton. Each level shows its ungrouped rows first, then its group
+    blocks in the order of each group's first field. A group whose fields
+    are all hidden has no block. While any of its rows (or their children)
+    shows an error, the header shows a "Contains errors" note; a folded
+    group stays folded.
+    Groups start folded; model rows start as Display(collapsed=...) says.
+    Folds the user sets on groups and model rows survive rebuilds of this
+    editor (branch, key-or-inline or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
     form.error.<path> is a QLabel under its field with current field errors;
@@ -96,16 +129,17 @@ class FormEditor[F: FormModel](QWidget):
         write decides where parsed input goes. When it is None (the default),
         each parsed batch is installed with state.write(batch, env) using the
         current env. When it is a callable, it receives every parsed batch, a
-        one-entry mapping from the edited field's write path to its JSON
-        input, and the editor never writes state itself. The callable installs
+        mapping from write paths to JSON input: one entry, the edited field's
+        path, except that choosing a ModuleInput key writes its kind and name
+        leaves together. The editor never writes state itself. The callable installs
         accepted input into this same state (for example after its own checks
         or substitutions); the editor still reads and subscribes to state, so
         input the callable does not install is not shown.
         To refuse a batch, the callable raises WriteRejected(message) before
         writing state. That field then keeps the user's input as local view
-        input with message as its error: text and key inputs keep the typed
-        text and mode; a checkbox, dropdown, Enabled box or Key/Inline switch
-        shows the state's value again. Like unparseable text, it appears in
+        input with message as its error: text inputs keep the typed text and
+        mode; a checkbox, dropdown (including a key-or-inline dropdown) or
+        Enabled box shows the state's value again. Like unparseable text, it appears in
         local_parse_errors and errors, blocks validity, survives refresh and
         publications, and clears on that field's next accepted write, on
         discard_local_text, or when the field leaves the form. Any other
@@ -122,6 +156,10 @@ class FormEditor[F: FormModel](QWidget):
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
+        self._groups: list[GroupBlock] = []
+        # User folds by model path, and by (model level path, group name).
+        self._model_expanded: dict[FormWritePath, bool] = {}
+        self._group_expanded: dict[tuple[FormWritePath, str], bool] = {}
         self._state_errors: FormErrors | None = None
         self._valid: bool | None = None
         # Hosts own outer margins; rows keep ROW_SPACING apart.
@@ -267,6 +305,7 @@ class FormEditor[F: FormModel](QWidget):
                 field.options is not None,
                 field.expression,
                 field.fixed,
+                field.group,
             )
             for field in flat
         )
@@ -277,6 +316,7 @@ class FormEditor[F: FormModel](QWidget):
                 row.field.options is not None,
                 row.field.expression,
                 row.field.fixed,
+                row.field.group,
             )
             for row in self._rows.values()
         )
@@ -295,7 +335,8 @@ class FormEditor[F: FormModel](QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ROW_SPACING)
         self._rows = {}
-        self._add_rows(fields, self._content, layout)
+        self._groups = []
+        self._add_level((), fields, self._content, layout)
         # One stretch below the last row takes spare height; a stretch inside a
         # group would make the group grow and spread its rows apart.
         layout.addStretch()
@@ -305,29 +346,70 @@ class FormEditor[F: FormModel](QWidget):
         old.setParent(None)
         old.deleteLater()
 
-    def _add_rows(
-        self, fields: tuple[FieldView, ...], parent: QWidget, layout: QVBoxLayout
+    def _add_level(
+        self,
+        path: FormWritePath,
+        fields: tuple[FieldView, ...],
+        parent: QWidget,
+        layout: QVBoxLayout,
     ) -> None:
-        level: list[FieldRow] = []
-        for field in fields:
-            row = FieldRow(field, parent, self._write, self._unparsed)
-            self._rows[field.path] = row
-            level.append(row)
-            layout.addWidget(row.widget)
-            if row.group is not None:
-                child_layout = row.group.layout()
-                if isinstance(child_layout, QVBoxLayout):
-                    self._add_rows(field.children, row.group, child_layout)
-        # One label column per model level: the widest label sets the width,
-        # so every control of this level starts at the same left edge.
-        width = max((row.label.sizeHint().width() for row in level), default=0)
-        for row in level:
-            row.label.setFixedWidth(width)
+        """Add the rows of the model level at path to layout under parent.
 
-    def _write(self, path: FormWritePath, value: JsonValue) -> None:
+        Ungrouped fields come first, then one GroupBlock per Display group in
+        the order of each group's first field, holding that group's fields.
+        """
+        groups: dict[str, list[FieldView]] = {}
+        for field in fields:
+            if field.group is not None:
+                groups.setdefault(field.group, []).append(field)
+        labels = [
+            self._add_row(field, parent, layout)
+            for field in fields
+            if field.group is None
+        ]
+        for name, members in groups.items():
+            block = GroupBlock(
+                path,
+                name,
+                tuple(member.path for member in members),
+                parent,
+                self._group_expanded,
+            )
+            self._groups.append(block)
+            layout.addWidget(block.widget)
+            labels.append(block.label)
+            # Rows in a group block are indented, so they get their own column.
+            _align_labels(
+                [self._add_row(member, block.body, block.rows) for member in members]
+            )
+        _align_labels(labels)
+
+    def _add_row(
+        self, field: FieldView, parent: QWidget, layout: QVBoxLayout
+    ) -> QLabel:
+        """Add field's row, and a model's child level, and return its label."""
+        row = FieldRow(
+            field,
+            parent,
+            self._write,
+            self._unparsed,
+            self._model_expanded,
+        )
+        self._rows[field.path] = row
+        layout.addWidget(row.widget)
+        if row.group is not None:
+            child_layout = row.group.layout()
+            if isinstance(child_layout, QVBoxLayout):
+                # Recursion back into _add_level: a model's children are a level.
+                self._add_level(field.path, field.children, row.group, child_layout)
+        return row.label
+
+    def _write(
+        self, path: FormWritePath, batch: Mapping[FormWritePath, JsonValue]
+    ) -> None:
+        """Install batch from the row at path, or keep it local if rejected."""
         state = self._require_state()
         self._local.pop(path, None)
-        batch = {path: value}
         if self._host_write is None:
             state.write(batch, self._require_env())
         else:
@@ -361,6 +443,14 @@ class FormEditor[F: FormModel](QWidget):
             row.set_error("\n".join(by_row.get(path, ())))
             if path in self._local:
                 row.clear_value()
+        for block in self._groups:
+            block.set_has_errors(
+                has_errors=any(
+                    path[: len(member)] == member
+                    for path in by_row
+                    for member in block.members
+                )
+            )
         valid = errors is None
         if valid != self._valid:
             self._valid = valid
@@ -373,3 +463,13 @@ class FormEditor[F: FormModel](QWidget):
                 if candidate == prefix:
                     return candidate
         return None
+
+
+def _align_labels(labels: list[QLabel]) -> None:
+    """Give labels one fixed width, the widest label's, as one label column.
+
+    Every control beside these labels then starts at the same left edge.
+    """
+    width = max((label.sizeHint().width() for label in labels), default=0)
+    for label in labels:
+        label.setFixedWidth(width)
