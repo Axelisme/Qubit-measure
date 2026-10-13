@@ -429,7 +429,8 @@ def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
     with (result_path / "setup.yaml").open(encoding="utf-8") as stream:
         document = YAML(typ="safe").load(stream)
     assert document["format"] == "zcu.parameter-container"
-    assert document["format_version"] == "1.0"
+    assert document["format_version"] == "2.0"
+    assert document["metadata"] == {}
     assert document["general"]["entry_id"] == entry.entry_id
     assert datetime.fromisoformat(
         document["general"]["created_at"]

@@ -7,7 +7,11 @@ from ruamel.yaml import YAML
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import ResultEntry, snapshot, source_path
 from zcu_tools.resources.entry.points import PointView
-from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+from zcu_tools.resources.entry.schema import (
+    PARAMETER_VERSION,
+    PointDocument,
+    SetupDocument,
+)
 from zcu_tools.resources.entry.views import EditView, SetupView
 
 
@@ -37,7 +41,10 @@ def test_component_field_names_support_public_reads_and_writes(
         except ValueError as error:
             raise AssertionError(f"schema rejected legal component {name!r}") from error
         store = DocumentStore(
-            source_path(view), schema, format="zcu.parameter-container"
+            source_path(view),
+            schema,
+            format="zcu.parameter-container",
+            supported_version=PARAMETER_VERSION,
         )
         with store.edit() as draft:
             draft.components = candidate.components
@@ -51,8 +58,6 @@ def test_component_field_names_support_public_reads_and_writes(
         assert getattr(draft, name).rate == 12.0
         assert component.rate == 11.0
     assert component.rate == 12.0
-    source = view.meta(f"{name}.rate")
-    assert source is not None and source.source == "manual"
     detached = snapshot(view)
     detached.components.clear()
     assert component.rate == 12.0
@@ -81,30 +86,39 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         raise AssertionError("schema must not enforce view membership") from error
     source = source_path(view)
     before = source.read_bytes()
-    ledger = entry.result_path / "records/ledger.jsonl"
     if owner == "edit":
         with pytest.raises(ValueError, match="edit.*shadow.*view"):
-            EditView(candidate, ledger=ledger, entry_id=entry.entry_id)
+            EditView(candidate)
     else:
-        store = DocumentStore(source, schema, format="zcu.parameter-container")
+        store = DocumentStore(
+            source,
+            schema,
+            format="zcu.parameter-container",
+            supported_version=PARAMETER_VERSION,
+        )
         with store.edit() as draft:
             draft.components = candidate.components
         before = source.read_bytes()
         if owner == "setup":
             setup_store = DocumentStore(
-                source, SetupDocument, format="zcu.parameter-container"
+                source,
+                SetupDocument,
+                format="zcu.parameter-container",
+                supported_version=PARAMETER_VERSION,
             )
             with pytest.raises(ValueError, match="edit.*shadow.*view"):
-                SetupView(setup_store, source, ledger=ledger, entry_id=entry.entry_id)
+                SetupView(setup_store, source)
         else:
             point_store = DocumentStore(
-                source, PointDocument, format="zcu.parameter-container"
+                source,
+                PointDocument,
+                format="zcu.parameter-container",
+                supported_version=PARAMETER_VERSION,
             )
             with pytest.raises(ValueError, match="edit.*shadow.*view"):
                 PointView(
                     point_store,
                     source,
-                    ledger=ledger,
                     entry_id=entry.entry_id,
                     result_root=entry_roots[0],
                     database_root=entry_roots[1],
@@ -124,6 +138,7 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
         "add_component",
         "resolve",
         "set",
+        "set_meta",
     ],
 )
 @pytest.mark.parametrize("owner", ["setup", "point"])

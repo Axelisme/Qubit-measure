@@ -42,7 +42,7 @@ from zcu_tools.resources.entry import (
     source_path,
     writeback,
 )
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import PARAMETER_VERSION, PointDocument
 
 from tests._native_support import native_metadata
 from tests.device._snapshot_fakes import SnapshotDevice
@@ -778,7 +778,11 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
     binding = capture_point_storage(point)
     bound = PointView(
         DocumentStore(
-            path, PointDocument, format="zcu.parameter-container", validate=reject_fit
+            path,
+            PointDocument,
+            format="zcu.parameter-container",
+            supported_version=PARAMETER_VERSION,
+            validate=reject_fit,
         ),
         path,
         ledger=tmp_path / "results" / "entry" / "records" / "ledger.jsonl",

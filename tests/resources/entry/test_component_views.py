@@ -59,7 +59,7 @@ def test_complex_view_reads_decode_leaves_while_document_reads_remain_raw(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-def test_manual_complex_writes_encode_and_keep_validation_and_sources(
+def test_manual_complex_writes_encode_and_keep_validation_and_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str
 ) -> None:
     class Measured(ComponentSchema):
@@ -86,9 +86,8 @@ def test_manual_complex_writes_encode_and_keep_validation_and_sources(
             }
             assert cal.center == 3 - 4j
         assert cal.center == 7 - 8j
-        for path in ("N1.ext.cal.center", "general.ext.center"):
-            source = view.meta(path)
-            assert source is not None and source.source == "manual"
+        with view.edit() as draft:
+            draft.set_meta("N1.ext.cal.center", {"stderr": 0.5})
         before = snapshot(view)
         with pytest.raises(ValidationError):
             view.N1.freq = 1 + 2j
@@ -102,7 +101,7 @@ def test_manual_complex_writes_encode_and_keep_validation_and_sources(
         assert document_value(snapshot(loaded), "N1.ext.cal.center") == {
             "__complex__": [7.0, -8.0]
         }
-        assert loaded.meta("N1.ext.cal.center") == view.meta("N1.ext.cal.center")
+        assert loaded.meta("N1.ext.cal.center") == {"stderr": 0.5}
 
 
 @pytest.mark.parametrize(
@@ -130,7 +129,7 @@ def test_malformed_complex_view_leaf_raises_without_mutating_document(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-@pytest.mark.parametrize("version", ["1.0", "1.2"])
+@pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_allow_extras_support_child_views_set_meta_seed_and_reload(
     tmp_path: Path,
     registry_state_guard: None,
@@ -168,10 +167,14 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
         with view.edit() as draft:
             draft.set("N1.future.level", 7)
             draft.set("N1.gain", 8)
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.future.level", {"comment": "caller"})
         accepted = view.meta("N1.future.level")
-        assert accepted is not None and accepted.source == "manual"
+        assert accepted == {"comment": "caller"}
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.gain", {"comment": "caller"})
         gain_source = view.meta("N1.gain")
-        assert gain_source is not None and gain_source.source == "manual"
+        assert gain_source == {"comment": "caller"}
         assert future.level == 7 and future.untouched == 4
         if owner == "setup":
             seeded = entry.new_point("seeded")
@@ -219,8 +222,10 @@ def test_nested_model_views_follow_commit_and_refresh_without_leaking_drafts(
             assert draft_pin.index == 5
             assert pin.index == 2
         assert pin.index == 5
+        with entry.setup.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.wiring.link.index", {"comment": "caller"})
         source = entry.setup.meta("N1.wiring.link.index")
-        assert source is not None and source.source == "manual"
+        assert source == {"comment": "caller"}
         other = ResultEntry.open("entry", result_root=results, database_root=database)
         with other.setup.edit() as draft:
             draft.set("N1.wiring.link.index", 8)
@@ -298,8 +303,10 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
         route = field_view(routes["drive"])
         pin = field_view(route.pin)
         pin["index"] = 3
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.routes.drive.pin.index", {"comment": "caller"})
         source = view.meta("N1.routes.drive.pin.index")
-        assert source is not None and source.source == "manual"
+        assert source == {"comment": "caller"}
         with view.edit() as draft:
             draft_routes = field_view(draft.N1.routes)
             draft_route = field_view(draft_routes.drive)
@@ -315,8 +322,10 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
             assert view.meta("N1.routes.drive.pin.index") == source
         assert pin.index == 3
         assert view.meta("N1.routes.drive.pin.index") == source
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.levels.gain.left", {"comment": "caller"})
         gain_source = view.meta("N1.levels.gain.left")
-        assert gain_source is not None and gain_source.source == "manual"
+        assert gain_source == {"comment": "caller"}
         if owner == "point":
             setup_routes = field_view(entry.setup.N1.routes)
             setup_route = field_view(setup_routes.drive)
@@ -338,7 +347,7 @@ def test_recursive_dict_views_preserve_models_constraints_and_sources(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-@pytest.mark.parametrize("version", ["1.0", "1.2"])
+@pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_collision_extra_edit_abort_preserves_both_components(
     tmp_path: Path, registry_state_guard: None, owner: str, version: str
 ) -> None:
@@ -391,7 +400,7 @@ def test_collision_extra_edit_abort_preserves_both_components(
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
 @pytest.mark.parametrize("write", ["set", "property"])
-def test_model_mapping_replacement_accepts_values_and_leaf_sources(
+def test_model_mapping_replacement_accepts_values_and_keeps_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str, write: str
 ) -> None:
     class Pin(BaseModel):
@@ -418,8 +427,10 @@ def test_model_mapping_replacement_accepts_values_and_leaf_sources(
             view.N1.routes = {"drive": {"pin": {"index": 6}}}
         route = field_view(field_view(view.N1.routes).drive)
         assert field_view(route.pin).index == 6
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.routes.drive.pin.index", {"comment": "caller"})
         accepted = view.meta("N1.routes.drive.pin.index")
-        assert accepted is not None and accepted.source == "manual"
+        assert accepted == {"comment": "caller"}
         with view.edit() as draft:
             if write == "set":
                 with pytest.raises(ValidationError):
@@ -442,7 +453,7 @@ def test_model_mapping_replacement_accepts_values_and_leaf_sources(
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
 @pytest.mark.parametrize("write", ["set", "property"])
-def test_model_list_replacement_accepts_values_and_source(
+def test_model_list_replacement_accepts_values_and_keeps_metadata(
     tmp_path: Path, registry_state_guard: None, owner: str, write: str
 ) -> None:
     class Pin(BaseModel):
@@ -464,8 +475,10 @@ def test_model_list_replacement_accepts_values_and_source(
         else:
             view.N1.routes = [{"pin": {"index": 6}}]
         assert view.N1.routes == [{"pin": {"index": 6}}]
+        with view.edit() as metadata_draft:
+            metadata_draft.set_meta("N1.routes", {"comment": "caller"})
         accepted = view.meta("N1.routes")
-        assert accepted is not None and accepted.source == "manual"
+        assert accepted == {"comment": "caller"}
         with view.edit() as draft:
             if write == "set":
                 with pytest.raises(ValidationError):
@@ -484,7 +497,7 @@ def test_model_list_replacement_accepts_values_and_source(
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
-@pytest.mark.parametrize("version", ["1.0", "1.2"])
+@pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_collision_extras_read_write_meta_and_reload(
     tmp_path: Path, registry_state_guard: None, owner: str, version: str
 ) -> None:
@@ -525,10 +538,14 @@ def test_collision_extras_read_write_meta_and_reload(
                 assert field_view(draft.N1.model_config).marker == "whole"
                 draft.set("N1.model_config.marker", "accepted")
                 draft.N1.model_dump = "accepted"
+            with view.edit() as metadata_draft:
+                metadata_draft.set_meta("N1.model_config.marker", {"comment": "caller"})
             accepted = view.meta("N1.model_config.marker")
-            assert accepted is not None and accepted.source == "manual"
+            assert accepted == {"comment": "caller"}
+            with view.edit() as metadata_draft:
+                metadata_draft.set_meta("N1.model_dump", {"comment": "caller"})
             method_source = view.meta("N1.model_dump")
-            assert method_source is not None and method_source.source == "manual"
+            assert method_source == {"comment": "caller"}
             assert config.marker == "accepted"
             assert view.N1.model_dump == "accepted"
             assert field_view(view.N2.model_config).marker == "second"
