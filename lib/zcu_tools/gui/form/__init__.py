@@ -22,3 +22,4 @@ from .model import (
     WriteRejected,
     field_error,
 )
+from .options import Option, OptionCommand

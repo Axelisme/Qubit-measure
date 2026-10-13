@@ -340,20 +340,12 @@ def _switch(
     )
     if branch is None:
         raise ValueError(f"Unknown discriminator at path {path!r}: {value!r}")
-    previous = old if isinstance(old, dict) else {}
     try:
-        new = _branch_defaults(branch, env, previous)
+        new = _branch_defaults(branch, env, {})
     except PydanticCustomError as exc:
         from ._sources import prefix_error
 
         raise prefix_error(exc, path[:-1]) from exc
-    new.update(
-        {
-            name: previous[name]
-            for name in branch.model_fields
-            if name != tag_key and name in previous
-        }
-    )
     new[tag_key] = value
     parent[key] = new
     return True
@@ -379,6 +371,67 @@ def _switch_inline(
     if not isinstance(parent.get(key), dict):
         parent[key] = _inline_defaults(info, env, path)
     return True
+
+
+def _select_object(
+    model: type[BaseModel],
+    data: dict[str, JsonValue],
+    path: FormWritePath,
+    value: JsonValue,
+    env: FormEnv,
+) -> bool:
+    """Apply a union-position partial object as fresh branch selection plus leaves."""
+    if not isinstance(value, dict):
+        return False
+    parent, key, info = _field_at(model, data, path)
+    tag = discriminator(info)
+    if tag is None and not key_or_inline(info.annotation):
+        return False
+    old = parent.get(key)
+    branch = selected(info, value if tag in value else old)
+    if branch is None:
+        raise ValueError(f"Missing or unknown discriminator at {path!r}")
+    if not isinstance(old, dict) or selected(info, old) is not branch:
+        seed = _branch_defaults(branch, env, {})
+    else:
+        seed = copy_object(old)
+    parent[key] = _partial_model(branch, seed, value, env)
+    return True
+
+
+def _partial_model(
+    model: type[BaseModel],
+    seed: dict[str, JsonValue],
+    value: dict[str, JsonValue],
+    env: FormEnv,
+) -> dict[str, JsonValue]:
+    """Expand partial model children to one candidate; containers remain leaves."""
+    batch: dict[FormWritePath, JsonValue] = {}
+    for name, item in value.items():
+        info = model.model_fields.get(name)
+        if info is None:
+            raise ValueError(f"Unknown field in partial branch object: {name!r}")
+        if (
+            isinstance(item, dict)
+            and model_types(info.annotation)
+            and discriminator(info) is None
+            and not key_or_inline(info.annotation)
+        ):
+            child = selected(info, item)
+            if child is None:
+                raise ValueError(f"Ambiguous partial model field: {name!r}")
+            prior = seed.get(name)
+            seed[name] = _partial_model(
+                child,
+                copy_object(prior)
+                if isinstance(prior, dict)
+                else _branch_defaults(child, env, {}),
+                item,
+                env,
+            )
+        else:
+            batch[(name,)] = item
+    return build_candidate(model, seed, batch, env)
 
 
 def _inline_defaults(
@@ -426,6 +479,7 @@ def build_candidate(
         if not (
             _switch(model, result, path, value, env)
             or _switch_inline(model, result, path, value, env)
+            or _select_object(model, result, path, value, env)
         ):
             pending[path] = value
     for path, value in pending.items():

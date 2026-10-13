@@ -1,14 +1,18 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-13，static defaults、文字欄位 expression、初始值求值、Display group 與 nullable library key／inline 契約
+**Last updated:** 2026-10-13，具名選項、分支初值與通用選項指令
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel defaults 與普通 model 的分支切換共用這個入口。
 
-FormModel 的實例只承載普通值。類別上的 defaults、choices 與 input_schema 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
+FormModel 的實例只承載普通值。類別上的 defaults、choices、options 與 input_schema 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
 
 Expression 只用於文字欄位：int、float、complex 與 str value leaves 只對顯式 `{"expr": str}` 求值。以下拉或勾選呈現的 leaf 沒有 expression：Literal、Enum、bool、宣告 choices 的 leaf，以及 library key（str-or-model 的 key 與 `ModuleRef.name`）。這些 leaf 的 input schema 沒有 Expr 分支；寫入的 envelope 留在 input，result 在該欄位報錯且不求值（choices leaf 由 core 報「只接受列出的值」，其餘由 Pydantic 報型別錯誤）；compatible restore 丟棄它們的 envelope（choices 隨 env 變，restore 不看 choices）。同時含文字成員與選項成員的 union（例如 `float | Literal["auto"]`）沒有對應的控制項，input schema、求值與 compatible restore 遇到時 raise ValueError，訊息帶欄位路徑。判斷規則只在 core 一處，schema、求值、defaults 與 restore 都呼叫它；editor 只看 schema 有沒有 Expr 分支。普通字串，包括 `$` 開頭的內容，仍是 literal。Core 使用共用 evaluate_scalar_expr，再遵守 Pydantic 約束；missing／unbound alias 指名失敗，不以預設值代替。Input schema 與 compatible restore 保留 expression 原文，GUI 與 MCP 共用這份輸入契約。
 
 Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 與分支切換的 defaults 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
+
+`Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 schema 的 `x-form-options` 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 投影成內嵌子 schema，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
+
+Union 位置的 partial object 是選分支加寫入內容，與 tag 葉切換共用新分支 defaults。不繼承舊值，defaults 收到空 previous。非換分支的 leaf write 與 compatible restore 規則不變。明確指令用 `OptionCommand(name, label, run)` 宣告，schema 只列 name 與 label。`FormState.run_command(path, name, env)` 只找目前 active branch 第一個匹配選項的指令。Run callable 讀同一份固定 env，回傳該欄位的部分 input，core 用一次 write 提交。未知或不適用指令、來源與結構失敗不寫入，不建立第二份 state。既有 `ModuleInline.defaults` 的 explicit previous 複製仍供明確 caller 使用，普通換分支不呼叫這條複製路徑。
 
 Input schema 的 tagged oneOf branch 以 x-form-discriminator-values 提供保留 JSON 型別的 intrinsic tags。這份 identity 不隨 dynamic choices 改變。Model 欄位可達的每個 branch 都是一個具體 model：union member 若是同一 tag key 的具名 union（例如 `ModuleSpec` 內的 `ReadoutSpec`），schema 把它展開成各 member 的 branch，與 core 對 annotation 的 union 展開一致。Choices 仍限制當次可接受的 leaf 值，不切換目前的 input branch。Discriminator 是決定子 model 形狀與 branch defaults 的結構 selector，schema 只提供普通 typed tag，不提供 expression envelope。
 

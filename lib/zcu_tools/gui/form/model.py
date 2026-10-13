@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Self, final
+from typing import TYPE_CHECKING, Annotated, Literal, Self, final
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
@@ -18,6 +18,10 @@ from zcu_tools.cfg_model import ModuleSpec
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
+
+if TYPE_CHECKING:
+    from .options import Option
+
 
 type FormPath = tuple[str | int, ...]
 """Relative model-field/mapping-key error path; integers are sequence indexes."""
@@ -215,7 +219,8 @@ class FormModel(BaseModel):
     ) -> dict[str, JsonValue]:
         """Return initial or new-branch defaults before input inheritance.
 
-        previous is empty for initial input, otherwise detached old-branch JSON. The fallback uses Pydantic static
+        previous is empty for initial input and write branch switches. Explicit
+        callers and compatible restore may supply detached prior JSON. The fallback uses Pydantic static
         defaults and leaves required keys absent; it does not validate a partial
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
@@ -250,9 +255,35 @@ class FormModel(BaseModel):
         return {}
 
     @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[Option, ...]]:
+        """Declare ordered named selections by relative model-field path.
+
+        Paths address fields, including model/union sections, not sequence
+        indexes or mapping keys. Unknown paths raise ValueError in schema and
+        command execution. The deepest nested declaration wins, including an
+        empty tuple, which means no selections and never falls back to a
+        parent or automatic list. Nonoverlapping parent paths remain effective.
+        Automatic Literal/Enum, choices and tagged-union selections apply only
+        without a declaration for that field. Commands resolve only the current
+        active branch; inactive branch declarations cannot provide an action. They do not add validation:
+        Pydantic and choices remain authoritative. Read env only as a fixed
+        borrowed capture, never refresh or mutate it; source failures propagate.
+        The default hook is empty. Consumers read input_schema's effective
+        x-form-options list, not this declaration hook or union structure.
+        """
+        return {}
+
+    @classmethod
     def input_schema(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Describe accepted input without constructing editing state.
 
+        x-form-options supplies effective ordered {label, value, fields?,
+        commands?} selections. fields is an embedded partial object schema,
+        without tags fixed by value; commands exposes only {name, label}.
+        Literal/Enum, choices and tagged unions get automatic selections;
+        options(env) declarations replace them. Bool and ordinary nullable
+        models keep their checkbox/Enabled contract. Selection matches each
+        value leaf, first match wins; no match preserves current input.
         Include an Expr alternative ({"expr": text}) for each text field: an
         int, float, complex or str value leaf. Leaves whose values are picked
         get none: Literal and Enum (schema enum/const), bool, leaves with
@@ -372,10 +403,12 @@ class FormState[F: FormModel]:
     def write(self, batch: Mapping[FormWritePath, JsonValue], env: FormEnv) -> None:
         """Install one input batch, keeping model-invalid drafts editable.
 
-        Discriminator changes apply first: use the new branch's defaults(env,
-        previous), with Expr defaults evaluated as in default_input, then
-        inherit old same-name fields (authored expressions stay expressions)
-        except the discriminator.
+        Discriminator changes apply first: use new-branch defaults(env, {}),
+        with Expr defaults evaluated as in default_input. Never inherit old
+        same-name fields or copy sources. A partial object at a union position
+        selects its branch and writes its leaves in this same batch; it need
+        not be a declared option value. Same-branch edits retain unsupplied
+        fields. Unknown tags or object fields raise before installation.
         Apply all remaining leaf writes afterwards, so explicitly supplied
         content wins. Required fields without defaults stay absent. Writes use
         model-field leaf paths. Sequences and typed mappings are whole leaves;
@@ -388,8 +421,9 @@ class FormState[F: FormModel]:
         A str-or-model field takes a string key as an ordinary leaf. Writing {}
         there switches a key or unfilled value to the inline model's defaults
         (a tagged inline union starts at its first branch and tag) and leaves
-        an inline object unchanged; the old key is never converted. Other
-        whole objects are model replacement and raise ValueError.
+        an inline object unchanged; the old key is never converted. Nonempty
+        partial union objects write supplied children; ordinary non-nullable
+        model replacement outside a union remains rejected.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
@@ -403,6 +437,37 @@ class FormState[F: FormModel]:
         candidate = build_candidate(self._model, self._data, batch, env)
         check_sources(self._model, candidate, env)
         self._install(candidate)
+
+    def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
+        """Execute a named action on the first option matching current raw input.
+
+        path addresses the option field; name is a command identifier from
+        its effective schema list. Resolve declarations with the same fixed
+        env used by the host for writes and sources. Unknown paths, missing
+        current input, no matching option or unavailable commands raise
+        ValueError, never silently do nothing. The callable returns partial
+        input for path; install it through one atomic write and notify once.
+        Callable/source/structural failures leave state unchanged; ordinary
+        validation failures remain drafts for result/preview. No refresh,
+        library semantics, I/O policy or separate state is introduced.
+        """
+        from ._schema import effective_options
+
+        options = effective_options(self._model, env, self._data).get(path, ())
+        current: JsonValue = self._data
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                raise ValueError(f"No current option at {path!r}")
+            current = current[part]
+        option = next((item for item in options if item.matches(current)), None)
+        command = (
+            next((item for item in option.commands if item.name == name), None)
+            if option is not None
+            else None
+        )
+        if command is None:
+            raise ValueError(f"Unavailable option command {name!r} at {path!r}")
+        self.write({path: command.run(env)}, env)
 
     def _install(self, candidate: dict[str, JsonValue]) -> None:
         if candidate == self._data:

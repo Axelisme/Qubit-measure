@@ -133,10 +133,6 @@ def test_object_write_switches_to_inline_defaults_and_string_write_to_a_key() ->
 
     state.write({("tone",): {}}, env)
     assert state.input.data == inline
-    with pytest.raises(ValueError, match="Whole model replacement"):
-        state.write({("tone",): {"ch": 4}}, env)
-    assert state.input.data == inline
-
     state.write({("tone",): "", ("shape",): ""}, env)
     assert state.input.data == {"tone": "", "shape": ""}
 

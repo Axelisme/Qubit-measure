@@ -537,9 +537,9 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
         ("branch", "kind"),
         ("branch", "context_only"),
         ("branch", "required"),
+        ("branch", "shared"),
     }
     assert by_path[("branch", "kind")].value == "context"
-    assert by_path[("branch", "required")].value == 7.0
 
     nullable = FormState(
         FormInput(NullableForm, {"section": {"start": 2.0, "stop": 4.0}})
@@ -553,7 +553,7 @@ def test_changes_describe_active_branch_leaves_and_nullable_null() -> None:
     assert changes[0].value is None
 
 
-def test_discriminator_first_factory_inheritance_and_explicit_content_order() -> None:
+def test_discriminator_first_factory_and_explicit_content_order() -> None:
     env = environment(8.0)
     state = FormState(BranchForm.default_input(env))
     state.write({("branch", "shared"): 5.0}, env)
@@ -564,9 +564,7 @@ def test_discriminator_first_factory_inheritance_and_explicit_content_order() ->
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
-    assert result.branch.shared == 5.0
     assert result.branch.context_only == 12.0
-    assert result.branch.required == 7.0
     assert len(notifications) == 1
 
     state.write({("branch", "kind"): "static"}, env)
@@ -575,7 +573,6 @@ def test_discriminator_first_factory_inheritance_and_explicit_content_order() ->
     assert isinstance(result, BranchForm)
     assert isinstance(result.branch, ContextBranch)
     assert result.branch.context_only == 8.0
-    assert result.branch.shared == 5.0
 
     state.write({("branch", "kind"): "static"}, env)
     state.write({("branch", "kind"): "required"}, env)
