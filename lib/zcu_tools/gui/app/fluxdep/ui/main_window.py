@@ -152,9 +152,7 @@ class MainWindow(QMainWindow):
         self._writable = writable
         for control in self._write_controls:
             control.setEnabled(writable)
-        if isinstance(
-            self._current_editor, (InteractiveMplWidget, ResultPreviewWidget)
-        ):
+        if isinstance(self._current_editor, InteractiveMplWidget):
             self._current_editor.set_editable(editable=writable)
         if self._analyze_panel is not None:
             self._analyze_panel.set_writable(writable=writable)
@@ -497,7 +495,7 @@ class MainWindow(QMainWindow):
 
     def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
-        if isinstance(widget, (InteractiveMplWidget, ResultPreviewWidget)):
+        if isinstance(widget, InteractiveMplWidget):
             widget.set_editable(editable=self._writable)
         self._editor_stack.addWidget(widget)
         self._editor_stack.setCurrentWidget(widget)

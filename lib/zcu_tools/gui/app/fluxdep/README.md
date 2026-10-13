@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，編輯流程、三個 picker 的控制欄與只隨人類意圖切頁；Fit 頁表單、狀態列與 Project 對話框的 Data root；清單與 spectrum.list 共用的已發布列查詢
+**Last updated:** 2026-10-13，GUI 改版（外殼與兩頁、編輯流程、picker 控制欄、Fit 頁、版面收尾、清單與 spectrum.list 共用的已發布列查詢）；published spectrum list 與 Filter 排除數
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -84,8 +84,8 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   `LoadSpectrumDialog` subclass `gui/widgets/load_dialog.LoadDataDialog`（共用 file
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`
   回 `LoadRequest`）；`error_messages` 用共用 `gui/error_messages` framework（domain rule
-  各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；`ui/interactive/display.contrast_limits`
-  一份供 find_points/result_preview。MainWindow 擁有的 EventBus subscriptions 在 window close
+  各 app）；`ui/paths.nearest_existing` 來自 `gui/project`；背景正規化（`contrast_limits`、
+  `onetone_dip_depth`）在 `plotting.fluxdep.image`，供 result_preview 與 OneTone picker 共用。MainWindow 擁有的 EventBus subscriptions 在 window close
   釋放，避免分析 view 被 bus callback 保活。
 - **`remote/`** — `RemoteControlAdapter` subclass 共用 `RemoteControlServiceBase`
   （`gui/remote/control_service`），注入 app methods、serializers 與控制身份。MCP
@@ -157,7 +157,8 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 控制欄由上而下是設定、編輯動作（Undo／Clear）、狀態文字；階段切換與 Finish 固定在欄底。
 每個 slider 與下拉都有 buddy label。控制項 objectName 為 `fluxdep.picker.<action>`
 （例如 `finish`、`undo`、`clear`、`auto_align`、`status`、`realign`、`sample`），
-ResultPreview 的下一步為 `fluxdep.preview.<align|realign|sample>`；測試以這些名稱定位，不依按鈕文字。
+ResultPreview 也是 `InteractiveMplWidget`：圖在左，下一步按鈕固定在右欄底部，objectName 為
+`fluxdep.preview.<align|realign|sample>`；測試以這些名稱定位，不依按鈕文字。
 定線資訊用固定小數位，位數由 device 軸步長決定；mirror loss 圖有 Device value／Frequency 軸標。
 canvas 每次 resize 重新 tight layout，軸標不會被窄視窗裁掉。
 
@@ -214,7 +215,9 @@ Apply 不依賴 preview worker，teardown 阻擋 hidden 舊 controls 與晚到 d
 互動圖背景一律 `gray_r`（白底、高值=黑），紅點落在高值共振線上對比最強
 （vs viridis 高值=黃，紅點不明顯）。對齊 notebook plotly 版的 Greys。定線圖與 mirror loss 圖也用
 `gray_r`；它們的 renderer 是共用的 `analysis.fluxdep.TwoLinePicker`，所以 notebook 的 InteractiveLines
-與 MCP 的定線 PNG 同樣是 `gray_r`。
+與 MCP 的定線 PNG 同樣是 `gray_r`。OneTone 採點 picker 與 ResultPreview 的 OneTone 背景用同一種正規化：
+平滑後的 magnitude 取 dip 深度（最大值減 magnitude），再以 2–98 百分位定色階，共振 dip 是白底上的深色線。
+採點 picker 的 renderer 是共用的 `plotting.fluxdep.onetone.OneTonePickPlot`，所以 MCP 的 OneTone 採點 PNG 也跟著改變。
 
 ### Remote RPC 與 MCP
 
@@ -330,11 +333,13 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
     **preset 綁 bounds 不綁 transitions**，transitions 是 `TransitionsForm` 純手填、無自己的 preset，各列以畫出的頻率命名）+
     右側診斷圖（QSplitter 可拖拉，圖佔剩餘寬度；控制欄靠上，表單不拉滿高度）。輸入的 transitions 需要而 r_f／sample_f
     留空時，欄位下方直接標示；Search 不在面板預檢頻率，由 Controller 拒絕。search 前擋空/不存在 db 路徑。
+    `Browse…` 用非阻塞 `open()` 的非 native chooser，選檔後填入 `Search DB`；開著時 owner 取得回 `local_busy`。
     Search 的錯誤（含 search 失敗）寫在 Search 狀態列 `fluxdep.fit.status`，不跳 modal；params export 的長路徑只作
     status/tooltip，不參與 panel 水平最小寬度。按鈕 `Search`、`Cancel`、`Export params…`。
   - **Show**：fit 視覺化 + 顯示工具：x/y 軸上下限數字框（Auto limits 取 `Controller.fit_auto_limits`，演算法同 notebook
     `auto_derive_limits`；已記錄 search 用同次 capture，即使過期，搜尋前與 params-only 用已發布來源）、r_f/sample_f 參考線 checkbox、要顯示的 transitions 子集（獨立於 fit 用的）。
     繪圖問題（子集缺頻率、無法繪製）寫在 Show 自己的狀態列 `fluxdep.show.status`，不寫進 Search。
+    Show canvas 每次 resize 重新 tight layout，縮小視窗時標題與軸標留在 canvas 內。
   - 測試以 objectName 定位 Fit 頁元件：`fluxdep.fit.*`（search_db、bounds_preset、r_f／sample_f 與其 `.required`、
     search、cancel、export_params、status、freshness）與 `fluxdep.show.*`（apply、auto_limits、status）。
   AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立，切頁只隱藏不銷毀），所有 tab 狀態保留。

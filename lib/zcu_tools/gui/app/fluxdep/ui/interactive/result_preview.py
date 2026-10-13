@@ -2,30 +2,26 @@
 
 Shown in the editing area when no picker is open: the spectrum (no mask) with
 its published points and, once aligned, the half/integer flux markers. The
-figure itself has no interaction. A row above it offers only the next steps
-the spectrum allows: Align when unaligned; Re-align and Sample when aligned.
+figure itself has no interaction. It uses the pickers' layout: the figure on
+the left and a control column on the right whose bottom offers only the next
+steps the spectrum allows: Align when unaligned; Re-align and Sample when
+aligned.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
-from qtpy.QtWidgets import (
-    QHBoxLayout,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtWidgets import QPushButton, QWidget
 
 from zcu_tools.analysis.fluxdep import cast2real_and_norm
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+from zcu_tools.plotting.fluxdep.image import contrast_limits, onetone_dip_depth
 
-from .display import contrast_limits
+from .base import InteractiveMplWidget
 
 
-class ResultPreviewWidget(QWidget):
+class ResultPreviewWidget(InteractiveMplWidget):
     """Read-only spectrum + published points + flux markers, with next steps."""
 
     def __init__(
@@ -41,17 +37,11 @@ class ResultPreviewWidget(QWidget):
         Unaligned: an Align button (``fluxdep.preview.align``) calls on_align.
         Aligned: Re-align (``fluxdep.preview.realign``) calls on_align and
         Sample (``fluxdep.preview.sample``) calls on_sample. An omitted
-        callback omits its button. set_editable gates the buttons only; the
-        figure stays viewable.
+        callback omits its button. The buttons sit at the bottom of the right
+        control column, top to bottom in that order. set_editable gates the
+        buttons only; the figure stays viewable.
         """
         super().__init__(parent)
-        self._figure = Figure(figsize=(6, 4))
-        self._canvas = FigureCanvasQTAgg(self._figure)
-        layout = QVBoxLayout(self)
-
-        self._edit_controls = QWidget()
-        row = QHBoxLayout(self._edit_controls)
-        row.setContentsMargins(0, 0, 0, 0)
         steps = (
             (("Re-align", "realign", on_align), ("Sample", "sample", on_sample))
             if entry.aligned
@@ -59,23 +49,20 @@ class ResultPreviewWidget(QWidget):
         )
         for text, action, on_click in steps:
             if on_click is not None:
-                row.addWidget(_step_button(text, action, on_click))
-        row.addStretch(1)
-        layout.addWidget(self._edit_controls)
-        layout.addWidget(self._canvas, stretch=1)
+                self.bottom_layout.addWidget(_step_button(text, action, on_click))
         self._render(entry)
 
-    def set_editable(self, *, editable: bool) -> None:
-        """Gate redo actions without disabling the read-only result canvas."""
-        self._edit_controls.setEnabled(editable)
-
     def _render(self, entry: SpectrumEntry) -> None:
-        ax = self._figure.add_subplot(1, 1, 1)
+        ax = self.figure.add_subplot(1, 1, 1)
         dev = entry.raw["dev_values"]
         freqs = entry.raw["freqs"]
-        # OneTone is locked to magnitude (phase uninformative); TwoTone uses phase.
-        use_phase = entry.spec_type != "OneTone"
-        amp = cast2real_and_norm(entry.raw["signals"], use_phase=use_phase)  # no mask
+        signals = entry.raw["signals"]  # no mask
+        # OneTone is locked to magnitude (phase uninformative) and drawn like
+        # its sample picker; TwoTone uses phase.
+        if entry.spec_type == "OneTone":
+            amp = onetone_dip_depth(signals)
+        else:
+            amp = cast2real_and_norm(signals, use_phase=True)
         vmin, vmax = contrast_limits(amp)
         ax.imshow(
             amp.T,
@@ -103,8 +90,8 @@ class ResultPreviewWidget(QWidget):
         ax.set_xlabel("Device value")
         ax.set_ylabel("Frequency (GHz)")
         ax.set_title(f"{entry.name}  ({pts['dev_values'].size} points)")
-        self._figure.tight_layout()
-        self._canvas.draw_idle()
+        self.figure.tight_layout()
+        self.canvas.draw_idle()
 
 
 def _step_button(text: str, action: str, on_click: Callable[[], None]) -> QPushButton:

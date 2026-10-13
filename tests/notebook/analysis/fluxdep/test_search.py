@@ -78,7 +78,10 @@ def test_search_warns_when_interrupted_after_best_so_far(monkeypatch) -> None:
         lambda _path: (
             np.array([0.0, 1.0], dtype=np.float64),
             np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=np.float64),
-            np.zeros((2, 2, 1), dtype=np.float64),
+            np.array(
+                [[[0.0, 0.75], [0.0, 0.75]], [[0.0, 1.5], [0.0, 1.5]]],
+                dtype=np.float64,
+            ),
         ),
     )
     monkeypatch.setattr(
@@ -89,7 +92,9 @@ def test_search_warns_when_interrupted_after_best_so_far(monkeypatch) -> None:
             np.zeros(len(fluxs), dtype=np.float64),
         ),
     )
-    monkeypatch.setattr(njit, "_apply_interp", lambda energies, _idxs, _ws: energies)
+    monkeypatch.setattr(
+        njit, "_apply_interp", lambda energies, idxs, _ws: energies[:, idxs, :]
+    )
     monkeypatch.setattr(
         njit,
         "_lower_bound_kernel",
@@ -112,7 +117,7 @@ def test_search_warns_when_interrupted_after_best_so_far(monkeypatch) -> None:
             np.array([0.1], dtype=np.float64),
             np.array([1.0], dtype=np.float64),
             "unused.h5",
-            {},
+            {"transitions": [(0, 1)]},
             (0.5, 3.0),
             (0.5, 3.0),
             (0.5, 3.0),

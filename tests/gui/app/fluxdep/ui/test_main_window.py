@@ -11,6 +11,8 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.text import Text
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
@@ -516,6 +518,66 @@ def _record_fit(ctrl: Controller, search_db: str) -> None:
         perfect_fit_result(fluxs, freqs, bounds),
         synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
     )
+
+
+def _show_canvas(window: MainWindow) -> FigureCanvasQTAgg:
+    panel = fit_panel(window)
+    assert panel is not None
+    return next(
+        canvas
+        for canvas in panel.findChildren(FigureCanvasQTAgg)
+        if canvas.figure.axes
+        and canvas.figure.axes[0].get_title().startswith("EJ/EC/EL")
+    )
+
+
+def _figure_labels(canvas: FigureCanvasQTAgg) -> list[Text]:
+    """Titles and axis labels of every axes, including secondary axes."""
+    texts: list[Text] = []
+    for axes in canvas.figure.axes:
+        for owner in (axes, *axes.child_axes):
+            texts += [owner.title, owner.xaxis.label, owner.yaxis.label]
+    return [text for text in texts if text.get_text()]
+
+
+def test_show_keeps_title_and_axis_labels_inside_a_1200x800_window(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    _record_fit(ctrl, search_database_hdf5)
+    win = MainWindow(ctrl)
+    win.resize(1600, 1000)
+    win.show()
+    try:
+        show_page(win, "fit")
+        panel = fit_panel(win)
+        assert panel is not None
+        panel.show_tab("show")
+        qapp.processEvents()
+        # Redraw at the larger size; the Outdated line lengthens the title.
+        ctrl.set_alignment("a", 0.55, 1.05)
+        qapp.processEvents()
+        win.resize(1200, 800)
+        qapp.processEvents()
+        canvas = _show_canvas(win)
+        canvas.draw()
+        renderer = canvas.get_renderer()
+        frame = canvas.figure.bbox
+        labels = _figure_labels(canvas)
+        assert any("Outdated" in text.get_text() for text in labels)
+        for text in labels:
+            box = text.get_window_extent(renderer)
+            inside = (
+                box.x0 >= frame.x0
+                and box.x1 <= frame.x1
+                and box.y0 >= frame.y0
+                and box.y1 <= frame.y1
+            )
+            assert inside, f"{text.get_text()!r} is clipped by the canvas"
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
 
 
 def test_spectrum_work_does_not_replace_the_fit_page(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QSlider
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
@@ -112,3 +113,29 @@ def test_control_column_runs_settings_edits_status_then_finish(widget):
     assert view.canvas.x() < finish.mapTo(view, finish.rect().topLeft()).x()
     assert unlabelled_inputs(view) == []
     assert background_cmaps(view.figure) == ["gray_r"]
+
+
+def test_background_matches_the_preview_and_draws_the_dip_dark(
+    widget, onetone_controller
+):
+    view, _context = widget
+    entry = onetone_controller.state.spectrums["one"]
+    preview = ResultPreviewWidget(entry)
+    try:
+        canvas = preview.findChild(FigureCanvasQTAgg)
+        assert canvas is not None
+        shown = canvas.figure.axes[0].get_images()[0]
+        picked = view.figure.axes[0].get_images()[0]
+        picked_values, shown_values = picked.get_array(), shown.get_array()
+        assert picked_values is not None and shown_values is not None
+        # The sample picker and the preview normalize the spectrum the same way.
+        np.testing.assert_allclose(picked_values, shown_values)
+        assert picked.get_clim() == pytest.approx(shown.get_clim())
+        # Under gray_r the resonator dip is dark on a light background.
+        signals = np.abs(entry.raw["signals"])
+        dev, freq = np.unravel_index(np.argmin(signals), signals.shape)
+        level = np.asarray(picked.norm(picked_values))
+        assert level[freq, dev] > 0.9
+        assert np.median(level) < 0.5
+    finally:
+        preview.deleteLater()

@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-12 — published spectrum evidence
+**Last updated:** 2026-10-13 — shared OneTone background normalization
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -23,6 +23,10 @@ indices onto device/GHz and normalized-amplitude panels. The Qt OneTone view and
 `make_onetone_pick_figure` share its layout and reusable artists. The builder
 returns a separate Agg Figure; projecting onto a supplied GUI Figure does not
 change its canvas. Neither path commits threshold or selection state.
+Its background is `image.onetone_dip_depth` (smoothed magnitude subtracted from
+its maximum) clipped by `image.contrast_limits`, so resonator dips draw dark under
+`gray_r`. The fluxdep GUI result preview uses the same two helpers for OneTone
+spectra, so the preview, the Qt picker and the native PNG share one background.
 
 `twotone.TwoTonePickPlot` renders a numerical `TwoTonePickView` onto a supplied
 Figure in native device/GHz axes. Current points, optional mask and positional

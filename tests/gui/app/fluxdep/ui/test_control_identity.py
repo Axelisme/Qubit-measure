@@ -30,6 +30,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
 
@@ -44,11 +45,13 @@ from tests.gui.app.fluxdep._window import (
     current_page,
     fit_panel,
     named,
+    open_chooser,
     picker_button,
     preview_button,
     show_page,
     spectra_list,
 )
+from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 
 
 def button(widget, text):
@@ -199,7 +202,7 @@ def test_remote_page_switch_keeps_agent_filter_session(window):
     assert ctrl.interactive.inspect("selection") == active
 
 
-@pytest.mark.parametrize("owner", ["load", "export", "result", "database", "search"])
+@pytest.mark.parametrize("owner", ["load", "export", "result", "database"])
 @pytest.mark.parametrize("cancel", [False, True])
 def test_local_chooser_preserves_path_and_cancel_contract(
     window, tmp_path, spectrum_hdf5, owner, cancel
@@ -210,17 +213,10 @@ def test_local_chooser_preserves_path_and_cancel_contract(
         target = tmp_path
     elif owner != "export":
         target = Path(spectrum_hdf5[0])
-    if owner == "search":
-        show_page(view, "fit")
-        panel = fit_panel(view)
-        assert panel is not None
-        panel.show_tab("search")
-        container = panel
-    else:
-        name = {"load": "fluxdep.spectrum.add", "export": "fluxdep.spectra.export"}
-        command(view, name.get(owner, "fluxdep.project")).click()
-        container = QApplication.activeModalWidget()
-        assert isinstance(container, QDialog)
+    name = {"load": "fluxdep.spectrum.add", "export": "fluxdep.spectra.export"}
+    command(view, name.get(owner, "fluxdep.project")).click()
+    container = QApplication.activeModalWidget()
+    assert isinstance(container, QDialog)
     edits = container.findChildren(QLineEdit)
     before = [edit.text() for edit in edits]
     browse_buttons = [
@@ -240,8 +236,49 @@ def test_local_chooser_preserves_path_and_cancel_contract(
             assert button(container, "OK").isEnabled()
     assert target.exists() == (owner != "export")
     assert ctrl.control_identity.status().holder == "gui"
-    if isinstance(container, QDialog):
-        container.reject()
+    container.reject()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_search_db_chooser_is_non_blocking_and_holds_local_while_open(
+    qapp, tmp_path, search_database_hdf5, cancel
+):
+    harness = RouteHarness.create(str(tmp_path))
+    view = MainWindow(harness.ctrl)
+    view.show()
+    try:
+        show_page(view, "fit")
+        panel = fit_panel(view)
+        assert panel is not None
+        panel.show_tab("search")
+        field = named(panel, QLineEdit, "fluxdep.fit.search_db")
+        before = field.text()
+        browse = button(panel, "Browse…")
+        chooser = open_chooser(browse.click)
+        # An open Local chooser refuses an agent's owner connection.
+        link = ClientLink("agent", token_required=False)
+        harness.service.on_client_open(link)
+        harness.links.append(link)
+        refused = harness.request(link, "control.connect", label="agent", mode="owner")
+        assert refused["ok"] is False
+        assert refused["error"].get("reason") == "local_busy"
+        assert harness.ctrl.control_identity.status().holder == "gui"
+        if cancel:
+            chooser.reject()
+            assert field.text() == before
+        else:
+            chooser.selectFile(search_database_hdf5)
+            chooser.accept()
+            assert field.text() == search_database_hdf5
+        assert QApplication.activeModalWidget() is None
+        accepted = harness.request(link, "control.connect", label="agent", mode="owner")
+        assert accepted["ok"], accepted
+    finally:
+        harness.ctrl.control_identity.reclaim_local()
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+        harness.close()
 
 
 def test_remote_filter_switch_cannot_cancel_until_reclaim(window):
