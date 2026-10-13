@@ -41,18 +41,18 @@ class CoherenceTunablesForm(FormModel):
     """Ordinary captured policies; expressions remain in the host FormInput.
 
     cal controls shared calibration. t1, t2ramsey and t2echo each supply their
-    own averaging/initial guess/timing/acceptance inputs. Ramsey detune_ratio
-    defaults to .05 fringes/step and is validated even when Ramsey is disabled.
-    Defaults use the existing nested form hooks and fixed source capture.
-    This form does not capture sources, submit revisions or control hardware.
+    own averaging/initial guess/timing/acceptance inputs. t1 has no static
+    default because T1's guess_us has none; defaults supplies it, so direct
+    construction must pass t1. Ramsey detune_ratio defaults to .05
+    fringes/step and is validated even when Ramsey is disabled. Defaults use
+    the existing nested form hooks and fixed source capture. This form does
+    not capture sources, submit revisions or control hardware.
     """
 
     cal: Annotated[
         CalibrationTunablesForm, Display(label="Calibration", collapsed=True)
     ] = Field(default_factory=CalibrationTunablesForm)
-    t1: Annotated[T1TunablesForm, Display(label="T1", collapsed=True)] = Field(
-        default_factory=T1TunablesForm
-    )
+    t1: Annotated[T1TunablesForm, Display(label="T1", collapsed=True)]
     t2ramsey: Annotated[
         T2RamseyTunablesForm, Display(label="Ramsey", collapsed=True)
     ] = Field(default_factory=T2RamseyTunablesForm)
@@ -64,10 +64,13 @@ class CoherenceTunablesForm(FormModel):
     def defaults(
         cls, env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
-        """Retain T1's captured initial-guess expression at its new nested path.
+        """Fill t1 from T1TunablesForm.defaults, including its initial guess.
 
-        Other lifetime defaults remain native ordinary values. Existing input
-        overlays remain the host's responsibility; no source is recaptured.
+        t1 has no static default, so this is its only default source; the
+        T1 initial guess follows T1TunablesForm.defaults (captured leaf
+        evaluated into a value, or 20 us without capture/leaf). cal, t2ramsey
+        and t2echo keep their static defaults. Existing input overlays remain
+        the host's responsibility; no source is recaptured.
         """
         data = super().defaults(env, previous)
         prior_t1 = previous.get("t1", {})
