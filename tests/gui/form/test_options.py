@@ -213,3 +213,121 @@ def test_declared_options_project_commands_and_execute_one_atomic_write() -> Non
     with pytest.raises(ValueError, match="command"):
         state.run_command(("value",), "convert", env)
     assert len(events) == 1
+
+
+class LocalOptions(FormModel):
+    empty: Literal[1, 2] = 1
+    local: int = 1
+    parent: int = 1
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {("empty",): (), ("local",): (api.Option("Local", 1),)}
+
+
+class NestedOptions(FormModel):
+    child: LocalOptions = Field(default_factory=LocalOptions)
+    sibling: LocalOptions = Field(default_factory=LocalOptions)
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {
+            ("child", "empty"): (api.Option("Parent empty", 2),),
+            ("child", "local"): (api.Option("Parent local", 2),),
+            ("child", "parent"): (api.Option("Parent retained", 1),),
+            ("sibling", "parent"): (api.Option("Sibling", 2),),
+        }
+
+
+def test_nested_options_keep_deepest_empty_and_nonoverlapping_parent_declarations() -> (
+    None
+):
+    assert hasattr(api, "Option"), "core must expose named Option"
+    props = obj(NestedOptions.input_schema(FormEnv())["properties"])
+    child = obj(obj(props["child"])["properties"])
+    sibling = obj(obj(props["sibling"])["properties"])
+    assert obj(child["empty"])["x-form-options"] == []
+    assert obj(child["local"])["x-form-options"] == [{"label": "Local", "value": 1}]
+    assert obj(child["parent"])["x-form-options"] == [
+        {"label": "Parent retained", "value": 1}
+    ]
+    assert obj(sibling["parent"])["x-form-options"] == [
+        {"label": "Sibling", "value": 2}
+    ]
+
+
+class ActiveBranch(FormModel):
+    kind: Literal["active"] = "active"
+    value: int = 1
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {
+            ("value",): (
+                api.Option(
+                    "One",
+                    1,
+                    commands=(api.OptionCommand("active", "Active", lambda _env: 2),),
+                ),
+            )
+        }
+
+
+class InactiveBranch(FormModel):
+    kind: Literal["inactive"] = "inactive"
+    value: int = 1
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {
+            ("value",): (
+                api.Option(
+                    "One",
+                    1,
+                    commands=(
+                        api.OptionCommand("inactive", "Inactive", lambda _env: 3),
+                    ),
+                ),
+            )
+        }
+
+
+class BranchCommands(FormModel):
+    branch: ActiveBranch | InactiveBranch = Field(
+        default_factory=ActiveBranch, discriminator="kind"
+    )
+
+
+def test_commands_only_use_the_active_branch_declaration() -> None:
+    assert hasattr(api, "OptionCommand"), "core must expose option command contract"
+    env = FormEnv()
+    state = FormState(BranchCommands.default_input(env))
+    before = state.input.data
+    with pytest.raises(ValueError, match="command"):
+        state.run_command(("branch", "value"), "inactive", env)
+    assert state.input.data == before
+    state.run_command(("branch", "value"), "active", env)
+    assert state.input.data == {"branch": {"kind": "active", "value": 2}}
+    state.write({("branch", "kind"): "inactive"}, env)
+    state.run_command(("branch", "value"), "inactive", env)
+    assert state.input.data == {"branch": {"kind": "inactive", "value": 3}}
+
+
+class UnknownOptionPath(FormModel):
+    value: int = 1
+
+    @classmethod
+    def options(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[api.Option, ...]]:
+        return {("missing",): (api.Option("One", 1),)}
+
+
+def test_unknown_declared_option_path_fails_before_state_changes() -> None:
+    assert hasattr(api, "Option"), "core must expose named Option"
+    env = FormEnv()
+    state = FormState(UnknownOptionPath.default_input(env))
+    before = state.input.data
+    with pytest.raises(ValueError, match="option.*path"):
+        UnknownOptionPath.input_schema(env)
+    with pytest.raises(ValueError, match="option.*path"):
+        state.run_command(("value",), "unused", env)
+    assert state.input.data == before
