@@ -48,6 +48,7 @@ from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.services.viz import (
     FitDisplay,
+    derive_fit_auto_limits,
     render_fit_result,
     render_selection_result,
 )
@@ -302,6 +303,22 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """
         render_selection_result(figure, self.state.spectrums, fit=self.state.fit)
 
+    def fit_auto_limits(
+        self,
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Return Show's ((flux_min, flux_max), (GHz_min, GHz_max)) on owner.
+
+        Recorded search uses only its detached capture backgrounds/calibration
+        and original search points, even when outdated. Before search or with a
+        params-only result, use current published backgrounds and selected points.
+        Empty sources yield a unit box, expanded by published frequency references.
+        No State or Figure changes. Foreign threads and missing recorded capture
+        raise RuntimeError; a fit result is not required.
+        """
+        self.state.assert_owner_thread()
+        fluxs, freqs = self.selected_pointcloud()
+        return derive_fit_auto_limits(self.state.fit, self.state.spectrums, fluxs, freqs)
+
     def render_fit(
         self,
         figure: Figure,
@@ -313,7 +330,9 @@ class Controller(BaseController[FluxDepState, EventBus]):
     ) -> None:
         """Draw the native Show overlay into caller-owned figure on owner thread.
 
-        Uses current result, spectra and selected points without publishing state.
+        Uses the recorded search's detached backgrounds/calibration and original
+        points, even when stale; params-only results use current published sources
+        and selected points. Does not publish state.
         Limits are normalized flux and GHz; None derives native auto limits.
         plot_transitions overrides the displayed lines only; None uses fit choices.
         show_const_freq toggles reference lines. Figure contents are replaced.

@@ -40,6 +40,7 @@ from zcu_tools.analysis.fluxdep.search_models import (
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     PipelineStage,
+    SearchRenderFrame,
     transitions_with_freqs,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -86,6 +87,8 @@ class SearchInput:
     search_db is the HDF5 database filename. fluxs is a copied 1-D cloud
     in Φ/Φ0; freqs is its copied GHz cloud. transitions is a deep copy with
     optional r_f/sample_f GHz values injected. bounds holds EJ/EC/EL GHz limits.
+    render_frame owns the same capture's copied source backgrounds/calibration
+    for Show and RPC rendering, retained with the recorded result until cleared.
     The arrays and transition lists belong to this snapshot, never live State.
     """
 
@@ -96,6 +99,7 @@ class SearchInput:
     bounds: ParamBounds
     # Owner-captured dependency graph/counters, including zero-point sources.
     stages: tuple[PipelineStage, ...]
+    render_frame: SearchRenderFrame
 
 
 class FitService:
@@ -195,6 +199,7 @@ class FitService:
             ),
             bounds=ParamBounds(EJ=fit.EJb, EC=fit.ECb, EL=fit.ELb),
             stages=self._state.pipeline_snapshot(),
+            render_frame=self._state.capture_render_frame(),
         )
 
     def compute_search(
@@ -246,7 +251,9 @@ class FitService:
         direct late publication remains marked stale, not refreshed. The search
         operation owner guards delivery before invoking this method.
         """
-        self._state.set_search_result(result, inputs.fluxs, inputs.freqs, inputs.stages)
+        self._state.set_search_result(
+            result, inputs.fluxs, inputs.freqs, inputs.stages, inputs.render_frame
+        )
         logger.debug("record_result: params=%s", result.params)
 
     # --- export ----------------------------------------------------------

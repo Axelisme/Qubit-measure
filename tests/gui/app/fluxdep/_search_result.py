@@ -37,6 +37,7 @@ def synthetic_search_input(
         ),
         bounds=bounds,
         stages=state.pipeline_snapshot(),
+        render_frame=state.capture_render_frame(),
     )
 
 

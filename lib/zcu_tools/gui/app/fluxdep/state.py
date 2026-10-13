@@ -14,6 +14,7 @@ replaces measure's tab/device/context model.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -159,6 +160,38 @@ class SpectrumEntry:
         return int(self.points["freqs"].size)
 
 
+@dataclass(frozen=True)
+class SearchSpectrumBackground:
+    """Detached background and calibration from one search capture.
+
+    raw owns copied native-device/normalized-flux/GHz axes and complex signals.
+    spec_type is OneTone or TwoTone, selecting amplitude normalization. aligned
+    records whether calibration was published; flux_half and flux_period are
+    native device values for half flux and one flux quantum respectively.
+    These fields retain their capture values until the recorded result is cleared
+    or replaced, regardless of later source or alignment publication.
+    """
+
+    raw: SpectrumData
+    spec_type: SpecType
+    aligned: bool
+    flux_half: float
+    flux_period: float
+
+
+@dataclass(frozen=True)
+class SearchRenderFrame:
+    """Backgrounds belonging to one search's original normalized-flux cloud.
+
+    spectrums maps source names to detached backgrounds in capture insertion
+    order, including zero-point sources. The first aligned background supplies
+    the device secondary axis. Capture owns the arrays; result publication copies
+    them again. The recorded frame lives and is cleared with search attribution.
+    """
+
+    spectrums: dict[str, SearchSpectrumBackground]
+
+
 @dataclass
 class SelectionState:
     """Stable downsample threshold remembered across selector sessions.
@@ -221,6 +254,8 @@ class FitState:
     result_freqs: NDArray[np.float64] = field(default_factory=lambda: np.empty(0))
     # Captured search graph/counters, never refreshed at numeric publication.
     input_stages: tuple[PipelineStage, ...] = ()
+    # Same-capture backgrounds/calibration; None only without a recorded search.
+    render_frame: SearchRenderFrame | None = None
 
     @property
     def has_result(self) -> bool:
@@ -528,9 +563,29 @@ class FluxDepState:
             result=None,
             result_fluxs=np.empty(0),
             result_freqs=np.empty(0),
+            render_frame=None,
             input_stages=self.pipeline_snapshot(),
         )
         self.version.bump(FIT_VERSION_KEY)
+
+    def capture_render_frame(self) -> SearchRenderFrame:
+        """Copy all published source backgrounds/calibrations on the owner thread.
+
+        Returns a detached normalized-flux/GHz frame in source insertion order,
+        including empty sampled sources. No inputs or versions change. Foreign
+        threads raise RuntimeError. Later State mutation cannot alter this frame.
+        """
+        self._assert_owner()
+        return SearchRenderFrame({
+            name: SearchSpectrumBackground(
+                raw=deepcopy(entry.raw),
+                spec_type=entry.spec_type,
+                aligned=entry.aligned,
+                flux_half=entry.flux_half,
+                flux_period=entry.flux_period,
+            )
+            for name, entry in self.spectrums.items()
+        })
 
     def set_search_result(
         self,
@@ -538,12 +593,15 @@ class FluxDepState:
         fluxs: NDArray[np.float64],
         freqs: NDArray[np.float64],
         stages: tuple[PipelineStage, ...],
+        render_frame: SearchRenderFrame,
     ) -> None:
         """Publish full kernel result with its original captured inputs, on owner.
 
         fluxs/freqs are same-order 1-D normalized-flux/GHz coordinates, before
         kernel modulo-one wrapping. Copy them so later capture-array edits cannot
         change plotted attribution. stages is the same capture's immutable graph.
+        render_frame holds the same capture's backgrounds and calibration; copy
+        it so later capture edits cannot change the recorded visualization.
         Never re-read live inputs or reset captured counters. Late direct
         publications retain their true stale reasons; the operation owner refuses
         changed dependencies before this call. Shape mismatches raise ValueError
@@ -564,6 +622,7 @@ class FluxDepState:
             result_fluxs=fluxs.copy(),
             result_freqs=freqs.copy(),
             input_stages=stages,
+            render_frame=deepcopy(render_frame),
         )
         self.version.bump(FIT_VERSION_KEY)
 
