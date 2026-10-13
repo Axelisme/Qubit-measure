@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 import pytest
 from pydantic import JsonValue, ValidationError, create_model
+from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import (
     BathResetSpec,
     ConfigBase,
@@ -242,8 +243,19 @@ def test_ref_family_only_limits_captured_keys_and_preserves_local_choices() -> N
         "choices" in errors.messages[("selection", "name")].lower()
         or "listed" in errors.messages[("selection", "name")].lower()
     )
-    state.write({("selection",): {"kind": "ref", "name": "Q.pulses.missing"}}, env)
-    missing = state.result(env)
+    before = state.input.data
+    base = state.base.data
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    with pytest.raises(PydanticCustomError, match=r"selection\.name"):
+        state.write({("selection",): {"kind": "ref", "name": "Q.pulses.missing"}}, env)
+    assert state.input.data == before
+    assert state.base.data == base
+    assert notifications == []
+    missing_state = FormState(
+        FormInput(model, {"selection": {"kind": "ref", "name": "Q.pulses.missing"}})
+    )
+    missing = missing_state.result(env)
     assert isinstance(missing, FormErrors)
     assert ("selection", "name") in missing.messages
 
