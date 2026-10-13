@@ -476,7 +476,8 @@ def _module_input(info: FieldInfo) -> bool:
         len(members) == 2
         and all(isinstance(m, type) for m in members)
         and sum(isinstance(m, type) and issubclass(m, ModuleRef) for m in members) == 1
-        and sum(isinstance(m, type) and issubclass(m, ModuleInline) for m in members) == 1
+        and sum(isinstance(m, type) and issubclass(m, ModuleInline) for m in members)
+        == 1
     )
 
 

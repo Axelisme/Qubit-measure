@@ -78,7 +78,8 @@ def test_generated_module_schema_merges_key_and_inline(nullable: bool) -> None:
     branches = probe["oneOf"]
     assert isinstance(branches, list)
     ref = next(
-        b for b in branches
+        b
+        for b in branches
         if isinstance(b, dict) and b["x-form-discriminator-values"] == ["ref"]
     )
     props = ref["properties"]
@@ -86,7 +87,9 @@ def test_generated_module_schema_merges_key_and_inline(nullable: bool) -> None:
     name = props["name"]
     assert isinstance(name, dict)
     assert name["x-form-library-keys"] == ["Q.pulses.probe"]
-    state = FormState(FormInput(form.model, {"probe": {"kind": "ref", "name": "Q.pulses.probe"}}))
+    state = FormState(
+        FormInput(form.model, {"probe": {"kind": "ref", "name": "Q.pulses.probe"}})
+    )
     assert not isinstance(state.result(env), FormErrors)
     state.write(form.module_inline_writes(state.input, ("probe",), env), env)
     value = state.result(env)
