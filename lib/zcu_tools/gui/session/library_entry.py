@@ -364,7 +364,11 @@ def _arb_data_paths(
     paths: list[tuple[str, ...]] = []
     for name, info in model.model_fields.items():
         for child in _model_members(info.annotation):
-            paths.extend(_arb_data_paths(child, (*prefix, name)))
+            child_path = (*prefix, name)
+            if child in _MODULE_SPECS or child in _WAVEFORM_SPECS:
+                # Generated inline Spec children live under a module wrapper.
+                child_path = (*child_path, "module")
+            paths.extend(_arb_data_paths(child, child_path))
     return paths
 
 
