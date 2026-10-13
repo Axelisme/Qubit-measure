@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from types import MappingProxyType, new_class
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
@@ -560,6 +560,32 @@ class Form[C: ConfigBase]:
             if previous.get("kind") == "inline"
             else field.inline_writes(previous, env)
         )
+
+    def module_input_kind(
+        self, input: FormInput[FormModel], path: tuple[str, ...]
+    ) -> Literal["ref", "inline"]:
+        """Read an authored core module's tag without evaluating its draft.
+
+        input must belong to this Form; another model raises TypeError. path
+        contains nonempty core field names, not inline descendants or extras.
+        Unknown/nonmodule paths raise ValueError, even if their input has a
+        kind tag. Return ref or inline from the public tagged input, including
+        partial modules and invalid expressions. Disabled, missing or untagged
+        module input raises ValueError naming the field. No validation,
+        expression evaluation, source read, input change or publication occurs.
+        """
+        if input.model is not self.model:
+            raise TypeError("module_input_kind requires this Form's input")
+        self._module_field(path)
+        raw: JsonValue = input.data
+        for part in path:
+            raw = raw.get(part) if isinstance(raw, dict) else None
+        kind = raw.get("kind") if isinstance(raw, dict) else None
+        if kind == "ref":
+            return "ref"
+        if kind == "inline":
+            return "inline"
+        raise ValueError(f"Module input has no ref/inline tag: {'.'.join(path)}")
 
     def read_module(
         self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from logging import getLogger
+from typing import Literal
 
 from pydantic import JsonValue
 
@@ -95,6 +96,7 @@ class TabFormResource:
             form.to_cfg
         )
         self._read_module = form.read_module
+        self._module_input_kind = form.module_input_kind
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
@@ -196,6 +198,21 @@ class TabFormResource:
         with self._mutation():
             self._state.write(batch, self._sources.env)
             self._notify()
+
+    def read_module_kind(self, path: tuple[str, ...]) -> Literal["ref", "inline"]:
+        """Read one authored core module's tag without evaluating its draft.
+
+        path contains nonempty core field names, for example ("modules",
+        "qub_pulse"), not inline descendants or extras. Return ref or inline,
+        even for partial input or invalid expressions. Unknown/nonmodule paths,
+        disabled, missing or untagged input raise ValueError naming the field.
+        Revocation raises CfgPreconditionError(RESOURCE_GONE). Busy and
+        notification reads are allowed; mutation callers must first use
+        require_mutation_allowed. No source read, expression evaluation,
+        validation, input change or publication occurs.
+        """
+        self._require_open()
+        return self._module_input_kind(self.input, path)
 
     def read_module(self, path: tuple[str, ...]) -> ModuleValues:
         """Read one core module field using the fixed Open/Reset capture.

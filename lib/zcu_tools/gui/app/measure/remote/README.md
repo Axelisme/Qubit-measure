@@ -337,11 +337,15 @@ full-cfg validation, native to_cfg and extras lowering. Busy and observer reads
 are allowed. Reads do not mutate input, publish or refresh sources.
 
 `tab.use_inline(tab_id, field)` requires holder and resource mutation admission.
-The handler reads the public module mode after admission. Key mode runs the
+The handler reads the public input tag at an exact core module path after
+admission, without evaluating the draft or reading sources. Ref runs the
 generated to_inline option command through resource.run_command using the fixed
 Open/Reset library capture. Locks remain applied. One atomic write publishes
-once. Existing inline input is a guarded no-op. Disabled or unresolved modules
-fail without fallback; select an Inline option to use template/type defaults.
+once. Existing inline input, including partial or invalid-expression drafts, is
+a guarded no-op. Disabled, missing or untagged module input returns
+invalid_params/form_errors with the field name and an Inline selection hint.
+Unresolved refs fail without fallback; select an Inline option to use
+template/type defaults.
 Wrong families, structural/source failures and busy/lifetime/reentrant guards
 reject before mutation. The reply is the complete Form observation.
 

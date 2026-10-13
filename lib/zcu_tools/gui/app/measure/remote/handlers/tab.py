@@ -357,9 +357,11 @@ def h_tab_use_inline(
     """Convert one module using the fixed capture and return its complete Form view.
 
     params supplies tab_id and a dotted core module field. Resource admission
-    runs before the public module-mode read. Key mode invokes to_inline through
-    the guarded command host; inline mode makes no write or publication.
-    Disabled/invalid modules and source failures reject without fallback.
+    runs before reading the public input tag at an exact core module path.
+    Ref invokes to_inline through the guarded command host; inline is a no-op
+    even for partial input or invalid expressions. Mode detection does not
+    evaluate the draft or read sources. Disabled, missing or untagged input and
+    unavailable ref commands reject without fallback.
     Busy, revoked and notification-reentrant calls also reject inline no-ops.
     Known form failures become directed RemoteError replies; unexpected failures
     propagate. No source refresh, caller layout construction or retry occurs.
@@ -371,8 +373,8 @@ def h_tab_use_inline(
     try:
         resource = adapter.cfg_lookup(str(params["tab_id"]))
         resource.require_mutation_allowed()
-        module = resource.read_module(path)
-        if module.mode == "key":
+        kind = resource.read_module_kind(path)
+        if kind == "ref":
             resource.run_command(path, "to_inline")
         # Inline is an explicit no-op after the same admission checks.
     except CfgPreconditionError as exc:
