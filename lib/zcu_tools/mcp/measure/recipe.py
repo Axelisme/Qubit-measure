@@ -869,17 +869,13 @@ class RecipeSession:
         """Open adapter's tab, or validate/reset the named reusable tab.
 
         adapter is a non-empty public GUI adapter ID. aliases maps caller-owned
-        alias names to concrete components and is copied for this recipe's Run.
-        None and {} mean no override and retain cached preview/acceptance.
-        Nonempty overrides use temporary preview and acceptance without changing
-        tab/global binding. reuse=None creates a fresh tab; otherwise reuse is a
-        non-empty GUI locator. Parameter/library reads and cfg previews use
-        current sources with this same temporary mapping, not a
-        tab birth capture or context.snapshot. Source/alias failures propagate
-        without fallback. Busy, mismatched adapters
-        and invalid locators fail without creating a fallback. Use the returned
-        cfg publication for recipe edits and Run preparation; each source query
-        uses current globals. GUI/connection
+        alias names to concrete components and is copied into a single Reset.
+        None and {} use global aliases at Reset. Every recipe preparation resets
+        before edits, including a new tab. Parameter/library reads, edits and Run
+        use that fixed capture until the next explicit Reset. The override is not
+        written to global aliases or saved input. reuse=None creates a fresh tab;
+        otherwise reuse is a non-empty GUI locator. Busy, mismatched adapters and
+        invalid locators fail without creating a fallback. GUI/connection
         errors propagate; empty/non-string names raise ValueError before any GUI request. Identifier errors propagate from the GUI context owner.
         """
         if not adapter or not adapter.strip():
@@ -897,7 +893,7 @@ class RecipeSession:
                 )
             with self._condition:
                 self._tab = tab
-            publication = self._tools.send_gui_rpc("tab.get_cfg", {"tab_id": tab})
+
         else:
             tab = reuse
             with self._condition:
@@ -915,7 +911,10 @@ class RecipeSession:
             interaction = _cfg_object(snapshot["interaction"])
             if interaction["is_running"] or interaction["is_analyzing"]:
                 raise GuiRpcError("Tab is busy", reason="tab_busy")
-            publication = self._tools.send_gui_rpc("tab.reset_cfg", {"tab_id": tab})
+        reset: dict[str, object] = {"tab_id": tab}
+        if overrides:
+            reset["aliases"] = overrides
+        publication = self._tools.send_gui_rpc("tab.reset_cfg", reset)
         return RecipeTab(
             _TabBinding(
                 self._tools,
@@ -945,30 +944,13 @@ class RecipeTab:
 
     def __init__(self, binding: _TabBinding) -> None:
         self._binding = binding
-        self._preview_aliases()
-
-    def _preview_aliases(self) -> None:
-        """Project named aliases at the retained ref; stale failures never refresh."""
-        if self._binding.aliases:
-            reply = self._binding.tools.send_gui_rpc(
-                "tab.get_cfg",
-                {
-                    "tab_id": self._binding.tab,
-                    **(
-                        {"aliases": self._binding.aliases}
-                        if self._binding.aliases
-                        else {}
-                    ),
-                },
-            )
-            self._binding.publication = _cfg_object(reply)
 
     def read_value(self, path: str) -> YamlValue:
-        """Read one non-blank logical leaf from current sources with this tab's aliases.
+        """Read one non-blank logical leaf from this tab's fixed Reset capture.
 
         path is a parameter path such as $custom.threshold or Q1.ext.seed, not an
         arithmetic formula. Missing and explicit null both return None. Each call
-        uses tab.parameter_read, returning a detached value without changing cfg,
+        uses tab.parameter_read without overrides, returning a detached value without changing cfg,
         provenance or Run state or refreshing context/operation guards. Source,
         alias and fixed-connection failures propagate without fallback or retry.
         ValueError rejects blank paths; malformed wire raises incompatible_wire.
@@ -982,7 +964,7 @@ class RecipeTab:
 
         None returns None without an RPC. Other references must be non-blank;
         custom/missing modules return None, never a client-guessed root. Queries
-        use the fixed connection and copied aliases, not context.snapshot. Cfg,
+        use the fixed Reset capture, not context.snapshot or live aliases. Cfg,
         provenance and Run state are unchanged. Source/connection errors propagate
         without fallback/retry; malformed root replies raise incompatible_wire.
         """
@@ -1026,13 +1008,12 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [path],
                 "module_refs": [],
-                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         return _cfg_object(reply.get("values")).get(path)
 
     def _library_reference(self, reference: str | None) -> str | None:
-        """Resolve a canonical module root using current sources and named aliases."""
+        """Resolve a canonical module root using the fixed Reset sources."""
         if reference is None:
             return None
         reply = self._binding.tools.send_gui_rpc(
@@ -1041,7 +1022,6 @@ class RecipeTab:
                 "tab_id": self._binding.tab,
                 "paths": [],
                 "module_refs": [reference],
-                **({"aliases": self._binding.aliases} if self._binding.aliases else {}),
             },
         )
         modules = _cfg_object(reply.get("modules"))
@@ -1071,7 +1051,6 @@ class RecipeTab:
                 },
             )
             self._binding.publication = _cfg_object(reply)
-            self._preview_aliases()
 
     def _reference(self, field: str) -> dict[str, object]:
         node = self._node(field)
@@ -1296,8 +1275,8 @@ class RecipeTab:
     def run(self) -> RunOperation:
         """Immediately send Run for this tab and return its yield handle.
 
-        The recipe cfg publication must be Valid. Nonempty aliases preview the
-        current inputs before this check; Invalid cfg fails before Run is sent.
+        The recipe cfg publication must be valid. Reset captured aliases and
+        parameter sources before edits; Run sends no source overrides.
         Capture actual conditions and result provenance. A pending between-yield
         cancel suppresses this one start and is consumed once. GUI rejection fails
         immediately; completion failures are thrown by the driver at the yield.
@@ -1309,7 +1288,6 @@ class RecipeTab:
         consume_cancel = self._binding.consume_cancel
         if consume_cancel is not None and consume_cancel():
             return suppressed
-        self._preview_aliases()
         if self._binding.publication["status"] != "Valid":
             raise GuiRpcError("Recipe cfg is not Valid", reason="invalid_cfg")
         actual = capture_actual(self._actual_fields())
@@ -1334,8 +1312,6 @@ class RecipeTab:
             binding.publish(replace(binding.capture, start_status="unknown"))
 
         payload: dict[str, object] = {"tab_id": tab}
-        if self._binding.aliases:
-            payload["aliases"] = self._binding.aliases
         try:
             started = tools.gui.send_gui_rpc(
                 "tab.run_start", payload, before_send=admit
