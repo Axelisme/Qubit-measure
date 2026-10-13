@@ -10,6 +10,8 @@ import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.gui.session.ui.alias_dialog import AliasDialog
 from zcu_tools.program.v2.mocksoc import make_mock_soc
@@ -75,6 +77,32 @@ def test_unavailable_qubit_shows_a_reason_instead_of_a_path(
     assert text.startswith("Qubit unavailable: ")
     assert len(text) > len("Qubit unavailable: ")
     assert ".kind" not in text
+
+
+def test_unreadable_source_shows_unavailable_with_its_reason(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    """A capture whose point source cannot be read is not an EMPTY context."""
+    window, harness = window_session.window, window_session.harness
+    bind_point(harness, window_session.root)
+    healthy = harness.services.context.read_context()
+    fault = ContextSourceFault(
+        "point", window_session.root / "point.yaml", "OSError", "disk detached"
+    )
+    unreadable = ParameterContext(
+        point=healthy.document(),
+        library=healthy.library,
+        target=healthy.target,
+        roles=None,
+        source_faults=(fault,),
+    )
+    harness.state.set_context(replace(harness.state.session_env, parameters=unreadable))
+    window.setup_dialog.reject()
+    qapp.processEvents()
+
+    label = chip(window, "workflow.source.status")
+    assert label.text().startswith("Qubit unavailable: ")
+    assert "disk detached" in label.text()
 
 
 def test_long_reason_is_elided_without_widening_the_window(
