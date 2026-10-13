@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.collections import QuadMesh
+from matplotlib.figure import Figure
 from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
 from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
 from zcu_tools.analysis.fluxdep.models import TransitionDict
@@ -235,6 +237,72 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
         assert _freshness(widget).text() == ""
         assert "Outdated" not in _show_title(widget)
         assert _export_button(widget).isEnabled()
+    finally:
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+
+
+def _set_joint_fit_inputs(ctrl: Controller, search_db: str) -> ParamBounds:
+    """Publish 0-1 inputs over the joint cloud and return their bounds."""
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    ctrl.set_fit_params(
+        search_db,
+        bounds.EJ,
+        bounds.EC,
+        bounds.EL,
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    return bounds
+
+
+def _record_perfect_fit(ctrl: Controller, bounds: ParamBounds) -> None:
+    """Publish a zero-residual result over the currently selected cloud."""
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+
+
+def _background_grids(figure: Figure) -> list[np.ndarray]:
+    """Every drawn heatmap's normalized-flux/GHz corner grid, in draw order."""
+    return [
+        np.asarray(mesh.get_coordinates(), dtype=np.float64)
+        for mesh in figure.axes[0].collections
+        if isinstance(mesh, QuadMesh)
+    ]
+
+
+def test_repeated_alignment_with_same_reason_redraws_show_background(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
+    widget = AnalyzePanelWidget(ctrl)
+    try:
+        _record_perfect_fit(ctrl, bounds)
+        widget.show_tab("show")
+        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        ctrl.set_alignment("a", 0.55, 1.05)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        first = _background_grids(shown)
+        ctrl.set_alignment("a", 0.60, 1.10)
+        assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        native = Figure()
+        ctrl.render_fit(native)
+        expected = _background_grids(native)
+        assert expected
+        second = _background_grids(shown)
+        assert len(second) == len(expected)
+        for drawn, current in zip(second, expected, strict=True):
+            np.testing.assert_allclose(drawn, current)
+        assert any(
+            drawn.shape != current.shape or not np.allclose(drawn, current)
+            for drawn, current in zip(first, expected, strict=True)
+        ), "the second alignment must move the source background"
     finally:
         widget.quiesce()
         widget.dispose()
