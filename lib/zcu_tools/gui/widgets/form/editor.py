@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from weakref import ref
 
 from pydantic import JsonValue
+from PyQt6 import sip
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QThread
 from qtpy.QtGui import QCloseEvent
@@ -81,7 +82,8 @@ class FormEditor[F: FormModel](QWidget):
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
-    QObject destruction also removes the subscription without touching state.
+    After QObject destruction or garbage collection of this view, the next
+    state publication removes the subscription without touching state.
     refresh and error queries after detach raise RuntimeError.
     validity_changed emits a bool only when combined validity changes; it is not
     an Apply request. GUI-thread use and a live QApplication are required.
@@ -150,18 +152,22 @@ class FormEditor[F: FormModel](QWidget):
         self._content = QWidget(self)
         self._layout.addWidget(self._content)
         self._publish()
-        # The state callback must not keep the QWidget alive. QObject destruction
-        # invokes the standalone unsubscribe even when closeEvent was skipped.
+        # The state callback must not keep the QWidget alive. No Python slot is
+        # connected to destroyed: cyclic GC may clear such a slot before Qt
+        # calls it while deleting the widget, which crashes the process. A
+        # publication that finds this view collected or deleted unsubscribes.
         weak_view = ref(self)
 
         def published() -> None:
             view = weak_view()
-            if view is not None and view._state is not None:
+            if view is None or sip.isdeleted(view):
+                # Bound below, before state can publish to this callback.
+                unsubscribe()
+            elif view._state is not None:
                 view._publish()
 
         unsubscribe = state.subscribe(published)
         self._unsubscribe = unsubscribe
-        self.destroyed.connect(lambda _object: unsubscribe())
 
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
