@@ -184,6 +184,47 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     )
 
 
+def kind_selection_schema(
+    schema: dict[str, JsonValue], root: str, root_label: str, depth: int
+) -> tuple[tuple[str, ...], list[JsonValue]]:
+    """Read public option fields; return the target path and its selections."""
+    root_schema = expect_object(expect_object(schema["properties"])[root])
+    root_options = root_schema["x-form-options"]
+    assert isinstance(root_options, list)
+    root_option = next(
+        expect_object(item)
+        for item in root_options
+        if expect_object(item)["label"] == root_label
+    )
+    path = (root, "module")
+    options = root_options
+    if depth:
+        fields = expect_object(root_option["fields"])
+        module_schema = expect_object(expect_object(fields["properties"])["module"])
+        if depth == 2:
+            pulse_schema = expect_object(
+                expect_object(module_schema["properties"])["pulse_cfg"]
+            )
+            pulse_options = pulse_schema["x-form-options"]
+            assert isinstance(pulse_options, list)
+            module_schema = expect_object(
+                next(
+                    expect_object(item)["fields"]
+                    for item in pulse_options
+                    if expect_object(item)["label"] == "Inline"
+                )
+            )
+            path = (*path, "pulse_cfg")
+        waveform_options = expect_object(
+            expect_object(module_schema["properties"])["waveform"]
+        )["x-form-options"]
+        assert isinstance(waveform_options, list)
+        options = waveform_options
+        path = (*path, "waveform")
+
+    return path, options
+
+
 @pytest.mark.parametrize(
     "depth", [0, 1, 2], ids=["module", "waveform", "nested-waveform"]
 )
@@ -224,40 +265,9 @@ def test_template_kind_reselection_at_each_depth_is_fresh(
     form.bind_templates({"authored": definition}, adapter="synthetic")
     env = module_env() if depth == 0 else FormEnv()
     state = FormState(form.default_input(env))
-    schema = state.input_schema(env)
-    root_schema = expect_object(expect_object(schema["properties"])[root])
-    root_options = root_schema["x-form-options"]
-    assert isinstance(root_options, list)
-    root_option = next(
-        expect_object(item)
-        for item in root_options
-        if expect_object(item)["label"] == root_label
+    path, options = kind_selection_schema(
+        state.input_schema(env), root, root_label, depth
     )
-    path = (root, "module")
-    options = root_options
-    if depth:
-        fields = expect_object(root_option["fields"])
-        module_schema = expect_object(expect_object(fields["properties"])["module"])
-        if depth == 2:
-            pulse_schema = expect_object(
-                expect_object(module_schema["properties"])["pulse_cfg"]
-            )
-            pulse_options = pulse_schema["x-form-options"]
-            assert isinstance(pulse_options, list)
-            module_schema = expect_object(
-                next(
-                    expect_object(item)["fields"]
-                    for item in pulse_options
-                    if expect_object(item)["label"] == "Inline"
-                )
-            )
-            path = (*path, "pulse_cfg")
-        waveform_options = expect_object(
-            expect_object(module_schema["properties"])["waveform"]
-        )["x-form-options"]
-        assert isinstance(waveform_options, list)
-        options = waveform_options
-        path = (*path, "waveform")
 
     def current() -> dict[str, JsonValue]:
         value = state.input.data
