@@ -80,6 +80,28 @@ def test_successful_expression_defaults_are_direct_native_values() -> None:
     assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
 
 
+@pytest.mark.parametrize("endpoint", ["start", "stop"])
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'"])
+def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) -> None:
+    env = FormEnv()
+    node = nodes.Range(
+        Expr(expression) if endpoint == "start" else 2.0,
+        Expr(expression) if endpoint == "stop" else 8.0,
+        4,
+    )
+    form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": node}})
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    assert isinstance(result, FormErrors), "Failed Range Expr must not use 0/1"
+    assert result.messages == {("sweep", "freq", endpoint): "Field required"}
+    state.write({("sweep", "freq", endpoint): 3.0 if endpoint == "start" else 9.0}, env)
+    cfg = form.to_cfg(require_result(state, env), env)
+    assert isinstance(cfg, ScalarCfg), cfg
+    assert cfg.sweep.freq.start == (3.0 if endpoint == "start" else 2.0)
+    assert cfg.sweep.freq.stop == (8.0 if endpoint == "start" else 9.0)
+    assert cfg.sweep.freq.expts == 4
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 
