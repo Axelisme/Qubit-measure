@@ -135,7 +135,7 @@ def test_list_counts_only_published_per_spectrum_filter_masks(
     observer = joint_route.client(mode="readonly")
     before = ctrl.state.version.snapshot()
     sources = copy.deepcopy(ctrl.state.spectrums)
-    draft = ctrl.interactive.inspect("selection")
+    draft = ctrl.interactive.inspect_selection()
     selection = joint_route.request(observer, "selection.snapshot")
     assert selection["ok"] is True, selection
     assert selection["result"]["pending"] is True
@@ -156,7 +156,7 @@ def test_list_counts_only_published_per_spectrum_filter_masks(
         after_selection = joint_route.request(observer, "selection.snapshot")
         assert after_selection["ok"] is True, after_selection
         assert after_selection["result"] == selection["result"]
-        assert ctrl.interactive.inspect("selection") is draft
+        assert ctrl.interactive.inspect_selection() is draft
         assert all(ctrl.interactive.inspect(name) is None for name in sources)
         assert ctrl.state.active_spectrum == "a"
         assert ctrl.state.version.snapshot() == before

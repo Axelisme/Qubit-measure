@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, native spectrum stages and Filter exclusion counts
+**Last updated:** 2026-10-13, explicit spectrum/selection draft targets
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -100,11 +100,11 @@ producer as Measure. MCP retains no spectrum, draft, provenance or fit state.
 It opens/reuses the named line draft, sends commands and summarizes half/integer
 lines, period and changed fields as before/after pairs. Every move_line first
 sets conjugate, defaulting to false, so the command does not inherit a hidden GUI
-mode. auto_align polls interactive.read once per second with the starting
-context_id until the GUI is not busy. A retired draft becomes an interrupted tool
+mode. auto_align polls interactive.read(target="spectrum", name) once per second
+with the starting context_id until the GUI is not busy. A retired draft becomes an interrupted tool
 error; MCP does not compare identities or keep a registry. finish accepts manual
 or load-inherited lines without auto_align and attaches spectrum.render evidence.
-image=true requests interactive.render for unfinished drafts. GUI open receipts
+image=true requests interactive.render(target="spectrum", name) for unfinished drafts. GUI open receipts
 supply discarded stage facts; downstream invalidation belongs to app publication,
 not MCP inference.
 
@@ -123,7 +123,7 @@ It opens/reuses the global GUI Filter and sends stroke, set_min_distance, undo
 or finish. Counts and per-spectrum [selected, total] pairs come from the GUI.
 Finish publishes and closes once, then attaches selection.render() evidence of
 the published cloud and masks. image=true on unfinished commands requests
-interactive.render(selection) draft evidence. MCP saves no mask or draft image.
+interactive.render(target="selection") draft evidence without a name. MCP saves no mask or draft image.
 
 Spectrum Export/Restore tools report sampled checkpoint summaries, including
 zero-point completed spectra. Export does not save Filter masks. Restore refuses

@@ -341,7 +341,7 @@ def test_selection_and_spectrum_contexts_coexist(controller: Controller):
     line = owner.begin_line_pick("sample")
     selection = owner.begin_cross_selection()
     line_active = owner.inspect("sample")
-    selection_active = owner.inspect("selection")
+    selection_active = owner.inspect_selection()
     assert line_active is not None and line_active.context is line
     assert selection_active is not None and selection_active.context is selection
     assert line_active.context_id != selection_active.context_id
@@ -356,7 +356,7 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
     controller.set_points("sample", np.array([-0.5, 0.5]), np.array([4.2, 4.3]))
     owner = controller.interactive
     old = owner.begin_cross_selection()
-    old_active = owner.inspect("selection")
+    old_active = owner.inspect_selection()
     successors: list[CrossSelectionContext] = []
 
     def reopen(fact: InteractiveChangedPayload) -> None:
@@ -365,8 +365,8 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
 
     subscription = controller.bus.subscribe(InteractiveChangedPayload, reopen)
     try:
-        owner.cancel("selection")
-        active = owner.inspect("selection")
+        owner.cancel_selection()
+        active = owner.inspect_selection()
         assert active is not None and active.context is successors[0]
         assert old_active is not None and active.context_id != old_active.context_id
         with pytest.raises(FailedPreconditionError, match="closed"):
@@ -378,8 +378,8 @@ def test_selection_cancel_callback_keeps_editable_successor(controller: Controll
         assert current.session.snapshot().min_distance == 0.01
     finally:
         subscription.unsubscribe()
-    owner.cancel("selection")
-    assert owner.inspect("selection") is None
+    owner.cancel_selection()
+    assert owner.inspect_selection() is None
     with pytest.raises(FailedPreconditionError, match="closed"):
         current.session.ensure_input_open()
 

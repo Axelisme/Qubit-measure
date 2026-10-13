@@ -22,8 +22,8 @@ from __future__ import annotations
 #     INCLUDING pure-internal logic changes that don't touch the wire.
 # This unpublished interface revision includes identity-only project setup,
 # data_root, spectrum evidence/drafts and fit search_db/render/database_info.
-WIRE_VERSION = 7
+WIRE_VERSION = 8
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 9  # published spectrum stages and per-source Filter exclusion counts
+GUI_VERSION = 10  # literal spectrum targets and independent global Filter lifetime

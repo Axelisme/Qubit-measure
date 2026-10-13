@@ -67,7 +67,10 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
                 sleep(1.0)
                 try:
                     native = call_gui(
-                        bridge, GuiRpcCall("interactive.read", envelope, 31.0)
+                        bridge,
+                        GuiRpcCall(
+                            "interactive.read", {**envelope, "target": "spectrum"}, 31.0
+                        ),
                     ).data
                 except GuiInvocationError as error:
                     if error.reason != "interactive_context_changed":
@@ -110,7 +113,12 @@ def build_align_tools(bridge: McpBridge) -> ToolTable:
         reply = ToolReply(summary)
         if command == "finish" or arguments.get("image", False):
             method = "spectrum.render" if command == "finish" else "interactive.render"
-            return with_png(reply, call_gui(bridge, GuiRpcCall(method, target, 31.0)))
+            render_params = (
+                target if command == "finish" else {**target, "target": "spectrum"}
+            )
+            return with_png(
+                reply, call_gui(bridge, GuiRpcCall(method, render_params, 31.0))
+            )
         return reply
 
     return {

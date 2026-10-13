@@ -71,7 +71,11 @@ def _base(
 
 
 def _closed(owner: FluxDepInteractiveOwner, active: ActiveInteractiveContext) -> bool:
-    current = owner.inspect(active.spectrum_name or "selection")
+    current = (
+        owner.inspect_selection()
+        if active.spectrum_name is None
+        else owner.inspect(active.spectrum_name)
+    )
     return current is None or current.context_id != active.context_id
 
 
@@ -89,7 +93,10 @@ def _execute(
     if command == "undo":
         session.undo()
     elif command == "cancel":
-        owner.cancel(name or "selection")
+        if name is None:
+            owner.cancel_selection()
+        else:
+            owner.cancel(name)
     elif command == "apply":
         owner.apply_cross_selection()
     elif command == "finish":
@@ -295,19 +302,31 @@ def _reply(
     return reply
 
 
+def _read_target(
+    owner: FluxDepInteractiveOwner, params: Mapping[str, object]
+) -> ActiveInteractiveContext | None:
+    """Use explicit wire target; never infer it from name, display or identity."""
+    if params["target"] == "selection":
+        return owner.inspect_selection()
+    name = params.get("name")
+    if not isinstance(name, str) or not name:
+        raise InvalidInputError("spectrum target requires a nonempty name")
+    return owner.inspect(name)
+
+
 def h_interactive_read(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> InteractiveReply:
     """Read a named draft on the owner loop without opening input or switching view.
 
-    params contains validated name, or selection for Filter. Optional context_id
-    refuses cancelled, removed or replaced input with interactive_context_changed.
-    Name-only reads return null context/effect when absent. Native failures propagate.
+    params requires target=spectrum with literal nonempty name, or
+    target=selection without name. Invalid envelopes raise INVALID_PARAMS.
+    Optional context_id refuses cancelled, removed, replaced or wrong-target
+    input with interactive_context_changed. Unbound reads return null
+    context/effect when absent. Native failures propagate.
     """
-    name = params["name"]
-    assert isinstance(name, str)
     owner = adapter.ctrl.interactive
-    active = owner.inspect(name)
+    active = _read_target(owner, params)
     context_id = params.get("context_id")
     if context_id is not None and (active is None or active.context_id != context_id):
         raise FailedPreconditionError(
@@ -372,7 +391,7 @@ def h_selection_interactive_open(
     del params
     owner = adapter.ctrl.interactive
     context = owner.begin_cross_selection()
-    active = owner.inspect("selection")
+    active = owner.inspect_selection()
     if active is None or active.context is not context:
         raise FailedPreconditionError(
             "opened context retired during GUI reaction",
@@ -412,9 +431,12 @@ def _command(
 ) -> InteractiveReply:
     context_id, command, command_params = _command_envelope(params)
     owner = adapter.ctrl.interactive
-    target = "selection" if selection else params["name"]
-    assert isinstance(target, str)
-    active = owner.inspect(target)
+    if selection:
+        active = owner.inspect_selection()
+    else:
+        name = params["name"]
+        assert isinstance(name, str)
+        active = owner.inspect(name)
     if active is None:
         raise FailedPreconditionError(
             "no live interactive context", reason_code="no_interactive_context"
@@ -472,10 +494,14 @@ def h_selection_interactive_command(
 def h_interactive_render(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> PngImage:
-    """Render a named current draft; never open input, edit or change display."""
-    name = params["name"]
-    assert isinstance(name, str)
-    active = adapter.ctrl.interactive.inspect(name)
+    """Render explicit target's current draft, without editing input or display.
+
+    params requires target=spectrum plus literal nonempty name, or
+    target=selection without name. Invalid envelopes raise INVALID_PARAMS.
+    Missing draft raises no_interactive_context; native rendering errors
+    propagate. Never falls back to published data or another target.
+    """
+    active = _read_target(adapter.ctrl.interactive, params)
     if active is None:
         raise FailedPreconditionError(
             "no live interactive context", reason_code="no_interactive_context"

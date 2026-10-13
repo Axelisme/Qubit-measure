@@ -76,6 +76,14 @@ def _read_sources(harness: RouteHarness, link: ClientLink) -> None:
     assert harness.request(link, "selection.snapshot")["ok"]
 
 
+def _read_picker(
+    harness: RouteHarness, link: ClientLink, name: str, **params: object
+) -> RouteReply:
+    return harness.request(
+        link, "interactive.read", target="spectrum", name=name, **params
+    )
+
+
 def _open_picker(
     harness: RouteHarness, link: ClientLink, name: str, kind: str
 ) -> dict[str, object]:
@@ -118,144 +126,6 @@ def _joint_command(
     )
 
 
-def test_explicit_targets_keep_selection_name_and_filter_independent(
-    route_harness: RouteHarness,
-    selection_name_controller: Controller,
-):
-    harness = copy_sources(route_harness, selection_name_controller)
-    link = harness.client()
-    named = _open_picker(harness, link, "selection", "line")
-    joint = _context(harness.request(link, "selection.interactive.open"))
-    assert named["context_id"] != joint["context_id"]
-    assert _picker_command(
-        harness, link, named, "move_line", role="half", position=0.5
-    )["ok"]
-    assert _joint_command(harness, link, joint, "set_min_distance", min_distance=0.05)[
-        "ok"
-    ]
-    observer = harness.client(mode="readonly", label="observer")
-    versions = harness.ctrl.state.version.snapshot()
-    active_name = harness.ctrl.state.active_spectrum
-    for target, draft, extra in (
-        ("spectrum", named, {"name": "selection"}),
-        ("selection", joint, {}),
-    ):
-        read = _context(
-            harness.request(observer, "interactive.read", target=target, **extra)
-        )
-        assert read["context_id"] == draft["context_id"]
-        assert read["can_undo"] is True
-        assert harness.request(observer, "interactive.render", target=target, **extra)[
-            "ok"
-        ]
-    listed = harness.request(observer, "spectrum.list")
-    assert listed["ok"] and listed["result"]["spectrums"][0]["pending"] == "align"
-    snapshot = harness.request(observer, "spectrum.snapshot", name="selection")
-    assert snapshot["ok"] and snapshot["result"]["pending"] == "align"
-    assert harness.ctrl.state.version.snapshot() == versions
-    assert harness.ctrl.state.active_spectrum == active_name
-    for target, wrong_id, extra in (
-        ("spectrum", joint["context_id"], {"name": "selection"}),
-        ("selection", named["context_id"], {}),
-    ):
-        _error(
-            harness.request(
-                observer,
-                "interactive.read",
-                target=target,
-                context_id=wrong_id,
-                **extra,
-            ),
-            "precondition_failed",
-            "interactive_context_changed",
-        )
-    _error(
-        _picker_command(harness, link, joint | {"spectrum_name": "selection"}, "undo"),
-        "precondition_failed",
-        "interactive_context_changed",
-    )
-    _error(
-        _joint_command(harness, link, named, "undo"),
-        "precondition_failed",
-        "interactive_context_changed",
-    )
-    assert _joint_command(harness, link, joint, "cancel")["ok"]
-    read_named = _context(
-        harness.request(
-            observer, "interactive.read", target="spectrum", name="selection"
-        )
-    )
-    assert read_named["context_id"] == named["context_id"]
-    sample = _open_picker(harness, link, "selection", "sample")
-    assert sample["kind"] == "onetone"
-    assert _picker_command(harness, link, sample, "set_threshold", threshold=0.2)["ok"]
-    assert (
-        harness.request(observer, "spectrum.snapshot", name="selection")["result"][
-            "pending"
-        ]
-        == "sample"
-    )
-    _error(
-        harness.request(
-            observer,
-            "interactive.read",
-            target="spectrum",
-            name="selection",
-            context_id=named["context_id"],
-        ),
-        "precondition_failed",
-        "interactive_context_changed",
-    )
-    joint = _context(harness.request(link, "selection.interactive.open"))
-    assert _picker_command(harness, link, sample, "cancel")["ok"]
-    assert (
-        _context(harness.request(observer, "interactive.read", target="selection"))[
-            "context_id"
-        ]
-        == joint["context_id"]
-    )
-    assert (
-        harness.request(observer, "spectrum.snapshot", name="selection")["result"][
-            "pending"
-        ]
-        is None
-    )
-    harness.ctrl.interactive.dispose()
-    for target, extra in (("spectrum", {"name": "selection"}), ("selection", {})):
-        assert (
-            harness.request(observer, "interactive.read", target=target, **extra)[
-                "result"
-            ]["context"]
-            is None
-        )
-
-
-@pytest.mark.parametrize("method", ["interactive.read", "interactive.render"])
-def test_explicit_targets_reject_ambiguous_envelopes(
-    joint_route: RouteHarness, method: str
-):
-    link = joint_route.client()
-    _context(joint_route.request(link, "selection.interactive.open"))
-    versions = joint_route.ctrl.state.version.snapshot()
-    for params in (
-        {"name": "selection"},
-        {"target": "wrong", "name": "selection"},
-        {"target": "selection", "name": "selection"},
-        {"target": "selection", "name": None},
-        {"target": "spectrum"},
-        {"target": "spectrum", "name": None},
-        {"target": "spectrum", "name": ""},
-    ):
-        try:
-            reply = joint_route.request(link, method, **params)
-        except RemoteError as error:
-            assert error.code == ErrorCode.INVALID_PARAMS
-        else:
-            _error(reply, "invalid_params", None)
-    assert joint_route.request(link, method, target="selection")["ok"]
-    assert joint_route.ctrl.state.version.snapshot() == versions
-
-
 def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
     one_route: RouteHarness,
 ):
@@ -285,34 +155,26 @@ def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
             assert started["info"] == {"alignment_busy": True, "alignment_error": None}
         deliveries[0](FluxPickState(flux_half=0.25, flux_int=0.75))
         completed = _context(
-            harness.request(
-                link, "interactive.read", name="one", context_id=first["context_id"]
-            )
+            _read_picker(harness, link, "one", context_id=first["context_id"])
         )
         assert _state(completed)["flux_half"] == 0.25
         assert _state(completed)["flux_int"] == 0.75
         assert completed["info"] == {"alignment_busy": False, "alignment_error": None}
-        assert _context(harness.request(link, "interactive.read", name="other"))[
-            "info"
-        ] == {"alignment_busy": True, "alignment_error": None}
+        assert _context(_read_picker(harness, link, "other"))["info"] == {
+            "alignment_busy": True,
+            "alignment_error": None,
+        }
         assert _picker_command(harness, link, second, "cancel")["ok"]
         replacement = _open_picker(harness, link, "other", "line")
         before = _state(replacement)
         deliveries[1](FluxPickState(flux_half=-1.0, flux_int=1.0))
         after = _context(
-            harness.request(
-                link,
-                "interactive.read",
-                name="other",
-                context_id=replacement["context_id"],
-            )
+            _read_picker(harness, link, "other", context_id=replacement["context_id"])
         )
         assert _state(after) == before
         assert after["info"] == {"alignment_busy": False, "alignment_error": None}
         _error(
-            harness.request(
-                link, "interactive.read", name="other", context_id=second["context_id"]
-            ),
+            _read_picker(harness, link, "other", context_id=second["context_id"]),
             "precondition_failed",
             "interactive_context_changed",
         )
@@ -351,9 +213,7 @@ def test_guarded_read_refuses_retired_alignment_identity(
         one_route.ctrl.interactive.begin_onetone_pick("one")
     else:
         one_route.ctrl.remove_spectrum("one")
-    guarded = one_route.request(
-        link, "interactive.read", name="one", context_id=draft["context_id"]
-    )
+    guarded = _read_picker(one_route, link, "one", context_id=draft["context_id"])
     _error(guarded, "precondition_failed", "interactive_context_changed")
 
 
@@ -368,21 +228,20 @@ def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteH
     assert _picker_command(
         one_route, link, first, "move_line", role="half", position=-0.5
     )["ok"]
-    read = _context(one_route.request(link, "interactive.read", name="one"))
+    read = _context(_read_picker(one_route, link, "one"))
     assert read["context_id"] == first["context_id"]
     assert _state(read)["flux_half"] == -0.5
     assert read["can_undo"] is True
-    rendered = one_route.request(link, "interactive.render", name="one")
+    rendered = one_route.request(
+        link, "interactive.render", target="spectrum", name="one"
+    )
     assert rendered["ok"] is True, rendered
     encoded = rendered["result"]["png_b64"]
     assert isinstance(encoded, str)
     with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
         assert image.format == "PNG"
         assert image.size == (640, 480)
-    assert (
-        _context(one_route.request(link, "interactive.read", name="one"))["can_undo"]
-        is True
-    )
+    assert _context(_read_picker(one_route, link, "one"))["can_undo"] is True
     denied = one_route.request(
         link,
         "spectrum.interactive.command",
@@ -393,9 +252,7 @@ def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteH
     _error(denied, "precondition_failed", "interactive_context_changed")
     assert _picker_command(one_route, link, first, "finish")["ok"]
     assert (
-        _context(one_route.request(link, "interactive.read", name="other"))[
-            "context_id"
-        ]
+        _context(_read_picker(one_route, link, "other"))["context_id"]
         == second["context_id"]
     )
     listed = one_route.request(link, "spectrum.list")
@@ -417,9 +274,7 @@ def test_observer_display_selection_is_readonly_and_preserves_drafts(
     assert one_route.ctrl.state.active_spectrum is None
     assert one_route.ctrl.state.version.snapshot() == versions
     assert (
-        _context(one_route.request(observer, "interactive.read", name="one"))[
-            "context_id"
-        ]
+        _context(_read_picker(one_route, observer, "one"))["context_id"]
         == draft["context_id"]
     )
     denied = _picker_command(one_route, observer, draft, "undo")
@@ -433,7 +288,7 @@ def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     facts = []
     one_route.ctrl.bus.subscribe(InteractiveChangedPayload, facts.append)
     versions = one_route.ctrl.state.version.snapshot()
-    reply = one_route.request(link, "interactive.read", name="one")
+    reply = _read_picker(one_route, link, "one")
     assert reply["ok"] is True
     assert reply["result"] == {"context": None, "effect": None}
     assert one_route.ctrl.interactive.inspect() is None
@@ -442,7 +297,7 @@ def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     native = one_route.ctrl.interactive.begin_onetone_pick("one")
     native.plugin.set_threshold.execute(native.session, 0.1)
     prior_facts = len(facts)
-    context = _context(one_route.request(link, "interactive.read", name="one"))
+    context = _context(_read_picker(one_route, link, "one"))
     assert context["can_undo"] is True
     assert _state(context)["threshold"] == 0.1
     assert native.session.can_undo()
@@ -465,7 +320,7 @@ def test_line_commands_share_gui_actions_and_feedback_undo(one_route: RouteHarne
     native = one_route.ctrl.interactive.current_line_pick()
     assert native is not None
     native.plugin.actions.move.execute(native.session, ("half", 0.1))
-    edited = _context(one_route.request(link, "interactive.read", name="one"))
+    edited = _context(_read_picker(one_route, link, "one"))
     assert _state(edited)["flux_half"] == 0.1
     moved = _picker_command(
         one_route, link, initial, "move_line", role="integer", position=0.9
@@ -779,7 +634,7 @@ def test_terminal_reply_retains_old_identity_despite_synchronous_successor(
         "closed": True,
         "changes": _changes(reply),
     }
-    next_context = _context(one_route.request(link, "interactive.read", name="one"))
+    next_context = _context(_read_picker(one_route, link, "one"))
     assert next_context["context_id"] != terminal["context_id"]
     assert next_context["kind"] == "onetone" and next_context["closed"] is False
 
@@ -794,11 +649,11 @@ def test_render_failure_does_not_edit_or_close_live_input(
         raise OSError("PNG unavailable")
 
     monkeypatch.setattr(interactive, "render_figure_png", fail)
-    reply = one_route.request(link, "interactive.render", name="one")
+    reply = one_route.request(link, "interactive.render", target="spectrum", name="one")
     assert reply["ok"] is False
     assert reply["error"]["code"] == "controller_error"
     assert not one_route.ctrl.state.spectrums["one"].points_completed
-    live = _context(one_route.request(link, "interactive.read", name="one"))
+    live = _context(_read_picker(one_route, link, "one"))
     assert live["context_id"] == context["context_id"]
 
 
@@ -1014,7 +869,7 @@ def test_command_receipt_survives_updated_callback_retirement(one_route: RouteHa
     assert receipt["kind"] == "onetone" and receipt["closed"] is True
     assert receipt["can_undo"] is False
     assert _state(receipt)["threshold"] == 0.1
-    successor = _context(one_route.request(link, "interactive.read", name="one"))
+    successor = _context(_read_picker(one_route, link, "one"))
     assert (
         successor["kind"] == "line" and successor["context_id"] != receipt["context_id"]
     )
@@ -1033,7 +888,7 @@ def test_failed_finish_keeps_native_input_and_undo_editable(one_route: RouteHarn
     _error(
         _picker_command(one_route, link, context, "finish"), "precondition_failed", None
     )
-    live = _context(one_route.request(link, "interactive.read", name="one"))
+    live = _context(_read_picker(one_route, link, "one"))
     assert live["context_id"] == context["context_id"] and live["closed"] is False
     assert live["can_undo"] is True
     assert one_route.ctrl.state.version.snapshot() == versions
@@ -1046,7 +901,7 @@ def test_joint_render_does_not_refresh_other_clients_and_apply_self_write(
     link, other = joint_route.client(), joint_route.client()
     _read_sources(joint_route, link)
     context = _context(joint_route.request(link, "selection.interactive.open"))
-    assert joint_route.request(other, "interactive.render", name="selection")["ok"]
+    assert joint_route.request(other, "interactive.render", target="selection")["ok"]
     _read_sources(joint_route, other)
     assert _joint_command(joint_route, link, context, "clear")["ok"]
     assert _joint_command(joint_route, link, context, "apply")["ok"]
