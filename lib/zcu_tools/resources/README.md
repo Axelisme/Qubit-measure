@@ -26,7 +26,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 
 `refresh()` 明確重讀文件。不同 mapping leaf 沿既有規則合併，同 leaf 衝突拒絕整筆提交。驗證、body、lock 或提交前 I/O 失敗不發布候選。提交後 observer 失敗只記錄錯誤，不撤銷已提交文件。這是單檔保證，不提供跨檔原子性、掉電恢復或自動 retry。
 
-`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。既有 entry 專用 GeneralView／ComponentView 重用這個 FieldView。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
+`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。Entry 的 setup／point 視圖重用這個 FieldView、stage_model 與 metadata 讀寫，並使用同一 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
 
 ## Scope 差別
 
@@ -38,7 +38,7 @@ Caller 從 `zcu_tools.resources.parameters` import `open_parameters`，提供既
 - `ResultEntry.samples(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。
 - `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
 
-`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。參數容器的檔案與視圖使用相同工作單位；值與來源表的 stderr 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
+`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
 
 DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。讀取與空 edit 不 normalize 寫檔。Entry 的 setup 與 point 不共用條目鎖或交易。
 
@@ -48,7 +48,7 @@ DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快�
 
 各 owner 的行為、限制與跨模組接縫只在自己的文件：
 
-- 條目、setup、point、角色與來源：[entry README](entry/README.md)。
+- 條目、setup、point、角色與 metadata：[entry README](entry/README.md)。
 - ModuleLibrary 與 experiment cfg materialization 的接縫：[context README](context/README.md)。
 - QubitParams：[qubit_params.md](qubit_params.md)。
 - JSONL 樣本與 v2 欄位協定：[sample_table README](sample_table/README.md)。

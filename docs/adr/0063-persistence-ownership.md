@@ -16,7 +16,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與來源共用一份文件；DocumentStore 擁有單檔衝突與原子提交，不換算數值，entry 擁有來源記錄與本條目 ledger 引用驗證。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameters` 的 2.0 header、metadata 讀寫與 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 獨立參數能力由 `resources.parameters` 擁有。Caller 只傳既有文件路徑與自己的 Pydantic value model 給 `open_parameters`，不組裝 DocumentStore，不要求 entry、kind registry、general、roots 或 ledger。`components` 保存直接值，`metadata` 是 opaque YAML mapping 旁表。一般欄位回傳數字等原值，metadata 從獨立入口讀寫。DocumentStore 仍是唯一單檔交易 owner。Resources 不查 metadata 的來源，不解釋 stderr 或 comment，也不因改值自動產生或清除 metadata。Caller 在同筆 edit 中明確替換 metadata mapping，提交沿用既有 mapping-leaf 合併與衝突規則。FieldView 與完整 value-model staging 由 resources 共用，沒有第二套交易或 validator framework。依賴仍由 C8 分層、C9 無循環與 C10 有狀態能力模組獨立 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Entry 的 authored alias 表由 `resources.entry` 保存為 `aliases.yaml`，不是 point、setup、memento 或 ledger。ContextService 擁有有序表的語法、初始化與 Apply 時機，resources 擁有檔案表示及單檔原子替換。Notebook 不讀這份 GUI 表，MCP 的單次 aliases／target 覆寫不保存它。
@@ -59,7 +59,7 @@ Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic 
 
 ### 資料表示與完整性
 
-參數容器的 YAML、快照與視圖使用同一個工作單位數字，來源表的 stderr 也不換算。元件 model 擁有型別、extra 策略與驗證。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
+參數容器的 YAML、快照與視圖使用同一個工作單位數字，metadata 內容也不換算。元件 model 擁有型別、extra 策略與驗證。這條規則不改 Experiment Data File 的單位契約；datafile 的格式責任仍由 datafile 擁有。
 
 參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色由 `zcu_lab.components` 擁有。Lib 外的組合根顯式傳入共用 ComponentRegistry，在 startup 註冊，不在 import 或 reload 時註冊。`.importlinter` 的 `entry-definitions-composition-only` 與 `framework-no-user` 禁止框架反向 import 定義。使用者 model 可用 validator 處理舊欄位；框架不猜兼容規則。
 
@@ -69,7 +69,7 @@ Format 與 format_version 只描述容器結構。檔頭不符或 major 不同�
 
 任何 minor 都由元件定義者的 model 決定 defaults、validators 與舊寫法演進。Forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們；ignore 丟棄的欄位在非空 commit 時移除。
 
-框架不提供版本遷移鏈或相容 loader。Entry 只為明確接受的值記錄來源，不把格式轉換記為 manual acceptance。
+框架不提供版本遷移鏈或相容 loader。Entry 不為值寫入或格式轉換產生 metadata。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。正規 data.h5 的各 Data Variable 可以使用不同 grid，共用一份結果身分與 metadata。Labber 的 canonical one-shot grouped 輸出才要求共同 grid 與明確 variable-to-channel mapping。必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
