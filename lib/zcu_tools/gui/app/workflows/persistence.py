@@ -11,14 +11,14 @@ from zcu_tools.gui.form import FormPath
 class WorkflowInputSnapshot(BaseModel):
     """Versioned parsed input, retaining expressions without evaluating them.
 
-    version identifies this app memento format and must be 1. plan and knobs
+    version identifies this app memento format and must be 2. plan and knobs
     contain detached FormInput JSON trees, including missing/null and expression
     tags. Empty mappings mean fresh-default overlays. No run or hardware state
     is saved. Unknown top-level fields and malformed trees are rejected.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     plan: dict[str, JsonValue] = Field(default_factory=dict)
     knobs: dict[str, JsonValue] = Field(default_factory=dict)
 

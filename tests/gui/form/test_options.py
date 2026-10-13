@@ -36,15 +36,9 @@ class Second(FormModel):
     required: float
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         del env
-        return (
-            {"kind": "second", "shared": 7.0, "required": len(previous), "derived": 1}
-            if previous
-            else {"kind": "second", "shared": {"expr": "2 * 4"}}
-        )
+        return {"kind": "second", "shared": {"expr": "2 * 4"}}
 
 
 class Picks(FormModel):
@@ -459,10 +453,8 @@ class UnavailableBranch(FormModel):
     source: str
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        del env, previous
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        del env
         raise api.field_error(("source",), "Unavailable captured source")
 
 

@@ -172,7 +172,7 @@ def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_
     assert [option.label for option in options] == ["Q.pulses.probe", "Inline"]
     inline = options[-1]
     assert inline.fields is not None and issubclass(inline.fields, FormModel)
-    defaults = inline.fields.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
+    defaults = inline.fields.defaults(env)
     assert expect_object(defaults["module"])["freq"] == 90.0
 
     state.write({("probe",): inline.value}, env)
@@ -335,37 +335,14 @@ def module_env() -> FormEnv:
 
 
 @pytest.mark.parametrize("nullable", [False, True])
-def test_generated_module_schema_merges_key_and_inline(nullable: bool) -> None:
+def test_generated_module_copy_and_nullable_result(nullable: bool) -> None:
     form = Form(NullableModuleCore if nullable else ModuleSection, {})
     env = module_env()
-    schema = form.model.input_schema(env)
-    properties = schema["properties"]
-    assert isinstance(properties, dict)
-    probe = properties["probe"]
-    assert isinstance(probe, dict)
-    if nullable:
-        variants = probe["anyOf"]
-        assert isinstance(variants, list)
-        assert {"type": "null"} in variants
-        probe = next(v for v in variants if isinstance(v, dict) and "oneOf" in v)
-    assert probe.get("x-form-key-or-inline") is True
-    branches = probe["oneOf"]
-    assert isinstance(branches, list)
-    ref = next(
-        b
-        for b in branches
-        if isinstance(b, dict) and b["x-form-discriminator-values"] == ["ref"]
-    )
-    props = ref["properties"]
-    assert isinstance(props, dict)
-    name = props["name"]
-    assert isinstance(name, dict)
-    assert name["x-form-library-keys"] == ["Q.pulses.probe"]
     state = FormState(
         FormInput(form.model, {"probe": {"kind": "ref", "name": "Q.pulses.probe"}})
     )
     assert not isinstance(state.result(env), FormErrors)
-    state.write(form.module_inline_writes(state.input, ("probe",), env), env)
+    state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
@@ -456,8 +433,11 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
     assert not isinstance(again, FormErrors), again
     assert again.value["freq"] == 100.0
     assert input.data == before
-    inline = form.module_inline_input(input, ("modules", "probe"), env)
-    assert inline["kind"] == "inline"
+    state = FormState(input)
+    if mode == "ref":
+        state.run_command(("modules", "probe"), "to_inline", env)
+    modules = expect_object(state.input.data["modules"])
+    assert expect_object(modules["probe"])["kind"] == "inline"
     assert input.data == before
 
 

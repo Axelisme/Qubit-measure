@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import Field, JsonValue
@@ -45,25 +44,22 @@ class T1TunablesForm(FormModel):
     )
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Build defaults, deriving the initial guess from the captured point.
 
-        When previous is empty and parameters contain general.ext.guess_us
+        When parameters contain general.ext.guess_us
         (even explicit null), declare that path as an expression default;
         default_input evaluates it into a direct value. A null, non-numeric
         or non-positive leaf leaves guess_us unfilled, so result reports
         only its "Field required" instead of silently using 20 us. Otherwise
-        (no capture, an absent leaf, or non-empty previous) set an explicit
+        (no capture or an absent leaf) set an explicit
         ordinary 20 us. Reads use the fixed point only, never
         materialization, devices or I/O. Unavailable captured sources
         propagate their source error.
         """
-        data = super().defaults(env, previous)
+        data = super().defaults(env)
         if (
-            not previous
-            and env.parameters is not None
+            env.parameters is not None
             and env.parameters.lookup_point("general.ext.guess_us").present
         ):
             data["guess_us"] = {"expr": "general.ext.guess_us"}

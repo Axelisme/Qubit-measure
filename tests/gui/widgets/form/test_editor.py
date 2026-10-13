@@ -46,20 +46,15 @@ class AlternateBranch(FormModel):
     required: float
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Supply the required field from this host-captured context."""
         return {
             "kind": "alternate",
             "shared": 9.0,
-            "required": previous.get(
-                "required",
-                (
-                    env.parameters.value("general.ext.seed")
-                    if env.parameters is not None
-                    else 4.0
-                ),
+            "required": (
+                env.parameters.value("general.ext.seed")
+                if env.parameters is not None
+                else 4.0
             ),
         }
 

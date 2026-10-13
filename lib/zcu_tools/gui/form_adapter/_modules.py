@@ -38,7 +38,6 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    FormWritePath,
     KeyRef,
     ModuleInline,
     ModuleRef,
@@ -373,10 +372,8 @@ def editable_spec(
     ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
         return _spec_options(cls, env)
 
-    def defaults(
-        cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        del env, previous
+    def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
+        del env
         return supported_input(cls, complete_input(cls, {}))
 
     namespace["options"] = classmethod(options)
@@ -448,10 +445,7 @@ def bind_template_defaults(
         if not issubclass(model, FormModel):
             raise TypeError("Template defaults require generated FormModel types")
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del previous
+        def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
             data = template_input(template, catalog, models, env)
             subtree = _template_subtree(data, ancestry)
             if subtree is None:
@@ -566,11 +560,9 @@ class ModuleField:
             "__annotations__": {"module": module},
         }
 
-        def defaults(
-            cls: type[ModuleInline], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del cls, previous
-            return field.inline_input({}, env)
+        def defaults(cls: type[ModuleInline], env: FormEnv) -> dict[str, JsonValue]:
+            del cls
+            return field.fresh_inline_input(env)
 
         namespace["defaults"] = classmethod(defaults)
         inline = new_class(
@@ -780,25 +772,8 @@ class ModuleField:
         )
         return ModuleValues(cfg.model_dump(mode="json"), mode, source)
 
-    def inline_input(
-        self, previous: Mapping[str, JsonValue], env: FormEnv
-    ) -> dict[str, JsonValue]:
-        """Build detached inline input, copying captured refs or authored fallback.
-
-        Already-inline input is retained. Missing captured library/key uses the
-        Slot Template fallback, or static blank when absent. Wrong families and
-        source read failures propagate; copied and fresh input restores locks.
-        """
-        if previous.get("kind") == "inline":
-            return deepcopy(dict(previous))
-        name = previous.get("name")
-        if (
-            previous.get("kind") == "ref"
-            and isinstance(name, str)
-            and env.library is not None
-            and name in env.library.module_keys()
-        ):
-            return self.copy_input(name, env)
+    def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
+        """Build fresh Template/blank input and locks without copying any prior ref."""
         template = (
             self.node
             if isinstance(self.node, Template)
@@ -816,15 +791,6 @@ class ModuleField:
             set_path(module, path, scalar_seed(value))
         return {"kind": "inline", "module": self._project(module)}
 
-    def inline_writes(
-        self, previous: Mapping[str, JsonValue], env: FormEnv
-    ) -> dict[FormWritePath, JsonValue]:
-        """Prepare one model-aware leaf batch for nullable or required modules."""
-        candidate = self.inline_input(previous, env)
-        if self.nullable:
-            return {self.path: candidate}
-        return _input_writes(self.inline, candidate, self.path)
-
     def materialize(self, item: BaseModel, env: FormEnv) -> ConfigBase:
         if isinstance(item, ModuleRef):
             raw = item.name
@@ -839,22 +805,3 @@ class ModuleField:
         return (
             NativeModuleFactory.from_core(cfg, context=context) if self.native else cfg
         )
-
-
-def _input_writes(
-    model: type[BaseModel], data: Mapping[str, JsonValue], path: tuple[str, ...]
-) -> dict[FormWritePath, JsonValue]:
-    """Project prepared model input to public leaf writes, preserving containers."""
-    batch: dict[FormWritePath, JsonValue] = {}
-    for name, value in data.items():
-        annotation = model.model_fields[name].annotation
-        if isinstance(value, dict) and any(
-            isinstance(member, type) and issubclass(member, BaseModel)
-            for member in members(annotation)
-        ):
-            batch.update(
-                _input_writes(selected_model(annotation, value), value, (*path, name))
-            )
-        else:
-            batch[(*path, name)] = value
-    return batch

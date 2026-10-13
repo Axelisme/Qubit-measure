@@ -175,9 +175,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 101`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 134`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 118`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION = 102`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION = 135`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION = 119`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.

@@ -70,7 +70,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v115: read-only predictor inputs and readiness without an installed predictor.
 # v116: explicit working-point selection and saved writeback destinations.
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
-MCP_VERSION = 118
+MCP_VERSION = 119
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -156,7 +156,15 @@ GUI hook and may report operation_failed for an already failed operation.
 
 Tab cfg reads and edits return Form schema/input/values/errors. Ordinary strings
 are literal; expressions use {expr: text}, complex uses the reversible __complex__
-tag, and library keys are actual keys. Edit unique model-field leaf paths;
+tag, and library keys are actual keys. Read x-form-options in schema order:
+each item has label/value and optional editable fields or commands. Select by
+writing its whole value once; selected fields omit fixed tags, and ref options
+have no fields. Match every value leaf by JSON type and value, first match wins.
+Do not infer choices from unions. Unmatched input and errors remain unchanged.
+Recipe read_field exposes only selected fields; tag leaves are not read paths.
+Inline leaf paths include module. use_inline runs the owner's guarded to_inline
+command against fixed library capture, not a private copy path.
+Edit unique model-field leaf paths;
 write range start/stop/n separately. Invalid input remains editable with errors.
 Open and explicit Reset capture sources once. Recipe preparation always Reset
 before edits, including new tabs. Reset(aliases=...) is the single-use source

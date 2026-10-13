@@ -174,7 +174,7 @@ def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
     assert isinstance(cfg, Core) and cfg.probe.freq == 0 and cfg.probe.gain == 0.8
     inline = form.model.model_fields["probe"].annotation
     assert isinstance(inline, type) and issubclass(inline, ModuleInline)
-    defaults = inline.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
+    defaults = inline.defaults(env)
     module = defaults["module"]
     assert isinstance(module, dict) and module["freq"] == 0
     state.write({("probe", "kind"): "ref"}, env)

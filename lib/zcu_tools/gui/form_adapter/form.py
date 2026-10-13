@@ -33,7 +33,6 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
-    FormWritePath,
     LinRange,
     Option,
     static_defaults,
@@ -237,10 +236,8 @@ class _Section:
             namespace[name] = field_info
         section = self
 
-        def defaults(
-            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
-        ) -> dict[str, JsonValue]:
-            del cls, previous
+        def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
+            del cls
             return section.default_data(env)
 
         def choices(
@@ -514,52 +511,6 @@ class Form[C: ConfigBase]:
         if path[-1] not in section.modules:
             raise ValueError(f"Not a core module field: {'.'.join(path)}")
         return section.modules[path[-1]]
-
-    def module_inline_input(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[str, JsonValue]:
-        """Prepare inline input for a core module path against fixed env.
-
-        input must belong to this Form; otherwise raise TypeError. path consists
-        of nonempty core field names, not module descendants; invalid paths raise
-        ValueError. Copy a captured library Spec into supported detached input;
-        absent library/key uses Template fallback or editable static blank.
-        Wrong family/source failures propagate. Preserve existing inline values
-        and locks. No mutation, validation of the whole draft, or publication
-        occurs; blank may still require ordinary leaf edits before Run.
-        """
-        if input.model is not self.model:
-            raise TypeError("module_inline_input requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        return field.inline_input(raw if isinstance(raw, dict) else {}, env)
-
-    def module_inline_writes(
-        self, input: FormInput[FormModel], path: tuple[str, ...], env: FormEnv
-    ) -> dict[FormWritePath, JsonValue]:
-        """Prepare one public leaf batch for required or nullable module input.
-
-        input, path and env follow module_inline_input, with the same failures,
-        locks and captured-library/Template/blank preparation. The generated
-        inline branch defaults use only the Template/blank preparation during
-        switching, never this explicit copy path. Return no writes for already-inline input. The resource must
-        apply this batch once through guarded public write; preparation changes
-        no input and publishes nothing. Callers need not know module layout.
-        """
-        if input.model is not self.model:
-            raise TypeError("module_inline_writes requires this Form's input")
-        field = self._module_field(path)
-        raw: JsonValue = input.data
-        for part in path:
-            raw = raw.get(part) if isinstance(raw, dict) else None
-        previous = raw if isinstance(raw, dict) else {}
-        return (
-            {}
-            if previous.get("kind") == "inline"
-            else field.inline_writes(previous, env)
-        )
 
     def module_input_kind(
         self, input: FormInput[FormModel], path: tuple[str, ...]

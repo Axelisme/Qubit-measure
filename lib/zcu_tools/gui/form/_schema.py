@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import get_args, get_origin
 
 from pydantic import BaseModel, JsonValue, PydanticInvalidForJsonSchema
@@ -12,7 +11,7 @@ from pydantic.fields import FieldInfo
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import PydanticOmit, core_schema
 
-from ._json import copy_object, default_json
+from ._json import copy_object
 from ._sources import local_choices
 from ._structure import (
     accepts_expression,
@@ -21,6 +20,7 @@ from ._structure import (
     check_form_shape,
     discriminator,
     fixed_tag,
+    intrinsic_tags,
     library_key,
     model_types,
     schema_branch_model,
@@ -32,33 +32,29 @@ from .model import (
     FormModel,
     FormPath,
     LinRange,
-    ModuleInline,
     ModuleInput,
-    ModuleRef,
 )
 from .options import Option
 
 
 class _InputJsonSchema(GenerateJsonSchema):
-    """Annotate native tagged schemas, including containers, aliases and definitions.
+    """Preserve native tagged branch order, including typed tag collisions.
 
-    Pydantic owns traversal and refs. Core choice keys supply intrinsic typed
-    tags; native choice schemas identify branches without string-key collisions.
+    Pydantic owns traversal and refs. Iterate native choices rather than the
+    string-keyed discriminator mapping, where numeric and string tags collide.
     """
 
     def tagged_union_schema(
         self, schema: core_schema.TaggedUnionSchema
     ) -> dict[str, JsonValue]:
-        """Extend native oneOf with typed tags, preserving native skipped choices.
+        """Emit ordered concrete choices, preserving native skipped branches.
 
-        Other generation errors propagate. Non-finite/non-JSON tags raise
-        ValueError through the shared JSON codec.
+        Other generation errors propagate. Intrinsic tags remain in the model
+        declaration; no consumer-specific branch metadata is emitted.
         """
         generated = copy_object(super().tagged_union_schema(schema))
         branches: list[dict[str, JsonValue]] = []
-        identities: list[list[JsonValue]] = []
-        # Group aliases before adding metadata so it does not change schema equality.
-        for tag, choice in schema["choices"].items():
+        for choice in schema["choices"].values():
             try:
                 choice_schema = self.generate_inner(choice)
             except (PydanticOmit, PydanticInvalidForJsonSchema):
@@ -67,12 +63,6 @@ class _InputJsonSchema(GenerateJsonSchema):
             branch = copy_object(choice_schema)
             if branch not in branches:
                 branches.append(branch)
-                identities.append([])
-            index = branches.index(branch)
-            native_tag = tag.value if isinstance(tag, Enum) else tag
-            identities[index].append(default_json(native_tag))
-        for branch, tags in zip(branches, identities, strict=True):
-            branch["x-form-discriminator-values"] = tags
         generated["oneOf"] = [branch for branch in branches]
         return generated
 
@@ -317,7 +307,7 @@ def _container_nodes(
 def _tagged_branches(
     variants: list[JsonValue], tag_key: str, root: dict[str, JsonValue]
 ) -> list[tuple[list[JsonValue], dict[str, JsonValue]]]:
-    """Inline emitted tagged branches as (intrinsic tags, model branch) pairs.
+    """Inline emitted tagged branches as (native tags, model branch) pairs.
 
     Pydantic emits a named union member (a ``type`` alias) that is tagged on
     the same key as one branch carrying all of its members' tags. Replace that
@@ -329,9 +319,6 @@ def _tagged_branches(
     for variant in variants:
         if not isinstance(variant, dict):
             raise ValueError("Tagged schema branch must be an object")
-        tags = variant.get("x-form-discriminator-values")
-        if not isinstance(tags, list):
-            raise ValueError("Tagged schema branch lacks intrinsic identities")
         _inline_ref(variant, root)
         nested = variant.get("oneOf")
         marker = variant.get("discriminator")
@@ -342,8 +329,37 @@ def _tagged_branches(
         ):
             branches.extend(_tagged_branches(nested, tag_key, root))
         else:
-            branches.append((tags, variant))
+            props = variant.get("properties")
+            selector = props.get(tag_key) if isinstance(props, dict) else None
+            if not isinstance(selector, dict):
+                raise ValueError("Tagged schema branch lacks a selector")
+            branches.append((_native_tags(selector, root), variant))
     return branches
+
+
+def _native_tags(
+    node: dict[str, JsonValue], root: dict[str, JsonValue]
+) -> list[JsonValue]:
+    """Read an undecorated selector to associate its schema with the annotation.
+
+    This runs before choices alter enums. Tags used by options come from that
+    annotation owner, not from this schema association or the wire mapping.
+    """
+    node = _resolve(node, root)
+    if "const" in node:
+        return [node["const"]]
+    values = node.get("enum")
+    if isinstance(values, list):
+        return values
+    variants = node.get("anyOf", node.get("allOf"))
+    if isinstance(variants, list):
+        return [
+            tag
+            for variant in variants
+            if isinstance(variant, dict)
+            for tag in _native_tags(variant, root)
+        ]
+    raise ValueError("Tagged schema selector lacks native Literal values")
 
 
 def _child_nodes(
@@ -402,72 +418,18 @@ class _Projection:
     """Inputs shared by one input_schema call.
 
     root is the partial schema being decorated in place. env is the caller's
-    environment. library_specs holds each captured library key with its Spec, read
-    once per call, or is None when env has no captured library. branch_tags maps
-    each tagged-union branch model of this form and ModuleInput, plus LinRange, to
-    its tag key (see branch_tags).
+    environment. branch_tags maps each tagged-union model to its tag key.
+    owners associates occurrence-local schema objects with their annotation
+    models before dynamic choices change selectors. Copies used for option
+    fields walk alongside these originals; identity never enters wire schema.
     """
 
     root: dict[str, JsonValue]
     env: FormEnv
-    library_specs: tuple[tuple[str, BaseModel], ...] | None
     branch_tags: Mapping[type[BaseModel], str]
     selections: dict[FormPath, tuple[Option, ...]] = field(default_factory=dict)
     active_fields: Mapping[FormPath, FieldInfo] | None = None
-
-
-def _library_specs(env: FormEnv) -> tuple[tuple[str, BaseModel], ...] | None:
-    library = env.library
-    if library is None:
-        return None
-    return (
-        *((key, library.module_spec(key)) for key in library.module_keys()),
-        *((key, library.waveform_spec(key)) for key in library.waveform_keys()),
-    )
-
-
-def _module_input(info: FieldInfo) -> bool:
-    """Recognize the ref/inline pair by base identity, including generated models.
-
-    info is the field declaration. Its non-null members must be exactly one
-    ModuleRef branch and one ModuleInline branch, or subclasses of those bases.
-    Their kind tag selects a name key or an inline module; schema consumers
-    need not infer branch identity from generated class names or properties.
-    Nullable input schemas keep the null branch. Only their non-null schema
-    node receives the merged key/inline selector marker. The editor contract
-    combines None, library keys and inline kinds in one selector, without an
-    Enabled checkbox. Required fields omit None; ordinary nullable models
-    retain their Enabled control.
-    """
-    members = tuple(m for m in alternatives(info.annotation) if m is not type(None))
-    return (
-        len(members) == 2
-        and all(isinstance(m, type) for m in members)
-        and sum(isinstance(m, type) and issubclass(m, ModuleRef) for m in members) == 1
-        and sum(isinstance(m, type) and issubclass(m, ModuleInline) for m in members)
-        == 1
-    )
-
-
-def _ref_keys(
-    target: dict[str, JsonValue],
-    projection: _Projection,
-    options: tuple[JsonValue, ...] | None,
-) -> None:
-    """List a ModuleRef name's offered library keys in x-form-library-keys.
-
-    target is the name property node. With a captured library the list is
-    every library module key, because an inline ModuleSpec accepts every
-    module type; options, the name's declared choices or None, keeps only
-    the keys among them, so each listed key passes both the choices and the
-    library check. Without a captured library the node gets no list.
-    """
-    library = projection.env.library
-    if library is None:
-        return
-    target["x-form-library-keys"] = [
-        key for key in library.module_keys() if options is None or key in options
-    ]
+    owners: dict[int, type[BaseModel]] = field(default_factory=dict)
 
 
 def _expression_rule(
@@ -507,7 +469,10 @@ def _local_options(
 
 
 def _automatic_options(
-    info: FieldInfo, target: dict[str, JsonValue], choices: tuple[JsonValue, ...] | None
+    info: FieldInfo,
+    target: dict[str, JsonValue],
+    choices: tuple[JsonValue, ...] | None,
+    field_nodes: Mapping[type[BaseModel], dict[str, JsonValue]],
 ) -> tuple[Option, ...]:
     if choices is not None:
         return tuple(Option(str(value), value) for value in choices)
@@ -516,18 +481,12 @@ def _automatic_options(
     variants = node.get("oneOf")
     if tag is not None and isinstance(variants, list):
         result: list[Option] = []
-        for variant in variants:
-            if (
-                isinstance(variant, dict)
-                and isinstance(tags := variant.get("x-form-discriminator-values"), list)
-                and tags
-            ):
-                # Each intrinsic tag, an alias included, is its own option;
-                # all tags of one branch select that branch's fields.
-                fields = schema_branch_model(info, tags)
-                result.extend(
-                    Option(str(value), {tag: value}, fields=fields) for value in tags
-                )
+        for model in field_nodes:
+            # One option per intrinsic tag; aliases share the model's fields.
+            result.extend(
+                Option(str(value), {tag: value}, fields=model)
+                for value in intrinsic_tags(model, tag)
+            )
         if type(None) in alternatives(info.annotation):
             result.insert(0, Option("None", None))
         return tuple(result)
@@ -539,21 +498,30 @@ def _automatic_options(
     return ()
 
 
-def _selected_fields(node: dict[str, JsonValue], value: dict[str, JsonValue]) -> None:
+def _selected_fields(
+    node: dict[str, JsonValue],
+    original: dict[str, JsonValue],
+    value: dict[str, JsonValue],
+    projection: _Projection,
+) -> dict[str, JsonValue]:
+    """Select copied fields using the original occurrence's annotation owner."""
     marker = node.get("discriminator")
     variants = node.get("oneOf")
     if not isinstance(marker, dict) or not isinstance(variants, list):
-        return
+        return original
     tag = marker.get("propertyName")
     if not isinstance(tag, str) or tag not in value:
-        return
-    for variant in variants:
-        if (
-            isinstance(variant, dict)
-            and isinstance(tags := variant.get("x-form-discriminator-values"), list)
-            and any(
-                type(item) is type(value[tag]) and item == value[tag] for item in tags
-            )
+        return original
+    originals = original.get("oneOf")
+    if not isinstance(originals, list):
+        raise ValueError("Option fields lack their original union schema")
+    for variant, source in zip(variants, originals, strict=True):
+        if not isinstance(variant, dict) or not isinstance(source, dict):
+            continue
+        model = projection.owners[id(source)]
+        if any(
+            type(item) is type(value[tag]) and item == value[tag]
+            for item in intrinsic_tags(model, tag)
         ):
             metadata = {
                 key: item
@@ -563,25 +531,32 @@ def _selected_fields(node: dict[str, JsonValue], value: dict[str, JsonValue]) ->
             node.clear()
             node.update(copy_object(variant))
             node.update(metadata)
-            return
+            return source
     raise ValueError(f"Option fields have no branch for {tag!r}: {value[tag]!r}")
 
 
-def _omit_selected_tags(node: dict[str, JsonValue], value: JsonValue) -> None:
+def _omit_selected_tags(
+    node: dict[str, JsonValue],
+    original: dict[str, JsonValue],
+    value: JsonValue,
+    projection: _Projection,
+) -> None:
     if not isinstance(value, dict):
         return
     node = _non_null(node)
-    _selected_fields(node, value)
+    original = _selected_fields(node, _non_null(original), value, projection)
     props = node.get("properties")
-    if not isinstance(props, dict):
+    originals = original.get("properties")
+    if not isinstance(props, dict) or not isinstance(originals, dict):
         return
     for name, selected_value in value.items():
         target = props.get(name)
-        if isinstance(target, dict):
+        source = originals.get(name)
+        if isinstance(target, dict) and isinstance(source, dict):
             if "const" in target or "enum" in target:
                 props.pop(name)
             else:
-                _omit_selected_tags(target, selected_value)
+                _omit_selected_tags(target, source, selected_value, projection)
 
 
 def _project_option(
@@ -593,17 +568,17 @@ def _project_option(
     if option.fields is not None:
         model = option.fields
         if model in field_nodes:
-            root = copy_object(field_nodes[model])
+            original = field_nodes[model]
+            owner = projection
         else:
             raw = copy_object(
                 model.model_json_schema(schema_generator=_InputJsonSchema)
             )
-            root = _partial(raw)
-            child_projection = _Projection(
-                root, projection.env, projection.library_specs, projection.branch_tags
-            )
-            _decorate(model, root, child_projection, set(), _Declarations(), ())
-        _omit_selected_tags(root, option.value)
+            original = _partial(raw)
+            owner = _Projection(original, projection.env, projection.branch_tags)
+            _decorate(model, original, owner, set(), _Declarations(), ())
+        root = copy_object(original)
+        _omit_selected_tags(root, original, option.value, owner)
         result["fields"] = root
     if option.commands:
         result["commands"] = [
@@ -651,7 +626,7 @@ def _selection_schema(
         _apply_choices(target, values)
     selections = declarations.options.get((name,))
     if selections is None:
-        selections = _automatic_options(info, target, values)
+        selections = _automatic_options(info, target, values, field_nodes)
     if selections or (name,) in declarations.options or values is not None:
         if declarations.active:
             projection.selections[path] = selections
@@ -683,6 +658,7 @@ def _decorate(
     seen = seen | {model}
     root = projection.root
     _inline_ref(node, root)
+    projection.owners[id(node)] = model
     declarations = _Declarations(
         {**inherited.choices, **local_choices(model, projection.env)},
         {**inherited.options, **_local_options(model, projection.env)},
@@ -703,12 +679,9 @@ def _decorate(
         if models and _label(info) is None:
             # The inlined definition carries its class name as title.
             target["title"] = _section_title(name)
-        if _module_input(info):
-            _non_null(target)["x-form-key-or-inline"] = True
         if library_key(model, name):
             # A library key is a plain string, never an Expr envelope.
             _without_expr(target)
-            _ref_keys(target, projection, declarations.choices.get((name,)))
         # Without a union selector, a branch model's tag has only one value.
         fixed = bool(models) and discriminator(info) is None
         field_nodes = dict(_child_nodes(info, target, root))
@@ -757,7 +730,6 @@ def _project(
     projection = _Projection(
         root,
         env,
-        _library_specs(env),
         tags,
         active_fields=_active_fields(model, data) if data is not None else None,
     )

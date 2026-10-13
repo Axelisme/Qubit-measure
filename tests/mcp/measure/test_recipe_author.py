@@ -143,21 +143,16 @@ def test_author_explicit_invalid_library_does_not_fall_back(tmp_path):
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")
         initial = tab.read_field("modules.readout")
-        client.transport.replies["tab.edit_cfg"] = {
-            "ok": False,
-            "error": {
-                "code": "invalid_params",
-                "message": "unknown library",
-                "reason": "form_errors",
-            },
-        }
+        before = list(client.transport.sent)
         with pytest.raises(GuiRpcError) as error:
             tab.use_library(
                 "modules.readout", "unknown.readout.main", required="readout_ref"
             )
-        assert error.value.reason == "form_errors"
+        assert error.value.reason == "invalid_cfg"
+        assert "modules.readout" in str(error.value)
+        assert "Available keys" in str(error.value)
         assert tab.read_field("modules.readout") == initial
-        assert sum(method == "tab.edit_cfg" for method, _ in client.transport.sent) == 1
+        assert client.transport.sent == before
 
 
 @pytest.mark.parametrize("expts", [0, 1, 1.5, True])

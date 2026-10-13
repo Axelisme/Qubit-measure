@@ -1,6 +1,5 @@
 """Expression defaults become direct values when input is built or a branch opens."""
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -33,10 +32,8 @@ class Seeded(FormModel):
     authored: float = 1.0
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
         data.update(SEEDED_EXPRESSIONS)
         return data
 
@@ -47,11 +44,9 @@ class Holder(FormModel):
     section: Seeded
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
-        data["section"] = Seeded.defaults(env, {})
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
+        data["section"] = Seeded.defaults(env)
         return data
 
 
@@ -70,10 +65,8 @@ class Derived(FormModel):
     offset: float = 0.0
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
-        data = super().defaults(env, previous)
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
+        data = super().defaults(env)
         data["level"] = {"expr": "general.ext.seed + 1"}
         return data
 

@@ -63,11 +63,9 @@ class OvernightPlanForm(FormModel):
     )
 
     @classmethod
-    def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
-    ) -> dict[str, JsonValue]:
+    def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Declare flux_dev from $flux_dev, evaluated when input is built; leave monitoring inputs empty."""
-        data = super().defaults(env, previous)
+        data = super().defaults(env)
         data["flux_dev"] = {"expr": "$flux_dev"}
         return data
 

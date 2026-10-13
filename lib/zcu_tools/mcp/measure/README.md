@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，recipe inline 轉換共用 guarded 選項指令
+**Last updated:** 2026-10-14，recipe 欄位依選項 fields，library selection 原子拒絕
 
 # `zcu_tools/mcp/measure/`
 
@@ -34,9 +34,9 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
-`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕 key selection。
+`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 與 nested key 保存 tagged ref 的 kind/name，inline 保存 kind/module。持久 Spec 的 child key 仍是字串。`use_library` 只寫清單中 value 恰為該 ref 的 Option，以一次整個欄位 write 選 key。未列出的 key 在 RPC 前拒絕，訊息指名欄位並列可用 keys。Locked Slot 的固定 inline tag 也在 RPC 前拒絕 key selection；沒有 captured library 的普通欄位不因此變成 locked。
 
-`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。locked 與 fields 來自公開 Form schema，errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
+`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。fields 只列選中 Option 的可編輯子欄位，不含 tag；ref 沒有 fields。MCP 依 value 葉的 JSON 型別和值匹配第一項，不從 union 猜 branch。mode 只讀公開 S2 input kind。locked 沿單一 model 的固定 kind.const 判斷，不因缺 key 選項而鎖定。errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Tag 葉不是 read_field 路徑。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.module.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
 
 `RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
 

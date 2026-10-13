@@ -45,7 +45,15 @@ def branch(field: dict[str, JsonValue], tag: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(branches, list)
     for candidate in branches:
         assert isinstance(candidate, dict)
-        tags = candidate.get("x-form-discriminator-values")
+        properties = candidate["properties"]
+        assert isinstance(properties, dict)
+        discriminator = field["discriminator"]
+        assert isinstance(discriminator, dict)
+        name = discriminator["propertyName"]
+        assert isinstance(name, str)
+        selector = properties[name]
+        assert isinstance(selector, dict)
+        tags = selector.get("enum", [selector.get("const")])
         assert isinstance(tags, list)
         if tag in tags:
             return candidate
