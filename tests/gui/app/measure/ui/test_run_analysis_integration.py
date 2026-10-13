@@ -378,21 +378,11 @@ def test_A3_Writeback_items_show_current_proposed_and_edit(qapp, make_ctrl):
 def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
     """The service captures baseline summaries from a fixed ParameterContext."""
     from zcu_tools.cfg_model import DirectReadoutCfg
-    from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-    from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
     from zcu_tools.gui.app.measure.services.writeback import WritebackService
-    from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.event_bus import BaseEventBus
-
-    from tests.gui.app.measure._cfg_fakes import PublishedHost
 
     parameters = _parameters()
-    state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))
     ctrl = make_ctrl()
-    cfg_editor = CfgEditorService(
-        PublishedHost(state), ctrl, MagicMock(), MagicMock(), BaseEventBus()
-    )
-    svc = WritebackService(cfg_editor, ctrl)
+    svc = WritebackService(ctrl, arb_names=lambda: ())
     md_item = ParameterWriteback(
         target_name="$resonator.freq", description="freq", proposed_value=6100.0
     )
@@ -401,13 +391,10 @@ def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
         description="missing",
         proposed_value=1,
     )
-    spec, value = module_cfg_to_value(
-        DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=0.0)
-    )
     module_item = ModuleWriteback(
         target_name="$resonator.readout.new_mod",
         description="new",
-        edit_schema=CfgSchema(spec, value),
+        proposal=DirectReadoutCfg(ro_ch=0, ro_length=1.0, ro_freq=0.0),
     )
     draft = svc.create_draft(
         [md_item, md_item2, module_item],

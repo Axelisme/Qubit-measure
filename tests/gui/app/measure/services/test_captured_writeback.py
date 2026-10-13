@@ -14,16 +14,10 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     PostAnalyzeRequest,
     PostWritebackRequest,
-    WaveformWriteback,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.services.cfg_editor import CfgEditorService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.writeback import (
     WritebackDraft,
@@ -31,7 +25,6 @@ from zcu_tools.gui.app.measure.services.writeback import (
     WritebackService,
     WritebackWritten,
 )
-from zcu_tools.gui.cfg import CfgSchema, EvalValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
@@ -86,8 +79,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         context.use_point(PointUseRequest("working"))
         control = ContextControlFacet(context=context)
         control.add_component("Q1", "fake/drive/a", {})
-        editor = CfgEditorService(MagicMock(), control, MagicMock(), MagicMock(), bus)
-        service = WritebackService(editor, write_port=control)
+        service = WritebackService(control, arb_names=lambda: ())
         yield WritebackSession(entry, control, service)
         assert registry_state() == installed
     finally:
@@ -108,10 +100,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
         control = ContextControlFacet(context=native.context)
-        editor = CfgEditorService(
-            MagicMock(), control, MagicMock(), MagicMock(), native.bus
-        )
-        service = WritebackService(editor, write_port=control)
+        service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
         captured = control.read_context()
         assert tab.run.metadata is not None
@@ -187,10 +176,7 @@ def test_analysis_draft_uses_start_run_identity(
         monkeypatch.setattr(tab.adapter, "analyze", analyze)
         monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
         control = ContextControlFacet(context=native.context)
-        editor = CfgEditorService(
-            MagicMock(), control, MagicMock(), MagicMock(), native.bus
-        )
-        writeback = WritebackService(editor, write_port=control)
+        writeback = WritebackService(control, arb_names=lambda: ())
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
         )
@@ -263,10 +249,7 @@ def test_post_analysis_draft_retains_primary_identity(
         captured = tab.run.parameters
         expected = native.metadata.run_id if source in ("run", "load") else None
         control = ContextControlFacet(context=native.context)
-        editor = CfgEditorService(
-            MagicMock(), control, MagicMock(), MagicMock(), native.bus
-        )
-        writeback = WritebackService(editor, write_port=control)
+        writeback = WritebackService(control, arb_names=lambda: ())
         primary_draft = (
             None
             if source == "without_primary_draft"
@@ -367,37 +350,41 @@ def test_post_rejects_incompatible_primary_draft_before_submission(
             plots.finish()
 
 
-def test_writeback_lowers_waveform_expression_from_creation_capture(
+def test_writeback_evaluates_module_expression_from_creation_capture(
     saved_session: WritebackSession,
 ) -> None:
     session = saved_session
     initial = session.control.read_context()
-    session.control.set_parameter(initial.target, "general.ext.flux_value", 1.0)
+    session.control.set_parameter(initial.target, "general.ext.flux_value", 0.5)
     captured = session.control.read_context()
-    spec, value = waveform_cfg_to_value(
-        ConstWaveformCfg(length=1.0).model_dump(mode="python")
-    )
-    value.fields["length"] = EvalValue("general.ext.flux_value")
     draft = session.service.create_draft(
         [
-            WaveformWriteback(
-                "Q1.waveforms.base",
-                "Captured waveform",
-                edit_schema=CfgSchema(spec, value),
+            ModuleWriteback(
+                "Q1.pulses.pi",
+                "Captured pulse",
+                PulseSpec(
+                    ch=0,
+                    nqz=1,
+                    freq=100.0,
+                    gain=0.2,
+                    waveform=ConstWaveformCfg(length=0.1),
+                ),
             )
         ],
         parameters=captured,
         experiment_name="test/writeback",
     )
-    session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
+    draft.edit("ml-1", edits={("gain",): {"expr": "general.ext.flux_value"}})
+    session.control.set_parameter(captured.target, "general.ext.flux_value", 0.9)
     session.service.apply_draft(draft)
     current = session.control.read_context()
-    assert current.library.get_waveform("Q1.waveforms.base").length == 1.0
+    written = current.library.module_spec("Q1.pulses.pi")
+    assert isinstance(written, PulseSpec) and written.gain == 0.5
     event = session.entry.ledger.events()[-1]
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.writes[0].path == "Q1.waveforms.base"
-    source = current.library.meta("Q1.waveforms.base.length")
+    assert event.payload.writes[0].path == "Q1.pulses.pi"
+    source = current.library.meta("Q1.pulses.pi.gain")
     assert source is not None and source.source == event.id
 
 
@@ -543,49 +530,28 @@ def test_receipt_reads_actual_role_target_after_point_change(
     assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
 
 
-@pytest.mark.parametrize("kind", ["module", "waveform"])
 def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     saved_session: WritebackSession,
-    kind: str,
 ) -> None:
     session = saved_session
     initial = session.control.read_context()
     session.control.set_parameter(initial.target, "general.ext.flux_value", 0.2)
     captured = session.control.read_context()
-    if kind == "module":
-        cfg = PulseSpec(
-            ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
-        )
-        spec, value = module_cfg_to_value(cfg.model_dump(mode="python"))
-        value.fields["gain"] = EvalValue("general.ext.flux_value")
-        item = ModuleWriteback(
-            "Q1.pulses.pi", "Pulse", edit_schema=CfgSchema(spec, value), stderr=0.02
-        )
-        session.control.set_module(
-            captured.target, item.target_name, cfg.model_copy(update={"gain": 0.6})
-        )
-        item_id, field = "ml-1", "gain"
-    else:
-        spec, value = waveform_cfg_to_value(
-            ConstWaveformCfg(length=0.2).model_dump(mode="python")
-        )
-        value.fields["length"] = EvalValue("general.ext.flux_value")
-        item = WaveformWriteback(
-            "Q1.waveforms.base",
-            "Waveform",
-            edit_schema=CfgSchema(spec, value),
-            stderr=0.03,
-        )
-        session.control.set_waveform(
-            captured.target, item.target_name, ConstWaveformCfg(length=0.6)
-        )
-        item_id, field = "wf-1", "length"
+    cfg = PulseSpec(
+        ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
+    )
+    item = ModuleWriteback("Q1.pulses.pi", "Pulse", cfg, stderr=0.02)
+    session.control.set_module(
+        captured.target, item.target_name, cfg.model_copy(update={"gain": 0.6})
+    )
+    item_id, field = "ml-1", "gain"
     draft = session.service.create_draft(
         [item],
         parameters=captured,
         run_id="original-run",
         experiment_name="test/writeback",
     )
+    draft.edit(item_id, edits={(field,): {"expr": "general.ext.flux_value"}})
     session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6

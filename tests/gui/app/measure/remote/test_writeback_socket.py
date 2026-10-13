@@ -3,26 +3,23 @@
 import numpy as np
 import pytest
 from pydantic import ValidationError
-from zcu_tools.cfg_model import ConstWaveformCfg, ModuleCfgFactory, PulseSpec
-from zcu_tools.gui.app.measure.adapter import (
-    ModuleWriteback,
-    ParameterWriteback,
-    WaveformWriteback,
-)
-from zcu_tools.gui.app.measure.cfg_schemas import (
-    module_cfg_to_value,
-    waveform_cfg_to_value,
-)
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 from zcu_tools.gui.app.measure.services.writeback import WritebackEdit
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
+from tests.gui.app.measure._synthetic import (
+    MODULE_PROPOSAL_TARGET,
+    MODULE_PROPOSAL_WAVEFORM,
+    ModuleProposalAdapter,
+    SampleAdapter,
+    SampleParams,
+)
 
-from ._helpers import Fixture, call, open_client
+from ._helpers import Fixture, call, mcp_client, open_client
 from ._point_application import PointAdapter, PointApplication
 
 
@@ -173,118 +170,164 @@ def test_complete_md_values_survive_preview_and_write_socket(
         fx.stop()
 
 
-def test_batch_write_keeps_same_named_module_and_waveform_results(
-    qapp, monkeypatch, point_models, point_registry_guard
-):
-    module = ModuleCfgFactory.from_raw(
-        {
-            "type": "pulse",
-            "ch": 0,
-            "nqz": 1,
-            "freq": 100.0,
-            "gain": 0.5,
-            "phase": 0.0,
-            "pre_delay": 0.0,
-            "post_delay": 0.0,
-            "waveform": {"style": "const", "length": 0.1},
-        }
-    )
-    waveform = ConstWaveformCfg(length=0.1)
-    module_schema = CfgSchema(*module_cfg_to_value(module))
-    waveform_schema = CfgSchema(*waveform_cfg_to_value(waveform))
-    monkeypatch.setattr(
-        SampleAdapter,
-        "get_writeback_items",
-        lambda self, request: [
-            ModuleWriteback(
-                target_name="Q1.pulses.same", description="M", edit_schema=module_schema
-            ),
-            WaveformWriteback(
-                target_name="Q1.waveforms.same",
-                description="W",
-                edit_schema=waveform_schema,
-            ),
-        ],
-    )
+@pytest.fixture
+def module_fixture(qapp, point_models, point_registry_guard):
+    """Return a started GUI fixture whose Q1 holds a pulse using a waveform key."""
     fx = Fixture(active_label="ctx001")
+    fx.registry.register("synthetic/module_writeback", ModuleProposalAdapter)
     context = fx.ctrl.context_control
     target = context.read_context().target
     context.add_component("Q1", "fake/drive/a", {})
-    context.set_module(
-        target, "Q1.pulses.same", PulseSpec.model_validate(module.to_dict())
-    )
-    context.set_waveform(target, "Q1.waveforms.same", waveform)
-    before_module = PulseSpec.model_validate(module.to_dict()).model_dump(mode="python")
-    before_waveform = waveform.model_dump(mode="python")
-    after_module = PulseSpec.model_validate(
-        {**module.to_dict(), "gain": 0.8}
-    ).model_dump(mode="python")
-    after_waveform = ConstWaveformCfg(length=0.2).model_dump(mode="python")
+    context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
+    context.set_module(target, MODULE_PROPOSAL_TARGET, _stored_pulse())
     fx.start()
-    sock = open_client(fx.service.port)
     try:
-        tab = fx.ctrl.new_tab("fake")
-        for operation in (
-            lambda: fx.ctrl.start_run(tab),
-            lambda: fx.ctrl.analyze(tab, SampleParams()),
-        ):
-            assert (
-                call(
-                    sock,
-                    "operation.await",
-                    {
-                        "operation_id": operation(),
-                        "timeout": 2,
-                    },
-                )["result"]["status"]
-                == "finished"
-            )
-        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
-        assert call(sock, "context.snapshot", {})["ok"]
-        result = call(
+        yield fx
+    finally:
+        fx.stop()
+
+
+def _stored_pulse(**changes: object) -> PulseSpec:
+    """Return the stored pulse; the synthetic proposal differs only in gain 0.3."""
+    fields: dict[str, object] = {
+        "ch": 0,
+        "nqz": 1,
+        "freq": 5000.0,
+        "gain": 0.2,
+        "waveform": MODULE_PROPOSAL_WAVEFORM,
+    }
+    return PulseSpec.model_validate(fields | changes)
+
+
+def _analyzed_module_tab(fx: Fixture, sock) -> str:
+    tab = fx.ctrl.new_tab("synthetic/module_writeback")
+    for operation in (
+        lambda: fx.ctrl.start_run(tab),
+        lambda: fx.ctrl.analyze(tab, SampleParams()),
+    ):
+        reply = call(
+            sock, "operation.await", {"operation_id": operation(), "timeout": 2}
+        )
+        assert reply["result"]["status"] == "finished", reply
+    assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+    assert call(sock, "context.snapshot", {})["ok"]
+    return tab
+
+
+def test_module_preview_proposes_the_current_shape(module_fixture):
+    sock = open_client(module_fixture.service.port)
+    try:
+        tab = _analyzed_module_tab(module_fixture, sock)
+        preview = call(
+            sock, "tab.writeback_preview", {"tab_id": tab, "subtab_id": "analysis"}
+        )
+        assert preview["ok"], preview
+        (item,) = preview["result"]["items"]
+        assert (item["id"], item["kind"]) == ("ml-1", "module")
+        assert item["actual_path"] == MODULE_PROPOSAL_TARGET
+        assert item["current"] == _stored_pulse().model_dump(mode="json")
+        assert item["proposed"] == _stored_pulse(gain=0.3).model_dump(mode="json")
+    finally:
+        sock.close()
+
+
+def test_module_edits_by_path_reply_with_form_and_write_the_edited_spec(
+    module_fixture,
+):
+    sock = open_client(module_fixture.service.port)
+    try:
+        tab = _analyzed_module_tab(module_fixture, sock)
+        params = {"tab_id": tab, "subtab_id": "analysis"}
+        edited = call(
+            sock,
+            "tab.writeback_set",
+            {**params, "id": "ml-1", "edits": [{"path": ["freq"], "value": 5100.0}]},
+        )
+        assert edited["ok"], edited
+        reply = edited["result"]
+        assert reply["item"]["id"] == "ml-1"
+        assert reply["errors"] == []
+        assert reply["input"]["freq"] == 5100.0
+        assert reply["input"]["waveform"] == MODULE_PROPOSAL_WAVEFORM
+        assert {"path": ["freq"], "value": 5100.0} in reply["values"]
+        assert "freq" in reply["schema"]["properties"]
+        written = call(
             sock,
             "tab.writeback_write",
             {
-                "tab_id": tab,
-                "subtab_id": "analysis",
+                **params,
                 "write": [
-                    {"id": "ml-1", "edits": [{"path": "gain", "value": 0.8}]},
-                    {"id": "wf-1", "edits": [{"path": "length", "value": 0.2}]},
+                    {
+                        "id": "ml-1",
+                        "edits": [{"path": ["post_delay"], "value": 0.05}],
+                    }
                 ],
             },
         )
-        assert result["ok"], result
-        assert (
-            fx.ctrl.read_context()
-            .library.module_spec("Q1.pulses.same")
-            .model_dump(mode="python")["gain"]
-            == 0.8
-        )
-        assert (
-            fx.ctrl.read_context()
-            .library.waveform_spec("Q1.waveforms.same")
-            .model_dump(mode="python")["length"]
-            == 0.2
-        )
-        assert result["result"]["written"] == [
+        assert written["ok"], written
+        expected = _stored_pulse(gain=0.3, freq=5100.0, post_delay=0.05)
+        assert written["result"]["written"] == [
             {
                 "id": "ml-1",
                 "kind": "module",
-                "target": "Q1.pulses.same",
-                "before": before_module,
-                "after": after_module,
-            },
-            {
-                "id": "wf-1",
-                "kind": "waveform",
-                "target": "Q1.waveforms.same",
-                "before": before_waveform,
-                "after": after_waveform,
-            },
+                "target": MODULE_PROPOSAL_TARGET,
+                "before": _stored_pulse().model_dump(mode="json"),
+                "after": expected.model_dump(mode="json"),
+            }
         ]
+        library = module_fixture.ctrl.read_context().library
+        assert library.module_spec(MODULE_PROPOSAL_TARGET) == expected
     finally:
         sock.close()
-        fx.stop()
+
+
+def test_invalid_module_edit_rejects_write_with_field_path(module_fixture):
+    sock = open_client(module_fixture.service.port)
+    try:
+        tab = _analyzed_module_tab(module_fixture, sock)
+        params = {"tab_id": tab, "subtab_id": "analysis"}
+        edited = call(
+            sock,
+            "tab.writeback_set",
+            {**params, "id": "ml-1", "edits": [{"path": ["gain"], "value": "bad"}]},
+        )
+        assert edited["ok"], edited
+        assert [error["path"] for error in edited["result"]["errors"]] == [["gain"]]
+        before = module_fixture.ctrl.read_context().library.document()
+        rejected = call(
+            sock, "tab.writeback_write", {**params, "write": [{"id": "ml-1"}]}
+        )
+        assert rejected["ok"] is False
+        assert rejected["error"]["code"] == "invalid_params"
+        assert [error["path"] for error in rejected["error"]["data"]["errors"]] == [
+            ["gain"]
+        ]
+        assert module_fixture.ctrl.read_context().library.document() == before
+        unknown = call(
+            sock,
+            "tab.writeback_set",
+            {**params, "id": "ml-1", "edits": [{"path": ["unknown"], "value": 1}]},
+        )
+        assert unknown["ok"] is False
+        assert unknown["error"]["code"] == "invalid_params"
+    finally:
+        sock.close()
+
+
+def test_apply_writeback_tool_writes_module_proposal_by_id(
+    module_fixture, tmp_path, request
+):
+    sock = open_client(module_fixture.service.port)
+    try:
+        tab = _analyzed_module_tab(module_fixture, sock)
+    finally:
+        sock.close()
+    _, invoke = mcp_client(module_fixture.service.port, tmp_path, request=request)
+    invoke("connect", {"port": module_fixture.service.port})
+    receipt = invoke("apply_writeback", {"tab": tab})
+    assert receipt["status"] == "finished", receipt
+    library = module_fixture.ctrl.read_context().library
+    assert library.module_spec(MODULE_PROPOSAL_TARGET) == _stored_pulse(gain=0.3)
 
 
 def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
