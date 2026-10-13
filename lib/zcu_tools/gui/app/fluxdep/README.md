@@ -79,7 +79,7 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   Finish 經 Controller services 發布。Window close dispose 全部 contexts 並 quiesce runner；view detach 不終止 Session。
 - **`event_bus.py`** — fluxdep 的 payload 型別，掛在共用 `BaseEventBus`
   （`gui/event_bus`，payload-type-key 訂閱）上；bus 機制共用、payload 定義 per-app。
-- **`ui/`** — `MainWindow`（上方列 + Spectra／Fit 兩頁，見「主視窗外殼」）、互動 widget
+- **`ui/`** — `MainWindow`（上方列 + Spectra／Fit 兩頁，見「主視窗外殼」）、譜清單 `spectrum_list`、階段列 `stage_bar`、互動 widget
   （`ui/interactive/`）、`load_dialog`/`export_dialog`。共用層（與 dispersive）：
   `LoadSpectrumDialog` subclass `gui/widgets/load_dialog.LoadDataDialog`（共用 file
   row/transpose/preview/OK-gate，`_build_options` 掛 Type/Inherit combo、`result_request`

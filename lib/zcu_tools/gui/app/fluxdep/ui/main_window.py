@@ -32,21 +32,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import QModelIndex, Qt
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QPushButton,
     QSplitter,
     QStackedWidget,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -55,7 +51,6 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.fluxdep.controller import (
     Controller,
     PendingKind,
-    SpectrumRow,
     pending_kind,
 )
 from zcu_tools.gui.app.fluxdep.event_bus import (
@@ -80,6 +75,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.app.fluxdep.ui.spectrum_list import SpectrumListWidget
 from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, StageStatus
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
@@ -90,50 +86,6 @@ from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
-
-# List item role holding a row's second line (kind · stage · points · ...).
-_DETAILS_ROLE = Qt.ItemDataRole.UserRole + 1
-
-
-class _SpectrumRowDelegate(QStyledItemDelegate):
-    """Draw a spectrum row as its name over its details, eliding a long name.
-
-    Each item holds the literal name (UserRole) and the details line
-    (_DETAILS_ROLE). A name wider than the cell is elided in the middle so
-    both ends stay readable; the item tooltip carries the full name. Qt
-    right-elides an overlong details line as usual.
-    """
-
-    def initStyleOption(
-        self,
-        option: QStyleOptionViewItem | None,
-        index: QModelIndex,
-    ) -> None:
-        super().initStyleOption(option, index)
-        if option is None:
-            raise TypeError("initStyleOption needs the option Qt paints with")
-        name = index.data(Qt.ItemDataRole.UserRole)
-        details = index.data(_DETAILS_ROLE)
-        if not isinstance(name, str) or not isinstance(details, str):
-            raise TypeError("spectrum rows hold a str name and str details")
-        widget = option.widget
-        style = widget.style()
-        if style is None:
-            raise RuntimeError("spectrum rows are painted by a styled list widget")
-        text_rect = style.subElementRect(
-            QStyle.SubElement.SE_ItemViewItemText, option, widget
-        )
-        # Qt insets item text by the focus-frame margin plus one on each side.
-        margin = (
-            style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
-        )
-        width = max(text_rect.width() - 2 * margin, 0)
-        elided = option.fontMetrics.elidedText(
-            name, Qt.TextElideMode.ElideMiddle, width
-        )
-        # Qt lays item text out with QTextLayout, which breaks lines only at
-        # U+2028 (QChar.LineSeparator), not at "\n".
-        option.text = f"{elided}\u2028{details}"
 
 
 def _stage_status(*, done: bool, draft: bool, locked: bool) -> StageStatus:
@@ -318,11 +270,7 @@ class MainWindow(QMainWindow):
         """Spectrum list with Remove below it, beside the stage-driven editor."""
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
-        self._list = QListWidget()
-        self._list.setObjectName("fluxdep.spectra")
-        # Rows elide to the list width instead of scrolling sideways.
-        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._list.setItemDelegate(_SpectrumRowDelegate(self._list))
+        self._list = SpectrumListWidget()
         self._list.currentItemChanged.connect(self._on_list_selection)
         left.addWidget(self._list, stretch=1)
         self._remove_btn = self._command_button(
@@ -475,38 +423,11 @@ class MainWindow(QMainWindow):
                 f"Project: {project.chip_name} / {project.qub_name}"
             )
 
-    def _row_details(self, row: SpectrumRow) -> str:
-        """A list row's second line, from the query that spectrum.list reports.
-
-        Spec type, stage and published point count always show; an unfinished
-        draft kind and the Filter-excluded count only when present.
-        """
-        parts = [row.spec_type, row.stage, f"{row.point_count} pts"]
-        if row.pending is not None:
-            parts.append(f"{row.pending} draft")
-        if row.filter_excluded_count:
-            parts.append(f"{row.filter_excluded_count} excluded")
-        return " · ".join(parts)
-
     def _refresh_list(self) -> None:
         """Rebuild the spectrum list from the Controller's published rows."""
         # Rows first: the query may retire a dead draft and re-enter this refresh.
-        rows = [
-            (row.name, self._row_details(row)) for row in self._ctrl.spectrum_rows()
-        ]
-        active = self._ctrl.state.active_spectrum
-        self._list.blockSignals(True)
-        self._list.clear()
-        for name, details in rows:
-            # Literal name over its details; the delegate elides a long name.
-            item = QListWidgetItem(f"{name}\n{details}")
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            item.setData(_DETAILS_ROLE, details)
-            item.setToolTip(name)
-            self._list.addItem(item)
-            if name == active:
-                self._list.setCurrentItem(item)
-        self._list.blockSignals(False)
+        rows = self._ctrl.spectrum_rows()
+        self._list.show_rows(rows, self._ctrl.state.active_spectrum)
 
     # --- actions ---------------------------------------------------------
 
