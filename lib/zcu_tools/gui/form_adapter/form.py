@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from types import MappingProxyType, new_class
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
     WaveformSpec,
+    get_field_meta,
 )
 from zcu_tools.gui.form import (
     Display,
@@ -51,6 +53,44 @@ class SweepRange(LinRange):
     """Core sweep input uses n internally, with the user-facing label Expts."""
 
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
+
+
+def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
+    """Generate endpoint requirements and float precision for one core sweep.
+
+    node is the authored sweep value; info is its core field declaration.
+    Only Expr endpoints lose the inherited LinRange default. FieldMeta decimals
+    decorates start/stop, never n or the outer model. Literal or unauthored
+    endpoints keep ordinary defaults. No expression is evaluated, and neither
+    the core declaration nor the shared SweepRange class is modified.
+    """
+    meta = get_field_meta(info)
+    decimals = meta.decimals if meta is not None else None
+    fields: dict[str, FieldInfo] = {}
+    for name in ("start", "stop"):
+        required = isinstance(node, Range) and isinstance(getattr(node, name), Expr)
+        if not required and decimals is None:
+            continue
+        endpoint = deepcopy(SweepRange.model_fields[name])
+        if required:
+            endpoint.default = PydanticUndefined
+            endpoint.default_factory = None
+        if decimals is not None:
+            endpoint.metadata.append(Display(decimals=decimals))
+        fields[name] = endpoint
+    if not fields:
+        return SweepRange
+    namespace: dict[str, object] = {
+        "__module__": __name__,
+        "__annotations__": {name: float for name in fields},
+        **fields,
+    }
+    model = new_class(
+        "AuthoredSweepRange", (SweepRange,), exec_body=lambda ns: ns.update(namespace)
+    )
+    if not issubclass(model, SweepRange):
+        raise TypeError("Generated sweep model must implement SweepRange")
+    return model
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:
@@ -90,6 +130,8 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
 def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
     result = deepcopy(info)
     if (display := field_display(info, locked=locked)) is not None:
+        if SweepCfg in _members(info.annotation):
+            display = replace(display, decimals=None)
         result.metadata.append(display)
     return result
 
@@ -233,7 +275,7 @@ class _Section:
                 else field.annotation
             )
         if SweepCfg in _members(info.annotation):
-            return SweepRange
+            return _sweep_model(node, info)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -565,11 +607,13 @@ class Form[C: ConfigBase]:
             raise TypeError("Template input model must implement FormModel")
         return model.default_input(env)
 
-    def input_from_spec(self, spec: C, env: FormEnv) -> FormInput[FormModel]:
+    def input_from_spec(self, spec: ConfigBase, env: FormEnv) -> FormInput[FormModel]:
         """Project an existing persistent Spec into fresh input for this Spec form.
 
         Only Forms built for a persistent Spec accept this; a core cfg Form raises
-        TypeError. spec must be exactly core_cfg, not a subclass; otherwise raise
+        TypeError. spec accepts the shared ConfigBase boundary so Form remains
+        covariant in its concrete result type. At runtime spec must be exactly
+        core_cfg, not a subclass; otherwise raise
         TypeError. Ordinary values and child library keys are copied, and None
         values stay absent like static defaults. Values of unsupported module
         fields are discarded, so to_cfg restores Spec defaults instead of the
