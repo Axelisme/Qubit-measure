@@ -411,6 +411,64 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     assert state.result(env) == result
 
 
+@pytest.mark.parametrize("phase", [Expr("$unbound.value"), Expr("2 * 3"), None])
+def test_nested_slot_fallback_expression_defaults_require_input(
+    phase: Expr | None,
+) -> None:
+    catalog = templates()
+    pulse = Template("pulse", set={"phase": phase} if phase is not None else {})
+    catalog["readout"] = TemplateDef(
+        PulseReadoutSpec,
+        "Readout",
+        {
+            "pulse_cfg": Slot("missing", fallback=pulse),
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_length": 0.2,
+            "ro_cfg.ro_freq": 100,
+        },
+    )
+    form = Form(ReadoutCore, {"readout": Template("readout")})
+    form.bind_templates(catalog, adapter="synthetic")
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    if phase == Expr("$unbound.value"):
+        assert isinstance(result, FormErrors), result
+        assert result.messages == {
+            ("readout", "module", "pulse_cfg", "phase"): "Field required"
+        }
+    else:
+        if isinstance(result, FormErrors):
+            pytest.fail(str(result.messages))
+        cfg = form.to_cfg(result, env)
+        if isinstance(cfg, FormErrors):
+            pytest.fail(str(cfg.messages))
+        assert cfg.readout.pulse_cfg.phase == (0 if phase is None else 6)
+    # Removing a fallback still leaves its unresolved required slot absent.
+    catalog["readout"] = TemplateDef(
+        PulseReadoutSpec,
+        "Readout",
+        {
+            "pulse_cfg": Slot("missing"),
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_length": 0.2,
+            "ro_cfg.ro_freq": 100,
+        },
+    )
+    control = Form(ReadoutCore, {"readout": Template("readout")})
+    control.bind_templates(catalog, adapter="synthetic-control")
+    control_state = FormState(control.default_input(env))
+    readout = control_state.input.data["readout"]
+    assert isinstance(readout, dict)
+    module = readout["module"]
+    assert isinstance(module, dict) and "pulse_cfg" not in module
+    control_result = control_state.result(env)
+    assert isinstance(control_result, FormErrors)
+    assert control_result.messages == {
+        ("readout", "module", "pulse_cfg"): "Field required"
+    }
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_missing_discriminator_error_names_template_and_nested_field(
     nested: bool,
