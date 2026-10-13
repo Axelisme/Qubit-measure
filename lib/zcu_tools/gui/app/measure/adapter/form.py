@@ -359,8 +359,8 @@ class Form[C: ConfigBase]:
         """Build fresh input from captured env; required unresolved names stay absent.
 
         No sources are refreshed or mutated. Source and default factory failures
-        propagate. Expressions remain envelopes until FormState.result evaluates
-        them against this same env.
+        propagate. The shared core evaluates expression defaults once into direct
+        input against this env. Unresolved or invalid defaults stay absent.
         """
         return self.model.default_input(env)
 

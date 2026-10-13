@@ -151,7 +151,7 @@ def test_template_required_nested_defaults_omit_none_and_preserve_literal_string
     assert module["phase"] == 0
     assert "mixer_freq" not in module
     assert "mux_freqs" not in module
-    assert module["freq"] == {"expr": "100 + 20"}
+    assert module["freq"] == 120
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)

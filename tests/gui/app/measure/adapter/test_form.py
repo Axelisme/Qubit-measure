@@ -81,7 +81,7 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
         "text",
     ]
     assert "optional" not in base.data
-    assert base.data["amount"] == {"expr": "2 * 3"}
+    assert base.data["amount"] == 6
     state = FormState(base)
     cfg = form.to_cfg(require_result(state, env), env)
     assert cfg == ScalarCfg(
