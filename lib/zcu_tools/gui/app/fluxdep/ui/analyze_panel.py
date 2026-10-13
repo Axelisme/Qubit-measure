@@ -35,8 +35,10 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 
+from matplotlib.backend_bases import Event
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -229,6 +231,7 @@ class AnalyzePanelWidget(QWidget):
         self._filter_widget: SelectorWidget | None = None
         self._filter_context_id: int | None = None
         self._shown_fit: _ShowKey | None = None
+        self._db_chooser: QFileDialog | None = None
         # Display choices taken by Apply; the controls may hold pending edits.
         self._applied_display = FitDisplay()
 
@@ -322,7 +325,6 @@ class AnalyzePanelWidget(QWidget):
     # --- Search tab ------------------------------------------------------
 
     def _build_search_tab(self) -> QWidget:
-        from qtpy.QtCore import Qt
         from qtpy.QtWidgets import QSplitter
 
         form_box = self._build_search_form()
@@ -441,7 +443,6 @@ class AnalyzePanelWidget(QWidget):
     # --- Show tab --------------------------------------------------------
 
     def _build_show_tab(self) -> QWidget:
-        from qtpy.QtCore import Qt
         from qtpy.QtWidgets import QSplitter
 
         tools_box = QGroupBox("Display")
@@ -474,6 +475,9 @@ class AnalyzePanelWidget(QWidget):
 
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
+        # Show lays out once per draw; re-fit on resize so the title and axis
+        # labels stay inside the canvas Qt actually gives the figure.
+        self._fit_canvas.mpl_connect("resize_event", self._fit_show_layout)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(_control_column(tools_box, self._show_status))
@@ -726,15 +730,19 @@ class AnalyzePanelWidget(QWidget):
             start = database_dir(
                 self._ctrl.state.project, self._ctrl.get_project_root()
             )
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select database",
-            start,
-            filter="HDF5 (*.h5 *.hdf5);;All files (*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
+        chooser = QFileDialog(
+            self, "Select search DB", start, "HDF5 (*.h5 *.hdf5);;All files (*)"
         )
-        if path:
-            self._db_edit.setText(path)
+        chooser.setOption(QFileDialog.Option.DontUseNativeDialog)
+        chooser.setFileMode(QFileDialog.FileMode.ExistingFile)
+        # Non-blocking open() keeps the Qt event loop (and the control socket)
+        # responsive; while it is open the owner turn still sees a Local modal.
+        chooser.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        chooser.fileSelected.connect(self._db_edit.setText)
+        # Hold a reference so open()'s immediate return doesn't let it be GC'd.
+        self._db_chooser = chooser
+        chooser.finished.connect(lambda _result=0: setattr(self, "_db_chooser", None))
+        chooser.open()
 
     def _on_search(self) -> None:
         db_path = self._db_edit.text().strip()
@@ -918,6 +926,9 @@ class AnalyzePanelWidget(QWidget):
             return
         if self._show_key() != self._shown_fit:
             self._redraw_show()
+
+    def _fit_show_layout(self, _event: Event) -> None:
+        self._fit_figure.tight_layout()
 
     def _redraw_show(self) -> None:
         """Render the fit visualisation with the applied display choices."""

@@ -5,7 +5,8 @@ canvas mouse events to overridable handlers (``on_press`` / ``on_move`` /
 ``on_release``, all no-ops by default). Subclasses add Qt controls to
 ``controls_layout`` top-down: settings, edit actions (Undo / Clear), then the
 status text. Finish and an optional stage switch stay pinned at the column
-bottom. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
+bottom in ``bottom_layout``; the read-only result preview puts its next steps
+there too. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
 button emits the ``finished`` signal so the host can collect the result and
 write it via the Controller.
 
@@ -42,8 +43,9 @@ class InteractiveMplWidget(QWidget):
     """Base widget: a Qt-embedded mpl canvas + a controls column + Finish.
 
     Layout: canvas on the left (stretches), a controls column on the right.
-    The column holds ``controls_layout`` on top and a bottom area pinned to
-    the column bottom for the stage switch and Finish. The ``finished`` signal
+    The column holds ``controls_layout`` on top and ``bottom_layout`` pinned
+    to the column bottom for the stage switch and Finish. ``addWidget`` on
+    either layout appends below what is already there. The ``finished`` signal
     fires when the user clicks Finish; the host then calls ``get_result()``.
     """
 
@@ -63,8 +65,8 @@ class InteractiveMplWidget(QWidget):
         self.controls_layout = QVBoxLayout()
         column.addLayout(self.controls_layout)
         column.addStretch(1)
-        self._bottom_layout = QVBoxLayout()
-        column.addLayout(self._bottom_layout)
+        self.bottom_layout = QVBoxLayout()
+        column.addLayout(self.bottom_layout)
         controls.setFixedWidth(220)
 
         # ``controls_side`` places the control column left or right of the canvas.
@@ -124,7 +126,7 @@ class InteractiveMplWidget(QWidget):
         button = QPushButton(text)
         button.setObjectName(picker_object_name(action))
         button.clicked.connect(on_click)
-        self._bottom_layout.insertWidget(0, button)
+        self.bottom_layout.insertWidget(0, button)
         return button
 
     def add_finish_button(self) -> QPushButton:
@@ -136,7 +138,7 @@ class InteractiveMplWidget(QWidget):
         finish = QPushButton("Finish")
         finish.setObjectName(picker_object_name("finish"))
         finish.clicked.connect(self.finished.emit)
-        self._bottom_layout.addWidget(finish)
+        self.bottom_layout.addWidget(finish)
         return finish
 
     def redraw(self) -> None:
