@@ -287,6 +287,9 @@ class FormModel(BaseModel):
         input; a missing key fails the source check at the name. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
+        A field whose union mixes text members (int, float, complex, str)
+        with picked members (Literal, Enum, bool) raises ValueError naming
+        its path: no control both types and picks a value.
         """
         from ._schema import input_schema
 
@@ -419,6 +422,8 @@ class FormState[F: FormModel]:
         types/ranges/cross-field rules.
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
+        Input at a field whose union mixes text and picked members raises
+        ValueError naming its path, as input_schema does.
         """
         from ._evaluate import result
 

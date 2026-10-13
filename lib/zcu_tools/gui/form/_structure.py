@@ -38,19 +38,25 @@ def alternatives(annotation: object) -> tuple[object, ...]:
     return (annotation,)
 
 
-def accepts_expression(annotation: object) -> bool:
+def accepts_expression(annotation: object, path: FormPath) -> bool:
     """Whether a value leaf of this annotation is a text field taking Expr input.
 
-    A text field holds an int, float, complex or str value, possibly nullable,
-    and is typed as text: no member is a Literal, an Enum or a bool, whose
-    values are picked rather than typed. A str-or-model key (see key_or_inline)
-    is not a text field either: an Expr envelope is an object, and an object
-    selects the inline model. Two leaves that this annotation check cannot
-    see are not text fields as well: a leaf with declared choices (by path)
-    and a ModuleRef name (see library_key).
+    This is the core's one text-field rule: the input schema offers an Expr
+    alternative, and decode, defaults evaluation and compatible restore
+    accept an Expr envelope, exactly where it returns True. Union members
+    are text values (int, float, complex, str), typed into a text field, or
+    picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
+    A text field has a text member and no picked member, possibly nullable.
+    A str-or-model key (see key_or_inline) is not a text field: an Expr
+    envelope is an object, and an object selects the inline model. Two
+    leaves this annotation check cannot see are not text fields either: a
+    leaf with declared choices (by path) and a ModuleRef name (see
+    library_key).
+
+    path is the leaf's field path, used only in the error. A union with both
+    text and picked members raises ValueError naming path: the editor has no
+    control that types a value and picks one.
     """
-    if key_or_inline(annotation):
-        return False
     members = alternatives(annotation)
     picked = any(
         get_origin(item) is Literal
@@ -58,10 +64,16 @@ def accepts_expression(annotation: object) -> bool:
         or (isinstance(item, type) and issubclass(item, Enum))
         for item in members
     )
-    return not picked and any(
+    text = any(
         item is int or item is float or item is complex or item is str
         for item in members
     )
+    if text and picked:
+        dotted = ".".join(str(part) for part in path)
+        raise ValueError(
+            f"{dotted}: a union of text and picked values is not supported"
+        )
+    return text and not key_or_inline(annotation)
 
 
 def library_key(model: type[BaseModel], name: str) -> bool:
@@ -466,7 +478,13 @@ def leaves(
     return result
 
 
-def _compatible(info: FieldInfo, value: JsonValue) -> bool:
+def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
+    """Whether value has a shape info's annotation accepts; path names the leaf.
+
+    A union of text and picked values raises ValueError (see
+    accepts_expression).
+    """
+    text_field = accepts_expression(info.annotation, path)
     # Containers are whole leaves, but nested selectors still require ordinary tags.
     tag = discriminator(info)
     if tag is not None and isinstance(value, dict) and isinstance(value.get(tag), dict):
@@ -474,7 +492,7 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types
-    if isinstance(value, dict) and accepts_expression(info.annotation):
+    if isinstance(value, dict) and text_field:
         if expr_text(value) is not None:
             return True
         if set(value) == {"__complex__"} and complex in types:
@@ -485,15 +503,15 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
             except ValueError:
                 return False
             return True
-    return any(_compatible_type(t, value) for t in types)
+    return any(_compatible_type(t, value, path) for t in types)
 
 
-def _compatible_type(annotation: object, value: JsonValue) -> bool:
+def _compatible_type(annotation: object, value: JsonValue, path: FormPath) -> bool:
     annotation = unwrap(annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return isinstance(value, dict) and all(
             name in annotation.model_fields
-            and _compatible(annotation.model_fields[name], item)
+            and _compatible(annotation.model_fields[name], item, (*path, name))
             for name, item in value.items()
         )
     if get_origin(annotation) is Literal:
@@ -505,23 +523,23 @@ def _compatible_type(annotation: object, value: JsonValue) -> bool:
         return isinstance(value, bool if annotation is bool else str)
     if get_origin(annotation) in (list, tuple, dict, Mapping):
         return (
-            _compatible_mapping(annotation, value)
+            _compatible_mapping(annotation, value, path)
             if get_origin(annotation) in (dict, Mapping)
-            else _compatible_sequence(annotation, value)
+            else _compatible_sequence(annotation, value, path)
         )
     return False
 
 
-def _compatible_mapping(annotation: object, value: JsonValue) -> bool:
+def _compatible_mapping(annotation: object, value: JsonValue, path: FormPath) -> bool:
     if not isinstance(value, dict):
         return False
-    args = get_args(annotation)
+    item_info = FieldInfo.from_annotation(get_args(annotation)[1])
     return all(
-        _compatible(FieldInfo.from_annotation(args[1]), item) for item in value.values()
+        _compatible(item_info, item, (*path, key)) for key, item in value.items()
     )
 
 
-def _compatible_sequence(annotation: object, value: JsonValue) -> bool:
+def _compatible_sequence(annotation: object, value: JsonValue, path: FormPath) -> bool:
     if not isinstance(value, list):
         return False
     args = get_args(annotation)
@@ -529,14 +547,21 @@ def _compatible_sequence(annotation: object, value: JsonValue) -> bool:
         return True
     if get_origin(annotation) is tuple and args[-1] is not Ellipsis:
         return len(value) == len(args) and all(
-            _compatible(FieldInfo.from_annotation(t), v)
-            for t, v in zip(args, value, strict=True)
+            _compatible(FieldInfo.from_annotation(t), v, (*path, index))
+            for index, (t, v) in enumerate(zip(args, value, strict=True))
         )
-    return all(_compatible(FieldInfo.from_annotation(args[0]), item) for item in value)
+    item_info = FieldInfo.from_annotation(args[0])
+    return all(
+        _compatible(item_info, item, (*path, index)) for index, item in enumerate(value)
+    )
 
 
 def _restore_child_model(
-    info: FieldInfo, current: JsonValue, saved: JsonValue, tag: str | None
+    info: FieldInfo,
+    current: JsonValue,
+    saved: JsonValue,
+    tag: str | None,
+    path: FormPath,
 ) -> type[BaseModel] | None:
     """Select a saved branch without coercion; omitted tags keep the current branch."""
     child = selected(info, saved)
@@ -546,7 +571,7 @@ def _restore_child_model(
         matches = tuple(
             model
             for model in model_types(info.annotation)
-            if _compatible_type(model, saved)
+            if _compatible_type(model, saved, path)
         )
         if len(matches) == 1:
             child = matches[0]
@@ -595,7 +620,7 @@ def _restore_field(
     dropped: list[FormPath],
 ) -> JsonValue:
     tag = discriminator(info)
-    child = _restore_child_model(info, current, saved, tag)
+    child = _restore_child_model(info, current, saved, tag, path)
     if child is not None and isinstance(saved, dict):
         # Structural selectors cannot accept Expr or complex envelopes.
         if tag is not None and isinstance(saved.get(tag), dict):
@@ -606,7 +631,7 @@ def _restore_field(
     if isinstance(saved, dict) and model_types(info.annotation):
         dropped.append(path)
         return current
-    if _compatible(info, saved):
+    if _compatible(info, saved, path):
         return copy_json(saved)
     dropped.append(path)
     return current

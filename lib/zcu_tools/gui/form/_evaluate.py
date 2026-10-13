@@ -72,6 +72,7 @@ class _Decoding:
 def _decode(
     info: FieldInfo, value: JsonValue, path: FormPath, decoding: _Decoding
 ) -> FormValue:
+    text_field = accepts_expression(info.annotation, path)
     annotation = _non_null_annotation(info.annotation)
     child = selected(info, value)
     if isinstance(value, dict) and key_or_inline(info.annotation):
@@ -94,9 +95,7 @@ def _decode(
         return None
     # Only text fields evaluate an Expr envelope; other leaves keep it as
     # ordinary input, which Pydantic rejects with its own type message.
-    if isinstance(value, dict) and (
-        accepts_expression(annotation) if expression else numeric
-    ):
+    if isinstance(value, dict) and (text_field if expression else numeric):
         return _scalar(value, path, decoding, numeric=numeric)
     return _decode_container(annotation, value, path, decoding)
 
@@ -422,8 +421,9 @@ def _evaluate_section(
         if child is not None and isinstance(value, dict):
             _evaluate_section(child, value, env, path, discriminator(info), substituted)
             continue
+        text_field = accepts_expression(info.annotation, path)
         text = expr_text(value)
-        if text is None or not accepts_expression(info.annotation):
+        if text is None or not text_field:
             continue
         try:
             evaluated = evaluate_scalar_expr(text, env.parameters)

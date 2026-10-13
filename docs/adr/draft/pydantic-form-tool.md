@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，editor 的唯讀但可讀模式，workflows run 中不再停用面板；expression 只用於文字欄位，workflows `WIRE_VERSION` 3；引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
+**Last updated:** 2026-10-13，文字與選項混合的 union 在 core raise；editor 的唯讀但可讀模式，workflows run 中不再停用面板；expression 只用於文字欄位，workflows `WIRE_VERSION` 3；引用或 inline 合併成一個不可編輯的下拉，`ModuleInput` 也帶 `x-form-key-or-inline`；defaults 的 expression 在 `default_input` 與分支 defaults 中算成值；editor 以右鍵選單切換 Direct／Expression；Display 的 group、`x-form-group` 標記與 editor 的可折疊群組區塊；editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；MCP 照列 hidden 欄位；str-or-model 欄位的 `x-form-key-or-inline` 標記；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -28,7 +28,7 @@ Workflow plan 與 tunables 需要 sequence、nullable、tagged union、typed map
 
 ## 輸入與普通值
 
-FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。只有文字欄位接受 `{"expr": "..."}`：以文字框輸入的 int、float、complex 與 str value leaves。以下拉或勾選呈現的欄位沒有 expression：`Literal`、Enum、宣告 choices 的 leaf、bool，以及 library key（`str | Model` 的 key 與 `ModuleRef.name`）。這些值是挑出來的，不是算出來的。判斷在 core：這些欄位的 input schema 沒有 Expr 分支，result 在該欄位報錯且不求值，compatible restore 丟棄它們的 envelope；editor 只依 schema 有沒有 Expr 分支決定給不給右鍵 Expression，不自己推論。這個收窄改變 wire 接受的 input，所以 workflows 的 `WIRE_VERSION` 升到 3。只有顯式 envelope 求值，普通字串包含 `$` 開頭的內容仍是 literal。Preview 與 result 使用共用 evaluator，再遵守 Pydantic 約束。Input schema 與 compatible restore 保留 expression 原文，editor 使用同一 schema 與 preview，不自行求值。Editor 不在欄位旁放模式下拉：文字欄位的右鍵選單在標準項目之後列出 Expression 切換；選項欄位的下拉只列選項，沒有右鍵選單；Expression 模式的輸入框以淺色底色區分。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
+FormInput 配對表單型別與可不完整的 JSON tree。缺 key 表示未填，null 表示明確的 null。只有文字欄位接受 `{"expr": "..."}`：以文字框輸入的 int、float、complex 與 str value leaves。以下拉或勾選呈現的欄位沒有 expression：`Literal`、Enum、宣告 choices 的 leaf、bool，以及 library key（`str | Model` 的 key 與 `ModuleRef.name`）。這些值是挑出來的，不是算出來的。同時含文字成員與選項成員的 union（例如 `float | Literal["auto"]`、`bool | int`）沒有一種控制項能同時打字與挑選，core 的 input schema 與求值遇到時 raise ValueError，訊息帶欄位路徑。判斷在 core，只有一條規則：這些欄位的 input schema 沒有 Expr 分支，result 在該欄位報錯且不求值，compatible restore 丟棄它們的 envelope；editor 只依 schema 有沒有 Expr 分支決定給不給右鍵 Expression，不自己推論。這個收窄改變 wire 接受的 input，所以 workflows 的 `WIRE_VERSION` 升到 3。只有顯式 envelope 求值，普通字串包含 `$` 開頭的內容仍是 literal。Preview 與 result 使用共用 evaluator，再遵守 Pydantic 約束。Input schema 與 compatible restore 保留 expression 原文，editor 使用同一 schema 與 preview，不自行求值。Editor 不在欄位旁放模式下拉：文字欄位的右鍵選單在標準項目之後列出 Expression 切換；選項欄位的下拉只列選項，沒有右鍵選單；Expression 模式的輸入框以淺色底色區分。Complex 直接值使用 `{"__complex__": [re, im]}`。Model 實例只含求值後的普通值。
 
 FormState 持有隔離的 input 與 base，不持 Engine revision。
 
