@@ -23,8 +23,10 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -33,6 +35,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
@@ -512,3 +515,102 @@ def test_busy_edit_request_shows_guard_reason_without_opening_dialog(
         )
     finally:
         ctrl.set_running(tab_id, running=False)
+
+
+@pytest.fixture
+def module_host(module_widget, qapp):
+    """Mount the same registered caller and real EventBus in its Qt host."""
+    ctrl, _isolated, tab_id, pane = module_widget
+    presenter = RecordingDialogPresenter()
+    window = MainWindow(ctrl, dialog_presenter=presenter)
+    window.add_tab_widget(tab_id, "synthetic/module")
+    window.refresh_tab_writeback(tab_id)
+    window.select_tab_pane(tab_id, "analysis")
+    widget = window.findChild(WritebackWidget)
+    assert widget is not None
+    window.show()
+    try:
+        yield ctrl, window, widget, tab_id, pane, presenter
+    finally:
+        window.remove_tab_widget(tab_id)
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
+def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
+    ctrl, window, widget, tab_id, pane, presenter = module_host
+    dialog = _module_dialog(widget)
+    _input(dialog, "freq").setText("5100.125")
+    mode = dialog.findChild(QAction, "form.mode.gain")
+    assert mode is not None
+    mode.trigger()
+    _input(dialog, "gain").setText("missing.value")
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    proposed = widget.findChild(QLabel, "writebackProposed")
+    assert proposed is not None and proposed.text() == "Invalid configuration"
+    assert dialog.isVisible() and _input(dialog, "freq").text() == "5100.125"
+    assert not _apply(widget).isEnabled()
+    with pytest.raises(LibraryEntryInvalid):
+        ctrl.apply_writeback_for_pane(tab_id, pane)
+    assert (
+        MODULE_PROPOSAL_TARGET
+        not in ctrl.context_control.read_context().library.module_keys()
+    )
+    assert presenter.calls == []
+    _input(dialog, "gain").setText("0.45")
+    dialog.accept()
+    window.apply_tab_writeback(tab_id, pane=pane)
+    assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
+    assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).freq == 5100.125
+
+
+@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
+def test_host_apply_presents_expected_busy_error_without_losing_draft(module_host):
+    ctrl, window, widget, tab_id, pane, presenter = module_host
+    dialog = _module_dialog(widget)
+    _input(dialog, "freq").setText("5100.125")
+    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    before = form.state.input.data
+    ctrl.set_running(tab_id, running=True)
+    try:
+        try:
+            window.apply_tab_writeback(tab_id, pane=pane)
+        except ExpectedError as error:
+            pytest.fail(
+                f"Host must present the writeback refusal instead of raising: {error}"
+            )
+        assert len(presenter.calls) == 1 and presenter.calls[0].kind == "critical"
+        assert "busy" in presenter.calls[0].message.lower()
+        assert (
+            MODULE_PROPOSAL_TARGET
+            not in ctrl.context_control.read_context().library.module_keys()
+        )
+        assert form.state.input.data == before
+        assert dialog.isVisible() and _input(dialog, "freq").text() == "5100.125"
+    finally:
+        ctrl.set_running(tab_id, running=False)
+
+
+@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
+def test_host_apply_does_not_swallow_unexpected_storage_error(module_host):
+    ctrl, window, _widget, tab_id, pane, presenter = module_host
+    context = ctrl.context_control
+    storage = context.capture_storage(context.read_context())
+    ledger = storage.result_path / "records" / "ledger.jsonl"
+    backup = ledger.with_suffix(".saved")
+    if ledger.exists():
+        ledger.rename(backup)
+    ledger.mkdir()
+    try:
+        with pytest.raises(IsADirectoryError):
+            window.apply_tab_writeback(tab_id, pane=pane)
+        assert presenter.calls == []
+        assert (
+            MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()
+        )
+    finally:
+        ledger.rmdir()
+        if backup.exists():
+            backup.rename(ledger)
