@@ -2,6 +2,12 @@
 
 from typing import NotRequired, TypedDict
 
+from zcu_tools.gui.app.fluxdep.remote.command_specs import (
+    SET_MIN_DISTANCE_PARAMS,
+    STROKE_PARAMS,
+)
+from zcu_tools.gui.app.fluxdep.remote.dto import SelectionContextReply
+from zcu_tools.gui.remote.param_spec import schema_property
 from zcu_tools.mcp.core.bridge import McpBridge
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
@@ -26,24 +32,33 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
     back accepted work. No identity, mask or numerical state survives this call.
     """
 
+    declarations = {
+        spec.name: spec for spec in (*STROKE_PARAMS, *SET_MIN_DISTANCE_PARAMS)
+    }
+    params_schema = {name: schema_property(spec) for name, spec in declarations.items()}
+
     def filter_points(arguments: FilterArguments) -> ToolReply:
         command = arguments["command"]
         opened = call_gui(bridge, GuiRpcCall("selection.interactive.open", {}, 31.0))
+        before: SelectionContextReply = opened.data["context"]
         native = call_gui(
             bridge,
             GuiRpcCall(
                 "selection.interactive.command",
                 {
-                    "context_id": opened.data["context"]["context_id"],
+                    "context_id": before["context_id"],
                     "command": command,
                     "params": arguments.get("params", {}),
                 },
                 31.0,
             ),
         ).data
-        context = native["context"]
+        context: SelectionContextReply = native["context"]
         state = context["state"]
-        selected = {"count": state["selected_count"], "total": len(state["selected"])}
+        selected: dict[str, object] = {
+            "count": state["selected_count"],
+            "total": len(state["selected"]),
+        }
         summary: dict[str, object] = {
             "stage": "filtered" if command == "finish" else "filter",
             "pending": not context["closed"],
@@ -51,6 +66,10 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
             "selected": selected,
             "per_spectrum": state["per_spectrum"],
         }
+        if before["state"]["min_distance"] != state["min_distance"]:
+            summary["changes"] = {
+                "min_distance": [before["state"]["min_distance"], state["min_distance"]]
+            }
         if command != "finish":
             changes = native["effect"]["changes"]
             selected["changes"] = [changes["points_added"], changes["points_removed"]]
@@ -75,7 +94,16 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
     return {
         bridge.config.tool_prefix + "filter": {
             "handler": filter_points,
-            "description": "Filter the joint cloud (J6). stroke uses flux/GHz vertices, normalized width and explicit select/erase mode; set_min_distance sets normalized distance. undo restores the previous edit. finish publishes and closes the global draft and returns published native evidence. image=true returns draft evidence for unfinished edits. Counts come from GUI; image errors do not roll back publication.",
+            "description": (
+                "Filter the joint cloud (J6). stroke uses flux/GHz vertices and explicit "
+                f"select/erase mode; width: {declarations['width'].description} "
+                "set_min_distance sets min_distance: "
+                f"{declarations['min_distance'].description} "
+                "undo restores the previous edit. finish publishes and closes the "
+                "global draft and returns published native evidence. image=true returns "
+                "draft evidence for unfinished edits. Counts come from GUI; image "
+                "errors do not roll back publication."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -85,24 +113,7 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
                     },
                     "params": {
                         "type": "object",
-                        "properties": {
-                            "vertices": {
-                                "type": "array",
-                                "items": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "minItems": 2,
-                                    "maxItems": 2,
-                                },
-                            },
-                            "width": {"type": "number", "minimum": 0, "maximum": 0.1},
-                            "mode": {"type": "string", "enum": ["select", "erase"]},
-                            "min_distance": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 0.1,
-                            },
-                        },
+                        "properties": params_schema,
                     },
                     "image": {"type": "boolean", "default": False},
                 },

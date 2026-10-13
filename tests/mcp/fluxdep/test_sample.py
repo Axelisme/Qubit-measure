@@ -254,3 +254,37 @@ def test_sampling_native_admission_is_not_preread_or_retried(
     assert rejected.value.code == code
     assert rejected.value.reason == reason
     assert rejected.value.message == message
+
+
+def test_empty_sampling_finish_reports_none_ranges(client: Client) -> None:
+    """Characterize the existing empty published-cloud summary at the tool seam."""
+    buffer = BytesIO()
+    with Image.new("RGB", (12, 8), "red") as png:
+        png.save(buffer, format="PNG")
+    client.transport.replies.extend(
+        [
+            GuiResponse(result=capture("onetone", 2.0)),
+            GuiResponse(result=capture("onetone", 2.0, closed=True)),
+            GuiResponse(
+                result={"points": {"dev_values": [], "fluxs": [], "freqs": []}}
+            ),
+            GuiResponse(
+                result={
+                    "png_b64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+                    "bytes": len(buffer.getvalue()),
+                }
+            ),
+        ]
+    )
+    value = client.server.tools["fluxdep_sample"]["handler"](
+        {"name": "s", "command": "finish"}
+    )
+    reply = value if isinstance(value, ToolReply) else ToolReply(value)
+    assert reply.data["points"] == {"count": 0, "flux_range": None, "freq_range": None}
+    assert len(reply.images) == 1
+    assert [r["method"] for r in client.transport.requests] == [
+        "spectrum.interactive.open",
+        "spectrum.interactive.command",
+        "spectrum.snapshot",
+        "spectrum.render",
+    ]

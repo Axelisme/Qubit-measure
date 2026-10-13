@@ -332,3 +332,21 @@ def test_remove_returns_native_receipt_without_followup_reads(client: Client) ->
     assert [(r["method"], r["params"]) for r in client.transport.requests] == [
         ("spectrum.remove", {"name": "a"})
     ]
+
+
+def test_empty_snapshot_reports_none_point_ranges(
+    client: Client, snapshot: dict[str, object], image_reply: dict[str, object]
+) -> None:
+    """Characterize the existing empty-cloud projection without helper coupling."""
+    snapshot["points"] = {"dev_values": [], "fluxs": [], "freqs": []}
+    client.transport.replies.extend(
+        [GuiResponse(result=snapshot), GuiResponse(result=image_reply)]
+    )
+    reply = tool_reply(
+        client.server.tools["fluxdep_spectrum_snapshot"]["handler"](
+            {"name": "raw.hdf5"}
+        )
+    )
+    assert reply.data["points"] == {"count": 0, "flux_range": None, "freq_range": None}
+    assert reply.data["stage"] == "sampled"
+    assert len(reply.images) == 1

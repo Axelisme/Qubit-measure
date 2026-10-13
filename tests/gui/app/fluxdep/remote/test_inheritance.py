@@ -60,6 +60,7 @@ def test_conjugate_notification_finish_preserves_alignment_source(
     )
     assert opened["ok"] is True
     context = opened["result"]["context"]
+    assert isinstance(context, dict)
     params = {"name": name, "context_id": context["context_id"]}
     changed = route_harness.request(
         route_harness.links[0],
@@ -72,7 +73,10 @@ def test_conjugate_notification_finish_preserves_alignment_source(
     draft = _snapshot(route_harness, name)
     assert draft["alignment"] == {"inherited_from": source}
     finished = route_harness.request(
-        route_harness.links[0], "spectrum.interactive.command", **params, command="finish"
+        route_harness.links[0],
+        "spectrum.interactive.command",
+        **params,
+        command="finish",
     )
     assert finished["ok"] is True
     published = _snapshot(route_harness, name)

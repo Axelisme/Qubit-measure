@@ -1,4 +1,8 @@
-"""Joint-cloud actions shared by GUI and command adapters."""
+"""Joint-cloud actions shared by GUI and command adapters.
+
+SET_MIN_DISTANCE_PARAMS declares the normalized distance command and its inclusive
+limits. The plugin and remote schemas use the same declaration.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +32,16 @@ from zcu_tools.gui.app.fluxdep.brush_commands import (
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import Action, Command, PluginDefinition, Session
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
+
+SET_MIN_DISTANCE_PARAMS = (
+    ParamSpec(
+        "min_distance",
+        JsonType.NUMBER,
+        minimum=MIN_DISTANCE_MIN,
+        maximum=MIN_DISTANCE_MAX,
+        description=f"Normalized distance [{MIN_DISTANCE_MIN:g},{MIN_DISTANCE_MAX:g}].",
+    ),
+)
 
 
 class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionResult]):
@@ -67,14 +81,7 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         seed = make_cross_selection_state(
             inputs, min_distance=min_distance, width=brush_width
         )
-        distance_params = (
-            ParamSpec(
-                "min_distance",
-                JsonType.NUMBER,
-                minimum=MIN_DISTANCE_MIN,
-                maximum=MIN_DISTANCE_MAX,
-            ),
-        )
+
         distance: Action[CrossSelectionState, float] = Action(
             lambda state, value: _transition(
                 lambda: set_cross_selection_distance(inputs, state, value)
@@ -107,7 +114,7 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
         def distance_command(
             session: Session[CrossSelectionState], params: Mapping[str, object]
         ) -> CrossSelectionState:
-            value = decode_parameters(distance_params, params)["min_distance"]
+            value = decode_parameters(SET_MIN_DISTANCE_PARAMS, params)["min_distance"]
             if not isinstance(value, float):
                 raise InvalidInputError("min_distance must be numeric")
             return distance.execute(session, value)
@@ -142,7 +149,7 @@ class CrossSelectionPlugin(PluginDefinition[CrossSelectionState, CrossSelectionR
             plugin_id="cross_selection",
             seed=seed,
             commands=(
-                Command("set_min_distance", distance_params, distance_command),
+                Command("set_min_distance", SET_MIN_DISTANCE_PARAMS, distance_command),
                 Command("set_tool", TOOL_PARAMS, tool_command),
                 Command("stroke", STROKE_PARAMS, stroke_command),
                 Command("perform_on_all", (), perform_command),

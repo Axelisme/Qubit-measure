@@ -30,13 +30,13 @@ from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
     SearchExecution,
-    database_info,
     search_database,
 )
 from zcu_tools.analysis.fluxdep.search_models import (
     transition_requires_levels,
     validate_transition_levels,
 )
+from zcu_tools.datafile import read_fluxdep_database_info
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     PipelineStage,
@@ -132,7 +132,7 @@ class FitService:
         except ValueError as exc:
             raise InvalidInputError(str(exc)) from exc
         if needs_levels:
-            levels = database_info(search_db).levels
+            levels = read_fluxdep_database_info(search_db).levels
             try:
                 validate_transition_levels(transitions, levels)
             except ValueError as exc:

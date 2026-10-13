@@ -26,4 +26,4 @@ WIRE_VERSION = 8
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
-GUI_VERSION = 10  # literal spectrum targets and independent global Filter lifetime
+GUI_VERSION = 11  # preserve inherited alignment on presentation-only draft edits

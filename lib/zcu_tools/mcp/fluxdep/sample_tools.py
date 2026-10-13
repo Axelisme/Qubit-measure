@@ -1,14 +1,21 @@
 """J3 sampling decisions compose native named drafts without retained state."""
 
+from dataclasses import replace
 from typing import NotRequired, TypedDict
 
+from zcu_tools.gui.app.fluxdep.remote.command_specs import (
+    SET_SETTINGS_PARAMS,
+    SET_THRESHOLD_PARAMS,
+    STROKE_PARAMS,
+)
 from zcu_tools.gui.app.fluxdep.remote.dto import InteractiveContextReply
+from zcu_tools.gui.remote.param_spec import schema_property
 from zcu_tools.mcp.core.bridge import McpBridge
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiRpcCall, call_gui
 from zcu_tools.mcp.core.stdio_server import ToolTable
 
-from .projection import with_png
+from .projection import point_summary, with_png
 
 
 class SampleArguments(TypedDict):
@@ -34,6 +41,33 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
     Invocation errors propagate without retry or rollback. No active selection,
     draft, detector settings or spectrum data is retained between calls.
     """
+
+    one_threshold = SET_THRESHOLD_PARAMS[0]
+    settings = {spec.name: spec for spec in SET_SETTINGS_PARAMS}
+    stroke = {spec.name: spec for spec in STROKE_PARAMS}
+    two_threshold = settings["threshold"]
+    # The union envelope is only a schema; the GUI validates the native domain.
+    threshold = replace(
+        one_threshold,
+        minimum=(
+            min(one_threshold.minimum, two_threshold.minimum)
+            if one_threshold.minimum is not None and two_threshold.minimum is not None
+            else None
+        ),
+        maximum=(
+            max(one_threshold.maximum, two_threshold.maximum)
+            if one_threshold.maximum is not None and two_threshold.maximum is not None
+            else None
+        ),
+        description=(
+            f"OneTone: {one_threshold.description} TwoTone: {two_threshold.description}"
+        ),
+    )
+    params_schema = {
+        spec.name: schema_property(spec)
+        for spec in (*SET_SETTINGS_PARAMS, *STROKE_PARAMS)
+    }
+    params_schema["threshold"] = schema_property(threshold)
 
     def sample(arguments: SampleArguments) -> ToolReply:
         name, command = arguments["name"], arguments["command"]
@@ -68,13 +102,7 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
             published_points = call_gui(
                 bridge, GuiRpcCall("spectrum.snapshot", target, 6.0)
             ).data["points"]
-            points: dict[str, object] = {"count": len(published_points["freqs"])}
-            for source, field in (("fluxs", "flux_range"), ("freqs", "freq_range")):
-                values = published_points[source]
-                points[field] = (
-                    [round(min(values), 3), round(max(values), 3)] if values else None
-                )
-            summary["points"] = points
+            summary["points"] = point_summary(published_points)
             if "invalidated" in native:
                 summary["invalidated"] = native["invalidated"]
             return with_png(
@@ -139,7 +167,23 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
     return {
         bridge.config.tool_prefix + "sample": {
             "handler": sample,
-            "description": "Sample a named aligned spectrum (J3). GUI selects its native picker from the published spectrum type. OneTone: set_threshold(threshold in [0,5]), finish. TwoTone: stroke(vertices=device/GHz pairs, width=normalized radius [0,0.1], mode=select|erase), set_settings(threshold in [1,20], sigma in [0,5], smooth_method=wavelet|gaussian; gaussian sigma >=0.001), undo, finish. Settings are dimensionless; set_settings requires at least one value. finish always returns published point ranges and native evidence; image=true requests draft evidence for other commands. Initial and reopened TwoTone sampling start empty. Replies summarize settings before/after, detected points and mask pixels separately. GUI owns prerequisites and parameter validation; accepted edits are not retried or rolled back.",
+            "description": (
+                "Sample a named aligned spectrum (J3). GUI selects its native picker "
+                "from the published spectrum type. OneTone: set_threshold; "
+                f"threshold: {one_threshold.description} finish. "
+                "TwoTone: stroke(vertices=device/GHz pairs, mode=select|erase); "
+                f"width: {stroke['width'].description} "
+                "set_settings accepts threshold, sigma, smooth_method=wavelet|gaussian; "
+                f"threshold: {settings['threshold'].description} "
+                f"sigma: {settings['sigma'].description} "
+                "set_settings requires at least one value. undo restores the previous "
+                "edit. finish always returns published point ranges and native evidence; "
+                "image=true requests draft evidence for other commands. Initial and "
+                "reopened TwoTone sampling start empty. Replies summarize settings "
+                "before/after, detected points and mask pixels separately. GUI owns "
+                "prerequisites and parameter validation; accepted edits are not retried "
+                "or rolled back."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -156,30 +200,7 @@ def build_sample_tools(bridge: McpBridge) -> ToolTable:
                     },
                     "params": {
                         "type": "object",
-                        "properties": {
-                            "threshold": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 20,
-                            },
-                            "sigma": {"type": "number", "minimum": 0, "maximum": 5},
-                            "smooth_method": {
-                                "type": "string",
-                                "enum": ["wavelet", "gaussian"],
-                            },
-                            "vertices": {
-                                "type": "array",
-                                "minItems": 1,
-                                "items": {
-                                    "type": "array",
-                                    "items": {"type": "number"},
-                                    "minItems": 2,
-                                    "maxItems": 2,
-                                },
-                            },
-                            "width": {"type": "number", "minimum": 0, "maximum": 0.1},
-                            "mode": {"type": "string", "enum": ["select", "erase"]},
-                        },
+                        "properties": params_schema,
                     },
                     "image": {"type": "boolean", "default": False},
                 },

@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-13, explicit spectrum/selection draft targets
+**Last updated:** 2026-10-13, native parameter declarations and Filter differences
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
@@ -112,7 +112,9 @@ not MCP inference.
 It opens `kind="sample"` without reading the spectrum first. The GUI chooses
 OneTone or TwoTone and rejects unknown or unaligned sources. MCP projects the
 returned native kind, detector settings and positional point differences.
-Setting changes list only changed fields as before/after pairs. TwoTone replies
+Setting changes list only changed fields as before/after pairs. Numeric limits
+and dependent sigma guidance project the remote public command declarations;
+OneTone and TwoTone keep distinct threshold domains in the combined tool. TwoTone replies
 keep detected point counts separate from mask pixels. Initial and reopened
 TwoTone drafts start empty in both GUI and RPC. finish reads published point
 ranges and attaches spectrum.render evidence; image=true requests draft evidence
@@ -121,6 +123,9 @@ for other commands. MCP exposes no brush mode setter or full-mask command.
 `filter_tools.py` implements J6 as `fluxdep_filter(command, params?, image?)`.
 It opens/reuses the global GUI Filter and sends stroke, set_min_distance, undo
 or finish. Counts and per-spectrum [selected, total] pairs come from the GUI.
+Parameter differences compare the same call's open and command captures; only a
+changed min_distance appears in changes as [before, after], including undo.
+Point changes remain [added, removed].
 Finish publishes and closes once, then attaches selection.render() evidence of
 the published cloud and masks. image=true on unfinished commands requests
 interactive.render(target="selection") draft evidence without a name. MCP saves no mask or draft image.

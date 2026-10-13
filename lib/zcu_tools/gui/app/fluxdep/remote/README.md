@@ -1,11 +1,16 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-13，explicit draft targets and literal spectrum names
+**Last updated:** 2026-10-13，public domain command declarations
 
 The adapter exposes the same Controller commands as Qt. Shared remote owns
 framing, authentication, queues and holder admission. Fluxdep supplies method
 schemas, readonly declarations, events, native result projection and application
 control identity. MCP consumes this contract; the GUI does not own MCP tools.
+
+`command_specs` exposes named sampling/Filter ParamSpec declarations from the
+same domain owners used by native plugins. MCP projects inclusive limits and
+dependent-limit descriptions from these declarations, without constructing a
+plugin, directly importing domain modules or generating one tool per command.
 
 Business methods require holder unless explicitly readonly. spectrum.set_active
 is readonly display selection: it does not begin, edit or retire a draft. Pipeline writes,
