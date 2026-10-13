@@ -47,9 +47,9 @@ from tests.gui.app.fluxdep._window import (
     named,
     open_chooser,
     picker_button,
-    preview_button,
     show_page,
     spectra_list,
+    stage_button,
 )
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 
@@ -118,8 +118,10 @@ def test_remote_blocks_spectrum_writes_but_keeps_result_canvas_available(window)
         "fluxdep.spectra.export",
     ):
         assert not command(view, name).isEnabled(), name
-    for action in ("realign", "sample"):
-        assert not preview_button(view, action).isEnabled(), action
+    # Stages stay clickable for viewing, but a non-holder click opens no input.
+    for stage in ("align", "sample"):
+        stage_button(view, stage).click()
+        assert ctrl.interactive.inspect("a") is None, stage
     spectra = spectra_list(view)
     assert spectra.isEnabled()
     canvas = view.findChild(FigureCanvasQTAgg)

@@ -13,7 +13,12 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidge
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
-from tests.gui.app.fluxdep._window import editor, picker_button, spectra_list
+from tests.gui.app.fluxdep._window import (
+    editor,
+    picker_button,
+    spectra_list,
+    stage_button,
+)
 
 
 @pytest.fixture
@@ -147,9 +152,11 @@ def test_production_background_delivery_and_gui_finish_publish_same_session(
     ctrl, window = composition
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="OneTone")
     spectra = spectra_list(window)
-    # A human list pick opens the line picker; an active change alone only displays.
+    # A human list pick shows the spectrum; its Align stage opens the line picker.
     spectra.setCurrentRow(0)
     assert ctrl.state.active_spectrum == name
+    assert ctrl.interactive.current_line_pick() is None
+    stage_button(window, "align").click()
     context = ctrl.interactive.current_line_pick()
     assert context is not None
     context.plugin.start_alignment(context.session)
