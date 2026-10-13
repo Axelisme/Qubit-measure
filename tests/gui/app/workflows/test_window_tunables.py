@@ -30,7 +30,7 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
 from ._synthetic import Context, Plan, Tunables
-from ._window_support import RpcRequest
+from ._window_support import RpcRequest, form_editable
 
 
 def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_capture(
@@ -438,7 +438,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     assert sample_input(panel.panel.state.input.data)["value"] == 45.0
     assert panel.panel.editor.local_parse_errors() is not None
     assert control.text() == "-" and not harness.gate.snapshot()
-    assert window.plan_panel.isEnabled() and window.tunables_panel.isEnabled()
+    assert form_editable(window.plan_panel) and form_editable(window.tunables_panel)
     start_button = window.findChild(QPushButton, "workflow.run.start")
     assert start_button is not None and start_button.isEnabled()
     assert not harness.progress.bars_for_owner("workflow")
@@ -506,7 +506,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     assert settlements == [token]
     assert harness.handles.live_count() == 0 and not harness.gate.snapshot()
     assert not harness.progress.bars_for_owner("workflow")
-    assert window.plan_panel.isEnabled() and not controller.has_pending_segment
+    assert form_editable(window.plan_panel) and not controller.has_pending_segment
     window.stop("tuning")
     assert window.close() and window.close()
     assert settlements == [token] and escaped_qt_errors == []
