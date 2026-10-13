@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel, Field
@@ -312,6 +312,84 @@ class ModuleRpcCfg(SampleCfg):
 
 class ModuleRpcAdapter(SampleAdapter):
     form = Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+@pytest.mark.parametrize("draft", ["partial", "invalid-expression"])
+def test_existing_inline_draft_is_a_guarded_noop(
+    form_rpc: tuple[Fixture, str, FormRpc], draft: str
+) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("module-rpc")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.write({("pulse", "kind"): "inline"})
+        if draft == "invalid-expression":
+            owner.write(
+                {
+                    ("pulse", "module", "ch"): 0,
+                    ("pulse", "module", "nqz"): 1,
+                    ("pulse", "module", "freq"): {"expr": "1 / 0"},
+                    ("pulse", "module", "gain"): 0.2,
+                    ("pulse", "module", "waveform", "kind"): "inline",
+                    ("pulse", "module", "waveform", "module", "style"): "const",
+                    ("pulse", "module", "waveform", "module", "length"): 0.1,
+                }
+            )
+        before = owner.input.data
+        version_key = f"tab:{tab}:cfg"
+        version = fixture.state.version.get(version_key)
+        notifications: list[str] = []
+        owner.subscribe(lambda: notifications.append("changed"))
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert reply["ok"], reply
+        assert reply["result"]["input"] == before
+        assert reply["result"]["errors"]
+        assert owner.input.data == before
+        assert fixture.state.version.get(version_key) == version
+        assert notifications == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+class TaggedExtraInputs(BaseModel):
+    kind: Literal["inline"] = "inline"
+
+
+class TaggedExtrasAdapter(ModuleRpcAdapter):
+    form = Form(
+        ModuleRpcCfg,
+        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        extras=TaggedExtraInputs,
+        lower=retain_cfg,
+    )
+
+
+def test_use_inline_rejects_tagged_nonmodule_input(
+    form_rpc: tuple[Fixture, str, FormRpc],
+) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("tagged-extras", TaggedExtrasAdapter)
+    tab = fixture.ctrl.new_tab("tagged-extras")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        before = owner.input.data
+        assert before["extras"] == {"kind": "inline"}
+        version_key = f"tab:{tab}:cfg"
+        version = fixture.state.version.get(version_key)
+        notifications: list[str] = []
+        owner.subscribe(lambda: notifications.append("changed"))
+        reply = rpc.call("tab.use_inline", {"tab_id": tab, "field": "extras"})
+        assert not reply["ok"], reply
+        assert reply["error"]["code"] == "invalid_params"
+        assert reply["error"]["reason"] == "form_errors"
+        assert "extras" in reply["error"]["message"]
+        assert "Inline" in reply["error"]["message"]
+        assert owner.input.data == before
+        assert fixture.state.version.get(version_key) == version
+        assert notifications == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) -> None:
