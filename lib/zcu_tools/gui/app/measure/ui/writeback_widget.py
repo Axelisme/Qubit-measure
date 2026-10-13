@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services.writeback import WritebackValues
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
 logger = logging.getLogger(__name__)
 
@@ -781,6 +782,18 @@ class WritebackWidget(QWidget):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
+    def _edit_module_form(
+        self, session_id: str, edit: Callable[[ModuleEntryForm], None]
+    ) -> None:
+        """Re-admit a write or option command and translate only expected refusals."""
+        try:
+            form = self._ctrl.get_writeback_item_form_for_pane(
+                self._tab_id, self._pane, session_id
+            )
+            edit(form)
+        except ExpectedError as exc:
+            raise WriteRejected(str(exc)) from exc
+
     def _edit_module_item(
         self,
         item: ModuleWriteback,
@@ -812,17 +825,17 @@ class WritebackWidget(QWidget):
         layout.addWidget(hint)
 
         def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
-            try:
-                editing_form = self._ctrl.get_writeback_item_form_for_pane(
-                    self._tab_id, self._pane, item.session_id
-                )
-                editing_form.state.write(batch, editing_form.env)
-            except ExpectedError as exc:
-                # The host guard rejects before state mutation. FormEditor
-                # keeps the authored input and shows this field-local refusal.
-                raise WriteRejected(str(exc)) from exc
+            self._edit_module_form(
+                item.session_id, lambda form: form.state.write(batch, form.env)
+            )
 
-        editor = FormEditor(form.state, form.env, write=write)
+        def run_command(path: FormWritePath, name: str) -> None:
+            self._edit_module_form(
+                item.session_id,
+                lambda form: form.state.run_command(path, name, form.env),
+            )
+
+        editor = FormEditor(form.state, form.env, write=write, run_command=run_command)
 
         def _refresh_preview(*_: object) -> None:
             self._refresh_cfg_item_preview(

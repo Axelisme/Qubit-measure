@@ -588,8 +588,12 @@ class WritebackService:
     def get_item_form(self, draft: WritebackDraft, session_id: str) -> ModuleEntryForm:
         """Return the module item's Form that edits, preview and apply all use.
 
-        Viewers write it with form.state.write(batch, form.env) or a FormEditor
-        on (form.state, form.env); writes mark the item unapplied. A non-module
+        Viewers write it with form.state.write(batch, form.env), execute
+        form.state.run_command(path, name, form.env), or use a FormEditor
+        on (form.state, form.env). Both operations publish through the same
+        state subscription and mark the item unapplied. App callers obtain
+        admission through get_writeback_item_form_for_pane immediately before
+        each operation, not just when opening the view. A non-module
         item raises InvalidInputError; a module item without a captured
         context raises FailedPreconditionError. Inactive/foreign drafts and
         unknown IDs raise as for edit_draft.

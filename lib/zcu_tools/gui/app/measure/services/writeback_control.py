@@ -38,7 +38,13 @@ class WritebackControlPort(Protocol):
     def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> ModuleEntryForm:
-        """Return a module item's shared Form; see WritebackService.get_item_form."""
+        """Admit access to a module item's shared editing Form for this pane.
+
+        Every call checks writeback permission, tab idle and current draft
+        ownership. Call again immediately before each state.write or
+        state.run_command; retaining a Form does not retain admission.
+        See WritebackService.get_item_form for the Form's editing effects.
+        """
         ...
 
     def set_writeback_item_for_pane(
@@ -125,6 +131,12 @@ class WritebackControlFacet:
     def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
     ) -> ModuleEntryForm:
+        """Admit each Form access under the writeback, idle and draft checks.
+
+        Consumers repeat this call before every state.write or state.run_command;
+        a retained Form is not continuing admission. See get_item_form for
+        the shared draft and its editing effects.
+        """
         self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
