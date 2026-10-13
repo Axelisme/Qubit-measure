@@ -98,8 +98,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab:h_tab_parameter_read",
         MethodSpec(
             5.0,
-            "Read only requested paths and module_refs from current point/library/aliases "
-            "for this tab. Optional aliases maps names to concrete components for this read only. None and {} mean no override. "
+            "Read requested paths and module_refs from the tab's fixed Open/Reset "
+            "parameter capture. Reset with aliases before querying overrides. "
             "Returns {values, modules}: absent values are "
             "omitted, null is retained; each module ref maps to an existing "
             "canonical library root or null for missing/custom. Invalid paths, "
@@ -108,12 +108,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string("tab_id"),
                 ParamSpec("paths", JsonType.ARRAY, required=True),
                 ParamSpec("module_refs", JsonType.ARRAY, required=True),
-                ParamSpec(
-                    "aliases",
-                    JsonType.OBJECT,
-                    required=False,
-                    description="Temporary alias-name to component-name overrides; None and {} mean no override",
-                ),
             ),
             readonly=True,
         ),
@@ -140,7 +134,15 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Reset cfg to current adapter defaults. Returns the complete new "
             "publication, which may be Invalid. Busy and notification-reentrant "
             "resets are rejected. Does not clear results or save artifacts.",
-            (required_string("tab_id"),),
+            (
+                required_string("tab_id"),
+                ParamSpec(
+                    "aliases",
+                    JsonType.OBJECT,
+                    required=False,
+                    description="Single Reset alias-name to component-name capture overrides",
+                ),
+            ),
         ),
     ),
     method_entry(

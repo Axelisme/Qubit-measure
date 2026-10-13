@@ -169,7 +169,7 @@ class TabParameterRead(TypedDict):
     values maps requested logical paths to YAML values. Absent leaves are
     omitted; explicit null is retained. modules maps each requested reference
     to its existing canonical library root, or None for custom/missing roots.
-    Both use current point/library/aliases, with optional temporary aliases.
+    Both use the tab's fixed Open/Reset parameter/library/alias capture.
     Neither mapping refreshes the live context or operation guards.
     """
 
@@ -195,12 +195,11 @@ def _parameter_query_strings(params: Mapping[str, object], name: str) -> list[st
 def h_tab_parameter_read(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> TabParameterRead:
-    """Read paths and module_refs through current sources for the named tab.
+    """Read paths and module_refs through fixed sources for the named tab.
 
     tab_id is an existing GUI tab. paths and module_refs are arrays of non-empty
-    strings, with $alias.path distinct from concrete component paths. Optional
-    aliases maps alias names to concrete components without changing globals.
-    None and {} mean no override.
+    strings, with $alias.path distinct from concrete component paths. Reset may
+    capture single-use aliases without changing globals; reads never recapture.
     Query only these requested data.
     Missing leaves and explicit null follow TabParameterRead. Module lookup uses
     the parameter owner's role/slot resolution and library membership. Unknown
@@ -214,8 +213,7 @@ def h_tab_parameter_read(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     paths = _parameter_query_strings(params, "paths")
     module_refs = _parameter_query_strings(params, "module_refs")
-    aliases = temporary_aliases(params)
-    parameters = adapter.tab_control.capture_parameters(tab_id, aliases=aliases)
+    parameters = adapter.cfg_lookup(tab_id).env.parameters
     if parameters is None:
         if paths or module_refs:
             raise RemoteError(

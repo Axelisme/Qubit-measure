@@ -26,6 +26,12 @@ def h_tab_run_start(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     aliases = temporary_aliases(params)
+    if aliases:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            "Run aliases are not supported; Reset the tab with aliases first",
+            reason="run_aliases_not_supported",
+        )
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
