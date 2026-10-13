@@ -127,7 +127,9 @@ def test_captured_waveform_key_is_a_unique_valid_option_and_stays_a_key() -> Non
     matching = [option for option in options if option.matches(current)]
     assert [option.label for option in matching] == ["Q.waveforms.flat"]
     assert matching[0].value == current == "Q.waveforms.flat"
-    schema = expect_object(expect_object(state.input_schema(env)["properties"])["waveform"])
+    schema = expect_object(
+        expect_object(state.input_schema(env)["properties"])["waveform"]
+    )
     projected = schema.get("x-form-options")
     assert isinstance(projected, list)
     assert any(expect_object(item)["value"] == current for item in projected)
@@ -140,17 +142,29 @@ def test_waveform_options_keep_all_inline_kinds_with_branch_fields() -> None:
     env = waveform_env()
     options = form.model.options(env).get(("waveform",), ())
     assert [option.label for option in options] == [
-        "Q.waveforms.flat", "Inline: const", "Inline: cosine", "Inline: gauss",
-        "Inline: drag", "Inline: arb", "Inline: flat_top",
+        "Q.waveforms.flat",
+        "Inline: const",
+        "Inline: cosine",
+        "Inline: gauss",
+        "Inline: drag",
+        "Inline: arb",
+        "Inline: flat_top",
     ]
-    schema = expect_object(expect_object(form.model.input_schema(env)["properties"])["waveform"])
+    schema = expect_object(
+        expect_object(form.model.input_schema(env)["properties"])["waveform"]
+    )
     projected = schema["x-form-options"]
     assert isinstance(projected, list)
     const = expect_object(projected[1])
     assert const["value"] == {"style": "const"}
-    assert set(expect_object(expect_object(const["fields"])["properties"])) == {"length"}
+    assert set(expect_object(expect_object(const["fields"])["properties"])) == {
+        "length"
+    }
     flat = expect_object(projected[-1])
-    assert set(expect_object(expect_object(flat["fields"])["properties"])) == {"length", "raise_waveform"}
+    assert set(expect_object(expect_object(flat["fields"])["properties"])) == {
+        "length",
+        "raise_waveform",
+    }
 
 
 def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -> None:
@@ -158,8 +172,14 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     env = waveform_env()
     spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
     state = FormState(form.input_from_spec(spec, env))
-    key = next(option for option in form.model.options(env)[("waveform",)] if option.matches("Q.waveforms.flat"))
-    assert [(command.name, command.label) for command in key.commands] == [("to_inline", "Convert to inline")]
+    key = next(
+        option
+        for option in form.model.options(env)[("waveform",)]
+        if option.matches("Q.waveforms.flat")
+    )
+    assert [(command.name, command.label) for command in key.commands] == [
+        ("to_inline", "Convert to inline")
+    ]
     notifications: list[str] = []
     state.subscribe(lambda: notifications.append("changed"))
 
@@ -168,7 +188,10 @@ def test_waveform_key_command_copies_once_and_disconnects_from_later_sources() -
     assert state.input.data["waveform"] == {"style": "const", "length": 0.1}
     assert notifications == ["changed"]
     assert env.library is not None
-    assert env.library.waveform_spec("Q.waveforms.flat").model_dump() == {"style": "const", "length": 0.1}
+    assert env.library.waveform_spec("Q.waveforms.flat").model_dump() == {
+        "style": "const",
+        "length": 0.1,
+    }
     cfg = result_spec(form, state, waveform_env(0.9))
     assert isinstance(cfg.waveform, ConstWaveformCfg) and cfg.waveform.length == 0.1
     with pytest.raises(ValueError, match="Unavailable option command"):
@@ -188,7 +211,11 @@ def test_waveform_command_source_failure_keeps_input_and_emits_nothing() -> None
     env = waveform_env()
     spec = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q.waveforms.flat")
     state = FormState(form.input_from_spec(spec, env))
-    key = next(option for option in form.model.options(env)[("waveform",)] if option.matches("Q.waveforms.flat"))
+    key = next(
+        option
+        for option in form.model.options(env)[("waveform",)]
+        if option.matches("Q.waveforms.flat")
+    )
     assert [command.name for command in key.commands] == ["to_inline"]
     assert env.library is not None
     broken = FormEnv(library=UnreadableWaveformLibrary(env.library.document()))

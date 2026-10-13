@@ -295,7 +295,8 @@ class FormModel(BaseModel):
         underscores as spaces and only the first letter capitalized. A model
         reached without a union selector keeps its one-value structural tag
         marked hidden: the tag field of a tagged-union branch that this form,
-        ModuleInput or RangeInput declares for the model or a base class.
+        ModuleInput declares for the model or a base class; LinRange.kind is
+        also structural even though ranges have only one supported shape.
         Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
@@ -615,7 +616,7 @@ class FormState[F: FormModel]:
 class LinRange(FormModel):
     """Stored linear range; adapters expand it only when converting to cfg.
 
-    kind selects this branch. start/stop are finite endpoints in caller units;
+    kind identifies the stored linear shape. start/stop are finite endpoints in caller units;
     n is the positive number of points (one point is permitted). Descending or
     repeated endpoints are allowed; no step/expts synchronization occurs.
     """
@@ -624,21 +625,6 @@ class LinRange(FormModel):
     start: float = 0.0
     stop: float = 1.0
     n: int = Field(default=3, ge=1)
-
-
-class ExplicitList(FormModel):
-    """Stored explicit finite values in caller units and their declared order.
-
-    kind selects this branch. values is a nonempty whole sequence; adapters
-    decide how to use it. Inputs persist as JSON arrays, models hold tuples.
-    """
-
-    kind: Literal["list"] = "list"
-    values: tuple[float, ...] = Field(default=(0.0,), min_length=1)
-
-
-type RangeInput = Annotated[LinRange | ExplicitList, Field(discriminator="kind")]
-"""Stored range or explicit-list branches; no implicit array expansion."""
 
 
 class ModuleRef(FormModel):

@@ -16,7 +16,6 @@ from zcu_tools.gui.form import (
     FormState,
     LinRange,
     ModuleInput,
-    RangeInput,
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -170,15 +169,13 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
         )
         alone: Alpha = Field(default_factory=Alpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        fluxes: RangeInput = Field(default_factory=LinRange)
 
     view, _state = build(TagForm, None)
     assert row_names(view, "alone.kind") == []
     assert row_names(view, "sweep.kind") == []
     assert child(view, QLineEdit, "form.input.sweep.start").text() == "0.0"
-    for path, tags in (("choice", ["alpha", "beta"]), ("fluxes", ["linrange", "list"])):
-        selector = child(view, QComboBox, f"form.input.{path}.kind")
-        assert [selector.itemData(i) for i in range(selector.count())] == tags
+    selector = child(view, QComboBox, "form.input.choice.kind")
+    assert [selector.itemData(i) for i in range(selector.count())] == ["alpha", "beta"]
 
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:

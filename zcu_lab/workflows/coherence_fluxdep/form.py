@@ -13,8 +13,8 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormModel,
     FormPath,
+    LinRange,
     ModuleInput,
-    RangeInput,
     field_error,
 )
 from zcu_tools.resources.entry import RoleResolutionError
@@ -110,7 +110,7 @@ class CoherencePlanForm(FormModel):
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
         Field(description="Explicit flux coordinate: YOKO A/V, Fake native")
     )
-    fluxes: Annotated[RangeInput, Display(label="Fluxes")] = Field(
+    fluxes: Annotated[LinRange, Display(label="Fluxes")] = Field(
         description="Ordered absolute device setpoints"
     )
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(

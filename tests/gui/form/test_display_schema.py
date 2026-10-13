@@ -14,7 +14,6 @@ from zcu_tools.gui.form import (
     FormState,
     LinRange,
     ModuleInput,
-    RangeInput,
 )
 
 
@@ -149,13 +148,12 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         alone: Alpha = Field(default_factory=Alpha)
         locked: LockedAlpha = Field(default_factory=LockedAlpha)
         sweep: LinRange = Field(default_factory=LinRange)
-        fluxes: RangeInput = Field(default_factory=LinRange)
         readout: DirectReadoutCfg | None = None
         fixed: Literal["fixed"] = "fixed"
 
     schema = TagForm.input_schema(FormEnv())
     # Models that a tagged union elsewhere selects by tag: this form's own
-    # union, gui.form's RangeInput, and the cfg_model module union.
+    # union and the cfg_model module union, plus the stored range's fixed tag.
     for path in (
         ("alone", "kind"),
         ("locked", "kind"),
@@ -165,7 +163,6 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         assert node(schema, *path).get("hidden") is True, path
     # Selectors in a union position and one-value ordinary leaves stay visible.
     assert "hidden" not in node(branch(node(schema, "choice"), "alpha"), "kind")
-    assert "hidden" not in node(branch(node(schema, "fluxes"), "linrange"), "kind")
     assert "hidden" not in node(schema, "locked", "count")
     assert "hidden" not in node(schema, "fixed")
 
@@ -173,7 +170,6 @@ def test_one_value_tags_outside_a_union_are_hidden_and_union_selectors_stay() ->
         choice: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
             default_factory=Alpha
         )
-        fluxes: RangeInput = Field(default_factory=LinRange)
 
     assert '"hidden"' not in json.dumps(UnionOnlyForm.input_schema(FormEnv()))
 

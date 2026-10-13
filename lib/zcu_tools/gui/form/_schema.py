@@ -31,10 +31,10 @@ from .model import (
     FormEnv,
     FormModel,
     FormPath,
+    LinRange,
     ModuleInline,
     ModuleInput,
     ModuleRef,
-    RangeInput,
 )
 from .options import Option
 
@@ -424,7 +424,7 @@ class _Projection:
     root is the partial schema being decorated in place. env is the caller's
     environment. library_specs holds each captured library key with its Spec, read
     once per call, or is None when env has no captured library. branch_tags maps
-    each tagged-union branch model of this form, ModuleInput and RangeInput to
+    each tagged-union branch model of this form and ModuleInput, plus LinRange, to
     its tag key (see branch_tags).
     """
 
@@ -796,7 +796,9 @@ def _project(
 ) -> _Projection:
     raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
     root = copy_object(_partial(raw))
-    tags = branch_tags((model, ModuleInput, RangeInput))
+    tags = branch_tags((model, ModuleInput))
+    # The stored range kind stays structural without a range/list selector.
+    tags[LinRange] = "kind"
     projection = _Projection(
         root,
         env,

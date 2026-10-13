@@ -148,7 +148,7 @@ def test_template_required_nested_defaults_omit_none() -> None:
     assert cfg.probe.freq == 120 and cfg.probe.waveform.length == 0.4
 
 
-def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
+def test_copy_command_does_not_reapply_initial_set() -> None:
     form = bound_form(Slot("Q.pulses.probe", copy=True, set={"gain": 0.8}))
     env = environment()
     state = FormState(form.default_input(env))
@@ -157,11 +157,11 @@ def test_copy_branch_switch_does_not_reapply_initial_set() -> None:
     initial = form.to_cfg(value, env)
     assert isinstance(initial, Core) and initial.probe.gain == 0.8
     state.write({("probe", "kind"): "ref", ("probe", "name"): "Q.pulses.probe"}, env)
-    state.write({("probe", "kind"): "inline"}, env)
+    state.run_command(("probe",), "to_inline", env)
     value = state.result(env)
     assert not isinstance(value, FormErrors), value
-    switched = form.to_cfg(value, env)
-    assert isinstance(switched, Core) and switched.probe.gain == 0.3
+    copied = form.to_cfg(value, env)
+    assert isinstance(copied, Core) and copied.probe.gain == 0.3
 
 
 def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
@@ -176,7 +176,7 @@ def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
     assert isinstance(inline, type) and issubclass(inline, ModuleInline)
     defaults = inline.defaults(env, {"kind": "ref", "name": "Q.pulses.probe"})
     module = defaults["module"]
-    assert isinstance(module, dict) and module["freq"] == 0 and module["gain"] == 0.3
+    assert isinstance(module, dict) and module["freq"] == 0
     state.write({("probe", "kind"): "ref"}, env)
     assert isinstance(state.result(env), FormErrors)
 

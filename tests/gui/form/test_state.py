@@ -6,7 +6,6 @@ from typing import Annotated, Literal, Self
 import pytest
 from pydantic import BaseModel, Field, JsonValue, model_validator
 from zcu_tools.gui.form import (
-    ExplicitList,
     FormEnv,
     FormErrors,
     FormInput,
@@ -15,7 +14,6 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
     LinRange,
-    RangeInput,
     field_error,
 )
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -196,9 +194,7 @@ class BranchForm(FormModel):
     branch: Annotated[
         StaticBranch | ContextBranch | RequiredBranch, Field(discriminator="kind")
     ] = Field(default_factory=StaticBranch)
-    fluxes: Annotated[LinRange | ExplicitList, Field(discriminator="kind")] = Field(
-        default_factory=LinRange
-    )
+    fluxes: LinRange = Field(default_factory=LinRange)
 
 
 class NullableBranchForm(FormModel):
@@ -581,7 +577,7 @@ def test_discriminator_first_factory_and_explicit_content_order() -> None:
     assert ("branch", "required") in result.messages
 
 
-def test_range_input_persists_as_range_and_switches_to_whole_explicit_list() -> None:
+def test_linear_range_input_persists_without_expansion() -> None:
     env = environment()
     state = FormState(BranchForm.default_input(env))
     state.write(
@@ -594,16 +590,6 @@ def test_range_input_persists_as_range_and_switches_to_whole_explicit_list() -> 
         "stop": 0.5,
         "n": 3,
     }
-    state.write({("fluxes", "values"): [0.5, 0.3], ("fluxes", "kind"): "list"}, env)
-    result = state.result(env)
-    assert isinstance(result, BranchForm)
-    assert isinstance(result.fluxes, ExplicitList)
-    assert result.fluxes.values == (0.5, 0.3)
-    state.write({("fluxes", "kind"): "linrange"}, env)
-    result = state.result(env)
-    assert isinstance(result, BranchForm)
-    assert isinstance(result.fluxes, LinRange)
-    assert result.fluxes.n == LinRange().n
 
 
 def test_dynamic_choices_revalidate_with_the_supplied_context() -> None:
@@ -632,7 +618,6 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
     dropped = state.write_compatible(
         {
             "branch": {"shared": 6.0, "required": 12.0, "kind": "context"},
-            "fluxes": {"values": [0.3, 0.4], "kind": "list"},
         },
         env,
     )
@@ -640,7 +625,6 @@ def test_compatible_restore_applies_branch_discriminator_before_saved_leaves() -
     result = state.result(env)
     assert isinstance(result, BranchForm)
     assert result.branch == ContextBranch(shared=6.0, required=12.0, context_only=4.0)
-    assert result.fluxes == ExplicitList(values=(0.3, 0.4))
 
 
 @pytest.mark.parametrize("kind", ["static", "context"])
@@ -692,9 +676,9 @@ def test_compatible_restore_cannot_replace_an_unselected_model_object(
 
 
 class NullableRangeAliasForm(FormModel):
-    """Expose the public range alias as a nullable active model section."""
+    """Expose the public linear range as a nullable active model section."""
 
-    fluxes: RangeInput | None = Field(default_factory=LinRange)
+    fluxes: LinRange | None = Field(default_factory=LinRange)
 
 
 def test_nullable_range_alias_evaluates_expressions_and_canonical_errors() -> None:

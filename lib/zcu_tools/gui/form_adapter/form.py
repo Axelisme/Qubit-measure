@@ -35,6 +35,7 @@ from zcu_tools.gui.form import (
     FormState,
     FormWritePath,
     LinRange,
+    Option,
     static_defaults,
 )
 from zcu_tools.program.v2.base import ProgramV2Cfg
@@ -158,7 +159,7 @@ class _SpecSection:
         self.editable = editable_spec(spec, {}, {})
         model = new_class(
             f"{spec.__name__}Form",
-            (FormModel, self.editable),
+            (self.editable,),
             exec_body=lambda ns: ns.update({"__module__": __name__}),
         )
         if not issubclass(model, FormModel):
@@ -245,10 +246,19 @@ class _Section:
                 if isinstance(node, AliasName) and node.choices_source == "devices"
             }
 
+        def options(
+            cls: type[FormModel], env: FormEnv
+        ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
+            del cls
+            return {
+                (name,): field.options(env) for name, field in section.modules.items()
+            }
+
         namespace.update(
             __annotations__=annotations,
             defaults=classmethod(defaults),
             choices=classmethod(choices),
+            options=classmethod(options),
         )
         model = new_class(
             f"{core.__name__}Form",
@@ -394,6 +404,12 @@ class Form[C: ConfigBase]:
     them (see bind_templates); there is no override. FieldMeta label, unit,
     decimals, description and group become Display metadata; locked fields
     drop decimals because they are single-value Literals.
+    Generated options(env) declares nullable None, family-limited captured keys
+    and every editable Inline kind. Key values keep the existing ref/string
+    shape; Inline values contain only branch tags and fields names the selected
+    child form. The key option command to_inline (Convert to inline) copies
+    supported captured Spec content in one write. Ordinary selections use fresh
+    Template/type defaults, never copy the key or retain another kind's draft.
     A core_cfg that is a concrete persistent module or waveform Spec builds the
     same Spec form as module_form and requires an empty tree.
     """
@@ -493,7 +509,7 @@ class Form[C: ConfigBase]:
 
         input must belong to this Form; otherwise raise TypeError. path consists
         of nonempty core field names, not module descendants; invalid paths raise
-        ValueError. Copy a captured library Spec through ModuleInline.defaults;
+        ValueError. Copy a captured library Spec into supported detached input;
         absent library/key uses Template fallback or editable static blank.
         Wrong family/source failures propagate. Preserve existing inline values
         and locks. No mutation, validation of the whole draft, or publication
@@ -514,8 +530,8 @@ class Form[C: ConfigBase]:
 
         input, path and env follow module_inline_input, with the same failures,
         locks and captured-library/Template/blank preparation. The generated
-        inline branch defaults use that same preparation during discriminator
-        switching. Return no writes for already-inline input. The resource must
+        inline branch defaults use only the Template/blank preparation during
+        switching, never this explicit copy path. Return no writes for already-inline input. The resource must
         apply this batch once through guarded public write; preparation changes
         no input and publishes nothing. Callers need not know module layout.
         """

@@ -7,13 +7,12 @@ import numpy as np
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
 from zcu_tools.gui.form import (
-    ExplicitList,
     FormEnv,
     FormErrors,
     FormPath,
+    LinRange,
     ModuleInput,
     ModuleRef,
-    RangeInput,
 )
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
@@ -139,18 +138,14 @@ def calibration_choices(env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]
     }
 
 
-def expand_fluxes(fluxes: RangeInput) -> tuple[float, ...]:
-    """Expand a validated absolute list/range, preserving order/repeated values.
+def expand_fluxes(fluxes: LinRange) -> tuple[float, ...]:
+    """Expand a validated linear range using its exact start/stop/n count.
 
-    List values are copied as a tuple; range uses its exact start/stop/n count.
-    No unit conversion, hardware lookup or sorting occurs.
+    Descending and repeated setpoints keep their order. No unit conversion,
+    hardware lookup or sorting occurs.
     """
-    return (
-        fluxes.values
-        if isinstance(fluxes, ExplicitList)
-        else tuple(
-            float(value) for value in np.linspace(fluxes.start, fluxes.stop, fluxes.n)
-        )
+    return tuple(
+        float(value) for value in np.linspace(fluxes.start, fluxes.stop, fluxes.n)
     )
 
 
