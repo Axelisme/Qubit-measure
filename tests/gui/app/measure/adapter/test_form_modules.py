@@ -133,3 +133,45 @@ def test_native_cfg_backfill_is_detached_inline_and_direct_range() -> None:
     assert cfg == native
     native.modules.probe.gain = 0.7
     assert cfg.modules.probe.gain == 0.1
+
+
+@pytest.mark.parametrize("mode", ["ref", "inline"])
+def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
+    class InvalidDraft(ModuleCore):
+        amount: float
+
+    form = Form(InvalidDraft, {})
+    env = module_env()
+    raw: JsonValue = (
+        {"kind": "ref", "name": "Q.pulses.probe"}
+        if mode == "ref"
+        else {
+            "kind": "inline",
+            "module": {
+                "type": "pulse",
+                "ch": 1,
+                "nqz": 1,
+                "gain": 0.3,
+                "freq": {"expr": "50 * 2"},
+                "waveform": {"style": "const", "length": 0.1},
+            },
+        }
+    )
+    input = FormInput(form.model, {"modules": {"probe": raw}})
+    before = input.data
+    assert hasattr(form, "read_module"), "Missing public field-local Form module read"
+    observed = form.read_module(input, ("modules", "probe"), env)
+    assert not isinstance(observed, FormErrors), observed
+    assert observed.value["freq"] == 100.0
+    assert observed.mode == ("key" if mode == "ref" else "inline")
+    assert observed.source == (
+        "library:Q.pulses.probe" if mode == "ref" else "modules.probe"
+    )
+    observed.value["freq"] = -1.0
+    again = form.read_module(input, ("modules", "probe"), env)
+    assert not isinstance(again, FormErrors), again
+    assert again.value["freq"] == 100.0
+    assert input.data == before
+    inline = form.module_inline_input(input, ("modules", "probe"), env)
+    assert inline["kind"] == "inline"
+    assert input.data == before

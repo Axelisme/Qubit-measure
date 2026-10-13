@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
-from zcu_tools.cfg_model import Range
+from zcu_tools.cfg_model import PulseCfg, Range
 from zcu_tools.gui.app.measure.adapter import Form
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
@@ -303,3 +303,76 @@ def test_run_aliases_rejected_before_view_or_operation_effects(form_rpc) -> None
     assert reply["error"]["reason"] == "run_aliases_not_supported", reply
     assert selected == []
     assert fixture.ctrl.tab_control.get_running_tab_id() is None
+
+
+class ModuleRpcCfg(SampleCfg):
+    pulse: PulseCfg | None = None
+
+
+class ModuleRpcAdapter(SampleAdapter):
+    form = Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+def test_module_rpc_conversion_values_errors_and_readonly_admission(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("module-rpc")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        notifications: list[str] = []
+        owner.subscribe(lambda: notifications.append("changed"))
+        converted = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert converted["ok"], converted
+        assert converted["result"]["input"]["pulse"]["kind"] == "inline"
+        assert notifications == ["changed"]
+        owner.write(
+            {
+                ("pulse", "module"): {
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": {"expr": "50 * 2"},
+                    "gain": 0.2,
+                    "waveform": {"style": "const", "length": 0.1},
+                },
+                ("gain",): {"expr": "1 / 0"},
+            }
+        )
+        before = owner.input.data
+        read = rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})
+        assert read["ok"], read
+        assert read["result"]["value"]["freq"] == 100.0
+        assert read["result"]["mode"] == "inline"
+        assert read["result"]["source"] == "pulse"
+        assert owner.input.data == before
+        changed = len(notifications)
+        assert rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})["ok"]
+        assert len(notifications) == changed
+        fixture.ctrl.control_identity.reclaim_local()
+        assert rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})["ok"]
+        denied = rpc.call("tab.use_inline", {"tab_id": tab, "field": "pulse"})
+        assert not denied["ok"]
+        assert denied["error"]["reason"] == "not_holder"
+        owner.write({("pulse", "module", "freq"): {"expr": "1 / 0"}})
+        invalid = rpc.call("tab.read_module", {"tab_id": tab, "field": "pulse"})
+        assert not invalid["ok"]
+        assert invalid["error"]["reason"] == "not_valid"
+        assert len(notifications) == changed + 1
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+@pytest.mark.parametrize(
+    "field", ["gain", "missing", "pulse.module.freq", "pulse..freq"]
+)
+def test_module_rpc_rejects_nonmodule_paths_without_mutation(
+    form_rpc, field: str
+) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.data
+    for method in ("tab.read_module", "tab.use_inline"):
+        rejected = rpc.call(method, {"tab_id": tab, "field": field})
+        assert not rejected["ok"], rejected
+        assert rejected["error"]["code"] == "invalid_params", rejected
+    assert owner.input.data == before
