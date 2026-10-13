@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.gui.session.services import arb_waveform
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.ui.arb_waveform_dialog import (
     ArbWaveformDialog,
     _PreviewCanvas,
@@ -484,7 +484,7 @@ def test_save_button_persists_without_remote_png(
     from qtpy.QtWidgets import QPushButton
 
     monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
-    state = State(
+    state = SessionState(
         SessionEnv(
             parameters=None,
             soc=None,
@@ -533,7 +533,7 @@ def entry_waveform_dialog(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         "_database_path",
         vars(ArbWaveformDatabase)["_database_path"],
     )
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
     context = ContextService(
         state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
     )

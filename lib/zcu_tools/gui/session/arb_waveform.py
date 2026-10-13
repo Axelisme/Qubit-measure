@@ -1,4 +1,8 @@
-"""Application-facing arbitrary waveform assets and their independent preview."""
+"""Host-neutral arbitrary waveform asset port and its preview result types.
+
+The session service implements the port; the shared ARB dialog, Inspect and
+each host's remote surface consume it.
+"""
 
 from __future__ import annotations
 

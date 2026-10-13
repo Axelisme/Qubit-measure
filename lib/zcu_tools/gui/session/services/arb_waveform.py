@@ -1,3 +1,5 @@
+"""Session-owned arbitrary waveform asset service shared by every GUI host."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +20,7 @@ from zcu_tools.resources.waveform_assets import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.session.state import SessionState
     from zcu_tools.gui.session.types import SessionEnv
 
 
@@ -26,9 +28,16 @@ ARB_WAVEFORMS_VERSION_KEY = "arb_waveforms"
 
 
 class ArbWaveformService:
-    """App-local adapter for the shared arbitrary waveform repository."""
+    """Session adapter for the qubit-scoped arbitrary waveform repository.
 
-    def __init__(self, state: State) -> None:
+    The asset root follows state.session_env (its database path and
+    chip/qubit names); every successful mutation bumps the shared
+    "arb_waveforms" version in state.version once. Listing before a project
+    database path exists returns no keys; other operations then raise
+    FailedPreconditionError(reason_code="no_project").
+    """
+
+    def __init__(self, state: SessionState) -> None:
         self._state = state
 
     def root_path(self) -> Path:

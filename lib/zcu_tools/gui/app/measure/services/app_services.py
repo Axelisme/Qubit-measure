@@ -11,6 +11,7 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.build import build_session_services
 from zcu_tools.gui.session.services.connection import SoCConnectionService
 from zcu_tools.gui.session.services.context import ContextService
@@ -22,7 +23,6 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from .analyze import AnalyzeService
-from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from .cfg_editor import CfgEditorService
 from .experiment_reload import ExperimentReloadService
 from .guard import GuardService
@@ -165,7 +165,7 @@ def build_app_services(
     )
     context = session.context
     device = session.device
-    arb_waveform = ArbWaveformService(state)
+    arb_waveform = session.arb_waveform
 
     bindings = MeasureCfgBindings(cfg_editor_ctrl)
 
