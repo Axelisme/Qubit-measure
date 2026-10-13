@@ -321,8 +321,8 @@ def test_spec_conversion_revalidates_without_mutating_ordinary_result() -> None:
 
 
 class UnreadableLibrary(LibrarySnapshot):
-    def module_spec(self, key: str) -> ModuleSpec:
-        del key
+    def module_spec(self, path: str) -> ModuleSpec:
+        del path
         raise OSError("Cannot read captured module")
 
 
