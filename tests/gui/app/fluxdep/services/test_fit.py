@@ -10,6 +10,7 @@ search State refactor) is that ``compute_search`` performs NO State write — on
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 
 import h5py
 import numpy as np
@@ -441,9 +442,10 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
             [0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0]
         )
         # Source changes cannot rewrite the recorded background or calibration.
-        entry.raw["freqs"][:] = [7.0, 8.0]
-        entry.raw["signals"][:] = 0
-        state.put_spectrum(entry)
+        replacement = deepcopy(state.get_spectrum(entry.name))
+        replacement.raw["freqs"][:] = [7.0, 8.0]
+        replacement.raw["signals"][:] = 0
+        state.put_spectrum(replacement)
         expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
         record()
         new_centers = np.array([0.2, 0.3]) - shift / 2
