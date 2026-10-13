@@ -157,6 +157,7 @@ Processed restore 包含零點的完成結果，不新增持久化欄位。
 （例如 `finish`、`undo`、`clear`、`auto_align`、`status`、`realign`、`sample`），
 ResultPreview 的下一步為 `fluxdep.preview.<align|realign|sample>`；測試以這些名稱定位，不依按鈕文字。
 定線資訊用固定小數位，位數由 device 軸步長決定；mirror loss 圖有 Device value／Frequency 軸標。
+canvas 每次 resize 重新 tight layout，軸標不會被窄視窗裁掉。
 
 ### 背景計算 + 即時中斷（generation 戳記）
 慢計算經共用 `BackgroundRunner.submit`（per-panel，`enter=None`）off-main，避免拖動卡 UI。

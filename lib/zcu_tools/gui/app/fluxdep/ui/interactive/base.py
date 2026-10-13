@@ -82,6 +82,9 @@ class InteractiveMplWidget(QWidget):
         # Subclasses populate controls_layout after super().__init__;
         # add_stage_button() and add_finish_button() fill the pinned bottom.
 
+        # Plot builders lay out once for the default figure size; re-fit on resize
+        # so tick and axis labels stay inside the canvas Qt actually gives us.
+        self.canvas.mpl_connect("resize_event", self._fit_layout)
         self.canvas.mpl_connect("button_press_event", self._dispatch_press)
         self.canvas.mpl_connect("motion_notify_event", self._dispatch_move)
         self.canvas.mpl_connect("button_release_event", self._dispatch_release)
@@ -138,6 +141,9 @@ class InteractiveMplWidget(QWidget):
 
     def redraw(self) -> None:
         self.canvas.draw_idle()
+
+    def _fit_layout(self, _event: Event) -> None:
+        self.figure.tight_layout()
 
     # --- overridable mouse handlers (default no-op) ----------------------
 
