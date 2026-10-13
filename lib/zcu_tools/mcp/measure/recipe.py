@@ -20,7 +20,6 @@ from threading import Condition, Event
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, TypeGuard
 
 from zcu_tools.format_version import YamlValue
-from zcu_tools.gui.form import ModuleRef
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -958,11 +957,10 @@ class RecipeTab:
             if slot == "locked":
                 raise ValueError(f"Cannot select a library key at locked Slot: {field}")
             if slot:
-                selection = ModuleRef(name=name).model_dump(mode="json")
                 self._edit(
                     [
-                        {"path": [*path, field_name], "value": value}
-                        for field_name, value in selection.items()
+                        {"path": [*path, "kind"], "value": "ref"},
+                        {"path": [*path, "name"], "value": name},
                     ]
                 )
             else:
