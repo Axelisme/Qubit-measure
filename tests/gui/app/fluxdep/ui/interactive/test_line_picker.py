@@ -143,3 +143,14 @@ def test_alignment_values_use_fixed_decimals(widget, context):
     ]
     for line in lines:
         assert re.fullmatch(r"[a-z ]+: -?\d+\.\d+", line), line
+
+
+def test_axis_labels_stay_inside_a_resized_canvas(qapp, widget):
+    widget.resize(700, 450)
+    widget.show()
+    qapp.processEvents()
+    widget.canvas.draw()
+    renderer = widget.canvas.get_renderer()
+    for axes in widget.figure.axes:
+        label = axes.yaxis.label.get_window_extent(renderer)
+        assert label.x0 >= 0, axes.get_ylabel()
