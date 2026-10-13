@@ -9,7 +9,6 @@ creation menu. This module does not register anything at import time.
 from __future__ import annotations
 
 from zcu_tools.cfg_model import (
-    ArbWaveformCfg,
     BathResetSpec,
     ConstWaveformCfg,
     CosineWaveformCfg,
@@ -97,7 +96,7 @@ def ro(
     }
 
 
-# Insertion order preserves library creation menus. Empty seeds preserve blanks.
+# Insertion order preserves library creation menus. Blank seeds retain legacy zeros.
 TEMPLATES: dict[str, TemplateDef] = {
     "res_probe": TemplateDef(
         PulseSpec,
@@ -194,19 +193,133 @@ TEMPLATES: dict[str, TemplateDef] = {
         {"length": 1.0},
         default_name="ro_waveform",
     ),
-    "pulse:blank": TemplateDef(PulseSpec, "Blank: pulse", {}),
-    "readout/direct:blank": TemplateDef(DirectReadoutCfg, "Blank: readout/direct", {}),
-    "readout/pulse:blank": TemplateDef(PulseReadoutSpec, "Blank: readout/pulse", {}),
-    "reset/none:blank": TemplateDef(NoneResetCfg, "Blank: reset/none", {}),
-    "reset/pulse:blank": TemplateDef(PulseResetSpec, "Blank: reset/pulse", {}),
-    "reset/two_pulse:blank": TemplateDef(
-        TwoPulseResetSpec, "Blank: reset/two_pulse", {}
+    "pulse:blank": TemplateDef(
+        PulseSpec,
+        "Blank: pulse",
+        {
+            "ch": 0,
+            "freq": 0.0,
+            "gain": 0.0,
+            "nqz": 1,
+            "phase": 0.0,
+            "pre_delay": 0.0,
+            "post_delay": 0.0,
+            "waveform.style": "const",
+            "waveform.length": 0.0,
+        },
     ),
-    "reset/bath:blank": TemplateDef(BathResetSpec, "Blank: reset/bath", {}),
-    "const:blank": TemplateDef(ConstWaveformCfg, "Blank: const", {}),
-    "cosine:blank": TemplateDef(CosineWaveformCfg, "Blank: cosine", {}),
-    "gauss:blank": TemplateDef(GaussWaveformCfg, "Blank: gauss", {}),
-    "drag:blank": TemplateDef(DragWaveformCfg, "Blank: drag", {}),
-    "flat_top:blank": TemplateDef(FlatTopWaveformSpec, "Blank: flat_top", {}),
-    "arb:blank": TemplateDef(ArbWaveformCfg, "Blank: arb", {}),
+    "readout/direct:blank": TemplateDef(
+        DirectReadoutCfg,
+        "Blank: readout/direct",
+        {"ro_ch": 0, "ro_freq": 0.0, "ro_length": 0.0, "trig_offset": 0.0},
+    ),
+    "readout/pulse:blank": TemplateDef(
+        PulseReadoutSpec,
+        "Blank: readout/pulse",
+        {
+            "pulse_cfg.ch": 0,
+            "pulse_cfg.freq": 0.0,
+            "pulse_cfg.gain": 0.0,
+            "pulse_cfg.nqz": 1,
+            "pulse_cfg.phase": 0.0,
+            "pulse_cfg.pre_delay": 0.0,
+            "pulse_cfg.post_delay": 0.0,
+            "pulse_cfg.waveform.style": "const",
+            "pulse_cfg.waveform.length": 0.0,
+            "ro_cfg.ro_ch": 0,
+            "ro_cfg.ro_freq": 0.0,
+            "ro_cfg.ro_length": 0.0,
+            "ro_cfg.trig_offset": 0.0,
+        },
+    ),
+    "reset/none:blank": TemplateDef(
+        NoneResetCfg, "Blank: reset/none", {"type": "reset/none"}
+    ),
+    "reset/pulse:blank": TemplateDef(
+        PulseResetSpec,
+        "Blank: reset/pulse",
+        {
+            "pulse_cfg.ch": 0,
+            "pulse_cfg.freq": 0.0,
+            "pulse_cfg.gain": 0.0,
+            "pulse_cfg.nqz": 1,
+            "pulse_cfg.phase": 0.0,
+            "pulse_cfg.pre_delay": 0.0,
+            "pulse_cfg.post_delay": 0.0,
+            "pulse_cfg.waveform.style": "const",
+            "pulse_cfg.waveform.length": 0.0,
+        },
+    ),
+    "reset/two_pulse:blank": TemplateDef(
+        TwoPulseResetSpec,
+        "Blank: reset/two_pulse",
+        {
+            "pulse1_cfg.ch": 0,
+            "pulse1_cfg.freq": 0.0,
+            "pulse1_cfg.gain": 0.0,
+            "pulse1_cfg.nqz": 1,
+            "pulse1_cfg.phase": 0.0,
+            "pulse1_cfg.pre_delay": 0.0,
+            "pulse1_cfg.post_delay": 0.0,
+            "pulse1_cfg.waveform.style": "const",
+            "pulse1_cfg.waveform.length": 0.0,
+            "pulse2_cfg.ch": 0,
+            "pulse2_cfg.freq": 0.0,
+            "pulse2_cfg.gain": 0.0,
+            "pulse2_cfg.nqz": 1,
+            "pulse2_cfg.phase": 0.0,
+            "pulse2_cfg.pre_delay": 0.0,
+            "pulse2_cfg.post_delay": 0.0,
+            "pulse2_cfg.waveform.style": "const",
+            "pulse2_cfg.waveform.length": 0.0,
+        },
+    ),
+    "reset/bath:blank": TemplateDef(
+        BathResetSpec,
+        "Blank: reset/bath",
+        {
+            "cavity_tone_cfg.ch": 0,
+            "cavity_tone_cfg.freq": 0.0,
+            "cavity_tone_cfg.gain": 0.0,
+            "cavity_tone_cfg.nqz": 1,
+            "cavity_tone_cfg.phase": 0.0,
+            "cavity_tone_cfg.pre_delay": 0.0,
+            "cavity_tone_cfg.post_delay": 0.0,
+            "cavity_tone_cfg.waveform.style": "const",
+            "cavity_tone_cfg.waveform.length": 0.0,
+            "qubit_tone_cfg.ch": 0,
+            "qubit_tone_cfg.freq": 0.0,
+            "qubit_tone_cfg.gain": 0.0,
+            "qubit_tone_cfg.nqz": 1,
+            "qubit_tone_cfg.phase": 0.0,
+            "qubit_tone_cfg.pre_delay": 0.0,
+            "qubit_tone_cfg.post_delay": 0.0,
+            "qubit_tone_cfg.waveform.style": "const",
+            "qubit_tone_cfg.waveform.length": 0.0,
+            "pi2_cfg.ch": 0,
+            "pi2_cfg.freq": 0.0,
+            "pi2_cfg.gain": 0.0,
+            "pi2_cfg.nqz": 1,
+            "pi2_cfg.phase": 0.0,
+            "pi2_cfg.pre_delay": 0.0,
+            "pi2_cfg.post_delay": 0.0,
+            "pi2_cfg.waveform.style": "const",
+            "pi2_cfg.waveform.length": 0.0,
+        },
+    ),
+    "const:blank": TemplateDef(ConstWaveformCfg, "Blank: const", {"length": 0.0}),
+    "cosine:blank": TemplateDef(CosineWaveformCfg, "Blank: cosine", {"length": 0.0}),
+    "gauss:blank": TemplateDef(
+        GaussWaveformCfg, "Blank: gauss", {"length": 0.0, "sigma": 0.0}
+    ),
+    "drag:blank": TemplateDef(
+        DragWaveformCfg,
+        "Blank: drag",
+        {"length": 0.0, "sigma": 0.0, "delta": 0.0, "alpha": 0.0},
+    ),
+    "flat_top:blank": TemplateDef(
+        FlatTopWaveformSpec,
+        "Blank: flat_top",
+        {"length": 0.0, "raise_waveform.style": "cosine", "raise_waveform.length": 0.0},
+    ),
 }
