@@ -146,9 +146,7 @@ def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
         mutation_allowed=lambda: True,
     )
     resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
-    assert hasattr(resource, "read_module"), (
-        "Missing field-local module observation"
-    )
+    assert hasattr(resource, "read_module"), "Missing field-local module observation"
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
     resource.use_inline(("pulse",))
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
@@ -212,3 +210,36 @@ def test_module_read_allows_other_invalid_input_but_rejects_own_errors() -> None
         resource.read_module(("pulse",))
     assert invalid.value.reason is CfgPreconditionReason.NOT_VALID
     assert "pulse" in str(invalid.value)
+
+
+class RequiredModuleCore(ConfigBase):
+    pulse: PulseCfg
+
+
+@pytest.mark.parametrize("captured", [True, False], ids=["captured-ref", "blank"])
+def test_required_module_conversion_uses_public_write_once(captured: bool) -> None:
+    resource = TabFormResource(
+        Form(RequiredModuleCore, {}),
+        capture=lambda _aliases: TabFormSources(
+            module_env(100.0) if captured else FormEnv()
+        ),
+        mutation_allowed=lambda: True,
+    )
+    if captured:
+        resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
+    notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    resource.use_inline(("pulse",))
+    assert notifications == ["changed"]
+    assert resource.input.data["pulse"]["kind"] == "inline"
+    if captured:
+        assert resource.read_module(("pulse",)).value["freq"] == 100.0
+        resource.write({("pulse", "module", "freq"): 125.0})
+    else:
+        resource.write({("pulse", "module", "freq"): 125.0})
+        assert resource.preview().values[("pulse", "module", "freq")] == 125.0
+    before = resource.input.data
+    changed = len(notifications)
+    resource.use_inline(("pulse",))
+    assert resource.input.data == before
+    assert len(notifications) == changed

@@ -175,3 +175,64 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
     inline = form.module_inline_input(input, ("modules", "probe"), env)
     assert inline["kind"] == "inline"
     assert input.data == before
+
+
+@pytest.mark.parametrize("fallback", [True, False], ids=["template", "blank"])
+@pytest.mark.parametrize("missing", ["library", "key"])
+def test_required_module_branch_switch_uses_owner_fallback(
+    fallback: bool, missing: str
+) -> None:
+    from zcu_tools.cfg_model import Slot, Template, TemplateDef
+
+    form = Form(
+        ModuleCore,
+        {
+            "modules": {
+                "probe": Slot(
+                    "$qubit.module.probe",
+                    fallback=Template("pulse") if fallback else None,
+                )
+            }
+        },
+    )
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {
+                    "ch": 1,
+                    "nqz": 1,
+                    "freq": 90.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
+                },
+            )
+        },
+        adapter="synthetic",
+    )
+    env = FormEnv() if missing == "library" else module_env()
+    # FormInput can preserve an invalid draft; ordinary write rejects missing refs.
+    input = FormInput(
+        form.model, {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.missing"}}}
+    )
+    before = input.data
+    state = FormState(input)
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    state.write({("modules", "probe", "kind"): "inline"}, env)
+    assert notifications == ["changed"]
+    assert input.data == before
+    module = state.input.data["modules"]["probe"]
+    assert module["kind"] == "inline"
+    assert module["module"]["type"] == "pulse"
+    if fallback:
+        observed = form.read_module(state.input, ("modules", "probe"), env)
+        assert not isinstance(observed, FormErrors), observed
+        assert observed.value["freq"] == 90.0
+    else:
+        state.write({("modules", "probe", "module", "freq"): 125.0}, env)
+        assert (
+            state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
+        )
