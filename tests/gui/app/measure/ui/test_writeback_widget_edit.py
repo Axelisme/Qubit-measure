@@ -532,7 +532,9 @@ def module_host(module_widget, qapp):
     try:
         yield ctrl, window, widget, tab_id, pane, presenter
     finally:
-        window.remove_tab_widget(tab_id)
+        # Publish the real tab close while its subscribed Qt host is still live.
+        if ctrl.has_tab(tab_id):
+            ctrl.tab_control.close_tab(tab_id)
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
