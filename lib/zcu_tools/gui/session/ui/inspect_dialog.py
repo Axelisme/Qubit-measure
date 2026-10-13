@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent, QFont, QKeyEvent
@@ -65,15 +65,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 type _EntryKey = tuple[LibraryKind, str]
-
-type InspectPage = Literal["parameters", "modules", "aliases"]
-"""One Inspect tab: Parameters, Modules or Aliases."""
-
-_PAGE_TITLES: tuple[tuple[InspectPage, str], ...] = (
-    ("parameters", "Parameters"),
-    ("modules", "Modules"),
-    ("aliases", "Aliases"),
-)
 
 _GROUPS: tuple[tuple[LibraryKind, str], ...] = (
     ("module", "modules"),
@@ -204,13 +195,9 @@ class InspectDialog(QDialog):
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
         self._aliases = AliasPanel(ctrl)
-        self._pages: dict[InspectPage, QWidget] = {
-            "parameters": self._component_tree,
-            "modules": self._build_modules_tab(),
-            "aliases": self._aliases,
-        }
-        for page, title in _PAGE_TITLES:
-            self._tabs.addTab(self._pages[page], title)
+        self._tabs.addTab(self._component_tree, "Parameters")
+        self._tabs.addTab(self._build_modules_tab(), "Modules")
+        self._tabs.addTab(self._aliases, "Aliases")
         layout.addWidget(self._tabs)
 
         bus.subscribe(ContextSwitchedPayload, self._on_bus_refresh)
@@ -314,10 +301,6 @@ class InspectDialog(QDialog):
         if self._editor is not None:
             self._editor.set_editing_enabled(enabled=not read_only)
         self._update_controls()
-
-    def show_page(self, page: InspectPage) -> None:
-        """Make page the current tab without asking about any draft."""
-        self._tabs.setCurrentWidget(self._pages[page])
 
     def refresh(self) -> None:
         """Reread the component tree and the library from a new capture."""
@@ -666,7 +649,7 @@ class InspectDialog(QDialog):
             if self._aliases.apply():
                 return True
             # The rejection is shown inline on the page; bring it into view.
-            self.show_page("aliases")
+            self._tabs.setCurrentWidget(self._aliases)
             return False
         if answer == "discard":
             self._aliases.revert()
@@ -710,4 +693,4 @@ def _find_item(tree: QTreeWidget, key: _EntryKey | None) -> QTreeWidgetItem | No
     return None
 
 
-__all__ = ["InspectDialog", "InspectPage"]
+__all__ = ["InspectDialog"]

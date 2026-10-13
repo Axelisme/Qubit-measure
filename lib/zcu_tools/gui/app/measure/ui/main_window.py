@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
-    from zcu_tools.gui.session.ui.inspect_dialog import InspectPage
 
 
 # ---------------------------------------------------------------------------
@@ -1060,10 +1059,6 @@ class MainWindow(QMainWindow):
                 f"tab {tab_id!r} post_analysis has no selected figure yet"
             )
         return render_figure_png(fig)
-
-    def select_inspect_page(self, page: InspectPage) -> None:
-        """Show page on the open Inspect; FailedPreconditionError when closed."""
-        self._dialog_registry.select_inspect_page(page)
 
     def take_dialog_screenshot(self, dialog_name: DialogName) -> bytes:
         """Grab a currently-open dialog and return raw PNG bytes."""

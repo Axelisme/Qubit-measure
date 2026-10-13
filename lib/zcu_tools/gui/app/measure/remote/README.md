@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-14，dialog.screenshot 的 Inspect tab；aliases 對話框名稱退休
+**Last updated:** 2026-10-14，aliases 對話框名稱退休，Inspect 截圖只擷取目前頁
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -294,7 +294,7 @@ For example, `predictor.predict` accepts `{"qubit":"Q2","device_value":1.80}` or
 - `operation.*`：live operation indexing, bounded wait, domain-owned cancellation and progress.
 - `arb_waveform.*`：qubit-scoped arbitrary waveform asset operations.
 - `value.*`：read-only session value lookup through `ContextControlPort`.
-- `dialog.screenshot`：captures an open named dialog (setup／device／predictor／inspect／arb_waveform). For `inspect`, optional `tab` (`parameters`／`modules`／`aliases`, default `parameters`) shows that page before the capture; other names reject `tab`, and unknown tabs fail as invalid params. Alias editing is Inspect's Aliases page, so there is no `aliases` dialog name.
+- `dialog.screenshot`：captures an open named dialog (setup／device／predictor／inspect／arb_waveform). It is read-only: `inspect` is captured on the page the user is showing, and no method opens a dialog or switches its page. Alias editing is Inspect's Aliases page, so there is no `aliases` dialog name.
 
 The `tab.get_figure` subtab locator is required and closed
 (`run|analysis|post_analysis`). It may bind a Run preview to

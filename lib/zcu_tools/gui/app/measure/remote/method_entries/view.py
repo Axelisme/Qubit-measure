@@ -5,7 +5,6 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-from ..dialogs import INSPECT_PAGES
 from ._params import (
     optional_integer,
     optional_string,
@@ -58,18 +57,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "view:h_dialog_screenshot",
         MethodSpec(
             10.0,
-            "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count. "
-            "For name=inspect, tab selects the shown page first (default parameters); "
-            "other names reject tab.",
+            "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
             (
                 required_string("name", "Dialog name"),
-                ParamSpec(
-                    "tab",
-                    JsonType.STRING,
-                    required=False,
-                    description="Inspect page to show and capture; only for name=inspect",
-                    enum=INSPECT_PAGES,
-                ),
                 optional_string(
                     "out_path", "Write PNG here instead of returning base64"
                 ),

@@ -58,22 +58,11 @@ def h_view_snapshot(
 def h_dialog_screenshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..dialogs import DialogName, parse_dialog_name, parse_inspect_page
+    from ..dialogs import parse_dialog_name
 
     name_str = str(params["name"])
     dialog_name = parse_dialog_name(name_str)
-    tab = params.get("tab")
-    view = render_view(adapter)
-    if dialog_name is DialogName.INSPECT:
-        # Inspect is always captured on a named page; omitted means Parameters.
-        view.select_inspect_page(
-            parse_inspect_page("parameters" if tab is None else tab)
-        )
-    elif tab is not None:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "tab applies only to the inspect dialog"
-        )
-    png = view.take_dialog_screenshot(dialog_name)
+    png = render_view(adapter).take_dialog_screenshot(dialog_name)
     return _png_reply(png, params)
 
 
