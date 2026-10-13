@@ -30,9 +30,10 @@ class FieldView:
     value as read-only text, so options is None and expression is False.
     raw is current JSON or a schema static default when present is False.
     value is the ordinary preview leaf when has_value is True; otherwise None
-    is only a placeholder. key_or_inline marks an untagged str-or-model
-    field: its row offers Key and Inline modes, kind is key for a string or
-    unfilled value and model for an object. children are current model rows,
+    is only a placeholder. key_or_inline marks a field the schema marks
+    x-form-key-or-inline (an untagged str-or-model field): its row offers Key
+    and Inline modes, kind is key for a string or unfilled value and model
+    for an object. children are current model rows,
     never container keys/indexes. Only kind=model can have children.
     """
 
@@ -109,24 +110,24 @@ def _options(schema: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
 
 
 def _key_and_inline(
-    variants: tuple[dict[str, JsonValue], ...],
+    schema: dict[str, JsonValue], variants: tuple[dict[str, JsonValue], ...]
 ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]] | None:
-    """Split a str-or-model field into its key and inline schema nodes.
+    """Split a field the schema marks x-form-key-or-inline into key and inline.
 
-    The JSON type selects between them: a plain string node (no Expr) is the
-    library key, a model node the inline value. Other fields return None.
+    Core decides which fields are str-or-model; unmarked fields return None.
+    variants are the field's flattened alternatives: the string node is the
+    library key, the other non-null node the inline model. A marked field
+    without exactly one of each raises ValueError.
     """
+    if schema.get("x-form-key-or-inline") is not True:
+        return None
     keys = [node for node in variants if node.get("type") == "string"]
-    # Expr and complex envelopes are objects too, but value alternatives.
-    models = [
-        node
-        for node in variants
-        if ("properties" in node or "discriminator" in node)
-        and not {"expr", "__complex__"} & set(_properties(node))
-    ]
-    if len(keys) == 1 and len(models) == 1:
-        return keys[0], models[0]
-    return None
+    inline = [node for node in variants if node.get("type") not in ("string", "null")]
+    if len(keys) != 1 or len(inline) != 1:
+        raise ValueError(
+            "x-form-key-or-inline schema requires one key and one inline alternative"
+        )
+    return keys[0], inline[0]
 
 
 def _shown(node: dict[str, JsonValue]) -> bool:
@@ -219,7 +220,7 @@ def _field(
     variants = _variants(schema)
     raw = data.get(path[-1])
     present = path[-1] in data
-    split = _key_and_inline(variants)
+    split = _key_and_inline(schema, variants)
     if split is None:
         direct = _direct(schema)
         kind: _Kind = _kind(variants)

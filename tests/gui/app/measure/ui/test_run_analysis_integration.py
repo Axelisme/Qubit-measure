@@ -34,15 +34,15 @@ from zcu_tools.gui.cfg import (
     CfgSectionSpec,
     CfgSectionValue,
     DirectValue,
-    IntSpec,
     ScalarSpec,
 )
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup, parameter_capture
+from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._components import ResonatorSchema
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
 
 
@@ -62,7 +62,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         authority = ControlIdentity()
         owners.append(authority)
         ctrl.control_identity = authority
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = {}
@@ -103,11 +103,6 @@ def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False
         writeback_items=(),
         has_writeback_draft=False,
     )
-    # cfg schema dummy
-    spec = CfgSectionSpec(label="root", fields={"reps": IntSpec("Reps")})
-    schema = CfgSchema(
-        spec=spec, value=CfgSectionValue(fields={"reps": DirectValue(100)})
-    )
 
     # params dataclass for analyze form
     @dataclasses.dataclass
@@ -117,7 +112,7 @@ def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False
     analysis_snap = dataclasses.replace(analysis_snap, params=P())
     snapshot = TabSnapshot(
         adapter_name="fake",
-        cfg_schema=schema,
+        cfg_input={},
         tab_id=tab_id,
         interaction=TabInteractionState(
             global_run_active=False,
@@ -189,8 +184,6 @@ def test_A1_Run_mounts_tree_with_visual_and_folding(
         assert tree.indentation() == 10
         assert tree.font().pixelSize() == 13
         assert tab.reset_btn.isEnabled() is True, ctrl.control_identity.status()
-        tab.cfg_form.set_editing_enabled(False)
-        tab.cfg_form.set_editing_enabled(True)
         assert isinstance(tab.reset_btn.toolTip(), str)
         busy_snap = snapshots("tab-1", analysis=AnalysisMode.FIT, post=False)
         assert busy_snap.interaction is not None

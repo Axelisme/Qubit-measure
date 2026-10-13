@@ -1,14 +1,13 @@
 # `zcu_tools.gui.cfg` — 共用設定機制
 
-**Last updated:** 2026-10-13, public capture owner
+**Last updated:** 2026-10-13, private editor capture
 
 此 Qt-free package 擁有 Spec／Value、`CfgSchema`、完整 value tree、codec、paired assembler、binding 與 generic finished-cfg lowering。Spec 是靜態欄位契約，Value 保存可變編輯內容。`LiteralSpec` 的鎖定值由 Spec 定義；assembler 對齊 value，renderer 不另建鎖定權威。Spec 的 fluent 覆寫回傳新 frozen spec；value 的 `with_*` 是可變操作。Role defaults 與 deferred seed 由實驗 adapter 擁有，不由 structural `make_default_value` 猜測業務預設。
 
-`gui.cfg.capture.ExpressionCapture` owns numeric `@{key}` preparation for one
-write command. It memoizes repeated keys from a caller-fixed source view and
-preserves the existing directed capture errors. The public module is separate
-from the pure package facade so domain cfg editing does not import GUI error
-policy through the facade.
+The CfgSchema editor privately prepares numeric `@{key}` tokens for one write
+command. It memoizes repeated keys from a caller-fixed source view and preserves
+the directed capture errors. The pure package facade does not expose this editor
+mechanism or import GUI error policy.
 
 每個 Spec 欄位在 value tree 中都有 entry。停用 optional reference 用裸 `None`，未填 scalar 用 `DirectValue(None)` 保留 direct／expression 模式區別。codec 保存編輯狀態，不以 lowering 對 disabled reference 的省略規則寫 memento。`CfgSchema` 可以承載尚未完成的編輯；成品邊界顯式驗證完整性、literal、direct value 型別與 choices。dynamic expression 與 required value 在 lowering 時檢查；不在 `CfgSchema` 建構時拒絕所有編輯中間態。
 

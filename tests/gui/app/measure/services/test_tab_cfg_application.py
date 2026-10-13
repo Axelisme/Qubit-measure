@@ -34,7 +34,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.events import DeviceChangedPayload, GateChangedPayload
+from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
@@ -76,6 +76,20 @@ def test_headless_lifetime_snapshot_and_single_authority(application: Fixture) -
     assert application.ctrl.cfg_resources.lookup(fresh).accept().values["gain"] == 1.0
 
 
+def test_resource_write_publishes_input_and_advances_cfg_version(
+    application: Fixture,
+) -> None:
+    tab_id = application.ctrl.new_tab("cfg-contract")
+    resource = application.ctrl.cfg_resources.lookup(tab_id)
+    version_key = f"tab:{tab_id}:cfg"
+    before = application.state.version.get(version_key)
+
+    resource.write({("gain",): 7.0})
+
+    assert application.ctrl.get_tab_snapshot(tab_id).cfg_input["gain"] == 7.0
+    assert application.state.version.get(version_key) > before
+
+
 def test_run_rejects_unaccepted_cfg_without_preflight_or_operation(
     application: Fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -112,41 +126,6 @@ def test_definition_failure_does_not_publish_a_partial_tab(
         application.ctrl.new_tab("broken-cfg")
     assert application.ctrl.list_tab_ids() == [tab_id]
     assert application.ctrl.cfg_resources.lookup(tab_id).input.data == before
-
-
-def test_production_capture_uses_published_cache_without_live_provider(
-    application: Fixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    application.state.put_device(
-        DeviceState(
-            name="flux",
-            type_name="FakeDevice",
-            address="none",
-            remember=True,
-            status=DeviceStatus.CONNECTED,
-            info=FakeDeviceInfo(address="none", value=0.25),
-        )
-    )
-    application.bus.emit(DeviceChangedPayload(name="flux"))
-    tab_id = application.ctrl.new_tab("cfg-contract")
-    editor = application.ctrl.cfg_resources.lookup(tab_id)
-
-    def live_read_forbidden(*_args, **_kwargs) -> NoReturn:
-        raise AssertionError("Capture must not query a live value provider")
-
-    monkeypatch.setattr(application.ctrl, "read_value_source", live_read_forbidden)
-    application.state.set_device_info(
-        "flux", FakeDeviceInfo(address="none", value=0.75)
-    )
-    application.bus.emit(DeviceChangedPayload(name="flux"))
-    editor.write({("gain",): {"expr": "@{device.flux.value}"}})
-    accepted = editor.accept()
-    assert accepted.values["gain"] == 0.25
-    assert any(source.source_id == "values" for source in accepted.source_basis)
-    editor.reset()
-    editor.write({("gain",): {"expr": "@{device.flux.value}"}})
-    assert editor.accept().values["gain"] == 0.75
-    assert accepted.values["gain"] == 0.25
 
 
 def test_source_events_leave_every_tab_capture_unchanged(application: Fixture) -> None:

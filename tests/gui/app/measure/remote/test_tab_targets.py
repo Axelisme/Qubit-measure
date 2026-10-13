@@ -5,10 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.gui.app.measure.adapter import (
-    SessionEnv,
-)
+from zcu_tools.cfg_model import ConstWaveformCfg, Expr, PulseSpec, Range
+from zcu_tools.gui.app.measure.adapter import Form, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -16,19 +14,9 @@ from zcu_tools.gui.app.measure.remote.handlers.tab import (
     h_tab_get_cfg,
     h_tab_new,
     h_tab_parameter_read,
+    h_tab_reset_cfg,
 )
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    EvalValue,
-    ScalarSpec,
-)
-from zcu_tools.gui.cfg.resource import (
-    CfgEdit,
-)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -40,7 +28,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry import component_registry
 
-from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.resources.entry.fakes import (
     Driver,
     register_fakes,
@@ -53,20 +41,19 @@ class LibraryDriver(Driver):
     module: dict[str, str]
 
 
+class TargetCfg(SampleCfg):
+    rate: float = 1.0
+
+
 class TargetAdapter(SampleAdapter):
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        return CfgSchema(
-            CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
-            CfgSectionValue(fields={"rate": EvalValue("$driver.rate")}),
-        )
+    form = Form(
+        TargetCfg,
+        {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
+    )
 
 
-class RolelessAdapter(TargetAdapter):
-    def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
-        return CfgSchema(
-            CfgSectionSpec(fields={"rate": ScalarSpec("Rate", float)}),
-            CfgSectionValue(fields={"rate": DirectValue(1.0)}),
-        )
+class RolelessAdapter(SampleAdapter):
+    form = Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 @dataclass
@@ -153,13 +140,16 @@ def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_s
     )
     tab_id = application.controller.tab_control.new_tab("targeted")
     rows = context.get_alias_rows()
+    h_tab_reset_cfg(
+        application.remote,
+        {"tab_id": tab_id, "aliases": {"driver": "QL", "sense": "R2"}},
+    )
     versions = application.state.version.snapshot()
-    publication = application.state.get_tab(tab_id).cfg.observe()
+    publication = h_tab_get_cfg(application.remote, {"tab_id": tab_id})
     result = h_tab_parameter_read(
         application.remote,
         {
             "tab_id": tab_id,
-            "aliases": {"driver": "QL", "sense": "R2"},
             "paths": ["$driver.rate", "$sense.rate", "$other.rate"],
             "module_refs": ["$driver.pulses.pi"],
         },
@@ -170,7 +160,7 @@ def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_s
     }
     assert context.get_alias_rows() == rows
     assert application.state.version.snapshot() == versions
-    assert application.state.get_tab(tab_id).cfg.observe() == publication
+    assert h_tab_get_cfg(application.remote, {"tab_id": tab_id}) == publication
 
 
 def test_parameter_read_uses_current_sources_and_temporary_aliases(
@@ -181,11 +171,11 @@ def test_parameter_read_uses_current_sources_and_temporary_aliases(
     context = application.controller.context_control
     context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
     original_rows = context.get_alias_rows()
+    h_tab_reset_cfg(application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}})
     sources = h_tab_parameter_read(
         application.remote,
         {
             "tab_id": tab_id,
-            "aliases": {"driver": "Q2"},
             "paths": ["$driver.rate", "$driver.energy_a", "$driver.not_supplied"],
             "module_refs": [],
         },
@@ -216,12 +206,12 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
             waveform=ConstWaveformCfg(length=0.05),
         ),
     )
+    h_tab_reset_cfg(application.remote, {"tab_id": tab_id, "aliases": {"driver": "QL"}})
     sources = h_tab_parameter_read(
         application.remote,
         {
             "tab_id": tab_id,
             "paths": [],
-            "aliases": {"driver": "QL"},
             "module_refs": [
                 "$driver.module.pi",
                 "$driver.pulses.pi",
@@ -266,38 +256,35 @@ def test_parameter_read_roleless_tab_can_read_current_concrete_paths(
     ) == {"values": {"Q2.rate": 20.0}, "modules": {"QL.pulses.pi": "QL.pulses.pi"}}
 
 
-def test_target_cfg_preview_keeps_publication(
+def test_target_cfg_uses_fixed_source_until_reset(
     application: TargetApplication,
 ) -> None:
     tab_id = application.controller.tab_control.new_tab("targeted")
-    cfg = application.state.get_tab(tab_id).cfg
-    observed = cfg.edit((CfgEdit(("rate",), 17.0),))
-    preview = h_tab_get_cfg(
-        application.remote,
-        {
-            "tab_id": tab_id,
-            "aliases": {"driver": "Q2"},
-        },
+    owner = application.state.get_tab(tab_id).cfg
+    owner.write({("rate",): {"expr": "$driver.rate"}})
+    before = h_tab_get_cfg(application.remote, {"tab_id": tab_id})
+    context = application.controller.context_control
+    context.set_parameter(context.read_context().target, "Q1.rate", 19.0)
+    assert h_tab_get_cfg(application.remote, {"tab_id": tab_id}) == before
+    reset = h_tab_reset_cfg(
+        application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}}
     )
-    assert preview["status"] == "Valid"
-    assert cfg.observe() == observed
+    values = reset["values"]
+    if not isinstance(values, list):
+        raise TypeError("Expected Form values")
+    assert {tuple(item["path"]): item["value"] for item in values}[("rate",)] == 20.0
 
 
 @pytest.mark.parametrize("target", ["", " ", 2, False])
-def test_target_source_reads_reject_malformed_target(
+def test_reset_rejects_malformed_alias_target(
     application: TargetApplication, target: object
 ) -> None:
     tab_id = application.controller.tab_control.new_tab("targeted")
-    for handler, query in (
-        (h_tab_parameter_read, {"paths": [], "module_refs": []}),
-        (h_tab_get_cfg, {}),
-    ):
-        with pytest.raises(RemoteError) as caught:
-            handler(
-                application.remote,
-                {"tab_id": tab_id, "aliases": {"driver": target}, **query},
-            )
-        assert caught.value.reason == "invalid_aliases"
+    with pytest.raises(RemoteError) as caught:
+        h_tab_reset_cfg(
+            application.remote, {"tab_id": tab_id, "aliases": {"driver": target}}
+        )
+    assert caught.value.reason == "invalid_aliases"
 
 
 @pytest.mark.parametrize("field", ["paths", "module_refs"])

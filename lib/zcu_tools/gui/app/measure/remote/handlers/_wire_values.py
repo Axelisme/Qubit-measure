@@ -5,12 +5,17 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from pydantic import JsonValue
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 
 
-def context_wire_value(value: object) -> object:
-    """Project complete context values; reject unsupported types and keys."""
+def context_wire_value(value: object) -> JsonValue:
+    """Project complete values to JSON; tuples become lists and complex uses tags.
+
+    Reject non-finite numbers, unsupported objects and non-string mapping keys.
+    Nested tuple/list/array values retain their ordering and scalar contents.
+    """
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError("non-finite context number")
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -22,13 +27,13 @@ def context_wire_value(value: object) -> object:
     if isinstance(value, np.generic):
         return context_wire_value(value.item())
     if isinstance(value, dict):
-        result: dict[str, object] = {}
+        result: dict[str, JsonValue] = {}
         for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError(f"unsupported context key: {type(key).__name__}")
             result[key] = context_wire_value(item)
         return result
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [context_wire_value(item) for item in value]
     raise TypeError(f"unsupported context value: {type(value).__name__}")
 

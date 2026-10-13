@@ -2,14 +2,15 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
-from qtpy.QtCore import QEventLoop, QMetaObject, Qt, QTimer
-from qtpy.QtWidgets import QFileDialog, QLineEdit, QPushButton, QTabWidget
+from qtpy.QtCore import QMetaObject, Qt
+from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    Form,
     LoadDataRequest,
 )
 from zcu_tools.gui.app.measure.app import _make_empty_ctx
@@ -20,11 +21,8 @@ from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg import DirectValue
-from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -38,24 +36,27 @@ from tests.gui.app.measure.remote._helpers import (
 from tests.gui.app.measure.ui._qt_interactions import modal_action
 
 
-class RuntimeCfg(ExpCfgModel):
-    knob: int = 42
-
-
 @dataclass
 class Result:
     data_path: str
+
+
+class RuntimeCfg(ExpCfgModel):
+    """The experiment cfg this adapter runs and stores with its results."""
+
+    knob: int = 7
 
 
 class LoadAdapter(OldAdapter):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         load_data=True, analysis=AnalysisMode.NONE
     )
+    form = Form(RuntimeCfg, {})
 
     def load(
         self, req: LoadDataRequest
     ) -> tuple[RunRecord[RuntimeCfg, Result], RunMetadata]:
-        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg()
+        cfg = None if req.data_path.endswith("missing.hdf5") else RuntimeCfg(knob=42)
         return RunRecord(cfg=cfg, result=Result(req.data_path)), historical_metadata()
 
 
@@ -94,68 +95,7 @@ def app(qapp, tmp_path):
         qapp.processEvents()
 
 
-def flush_form_timers():
-    loop = QEventLoop()
-    QTimer.singleShot(30, loop.quit)
-    loop.exec()
-
-
-def test_local_load_publishes_to_the_same_resource_and_form(app):
-    ctrl, window, state, tab_id = app
-    resource = ctrl.cfg_resources.lookup(tab_id)
-    resource.edit((CfgEdit(("knob",), 99),))
-    outcome = ctrl.load_tab_result(tab_id, "result.hdf5")
-    assert outcome.cfg_backfill == "applied"
-    version = state.version.get(f"tab:{tab_id}:cfg")
-    form = window.findChild(ResourceCfgFormWidget)
-    assert form is not None
-    entry = form.findChild(QLineEdit)
-    assert entry is not None and entry.text() == "42"
-    flush_form_timers()
-    assert state.version.get(f"tab:{tab_id}:cfg") == version
-    resource.edit((CfgEdit(("knob",), 43),))
-    assert entry.text() == "43"
-    assert state.get_tab(tab_id).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(43)
-
-
-@pytest.mark.parametrize(
-    "path, disposition", [("result.hdf5", "applied"), ("missing.hdf5", "not_applied")]
-)
-def test_remote_load_reports_same_result_and_refreshes_live_qt(app, path, disposition):
-    ctrl, window, _, tab_id = app
-    resource = ctrl.cfg_resources.lookup(tab_id)
-    before = resource.observe()
-    remote = RemoteControlAdapter(
-        controller=ctrl,
-        opts=ControlOptions(port=0),
-        owner_scheduler=QtOwnerScheduler(),
-        render_view=window,
-    )
-    port = remote.start()
-    try:
-        with open_client(port) as client:
-            for method, params in (
-                ("tab.snapshot", {"tab_id": tab_id}),
-                ("context.snapshot", {}),
-            ):
-                assert call(client, method, params)["ok"]
-            reply = call(client, "tab.load_data", {"tab_id": tab_id, "data_path": path})
-            assert reply["ok"], reply
-            assert reply["result"]["cfg_backfill"] == disposition
-            form = window.findChild(ResourceCfgFormWidget)
-            assert form is not None
-            entry = form.findChild(QLineEdit)
-            assert entry is not None
-            assert entry.text() == ("42" if disposition == "applied" else "7")
-            if disposition != "applied":
-                assert resource.observe() == before
-    finally:
-        remote.stop()
-
-
-def test_mcp_tab_open_from_file_loads_and_backfills_gui(
+def test_mcp_tab_open_from_file_loads_the_result_into_a_new_active_tab(
     app, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
@@ -181,9 +121,6 @@ def test_mcp_tab_open_from_file_loads_and_backfills_gui(
         )["tab_id"]
         assert tab != previous
         assert state.active_tab_id == tab
-        assert state.get_tab(tab).cfg.snapshot_inputs().value.fields[
-            "knob"
-        ] == DirectValue(42)
         summary = invoke(
             "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
         )["tabs"][0]
@@ -250,20 +187,13 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
         remote.stop()
 
 
-@pytest.mark.parametrize(
-    "path, expected",
-    [
-        ("result.hdf5", "Loaded data from result.hdf5"),
-        ("missing.hdf5", "Loaded data from missing.hdf5; Config was not backfilled"),
-    ],
-)
-def test_qt_load_status_reports_one_overall_disposition(
-    app, qapp, tmp_path, path, expected
-):
+@pytest.mark.parametrize("path", ["result.hdf5", "missing.hdf5"])
+def test_qt_load_status_reports_the_loaded_path(app, qapp, tmp_path, path):
+    """Load shows results only, so the status names the file and nothing else."""
     _, window, _, _ = app
     selected = tmp_path / path
     selected.touch()
-    expected = expected.replace(path, str(selected))
+    expected = f"Loaded data from {selected}"
     tab = window.findChild(ExpTabWidget)
     assert tab is not None
     load_button = next(
@@ -290,16 +220,3 @@ def test_qt_load_status_reports_one_overall_disposition(
         [(RunLoadDialog, open_file), (QFileDialog, choose_file)],
     )
     assert window.statusBar().currentMessage() == expected
-
-
-def test_reload_captures_backfilled_config_not_retired_editor(app):
-    ctrl, _, state, tab_id = app
-    ctrl.load_tab_result(tab_id, "result.hdf5")
-    preview = ctrl.prepare_experiment_reload()
-    ctrl.reload_experiments(preview)
-    restored = ctrl.list_tab_ids()
-    assert len(restored) == 1
-    assert restored[0] != tab_id
-    assert state.get_tab(restored[0]).cfg.snapshot_inputs().value.fields[
-        "knob"
-    ] == DirectValue(42)

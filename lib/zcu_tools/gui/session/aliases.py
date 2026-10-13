@@ -141,7 +141,7 @@ class AliasTable:
         """
         name = self._resolve_name(alias, point, kind=kind)
         if name is None:
-            root = self._unbound_root(alias)
+            root = self._link_chain(alias)[-1].alias
             message = (
                 f"${alias} is not bound: bind it in Aliases"
                 if root == alias
@@ -177,8 +177,7 @@ class AliasTable:
     def _resolve_name(
         self, alias: str, point: PointDocument, *, kind: str | None = None
     ) -> str | None:
-        authored = {row.alias: row.value for row in self._rows}
-        if alias not in authored:
+        if all(row.alias != alias for row in self._rows):
             raise RoleResolutionError(
                 alias,
                 None,
@@ -186,19 +185,14 @@ class AliasTable:
                 "Unknown alias",
                 message=f"${alias} is not defined: add it in Aliases",
             )
-        # Validated links always move to an earlier row, so no cycle machinery is needed.
-        links: list[tuple[str, str]] = []
-        current = alias
-        value = authored[current]
-        while value.startswith("$"):
-            dependency, suffix = value[1:].split(".", 1)
-            links.append((current, suffix))
-            current = dependency
-            value = authored[current]
-        if not value:
+        chain = self._link_chain(alias)
+        name = chain[-1].value
+        if not name:
             return None
-        name = value
-        for referring_alias, suffix in reversed(links):
+        # Read each link's field outward, from the root's name back to alias.
+        for link in reversed(chain[:-1]):
+            referring_alias = link.alias
+            suffix = link.value.split(".", 1)[1]
             try:
                 target = document_value(point, f"{name}.{suffix}")
             except AttributeError as cause:
@@ -234,13 +228,20 @@ class AliasTable:
             )
         return name
 
-    def _unbound_root(self, alias: str) -> str:
-        """Return the empty row that alias's $ links end at, possibly alias itself."""
-        authored = {row.alias: row.value for row in self._rows}
-        current = alias
-        while authored[current].startswith("$"):
-            current = authored[current][1:].split(".", 1)[0]
-        return current
+    def _link_chain(self, alias: str) -> tuple[AliasRow, ...]:
+        """Return the rows alias's $ links pass through, alias's own row first.
+
+        Each row but the last holds a $ link to the next row; the last (the
+        root, possibly alias itself) holds a concrete name or is empty. alias
+        must name an authored row.
+        """
+        rows = {row.alias: row for row in self._rows}
+        chain = [rows[alias]]
+        # Validated links always move to an earlier row, so no cycle machinery is needed.
+        while chain[-1].value.startswith("$"):
+            dependency = chain[-1].value[1:].split(".", 1)[0]
+            chain.append(rows[dependency])
+        return tuple(chain)
 
 
 def _public_identifier(text: str) -> bool:

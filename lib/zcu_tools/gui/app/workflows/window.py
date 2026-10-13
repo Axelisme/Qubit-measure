@@ -160,10 +160,10 @@ class WorkflowWindow[C](QWidget):
             (self._controls.reload, self._reload_clicked),
         ):
             button.clicked.connect(slot)
-        self._controls.reload.setEnabled(self._loader is not None)
         self._run_view = WorkflowRunView(
             self._controls, self.controller, self._forms, self
         )
+        self._sync_source_buttons()
         self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
@@ -191,6 +191,22 @@ class WorkflowWindow[C](QWidget):
         dialog.finished.connect(self._session.refresh)
         dialog.finished.connect(dialog.deleteLater)
         dialog.show()
+
+    def _sync_source_buttons(self) -> None:
+        """Disable Prepare forms and Reload source while a run holds Start.
+
+        The host rejects both from Start until terminal delivery (pending,
+        running, pausing, paused, stopping). Reload also needs a loader and no
+        restart-required reload failure. Setup and Aliases stay enabled: they
+        change the session, not the run's capture.
+        """
+        idle = not self._run_view.start_locked
+        error = self._catalog_error
+        restart_required = error is not None and error.restart_required
+        self._controls.prepare.setEnabled(idle)
+        self._controls.reload.setEnabled(
+            idle and self._loader is not None and not restart_required
+        )
 
     def _use_source_clicked(self) -> None:
         try:
@@ -334,7 +350,7 @@ class WorkflowWindow[C](QWidget):
             )
             self._catalog_error = error
             self._controls.start.setEnabled(False)
-            self._controls.reload.setEnabled(not error.restart_required)
+            self._sync_source_buttons()
             self._controls.message.setText(str(error))
             if error is exc:
                 raise
@@ -361,14 +377,20 @@ class WorkflowWindow[C](QWidget):
         """Capture parsed plan/knobs input on the owner thread, without I/O.
 
         Expressions stay as entered, not their evaluated values. Plan comes
-        from the Start panel. Once a run is attached, knobs come from its unique
-        Controller binding, including unsubmitted parsed edits. Renderer-local
-        incomplete text, native values and journal/hardware state are excluded.
+        from the Start panel. From Start until terminal delivery, knobs come
+        from the run's unique Controller binding, including unsubmitted parsed
+        edits; otherwise, including after terminal delivery, from the editable
+        Start knobs panel. Renderer-local incomplete text, native values and
+        journal/hardware state are excluded.
         """
         binding = self.controller.binding
+        # start_locked, not knobs_from_run: save the knobs the user edits and
+        # would Start next. After terminal delivery those are the Start knobs,
+        # already reset to the run's accepted input, while remote reads of the
+        # run_id still use the run's binding.
         knobs = (
             binding.state.input.data
-            if binding is not None and self._run_view.knobs_from_run
+            if binding is not None and self._run_view.start_locked
             else self.tunables_panel.state.input.data
         )
         return WorkflowInputSnapshot(plan=self.plan_panel.state.input.data, knobs=knobs)
@@ -543,6 +565,7 @@ class WorkflowWindow[C](QWidget):
             editor.refresh(env)
             editor.discard_local_text()
         self._run_view.submitted(attachment.name)
+        self._sync_source_buttons()
         return token
 
     def _start_ports(
@@ -624,6 +647,9 @@ class WorkflowWindow[C](QWidget):
             self.controller.require_run_id(run_id)
             if binding.engine is None:
                 raise RuntimeError("Form inspection requires native acceptance")
+            # knobs_from_run, not start_locked: run_id names the attached run
+            # until fresh Start panels replace its forms, so reads and previews
+            # use that run's fixed env and knobs state, also after terminal.
             if self._run_view.knobs_from_run:
                 env = binding.env
             revision = binding.engine.tunables(binding.run_id).revision
@@ -745,6 +771,7 @@ class WorkflowWindow[C](QWidget):
             self._run_view.paused()
             return
         self._run_view.ended(status, error)
+        self._sync_source_buttons()
         self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:

@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.remote import (
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.cfg.resource import CfgEdit
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -120,7 +119,7 @@ def test_remote_facing_facets_cannot_reenter_during_import(
 ) -> None:
     app = window_app
     previous = app.ctrl.new_tab("demo")
-    app.ctrl.cfg_resources.lookup(previous).observe()
+    assert app.ctrl.cfg_resources.lookup(previous).input.data == {"knob": 7}
 
     def during_load() -> None:
         with pytest.raises(FailedPreconditionError, match="reload"):
@@ -209,7 +208,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
     app = window_app
     previous = app.ctrl.new_tab("demo")
     cfg = app.ctrl.cfg_resources.lookup(previous)
-    cfg.edit((CfgEdit(("knob",), 8),))
+    cfg.write({("knob",): 8})
     scheduler = ObservedOwnerScheduler()
     remote = RemoteControlAdapter(
         controller=app.ctrl,

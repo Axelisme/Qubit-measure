@@ -1,10 +1,25 @@
-"""Shared cfg field recording collaborator for generic and domain owners."""
+"""Real Form recording fixture for two independent authored ranges."""
 
-from ._recipe_support import LookbackGui, scalar, section
+from zcu_tools.cfg_model import ConfigBase, Range, Slot, Template
+from zcu_tools.gui.app.measure.adapter import Form
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
+from zcu_tools.gui.form import FormEnv
+from zcu_tools.program.v2 import SweepCfg
+
+from ._recipe_support import READOUT_TEMPLATE, LookbackGui, RecipeControlsBase
+
+
+class SweepFields(ConfigBase):
+    freq: SweepCfg
+    flux: SweepCfg
+
+
+class SweepControls(RecipeControlsBase):
+    sweep: SweepFields
 
 
 class SweepGui(LookbackGui):
-    """Cfg collaborator that resolves declared expressions like the GUI owner."""
+    """Use public source capture, expression evaluation and range leaf writes."""
 
     def __init__(self):
         super().__init__()
@@ -23,56 +38,40 @@ class SweepGui(LookbackGui):
             "type_name": "YOKOGS200",
             "info": {"type": "YOKOGS200"},
         }
-        self.publication["tree"]["children"].update(
-            dev=section(flux_dev=scalar("coil")),
-            flux_unit=scalar("A"),
-            sweep=section(
-                freq={
-                    "kind": "sweep",
-                    "valid": True,
-                    "readonly": False,
-                    "inputs": {
-                        "start": self.input("$resonator.freq - 2 * $resonator.kappa"),
-                        "stop": self.input("$resonator.freq + 3 * $resonator.kappa"),
-                        "expts": self.input(41),
-                    },
+
+        form = Form(
+            SweepControls,
+            {
+                "modules": {
+                    "reset": Slot("$qubit.module.reset"),
+                    "init_pulse": Slot("$qubit.module.init_pulse"),
+                    "readout": Template("readout"),
                 },
-                flux={
-                    "kind": "sweep",
-                    "valid": True,
-                    "readonly": False,
-                    "inputs": {
-                        "start": self.input("2 * $qubit.flux_int - $qubit.flux_half"),
-                        "stop": self.input("2 * $qubit.flux_half - $qubit.flux_int"),
-                        "expts": self.input(19),
-                    },
+                "sweep": {
+                    "freq": Range.between(
+                        "$resonator.freq - 2 * $resonator.kappa",
+                        "$resonator.freq + 3 * $resonator.kappa",
+                        expts=41,
+                    ),
+                    "flux": Range.between(
+                        "2 * $qubit.flux_int - $qubit.flux_half",
+                        "2 * $qubit.flux_half - $qubit.flux_int",
+                        expts=19,
+                    ),
                 },
-            ),
+            },
         )
+        form.bind_templates({"readout": READOUT_TEMPLATE}, adapter="lookback")
 
-    def input(self, value: object) -> dict[str, object]:
-        """Resolve a scalar or expression against this collaborator's md."""
-        result: dict[str, object] = scalar(
-            self.evaluate_expression(value) if isinstance(value, str) else value
-        )["input"]
-        if isinstance(value, str):
-            result.update(mode="expression", raw=value)
-        return result
+        def capture(aliases):
+            parameters = self.capture_parameters(aliases)
+            return TabFormSources(
+                FormEnv(parameters=parameters, library=parameters.library)
+            )
 
-    def _edit(self, params):
-        ordinary = []
-        for edit in params["edits"]:
-            if edit["path"][0] == "sweep":
-                inputs = self.publication["tree"]["children"]["sweep"]["children"][
-                    edit["path"][1]
-                ]["inputs"]
-                for key, value in edit["value"].items():
-                    inputs[key] = self.input(
-                        value["__expr"] if isinstance(value, dict) else value
-                    )
-            else:
-                ordinary.append(edit)
-        super()._edit({**params, "edits": ordinary})
+        self.owner = TabFormResource(
+            form, capture=capture, mutation_allowed=lambda: True
+        )
 
     def __call__(self, method, params):
         if method == "value.list":

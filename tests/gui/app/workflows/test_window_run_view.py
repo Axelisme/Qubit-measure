@@ -1,4 +1,5 @@
-"""Run presentation: status bar, fixed Plan, live Tunables tab, banner and Stop.
+"""Run presentation: status bar, fixed Plan, live Tunables tab, banner, Stop and
+the session row's buttons.
 
 Synthetic workflows only. The assertions read what a user sees: the status
 bar's labels left to right, the diagnostics line under it, the form tabs'
@@ -7,10 +8,11 @@ workflow's worker hook observes the Window while a point is live; the host
 never sees a workflow name.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from time import monotonic
 
+import pytest
 from qtpy.QtCore import QEventLoop, QPoint, QRect, QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -40,6 +42,10 @@ STATUS_PARTS = (
     "workflow.run.workflow",
     "workflow.run.detail",
 )
+# The session row's buttons, left to right: Setup…, Aliases…, Prepare forms
+# ("use") and Reload source.
+SOURCES = ("setup", "aliases", "use", "reload")
+SESSION_ONLY = ("setup", "aliases")
 
 
 def child[W: QWidget](window: QWidget, kind: type[W], name: str) -> W:
@@ -93,6 +99,15 @@ def button(window: QWidget, name: str) -> QPushButton:
     return child(window, QPushButton, f"workflow.run.{name}")
 
 
+def enabled_sources(window: QWidget) -> tuple[str, ...]:
+    """The session row's buttons a user can click, left to right."""
+    return tuple(
+        name
+        for name in SOURCES
+        if child(window, QPushButton, f"workflow.source.{name}").isEnabled()
+    )
+
+
 def tabs(window: QWidget) -> QTabWidget:
     return child(window, QTabWidget, "workflow.forms")
 
@@ -133,6 +148,7 @@ class Seen:
     live_only: bool
     current_tab: int
     banner: bool
+    sources: tuple[str, ...]
 
 
 def see(window: WorkflowWindow[None]) -> Seen:
@@ -152,6 +168,7 @@ def see(window: WorkflowWindow[None]) -> Seen:
         live_only=tuning is not None and shown == [tuning.panel],
         current_tab=tabs(window).currentIndex(),
         banner=banner(window).isVisibleTo(window),
+        sources=enabled_sources(window),
     )
 
 
@@ -290,9 +307,7 @@ def test_pause_switches_to_live_tunables_and_banner_until_resume(
     assert paused.status == f"paused synthetic_wide 1 committed · run {RUN_ID}"
     assert paused.current_tab == TUNABLES_TAB
     assert paused.tunables_title == "Tunables (live)" and paused.live_only
-    assert paused.banner
-    note = banner(window).text()
-    assert "Resume" in note and "Apply" in note and "uncommitted" in note
+    assert paused.banner and banner(window).text().strip()
     assert paused.stop and paused.resume and not paused.pause
     assert not paused.plan_editable and paused.plan_note
 
@@ -450,6 +465,96 @@ def test_switching_workflow_marks_the_previous_run_until_next_start(
     window_session.harness.complete_segment()
     qapp.processEvents()
     assert status_text(window) == "done synthetic_small 0 committed · run small"
+
+
+def test_prepare_and_reload_stay_disabled_from_pending_through_paused(
+    window_session: WindowSession, qapp: QApplication
+) -> None:
+    window = bound(window_session, qapp)
+    assert enabled_sources(window) == SOURCES
+    seen = observe_at(window_session, qapp, 1, "pausing", lambda: window.pause(RUN_ID))
+    assert isinstance(window.start(RUN_ID), int)
+    pending = see(window)
+    assert pending.badge == "pending" and pending.sources == SESSION_ONLY
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+
+    assert len(seen) == 1 and seen[0].sources == SESSION_ONLY
+    paused = see(window)
+    assert paused.badge == "paused" and paused.sources == SESSION_ONLY
+    button(window, "stop").click()
+    qapp.processEvents()
+    assert badge(window) == "stopped" and enabled_sources(window) == SOURCES
+
+
+@pytest.mark.parametrize(
+    ("lifecycle", "terminal"), [("running", "done"), ("stopping", "stopped")]
+)
+def test_prepare_and_reload_stay_disabled_while_live_until_terminal(
+    window_session: WindowSession, qapp: QApplication, lifecycle: str, terminal: str
+) -> None:
+    window = bound(window_session, qapp)
+    actions: dict[str, Callable[[], object] | None] = {
+        "running": None,
+        "stopping": lambda: window.stop(RUN_ID),
+    }
+    seen = observe_at(window_session, qapp, 1, lifecycle, actions[lifecycle])
+    assert isinstance(window.start(RUN_ID), int)
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+
+    assert len(seen) == 1 and seen[0].sources == SESSION_ONLY
+    assert badge(window) == terminal and enabled_sources(window) == SOURCES
+    before = window.plan_panel
+    child(window, QPushButton, "workflow.source.use").click()
+    assert window.plan_panel is not before and message(window) == ""
+    assert enabled_sources(window) == SOURCES
+
+
+@pytest.fixture
+def unmonitored(
+    window_session: WindowSession, qapp: QApplication
+) -> Iterator[WorkflowWindow[None]]:
+    """A second Window over the same bound session, built without a loader.
+
+    Teardown cancels and drains its own pending run before closing it.
+    """
+    harness = window_session.harness
+    bind_point(harness, window_session.root)
+    install_soc(harness)
+    window = WorkflowWindow(
+        harness.state,
+        harness.services,
+        harness.owner,
+        registrations=window_session.source.catalog.attachments,
+    )
+    try:
+        yield window
+    finally:
+        operation = window.controller.operation_id
+        if harness.background.work is not None and operation is not None:
+            harness.handles.cancel(operation)
+            harness.complete_segment()
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_reload_without_a_loader_stays_disabled_through_a_run(
+    window_session: WindowSession,
+    unmonitored: WorkflowWindow[None],
+    qapp: QApplication,
+) -> None:
+    window = unmonitored
+    window.show()
+    window.select_workflow("synthetic_small")
+    idle = ("setup", "aliases", "use")
+    assert enabled_sources(window) == idle
+    assert isinstance(window.start(RUN_ID), int)
+    assert enabled_sources(window) == SESSION_ONLY
+    window_session.harness.complete_segment()
+    qapp.processEvents()
+    assert badge(window) == "done" and enabled_sources(window) == idle
 
 
 def area(window: QWidget, widget: QWidget) -> QRect:

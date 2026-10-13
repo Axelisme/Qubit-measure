@@ -34,7 +34,9 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
-`RecipeTab.use_library` 選 module 或 waveform 的 library 名稱，建立唯讀 ref，不隱含複製或編輯內容。`read_field` 讀取 cfg owner 的 mode 與 readonly。Ref 子欄位必須先在 owner 顯式轉 inline 才可編輯；MCP 不另做 resolver 或 copy。
+`RecipeTab.use_library` 選實際 library key，不建立舊 ref tree，也不複製內容。Slot 保存公開 ModuleRef 的 kind/name，inline 保存 ModuleInline 的 kind/module。Nested key-or-inline 欄位直接保存字串。Locked Slot 只有 inline branch，use_library 在送 RPC 前拒絕 key selection。
+
+`read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。locked 與 fields 來自公開 Form schema，errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
 
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
@@ -42,7 +44,7 @@ Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核
 
 `twotone_spectrum` 的 center_mhz／span_mhz／points 必填。三個 resonator spectrum 可省略 frequency range，domain helper 讀目前 frequency／linewidth 後寫數字 endpoints。正式 freq／power／flux 的 full-span 倍率為 3／3／2，省略 count 保留 GUI 值。四個 spectrum 摘要只保 sweep，不另計 center／span。Frequency／flux／unit policy 由 zcu_lab.recipes.helpers 擁有。
 
-`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar／sweep label，不發 RPC、不改 cfg 或 revision。Framework 不解讀 calibration、角色或 linewidth。
+`RecipeTab` 提供通用 read_value、read_library_root、read_field、read_device、set、set_fields 與 set_sweep。Read_device 只讀 cached snapshot，不連線或換算。Set_fields 先驗證，再以一次 edit_cfg 寫入；None 保留值並標 gui_default。Retain_source 只記 caller 選好的 scalar/sweep label，不發 RPC，也不改 Form input。Framework 不解讀 calibration、角色或 linewidth。
 
 Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server 同步處理請求，首次等待期間不保證同連線的另一控制請求立即處理。Client timeout 不等於取消，不可因此自動重跑。
 
@@ -52,7 +54,11 @@ Client deadline 必須超過 300 秒並留傳輸與回覆開銷。Stdio server �
 
 `finish_early` 對 recipe 停止採集，有可用結果就先保存 raw，再繼續分析及保存。`cancel` 優先，停止後續分析與保存；已啟動且不可取消的保存仍等真實結果。Registered analysis 的 cancel 也不再啟動新的結果讀取。GUI cancellation 回覆獨立放在 `gui_cancel`，不能拿它覆寫 execution 的既有 terminal outcome。未註冊的 `cancel(op)` 沿用直接 GUI hook。
 
-Recipe 不自動挑選重用 tab，也不自動清理。明確 `reuse_tab_id` 的流程先確認可用，再 reset、套本次 cfg 與 Run。`RecipeSession.open_tab` 接收 caller-owned `aliases`，以 alias 名稱指定當次覆寫，並複製這份 mapping。省略 aliases、None 與 {} 等價，不觸發 temporary preview 或重新 lowering。非空 mapping 讓參數／library 查詢、cfg preview 與 Run 使用同一份覆寫。新 tab 與 reuse tab 都不保存覆寫，tab.new/reset 不收這份 mapping。Zcu_lab recipes 保留 target 參數，明確對到 qubit alias，沒有 target 就不覆寫。Temporary preview 解析目前 inputs，不發布 cfg。Execution 的 resolved conditions 捕捉這份 preview，不冒用全域 publication。關閉由 `tab_close` 明確指定。
+Recipe 不自動挑選重用 tab，也不自動清理。`RecipeSession.open_tab` 的 adapter、aliases、reuse 簽名不變。它先建立 tab 或驗證 reuse，再以一次 `tab.reset_cfg(aliases=...)` 捕捉來源，之後才設定參數與 Run。省略 aliases、None 與 {} 使用 Reset 當時的全域列。非空 mapping 只覆寫這次 Reset，不寫 alias 表，也不保存到 memento。Target 對到 Reset 的 qubit alias。
+
+Parameter/library reads、cfg、Edit 與 Run 使用同一固定來源。`tab.parameter_read` 不收 aliases，`tab.get_cfg` 不作臨時 preview。`tab.run_start` 在 focus 與 operation 效果前拒絕非空 aliases。None 與 {} 使用畫面上的值。全域 source 變更不刷新既有 Form，取得最新值要明確 Reset。關閉由 `tab_close` 指定。
+
+Load 只載既有結果及分析來源，不覆寫 Form input。RPC/MCP 的 Load 回覆保留結果與分析準備 facts，不含回填狀態。要看數據檔當時的 native cfg，使用結果 Inspect。
 
 Author Run 的 cfg、來源與 completion 由 `recipe.py` 的 opaque handles 擁有。Framework 讀 detached snapshots，不讀 handle 的 private backing。`raw_save.py` 捕捉原 Run 的當次同步 Save report，保留全部輸出與該 Run 的 run_id，全部輸出失敗亦保留這個 ID。Author handle 使用這份保存契約。沒有 SaveReport 時 steps.raw_save 為 null，不推論 not_started、unknown 或 Save 是否已送出。save_raw 的傳輸與 admission 失敗照常拋出，recipe 回覆的原因只在 error；不加 requested 旗標。
 
@@ -103,7 +109,7 @@ GUI 在 owner dispatch 檢查目前 holder，不維護每連線 seen baseline。
 
 接手既有或重啟後的 GUI 時，按操作需要讀 tab、SoC、context 與 device snapshots，核對實際狀態，不是建立寫入許可。Context 可能包含大型敏感資料，不可序列化時完整讀取失敗。摘要與 resource counters 不代替內容。
 
-Cfg 使用 `tab.get_cfg` 的 publication。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit/reset 作用於目前 inputs，Run 接受當下 Valid cfg 或明示 aliases 的固定一次性解析，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它；新 holder 可取消，observer 可 wait。
+Cfg 使用 `tab.get_cfg` 的 Form schema/input/values/errors。`tab.edit_cfg`、`tab.reset_cfg` 與 `tab.run_start` 不收 ref。Edit 作用於目前 input，Reset 重新捕捉來源及 defaults。Run 只接受目前有效值，並隔離執行值與 source provenance。後續編輯不改已接受 Run，轉移或斷線也不取消它。新 holder 可取消，observer 可 wait。
 
 Admission 拒絕、斷線或 timeout 都不自動重送。傳輸失敗不證明 mutation 沒有副作用；先讀現況，再由 caller 決定下一步。
 
