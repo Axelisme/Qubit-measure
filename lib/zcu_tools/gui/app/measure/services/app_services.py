@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalogLoader
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-from zcu_tools.gui.cfg.resource import SourceRevision
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -179,7 +178,6 @@ def build_app_services(
 
     def form_sources(aliases: Mapping[str, str] | None) -> TabFormSources:
         parameters = captured_parameters(aliases)
-        captured = session.value_sources.snapshot()
         return TabFormSources(
             env=FormEnv(
                 parameters=parameters,
@@ -190,11 +188,7 @@ def build_app_services(
                     if device.info is not None
                 },
             ),
-            captures=captured.values,
-            source_basis=(
-                *bindings.source_basis(state),
-                SourceRevision("values", int(captured.revision)),
-            ),
+            source_basis=bindings.source_basis(state),
         )
 
     tab_cfg = TabFormResources(
