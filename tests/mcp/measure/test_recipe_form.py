@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpec, Slot
 from zcu_tools.gui.app.measure.adapter import Form
-from zcu_tools.gui.app.measure.remote.form_observation import observe_form
+from zcu_tools.gui.app.measure.remote.form_observation import form_writes, observe_form
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, ModuleInline
 from zcu_tools.mcp.measure.recipe import RecipeSession
@@ -43,8 +43,8 @@ class FormGui(LookbackGui):
         form = Form(
             AuthorCfg,
             {
-                "pulse": Slot("qubit", "pulse"),
-                "locked_pulse": Slot("qubit", "pulse", lock={"freq": 100.0}),
+                "pulse": Slot("$qubit.module.pulse"),
+                "locked_pulse": Slot("$qubit.module.pulse", lock={"freq": 100.0}),
             },
         )
         self.owner = TabFormResource(
@@ -60,9 +60,7 @@ class FormGui(LookbackGui):
         if method == "tab.reset_cfg":
             return dict(observe_form(self.owner))
         if method == "tab.edit_cfg":
-            self.owner.write(
-                {tuple(edit["path"]): edit["value"] for edit in params["edits"]}
-            )
+            self.owner.write(form_writes(params["edits"]))
             return dict(observe_form(self.owner))
         return super().__call__(method, params)
 
@@ -105,7 +103,10 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert selected.input == {"kind": "ref", "name": "Q1.pulses.pi"}
         assert not selected.locked
         assert selected.errors == ()
-        assert gui.owner.accept().values["pulse"]["freq"] == 100.0
+        values = gui.owner.accept().values["pulse"]
+        if not isinstance(values, dict):
+            raise TypeError("Expected pulse cfg values")
+        assert values["freq"] == 100.0
 
 
 def test_locked_inline_slot_rejects_library_selection_before_rpc(
