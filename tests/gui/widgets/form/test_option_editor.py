@@ -449,6 +449,97 @@ def test_numeric_tags_are_written_as_typed_option_values(build: Build) -> None:
     assert editor.findChild(QWidget, "form.input.branch.a_only") is None
 
 
+class AliasFlat(BaseModel):
+    """A branch with two intrinsic tags; plateau is an alias of flat."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["flat", "plateau"] = "flat"
+    length: float = 1.0
+
+
+class AliasShapeForm(FormModel):
+    """A tagged union whose first branch accepts an alias tag."""
+
+    shape: Annotated[AliasFlat | Ramp, Field(discriminator="kind")]
+
+
+def test_an_alias_tag_is_its_own_option_with_its_branch_fields(build: Build) -> None:
+    env = FormEnv()
+    state = new_state(AliasShapeForm, {"shape": {"kind": "plateau", "length": 5.0}})
+    editor = build(state, env, None, None)
+
+    dropdown = child(editor, QComboBox, "form.input.shape")
+    assert items(dropdown) == schema_items(state, env, "shape")
+    assert items(dropdown) == [
+        ("flat", {"kind": "flat"}),
+        ("plateau", {"kind": "plateau"}),
+        ("ramp", {"kind": "ramp"}),
+    ]
+    assert dropdown.currentText() == "plateau"
+    assert dropdown.currentData() == {"kind": "plateau"}
+    assert Option("plateau", {"kind": "plateau"}).matches(state.input.data["shape"])
+    assert child(editor, QWidget, "form.input.shape.length") is not None
+    for path in ("shape.kind", "shape.sigma"):
+        assert editor.findChild(QWidget, f"form.input.{path}") is None, path
+
+    choose(dropdown, "ramp")
+    assert state.input.data["shape"] == {"kind": "ramp", "length": 2.0, "sigma": 0.1}
+
+    choose(child(editor, QComboBox, "form.input.shape"), "plateau")
+
+    # The alias starts its branch from fresh defaults, like any other option.
+    assert state.input.data["shape"] == {"kind": "plateau", "length": 1.0}
+    assert child(editor, QComboBox, "form.input.shape").currentText() == "plateau"
+    assert editor.findChild(QWidget, "form.input.shape.sigma") is None
+
+
+class AliasOne(BaseModel):
+    """A numeric-tag branch with the alias tag 2."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[1, 2] = 1
+    a_only: float = 3.0
+
+
+class NumericAliasForm(FormModel):
+    """A numeric tagged union whose first branch accepts an alias tag."""
+
+    branch: Annotated[AliasOne | Three, Field(discriminator="kind")]
+
+
+def test_a_numeric_alias_tag_is_a_typed_option_with_its_branch_fields(
+    build: Build,
+) -> None:
+    env = FormEnv()
+    state = new_state(NumericAliasForm, {"branch": {"kind": 2, "a_only": 7.0}})
+    editor = build(state, env, None, None)
+
+    dropdown = child(editor, QComboBox, "form.input.branch")
+    assert items(dropdown) == [
+        ("1", {"kind": 1}),
+        ("2", {"kind": 2}),
+        ("3", {"kind": 3}),
+    ]
+    assert dropdown.currentText() == "2"
+    data = dropdown.currentData()
+    assert isinstance(data, dict) and type(data["kind"]) is int
+    assert Option("2", {"kind": 2}).matches(state.input.data["branch"])
+    assert child(editor, QWidget, "form.input.branch.a_only") is not None
+    assert editor.findChild(QWidget, "form.input.branch.b_only") is None
+
+    choose(dropdown, "3")
+    assert state.input.data["branch"] == {"kind": 3, "b_only": 4.0}
+
+    choose(child(editor, QComboBox, "form.input.branch"), "1")
+
+    branch = state.input.data["branch"]
+    assert branch == {"kind": 1, "a_only": 3.0}
+    assert isinstance(branch, dict) and type(branch["kind"]) is int
+    assert child(editor, QWidget, "form.input.branch.a_only") is not None
+
+
 def test_a_key_option_lists_its_commands_and_runs_them_on_the_state(
     build: Build,
 ) -> None:
