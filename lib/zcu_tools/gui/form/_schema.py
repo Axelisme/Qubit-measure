@@ -14,12 +14,14 @@ from ._json import copy_object, default_json
 from ._sources import local_choices
 from ._structure import (
     alternatives,
+    branch_tags,
     discriminator,
+    fixed_tag,
     key_or_inline,
     model_types,
     schema_branch_model,
 )
-from .model import Display, FormEnv, FormModel, FormPath
+from .model import Display, FormEnv, FormModel, FormPath, ModuleInput, RangeInput
 
 
 class _InputJsonSchema(GenerateJsonSchema):
@@ -170,17 +172,68 @@ def _field_metadata(info: FieldInfo, target: dict[str, JsonValue]) -> None:
         target["anyOf"] = variants
     for metadata in info.metadata:
         if isinstance(metadata, Display):
+            if metadata.decimals is not None and float not in alternatives(
+                info.annotation
+            ):
+                raise ValueError(
+                    f"Display decimals requires a float field, not {info.annotation!r}"
+                )
             for key, value in (
                 ("title", metadata.label),
                 ("description", metadata.description),
                 ("unit", metadata.unit),
                 ("placeholder", metadata.placeholder),
+                ("decimals", metadata.decimals),
             ):
                 if value is not None:
                     target[key] = value
             target["collapsed"] = metadata.collapsed
+            # Only declared: forms without hidden fields keep their schema.
+            if metadata.hidden:
+                target["hidden"] = True
     for child_info, child_target in _container_nodes(info, target):
         _field_metadata(child_info, child_target)
+
+
+def _label(info: FieldInfo) -> str | None:
+    """Return the field's Display label, or None when it declares none."""
+    return next(
+        (
+            metadata.label
+            for metadata in info.metadata
+            if isinstance(metadata, Display) and metadata.label is not None
+        ),
+        None,
+    )
+
+
+def _section_title(name: str) -> str:
+    """Title a model field by name: underscores as spaces, first letter upper.
+
+    For example ro_cfg becomes "Ro cfg" and module becomes "Module".
+    """
+    text = name.replace("_", " ")
+    return text[:1].upper() + text[1:]
+
+
+def _hide_fixed_tag(
+    model: type[BaseModel],
+    node: dict[str, JsonValue],
+    tags: Mapping[type[BaseModel], str],
+) -> None:
+    """Mark model's one-value structural tag hidden in its schema node.
+
+    The caller reached model without a union selector, so its tag can hold
+    only one value and the editor does not draw it. Models without such a tag
+    (see fixed_tag) are left unchanged.
+    """
+    key = fixed_tag(model, tags)
+    properties = node.get("properties")
+    if key is None or not isinstance(properties, dict):
+        return
+    selector = properties.get(key)
+    if isinstance(selector, dict):
+        selector["hidden"] = True
 
 
 def _non_null(target: dict[str, JsonValue]) -> dict[str, JsonValue]:
@@ -339,12 +392,15 @@ class _Projection:
 
     root is the partial schema being decorated in place. env is the caller's
     environment. library_specs holds each captured library key with its Spec, read
-    once per call, or is None when env has no captured library.
+    once per call, or is None when env has no captured library. branch_tags maps
+    each tagged-union branch model of this form, ModuleInput and RangeInput to
+    its tag key (see branch_tags).
     """
 
     root: dict[str, JsonValue]
     env: FormEnv
     library_specs: tuple[tuple[str, BaseModel], ...] | None
+    branch_tags: Mapping[type[BaseModel], str]
 
 
 def _library_specs(env: FormEnv) -> tuple[tuple[str, BaseModel], ...] | None:
@@ -402,6 +458,10 @@ def _decorate(
             continue
         _inline_ref(target, root)
         _field_metadata(info, target)
+        models = model_types(info.annotation)
+        if models and _label(info) is None:
+            # The inlined definition carries its class name as title.
+            target["title"] = _section_title(name)
         if key_or_inline(info.annotation):
             _key_branch(info, target, projection)
         child_options = {
@@ -409,8 +469,12 @@ def _decorate(
             for path, values in options.items()
             if len(path) > 1 and path[0] == name
         }
+        # Without a union selector, a branch model's tag has only one value.
+        fixed = bool(models) and discriminator(info) is None
         for child, variant in _child_nodes(info, target, root):
             _decorate(child, variant, projection, seen, child_options)
+            if fixed:
+                _hide_fixed_tag(child, variant, projection.branch_tags)
         values = options.get((name,))
         if values is not None:
             _apply_choices(target, values)
@@ -420,5 +484,7 @@ def input_schema(model: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
     """Project a Pydantic schema to partial tagged JSON input for this environment."""
     raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
     root = copy_object(_partial(raw))
-    _decorate(model, root, _Projection(root, env, _library_specs(env)), set(), {})
+    tags = branch_tags((model, ModuleInput, RangeInput))
+    projection = _Projection(root, env, _library_specs(env), tags)
+    _decorate(model, root, projection, set(), {})
     return root

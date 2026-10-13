@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import (
@@ -21,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
+    Form,
     PostAnalyzeRequest,
     RunRequest,
     SessionEnv,
@@ -30,7 +30,6 @@ from zcu_tools.gui.app.measure.adapter.types import (
     AnalyzeResultBase,
     PostAnalyzeResultBase,
 )
-from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
@@ -39,7 +38,6 @@ from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -52,7 +50,7 @@ from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure.adapter._cfg_fakes import StaticCfgDefinition
 
 GUI_ORIGIN = CommandOrigin("gui")
@@ -79,6 +77,7 @@ class SavingAdapter(
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 
     exp_cls = SavingCore
+    form = Form(SavingCfg, {})
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
@@ -217,7 +216,7 @@ def native_save_session(
         Session(
             adapter_name="saving",
             adapter=AnalysisSavingAdapter(),
-            cfg=make_cfg(CfgSchema(CfgSectionSpec(), CfgSectionValue()), state=state),
+            cfg=make_form(SavingAdapter.form, state=state),
         ),
     )
     state.update_tab_result("tab", record, metadata=metadata, parameters=captured)
@@ -226,13 +225,7 @@ def native_save_session(
     service = SaveService(state, bus)
     control = SaveControlFacet(
         state=state,
-        guard=GuardService(
-            state,
-            captured_parameters=lambda aliases: context.read_context(aliases=aliases),
-            cfg_resolution=lambda parameters: MeasureCfgBindings(
-                MagicMock()
-            ).snapshot_from_state(state, captured_values={}, parameters=parameters),
-        ),
+        guard=GuardService(state),
         save=service,
         context=context,
     )

@@ -18,6 +18,9 @@ from typing import (
     runtime_checkable,
 )
 
+from pydantic import JsonValue
+
+from zcu_tools.gui.form import FormPath
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
 
@@ -138,13 +141,14 @@ class TabSnapshot:
     """Immutable full-state snapshot of one tab (contract-layer DTO).
 
     Render (``TabService.get_snapshot``) populates every field; persist/restore
-    uses only the serializable head (adapter_name + cfg_schema). Pane-owned
+    uses only the serializable head (adapter_name + cfg_input). cfg_input is
+    detached authored Form JSON, never an accepted cfg or source snapshot. Pane-owned
     read models (run/analysis/post_analysis/save/artifacts) are the only
     runtime/read-model contract — no flat projections for legacy callers.
     """
 
     adapter_name: str
-    cfg_schema: CfgSchema
+    cfg_input: dict[str, JsonValue]
     tab_id: str | None = None
     interaction: TabInteractionState | None = None
     capabilities: AdapterCapabilities | None = None
@@ -164,12 +168,26 @@ class RestoreIssue:
 
 
 @dataclass(frozen=True)
+class RestoreDroppedInputs:
+    """Compatible restoration kept a tab but discarded these authored input paths.
+
+    adapter_name identifies the persisted experiment. paths are model-field paths,
+    with integer indexes when FormState reports them; they are never wire strings.
+    """
+
+    adapter_name: str
+    paths: tuple[FormPath, ...]
+
+
+@dataclass(frozen=True)
 class RestoreReport:
     """Outcome of applying a persisted session: how many tabs restored, and the
     per-tab rejections to surface to the user."""
 
     restored_tabs: int
     rejected_tabs: tuple[RestoreIssue, ...]
+    # Successfully restored tabs may discard incompatible leaves, grouped by adapter.
+    dropped_inputs: tuple[RestoreDroppedInputs, ...] = ()
 
 
 @runtime_checkable
@@ -221,7 +239,9 @@ class TabLifecyclePort(Protocol):
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
-    def make_default_cfg(self, adapter_name: str) -> CfgSchema: ...
+    def dropped_input_paths(self, tab_id: str) -> tuple[FormPath, ...]:
+        """Return paths discarded when creating this tab from saved Form input."""
+        ...
 
 
 @runtime_checkable

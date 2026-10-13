@@ -27,7 +27,7 @@ def test_app_state_model_dump_validate_roundtrip():
             tabs=(
                 PersistedTab(
                     adapter_name="fake",
-                    cfg_raw={"x": 1, "nested": {"y": 2}},
+                    form_input={"x": 1, "nested": {"y": 2}},
                 ),
             ),
             active_tab_index=0,
@@ -52,9 +52,9 @@ def test_persisted_tab_does_not_carry_save_paths_override():
     # Process-local data/analysis/post path overrides are not persisted; only
     # adapter_name + cfg_raw survive a round-trip. This proves the final
     # contract has no combined save_paths_override projection.
-    tab = PersistedTab(adapter_name="fake", cfg_raw={})
+    tab = PersistedTab(adapter_name="fake", form_input={})
     dumped = tab.model_dump(mode="json")
     assert "save_paths_override" not in dumped
     back = PersistedTab.model_validate(dumped)
     assert back.adapter_name == "fake"
-    assert back.cfg_raw == {}
+    assert back.form_input == {}

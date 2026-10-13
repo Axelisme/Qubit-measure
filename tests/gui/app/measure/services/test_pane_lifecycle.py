@@ -13,6 +13,7 @@ from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
+    Form,
     ParameterWriteback,
     SessionEnv,
 )
@@ -30,7 +31,6 @@ from zcu_tools.gui.app.measure.state import (
     Session,
     State,
 )
-from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.session.aliases import AliasRow
@@ -44,12 +44,10 @@ from zcu_tools.resources.entry import ArtifactKey, JsonObject
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import (
-    cfg_resolution,
-    cfg_resources,
-    make_cfg,
     parameter_capture,
 )
 from tests.gui.app.measure._components import QubitSchema
+from tests.gui.app.measure._form_fakes import form_resources, make_form
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     PaneSummary,
@@ -132,7 +130,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
         Session(
             adapter_name="fake",
             adapter=adapter,
-            cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
+            cfg=make_form(Form(SavingCfg, {}), state=state),
         ),
     )
     state.update_tab_result("tab", "run", parameters=ctx.parameters)
@@ -184,7 +182,7 @@ def test_snapshot_exposes_independent_panes_and_paths(
         ["primary-item"] if draft is primary_draft else ["post-item"]
     )
     tabs = TabService(
-        state, MagicMock(), writeback, cfg_resources(state), MagicMock(), MagicMock()
+        state, MagicMock(), writeback, form_resources(state), MagicMock(), MagicMock()
     )
     snapshot = tabs.get_snapshot(tab_id)
     assert snapshot.run is not None and snapshot.run.result is run_result
@@ -256,7 +254,7 @@ def test_named_panes_project_paths_and_retire_original_collections(
     post.finish()
     state.replace_post_analysis_pane(tab_id, result=PostSummary(), plots=post)
     tabs = TabService(
-        state, MagicMock(), MagicMock(), cfg_resources(state), MagicMock(), MagicMock()
+        state, MagicMock(), MagicMock(), form_resources(state), MagicMock(), MagicMock()
     )
     snapshot = tabs.get_snapshot(tab_id)
     assert (
@@ -554,7 +552,7 @@ def test_pane_post_uses_adopted_fit_and_projects_separate_artifacts_and_writebac
         panes.state,
         MagicMock(),
         panes.writeback,
-        cfg_resources(panes.state),
+        form_resources(panes.state),
         MagicMock(),
         MagicMock(),
     ).get_snapshot(panes.tab_id)
@@ -662,7 +660,6 @@ def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
     load = LoadService(
         state,
         MagicMock(),
-        provide_options=lambda _kind: [],
         context=MagicMock(),
         captured_parameters=lambda _aliases: state.session_env.parameters,
     )
@@ -684,9 +681,5 @@ def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
             return object()
 
     state.get_tab(tab_id).adapter = EnabledAdapter()  # type: ignore[assignment]
-    GuardService(
-        state,
-        captured_parameters=lambda _aliases: state.session_env.parameters,
-        cfg_resolution=lambda parameters: cfg_resolution(state, parameters),
-    ).check_load(tab_id)
+    GuardService(state).check_load(tab_id)
     assert state.get_tab(tab_id).run.result == "run"

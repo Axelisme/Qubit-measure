@@ -7,11 +7,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
     ExpAdapterProtocol,
+    Form,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -38,7 +40,8 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module, ProgramV2Cfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
-from tests.gui.app.measure._cfg_fakes import make_cfg, parameter_capture
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import make_form
 
 
 def empty_schema() -> CfgSchema:
@@ -65,7 +68,7 @@ def make_state(
         Session(
             adapter_name="any",
             adapter=adapter,
-            cfg=make_cfg(empty_schema(), state=state),
+            cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
     return state, tab_id, adapter

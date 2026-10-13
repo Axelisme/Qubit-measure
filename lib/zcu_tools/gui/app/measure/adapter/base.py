@@ -27,6 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
+    Form,
     LoadDataRequest,
     NoAnalyzeParams,
     PostAnalyzeRequest,
@@ -98,13 +99,31 @@ def _can_construct_without_args(cls: type[Any]) -> bool:
     return True
 
 
+def _require_boolean_load_flag(value: object, adapter_name: str) -> None:
+    if not isinstance(value, bool):
+        raise TypeError(
+            f"{adapter_name}.capabilities.load_data must be bool, "
+            f"got {type(value).__name__}"
+        )
+
+
+def _validated_capabilities(value: object, adapter_name: str) -> AdapterCapabilities:
+    # Plugin declarations can violate their static annotations at import time.
+    if not isinstance(value, AdapterCapabilities):
+        raise TypeError(
+            f"{adapter_name}.capabilities must be an AdapterCapabilities instance"
+        )
+    _require_boolean_load_flag(value.load_data, adapter_name)
+    return value
+
+
 class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``cfg_definition``, ``build_exp_cfg``, ``make_filename_stem``
+    (``form``, ``build_exp_cfg``, ``make_filename_stem``
     and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
-    Everything else (definition instantiation, run delegation, save-path policy,
+    Everything else (run delegation, save-path policy,
     save) is provided here once.
 
     The class is generic over the four experiment types. Adapters without analysis
@@ -132,6 +151,8 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # set this and inherit build_exp_cfg. Adapters with a bespoke mapping (e.g.
     # extra kwargs, hand-built cfg) override build_exp_cfg and leave this None.
     ExpCfg_cls: ClassVar[Any] = None
+    # Concrete adapters publish one core-derived definition; the host owns state.
+    form: Form[T_Cfg]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -173,16 +194,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     @classmethod
     def _validate_capability_contract(cls) -> None:
         """Fail fast when declared capabilities and implemented hooks disagree."""
-        caps = cls.capabilities
-        if not isinstance(caps, AdapterCapabilities):
-            raise TypeError(
-                f"{cls.__name__}.capabilities must be an AdapterCapabilities instance"
-            )
-        if not isinstance(caps.load_data, bool):
-            raise TypeError(
-                f"{cls.__name__}.capabilities.load_data must be bool, "
-                f"got {type(caps.load_data).__name__}"
-            )
+        caps = _validated_capabilities(cls.capabilities, cls.__name__)
         analysis = caps.analysis
 
         if analysis is AnalysisMode.FIT:
@@ -292,9 +304,14 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # -- experiment-specific contract (subclass must fill) -----------------
 
     @classmethod
-    @abstractmethod
     def cfg_definition(cls) -> AdapterCfgDefinition:
-        """Return the context-free cfg shape and deferred fresh-value recipes."""
+        """Return a legacy independent schema definition; not used by tab forms.
+
+        Adapters that still use make_default_cfg must declare this hook. The
+        core-derived tab path uses form instead. Missing legacy hooks raise
+        NotImplementedError rather than guessing a form/schema conversion.
+        """
+        raise NotImplementedError("Legacy cfg_definition is not declared")
 
     @classmethod
     def guide(cls) -> AdapterGuide:

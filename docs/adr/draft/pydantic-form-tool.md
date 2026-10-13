@@ -4,7 +4,7 @@ status: draft
 
 # Pydantic 表單、輸入與宿主提交
 
-**Last updated:** 2026-10-13，未標籤 `str | Model` 的結構 selector
+**Last updated:** 2026-10-13，editor 的 host write callable 與 WriteRejected；Display 的 decimals／hidden、單值 Literal、固定的結構 tag 與段落標題；FormEnv 的 devices 是 detached BaseDeviceInfo snapshots
 
 ## 脈絡與範圍
 
@@ -43,11 +43,15 @@ FormState 持有隔離的 input 與 base，不持 Engine revision。
 
 Write paths 是 model-field tuples，不進入 sequence index 或 mapping key。Mapping key 可含點。Host 將已確認的 leaf path 轉成 Engine dot path。FormErrors 保留 Pydantic 的 error path 與 sequence index；model-wide error 使用空 tuple。GUI 在表單頂端顯示 model-wide error，RPC 保留路徑與訊息。
 
+Editor 預設直接呼叫 `FormState.write`。Host 需要在寫入前檢查或替換輸入時，傳入 write callable：editor 把每批 parsed write 交給它，自己不寫 state，照舊讀取並訂閱同一個 FormState。Host 以 `gui.form.WriteRejected(message)` 拒絕時，該欄保留使用者輸入並顯示 host 的訊息；其他例外照常拋出。這個接縫是一個 callable 參數，不是 Protocol、registry 或 writer 類別。
+
 ## Defaults、分支與 module reference
 
 `defaults(env, previous)` 是唯一 defaults hook。`default_input(env)` 是 final 組裝入口，依序呼叫 `defaults(env, {})`、檢查來源並建立 FormInput。Defaults 可以包含 expression 與 complex tags。Required keys 沒有預設時保持未填。
 
 Branch switch 先呼叫新分支的 defaults，previous 是舊分支的隔離 input。接著沿用同名欄位，明送內容最後覆蓋。Discriminator 使用新分支的普通 typed tag。它是結構 selector，決定子 model 的形狀與 branch defaults，不是延後求值的 value leaf。Core schema 不提供 expression envelope，editor 不提供 expression mode，字串與 numeric selector 遵守同一規則。沒有 branch factory registry。
+
+只有一個合法值的 `Literal` 沒有可選或可算的內容。Editor 把它畫成唯讀文字，沒有模式選單、下拉與 expression 模式；core schema 不因此改變。Model 不經 union selector 到達時，例如單一 model 欄位、nullable model 或 `str | Model` 的單一 model，它身為 tagged union branch 的 tag 只剩一個值，是固定的結構 tag。Schema 把這個 tag 標成 `hidden`，editor 不畫它，值照常留在 input 並驗證。Branch 身分來自本表單、ModuleInput 與 RangeInput 可達的 tagged union，也涵蓋 branch 的子類別，例如單獨使用的 `LinRange.kind`，以及 inline readout 的 `ro_cfg.type`。在 union 位置的 tag 照舊是 selector。
 
 未標籤的 `str | Model` union 以 JSON 型別（字串／物件）當結構 selector：字串是 library key，物件是 inline model，inline 物件再依自己的 tag 選 branch。Key 不接受 expression envelope，因為 envelope 是物件。Editor 以 Key／Inline 切換呈現，切換時寫入該模式的預設值，不轉換另一模式的值。Captured library 中 Spec 型別相符的 keys 只是建議，不限制輸入。
 
@@ -55,13 +59,15 @@ T1TunablesForm 只在 previous 為空時預填 lifetime expression。Captured po
 
 `choices(env)` 提供 model-field leaf 的合法值。最深 nested FormModel 的 local choices 優先，包含空選項。Input schema 與 result 共用這些選項。Display 只描述標籤、說明、單位與呈現，順序與分組沿欄位宣告及 nested model。
 
+Display 的 `decimals` 是 float 欄位顯示的小數位數。Editor 四捨五入並去掉尾端的 0，不改 input；非 float 欄位宣告它時 input schema 報錯。`hidden` 讓 editor 不畫欄位：值與預設留在 input，照常驗證，錯誤落在最近的已畫祖先列或表單頂端。Input schema 目前仍列出 hidden 欄位並標 `hidden`；MCP 是否列出它們尚未決定。Schema 的 `decimals` 只出現在宣告它的欄位，`hidden` 只出現在宣告的欄位與固定的結構 tag，其他表單的 schema 不多出這兩個 key。巢狀 model 欄位沒有 Display label 時，段落標題是欄位名：底線換成空白，只有第一個字母大寫，例如 `ro_cfg` 是 `Ro cfg`，`ModuleInline.module` 是 `Module`。Pydantic 帶進來的類別名不當標題。
+
 Module ref 與 inline 使用 tagged 子 model。Ref 保存 library key，inline 保存 ModuleSpec。Ref 切 inline 從固定 library 讀取 Spec，切換後不跟隨 library 改動。Defaults 與 choices 使用 LibrarySnapshot 的公開讀取；具體 to_cfg 使用公開 factory 與固定 validation context。缺 key、錯 family、materialization 與 asset 錯誤不降級為 default。
 
 LinRange 與 ExplicitList 保存兩種 flux 輸入。具體 to_cfg 才展開 setpoints。Delay grid 由 workflow 計算。固定值在具體 to_cfg 或 runtime 明寫，不新增通用 sweep 連動、inheritance、`$` capture、refresh、live linking 或 Unavailable publication。
 
 ## 來源與既有工具
 
-FormEnv 借用 host 捕捉的 ParameterContext、LibrarySnapshot 與 native DeviceInfo mapping。ParameterContext owner 在 capture 邊界隔離 point 與 roles，表單不再次複製，也不轉成 flat MetaDict。純數學 expression 與普通 input 不需要 parameter capture。來源缺失的錯誤落在消費欄位。
+FormEnv 借用 host 捕捉的 ParameterContext、LibrarySnapshot，以及裝置名稱到 detached `BaseDeviceInfo` snapshot 的 mapping（含 custom driver 的 info）。共用工具只讀裝置名稱，需要特定 driver 欄位的表單自己以 `isinstance` 收窄。ParameterContext owner 在 capture 邊界隔離 point 與 roles，表單不再次複製，也不轉成 flat MetaDict。純數學 expression 與普通 input 不需要 parameter capture。來源缺失的錯誤落在消費欄位。
 
 Host 決定 capture 與重算時機。每次 result 和 changes 使用傳入的 env。工具不 load YAML、不 refresh、不 poll device；frozen dataclass 不承諾凍結 driver 或 waveform asset bytes。
 

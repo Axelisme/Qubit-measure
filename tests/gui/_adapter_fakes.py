@@ -8,12 +8,14 @@ from typing import ClassVar, Literal
 
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
+    Form,
     LoadDataRequest,
     NoAnalyzeParams,
     ParameterWriteback,
@@ -61,6 +63,7 @@ class DummyAdapter:
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     experiment_tag: ClassVar[str | None] = None
     exp_cls = DummyExp
+    form = Form(ExpCfgModel, {})
 
     @classmethod
     def guide(cls) -> AdapterGuide:

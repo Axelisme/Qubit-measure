@@ -66,9 +66,12 @@ class Slot:
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or
-    references. The library creation catalog accepts only Slot(path); it rejects
-    nondefault copy/set/lock/fallback with TypeError and does not use Form fallback
-    policy. Each consumer owns source lookup and schema compatibility failures.
+    references. The library creation catalog accepts Slot(path) and optional
+    fallback=Template(id), but rejects Slot.copy/set/lock, Template.set/lock and
+    nondefault Template component bindings with TypeError. Its bound unset/dangling
+    sources expand fallback inline; unbound aliases stay linked empty. Without a
+    library fallback, nested structural defaults remain. Each consumer owns source
+    lookup and schema compatibility failures.
     """
 
     path: str

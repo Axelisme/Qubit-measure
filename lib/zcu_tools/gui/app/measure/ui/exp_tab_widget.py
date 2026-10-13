@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.app.measure.state import TabInteractionState
     from zcu_tools.plotting.figures import FigureCollection
 
 
@@ -1096,6 +1097,13 @@ class ExpTabWidget(QWidget):
             self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
+        """Refresh action, editing, and save gates on the Qt owner thread.
+
+        The snapshot must contain interaction facts and the capabilities used
+        to construct this widget. Missing or mismatched capabilities, or a
+        missing Save pane, raise RuntimeError. Missing interaction is an invariant
+        failure. The main window's pushed availability also gates local editing.
+        """
         assert snapshot.interaction is not None
         if snapshot.capabilities is None:
             raise RuntimeError(
@@ -1126,31 +1134,9 @@ class ExpTabWidget(QWidget):
             self._run_action_layout.setStretch(1, 80)
             self.run_btn.setText("Run")
             self.run_btn.setObjectName("primaryButton")
-            cfg_valid = self.cfg_form.is_valid()
-            can_run = (
-                writable
-                and not local_busy
-                and not state.global_run_active
-                and state.has_active_context
-                and (not capabilities.requires_soc or state.has_soc)
-                and cfg_valid
+            self._update_run_admission(
+                state, capabilities, writable=writable, local_busy=local_busy
             )
-            self.run_btn.setEnabled(can_run)
-            if can_run:
-                self.run_btn.setToolTip("")
-            elif local_busy:
-                self.run_btn.setToolTip("Tab is busy")
-            elif state.global_run_active:
-                self.run_btn.setToolTip("Another tab is running")
-            elif not state.has_active_context:
-                self.run_btn.setToolTip("Select or create a working point first")
-            elif capabilities.requires_soc and not state.has_soc:
-                self.run_btn.setToolTip("No SoC connection")
-            elif not cfg_valid:
-                reason = self.cfg_form.first_invalid_reason()
-                self.run_btn.setToolTip(
-                    f"Config invalid: {reason}" if reason else "Config invalid"
-                )
             # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
             self.run_btn.setStyleSheet(_BLUE_PRIMARY_STYLESHEET)
             # Force style refresh for objectName/stylesheet change
@@ -1195,6 +1181,41 @@ class ExpTabWidget(QWidget):
             )
         self._save_center.set_comment_text(snapshot.save.comment)
         self._save_center.update_interaction(snapshot, writable=writable)
+
+    def _update_run_admission(
+        self,
+        state: TabInteractionState,
+        capabilities: AdapterCapabilities,
+        *,
+        writable: bool,
+        local_busy: bool,
+    ) -> None:
+        """Enable idle Run and project the first blocking reason in UI priority order."""
+        cfg_valid = self.cfg_form.is_valid()
+        can_run = (
+            writable
+            and not local_busy
+            and not state.global_run_active
+            and state.has_active_context
+            and (not capabilities.requires_soc or state.has_soc)
+            and cfg_valid
+        )
+        self.run_btn.setEnabled(can_run)
+        if can_run:
+            self.run_btn.setToolTip("")
+        elif local_busy:
+            self.run_btn.setToolTip("Tab is busy")
+        elif state.global_run_active:
+            self.run_btn.setToolTip("Another tab is running")
+        elif not state.has_active_context:
+            self.run_btn.setToolTip("Select or create a working point first")
+        elif capabilities.requires_soc and not state.has_soc:
+            self.run_btn.setToolTip("No SoC connection")
+        elif not cfg_valid:
+            reason = self.cfg_form.first_invalid_reason()
+            self.run_btn.setToolTip(
+                f"Config invalid: {reason}" if reason else "Config invalid"
+            )
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id

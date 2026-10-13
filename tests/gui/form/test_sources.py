@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import PulseSpec
-from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.device import BaseDeviceInfo, FakeDeviceInfo
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -291,3 +291,30 @@ def test_captured_devices_choices_missing_source_and_no_mutation() -> None:
     assert state.input.data == current
     with pytest.raises(PydanticCustomError, match="device"):
         DeviceChoiceForm.default_input(missing_env)
+
+
+class CustomDriverInfo(BaseDeviceInfo):
+    """A custom driver's detached info, outside the native DeviceInfo union."""
+
+    type: str = "custom/attenuator"
+    attenuation_db: float = 0.0
+
+
+class SourceFreeForm(FormModel):
+    """Evaluate without reading any captured device field."""
+
+    averages: int = 1
+
+
+def test_custom_driver_info_is_a_captured_device() -> None:
+    custom = CustomDriverInfo(address="lab:attenuator", attenuation_db=3.0)
+    env = FormEnv(devices={"flux": FakeDeviceInfo(address="none"), "atten": custom})
+
+    state = FormState(DeviceChoiceForm.default_input(env))
+    state.write({("device",): "atten"}, env)
+    chosen = state.result(env)
+    assert isinstance(chosen, DeviceChoiceForm) and chosen.device == "atten"
+
+    unused = FormState(SourceFreeForm.default_input(env))
+    assert unused.result(env) == SourceFreeForm(averages=1)
+    assert env.devices["atten"] is custom

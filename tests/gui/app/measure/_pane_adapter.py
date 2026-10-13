@@ -11,6 +11,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalyzeRequest,
     AnalyzeResultBase,
+    Form,
     ParameterWriteback,
     PostAnalyzeRequest,
     PostWritebackRequest,
@@ -54,6 +55,7 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
     )
     exp_cls = SavingCore
     ExpCfg_cls = SavingCfg
+    form = Form(SavingCfg, {})
     experiment_tag: ClassVar[str | None] = "test/saving"
 
     @classmethod

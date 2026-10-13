@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue
 from qick import QickConfig
-from qtpy.QtCore import QSignalBlocker, QTimer
+from qtpy.QtCore import QSignalBlocker
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import QWidget
 
@@ -30,6 +30,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.app.workflows._form_io import inspect_form_input, prepare_start_form
 from zcu_tools.gui.app.workflows.controller import WorkflowController
+from zcu_tools.gui.app.workflows.figure_area import WorkflowFigureArea
 from zcu_tools.gui.app.workflows.layout import build_workflow_layout
 from zcu_tools.gui.app.workflows.persistence import (
     WorkflowInputRestoreReport,
@@ -51,8 +52,6 @@ from zcu_tools.gui.form import (
     FormModel,
     FormWritePath,
 )
-from zcu_tools.gui.plotting.container import FigureContainer
-from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.remote.control_service import ControlOptions
 from zcu_tools.gui.session.persistence import PersistenceError
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -69,6 +68,7 @@ from .attachment import Attachment
 from .catalog import WorkflowCatalog
 from .figures import WorkflowFigureViews
 from .forms import WorkflowForms
+from .run_view import WorkflowRunView
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel, WorkflowPlanPanel
@@ -82,8 +82,10 @@ class WorkflowWindow[C](QWidget):
 
     plan_panel/tunables_panel expose selected independent parsed drafts.
     controller stays fixed; its engine is None until native acceptance, and
-    tuning_panel presents its unique run binding. SessionServices owns shared
-    runner/progress, hardware, exclusion and workers; parent permits embedding.
+    tuning_panel presents its unique run binding in the Tunables tab; a status
+    bar names the run above the diagnostics line (WorkflowRunView). Shared
+    SessionServices owns runner/progress, hardware, exclusion and workers;
+    parent permits embedding.
     RPC calls these same controls. Start uses cached native info; every env.run
     captures live drivers in the worker. Pause retains plan/plots/input capture;
     Resume keeps the same operation, without recapture or a second Engine owner.
@@ -119,7 +121,6 @@ class WorkflowWindow[C](QWidget):
         current = WorkflowCatalog(tuple(registrations))
         self._loader = loader
         self._thread = get_ident()
-        self._forms_for_run = False
         self._catalog_error: CatalogReloadError | None = None
         self._state = state
         self._services = services
@@ -130,7 +131,6 @@ class WorkflowWindow[C](QWidget):
         self.controller: WorkflowController[FormModel, C] = WorkflowController(
             services.runner, "workflow", on_finished=self._finished
         )
-        self.tuning_panel: WorkflowTuningPanel[FormModel, C] | None = None
 
         env = (
             self._capture_env(self._services.device.capture_native_device_info())
@@ -139,8 +139,13 @@ class WorkflowWindow[C](QWidget):
         )
         self._forms = WorkflowForms(current, env, self)
         self._session = WorkflowSessionStrip(services, self)
+        self._figure_area = WorkflowFigureArea(owner, self)
         self._controls = build_workflow_layout(
-            self, self._session, self.plan_panel, self.tunables_panel
+            self,
+            self._session,
+            self._figure_area,
+            self.plan_panel,
+            self.tunables_panel,
         )
         self._controls.selector.addItems(list(current.names))
         self._controls.selector.currentTextChanged.connect(self._selection_changed)
@@ -156,17 +161,12 @@ class WorkflowWindow[C](QWidget):
         ):
             button.clicked.connect(slot)
         self._controls.reload.setEnabled(self._loader is not None)
-        self._plot_host = QtPlotHost(
-            FigureContainer(self._controls.plot_stack, self._controls.plot_placeholder),
-            owner,
+        self._run_view = WorkflowRunView(
+            self._controls, self.controller, self._forms, self
         )
-        self._figure_views = WorkflowFigureViews()
+        self._figure_views = WorkflowFigureViews(self._figure_area)
         self.setup_dialog = SetupDialog(self._services.setup_control, self)
         self.setup_dialog.finished.connect(self._session.refresh)
-        self._poll = QTimer(self)
-        self._poll.setInterval(50)
-        self._poll.timeout.connect(self._refresh_run)
-        self._refresh_run()
 
     setup_dialog: SetupDialog
 
@@ -234,6 +234,15 @@ class WorkflowWindow[C](QWidget):
         return self._forms.knobs
 
     @property
+    def tuning_panel(self) -> WorkflowTuningPanel[FormModel, C] | None:
+        """Return the attached run's tuning panel, None before native acceptance.
+
+        It is the Tunables tab's content while the run is live and stays,
+        hidden, after terminal delivery until Start, panel replacement or close.
+        """
+        return self._run_view.tuning_panel
+
+    @property
     def workflow_name(self) -> str:
         """Return the native name selected by the sole GUI/MCP catalog."""
         return self._forms.attachment.name
@@ -265,7 +274,7 @@ class WorkflowWindow[C](QWidget):
             self._controls.selector.clear()
             self._controls.selector.addItems(list(self._forms.catalog.names))
             self._controls.selector.setCurrentText(self.workflow_name)
-        self._refresh_run()
+        self._run_view.refresh()
 
     def _selection_changed(self, name: str) -> None:
         try:
@@ -285,14 +294,7 @@ class WorkflowWindow[C](QWidget):
             panel.deleteLater()
         self.plan_panel.show()
         self.tunables_panel.show()
-        self._forms_for_run = False
-        self._close_tuning_panel()
-
-    def _close_tuning_panel(self) -> None:
-        if self.tuning_panel is not None:
-            self.tuning_panel.close()
-            self.tuning_panel.deleteLater()
-            self.tuning_panel = None
+        self._run_view.forms_replaced()
 
     def reload_source(self) -> WorkflowInputRestoreReport:
         """Replace current declarations and compatible parsed drafts, on owner thread.
@@ -366,7 +368,7 @@ class WorkflowWindow[C](QWidget):
         binding = self.controller.binding
         knobs = (
             binding.state.input.data
-            if binding is not None and self._forms_for_run
+            if binding is not None and self._run_view.knobs_from_run
             else self.tunables_panel.state.input.data
         )
         return WorkflowInputSnapshot(plan=self.plan_panel.state.input.data, knobs=knobs)
@@ -516,13 +518,13 @@ class WorkflowWindow[C](QWidget):
             database_path=storage.database_path,
             run_id=run_id,
         )
-        plots = Plots(self._plot_host)
+        plots = Plots(self._figure_area)
         ports, provenance = self._start_ports(
             session.soc, session.soccfg, plots, prepared.context
         )
         identity = RunIdentity(run_id, provenance, str(storage.entry_id), storage.point)
         # Install presentation before synchronous admission listeners can reenter.
-        self._close_tuning_panel()
+        self._run_view.release_tuning()
         self._figure_views.install_native(plots)
         try:
             token = prepared.submit(
@@ -540,13 +542,7 @@ class WorkflowWindow[C](QWidget):
         for editor in (self.plan_panel.editor, self.tunables_panel.editor):
             editor.refresh(env)
             editor.discard_local_text()
-        self.plan_panel.setEnabled(False)
-        self.tunables_panel.setEnabled(False)
-        self._controls.selector.setEnabled(False)
-        self._controls.start.setEnabled(False)
-        self._controls.message.setText("Startup pending")
-        self._forms_for_run = True
-        self._poll.start()
+        self._run_view.submitted(attachment.name)
         return token
 
     def _start_ports(
@@ -628,10 +624,10 @@ class WorkflowWindow[C](QWidget):
             self.controller.require_run_id(run_id)
             if binding.engine is None:
                 raise RuntimeError("Form inspection requires native acceptance")
-            if self._forms_for_run:
+            if self._run_view.knobs_from_run:
                 env = binding.env
             revision = binding.engine.tunables(binding.run_id).revision
-            if form == "tunables" and self._forms_for_run:
+            if form == "tunables" and self._run_view.knobs_from_run:
                 state = binding.state
                 if self.tuning_panel is None:
                     raise RuntimeError("Accepted run has no tuning panel")
@@ -692,7 +688,7 @@ class WorkflowWindow[C](QWidget):
         """
         controller = self.controller
         controller.require_run_id(run_id)
-        self._refresh_run()
+        self._run_view.refresh()
         panel = self.tuning_panel
         if panel is None:
             raise RuntimeError("Applying tunables requires accepted run")
@@ -739,59 +735,16 @@ class WorkflowWindow[C](QWidget):
         """
         return self.controller.stop(run_id)
 
-    def _refresh_run(self) -> None:
-        controller = self.controller
-        status = controller.status()
-        if status is None:
-            return
-        self._controls.message.setText(status.lifecycle)
-        self._controls.pause.setEnabled(
-            controller.operation_id is not None and status.lifecycle == "running"
-        )
-        self._controls.resume.setEnabled(
-            not controller.has_pending_segment and status.lifecycle == "paused"
-        )
-        binding = controller.binding
-        if (
-            self._forms_for_run
-            and self.tuning_panel is None
-            and binding is not None
-            and binding.engine is not None
-        ):
-            self.tuning_panel = WorkflowTuningPanel(
-                controller, self, panel_factory=self._forms.attachment.knobs_panel
-            )
-            page = self._controls.tunables_page
-            page.insertWidget(page.indexOf(self.tunables_panel) + 1, self.tuning_panel)
-        if self.tuning_panel is not None:
-            self.tuning_panel.setEnabled(
-                status.lifecycle in {"running", "pausing", "paused"}
-            )
-
     def _finished(self, status: RunStatus | None, error: Exception | None) -> None:
         """Display native delivery; terminal admission is already released.
 
         Paused delivery keeps the same operation, lease, plots and run inputs.
         View errors belong to logging, not the native operation outcome.
         """
-        self._refresh_run()
-        self._controls.pause.setEnabled(False)
-        self._controls.resume.setEnabled(
-            error is None and status is not None and status.lifecycle == "paused"
-        )
         if error is None and status is not None and status.lifecycle == "paused":
-            # Paused delivery retains the operation and run resources.
-            self._poll.start()
+            self._run_view.paused()
             return
-        self._poll.stop()
-        self.plan_panel.setEnabled(True)
-        self.tunables_panel.setEnabled(True)
-        self._controls.selector.setEnabled(True)
-        self._controls.start.setEnabled(True)
-        if error is not None:
-            self._controls.message.setText(str(error))
-        elif status is None:
-            self._controls.message.setText("Stopped before startup")
+        self._run_view.ended(status, error)
         self._figure_views.finish_native()
 
     def _pause_clicked(self) -> None:
@@ -803,6 +756,8 @@ class WorkflowWindow[C](QWidget):
         except Exception as error:
             logger.exception("Workflow Pause failed")
             self._controls.message.setText(str(error))
+            return
+        self._run_view.refresh()
 
     def _resume_clicked(self) -> None:
         run_id = self.controller.run_id
@@ -813,6 +768,8 @@ class WorkflowWindow[C](QWidget):
         except Exception as error:
             logger.exception("Workflow Resume failed")
             self._controls.message.setText(str(error))
+            return
+        self._run_view.refresh()
 
     def _stop_clicked(self) -> None:
         # Qt clicked(bool) is not a run target; use the Controller's native ID.
@@ -824,6 +781,8 @@ class WorkflowWindow[C](QWidget):
         except Exception as error:
             logger.exception("Workflow Stop failed")
             self._controls.message.setText(str(error))
+            return
+        self._run_view.refresh()
 
     def _start_clicked(self) -> None:
         try:
@@ -887,10 +846,8 @@ class WorkflowWindow[C](QWidget):
             return
         self.setup_dialog.close()
         self._session.detach()
-        self._poll.stop()
+        self._run_view.close()
         self._figure_views.release()
         self.plan_panel.editor.detach()
         self.tunables_panel.editor.detach()
-        if self.tuning_panel is not None:
-            self.tuning_panel.close()
         super().closeEvent(a0)

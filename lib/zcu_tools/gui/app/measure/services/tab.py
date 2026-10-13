@@ -9,11 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
-from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.cfg.resource import (
-    CfgObservation,
-    CfgResolution,
-)
+from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.form import FormPath, FormPreview
 from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AnalysisMode, WritebackItem
@@ -35,7 +32,7 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry import PointStorageBinding
 
     from .ports import WritebackLifecyclePort
-    from .tab_cfg import TabCfgResources
+    from .tab_form import TabFormResources, TabFormSources
 
 
 # Characters allowed verbatim in a tab-id slug; everything else (notably the
@@ -68,19 +65,18 @@ class TabService:
         state: State,
         registry: Registry,
         writeback: WritebackLifecyclePort,
-        cfg_resources: TabCfgResources,
-        cfg_resolution: Callable[[ParameterContext | None], CfgResolution],
+        cfg_resources: TabFormResources,
+        form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
         captured_parameters: Callable[
             [Mapping[str, str] | None], ParameterContext | None
         ],
     ) -> None:
-        """Inject owner-sequence captures and fixed cfg resolution construction.
+        """Inject one owner-sequence form source capture for Open and Reset only.
 
-        captured_parameters freezes current global sources with optional named
-        aliases overrides. None and {} mean no override. EMPTY returns None
-        without overrides; nonempty aliases reject no_context. Source/alias errors
-        propagate before registration. Every cfg refresh/reset captures current
-        sources anew; cfg_resolution retains only its supplied fixed capture.
+        form_sources captures parameters/library/devices/value cache with optional
+        named aliases overrides. It performs no hardware I/O. captured_parameters
+        serves explicit consumer queries, not cfg preview or Run; EMPTY returns
+        None without overrides. Errors propagate before registering a new tab.
         """
         self._state = state
         self._registry = registry
@@ -88,7 +84,7 @@ class TabService:
         # one narrow port, without depending on the concrete sibling service.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
-        self._cfg_resolution = cfg_resolution
+        self._form_sources = form_sources
         self._captured_parameters = captured_parameters
 
     def capture_parameters(
@@ -105,21 +101,16 @@ class TabService:
 
     def preview_cfg(
         self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> CfgObservation:
-        """Preview cfg with named aliases without publication or Run acceptance.
+    ) -> FormPreview:
+        """Preview current input leaves using the tab's fixed source snapshot.
 
-        Require an existing tab. Resolve current inputs from the same
-        capture owner as Run admission. Source/alias failures and cfg notification
-        guards propagate. None and {} return the cached observation.
-        Nonempty aliases resolves current inputs once. Return Valid or Invalid
-        without changing global rows, inputs or publication.
+        None and empty aliases leave the snapshot unchanged. Nonempty aliases
+        raise FailedPreconditionError; use resource.reset(aliases=...) to replace
+        defaults with a one-shot source capture. No input or source is mutated.
         """
-        tab = self._state.get_tab(tab_id)
-        observed = tab.cfg.observe()
-        if not aliases:
-            return observed
-        parameters = self.capture_parameters(tab_id, aliases=aliases)
-        return tab.cfg.preview(resolution=self._cfg_resolution(parameters))
+        if aliases:
+            raise FailedPreconditionError("Reset with aliases before previewing cfg")
+        return self._state.get_tab(tab_id).cfg.preview()
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
@@ -152,7 +143,7 @@ class TabService:
         post_items = _items_for_pane(tab.post_analysis)
         return TabSnapshot(
             adapter_name=tab.adapter_name,
-            cfg_schema=tab.cfg.snapshot_inputs(),
+            cfg_input=tab.cfg.input.data,
             tab_id=tab_id,
             interaction=interaction,
             capabilities=tab.adapter.capabilities,
@@ -203,16 +194,13 @@ class TabService:
         adapter_name: str,
         from_dict: TabSnapshot | None = None,
     ) -> str:
-        """Create a tab cfg whose refresh/reset reads current global sources.
+        """Create a tab form with one fixed source snapshot and fresh defaults.
 
-        Defaults use current global aliases, not focus or via inference. Unbound
-        aliases still permit tab creation; cfgs that consume them are Invalid.
-        The tab retains no source capture; Run admission captures its own inputs.
-
-        ``from_dict is None`` → a fresh tab with the adapter's default cfg.
-        ``from_dict`` given (restore) → rebuild the tab from the snapshot's
-        detached ``cfg_schema`` input memento. Path overrides are process-local and not
-        persisted, so restore creates fresh panes.
+        Defaults use current global aliases. Unresolved consumed fields may make
+        the form Invalid without blocking tab creation. from_dict optionally
+        supplies detached cfg_input JSON to overlay via write_compatible; dropped
+        paths are available through dropped_input_paths. Source captures and pane
+        results are not restored. Failed preparation publishes no partial tab.
         """
         adapter = self._registry.create(adapter_name)
         tab_id = f"{_slug(adapter_name)}-{uuid.uuid4().hex[:8]}"
@@ -223,16 +211,11 @@ class TabService:
             from_dict is not None,
         )
 
-        def current_parameters() -> ParameterContext | None:
-            return self._captured_parameters(None)
-
         cfg = self._cfg_resources.create(
             tab_id,
-            lambda: adapter.make_default_cfg(
-                replace(self._state.session_env, parameters=current_parameters())
-            ),
-            resolution=lambda: self._cfg_resolution(current_parameters()),
-            initial=from_dict.cfg_schema if from_dict is not None else None,
+            adapter.form,
+            capture=self._form_sources,
+            initial=from_dict.cfg_input if from_dict is not None else None,
         )
         self._state.add_tab(
             tab_id,
@@ -243,20 +226,15 @@ class TabService:
             ),
         )
 
-        def cfg_changed(_observation: CfgObservation) -> None:
+        def cfg_changed() -> None:
             self._state.version.bump(f"tab:{tab_id}:cfg")
 
-        cfg.watch(cfg_changed)
+        cfg.subscribe(cfg_changed)
         return tab_id
 
-    def make_default_cfg(self, adapter_name: str) -> CfgSchema:
-        """The adapter's default cfg under the current context — the base schema
-        WorkspaceService needs to decode a persisted raw cfg into a live one."""
-        adapter = self._registry.create(adapter_name)
-        parameters = self._captured_parameters(None)
-        return adapter.make_default_cfg(
-            replace(self._state.session_env, parameters=parameters)
-        )
+    def dropped_input_paths(self, tab_id: str) -> tuple[FormPath, ...]:
+        """Return discarded paths from this tab's compatible initial restoration."""
+        return self._state.get_tab(tab_id).cfg.dropped_paths
 
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()

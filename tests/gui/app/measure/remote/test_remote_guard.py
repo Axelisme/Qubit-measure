@@ -425,7 +425,10 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         bridge.disconnect()
 
 
-@pytest.mark.parametrize("value_bytes", [2 << 20, MAX_LINE_BYTES - 2048])
+@pytest.mark.parametrize(
+    "value_bytes",
+    [2 << 20, pytest.param(MAX_LINE_BYTES - 2048, marks=pytest.mark.slow)],
+)
 def test_large_context_roundtrip_restores_load_guard(
     fx, tmp_path: Path, value_bytes: int
 ) -> None:
@@ -453,6 +456,7 @@ def test_large_context_roundtrip_restores_load_guard(
         bridge.disconnect()
 
 
+@pytest.mark.slow
 def test_oversized_context_read_returns_error_without_advancing_guard(
     fx, tmp_path: Path
 ) -> None:

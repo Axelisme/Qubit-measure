@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import ClassVar, Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.native_persistence import PreparedRunData
-from zcu_tools.gui.app.measure.adapter import LoadDataRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import Form, LoadDataRequest, SessionEnv
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.cfg import (
@@ -21,10 +22,17 @@ from zcu_tools.gui.cfg import (
 from tests.gui._adapter_fakes import DummyAdapter
 
 
+class ReloadCfg(ConfigBase):
+    """A knob is retained across catalog reload without scientific dependencies."""
+
+    knob: int = 7
+
+
 class OldAdapter(DummyAdapter):
     """Context-free cfg adapter for reload tests, without native persistence."""
 
     experiment_tag: ClassVar[str | None] = None
+    form = Form(ReloadCfg, {})
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
         """Reject native Load requests; this reload-only fake has no loader."""
@@ -62,7 +70,7 @@ class NewAdapter(OldAdapter):
 class Loader:
     def __init__(self) -> None:
         self.candidate = Registry()
-        self.candidate.register("demo", NewAdapter)
+        self.candidate.register("demo", NewAdapter, form=NewAdapter.form)
         self.failure: CatalogReloadError | None = None
         self.prepare_failure: Exception | None = None
         self.during_load: Callable[[], None] = lambda: None

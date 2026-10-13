@@ -10,16 +10,12 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    Form,
     LoadDataRequest,
     NoAnalyzeParams,
 )
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -28,12 +24,8 @@ from zcu_tools.gui.expected_error import (
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._load_support import historical_metadata
-
-
-def _empty_schema() -> CfgSchema:
-    return CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
 
 
 def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
@@ -43,7 +35,11 @@ def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
     adapter.capabilities = AdapterCapabilities(load_data=load_data)
     state.add_tab(
         tab_id,
-        Session(adapter_name="any", adapter=adapter, cfg=make_cfg(_empty_schema())),
+        Session(
+            adapter_name="any",
+            adapter=adapter,
+            cfg=make_form(Form(ExpCfgModel, {}), state=state),
+        ),
     )
     return state, tab_id, adapter
 
@@ -59,7 +55,6 @@ def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
         LoadService(
             state,
             writeback,
-            provide_options=lambda source_id: (),
             context=context,
             captured_parameters=lambda _aliases: state.session_env.parameters,
         ),
@@ -155,7 +150,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     emit.assert_not_called()
     assert outcome.result_type == "RunRecord"
     assert outcome.has_cfg_snapshot is (not missing_cfg)
-    assert outcome.cfg_backfill == "not_applied"
+    assert outcome.cfg_backfill == ("not_applied" if missing_cfg else "applied")
     assert outcome.has_analyze_params is False
     assert state.version.get(f"tab:{tab_id}:result") == 1
     assert state.version.get(f"tab:{tab_id}:analyze") == 1
