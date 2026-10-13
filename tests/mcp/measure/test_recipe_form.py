@@ -109,6 +109,29 @@ def test_use_library_sets_actual_key_and_exposes_key_mode(tmp_path: Path) -> Non
         assert values["freq"] == 100.0
 
 
+def test_use_library_switches_active_inline_slot_to_actual_key(tmp_path: Path) -> None:
+    gui = FormGui()
+    library = gui.owner.env.library
+    if library is None:
+        raise TypeError("Expected library")
+    module = library.module_spec("Q1.pulses.pi")
+    gui.owner.write({("pulse",): ModuleInline(module=module).model_dump(mode="json")})
+    with recipe_client(tmp_path, gui) as client:
+        tab = RecipeSession(client.context).open_tab("lookback")
+        assert tab.read_field("pulse").mode == "inline"
+        try:
+            tab.use_library("pulse", "Q1.pulses.pi")
+        except ValueError as error:
+            raise AssertionError(
+                "use_library must switch an active inline Slot"
+            ) from error
+        assert tab.read_field("pulse").key == "Q1.pulses.pi"
+        cfg = AuthorCfg.model_validate(gui.owner.accept().cfg)
+        if cfg.pulse is None:
+            raise TypeError("Expected accepted pulse")
+        assert cfg.pulse.freq == 100.0
+
+
 def test_locked_inline_slot_rejects_library_selection_before_rpc(
     tmp_path: Path,
 ) -> None:
