@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，Fit 頁階段化與 Filter 常駐、Spectra 階段列、Show 工具列與色弱配色
+**Last updated:** 2026-10-14，Fit 頁階段化與 Filter 常駐、Show 隨 Search 連鎖鎖住、Cancel 不受階段鎖、Spectra 階段列、Show 工具列與色弱配色
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -304,8 +304,9 @@ Local modal 期間 owner 取得回 `local_busy` 與「Local 使用中」。Qt re
 在 owner turn 查 active modal，chooser 使用非 native option。Dialog 不接 control，
 chooser 返回與 accepted callback 不重查 holder。
 
-Analyze 的 Search form（含 Cancel）與 Show 的 Display 群組（x／y limits、Auto limits、reference lines、
+Analyze 的 Search form（含 Search 與 Export）與 Show 的 Display 群組（x／y limits、Auto limits、reference lines、
 Transitions to show、Apply）在 Remote 停用，該階段鎖住時對 holder 也停用，解鎖後依控制權恢復；
+Search 的 Cancel 在表單外，只看控制權與是否有搜尋在跑：holder 在 Search 鎖住時仍能取消進行中的搜尋，非 holder 一律停用。
 Search 與 Show 的狀態列在表單外，非 holder 與鎖住時仍可讀。
 Show 畫布上方的 matplotlib 工具列 `fluxdep.show.toolbar`（Home、Back、Forward、Pan、Zoom）只改本機畫面，所有人都可用，Show 鎖住時也可用；
 不放 Subplots、Customize 與 Save，因為它們會開阻塞對話框。
@@ -360,7 +361,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   狀態由 State 與 live Filter context 推導，不新增 State 欄位：
   - Filter：有 live 草稿為 draft；每張有點的譜都有已發布遮罩為 done（上游改動丟掉遮罩後回到 open），否則 open。
   - Search：Filter 未 done 或有 live Filter 草稿時 locked；有搜尋結果（含過期）為 done，否則 open。
-  - Show：沒有搜尋結果或有 live Filter 草稿時 locked，否則 open。
+  - Show：Search locked 或沒有搜尋結果時 locked，否則 open。遮罩失效但舊結果仍在時，Show 跟著 Search 鎖住。
   - **Filter**：沒有 Session 時唯讀已發布遮罩，有 Session 時嵌 cross-spectrum `SelectorWidget`（見「跨譜篩選」）。
   - **Search**：搜尋表單（`Search DB` 是 fit 的 `search_db`，與專案的 Data root 分開；bounds preset 下拉
     `general`/`integer`/`all` 填三組 bound spinbox，下拉永遠顯示與 spinbox 數值完全相符的 preset，數值被改過時顯示 `custom`——

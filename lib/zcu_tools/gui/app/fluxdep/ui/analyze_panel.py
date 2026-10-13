@@ -3,8 +3,9 @@
 One panel (a MainWindow singleton) gathers the three post-selection analysis
 steps under a stage bar ``1 Filter -> 2 Search -> 3 Show``. A stage is locked
 until the earlier ones are done: Search until every sampled spectrum has a
-published Filter mask, Show until a search result exists, and both while a
-Filter draft is live.
+published Filter mask, Show until Search is unlocked and a search result
+exists, and both while a Filter draft is live. A running search's Cancel
+ignores the locks.
 
 - **Filter**: the published masks read-only, or the live cross-spectrum
   selector over the joint point cloud (``FilterStage``).
@@ -82,7 +83,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     transitions_need_sample_f,
 )
 from zcu_tools.gui.app.fluxdep.ui.filter_stage import FilterStage
-from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, StageStatus
+from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -277,24 +278,26 @@ class AnalyzePanelWidget(QWidget):
 
         Filter is done once every sampled spectrum has a published mask
         (upstream changes drop masks, which reopens it); Search is done once
-        a search result exists. Search needs a done Filter, Show needs a
-        result, and a live Filter draft locks both. A locked stage stays shown
-        if it is current; its form (Search, with Search/Cancel/Export) or
-        display choices (Show) are disabled until it unlocks, and always for
-        a non-holder. Show's toolbar only moves the local view and stays on.
+        a search result exists. Search needs a done Filter and no live Filter
+        draft; Show needs an unlocked Search and a result, so an old result
+        stays hidden behind a locked Search. A locked stage stays shown if it
+        is current; its form (Search, with Search and Export) or display
+        choices (Show) are disabled until it unlocks, and always for a
+        non-holder. A running search's Cancel and Show's toolbar ignore the
+        locks (see _refresh_cancel_button; the toolbar only moves the local
+        view).
         """
         state = self._ctrl.state
         drafting = self._ctrl.interactive.current_cross_selection() is not None
         sampled = [e for e in state.spectrums.values() if e.point_count > 0]
         filtered = bool(sampled) and all(e.filter_mask is not None for e in sampled)
         has_result = state.fit.has_result
-        filter_status: StageStatus = (
-            "draft" if drafting else "done" if filtered else "open"
+        search_locked = drafting or not filtered
+        filter_status = stage_status(done=filtered, draft=drafting, locked=False)
+        search_status = stage_status(done=has_result, draft=False, locked=search_locked)
+        show_status = stage_status(
+            done=False, draft=False, locked=search_locked or not has_result
         )
-        search_status: StageStatus = (
-            "locked" if drafting or not filtered else "done" if has_result else "open"
-        )
-        show_status: StageStatus = "locked" if drafting or not has_result else "open"
         self._stages.set_status("filter", filter_status)
         self._stages.set_status("search", search_status)
         self._stages.set_status("show", show_status)
@@ -308,6 +311,12 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtWidgets import QSplitter
 
         form_box = self._build_search_form()
+        # Cancel sits outside the form, so the Search stage lock that disables
+        # the form never reaches it; _refresh_cancel_button gates it instead.
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("fluxdep.fit.cancel")
+        self._cancel_btn.clicked.connect(self._on_cancel_search)
+        self._cancel_btn.setEnabled(False)
         # Status lines sit outside the form, so a non-holder reads them enabled.
         self._status = _message_label("Status", "fluxdep.fit.status")
         # Outdated-fit line with its root-change reasons; blank while fresh.
@@ -321,7 +330,9 @@ class AnalyzePanelWidget(QWidget):
         self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(_control_column(form_box, self._status, self._freshness))
+        splitter.addWidget(
+            _control_column(form_box, self._cancel_btn, self._status, self._freshness)
+        )
         splitter.addWidget(self._diag_stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -391,18 +402,11 @@ class AnalyzePanelWidget(QWidget):
         form.addRow("sample_f (GHz)", self._sample_f)
 
     def _add_search_actions(self, form: QFormLayout) -> None:
-        """Add Search / Cancel, the progress bar and Export params…."""
+        """Add Search, the progress bar and Export params…."""
         self._search_btn = QPushButton("Search")
         self._search_btn.setObjectName("fluxdep.fit.search")
         self._search_btn.clicked.connect(self._on_search)
-        self._cancel_btn = QPushButton("Cancel")
-        self._cancel_btn.setObjectName("fluxdep.fit.cancel")
-        self._cancel_btn.clicked.connect(self._on_cancel_search)
-        self._cancel_btn.setEnabled(False)
-        run_row = QHBoxLayout()
-        run_row.addWidget(self._search_btn)
-        run_row.addWidget(self._cancel_btn)
-        form.addRow(run_row)
+        form.addRow(self._search_btn)
 
         self._progress = QProgressBar()
         self._progress.setVisible(False)
@@ -604,11 +608,12 @@ class AnalyzePanelWidget(QWidget):
         A non-holder keeps the stage bar, the status lines, the canvases and
         the Show toolbar; Filter's Edit/Discard and Selector controls follow.
         The holder's Search form and Show display choices also follow the
-        stage locks (see _refresh_stages).
+        stage locks (see _refresh_stages); a running search's Cancel does not.
         """
         self._writable = writable
         self._filter.set_writable(writable=writable)
         self._refresh_stages()
+        self._refresh_cancel_button()
 
     # --- Search actions --------------------------------------------------
 
@@ -699,6 +704,16 @@ class AnalyzePanelWidget(QWidget):
         pending = activity is not None and activity.status == "pending"
         self._search_btn.setEnabled(not pending and not self._needs_frequency)
 
+    def _refresh_cancel_button(self) -> None:
+        """Enable Cancel for the holder while a search is pending.
+
+        Only control authority and the running search gate it; the stage
+        locks do not, so a running search can always be stopped.
+        """
+        activity = self._ctrl.search.current
+        pending = activity is not None and activity.status == "pending"
+        self._cancel_btn.setEnabled(self._writable and pending)
+
     def _on_browse_db(self) -> None:
         from .paths import database_dir
 
@@ -762,7 +777,7 @@ class AnalyzePanelWidget(QWidget):
         activity = self._ctrl.search.current
         pending = activity is not None and activity.status == "pending"
         self._refresh_search_button()
-        self._cancel_btn.setEnabled(pending)
+        self._refresh_cancel_button()
         self._progress.setVisible(pending)
         stale_reasons = self._stale_reasons()
         self._freshness.setText(format_stale_reasons(stale_reasons))

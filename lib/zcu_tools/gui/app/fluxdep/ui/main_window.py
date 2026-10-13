@@ -76,7 +76,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
 from zcu_tools.gui.app.fluxdep.ui.spectrum_list import SpectrumListWidget
-from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, StageStatus
+from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -86,15 +86,6 @@ from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
-
-
-def _stage_status(*, done: bool, draft: bool, locked: bool) -> StageStatus:
-    """A live draft shows first, then a lock, then a published result."""
-    if draft:
-        return "draft"
-    if locked:
-        return "locked"
-    return "done" if done else "open"
 
 
 class MainWindow(QMainWindow):
@@ -581,11 +572,11 @@ class MainWindow(QMainWindow):
         pending = None if draft is None else pending_kind(draft)
         self._stage_bar.set_status(
             "align",
-            _stage_status(done=entry.aligned, draft=pending == "align", locked=False),
+            stage_status(done=entry.aligned, draft=pending == "align", locked=False),
         )
         self._stage_bar.set_status(
             "sample",
-            _stage_status(
+            stage_status(
                 done=entry.aligned and entry.points_completed,
                 draft=pending == "sample",
                 locked=not entry.aligned,

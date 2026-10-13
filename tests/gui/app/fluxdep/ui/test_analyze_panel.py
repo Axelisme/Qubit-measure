@@ -113,6 +113,7 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     from zcu_tools.gui.app.fluxdep.services import viz
 
     widget, ctrl = panel
+    _unlock_search(ctrl)  # Show also needs an unlocked Search
     ctrl.set_fit_params(
         search_database_hdf5,
         (3.0, 12.0),
@@ -292,6 +293,14 @@ def _set_joint_fit_inputs(ctrl: Controller, search_db: str) -> ParamBounds:
     return bounds
 
 
+def _publish_filter(ctrl: Controller) -> None:
+    """Publish an all-kept Filter over the cross controller's four points.
+
+    An upstream change drops the masks, which locks Search and Show with it.
+    """
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
+
+
 def _record_perfect_fit(ctrl: Controller, bounds: ParamBounds) -> None:
     """Publish a zero-residual result over the currently selected cloud."""
     fluxs, freqs = ctrl.selected_pointcloud()
@@ -390,6 +399,7 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
     widget = AnalyzePanelWidget(ctrl)
     try:
@@ -404,6 +414,7 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
         # A non-integer shift of one source; the recorded search keeps its frame.
         ctrl.set_alignment("a", 0.685, 1.185)
         assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        _publish_filter(ctrl)
         assert _click_auto_limits(widget) == captured
 
         _record_perfect_fit(ctrl, bounds)
@@ -420,6 +431,7 @@ def test_params_only_auto_limits_follow_current_sources(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     _set_joint_fit_inputs(ctrl, search_database_hdf5)
     ctrl.state.set_fit_result((5.0, 1.0, 0.5))
     widget = AnalyzePanelWidget(ctrl)
@@ -427,6 +439,7 @@ def test_params_only_auto_limits_follow_current_sources(
         widget.show_tab("show")
         before = _click_auto_limits(widget)
         ctrl.set_alignment("a", 0.685, 1.185)
+        _publish_filter(ctrl)
         moved = _click_auto_limits(widget)
         assert moved == _as_displayed(widget, ctrl.fit_auto_limits())
         assert moved[0] != before[0], "params-only display has no recorded frame"
@@ -440,6 +453,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
     widget = AnalyzePanelWidget(ctrl)
     try:
@@ -473,6 +487,9 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         assert show_form.get_transitions() == {"transitions": [(0, 2)]}
         assert x_hi.value() == pytest.approx(0.9)
 
+        # Re-publishing the dropped mask unlocks Show; edits are still pending.
+        _publish_filter(ctrl)
+        assert labels() == ["0 -> 1"]
         named(widget, QPushButton, "fluxdep.show.apply").click()
         assert labels() == ["0 -> 2"]
         assert shown.axes[0].get_xlim()[1] == pytest.approx(0.9)
@@ -909,6 +926,7 @@ def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     ctrl.set_fit_params(
         search_database_hdf5,
         (3.0, 12.0),

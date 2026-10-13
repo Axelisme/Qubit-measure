@@ -34,7 +34,13 @@ class BrushBand:
 
         x_span and y_span are the positive data spans one normalized unit
         means on each axis. zorder places the band; the line sits just above.
+        Raises ValueError, before adding any artist, when either span is not
+        positive (zero, negative or NaN).
         """
+        if not (x_span > 0 and y_span > 0):
+            raise ValueError(
+                f"brush spans must be positive, got x_span={x_span}, y_span={y_span}"
+            )
         self._x_span = x_span
         self._y_span = y_span
         self._band = PathPatch(

@@ -3,8 +3,9 @@
 The bar only draws what its host tells it and reports clicks. The host derives
 each stage's status from published State and live interactive facts, decides
 what a click does (holder gate, discard confirmation, view only), and marks
-the stage whose content it shows as current. The Spectra page uses it for
-``Align → Sample``.
+the stage whose content it shows as current. ``stage_status`` gives every
+host the same priority when facts overlap. The Spectra page uses it for
+``Align → Sample`` and the Fit page for ``Filter → Search → Show``.
 """
 
 from __future__ import annotations
@@ -36,6 +37,21 @@ _TOOLTIP: dict[StageStatus, str] = {
     "draft": "Unfinished draft",
     "locked": "Finish the previous stage first",
 }
+
+
+def stage_status(*, done: bool, draft: bool, locked: bool) -> StageStatus:
+    """Pick one status from a stage's facts: draft, then locked, then done.
+
+    done means the stage's result is published; draft means an unfinished
+    draft of it is live; locked means a previous stage is not done. A live
+    draft wins over a lock, and a lock hides a published result. Returns
+    "open" when none of them holds.
+    """
+    if draft:
+        return "draft"
+    if locked:
+        return "locked"
+    return "done" if done else "open"
 
 
 class StageBar[K: str](QWidget):
