@@ -58,13 +58,26 @@ class FormEditor[F: FormModel](QWidget):
     Fields the schema marks hidden (Display(hidden=True), or a one-value
     structural tag outside a union) have no controls. Their input is kept,
     and their errors appear at the nearest drawn ancestor row or form.error.
-    An untagged str-or-model field (a library key or an inline model) has
-    no Expression action; its form.mode.<path> is a QComboBox with data "key"
-    and "inline": Key mode shows
-    form.input.<path> as a QLineEdit, or an editable QComboBox listing the
-    captured library keys whose Spec matches; Inline mode shows the model's
-    child rows, a tagged union with its selector. Switching writes the new
-    mode's default ("" or {}); the other mode's value is never converted.
+    A field the schema marks x-form-key-or-inline holds a library key or an
+    inline model: a str-or-model field (str | Model) or a ModuleInput. It has
+    no form.mode.<path>; its form.input.<path> is one non-editable QComboBox.
+    The first item is "Inline" with item data None; then come the schema's
+    x-form-library-keys, each with the key as data (for a str-or-model
+    field the library keys whose Spec matches the model; for a ModuleInput
+    every library module key, or only those among declared choices for its
+    name). While the input holds a key not in that list, a last item shows
+    it as "<key> (missing)" with data "<key>" (an empty or non-string key,
+    such as an expression a wire write left in a ModuleInput name, as its
+    JSON text) and is selected; the state is not changed and the field's
+    errors still show. Without offered keys the list is Inline only, plus
+    that missing item. An unfilled field selects no item. The GUI cannot
+    type a key; wire writes can still hold any key. Choosing a key writes it
+    (a ModuleInput writes {"kind": "ref", "name": <key>} as its kind and
+    name leaves in one batch). Choosing Inline writes {} for a str-or-model
+    field and kind "inline" for a ModuleInput, whose inline defaults copy
+    the referenced library module; it then shows the inline model's child
+    rows below (a tagged union with its selector; a ModuleInput shows its
+    module, without a kind row). Neither choice converts the other's value.
     form.enabled.<path> is a nullable-model activation QCheckBox.
     form.group.<path>.<group> (form.group.<group> at the root level) is the
     block of one Display group of the model level at <path>. It holds the
@@ -77,7 +90,7 @@ class FormEditor[F: FormModel](QWidget):
     group stays folded.
     Groups start folded; model rows start as Display(collapsed=...) says.
     Folds the user sets on groups and model rows survive rebuilds of this
-    editor (branch, Key/Inline or activation changes), remembered by path.
+    editor (branch, key-or-inline or activation changes), remembered by path.
     form.value.<path> is a QLabel with the resolved value of an Expression-mode
     input; Direct input is not echoed, and the label is hidden while empty.
     form.error.<path> is a QLabel under its field with current field errors;
@@ -115,16 +128,17 @@ class FormEditor[F: FormModel](QWidget):
         write decides where parsed input goes. When it is None (the default),
         each parsed batch is installed with state.write(batch, env) using the
         current env. When it is a callable, it receives every parsed batch, a
-        one-entry mapping from the edited field's write path to its JSON
-        input, and the editor never writes state itself. The callable installs
+        mapping from write paths to JSON input: one entry, the edited field's
+        path, except that choosing a ModuleInput key writes its kind and name
+        leaves together. The editor never writes state itself. The callable installs
         accepted input into this same state (for example after its own checks
         or substitutions); the editor still reads and subscribes to state, so
         input the callable does not install is not shown.
         To refuse a batch, the callable raises WriteRejected(message) before
         writing state. That field then keeps the user's input as local view
-        input with message as its error: text and key inputs keep the typed
-        text and mode; a checkbox, dropdown, Enabled box or Key/Inline switch
-        shows the state's value again. Like unparseable text, it appears in
+        input with message as its error: text inputs keep the typed text and
+        mode; a checkbox, dropdown (including a key-or-inline dropdown) or
+        Enabled box shows the state's value again. Like unparseable text, it appears in
         local_parse_errors and errors, blocks validity, survives refresh and
         publications, and clears on that field's next accepted write, on
         discard_local_text, or when the field leaves the form. Any other
@@ -389,10 +403,12 @@ class FormEditor[F: FormModel](QWidget):
                 self._add_level(field.path, field.children, row.group, child_layout)
         return row.label
 
-    def _write(self, path: FormWritePath, value: JsonValue) -> None:
+    def _write(
+        self, path: FormWritePath, batch: Mapping[FormWritePath, JsonValue]
+    ) -> None:
+        """Install batch from the row at path, or keep it local if rejected."""
         state = self._require_state()
         self._local.pop(path, None)
-        batch = {path: value}
         if self._host_write is None:
             state.write(batch, self._require_env())
         else:

@@ -2,7 +2,7 @@
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from pydantic import ConfigDict, JsonValue, TypeAdapter
@@ -33,7 +33,7 @@ from zcu_tools.gui.widgets.cfg.fields.common import (
 )
 from zcu_tools.gui.widgets.spinbox import trimmed_decimals
 
-from ._schema_view import FieldView
+from ._schema_view import FieldView, KeyOrInline
 
 _JSON = TypeAdapter(JsonValue, config=ConfigDict(allow_inf_nan=False))
 # Vertical density: pixels between sibling rows, between a row's header and
@@ -50,6 +50,10 @@ _EXPRESSION_TINT = 0.18
 # Shown in a group block's header while any of its rows shows an error, so a
 # folded group still tells the user where Start is blocked.
 GROUP_ERRORS_NOTE = "Contains errors"
+# Key-or-inline dropdown: the first item's text, and the suffix of an item
+# showing the input's key when the offered library keys do not include it.
+INLINE_ITEM = "Inline"
+MISSING_SUFFIX = " (missing)"
 _ERRORS_NOTE_STYLE = "QLabel { color: #b3261e; }"
 
 
@@ -60,8 +64,9 @@ class LocalText:
     text is the unparsed or host-rejected typed text ("" for a control that
     has no text). error is its parse error or the host's rejection message.
     expression is whether Expr mode was selected. section is True when it was
-    recorded on a model section's row (a rejected Enabled box or Key/Inline
-    switch), which carries only the error.
+    recorded on a model section's row (a rejected Enabled box, or a rejected
+    key-or-inline dropdown while the input is inline), which carries only
+    the error.
     """
 
     text: str
@@ -202,13 +207,17 @@ class FieldRow:
     the left-aligned name label at the start of the header; its parent sets
     one width for a model level's labels so their controls share a left edge.
     input is its optional scalar control (read-only text for a fixed one-value
-    Literal, which has no mode). mode is the checkable Expression action of a
+    Literal, which has no mode), or on a key-or-inline field its one
+    non-editable dropdown: INLINE_ITEM (item data None), then the offered
+    library keys (data is the key), then, while the input holds a key they
+    lack, that key's text plus MISSING_SUFFIX (data is the text). mode is
+    the checkable Expression action of a
     row that offers Expression input, checked in Expression mode; input lists
     it in actions() and its right-click menu, after a text field's standard
     items. A choice row's input is a dropdown of only the choices in Direct
-    mode and a text field in Expression mode. switch selects Key or Inline
-    on a str-or-model field; enabled toggles nullable models; group hosts
-    model children. value/error are public-named presentation labels, hidden
+    mode and a text field in Expression mode. enabled toggles nullable
+    models; group hosts model children, including a key-or-inline field's
+    inline rows. value/error are public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
     shows below the header. These controls never own or evaluate form state.
     """
@@ -217,12 +226,15 @@ class FieldRow:
         self,
         field: FieldView,
         parent: QWidget,
-        changed: Callable[[FormWritePath, JsonValue], None],
+        changed: Callable[[FormWritePath, Mapping[FormWritePath, JsonValue]], None],
         unparsed: Callable[[FormWritePath, LocalText], None],
         folds: dict[FormWritePath, bool],
     ) -> None:
-        """Build under parent; call changed(path, JSON) or unparsed(path, text).
+        """Build under parent; call changed(path, batch) or unparsed(path, text).
 
+        path is this row's field path. batch maps write paths to JSON input:
+        one entry at path, except a tagged key-or-inline field's choices,
+        which write its tag and key (see KeyOrInline).
         Callbacks run synchronously for user input, never during display.
         Child-model rows are built by the editor inside group.layout().
         folds is the editor's record of user folds by model path (True is
@@ -242,19 +254,18 @@ class FieldRow:
         self.layout.setSpacing(_HEADER_SPACING)
         self.input: QWidget | None = None
         self.mode: QAction | None = None
-        self.switch: QComboBox | None = None
         self.enabled: QCheckBox | None = None
         self.group: QGroupBox | None = None
         header = QHBoxLayout()
         self.layout.addLayout(header)
         self.label = _tight_label(field.label, self.widget)
         header.addWidget(self.label)
-        if field.key_or_inline:
-            self._build_switch(header)
-        if field.kind == "model":
+        if field.key_or_inline is not None:
+            self._build_key_choice(header)
+            if field.kind == "model":
+                self._build_group(header)
+        elif field.kind == "model":
             self._build_group(header)
-        elif field.kind == "key":
-            self._build_key(header)
         elif field.fixed:
             self._build_fixed(header)
         else:
@@ -265,7 +276,7 @@ class FieldRow:
         self.value.setObjectName(self._name("value"))
         self.value.hide()
         header.addWidget(self.value)
-        if field.kind == "model":
+        if field.kind == "model" and field.key_or_inline is None:
             # Keep the fold button beside its label instead of stretching it.
             header.addStretch()
         self.error = QLabel(self.widget)
@@ -309,31 +320,14 @@ class FieldRow:
         header.addWidget(fold)
         self.layout.addWidget(self.group)
 
-    def _build_switch(self, header: QHBoxLayout) -> None:
-        # Named form.mode.<path> like the Expression action of value rows,
-        # but a QComboBox with data key/inline; such a row has no Expression.
-        self.switch = QComboBox(self.widget)
-        self.switch.setObjectName(self._name("mode"))
-        self.switch.addItem("Key", "key")
-        self.switch.addItem("Inline", "inline")
-        self.switch.setCurrentIndex(1 if self.field.kind == "model" else 0)
-        self.switch.currentIndexChanged.connect(self._switch_changed)
-        header.addWidget(self.switch)
-
-    def _build_key(self, header: QHBoxLayout) -> None:
-        # A library key is free text; captured keys are suggestions in an
-        # editable combo, so a key outside them stays typeable.
-        widget = make_value_widget(str, "", self.field.options)
-        widget.setParent(self.widget)
+    def _build_key_choice(self, header: QHBoxLayout) -> None:
+        # Not editable: the GUI picks Inline or an offered key, while wire
+        # writes may still hold any key, shown as a missing item.
+        widget = QComboBox(self.widget)
         widget.setObjectName(self._name("input"))
-        if isinstance(widget, QComboBox):
-            widget.setEditable(True)
-            # Take the spare width like a line edit, leaving the switch compact.
-            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            widget.editTextChanged.connect(self._key_changed)
-        elif isinstance(widget, QLineEdit):
-            widget.setPlaceholderText(self.field.placeholder)
-            widget.textChanged.connect(self._key_changed)
+        # Take the spare width like a line edit.
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        widget.currentIndexChanged.connect(self._key_choice_changed)
         self.input = widget
         header.addWidget(widget)
 
@@ -350,17 +344,28 @@ class FieldRow:
         self.input = widget
         header.addWidget(widget)
 
-    def _switch_changed(self, _index: int) -> None:
-        if self._displaying or self.switch is None:
+    def _key_choice_changed(self, index: int) -> None:
+        rule = self.field.key_or_inline
+        widget = self.input
+        if (
+            self._displaying
+            or index < 0
+            or rule is None
+            or not isinstance(widget, QComboBox)
+        ):
             return
-        # Each mode starts from its own default; the other mode's value is
-        # never converted: "" is an empty key, {} the inline model defaults.
-        inline = self.switch.currentData() == "inline"
-        self._changed(self.field.path, {} if inline else "")
+        key = widget.itemData(index)
+        path = self.field.path
+        # Inline starts from the core's inline defaults; a key is never
+        # converted into the inline model or back.
+        if key is None:
+            self._changed(path, rule.inline_write(path))
+        elif isinstance(key, str):
+            self._changed(path, rule.key_write(path, key))
 
-    def _key_changed(self, text: str) -> None:
-        if not self._displaying:
-            self._changed(self.field.path, text)
+    def _write(self, value: JsonValue) -> None:
+        """Send value as this row's one-entry batch."""
+        self._changed(self.field.path, {self.field.path: value})
 
     def _build_input(self, header: QHBoxLayout) -> None:
         # Numeric inputs use raw text, not spinbox ranges/validators: partial
@@ -404,7 +409,7 @@ class FieldRow:
 
     def _activate(self) -> None:
         if not self._displaying and self.enabled is not None:
-            self._changed(self.field.path, {} if self.enabled.isChecked() else None)
+            self._write({} if self.enabled.isChecked() else None)
 
     def _mode_changed(self) -> None:
         if self._displaying:
@@ -505,12 +510,12 @@ class FieldRow:
             return
         widget = self.input
         if isinstance(widget, QCheckBox):
-            self._changed(self.field.path, widget.isChecked())
+            self._write(widget.isChecked())
         elif isinstance(widget, QComboBox):
             index = widget.currentIndex()
             options = self.field.options or ()
             if 0 <= index < len(options):
-                self._changed(self.field.path, options[index])
+                self._write(options[index])
         elif isinstance(widget, QLineEdit):
             expression = self._expression_selected()
             text = widget.text()
@@ -520,22 +525,17 @@ class FieldRow:
                 local = LocalText(text, str(exc), expression, section=False)
                 self._unparsed(self.field.path, local)
                 return
-            self._changed(self.field.path, parsed)
+            self._write(parsed)
 
     def rejected_input(self, message: str) -> LocalText:
         """Return the row's current input as local input the host rejected.
 
-        message is the host's reason. Text and key inputs keep their typed
-        text and Expr mode; other controls keep no text, so display shows
-        state's value again. Reads widgets only; writes nothing.
+        message is the host's reason. Text inputs keep their typed text and
+        Expr mode; other controls, including dropdowns, keep no text, so
+        display shows state's value again. Reads widgets only; writes nothing.
         """
         widget = self.input
-        if isinstance(widget, QLineEdit):
-            text = widget.text()
-        elif isinstance(widget, QComboBox) and widget.isEditable():
-            text = widget.currentText()
-        else:
-            text = ""
+        text = widget.text() if isinstance(widget, QLineEdit) else ""
         expression = self._expression_selected()
         section = self.field.kind == "model"
         return LocalText(text, message, expression, section=section)
@@ -546,8 +546,8 @@ class FieldRow:
         """Show a same-shape publication, keeping local text and blocking writes.
 
         editable controls input enablement, not model validity. local overrides
-        the text and mode of a text or key input and hides its evaluated label;
-        checkboxes, dropdowns and switches still show state. The value label shows
+        the text and mode of a text input and hides its evaluated label;
+        checkboxes and dropdowns still show state. The value label shows
         only a resolved Expression-mode value; Direct input is not echoed.
         Shape changes require a new row; metadata stays as built, and the
         fold stays as built or as the user last set it.
@@ -567,40 +567,52 @@ class FieldRow:
         finally:
             self._displaying = False
 
-    def _display_key(self, local: LocalText | None, *, editable: bool) -> None:
+    def _display_key_choice(self, rule: KeyOrInline, *, editable: bool) -> None:
+        """Show Inline, the offered keys and a missing key; select the input's.
+
+        Inline is selected for an inline input and nothing for an unfilled
+        one. A held key the offered keys lack gets a missing item: its text
+        is the key, or the JSON text of an empty or non-string key.
+        """
         widget = self.input
-        if local is not None:
-            text = local.text
+        if not isinstance(widget, QComboBox):
+            return
+        items: list[tuple[str, str | None]] = [
+            (INLINE_ITEM, None),
+            *((offered, offered) for offered in rule.keys),
+        ]
+        key = rule.key(self.field.raw)
+        if self.field.kind == "model":
+            selected = 0
+        elif key is None:
+            selected = -1
+        elif isinstance(key, str) and key in rule.keys:
+            selected = 1 + rule.keys.index(key)
         else:
-            text = "" if self.field.raw is None else str(self.field.raw)
-        if isinstance(widget, QComboBox):
-            widget.setEnabled(editable)
-            keys = [str(key) for key in self.field.options or ()]
-            if [widget.itemText(index) for index in range(widget.count())] != keys:
-                widget.clear()
-                widget.addItems(keys)
-            # Avoid resetting cursor/selection on unchanged publications.
-            if widget.currentText() != text:
-                widget.setEditText(text)
-        elif isinstance(widget, QLineEdit):
-            widget.setEnabled(editable)
-            if widget.text() != text:
-                widget.setText(text)
+            text = key if isinstance(key, str) and key else json.dumps(key)
+            items.append((text + MISSING_SUFFIX, text))
+            selected = len(items) - 1
+        shown = [
+            (widget.itemText(i), widget.itemData(i)) for i in range(widget.count())
+        ]
+        if shown != items:
+            widget.clear()
+            for item_text, item_data in items:
+                widget.addItem(item_text, item_data)
+        widget.setCurrentIndex(selected)
+        widget.setEnabled(editable)
 
     def _display_input(self, local: LocalText | None, *, editable: bool) -> None:
         field = self.field
-        if self.switch is not None:
-            self.switch.setCurrentIndex(1 if field.kind == "model" else 0)
-            self.switch.setEnabled(editable)
-        if field.kind == "key":
-            self._display_key(local, editable=editable)
+        if self.enabled is not None:
+            self.enabled.setChecked(field.active)
+            self.enabled.setEnabled(editable)
+        if field.key_or_inline is not None:
+            self._display_key_choice(field.key_or_inline, editable=editable)
             return
         expression = local.expression if local else _expression(field)
         if field.options is not None and not expression:
             self._direct_raw = field.raw
-        if self.enabled is not None:
-            self.enabled.setChecked(field.active)
-            self.enabled.setEnabled(editable)
         if self.mode is not None:
             self.mode.setEnabled(editable)
         self._select_input(expression=expression)

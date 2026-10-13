@@ -269,7 +269,16 @@ class FormModel(BaseModel):
         is a plain library key without Expr, and its object branch is the
         inline model. With a captured library, that string branch's
         x-form-library-keys lists the library keys whose Spec is one of the
-        field's models; they are suggestions, not choices. This
+        field's models; they are suggestions, not choices. Its field node
+        is marked x-form-key-or-inline: true. A ModuleInput field (not
+        nullable) has the same marker on its tagged node: its ref branch
+        holds the key in name and its inline branch the module. With a
+        captured library, the ref branch's name property lists in
+        x-form-library-keys every library module key, since the inline
+        ModuleSpec accepts every module type; when choices declare options
+        for that name, only the module keys among them. Without a captured
+        library the list is absent. Any string key remains acceptable
+        input; a missing key fails the source check at the name. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
         """

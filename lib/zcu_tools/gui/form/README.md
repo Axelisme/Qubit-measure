@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-13，defaults 的 expression 在 default_input 與分支 defaults 中算成值；Display group 與 `x-form-group` schema 標記；str-or-model 欄位的 `x-form-key-or-inline` schema 標記；host 拒絕寫入的 WriteRejected；Display decimals／hidden、段落標題與固定的結構 tag；FormEnv 的 devices 接受 custom driver info
+**Last updated:** 2026-10-13，ModuleInput 也帶 `x-form-key-or-inline`，ref name 列出 library module keys；defaults 的 expression 在 default_input 與分支 defaults 中算成值；Display group 與 `x-form-group` schema 標記；str-or-model 欄位的 `x-form-key-or-inline` schema 標記；host 拒絕寫入的 WriteRejected；Display decimals／hidden、段落標題與固定的結構 tag；FormEnv 的 devices 接受 custom driver info
 
 FormModel 的實例只承載普通值。類別上的 defaults、choices 與 input_schema 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags；FormState 擁有 draft/base、batch write、branch switch、結果、差異與 compatible restore，不擁有 Engine revision 或提交 policy。
 
@@ -11,6 +11,8 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 Input schema 的 tagged oneOf branch 以 x-form-discriminator-values 提供保留 JSON 型別的 intrinsic tags。這份 identity 不隨 dynamic choices 改變。Model 欄位可達的每個 branch 都是一個具體 model：union member 若是同一 tag key 的具名 union（例如 `ModuleSpec` 內的 `ReadoutSpec`），schema 把它展開成各 member 的 branch，與 core 對 annotation 的 union 展開一致。Choices 仍限制當次可接受的 leaf 值，不切換目前的 input branch。Discriminator 是決定子 model 形狀與 branch defaults 的結構 selector，schema 只提供普通 typed tag，不提供 expression envelope。
 
 未標 tag 的 `str | Model` 欄位（例如 pulse 的 `waveform`、readout 的 `pulse_cfg`）以 JSON 型別當結構 selector：字串是 library key，物件是 inline model。Input schema 在這類欄位節點標 `x-form-key-or-inline: true`；editor 只讀這個標記，判斷規則只在 core。Model 可以是 tagged union；inline 物件照 tagged 規則選 branch、寫 child leaf、切換 tag、求值 nested expression，錯誤路徑落在 branch 欄位，不帶 union member 標籤，也不報字串那一支的錯。Key 是普通字串，schema 的字串 branch 沒有 Expr envelope。寫 `{}` 從 key 或未填切到 inline model 的 defaults（tagged union 從第一個 branch 開始），已是 inline 時不變；寫字串回到 key。兩邊都不轉換舊值。有 captured library 時，字串 branch 的 `x-form-library-keys` 列出 Spec 型別屬於該欄位 model 的 library keys，只是建議，不限制輸入。
+
+`ModuleInput`（`ModuleRef | ModuleInline`，不含 nullable）也是 library key 或 inline model，只是由 `kind` tag 選：ref 的 `name` 是 key，inline 的 `module` 是 model。Schema 在它的欄位節點同樣標 `x-form-key-or-inline: true`，是加法，tagged 形狀不變。有 captured library 時，ref branch 的 `name` property 帶 `x-form-library-keys`：inline 的 `ModuleSpec` 接受所有 module 型別，所以清單是全部 library module keys；Form 用 `choices()` 為 `<field>.name` 宣告選項時，只留兩者的交集，清單裡每個 key 都能通過 choices 與 library 檢查。沒有 captured library 時沒有清單。Wire 仍可寫任意 name，library 沒有的 name 在 source 檢查時報在 `name`。
 
 Scalar、整個 sequence 與整個 typed mapping 都是 leaf。普通 nested model 只編輯子欄位，nullable 區段支援 object／null 啟停。Choices 使用 model-field leaf paths，驗證與 schema 共用同一份當次選項。Parent 與 child 宣告同一 leaf 時，最深 nested FormModel 的 local choices 優先，包含空選項。非重疊的 parent 選項保持有效，重用同型 nested model 的欄位各自隔離。
 
