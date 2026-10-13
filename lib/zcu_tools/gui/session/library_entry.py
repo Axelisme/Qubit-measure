@@ -17,6 +17,7 @@ from typing import (
     Annotated,
     ClassVar,
     Literal,
+    Self,
     TypeAliasType,
     Union,
     get_args,
@@ -25,7 +26,26 @@ from typing import (
 
 from pydantic import BaseModel, JsonValue
 
-from zcu_tools.cfg_model import ArbWaveformCfg, ConfigBase, ModuleSpec, WaveformSpec
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    BathResetSpec,
+    ConfigBase,
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    DirectReadoutCfg,
+    DragWaveformCfg,
+    FlatTopWaveformSpec,
+    GaussWaveformCfg,
+    ModuleSpec,
+    NoneResetCfg,
+    PulseReadoutSpec,
+    PulseResetSpec,
+    PulseSpec,
+    Template,
+    TemplateDef,
+    TwoPulseResetSpec,
+    WaveformSpec,
+)
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.form import (
     FormEnv,
@@ -95,6 +115,35 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         model = _with_arb_choices(self._form.model, type(spec), tuple(arb_names))
         projected = self._form.input_from_spec(spec, self._env)
         self._state: FormState[FormModel] = FormState(FormInput(model, projected.data))
+
+    @classmethod
+    def from_template(
+        cls,
+        spec_type: type[S],
+        template: Template,
+        catalog: Mapping[str, TemplateDef],
+        parameters: ParameterContext,
+        *,
+        arb_names: Sequence[str],
+    ) -> Self:
+        """Build a fresh entry state from a template for this family's spec_type.
+
+        template names a catalog definition matching spec_type. The public
+        generator resolves Expr and Slot seeds against parameters. Its returned
+        specialized input model owns the new state; no existing state is reset.
+        arb_names supplies the same captured choices as the Spec constructor.
+        Bad templates raise the generator's errors; incomplete inputs remain
+        editable and spec()/put() reject them with LibraryEntryInvalid.
+        """
+        # Template input may be incomplete, so there is no Spec for __init__ yet.
+        entry = cls.__new__(cls)
+        entry._form = module_form(spec_type)
+        entry._parameters = parameters
+        entry._env = FormEnv(parameters=parameters, library=parameters.library)
+        projected = entry._form.template_input(template, catalog, entry._env)
+        model = _with_arb_choices(projected.model, spec_type, tuple(arb_names))
+        entry._state = FormState(FormInput(model, projected.data))
+        return entry
 
     @property
     def parameters(self) -> ParameterContext:
@@ -175,6 +224,55 @@ class WaveformEntryForm(LibraryEntryForm[WaveformSpec]):
         self, action: Literal["put", "replace"], path: str, new_path: str | None
     ) -> LibraryChange:
         return LibraryChange("waveform", action, path, new_path, waveform=self.spec())
+
+
+def new_library_entry(
+    parameters: ParameterContext,
+    template: Template,
+    catalog: Mapping[str, TemplateDef],
+    *,
+    arb_names: Sequence[str],
+) -> ModuleEntryForm | WaveformEntryForm:
+    """Build an editable library entry from the injected persistent template.
+
+    Capture, input lifecycle and arb choices follow from_template. Unknown IDs
+    raise KeyError; invalid definitions propagate without writing any library.
+    The returned entry produces the same Spec put/replace contract as an opened
+    entry. The caller owns its state and commits explicitly.
+    """
+    spec_type = catalog[template.id].module
+    if issubclass(
+        spec_type,
+        (
+            PulseSpec,
+            DirectReadoutCfg,
+            PulseReadoutSpec,
+            NoneResetCfg,
+            PulseResetSpec,
+            TwoPulseResetSpec,
+            BathResetSpec,
+        ),
+    ):
+        return ModuleEntryForm.from_template(
+            spec_type, template, catalog, parameters, arb_names=arb_names
+        )
+    if issubclass(
+        spec_type,
+        (
+            ConstWaveformCfg,
+            CosineWaveformCfg,
+            GaussWaveformCfg,
+            DragWaveformCfg,
+            ArbWaveformCfg,
+            FlatTopWaveformSpec,
+        ),
+    ):
+        return WaveformEntryForm.from_template(
+            spec_type, template, catalog, parameters, arb_names=arb_names
+        )
+    raise TypeError(
+        "Template must define a concrete persistent module or waveform Spec"
+    )
 
 
 def open_library_entry(

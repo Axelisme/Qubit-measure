@@ -9,11 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.cfg_assembler import (
-    ExperimentCfgInput,
-    ExperimentCfgValue,
-    assemble_experiment_cfg,
-)
+from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
@@ -146,11 +142,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
     guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
 
-    # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
-    # raw → cfg mapping is the common "flat dict through make_cfg" shape just
-    # set this and inherit build_exp_cfg. Adapters with a bespoke mapping (e.g.
-    # extra kwargs, hand-built cfg) override build_exp_cfg and leave this None.
-    ExpCfg_cls: ClassVar[Any] = None
     # Concrete adapters publish one core-derived definition; the host owns state.
     form: Form[T_Cfg]
 
@@ -329,22 +320,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def build_exp_cfg(
         self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
     ) -> T_Cfg:
-        """Build experiment config from the flat GUI raw dict.
+        """Validate an accepted Form dump as this adapter's concrete core cfg.
 
-        Materialize resolved fields with the request's fixed library/assets
-        capability. Device selections remain role-to-name strings; this method
-        neither reads nor configures hardware. An adapter must set ExpCfg_cls
-        or override this method.
+        raw_cfg contains the already lowered values from TabFormResource.accept,
+        not authored input or library references. req remains the Run request;
+        this conversion needs no sources, assets or hardware. Return the type
+        published by form.core_cfg. Core ValidationError propagates for invalid
+        mappings. The mapping and request are not modified or reassembled.
         """
-        if self.ExpCfg_cls is None:
-            raise NotImplementedError(
-                f"{type(self).__name__} must set ExpCfg_cls or override build_exp_cfg"
-            )
-        return assemble_experiment_cfg(
-            ExperimentCfgInput(raw_cfg),
-            self.ExpCfg_cls,
-            context=req.cfg_context,
-        )
+        del req
+        return self.form.core_cfg.model_validate(raw_cfg)
 
     def validate_run_request(
         self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]

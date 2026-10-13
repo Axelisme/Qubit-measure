@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from types import MappingProxyType, new_class
 from typing import Annotated
 
@@ -23,6 +24,7 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
     WaveformSpec,
+    get_field_meta,
 )
 from zcu_tools.gui.form import (
     Display,
@@ -41,7 +43,8 @@ from zcu_tools.resources.entry.roles import RoleResolutionError
 
 from ._display import field_display
 from ._modules import ModuleField, ModuleValues, editable_spec, module_specs
-from ._seeds import supported_input
+from ._seeds import supported_input, template_seed_tree
+from ._seeds import template_input as _template_input
 from ._types import literal_type, union_type
 from ._types import members as _members
 
@@ -50,6 +53,44 @@ class SweepRange(LinRange):
     """Core sweep input uses n internally, with the user-facing label Expts."""
 
     n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
+
+
+def _sweep_model(node: FormNode, info: FieldInfo) -> type[SweepRange]:
+    """Generate endpoint requirements and float precision for one core sweep.
+
+    node is the authored sweep value; info is its core field declaration.
+    Only Expr endpoints lose the inherited LinRange default. FieldMeta decimals
+    decorates start/stop, never n or the outer model. Literal or unauthored
+    endpoints keep ordinary defaults. No expression is evaluated, and neither
+    the core declaration nor the shared SweepRange class is modified.
+    """
+    meta = get_field_meta(info)
+    decimals = meta.decimals if meta is not None else None
+    fields: dict[str, FieldInfo] = {}
+    for name in ("start", "stop"):
+        required = isinstance(node, Range) and isinstance(getattr(node, name), Expr)
+        if not required and decimals is None:
+            continue
+        endpoint = deepcopy(SweepRange.model_fields[name])
+        if required:
+            endpoint.default = PydanticUndefined
+            endpoint.default_factory = None
+        if decimals is not None:
+            endpoint.metadata.append(Display(decimals=decimals))
+        fields[name] = endpoint
+    if not fields:
+        return SweepRange
+    namespace: dict[str, object] = {
+        "__module__": __name__,
+        "__annotations__": {name: float for name in fields},
+        **fields,
+    }
+    model = new_class(
+        "AuthoredSweepRange", (SweepRange,), exec_body=lambda ns: ns.update(namespace)
+    )
+    if not issubclass(model, SweepRange):
+        raise TypeError("Generated sweep model must implement SweepRange")
+    return model
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:
@@ -89,6 +130,8 @@ def _alias_name(node: AliasName, env: FormEnv) -> str | None:
 def _field_info(info: FieldInfo, *, locked: bool) -> FieldInfo:
     result = deepcopy(info)
     if (display := field_display(info, locked=locked)) is not None:
+        if SweepCfg in _members(info.annotation):
+            display = replace(display, decimals=None)
         result.metadata.append(display)
     return result
 
@@ -232,7 +275,7 @@ class _Section:
                 else field.annotation
             )
         if SweepCfg in _members(info.annotation):
-            return SweepRange
+            return _sweep_model(node, info)
         child_core = _section_type(info.annotation)
         if child_core is None:
             return info.annotation
@@ -511,11 +554,66 @@ class Form[C: ConfigBase]:
             raw = raw.get(part) if isinstance(raw, dict) else None
         return field.read(raw, env)
 
-    def input_from_spec(self, spec: C, env: FormEnv) -> FormInput[FormModel]:
+    def template_input(
+        self,
+        template: Template,
+        catalog: Mapping[str, TemplateDef],
+        env: FormEnv,
+    ) -> FormInput[FormModel]:
+        """Build fresh creation input for this persistent module or waveform Spec.
+
+        template names a catalog ID, with optional qubit/resonator bindings,
+        relative-path seed overrides and literal locks. catalog maps IDs to
+        TemplateDef values. env supplies captured parameters and library for
+        Expr initial values and Slot resolution. Partial seeds overlay Spec
+        defaults; failed Expr initial values leave required fields unfilled.
+        Bound Slots keep child library keys; unbound Slots use their fallback.
+        No native cfg or asset is materialized. to_cfg returns the original Spec.
+
+        input.model may be a subclass of this Form's model, specialized for
+        this template's Expr requirements and locks. Build a new FormState from
+        the returned input. Recompute the same template's initial values with
+        input.model.default_input(env); changing templates requires a new state.
+        The original Form.model, template, catalog and sources are not modified.
+        The input model retains a detached catalog mapping, not the caller's map.
+
+        Core cfg Forms raise TypeError. Unknown IDs, incompatible Spec families,
+        unsupported or malformed seed/lock paths and recursive fallbacks raise
+        ValueError naming the template or path. Captured-source and default
+        factory failures propagate; they never silently use a fallback.
+        """
+        if not isinstance(self._section, _SpecSection):
+            raise TypeError("template_input requires a persistent Spec form")
+        bound = MappingProxyType(dict(catalog))
+        _template_input(template, bound, (self.model,), None)
+        editable = editable_spec(
+            self.model, template.lock, template_seed_tree(template, bound)
+        )
+
+        def defaults(
+            cls: type[FormModel], env: FormEnv, previous: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            del previous
+            return _template_input(template, bound, (cls,), env)
+
+        model = new_class(
+            f"{self.model.__name__}Template",
+            (editable,),
+            exec_body=lambda ns: ns.update(
+                {"__module__": __name__, "defaults": classmethod(defaults)}
+            ),
+        )
+        if not issubclass(model, FormModel):
+            raise TypeError("Template input model must implement FormModel")
+        return model.default_input(env)
+
+    def input_from_spec(self, spec: ConfigBase, env: FormEnv) -> FormInput[FormModel]:
         """Project an existing persistent Spec into fresh input for this Spec form.
 
         Only Forms built for a persistent Spec accept this; a core cfg Form raises
-        TypeError. spec must be exactly core_cfg, not a subclass; otherwise raise
+        TypeError. spec accepts the shared ConfigBase boundary so Form remains
+        covariant in its concrete result type. At runtime spec must be exactly
+        core_cfg, not a subclass; otherwise raise
         TypeError. Ordinary values and child library keys are copied, and None
         values stay absent like static defaults. Values of unsupported module
         fields are discarded, so to_cfg restores Spec defaults instead of the
@@ -543,8 +641,9 @@ class Form[C: ConfigBase]:
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
         """Convert this form's ordinary result into a validated concrete core cfg.
 
-        value must be a result of this generated model; another model raises
-        TypeError. env is the same captured source used by result. Core validation
+        value must be a result of this generated model or its template_input
+        subclass; another model raises TypeError. env is the same captured
+        source used by result. Core validation
         failures return FormErrors at their cfg field paths. Conversion does not
         mutate input or sources. Exceptions from the author-provided lower hook
         propagate; its result is validated again against core_cfg.

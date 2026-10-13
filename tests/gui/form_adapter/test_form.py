@@ -80,6 +80,63 @@ def test_successful_expression_defaults_are_direct_native_values() -> None:
     assert form.to_cfg(require_result(state, env), env) == DefaultedCfg(amount=12)
 
 
+@pytest.mark.parametrize("endpoint", ["start", "stop"])
+@pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'"])
+def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) -> None:
+    env = FormEnv()
+    node = nodes.Range(
+        Expr(expression) if endpoint == "start" else 2.0,
+        Expr(expression) if endpoint == "stop" else 8.0,
+        4,
+    )
+    form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": node}})
+    state = FormState(form.default_input(env))
+    result = state.result(env)
+    assert isinstance(result, FormErrors), "Failed Range Expr must not use 0/1"
+    assert result.messages == {("sweep", "freq", endpoint): "Field required"}
+    state.write({("sweep", "freq", endpoint): 3.0 if endpoint == "start" else 9.0}, env)
+    cfg = form.to_cfg(require_result(state, env), env)
+    assert isinstance(cfg, ScalarCfg), cfg
+    assert cfg.sweep.freq.start == (3.0 if endpoint == "start" else 2.0)
+    assert cfg.sweep.freq.stop == (8.0 if endpoint == "start" else 9.0)
+    assert cfg.sweep.freq.expts == 4
+
+
+class PreciseSweepCfg(ConfigBase):
+    """Sweep precision describes endpoint float controls, not the range object."""
+
+    sweep: Annotated[SweepCfg, FieldMeta(label="Flux", unit="A", decimals=4)]
+
+
+@pytest.mark.parametrize("authored", [False, True])
+def test_sweep_decimals_decorate_only_float_endpoints(authored: bool) -> None:
+    form = form_adapter.Form(
+        PreciseSweepCfg,
+        {"sweep": nodes.Range.between("2 + 1", 9.0, 4)} if authored else {},
+    )
+    try:
+        schema = form.model.input_schema(FormEnv())
+    except ValueError as exc:
+        raise AssertionError("Sweep precision must reach its float endpoints") from exc
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    sweep = properties["sweep"]
+    assert isinstance(sweep, dict)
+    assert sweep.get("decimals") is None
+    assert sweep["title"] == "Flux"
+    assert sweep["unit"] == "A"
+    endpoints = sweep["properties"]
+    assert isinstance(endpoints, dict)
+    for name in ("start", "stop"):
+        endpoint = endpoints[name]
+        assert isinstance(endpoint, dict)
+        assert endpoint["decimals"] == 4
+    count = endpoints["n"]
+    assert isinstance(count, dict)
+    assert count.get("decimals") is None
+    assert count["title"] == "Expts"
+
+
 class DeviceCfg(ConfigBase):
     """Core device names remain independent of aliases and sessions."""
 

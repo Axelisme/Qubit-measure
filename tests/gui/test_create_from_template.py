@@ -1,412 +1,213 @@
-"""Create templates through the real entry, parameter and library owners."""
+"""Create persistent templates through the controller and real library owners."""
 
-from __future__ import annotations
-
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from zcu_tools.cfg_model import module_spec_from_raw
-from zcu_tools.format_version import YamlMap
+from zcu_tools.cfg_model import (
+    ConstWaveformCfg,
+    Expr,
+    PulseReadoutSpec,
+    PulseSpec,
+    Slot,
+    TemplateDef,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.specs import make_pulse_spec
 from zcu_tools.gui.app.measure.state import State
-from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog, TemplateEntry
-from zcu_tools.gui.cfg import (
-    CfgSectionSpec,
-    CfgSectionValue,
-    DirectValue,
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
-)
-from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.events import MlChangedPayload
+from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
-from tests.gui._component_fakes import Qubit as QubitSchema
-from tests.gui._component_fakes import Resonator as ResonatorSchema
+from tests.gui._component_fakes import Qubit
 
 
-def _register_templates(catalog: TemplateCatalog) -> None:
-    from zcu_tools.gui.app.measure.specs import make_const_waveform_spec
-    from zcu_tools.gui.cfg import EvalValue
+class TemplateController(Controller):
+    """Join the concrete background executor during fixture teardown."""
 
-    def linked_value(_ctx: SessionEnv) -> ReferenceValue:
-        value = make_default_value(make_pulse_spec())
-        value.fields["ch"] = EvalValue("$resonator.wiring.ch")
-        value.fields["freq"] = EvalValue("$resonator.freq")
-        return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-    catalog.register(
-        TemplateEntry(
-            "res_probe", "Linked pulse", "module", make_pulse_spec, linked_value
-        )
-    )
-    catalog.register(
-        TemplateEntry(
-            "res_waveform",
-            "Constant waveform",
-            "waveform",
-            make_const_waveform_spec,
-            lambda ctx: ReferenceValue(
-                make_custom_reference_key("Const"),
-                make_default_value(make_const_waveform_spec()),
-            ),
-        )
-    )
+    def quiesce(self) -> None:
+        self._background_svc.quiesce()
 
 
-def _make_ctrl(
-    root: Path,
-    resonator_fields: YamlMap | None = None,
-    *,
-    catalog: TemplateCatalog | None = None,
-) -> Controller:
-    if catalog is None:
-        catalog = TemplateCatalog()
-        _register_templates(catalog)
-    ctrl = Controller(
-        state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        registry=Registry(),
-        view=None,
-        bus=EventBus(),
-        template_catalog=catalog,
-        project_root=str(root),
+@pytest.fixture
+def controller(qapp, tmp_path: Path):
+    templates = {
+        "probe": TemplateDef(
+            PulseSpec,
+            "Probe",
+            {
+                "ch": 2,
+                "nqz": 1,
+                "freq": Expr("{qubit}.ext.freq"),
+                "gain": 0.25,
+                "waveform.style": "const",
+                "waveform.length": 0.4,
+            },
+            "{qubit}.pulses.probe",
+        ),
+        "readout": TemplateDef(
+            PulseReadoutSpec,
+            "Readout",
+            {
+                "pulse_cfg": Slot("{qubit}.pulses.probe", fallback=None),
+                "ro_cfg.ro_ch": 1,
+                "ro_cfg.ro_freq": 100.0,
+                "ro_cfg.ro_length": 2.0,
+            },
+            "{qubit}.readout.probe",
+        ),
+        "envelope": TemplateDef(ConstWaveformCfg, "Envelope", {"length": 0.5}, "base"),
+    }
+    ctrl = TemplateController(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        Registry(templates=templates),
+        None,
+        BaseEventBus(),
+        project_root=str(tmp_path),
     )
     ctrl.setup_control.new_entry(EntryRequest("templates"))
     before = component_registry.kinds()
-    added: list[str] = []
+    component_registry.register("template/qubit", Qubit)
     try:
-        for kind, model in [
-            ("qubit/transmon", QubitSchema),
-            ("resonator", ResonatorSchema),
-        ]:
-            if kind not in before:
-                component_registry.register(kind, model)
-                added.append(kind)
-            assert component_registry.get(kind) is model
-        ctrl.context_control.add_component("Q1", "qubit/transmon", {}, setup=True)
-        ctrl.context_control.add_component(
-            "R1", "resonator", resonator_fields or {}, setup=True
-        )
+        ctrl.context_control.add_component("Q1", "template/qubit", {}, setup=True)
         ctrl.setup_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
+        ctrl.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
+        capture = ctrl.read_context()
+        ctrl.context_control.set_parameter(capture.target, "Q1.ext.freq", 6123.0)
+        yield ctrl
     finally:
-        for kind in reversed(added):
-            component_registry.unregister(kind)
+        ctrl.quiesce()
+        component_registry.unregister("template/qubit")
         assert component_registry.kinds() == before
-    ctrl.context_control.set_alias_rows(
-        (AliasRow("qubit", "Q1"), AliasRow("resonator", "R1"))
+
+
+def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
+    controller: Controller,
+):
+    controller.create_from_template("module", "probe", "Q1.pulses.probe")
+    library = controller.read_context().library
+    pulse = library.module_spec("Q1.pulses.probe")
+    assert pulse == PulseSpec(
+        ch=2, nqz=1, freq=6123.0, gain=0.25, waveform=ConstWaveformCfg(length=0.4)
     )
-    return ctrl
-
-
-def _instrumented_entry(
-    events: list[str],
-    *,
-    fail_value: bool = False,
-    fail_shape_on_create: bool = False,
-) -> tuple[
-    TemplateEntry,
-    list[tuple[CfgSectionSpec, CfgSectionSpec]],
-    list[tuple[CfgSectionValue, CfgSectionValue]],
-]:
-    made_specs: list[tuple[CfgSectionSpec, CfgSectionSpec]] = []
-    made_values: list[tuple[CfgSectionValue, CfgSectionValue]] = []
-    shape_calls = 0
-
-    def shape() -> CfgSectionSpec:
-        nonlocal shape_calls
-        shape_calls += 1
-        events.append("shape")
-        if fail_shape_on_create and shape_calls > 1:
-            raise RuntimeError("shape failed")
-        spec = make_pulse_spec()
-        made_specs.append((spec, deepcopy(spec)))
-        return spec
-
-    def make_value(_ctx: SessionEnv) -> ReferenceValue:
-        events.append("value")
-        if fail_value:
-            raise RuntimeError("value failed")
-        ref = ReferenceValue(
-            make_custom_reference_key("pulse"),
-            make_default_value(make_pulse_spec()),
-        )
-        assert ref.value is not None
-        made_values.append((ref.value, deepcopy(ref.value)))
-        return ref
-
-    return (
-        TemplateEntry("instrumented", "Instrumented", "module", shape, make_value),
-        made_specs,
-        made_values,
-    )
-
-
-def _pulse_raw() -> YamlMap:
-    return {
-        "type": "pulse",
-        "ch": 0,
-        "nqz": 1,
-        "freq": 0.0,
-        "gain": 0.0,
-        "phase": 0.0,
-        "pre_delay": 0.0,
-        "post_delay": 0.0,
-        "waveform": {"style": "const", "length": 0.0},
-    }
-
-
-def _library_keys(ctrl: Controller) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    library = ctrl.read_context().library
-    return library.module_keys(), library.waveform_keys()
-
-
-def test_create_module_from_role_uses_md_value(qapp, tmp_path: Path):
-    ctrl = _make_ctrl(tmp_path, {"freq": 6123.0, "wiring": {"ch": 1, "ro_ch": 2}})
-    ctrl.create_from_template("module", "res_probe", "R1.pulses.my_ro")
-
-    library = ctrl.read_context().library
-    assert "R1.pulses.my_ro" in library.module_keys()
-    raw = library.get_module("R1.pulses.my_ro").to_dict()
-    assert raw["freq"] == 6123.0
-
-
-def test_create_from_template_uses_value_then_fresh_shape_exactly_once(
-    qapp, tmp_path: Path
-) -> None:
-    events: list[str] = []
-    entry, made_specs, made_values = _instrumented_entry(events)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    made_specs.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-
-    ctrl.create_from_template("module", "instrumented", "Q1.pulses.created")
-
-    assert events == ["value", "shape"]
-    assert len(made_specs) == 1
-    assert len(made_values) == 1
-    library = ctrl.read_context().library
-    raw = library.get_module("Q1.pulses.created").to_dict()
-    assert raw["freq"] == 0.0
-    assert raw["gain"] == 0.0
-    assert raw["ch"] == 0
-    assert library.module_spec("Q1.pulses.created").type == "pulse"
-    assert made_values[0][0].fields["freq"] == DirectValue(raw["freq"])
-    assert made_specs[0][0] == made_specs[0][1]
-    assert made_values[0][0] == made_values[0][1]
-
-
-def test_create_from_template_value_failure_does_not_call_shape(
-    qapp, tmp_path: Path
-) -> None:
-    events: list[str] = []
-    entry, _, _ = _instrumented_entry(events, fail_value=True)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-    before = _library_keys(ctrl)
-
-    with pytest.raises(RuntimeError, match="value failed"):
-        ctrl.create_from_template("module", "instrumented", "Q1.pulses.created")
-
-    assert events == ["value"]
-    assert _library_keys(ctrl) == before
-
-
-def test_create_from_template_shape_failure_occurs_after_value(
-    qapp, tmp_path: Path
-) -> None:
-    events: list[str] = []
-    entry, _, _ = _instrumented_entry(events, fail_shape_on_create=True)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-    before = _library_keys(ctrl)
-
-    with pytest.raises(RuntimeError, match="shape failed"):
-        ctrl.create_from_template("module", "instrumented", "Q1.pulses.created")
-
-    assert events == ["value", "shape"]
-    assert _library_keys(ctrl) == before
-
-
-def test_create_from_template_context_failure_calls_no_factory_or_write(qapp) -> None:
-    events: list[str] = []
-    entry, _, _ = _instrumented_entry(events)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    bus = EventBus()
-    writes: list[MlChangedPayload] = []
-    bus.subscribe(MlChangedPayload, writes.append)
-    ctrl = Controller(
-        state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        registry=Registry(),
-        view=None,
-        bus=bus,
-        template_catalog=catalog,
-    )
-
-    with pytest.raises(FailedPreconditionError) as caught:
-        ctrl.create_from_template("module", "instrumented", "Q1.pulses.created")
-
-    assert caught.value.reason_code == "no_context"
-    assert events == []
-    assert writes == []
-
-
-def test_create_from_template_downstream_failure_preserves_factory_counts_and_identity(
-    qapp, tmp_path: Path
-) -> None:
-    events: list[str] = []
-    entry, made_specs, made_values = _instrumented_entry(events)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    made_specs.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-    before = _library_keys(ctrl)
-    info = ctrl.setup_control.get_entry_info()
-    assert info is not None
-    (info.result_path / "points" / "working" / "module_cfg.yaml").unlink()
-
-    with pytest.raises(FileNotFoundError):
-        ctrl.create_from_template("module", "instrumented", "Q1.pulses.created")
-
-    assert events == ["value", "shape"]
-    assert len(made_specs) == 1
-    assert len(made_values) == 1
-    assert made_specs[0][0] == made_specs[0][1]
-    assert made_values[0][0] == made_values[0][1]
-    assert _library_keys(ctrl) == before
+    controller.create_from_template("module", "readout", "Q1.readout.probe")
+    readout = controller.read_context().library.module_spec("Q1.readout.probe")
+    assert isinstance(readout, PulseReadoutSpec)
+    assert readout.pulse_cfg == "Q1.pulses.probe"
+    controller.create_from_template("waveform", "envelope", "Q1.waveforms.base")
+    assert controller.read_context().library.waveform_spec(
+        "Q1.waveforms.base"
+    ) == ConstWaveformCfg(length=0.5)
 
 
 @pytest.mark.parametrize(
-    ("item_kind", "name", "error"),
+    "kind,template,name,error",
     [
-        ("module", "", "name must not be empty"),
-        ("waveform", "created", "not a waveform"),
+        ("module", "missing", "Q1.pulses.new", KeyError),
+        ("module", "probe", "Q1.pulses.occupied", FailedPreconditionError),
+        ("waveform", "probe", "Q1.waveforms.new", FailedPreconditionError),
+        ("module", "probe", "", FailedPreconditionError),
     ],
 )
-def test_create_from_template_guards_do_not_call_value_or_shape(
-    qapp,
-    tmp_path: Path,
-    item_kind: str,
-    name: str,
-    error: str,
-) -> None:
-    events: list[str] = []
-    entry, _, _ = _instrumented_entry(events)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-    before = _library_keys(ctrl)
-
-    with pytest.raises(RuntimeError, match=error):
-        ctrl.create_from_template(item_kind, "instrumented", name)
-
-    assert events == []
-    assert _library_keys(ctrl) == before
-
-
-def test_create_from_template_name_clash_guard_does_not_call_value_or_shape(
-    qapp, tmp_path: Path
-) -> None:
-    events: list[str] = []
-    entry, _, _ = _instrumented_entry(events)
-    catalog = TemplateCatalog()
-    catalog.register(entry)
-    events.clear()
-    ctrl = _make_ctrl(tmp_path, catalog=catalog)
-    ctrl.context_control.set_module(
-        ctrl.read_context().target,
-        "Q1.pulses.existing",
-        module_spec_from_raw(_pulse_raw()),
-    )
-    before = _library_keys(ctrl)
-
-    with pytest.raises(RuntimeError, match="already exists"):
-        ctrl.create_from_template("module", "instrumented", "Q1.pulses.existing")
-
-    assert events == []
-    assert _library_keys(ctrl) == before
-
-
-def test_create_module_from_role_without_calibration_fails_without_writing(
-    qapp, tmp_path: Path
+def test_rejected_creation_leaves_library_unchanged(
+    controller: Controller, kind: str, template: str, name: str, error: type[Exception]
 ):
-    ctrl = _make_ctrl(tmp_path)
-    before = _library_keys(ctrl)
-    with pytest.raises(InvalidInputError):
-        ctrl.create_from_template("module", "res_probe", "R1.pulses.ro_blank")
-    assert _library_keys(ctrl) == before
-
-
-def test_create_from_template_name_clash_fails(qapp, tmp_path: Path):
-    """Create rejects a duplicate without overwriting the first entry."""
-    ctrl = _make_ctrl(tmp_path, {"freq": 6000.0})
-    ctrl.context_control.set_module(
-        ctrl.read_context().target, "R1.pulses.dup", module_spec_from_raw(_pulse_raw())
+    capture = controller.read_context()
+    controller.context_control.set_module(
+        capture.target,
+        "Q1.pulses.occupied",
+        PulseSpec(
+            ch=0, nqz=1, freq=1.0, gain=0.1, waveform=ConstWaveformCfg(length=1.0)
+        ),
     )
-    with pytest.raises(RuntimeError, match="already exists"):
-        ctrl.create_from_template("module", "res_probe", "R1.pulses.dup")
+    before = controller.read_context().library
+    with pytest.raises(error):
+        controller.create_from_template(kind, template, name)
+    after = controller.read_context().library
+    assert after.module_keys() == before.module_keys()
+    assert after.waveform_keys() == before.waveform_keys()
+    assert after.module_spec("Q1.pulses.occupied") == before.module_spec(
+        "Q1.pulses.occupied"
+    )
+
+
+def test_invalid_template_input_is_rejected_before_write(controller: Controller):
+    capture = controller.read_context()
+    controller.context_control.set_parameter(capture.target, "Q1.ext.freq", None)
+    with pytest.raises(LibraryEntryInvalid, match="freq"):
+        controller.create_from_template("module", "probe", "Q1.pulses.new")
+    assert controller.read_context().library.module_keys() == ()
+
+
+def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
+    from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.handlers.context import (
+        h_context_ml_create_from_role,
+        h_context_ml_list_roles,
+    )
+
+    adapter = RemoteControlAdapter(
+        controller=controller,
+        opts=ControlOptions(port=0),
+        owner_scheduler=controller.owner_scheduler,
+    )
+    assert h_context_ml_list_roles(adapter, {}) == {
+        "roles": [
+            {
+                "role_id": "probe",
+                "label": "Probe",
+                "item_kind": "module",
+                "default_name": "{qubit}.pulses.probe",
+            },
+            {
+                "role_id": "readout",
+                "label": "Readout",
+                "item_kind": "module",
+                "default_name": "{qubit}.readout.probe",
+            },
+            {
+                "role_id": "envelope",
+                "label": "Envelope",
+                "item_kind": "waveform",
+                "default_name": "base",
+            },
+        ]
+    }
+    assert h_context_ml_create_from_role(
+        adapter, {"role_id": "probe", "name": "Q1.pulses.rpc"}
+    ) == {"created": "Q1.pulses.rpc"}
     assert (
-        ctrl.read_context().library.get_module("R1.pulses.dup").to_dict()["type"]
-        == "pulse"
+        controller.read_context()
+        .library.module_spec("Q1.pulses.rpc")
+        .model_dump()["freq"]
+        == 6123.0
     )
 
 
-def test_create_waveform_from_role(qapp, tmp_path: Path):
-    ctrl = _make_ctrl(tmp_path)
-    ctrl.create_from_template("waveform", "res_waveform", "R1.waveforms.ro_wav")
-    assert "R1.waveforms.ro_wav" in ctrl.read_context().library.waveform_keys()
-
-
-def test_item_kind_mismatch_raises(qapp, tmp_path: Path):
-    ctrl = _make_ctrl(tmp_path)
-    with pytest.raises(RuntimeError, match="not a waveform"):
-        ctrl.create_from_template("waveform", "res_probe", "x")
-
-
-def test_unknown_role_raises(qapp, tmp_path: Path):
-    ctrl = _make_ctrl(tmp_path)
-    before = _library_keys(ctrl)
-    with pytest.raises(KeyError):
-        ctrl.create_from_template("module", "no_such_role", "x")
-    assert _library_keys(ctrl) == before
-
-
-def test_empty_name_raises(qapp, tmp_path: Path):
-    ctrl = _make_ctrl(tmp_path)
-    with pytest.raises(RuntimeError, match="name must not be empty"):
-        ctrl.create_from_template("module", "res_probe", "")
-
-
-def test_no_catalog_wired_raises(qapp):
-    ctx = SessionEnv(parameters=None, soc=None, soccfg=None)
-    ctrl = Controller(
-        state=State(ctx),
-        registry=Registry(),
-        view=None,
-        bus=EventBus(),
+def test_wire_missing_id_is_invalid_params_without_write(controller: Controller):
+    from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+    from zcu_tools.gui.app.measure.remote.handlers.context import (
+        h_context_ml_create_from_role,
     )
-    with pytest.raises(RuntimeError, match="No template catalog"):
-        ctrl.create_from_template("module", "res_probe", "x")
+    from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+    adapter = RemoteControlAdapter(
+        controller=controller,
+        opts=ControlOptions(port=0),
+        owner_scheduler=controller.owner_scheduler,
+    )
+    with pytest.raises(RemoteError) as exc:
+        h_context_ml_create_from_role(
+            adapter, {"role_id": "missing", "name": "Q1.pulses.rpc"}
+        )
+    assert exc.value.code == ErrorCode.INVALID_PARAMS
+    assert controller.read_context().library.module_keys() == ()

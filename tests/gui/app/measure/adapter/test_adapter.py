@@ -875,29 +875,6 @@ def test_base_adapter_analyze_raises_by_default():
 
 
 # ---------------------------------------------------------------------------
-# BaseAdapter — default build_exp_cfg via ExpCfg_cls
-# ---------------------------------------------------------------------------
-
-
-def test_base_adapter_build_exp_cfg_raises_without_expcfg_cls():
-    """Neither ExpCfg_cls set nor build_exp_cfg overridden → Fast Fail."""
-
-    class _Adapter(BaseAdapter):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
-        exp_cls = MagicMock()
-
-        @classmethod
-        def cfg_definition(cls) -> MeasureCfgDefinition:
-            return _empty_cfg_definition()
-
-        def make_filename_stem(self, ctx):
-            return "stem"
-
-    with pytest.raises(NotImplementedError, match="ExpCfg_cls"):
-        _Adapter().build_exp_cfg({}, MagicMock())
-
-
-# ---------------------------------------------------------------------------
 # analyze_params_cls — fallback to NoAnalyzeParams when no annotation
 # ---------------------------------------------------------------------------
 

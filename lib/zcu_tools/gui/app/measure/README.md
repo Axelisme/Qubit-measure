@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13, library entries, `context.ml_edit` and writeback module proposals share Form entries
+**Last updated:** 2026-10-13, library creation uses Registry templates and shared Form entries
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -50,6 +50,10 @@ Library entry 的開啟、提交與取代由 controller 交給 session 的
 `LibraryEntryForm`：controller 開啟時捕捉 parameters 與 arb 名稱，表單由呼叫端
 持有，寫入與捨棄不經 controller。`context.ml_edit` 經 controller 的
 `edit_library_entry` 走同一個表單：整批寫入一次，只有 Valid 才寫 library。
+Library 新建從 `Registry.templates` 讀 `TemplateDef`。Controller 的 `list_templates`
+保留 role discovery 的欄位與順序，`create_from_template` 以固定 capture 建立
+session 的 `new_library_entry`，驗證 Spec 後提交 put。Expr seeds 求成初值，
+Slot 已綁定時保留 child library key。換範本建立新 State，不重設既有 State。
 `CfgEditorService` 按 `editor_id` 保存 seeded cfg draft；由 UI owner 建立的
 seeded session 由 owner 顯式 teardown。Widget attach／detach 不取得 draft 的銷毀權。
 Tab cfg 由 `Session.cfg` 的 `TabFormResource` 擁有。Open／Reset 捕捉來源，
@@ -376,7 +380,7 @@ Key ownership rules:
 `ExperimentReloadService` 擁有 RAM-only snapshot 與重載／恢復狀態，透過注入的
 `ExperimentCatalogLoader` 載入新 registry，透過 Workspace 的正常 close/apply seam
 重建全部 tabs。Controller 只轉接，工具列與 MainWindow 負責整批 destructive confirmation
-和 failure/recovery presentation。Template catalog、hardware context 與 framework 不重建。
+和 failure/recovery presentation。Registry 的持久範本、hardware context 與 framework 不重建。
 
 `catalog_loader.py` 提供通用 `SourceExperimentCatalogLoader`。組合根用 `SourcePackage`
 宣告 framework 與使用者 source 目錄，並指定 reload、preserved 與 catalog module。
