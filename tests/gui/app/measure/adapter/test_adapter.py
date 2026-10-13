@@ -6,13 +6,13 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     ModuleWriteback,
     NoAnalysisResult,
     ParameterWriteback,
-    WaveformWriteback,
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -547,21 +547,13 @@ def test_parameter_writeback_valid():
 
 
 def test_module_writeback_valid():
-    # target_name is the apply destination; edit_schema defaults to None and
-    # editor identity is not part of the adapter item interface.
-    item = ModuleWriteback(target_name="pulse_a", description="d")
+    # target_name is the apply destination; the proposal is a persistent Spec.
+    proposal = PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.1, waveform="Q1.waveforms.a")
+    item = ModuleWriteback(target_name="pulse_a", description="d", proposal=proposal)
     assert item.target_name == "pulse_a"
-    assert item.edit_schema is None
+    assert item.proposal is proposal
     assert item.role_id is None
-    assert not hasattr(item, "editor_id")
     assert item.session_id == ""
-
-
-def test_waveform_writeback_valid():
-    item = WaveformWriteback(target_name="gauss", description="d")
-    assert item.target_name == "gauss"
-    assert item.edit_schema is None
-    assert item.role_id is None
 
 
 # ---------------------------------------------------------------------------

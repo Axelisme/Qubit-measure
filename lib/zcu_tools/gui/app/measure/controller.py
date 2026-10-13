@@ -844,17 +844,18 @@ class Controller(SessionControllerMixin):
     # Writeback (TabService)
     # ------------------------------------------------------------------
 
-    def get_writeback_item_draft_for_pane(
+    def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
-    ) -> CfgDraft:
-        return self._writeback_control.get_writeback_item_draft_for_pane(
+    ) -> ModuleEntryForm:
+        """Return a module item's shared Form; see WritebackService.get_item_form."""
+        return self._writeback_control.get_writeback_item_form_for_pane(
             tab_id, pane, session_id
         )
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
-    ) -> dict[str, object]:
-        return self._writeback_control.set_writeback_item_for_pane(
+    ) -> None:
+        self._writeback_control.set_writeback_item_for_pane(
             tab_id, pane, session_id, **changes
         )
 

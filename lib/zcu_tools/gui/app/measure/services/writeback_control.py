@@ -18,8 +18,8 @@ WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.cfg.binding import CfgDraft
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+    from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
     from .guard import GuardService
     from .writeback import (
@@ -35,13 +35,17 @@ class WritebackControlPort(Protocol):
 
     def has_tab(self, tab_id: str) -> bool: ...
 
-    def get_writeback_item_draft_for_pane(
+    def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
-    ) -> CfgDraft: ...
+    ) -> ModuleEntryForm:
+        """Return a module item's shared Form; see WritebackService.get_item_form."""
+        ...
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
-    ) -> dict[str, object]: ...
+    ) -> None:
+        """Edit one item; changes follow WritebackService.edit_draft."""
+        ...
 
     def apply_writeback_for_pane(
         self,
@@ -118,23 +122,26 @@ class WritebackControlFacet:
             )
         return draft  # type: ignore[return-value]
 
-    def get_writeback_item_draft_for_pane(
+    def get_writeback_item_form_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str
-    ) -> CfgDraft:
+    ) -> ModuleEntryForm:
         self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.get_item_draft(draft, session_id)  # type: ignore[arg-type]
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        return self._writeback.get_item_form(draft, session_id)
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
-    ) -> dict[str, object]:
+    ) -> None:
         self._guard.check_writeback(tab_id)
         self._require_tab_idle(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        result = self._writeback.edit_draft(draft, session_id, **changes)  # type: ignore[arg-type]
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        self._writeback.edit_draft(draft, session_id, **changes)
         self._emit_draft_changed(tab_id)
-        return result
 
     def apply_writeback_for_pane(
         self,

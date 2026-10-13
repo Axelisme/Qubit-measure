@@ -8,7 +8,7 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -66,8 +66,6 @@ if TYPE_CHECKING:
         Session,
         TabInteractionState,
     )
-    from zcu_tools.gui.cfg import CfgSchema
-    from zcu_tools.gui.cfg.binding import CfgDraft, SettableTarget
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
@@ -265,47 +263,12 @@ class WritebackLifecyclePort(Protocol):
 
         run_id is historical RunMetadata.run_id, even before Save, or None
         without native evidence. Save does not change the draft's identity.
-        Editor failure propagates after retiring any newly opened sessions.
+        A module proposal that is not a concrete persistent Spec raises.
         """
         ...
 
     def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
     def teardown_draft(self, draft: Any) -> None: ...
-
-
-@runtime_checkable
-class CfgEditorPort(Protocol):
-    """The cfg-editor surface consumed by ``WritebackService``.
-
-    ``WritebackService`` opens a gc=False editor session for each
-    module/waveform writeback item (seeded from its ``edit_schema``), tears it
-    down on reanalyze/rerun, and snapshots the live draft at apply time.
-    Depending on this port instead of the concrete ``CfgEditorService`` keeps
-    the coupling at the interface level (ADR-0067).
-    """
-
-    def open_seeded(
-        self,
-        seed: CfgSchema,
-        *,
-        parameters: ParameterContext | None,
-        gc: bool = False,
-        owner_key: str | None = None,
-    ) -> tuple[str, tuple[SettableTarget, ...]]: ...
-
-    def teardown(self, editor_id: str, *, reason: str = ...) -> None: ...
-
-    def get_draft(self, editor_id: str) -> CfgDraft: ...
-
-    # On the port so WritebackService can apply an agent's module/waveform draft
-    # edit through the item's editor session (ADR-0008): the writeback editing
-    # surface internalizes editor_id, so the service writes via the port rather
-    # than re-exposing the handle. Signature mirrors CfgEditorService.set_field.
-    def set_field(self, editor_id: str, path: str, value: object) -> CfgEditResult: ...
-
-    def set_fields(
-        self, editor_id: str, edits: Sequence[CfgEdit], *, agent_edit: bool = False
-    ) -> CfgEditResult: ...
 
 
 @runtime_checkable
