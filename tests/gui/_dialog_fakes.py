@@ -10,8 +10,15 @@ from typing import Literal
 from qtpy.QtWidgets import QWidget  # type: ignore[attr-defined]
 
 DialogKind = Literal[
-    "information", "warning", "critical", "confirm", "destructive_confirm"
+    "information",
+    "warning",
+    "critical",
+    "confirm",
+    "destructive_confirm",
+    "save_discard_cancel",
 ]
+# Mirrors the production SaveDiscardCancel answer type structurally.
+SaveDiscardCancel = Literal["save", "discard", "cancel"]
 
 
 @dataclass(frozen=True)
@@ -31,11 +38,13 @@ class RecordingDialogPresenter:
         *,
         confirm_answers: Iterable[bool] | None = None,
         destructive_answers: Iterable[bool] | None = None,
+        save_discard_cancel_answers: Iterable[SaveDiscardCancel] | None = None,
         defer_confirm: bool = False,
     ) -> None:
         self.calls: list[DialogCall] = []
         self._confirm_answers = deque(confirm_answers or ())
         self._destructive_answers = deque(destructive_answers or ())
+        self._save_discard_cancel_answers = deque(save_discard_cancel_answers or ())
         self._defer_confirm = defer_confirm
         self._pending_confirm: deque[Callable[[bool], None]] = deque()
 
@@ -44,6 +53,9 @@ class RecordingDialogPresenter:
 
     def queue_destructive_confirm(self, *answers: bool) -> None:
         self._destructive_answers.extend(answers)
+
+    def queue_save_discard_cancel(self, *answers: SaveDiscardCancel) -> None:
+        self._save_discard_cancel_answers.extend(answers)
 
     def information(self, parent: QWidget, title: str, message: str) -> None:
         del parent
@@ -94,6 +106,18 @@ class RecordingDialogPresenter:
         if not self._pending_confirm:
             raise AssertionError("No pending asynchronous confirmation")
         self._pending_confirm.popleft()(accepted)
+
+    def save_discard_cancel(
+        self, parent: QWidget, title: str, message: str
+    ) -> SaveDiscardCancel:
+        del parent
+        self.calls.append(DialogCall("save_discard_cancel", title, message))
+        if self._save_discard_cancel_answers:
+            return self._save_discard_cancel_answers.popleft()
+        raise AssertionError(
+            "Unexpected Save/Discard/Cancel dialog without a queued answer: "
+            f"title={title!r}, message={message!r}"
+        )
 
     def destructive_confirm(
         self,

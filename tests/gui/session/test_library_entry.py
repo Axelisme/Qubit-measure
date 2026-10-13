@@ -123,6 +123,14 @@ def test_root_tag_is_fixed_to_the_entry_family(session: LibrarySession) -> None:
     )
 
 
+def test_root_tag_is_hidden_from_the_entry_form(session: LibrarySession) -> None:
+    capture = _seed(session)
+    entry = open_library_entry(capture, "module", PULSE, arb_names=("data",))
+    tag = _schema_property(entry, "type")
+    assert tag.get("hidden") is True
+    assert entry.state.input.data["type"] == "pulse"
+
+
 def test_invalid_form_rejects_submission_with_field_paths(
     session: LibrarySession,
 ) -> None:

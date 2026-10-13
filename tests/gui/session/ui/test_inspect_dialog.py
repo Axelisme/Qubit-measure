@@ -1,0 +1,535 @@
+"""The shared Inspect dialog edits library entries through real session owners."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Generator, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from qtpy.QtCore import QEvent, Qt
+from qtpy.QtGui import QKeyEvent
+from qtpy.QtTest import QTest
+from qtpy.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QTreeWidget,
+    QWidget,
+)
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, TemplateDef
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
+from zcu_tools.gui.session.operation_handles import OperationHandles
+from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.services.build import build_session_services
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.ui.arb_waveform_dialog import ArbWaveformDialog
+from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+
+PULSE = "Q1.pulses.pi"
+WAVEFORM = "Q1.waveforms.base"
+
+TEMPLATES: dict[str, TemplateDef] = {
+    "probe": TemplateDef(
+        PulseSpec,
+        "Probe pulse",
+        {
+            "ch": 1,
+            "nqz": 1,
+            "freq": 100.0,
+            "gain": 0.5,
+            "waveform.style": "const",
+            "waveform.length": 0.2,
+        },
+        default_name="Q1.pulses.probe",
+    ),
+    "drive": TemplateDef(
+        PulseSpec,
+        "Drive pulse",
+        {
+            "ch": 2,
+            "nqz": 2,
+            "freq": 200.0,
+            "gain": 0.1,
+            "waveform.style": "const",
+            "waveform.length": 0.4,
+        },
+        default_name="Q1.pulses.drive",
+    ),
+    "flat": TemplateDef(
+        ConstWaveformCfg, "Flat waveform", {"length": 0.3}, default_name="Q1.waveforms.flat"
+    ),
+}
+
+
+class _ArbNames:
+    """Arb asset names offered to arb data fields; no asset database is read."""
+
+    def list_data_keys(self) -> list[str]:
+        return []
+
+
+@dataclass
+class _Session:
+    entry: ResultEntry
+    control: ContextControlFacet
+    bus: BaseEventBus
+    dialogs: list[QDialog] = field(default_factory=list)
+    arb_opened: list[bool] = field(default_factory=list)
+
+
+@pytest.fixture
+def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
+    entry = ResultEntry.create(
+        "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
+    )
+    entry.new_point("point")
+    with entry.module_library("point").edit() as draft:
+        draft.set_waveform(WAVEFORM, ConstWaveformCfg(length=0.1))
+        draft.set_module(
+            PULSE,
+            PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform=WAVEFORM),
+        )
+    bus = BaseEventBus()
+    service = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        bus,
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    service.install_entry(entry)
+    control = ContextControlFacet(context=service)
+    control.use_point(PointUseRequest("point"))
+    session = _Session(entry, control, bus)
+    try:
+        yield session
+    finally:
+        for dialog in session.dialogs:
+            dialog.close()
+            dialog.deleteLater()
+        qapp.processEvents()
+
+
+def _open(
+    session: _Session,
+    presenter: RecordingDialogPresenter,
+    *,
+    templates: Mapping[str, TemplateDef] = TEMPLATES,
+) -> InspectDialog:
+    """Build the shared Inspect with every required collaborator and show Modules."""
+    dialog = InspectDialog(
+        session.control,
+        session.bus,
+        templates=templates,
+        arb_waveforms=_ArbNames(),
+        open_arb_waveforms=lambda: session.arb_opened.append(True),
+        dialog_presenter=presenter,
+    )
+    session.dialogs.append(dialog)
+    tabs = dialog.findChild(QTabWidget)
+    assert tabs is not None
+    tabs.setCurrentIndex(1)
+    return dialog
+
+
+def _child[W: QWidget](parent: QWidget, kind: type[W], name: str) -> W:
+    widget = parent.findChild(kind, name)
+    assert widget is not None, f"{name!r} is missing"
+    return widget
+
+
+def _button(parent: QWidget, text: str) -> QPushButton:
+    return next(b for b in parent.findChildren(QPushButton) if b.text() == text)
+
+
+def _select(dialog: InspectDialog, name: str) -> None:
+    tree = _child(dialog, QTreeWidget, "inspect.library")
+    (item,) = tree.findItems(
+        name, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
+    )
+    tree.setCurrentItem(item)
+
+
+def _status(dialog: QWidget) -> str:
+    return _child(dialog, QLabel, "inspect.entry.status").text()
+
+
+def _group_fold(parent: QWidget, name: str) -> QPushButton:
+    block = _child(parent, QWidget, f"form.group.{name}")
+    (button,) = block.findChildren(
+        QPushButton, "", Qt.FindChildOption.FindDirectChildrenOnly
+    )
+    return button
+
+
+def _library(session: _Session):
+    return session.entry.module_library("point").snapshot()
+
+
+def test_entry_edit_is_unsaved_until_revert_or_apply(session: _Session) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == PULSE
+    assert _status(dialog) == "Saved"
+    gain = _child(dialog, QLineEdit, "form.input.gain")
+    apply = _child(dialog, QPushButton, "inspect.entry.apply")
+    revert = _child(dialog, QPushButton, "inspect.entry.revert")
+    assert not apply.isEnabled()
+
+    gain.setText("0.5")
+    assert _status(dialog) == "Unsaved"
+    assert apply.isEnabled() and revert.isEnabled()
+    revert.click()
+    assert _status(dialog) == "Saved"
+    assert float(_child(dialog, QLineEdit, "form.input.gain").text()) == 0.25
+    assert _library(session).module_spec(PULSE) == PulseSpec(
+        ch=0, nqz=1, freq=100.0, gain=0.25, waveform=WAVEFORM
+    )
+
+    _child(dialog, QLineEdit, "form.input.gain").setText("0.5")
+    _child(dialog, QPushButton, "inspect.entry.apply").click()
+    written = _library(session).module_spec(PULSE)
+    assert isinstance(written, PulseSpec)
+    assert written.gain == 0.5
+    assert _status(dialog) == "Saved"
+    presenter.assert_no_unexpected_messages()
+
+
+def test_child_key_is_offered_in_the_dropdown_and_stays_a_key(
+    session: _Session,
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    waveform = _child(dialog, QComboBox, "form.input.waveform")
+    assert waveform.currentData() == WAVEFORM
+    assert waveform.findData(WAVEFORM) >= 0
+    _child(dialog, QLineEdit, "form.input.freq").setText("150")
+    _child(dialog, QPushButton, "inspect.entry.apply").click()
+    written = _library(session).module_spec(PULSE)
+    assert isinstance(written, PulseSpec)
+    assert written.waveform == WAVEFORM
+    assert written.freq == 150.0
+
+
+def test_root_family_tag_has_no_row(session: _Session) -> None:
+    dialog = _open(session, RecordingDialogPresenter())
+    _select(dialog, PULSE)
+    assert dialog.findChild(QLineEdit, "form.input.gain") is not None
+    assert dialog.findChild(QWidget, "form.input.type") is None
+
+
+def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
+    session: _Session,
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    name = _child(dialog, QLineEdit, "inspect.entry.name")
+    before = _library(session).document()
+    QTest.keyClicks(name, "_v2")
+    _child(dialog, QLineEdit, "form.input.gain").setText("0.75")
+    # The waveform family is separate; a module name must not reuse a module key.
+    session.control.set_module(
+        session.control.read_context().target,
+        f"{PULSE}_v2",
+        PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
+    )
+    taken = _library(session).document()
+    assert taken != before
+    _child(dialog, QPushButton, "inspect.entry.apply").click()
+    assert presenter.messages("warning"), "a taken name must be reported"
+    assert _library(session).document() == taken
+    assert _status(dialog) == "Unsaved"
+    assert name.text() == f"{PULSE}_v2"
+
+    name.setText(f"{PULSE}_v3")
+    presenter.calls.clear()
+    _child(dialog, QPushButton, "inspect.entry.apply").click()
+    library = _library(session)
+    assert PULSE not in library.module_keys()
+    written = library.module_spec(f"{PULSE}_v3")
+    assert isinstance(written, PulseSpec)
+    assert written.gain == 0.75
+    assert name.text() == f"{PULSE}_v3"
+    assert _status(dialog) == "Saved"
+    presenter.assert_no_unexpected_messages()
+
+
+def test_switching_with_unsaved_changes_prompts_and_discard_loads_next(
+    session: _Session,
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    _child(dialog, QLineEdit, "form.input.gain").setText("0.9")
+    before = _library(session).document()
+
+    presenter.queue_save_discard_cancel("cancel")
+    _select(dialog, WAVEFORM)
+    assert [call.kind for call in presenter.calls] == ["save_discard_cancel"]
+    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == PULSE
+    assert _child(dialog, QLineEdit, "form.input.gain").text() == "0.9"
+    assert _status(dialog) == "Unsaved"
+
+    presenter.queue_save_discard_cancel("discard")
+    _select(dialog, WAVEFORM)
+    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == WAVEFORM
+    assert float(_child(dialog, QLineEdit, "form.input.length").text()) == 0.1
+    assert _status(dialog) == "Saved"
+    assert _library(session).document() == before
+
+
+def test_dirty_close_requires_an_explicit_decision(session: _Session) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    dialog.show()
+    _select(dialog, PULSE)
+    _child(dialog, QLineEdit, "form.input.gain").setText("0.9")
+
+    presenter.queue_save_discard_cancel("cancel")
+    dialog.close()
+    assert dialog.isVisible()
+    assert _status(dialog) == "Unsaved"
+
+    presenter.queue_save_discard_cancel("save")
+    dialog.close()
+    assert not dialog.isVisible()
+    written = _library(session).module_spec(PULSE)
+    assert isinstance(written, PulseSpec)
+    assert written.gain == 0.9
+
+
+def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
+    session: _Session, qapp: QApplication
+) -> None:
+    dialog = _open(session, RecordingDialogPresenter())
+    dialog.resize(520, 260)
+    dialog.show()
+    _select(dialog, PULSE)
+    dialog.set_read_only(read_only=True)
+    qapp.processEvents()
+
+    gain = _child(dialog, QLineEdit, "form.input.gain")
+    assert gain.isReadOnly()
+    assert _child(dialog, QLineEdit, "inspect.entry.name").isReadOnly()
+    for text in ("New", "Delete", "Arb Waveforms…"):
+        assert not _button(dialog, text).isEnabled(), text
+    assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
+    QTest.keyClicks(gain, "9")
+    assert float(gain.text()) == 0.25
+    assert _status(dialog) == "Saved"
+
+    advanced = _group_fold(dialog, "Advanced")
+    nqz = _child(dialog, QWidget, "form.input.nqz")
+    assert not nqz.isVisibleTo(dialog)
+    advanced.click()
+    assert nqz.isVisibleTo(dialog)
+    qapp.processEvents()
+    bar = _child(dialog, QScrollArea, "inspect.entry.scroll").verticalScrollBar()
+    assert bar is not None and bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    assert bar.value() == bar.maximum()
+
+    dialog.set_read_only(read_only=False)
+    assert not _child(dialog, QLineEdit, "form.input.gain").isReadOnly()
+    assert _button(dialog, "New").isEnabled()
+
+
+def test_delete_button_confirms_and_the_tree_delete_key_is_direct(
+    session: _Session, qapp: QApplication
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    before = _library(session).document()
+
+    presenter.queue_confirm(False)
+    _button(dialog, "Delete").click()
+    assert _library(session).document() == before
+    presenter.queue_confirm(True)
+    _button(dialog, "Delete").click()
+    assert _library(session).module_keys() == ()
+
+    dialog.show()
+    _select(dialog, WAVEFORM)
+    tree = _child(dialog, QTreeWidget, "inspect.library")
+    tree.setFocus()
+    qapp.processEvents()
+    calls = len(presenter.calls)
+    QApplication.sendEvent(
+        tree,
+        QKeyEvent(
+            QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier
+        ),
+    )
+    assert _library(session).waveform_keys() == ()
+    assert len(presenter.calls) == calls, "the Delete key does not confirm"
+    presenter.assert_no_unexpected_messages()
+
+
+def _new_dialog(dialog: InspectDialog) -> QDialog:
+    _button(dialog, "New").click()
+    created = _child(dialog, QDialog, "inspect.new_entry")
+    assert created.isVisible()
+    return created
+
+
+def _choose_template(new: QDialog, label: str) -> None:
+    combo = _child(new, QComboBox, "inspect.new_entry.template")
+    index = next(
+        i for i in range(combo.count()) if combo.itemText(i).startswith(label)
+    )
+    combo.setCurrentIndex(index)
+
+
+def test_new_entry_suggests_names_until_the_user_types_one(
+    session: _Session,
+) -> None:
+    session.control.set_module(
+        session.control.read_context().target,
+        "Q1.pulses.probe",
+        PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
+    )
+    dialog = _open(session, RecordingDialogPresenter())
+    new = _new_dialog(dialog)
+    name = _child(new, QLineEdit, "inspect.new_entry.name")
+    combo = _child(new, QComboBox, "inspect.new_entry.template")
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "Probe pulse  (module)",
+        "Drive pulse  (module)",
+        "Flat waveform  (waveform)",
+    ]
+    assert name.text() == "Q1.pulses.probe_2"
+    _choose_template(new, "Drive pulse")
+    assert name.text() == "Q1.pulses.drive"
+    name.clear()
+    QTest.keyClicks(name, "mine")
+    _choose_template(new, "Flat waveform")
+    assert name.text() == "mine"
+
+
+def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
+    session: _Session, qapp: QApplication
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    new = _new_dialog(dialog)
+    new.resize(420, 240)
+    qapp.processEvents()
+    name = _child(new, QLineEdit, "inspect.new_entry.name")
+    name.clear()
+    QTest.keyClicks(name, "Q1.pulses.my_pulse")
+    _child(new, QLineEdit, "form.input.gain").setText("0.9")
+    _group_fold(new, "Advanced").click()
+    nqz = _child(new, QWidget, "form.input.nqz")
+    assert nqz.isVisibleTo(new)
+    qapp.processEvents()
+    bar = _child(new, QScrollArea, "inspect.new_entry.scroll").verticalScrollBar()
+    assert bar is not None and bar.maximum() > 0
+    bar.setValue(bar.maximum())
+
+    _choose_template(new, "Drive pulse")
+    qapp.processEvents()
+    assert name.text() == "Q1.pulses.my_pulse"
+    assert float(_child(new, QLineEdit, "form.input.gain").text()) == 0.1
+    assert float(_child(new, QLineEdit, "form.input.freq").text()) == 200.0
+    assert not _child(new, QWidget, "form.input.nqz").isVisibleTo(new)
+    bar = _child(new, QScrollArea, "inspect.new_entry.scroll").verticalScrollBar()
+    assert bar is not None and bar.value() == 0
+
+    _button(new, "Create").click()
+    created = _library(session).module_spec("Q1.pulses.my_pulse")
+    assert isinstance(created, PulseSpec)
+    assert (created.ch, created.nqz, created.freq, created.gain) == (2, 2, 200.0, 0.1)
+    assert not new.isVisible()
+    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == "Q1.pulses.my_pulse"
+    assert _status(dialog) == "Saved"
+    presenter.assert_no_unexpected_messages()
+
+
+def test_new_entry_rejects_a_name_taken_in_its_family(session: _Session) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    new = _new_dialog(dialog)
+    _choose_template(new, "Flat waveform")
+    name = _child(new, QLineEdit, "inspect.new_entry.name")
+    name.setText(WAVEFORM)
+    before = _library(session).document()
+    _button(new, "Create").click()
+    assert presenter.messages("warning")
+    assert new.isVisible()
+    assert _library(session).document() == before
+
+
+def test_arb_waveforms_button_calls_the_host_entry(session: _Session) -> None:
+    dialog = _open(session, RecordingDialogPresenter())
+    _button(dialog, "Arb Waveforms…").click()
+    assert session.arb_opened == [True]
+
+
+def test_a_synthetic_host_opens_the_shared_arb_dialog(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """A workflows-like host wires Inspect to session services only."""
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    gate = RunBlocksHardwareGate(run_kind="run", bus=bus)
+    handles = OperationHandles()
+    background = MagicMock()
+    progress = ProgressService(MagicMock())
+    services = build_session_services(
+        state=state,
+        bus=bus,
+        gate=gate,
+        handles=handles,
+        background=background,
+        progress=progress,
+        runner=OperationRunner(gate, handles, progress, background, bus),
+        bind_assets=ArbWaveformDatabase.info_at,
+        project_root=str(tmp_path),
+    )
+    host = QWidget()
+    opened: list[ArbWaveformDialog] = []
+
+    def open_arb_waveforms() -> None:
+        arb = ArbWaveformDialog(services.arb_waveform, parent=host)
+        opened.append(arb)
+        arb.open()
+
+    open_entry: Callable[[], None] = open_arb_waveforms
+    dialog = InspectDialog(
+        services.context_control,
+        bus,
+        templates=TEMPLATES,
+        arb_waveforms=services.arb_waveform,
+        open_arb_waveforms=open_entry,
+        dialog_presenter=RecordingDialogPresenter(),
+        parent=host,
+    )
+    try:
+        _button(dialog, "Arb Waveforms…").click()
+        assert len(opened) == 1 and opened[0].isVisible()
+        assert host.findChild(ArbWaveformDialog) is opened[0]
+    finally:
+        for arb in opened:
+            arb.close()
+        dialog.close()
+        host.deleteLater()
+        qapp.processEvents()
