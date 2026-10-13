@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QTabWidget,
+    QToolBar,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
@@ -838,6 +840,93 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
     finally:
         ctrl.search.begin_close()
         assert runner.quiesce()
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+        ctrl.interactive.dispose()
+
+
+def _drag(canvas: FigureCanvasQTAgg, start, end) -> None:
+    """Press, drag with the left button held, and release between two pixels."""
+    events = (
+        MouseEvent("button_press_event", canvas, *start, button=MouseButton.LEFT),
+        MouseEvent("motion_notify_event", canvas, *end, buttons={MouseButton.LEFT}),
+        MouseEvent("button_release_event", canvas, *end, button=MouseButton.LEFT),
+    )
+    for event in events:
+        canvas.callbacks.process(event.name, event)
+
+
+def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    ctrl.set_fit_params(
+        search_database_hdf5,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+    widget = AnalyzePanelWidget(ctrl)
+    widget.resize(1000, 700)
+    widget.show()
+    try:
+        widget.show_tab("show")
+        qapp.processEvents()
+        toolbar = named(widget, QToolBar, "fluxdep.show.toolbar")
+        tools = {action.text(): action for action in toolbar.actions() if action.text()}
+        # Only view navigation: no tool that opens a blocking dialog.
+        assert set(tools) == {"Home", "Back", "Forward", "Pan", "Zoom"}
+        canvas = widget.findChildren(FigureCanvasQTAgg)[0]
+        canvas.draw()
+        axes = canvas.figure.axes[0]
+        drawn = (axes.get_xlim(), axes.get_ylim())
+        boxes = [
+            box.value() for box in _display_group(widget).findChildren(QDoubleSpinBox)
+        ]
+
+        tools["Zoom"].trigger()
+        corner = axes.transAxes.transform
+        _drag(canvas, corner((0.25, 0.25)), corner((0.75, 0.75)))
+        zoomed_x, zoomed_y = axes.get_xlim(), axes.get_ylim()
+        assert zoomed_x[1] - zoomed_x[0] < 0.75 * (drawn[0][1] - drawn[0][0])
+        assert zoomed_y[1] - zoomed_y[0] < 0.75 * (drawn[1][1] - drawn[1][0])
+        # Zooming changes only this view, not the display choices.
+        assert [
+            box.value() for box in _display_group(widget).findChildren(QDoubleSpinBox)
+        ] == boxes
+
+        tools["Home"].trigger()
+        assert axes.get_xlim() == pytest.approx(drawn[0])
+        assert axes.get_ylim() == pytest.approx(drawn[1])
+
+        # After Apply redraws with new limits, Home returns to that new drawing.
+        y_lo, y_hi = _display_group(widget).findChildren(QDoubleSpinBox)[2:4]
+        y_hi.setValue(y_hi.value() + 1.0)
+        named(widget, QPushButton, "fluxdep.show.apply").click()
+        canvas.draw()
+        redrawn = canvas.figure.axes[0]
+        applied = (redrawn.get_xlim(), redrawn.get_ylim())
+        assert applied[1] == pytest.approx((y_lo.value(), y_hi.value()))
+        _drag(
+            canvas,
+            redrawn.transAxes.transform((0.25, 0.25)),
+            redrawn.transAxes.transform((0.75, 0.75)),
+        )
+        assert redrawn.get_ylim() != pytest.approx(applied[1])
+        tools["Home"].trigger()
+        assert redrawn.get_xlim() == pytest.approx(applied[0])
+        assert redrawn.get_ylim() == pytest.approx(applied[1])
+    finally:
         widget.quiesce()
         widget.dispose()
         widget.deleteLater()

@@ -14,12 +14,16 @@ from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
+    QDoubleSpinBox,
     QGroupBox,
     QLabel,
     QLineEdit,
     QPushButton,
     QTabWidget,
+    QToolBar,
+    QWidget,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds, SearchCancelled
@@ -178,6 +182,48 @@ def test_remote_viewer_reads_fit_page_without_opening_filter(
     assert "Outdated: filter changed" in title
     assert ctrl.interactive.current_cross_selection() is None
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
+
+
+def _show_display_inputs(panel) -> list[QWidget]:
+    """Every input of Show's Display group: limits, Auto limits, lines, subset, Apply."""
+    display = next(g for g in panel.findChildren(QGroupBox) if g.title() == "Display")
+    return [
+        control
+        for control in display.findChildren(QWidget)
+        if isinstance(control, (QDoubleSpinBox, QCheckBox, QLineEdit, QPushButton))
+    ]
+
+
+def test_remote_viewer_show_display_is_disabled_but_toolbar_zooms_until_reclaim(
+    window, search_database_hdf5
+):
+    view, ctrl = window
+    _record_stale_fit(ctrl, search_database_hdf5)
+    show_page(view, "fit")
+    panel = fit_panel(view)
+    assert panel is not None
+    panel.show_tab("show")
+    inputs = _show_display_inputs(panel)
+    kinds = {type(control) for control in inputs}
+    assert {QDoubleSpinBox, QCheckBox, QLineEdit, QPushButton} <= kinds
+    assert {"fluxdep.show.apply", "fluxdep.show.auto_limits"} <= {
+        control.objectName() for control in inputs
+    }
+    assert all(control.isEnabled() for control in inputs)
+
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    still_enabled = [control for control in inputs if control.isEnabled()]
+    assert still_enabled == [], "a non-holder must not edit Show's display choices"
+    # The toolbar only changes this viewer's own view, so it stays usable.
+    toolbar = named(panel, QToolBar, "fluxdep.show.toolbar")
+    assert toolbar.isEnabled()
+    tools = {action.text(): action for action in toolbar.actions() if action.text()}
+    # Back/Forward follow matplotlib's view history, not control authority.
+    assert all(tools[name].isEnabled() for name in ("Home", "Pan", "Zoom"))
+
+    indicator(view).click()
+    assert all(control.isEnabled() for control in inputs)
+    assert toolbar.isEnabled()
 
 
 def test_remote_page_switch_keeps_agent_filter_session(window):
@@ -496,7 +542,7 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     assert tabs is not None and tabs.tabBar().isTabEnabled(2)
     tabs.setCurrentIndex(2)
     assert panel.current_tab == "show"
-    assert next(
+    assert not next(
         g for g in panel.findChildren(QGroupBox) if g.title() == "Display"
     ).isEnabled()
     cancel.click()
