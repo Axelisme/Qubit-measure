@@ -36,7 +36,7 @@ class Second(FormModel):
 
     @classmethod
     def defaults(
-        cls, env: FormEnv, previous: Mapping[str, JsonValue]
+        cls, _env: FormEnv, previous: Mapping[str, JsonValue]
     ) -> dict[str, JsonValue]:
         return (
             {"kind": "second", "shared": 7.0, "required": len(previous), "derived": 1}
@@ -117,9 +117,9 @@ def test_option_matches_typed_leaves_first_match_and_missing_without_mutation() 
     assert isinstance(exported, dict)
     exported["kind"] = "second"
     assert detached.matches(current)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="finite"):
         Option("bad", float("inf"))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="fields"):
         Option("bad fields", "key", fields=First)
 
 
@@ -144,7 +144,7 @@ def test_branch_selection_starts_from_fresh_defaults_and_commits_once(
     state.write({("branch",): {"kind": "first", "shared": 6}}, env)
     assert state.input.data == {"branch": {"kind": "first", "shared": 6}}
     before = state.input.data
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="[Uu]nknown"):
         state.write({("branch",): {"kind": "second", "unknown": 1}}, env)
     assert state.input.data == before
     assert len(observed) == 2
