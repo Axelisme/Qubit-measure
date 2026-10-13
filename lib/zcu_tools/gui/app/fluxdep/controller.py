@@ -317,7 +317,9 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """
         self.state.assert_owner_thread()
         fluxs, freqs = self.selected_pointcloud()
-        return derive_fit_auto_limits(self.state.fit, self.state.spectrums, fluxs, freqs)
+        return derive_fit_auto_limits(
+            self.state.fit, self.state.spectrums, fluxs, freqs
+        )
 
     def render_fit(
         self,

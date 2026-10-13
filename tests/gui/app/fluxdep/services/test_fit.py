@@ -29,6 +29,7 @@ from zcu_tools.analysis.fluxdep.search import (
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
+from zcu_tools.gui.app.fluxdep.services import viz
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
@@ -41,6 +42,8 @@ from zcu_tools.gui.app.fluxdep.state import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.project import ProjectInfo
+
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
 
 # --- fixtures --------------------------------------------------------------
 
@@ -382,9 +385,6 @@ def test_capture_search_fast_fails_without_points(tiny_database):
 def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
     monkeypatch, shift
 ):
-    from tests.gui.app.fluxdep._search_result import perfect_fit_result
-    from zcu_tools.gui.app.fluxdep.services import viz
-
     def simulate(params, fluxs, *, cutoff, evals_count):
         return fluxs, np.tile(np.arange(evals_count, dtype=np.float64), (fluxs.size, 1))
 
@@ -430,7 +430,9 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
         )
         np.testing.assert_allclose(ax.get_xlim(), centers)
         np.testing.assert_allclose(ax.get_ylim(), frequency_limits)
-        np.testing.assert_allclose(ax.child_axes[0].get_xlim(), device_limits, atol=1e-12)
+        np.testing.assert_allclose(
+            ax.child_axes[0].get_xlim(), device_limits, atol=1e-12
+        )
         np.testing.assert_allclose(
             np.asarray(ax.lines[0].get_xdata(), dtype=np.float64)[[0, -1]], centers
         )

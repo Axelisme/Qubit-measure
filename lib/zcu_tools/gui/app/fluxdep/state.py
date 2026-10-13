@@ -576,16 +576,18 @@ class FluxDepState:
         threads raise RuntimeError. Later State mutation cannot alter this frame.
         """
         self._assert_owner()
-        return SearchRenderFrame({
-            name: SearchSpectrumBackground(
-                raw=deepcopy(entry.raw),
-                spec_type=entry.spec_type,
-                aligned=entry.aligned,
-                flux_half=entry.flux_half,
-                flux_period=entry.flux_period,
-            )
-            for name, entry in self.spectrums.items()
-        })
+        return SearchRenderFrame(
+            {
+                name: SearchSpectrumBackground(
+                    raw=deepcopy(entry.raw),
+                    spec_type=entry.spec_type,
+                    aligned=entry.aligned,
+                    flux_half=entry.flux_half,
+                    flux_period=entry.flux_period,
+                )
+                for name, entry in self.spectrums.items()
+            }
+        )
 
     def set_search_result(
         self,
