@@ -2,8 +2,17 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from types import UnionType, new_class
-from typing import Annotated, ClassVar, TypeAliasType, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    ClassVar,
+    Literal,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel, Field, JsonValue
 from qick.asm_v2 import QickParam
@@ -20,11 +29,28 @@ from zcu_tools.cfg_model import (
     get_field_meta,
     module_spec_from_raw,
 )
-from zcu_tools.gui.form import Display, FormEnv, ModuleInline, ModuleRef
+from zcu_tools.gui.form import (
+    Display,
+    FormEnv,
+    FormErrors,
+    FormInput,
+    FormModel,
+    FormState,
+    FormWritePath,
+    ModuleInline,
+    ModuleRef,
+)
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
-from ._form_seeds import complete_input, scalar_seed, set_path, slot_key, template_input
+from ._form_seeds import (
+    complete_input,
+    scalar_seed,
+    selected_model,
+    set_path,
+    slot_key,
+    template_input,
+)
 from ._form_types import annotated_type, literal_type, members, type_tag, union_type
 
 _SPEC_BY_TAG = {
@@ -140,6 +166,28 @@ class LockedInline(ModuleInline):
         return data
 
 
+@dataclass(frozen=True)
+class ModuleValues:
+    """Detached execution module and its authored input origin.
+
+    value contains this field's materialized module JSON, not the full native
+    cfg after to_cfg or extras lowering. mode is key or inline, not a mode for
+    its descendants.
+    source is library:<actual-key> for key mode, otherwise the dotted Form path.
+    No container aliases input or captured library; this is not a preview.
+    """
+
+    value: dict[str, JsonValue]
+    mode: Literal["key", "inline"]
+    source: str
+
+
+class ModuleValueForm(FormModel):
+    """Typed single-field evaluation shell for generated family-limited input."""
+
+    value: ModuleRef | ModuleInline
+
+
 class ModuleField:
     """A core module field's family-limited ref/inline input and lowering policy."""
 
@@ -149,6 +197,7 @@ class ModuleField:
         self.specs = module_specs(annotation)
         self.path = path
         self.node = node
+        self.nullable = type(None) in members(annotation)
         self.catalog: Mapping[str, TemplateDef] = {}
         self.locks = node.lock if node is not None else {}
         self.editable = tuple(_editable_spec(spec, self.locks) for spec in self.specs)
@@ -187,17 +236,42 @@ class ModuleField:
             "__module__": __name__,
             "__annotations__": {"module": module},
         }
+
+        def defaults(
+            cls: type[ModuleInline], env: FormEnv, previous: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            del cls
+            return field.inline_input(previous, env)
+
         namespace["locks"] = self.locks
+        namespace["defaults"] = classmethod(defaults)
         inline = new_class(
             f"{''.join(path)}Inline",
             (LockedInline,),
             exec_body=lambda ns: ns.update(namespace),
         )
+        if not issubclass(inline, LockedInline):
+            raise TypeError("Generated inline model must implement ModuleInline")
+        self.inline = inline
         self.annotation = (
             inline
             if self.locks
             else annotated_type(union_type((ref, inline)), Field(discriminator="kind"))
         )
+        # A single-field form evaluates this module without unrelated draft errors.
+        value_model = new_class(
+            f"{''.join(path)}ValueForm",
+            (ModuleValueForm,),
+            exec_body=lambda ns: ns.update(
+                {
+                    "__module__": __name__,
+                    "__annotations__": {"value": self.annotation},
+                }
+            ),
+        )
+        if not issubclass(value_model, ModuleValueForm):
+            raise TypeError("Module value model must implement FormModel")
+        self.value_model = value_model
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
         template = (
@@ -243,6 +317,91 @@ class ModuleField:
         )
         return {"kind": "inline", "module": complete_input(selected, module)}
 
+    def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
+        """Evaluate only this module, then materialize against its fixed capture.
+
+        Failures return directed errors at this field, not unrelated cfg errors.
+        No full-cfg or extras lower hook runs; source and family checks are the
+        same ones used for ordinary Form module evaluation and materialization.
+        """
+        result = FormState(FormInput(self.value_model, {"value": raw})).result(env)
+        if isinstance(result, FormErrors):
+            return FormErrors(
+                {
+                    (*self.path, *path[1:]): message
+                    for path, message in result.messages.items()
+                }
+            )
+        item = result.value
+        raw_module = (
+            item.name
+            if isinstance(item, ModuleRef)
+            else item.module.model_dump(mode="python")
+        )
+        context = env.library.validation_context() if env.library is not None else None
+        try:
+            cfg = ModuleCfgFactory.from_raw(raw_module, context=context)
+        except ValueError as exc:
+            return FormErrors({self.path: str(exc)})
+        mode = "key" if isinstance(item, ModuleRef) else "inline"
+        source = (
+            f"library:{item.name}"
+            if isinstance(item, ModuleRef)
+            else ".".join(self.path)
+        )
+        return ModuleValues(cfg.model_dump(mode="json"), mode, source)
+
+    def inline_input(
+        self, previous: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[str, JsonValue]:
+        """Build detached inline input, copying captured refs or authored fallback.
+
+        Already-inline input is retained. Missing captured library/key uses the
+        Slot Template fallback, or static blank when absent. Wrong families and
+        source read failures propagate; locks are reapplied by inline defaults.
+        """
+        if previous.get("kind") == "inline":
+            return deepcopy(dict(previous))
+        name = previous.get("name")
+        if (
+            previous.get("kind") == "ref"
+            and isinstance(name, str)
+            and env.library is not None
+            and name in env.library.module_keys()
+        ):
+            if not isinstance(env.library.module_spec(name), self.specs):
+                raise ValueError(f"Incompatible module family at {'.'.join(self.path)}")
+            data = super(LockedInline, self.inline).defaults(env, previous)
+            module = data.get("module")
+            if not isinstance(module, dict):
+                raise TypeError("ModuleInline defaults must produce module input")
+        else:
+            template = (
+                self.node
+                if isinstance(self.node, Template)
+                else self.node.fallback
+                if self.node is not None
+                else None
+            )
+            if template is not None:
+                module = template_input(template, self.catalog, self.editable, env)
+            elif len(self.editable) == 1:
+                module = complete_input(self.editable[0], {})
+            else:
+                return super(LockedInline, self.inline).defaults(env, {})
+        for path, value in self.locks.items():
+            set_path(module, path, scalar_seed(value))
+        return {"kind": "inline", "module": module}
+
+    def inline_writes(
+        self, previous: Mapping[str, JsonValue], env: FormEnv
+    ) -> dict[FormWritePath, JsonValue]:
+        """Prepare one model-aware leaf batch for nullable or required modules."""
+        candidate = self.inline_input(previous, env)
+        if self.nullable:
+            return {self.path: candidate}
+        return _input_writes(self.inline, candidate, self.path)
+
     def cfg_input(self, cfg: ConfigBase) -> dict[str, JsonValue]:
         """Return detached inline input for a materialized module in this family.
 
@@ -269,3 +428,22 @@ class ModuleField:
         return (
             NativeModuleFactory.from_core(cfg, context=context) if self.native else cfg
         )
+
+
+def _input_writes(
+    model: type[BaseModel], data: Mapping[str, JsonValue], path: tuple[str, ...]
+) -> dict[FormWritePath, JsonValue]:
+    """Project prepared model input to public leaf writes, preserving containers."""
+    batch: dict[FormWritePath, JsonValue] = {}
+    for name, value in data.items():
+        annotation = model.model_fields[name].annotation
+        if isinstance(value, dict) and any(
+            isinstance(member, type) and issubclass(member, BaseModel)
+            for member in members(annotation)
+        ):
+            batch.update(
+                _input_writes(selected_model(annotation, value), value, (*path, name))
+            )
+        else:
+            batch[(*path, name)] = value
+    return batch

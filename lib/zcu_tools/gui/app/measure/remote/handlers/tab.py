@@ -317,3 +317,54 @@ def h_tab_edit_cfg(
         ) from exc
     follow_tab(adapter, tab_id, "run")
     return dict(observe_form(resource))
+
+
+def module_path(raw: object) -> tuple[str, ...]:
+    """Validate a dotted core module field supplied to the module RPCs."""
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or any(not part or part != part.strip() for part in raw.split("."))
+    ):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "field must be a dotted module path"
+        )
+    return tuple(raw.split("."))
+
+
+def h_tab_read_module(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read detached field-local module values, without source refresh or mutation."""
+    from ..cfg_observation import cfg_error_to_remote
+
+    path = module_path(params["field"])
+    try:
+        module = adapter.cfg_lookup(str(params["tab_id"])).read_module(path)
+    except CfgPreconditionError as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
+    return {"value": module.value, "mode": module.mode, "source": module.source}
+
+
+def h_tab_use_inline(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Convert a module through guarded resource write and return its Form view."""
+    from ..cfg_observation import cfg_error_to_remote
+    from ..form_observation import observe_form
+
+    path = module_path(params["field"])
+    try:
+        resource = adapter.cfg_lookup(str(params["tab_id"]))
+        resource.use_inline(path)
+    except (CfgInputError, CfgPreconditionError) as exc:
+        raise cfg_error_to_remote(exc) from exc
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
+        ) from exc
+    return dict(observe_form(resource))

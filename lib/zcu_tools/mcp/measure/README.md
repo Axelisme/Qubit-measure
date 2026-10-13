@@ -38,6 +38,12 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 `read_field` 回傳具名 RecipeFormField。input 保留 Form JSON，input_present 區分未填與 null。value 是 ordinary leaf 或 subtree，不能作為有效性的證明。mode 是 key、inline 或 None，key 是實際 library key 或 None。locked 與 fields 來自公開 Form schema，errors 包含絕對 path/message。DTO 不含 CfgSchema kind 或 ref 子欄位 readonly 投影。Inline 路徑包含 module，例如 `modules.readout.module.pulse_cfg.freq`。Range 使用 start、stop、n，set_sweep 的公開 expts 寫入 n。
 
+`RecipeTab.read_module(field)` 回傳具名 RecipeModuleValues，含 detached value、key／inline mode 與 source。Key mode 讀 Reset 的固定 library capture，source 是 library:<key>。Inline mode 只求該欄位的值，source 是 dotted core module path。其他欄位 invalid 不擋讀取，該 module 自身 invalid 才拒絕。值不含 extras lowering、整份 cfg 驗證或 native to_cfg。
+
+`use_inline(field)` 請 owner 從 captured library 建立 inline input。缺 library／key 用 Template fallback，沒有 Template 則留 editable blank。Resource 保留 locks，先檢查 holder、busy、lifetime 和通知重入 guard，再以一次 public write 發布。已有 inline input 不變。Caller 之後用 set 寫入 module 葉，不自己組 envelope。
+
+`retain_module_source(field, summary_field=..., value_path=...)` 記錄通用 scalar projection 及 module source。summary_field 使用 dotted inline 葉路徑；key mode 也用相同身分，即使 input 沒有該葉。value_path 是 module-relative path，不含 inline envelope。Run 讀目前 scalar 值，保留數字而非 library key 或整個 module。無效 projection 不記成功前綴。後續 set 的來源可取代 label，既有 Run capture 不變。Frequency／linewidth policy 仍由 caller 決定。
+
 Recipe 將既有 GUI 操作串成有界實驗流程，不在 MCP 複製實驗核心或 cfg defaults。參數來源、缺參數與分析分支由個別 recipe 宣告。首次呼叫等待最多 300 秒；缺參數、失敗或互動需求會提早交付。仍執行時回傳 execution，背景接續不因等待逾時而停止。
 
 `onetone_spectrum_over_flux` 必填 `flux_device`、`flux_unit`、`flux_range` 與 `flux_points`，都不能為 null。Range 保留兩個 native endpoints，不換算數字。Unit 必須與 cached device snapshot 相同，native 也必須明填。Helper 成功後寫 cfg 的 dev.flux_dev 與独立 flux_unit，不把 unit 附在 sweep 上。其他不符情境在 Run 前拒絕，不由 recipe 連裝置或修改共用安全規則。
