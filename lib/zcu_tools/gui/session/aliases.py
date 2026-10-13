@@ -134,11 +134,23 @@ class AliasTable:
         requires a component matching a fnmatch pattern for component consumers.
         Unknown aliases, unbound links, unreadable fields, non-name link
         targets and wrong kinds raise RoleResolutionError naming the requested
-        alias. No same-named concrete component substitutes for an alias.
+        alias. Its message names $alias; unknown and unbound rows also say what
+        to add or bind in Aliases, naming the empty row a link chain ends at.
+        Its reason stays "Unknown alias" or "Alias is not bound" for those two
+        cases. No same-named concrete component substitutes for an alias.
         """
         name = self._resolve_name(alias, point, kind=kind)
         if name is None:
-            raise RoleResolutionError(alias, None, kind, "Alias is not bound")
+            root = self._link_chain(alias)[-1].alias
+            message = (
+                f"${alias} is not bound: bind it in Aliases"
+                if root == alias
+                else f"${alias} is not bound: it links to ${root}, which is "
+                f"unbound; bind ${root} in Aliases"
+            )
+            raise RoleResolutionError(
+                alias, None, kind, "Alias is not bound", message=message
+            )
         return name
 
     def names(
@@ -165,22 +177,22 @@ class AliasTable:
     def _resolve_name(
         self, alias: str, point: PointDocument, *, kind: str | None = None
     ) -> str | None:
-        authored = {row.alias: row.value for row in self._rows}
-        if alias not in authored:
-            raise RoleResolutionError(alias, None, None, "Unknown alias")
-        # Validated links always move to an earlier row, so no cycle machinery is needed.
-        links: list[tuple[str, str]] = []
-        current = alias
-        value = authored[current]
-        while value.startswith("$"):
-            dependency, suffix = value[1:].split(".", 1)
-            links.append((current, suffix))
-            current = dependency
-            value = authored[current]
-        if not value:
+        if all(row.alias != alias for row in self._rows):
+            raise RoleResolutionError(
+                alias,
+                None,
+                None,
+                "Unknown alias",
+                message=f"${alias} is not defined: add it in Aliases",
+            )
+        chain = self._link_chain(alias)
+        name = chain[-1].value
+        if not name:
             return None
-        name = value
-        for referring_alias, suffix in reversed(links):
+        # Read each link's field outward, from the root's name back to alias.
+        for link in reversed(chain[:-1]):
+            referring_alias = link.alias
+            suffix = link.value.split(".", 1)[1]
             try:
                 target = document_value(point, f"{name}.{suffix}")
             except AttributeError as cause:
@@ -189,6 +201,8 @@ class AliasTable:
                     None,
                     None,
                     f"Unreadable link for {referring_alias!r}: {name}.{suffix}",
+                    message=f"${alias} cannot be resolved: {name}.{suffix} is "
+                    f"missing (link in ${referring_alias})",
                 ) from cause
             if not isinstance(target, str) or not _public_identifier(target):
                 raise RoleResolutionError(
@@ -196,6 +210,8 @@ class AliasTable:
                     None,
                     None,
                     f"Link for {referring_alias!r} must name a component or device",
+                    message=f"${alias} cannot be resolved: {name}.{suffix} must "
+                    f"name a component or device (link in ${referring_alias})",
                 )
             name = target
         component = point.components.get(name)
@@ -203,9 +219,29 @@ class AliasTable:
             component is None or not fnmatchcase(component.kind, kind)
         ):
             raise RoleResolutionError(
-                alias, None, kind, f"Alias targets wrong-kind component {name!r}"
+                alias,
+                None,
+                kind,
+                f"Alias targets wrong-kind component {name!r}",
+                message=f"${alias} resolves to {name!r}, which is not a "
+                f"component of kind {kind!r}",
             )
         return name
+
+    def _link_chain(self, alias: str) -> tuple[AliasRow, ...]:
+        """Return the rows alias's $ links pass through, alias's own row first.
+
+        Each row but the last holds a $ link to the next row; the last (the
+        root, possibly alias itself) holds a concrete name or is empty. alias
+        must name an authored row.
+        """
+        rows = {row.alias: row for row in self._rows}
+        chain = [rows[alias]]
+        # Validated links always move to an earlier row, so no cycle machinery is needed.
+        while chain[-1].value.startswith("$"):
+            dependency = chain[-1].value[1:].split(".", 1)[0]
+            chain.append(rows[dependency])
+        return tuple(chain)
 
 
 def _public_identifier(text: str) -> bool:

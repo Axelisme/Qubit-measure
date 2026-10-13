@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from zcu_lab.v2.singleshot.ge.gui import GEPostAnalyzeParams
+from tests.gui.app.measure._synthetic import EmptyParams
 
 from ._helpers import dispatch_handler as _dispatch
 
@@ -34,7 +34,7 @@ _DEFAULT = object()
 
 def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
     if post_params is _DEFAULT:
-        post_params = GEPostAnalyzeParams()
+        post_params = EmptyParams()
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
     ctrl.get_tab_snapshot.return_value = _snapshot(
@@ -61,7 +61,7 @@ def test_start_with_primary_result_starts_op():
     }
     ctrl.start_post_analyze.assert_called_once()
     args, _ = ctrl.start_post_analyze.call_args
-    assert args == ("t", GEPostAnalyzeParams())
+    assert args == ("t", EmptyParams())
 
 
 def test_start_without_primary_result_fast_fails():
@@ -101,7 +101,7 @@ def test_start_invalid_update_field_rejected():
 def test_get_params_serializes_dataclass():
     ctrl = _ctrl()
     res = _dispatch(ctrl, "tab.get_post_analyze_params", {"tab_id": "t"})
-    assert res["post_analyze_params"] == asdict(GEPostAnalyzeParams())
+    assert res["post_analyze_params"] == asdict(EmptyParams())
 
 
 # ---------------------------------------------------------------------------

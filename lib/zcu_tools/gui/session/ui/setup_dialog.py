@@ -146,6 +146,50 @@ class SetupDialog(QDialog):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
+        left_layout.addWidget(self._build_entry_group())
+
+        left_layout.addWidget(self._build_point_list(), stretch=1)
+
+        left_layout.addWidget(self._build_new_point_group())
+
+        # project status label
+        splitter.addWidget(left_widget)
+
+        splitter.addWidget(self._build_connection_panel())
+
+        splitter.setSizes([450, 450])
+
+        # ── Close button ─────────────────────────────────────────────────
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(self.reject)
+        # Full-width status keeps long project messages to as few lines as possible.
+        self._project_status = _wrapping_label("setup_status")
+        root_layout.addWidget(self._project_status)
+        root_layout.addWidget(btn_box)
+
+        # initialise
+        self._refresh_entries()
+        self._prefill_from_preferences()
+        self._refresh_device_list()
+        self._refresh_context_list()
+        self._maybe_show_current_cfg()
+
+        # EventBus subscriptions for live updates
+        from zcu_tools.gui.session.events import (
+            ContextSwitchedPayload,
+            DeviceChangedPayload,
+            SocChangedPayload,
+        )
+
+        bus = controller.get_bus()
+        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
+        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
+        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
+        self._bus_subs_active = True
+        self.finished.connect(self._cleanup_bus_subscriptions)
+        self.destroyed.connect(self._cleanup_bus_subscriptions)
+
+    def _build_entry_group(self) -> QGroupBox:
         # Entry binding is explicit; changing the selection only edits the form.
         entry_group = QGroupBox("Result entry")
         entry_form = QFormLayout(entry_group)
@@ -181,8 +225,9 @@ class SetupDialog(QDialog):
         entry_form.addRow(
             "Database:", self._path_row(self._database_path, self._database_open)
         )
-        left_layout.addWidget(entry_group)
+        return entry_group
 
+    def _build_point_list(self) -> QGroupBox:
         # context list
         ctx_group = QGroupBox("Working points")
         ctx_layout = QVBoxLayout(ctx_group)
@@ -205,8 +250,9 @@ class SetupDialog(QDialog):
         self._switch_btn.clicked.connect(self._on_switch_clicked)
         switch_row.addWidget(self._switch_btn)
         ctx_layout.addLayout(switch_row)
-        left_layout.addWidget(ctx_group, stretch=1)
+        return ctx_group
 
+    def _build_new_point_group(self) -> QGroupBox:
         # new context
         new_group = QGroupBox("New working point")
         new_form = QFormLayout(new_group)
@@ -240,11 +286,9 @@ class SetupDialog(QDialog):
         self._new_ctx_btn = QPushButton("Create")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
         new_form.addRow("", self._new_ctx_btn)
-        left_layout.addWidget(new_group)
+        return new_group
 
-        # project status label
-        splitter.addWidget(left_widget)
-
+    def _build_connection_panel(self) -> QWidget:
         # ── Right panel: Connection ──────────────────────────────────────
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -289,39 +333,7 @@ class SetupDialog(QDialog):
         right_layout.addWidget(self._cfg_text, stretch=1)
 
         right_layout.addStretch()
-        splitter.addWidget(right_widget)
-
-        splitter.setSizes([450, 450])
-
-        # ── Close button ─────────────────────────────────────────────────
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btn_box.rejected.connect(self.reject)
-        # Full-width status keeps long project messages to as few lines as possible.
-        self._project_status = _wrapping_label("setup_status")
-        root_layout.addWidget(self._project_status)
-        root_layout.addWidget(btn_box)
-
-        # initialise
-        self._refresh_entries()
-        self._prefill_from_preferences()
-        self._refresh_device_list()
-        self._refresh_context_list()
-        self._maybe_show_current_cfg()
-
-        # EventBus subscriptions for live updates
-        from zcu_tools.gui.session.events import (
-            ContextSwitchedPayload,
-            DeviceChangedPayload,
-            SocChangedPayload,
-        )
-
-        bus = controller.get_bus()
-        bus.subscribe(ContextSwitchedPayload, self._on_bus_context_switched)
-        bus.subscribe(SocChangedPayload, self._on_bus_soc_changed)
-        bus.subscribe(DeviceChangedPayload, self._on_bus_device_changed)
-        self._bus_subs_active = True
-        self.finished.connect(self._cleanup_bus_subscriptions)
-        self.destroyed.connect(self._cleanup_bus_subscriptions)
+        return right_widget
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:

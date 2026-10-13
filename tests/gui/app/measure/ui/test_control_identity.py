@@ -70,12 +70,12 @@ from zcu_tools.resources.waveform_assets import FormulaRecipe
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 from tests.gui.app.measure.ui._qt_interactions import modal_action, wait_until
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import ResonatorSchema
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 

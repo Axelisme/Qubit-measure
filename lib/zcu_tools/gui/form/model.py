@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from pydantic_core import PydanticCustomError
 
 from zcu_tools.cfg_model import ModuleSpec
-from zcu_tools.device import DeviceInfo
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot
 
@@ -41,10 +41,22 @@ type FormValue = (
 class Display:
     """Presentation metadata carried by Annotated fields.
 
-    label overrides the field-name label. description explains the input; unit
+    label overrides the field title (a model section's default title is its
+    field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
     is its display unit and placeholder is an input hint. None leaves each
     item unspecified. collapsed is an initial fold hint only for model fields.
-    Declaration order sets order; nested models set groups. No layout registry.
+    decimals is how many digits a float field shows after the decimal point,
+    rounded with trailing zeros trimmed; None shows the full value. It never
+    rounds input. A negative count raises ValueError here; input_schema raises
+    ValueError when the field is not a float. hidden=True keeps the field out
+    of the editor only: its value and defaults stay in the input, it is still
+    validated, and the input schema still lists it. group names a foldable
+    display group within the field's model level, such as "Advanced"; the
+    input schema marks the field with x-form-group and the editor draws the
+    level's groups after its ungrouped fields. None leaves the field
+    ungrouped; an empty name raises ValueError here. Groups never change
+    validation, defaults, choices or input.
+    Declaration order sets order; nested models set sections. No layout registry.
     """
 
     label: str | None = None
@@ -52,6 +64,16 @@ class Display:
     unit: str | None = None
     placeholder: str | None = None
     collapsed: bool = False
+    decimals: int | None = None
+    hidden: bool = False
+    group: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject a negative decimals count or an empty group with ValueError."""
+        if self.decimals is not None and self.decimals < 0:
+            raise ValueError(f"Display decimals must be >= 0, got {self.decimals}")
+        if self.group == "":
+            raise ValueError("Display group must be a nonempty name or None")
 
 
 @dataclass(frozen=True)
@@ -61,7 +83,9 @@ class FormEnv:
     parameters is the host's fixed ParameterContext, or None for source-free
     input and arithmetic. Parameter expressions use native point/library paths.
     library is the fixed LibrarySnapshot, or None when unused. devices maps
-    host device names to captured native DeviceInfo, or is empty when unused.
+    host device names to captured detached BaseDeviceInfo snapshots, including
+    custom driver infos, or is empty when unused. Shared tools read only the
+    names; a form that needs driver-specific fields narrows with isinstance.
     The frozen shell does not make these borrowed objects deeply immutable.
     Tools never mutate, load, refresh or poll them. A used missing capability
     fails with its field path, rather than being treated as an unfilled value.
@@ -69,7 +93,7 @@ class FormEnv:
 
     parameters: ParameterContext | None = None
     library: LibrarySnapshot | None = None
-    devices: Mapping[str, DeviceInfo] = field(default_factory=dict)
+    devices: Mapping[str, BaseDeviceInfo] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -118,6 +142,22 @@ class FormChange:
     value: FormValue
 
 
+class WriteRejected(Exception):
+    """A host's write entry point refuses one input batch it will not install.
+
+    message is the human-readable reason, written by the host, that the user
+    sees at the edited field. Raise it before writing any of the batch, so the
+    state is unchanged; for example for an unknown captured key. Values the
+    model would reject belong in state instead, where result reports them.
+    Core FormState never raises this type.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Store message as both the exception text and the message field."""
+        super().__init__(message)
+        self.message = message
+
+
 def field_error(path: FormPath, message: str) -> PydanticCustomError:
     """Return an error to raise in a Pydantic model_validator.
 
@@ -133,8 +173,9 @@ def field_error(path: FormPath, message: str) -> PydanticCustomError:
 class FormModel(BaseModel):
     """Ordinary values with typed class-level input hooks.
 
-    Override defaults for initial and branch defaults (including Expr), and
-    choices for dynamic path-to-options mappings. default_input is final.
+    Override defaults for initial and branch defaults (an Expr default is
+    evaluated into its value), and choices for dynamic path-to-options
+    mappings. default_input is final.
     No instances carry input, environment, revision or editing state. Ordinary
     nested BaseModel types remain supported without inheriting FormModel.
     """
@@ -147,14 +188,26 @@ class FormModel(BaseModel):
         """Build isolated input from declared defaults; required keys stay absent.
 
         Calls defaults(env, {}) before checking sources and assembling input.
-        defaults may include Expr/complex JSON. Used missing library or
-        device sources raise field_error with the consuming path. No I/O occurs.
+        Used missing library or device sources raise field_error with the
+        consuming path. A text-field {"expr": text} default (int, float,
+        complex or str, a choice leaf included) is evaluated once with
+        env.parameters and stored as its direct value, so the input holds no
+        envelope for it; later source changes need a new default_input. When
+        that expression fails (missing path, unbound alias, non-numeric value)
+        or its value is invalid for the field, the field is left unfilled: a
+        required field then reports only "Field required" from result, and a
+        field with a static Pydantic default validates with it. Other
+        evaluation exceptions, such as unavailable captured sources, propagate.
+        Complex JSON tags stay as they are, and so does an envelope on a
+        Literal, Enum, bool or library-key leaf, which result then reports
+        at that leaf. No I/O occurs.
         """
+        from ._evaluate import evaluate_defaults
         from ._sources import check_sources
 
         data = cls.defaults(env, {})
         check_sources(cls, data, env)
-        return FormInput(cls, data)
+        return FormInput(cls, evaluate_defaults(cls, data, env))
 
     @classmethod
     def defaults(
@@ -166,6 +219,10 @@ class FormModel(BaseModel):
         defaults and leaves required keys absent; it does not validate a partial
         model or replace missing keys with None. Domain factories may use env
         and previous; source failures propagate with the consuming field path.
+        A text-field leaf may be {"expr": text} to derive its initial value from
+        env, such as {"expr": "$flux_dev"}; default_input and branch switches
+        evaluate it into a direct value (see default_input), so it never stays
+        in input as an expression.
         """
         from ._structure import static_defaults
 
@@ -184,9 +241,9 @@ class FormModel(BaseModel):
         another field that reuses the same nested model. When enclosing and
         nested FormModels declare options for the same leaf, the deepest local
         declaration wins, including empty options. Nonoverlapping enclosing
-        options remain in effect. Numeric/complex leaves permit a well-formed
-        arithmetic Expr; result validates its evaluated
-        value against choices. The reused evaluator does not return strings.
+        options remain in effect. A choice leaf takes one of its options,
+        not an Expr envelope: input_schema gives it no Expr alternative and
+        result reports an envelope there without evaluating it.
         Empty options for one declared path permit no value. Consumers needing
         an absent captured device/library source raise field_error at that path.
         """
@@ -196,14 +253,43 @@ class FormModel(BaseModel):
     def input_schema(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Describe accepted input without constructing editing state.
 
-        Include Expr alternatives for numeric, complex and string value leaves,
-        the shared complex tag, Field constraints, Display metadata and current
-        choices enums. Structural selectors accept only ordinary typed tags,
+        Include an Expr alternative ({"expr": text}) for each text field: an
+        int, float, complex or str value leaf. Leaves whose values are picked
+        get none: Literal and Enum (schema enum/const), bool, leaves with
+        current choices, the key of a str-or-model field and a ModuleRef
+        name. Include the shared complex tag, Field constraints, Display metadata and current
+        choices enums. Display decimals and hidden appear only where declared.
+        A model field without a Display label is titled by its field name,
+        underscores as spaces and only the first letter capitalized. A model
+        reached without a union selector keeps its one-value structural tag
+        marked hidden: the tag field of a tagged-union branch that this form,
+        ModuleInput or RangeInput declares for the model or a base class.
+        Structural selectors accept only ordinary typed tags,
         never Expr envelopes. Each tagged
         oneOf branch has x-form-discriminator-values: its intrinsic Literal
-        tags as ordinary JSON values, independent of current choices. This
+        tags as ordinary JSON values, independent of current choices. Each
+        branch reachable through model fields is one concrete model; a named
+        nested union tagged on the same key expands into its members. An
+        untagged str-or-model field (str | Model, Model possibly a tagged
+        union) uses the JSON type as its structural selector: its string branch
+        is a plain library key without Expr, and its object branch is the
+        inline model. With a captured library, that string branch's
+        x-form-library-keys lists the library keys whose Spec is one of the
+        field's models; they are suggestions, not choices. Its field node
+        is marked x-form-key-or-inline: true. A ModuleInput field (not
+        nullable) has the same marker on its tagged node: its ref branch
+        holds the key in name and its inline branch the module. With a
+        captured library, the ref branch's name property lists in
+        x-form-library-keys every library module key, since the inline
+        ModuleSpec accepts every module type; when choices declare options
+        for that name, only the module keys among them. Without a captured
+        library the list is absent. Any string key remains acceptable
+        input; a missing key fails the source check at the name. This
         schema describes partial JSON input, not just a valid model. Domain
         source failures from choices propagate; no refresh or file access occurs.
+        A field whose union mixes text members (int, float, complex, str)
+        with picked members (Literal, Enum, bool) raises ValueError naming
+        its path: no control both types and picks a value.
         """
         from ._schema import input_schema
 
@@ -216,9 +302,10 @@ class FormInput[F: FormModel]:
     def __init__(self, model: type[F], data: Mapping[str, JsonValue]) -> None:
         """Copy JSON input for model; do not require model validity.
 
-        Missing keys remain missing and None remains explicit null. Numeric,
-        complex and string value expressions use {"expr": text}; ordinary strings
-        remain literal. Complex literals use {"__complex__": [re, im]}.
+        Missing keys remain missing and None remains explicit null. Text-field
+        expressions (int, float, complex and str leaves; see
+        FormModel.input_schema) use {"expr": text}; ordinary strings remain
+        literal. Complex literals use {"__complex__": [re, im]}.
         Structural selectors require ordinary typed tags, not Expr envelopes.
         Non-JSON/nonfinite data raises ValueError; unknown fields, malformed tags
         and invalid values remain input for result/compatible restoration.
@@ -286,7 +373,9 @@ class FormState[F: FormModel]:
         """Install one input batch, keeping model-invalid drafts editable.
 
         Discriminator changes apply first: use the new branch's defaults(env,
-        previous), then inherit old same-name fields except the discriminator.
+        previous), with Expr defaults evaluated as in default_input, then
+        inherit old same-name fields (authored expressions stay expressions)
+        except the discriminator.
         Apply all remaining leaf writes afterwards, so explicitly supplied
         content wins. Required fields without defaults stay absent. Writes use
         model-field leaf paths. Sequences and typed mappings are whole leaves;
@@ -296,6 +385,11 @@ class FormState[F: FormModel]:
         model creates its static defaults object before applying the leaf.
         Nullable model sections accept None or an object to deactivate/activate;
         an explicit null section requires object activation before child edits.
+        A str-or-model field takes a string key as an ordinary leaf. Writing {}
+        there switches a key or unfilled value to the inline model's defaults
+        (a tagged inline union starts at its first branch and tag) and leaves
+        an inline object unchanged; the old key is never converted. Other
+        whole objects are model replacement and raise ValueError.
         Structurally unknown or overlapping paths raise ValueError without
         installing a partial batch.
         Ordinary invalid values/Expr are retained for result to report. Missing
@@ -321,9 +415,15 @@ class FormState[F: FormModel]:
         """Evaluate/decode input and validate its model, without editing input.
 
         Reuse the scalar evaluator with env.parameters and the existing complex codec.
-        Validate dynamic choices and Pydantic types/ranges/cross-field rules.
+        Only text fields evaluate {"expr": text}. An envelope on a choice leaf
+        is an error at that leaf; on a Literal, Enum, bool or library-key
+        leaf it is ordinary input that Pydantic rejects there. Neither is
+        evaluated. Validate dynamic choices and Pydantic
+        types/ranges/cross-field rules.
         Return a model or path-directed errors, including a used missing source;
         ordinary model-wide errors use (). Each call uses the supplied env.
+        Input at a field whose union mixes text and picked members raises
+        ValueError naming its path, as input_schema does.
         """
         from ._evaluate import result
 
@@ -417,25 +517,33 @@ class FormState[F: FormModel]:
         and type-incompatible leaves, but keep range/cross-field-invalid values
         so result can report them. Untagged model unions select a branch only
         when saved field names and raw value types match exactly one member;
-        valid expression envelopes count as compatible for expression-capable
-        fields without evaluation. Zero or multiple matches discard that subtree,
+        valid expression envelopes count as compatible for text fields without
+        evaluation; on a Literal, Enum, bool or library-key leaf an envelope
+        is incompatible and dropped. Choice leaves are not checked here. Zero or multiple matches discard that subtree,
         never select the first branch. Tagged selection/defaults stay unchanged.
         This is not legacy format support. Branch
         writes use the same discriminator-first order as write. A saved object
         without a discriminator overlays the current selected branch, retaining
         its tag and unsaved defaults; an empty object makes no change. If neither
         saved nor current input selects a branch, drop that object instead of
-        replacing the model section. Source failures retain their consuming
-        path; a changed restoration notifies once.
+        replacing the model section. A restored leaf whose captured source check
+        fails, such as a ref name absent from env.library or any ref without a
+        captured library, keeps the current input at that leaf (or stays unfilled
+        when current has none) and its leaf path is returned with the other
+        dropped paths. Source failures that no restored leaf causes, such as a
+        used static default or a model-wide error, raise PydanticCustomError
+        without installing. A changed restoration notifies once.
         """
         from ._json import copy_object
-        from ._sources import check_sources
+        from ._sources import drop_unmatched_sources
         from ._structure import restore
 
-        candidate, dropped = restore(self._model, self._data, copy_object(saved), env)
-        check_sources(self._model, candidate, env)
+        restored, dropped = restore(self._model, self._data, copy_object(saved), env)
+        candidate, unmatched = drop_unmatched_sources(
+            self._model, restored, self._data, env
+        )
         self._install(candidate)
-        return dropped
+        return (*dropped, *unmatched)
 
 
 class LinRange(FormModel):

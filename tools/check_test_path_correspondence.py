@@ -33,6 +33,7 @@ RESERVED_SEGMENTS: Final = frozenset({"contract", "parity"})
 _DEFAULT_SOURCE_ROOT: Final = PurePosixPath("lib/zcu_tools")
 _SOURCE_ROOT_OVERRIDES: Final = {
     "migrations": PurePosixPath("migrations"),
+    "mcp_servers": PurePosixPath("mcp_servers"),
     "scripts": PurePosixPath("scripts"),
     "tools": PurePosixPath("tools"),
     "zcu_lab": PurePosixPath("zcu_lab"),

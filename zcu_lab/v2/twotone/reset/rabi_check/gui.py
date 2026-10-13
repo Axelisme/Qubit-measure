@@ -19,15 +19,16 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.cfg import (
     SweepValue,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
+from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.rabi_check.core import (
     RabiCheckCfg,
     RabiCheckExp,
@@ -120,7 +121,9 @@ class RabiCheckAdapter(
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
         return (
-            MeasureCfgBuilder()
+            MeasureCfgBuilder(
+                role_factories=ROLE_FACTORIES,
+            )
             .reset(optional=True)
             .pulse("rabi_pulse", role_id="pi_pulse", label="Rabi Pulse")
             .reset("tested_reset", role_id="reset", label="Tested Reset")

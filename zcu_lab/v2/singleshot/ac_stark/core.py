@@ -10,6 +10,11 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from pydantic import field_serializer
 from zcu_tools.analysis.fitting import fitlor
+from zcu_tools.analysis.singleshot import (
+    calc_populations,
+    correct_populations,
+    raw_population_signal,
+)
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     IDENTITY,
@@ -34,12 +39,6 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.process import minus_background
-
-from zcu_lab.v2._support.singleshot.util import (
-    calc_populations,
-    correct_populations,
-    raw_population_signal,
-)
 
 
 def _default_population_states() -> NDArray[np.int64]:

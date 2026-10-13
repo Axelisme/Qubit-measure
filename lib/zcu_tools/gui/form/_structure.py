@@ -13,8 +13,8 @@ from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
-from ._json import copy_json, copy_object, default_json
-from .model import FormEnv, FormModel, FormPath, FormWritePath
+from ._json import copy_json, copy_object, default_json, expr_text
+from .model import FormEnv, FormModel, FormPath, FormWritePath, ModuleRef
 
 
 def unwrap(annotation: object) -> object:
@@ -38,24 +38,51 @@ def alternatives(annotation: object) -> tuple[object, ...]:
     return (annotation,)
 
 
-def accepts_expression(annotation: object) -> bool:
-    """Accept numeric and string value annotations, including string choices.
+def accepts_expression(annotation: object, path: FormPath) -> bool:
+    """Whether a value leaf of this annotation is a text field taking Expr input.
 
-    Literal strings and string Enum values still undergo Pydantic validation
-    after evaluation. Nullable wrappers do not change expression support.
+    This is the core's one text-field rule: the input schema offers an Expr
+    alternative, and decode, defaults evaluation and compatible restore
+    accept an Expr envelope, exactly where it returns True. Union members
+    are text values (int, float, complex, str), typed into a text field, or
+    picked values (Literal, Enum, bool), chosen from a dropdown or checkbox.
+    A text field has a text member and no picked member, possibly nullable.
+    A str-or-model key (see key_or_inline) is not a text field: an Expr
+    envelope is an object, and an object selects the inline model. Two
+    leaves this annotation check cannot see are not text fields either: a
+    leaf with declared choices (by path) and a ModuleRef name (see
+    library_key).
+
+    path is the leaf's field path, used only in the error. A union with both
+    text and picked members raises ValueError naming path: the editor has no
+    control that types a value and picks one.
     """
-    return any(
-        item is int
-        or item is float
-        or item is complex
-        or item is str
-        or (
-            get_origin(item) is Literal
-            and any(isinstance(tag, str) for tag in get_args(item))
-        )
-        or (isinstance(item, type) and issubclass(item, str) and issubclass(item, Enum))
-        for item in alternatives(annotation)
+    members = alternatives(annotation)
+    picked = any(
+        get_origin(item) is Literal
+        or item is bool
+        or (isinstance(item, type) and issubclass(item, Enum))
+        for item in members
     )
+    text = any(
+        item is int or item is float or item is complex or item is str
+        for item in members
+    )
+    if text and picked:
+        dotted = ".".join(str(part) for part in path)
+        raise ValueError(
+            f"{dotted}: a union of text and picked values is not supported"
+        )
+    return text and not key_or_inline(annotation)
+
+
+def library_key(model: type[BaseModel], name: str) -> bool:
+    """Whether field name of model holds a library key: a ModuleRef's name.
+
+    A library key is a plain string, never an Expr envelope, like the key
+    of a str-or-model field.
+    """
+    return issubclass(model, ModuleRef) and name == "name"
 
 
 def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -67,11 +94,32 @@ def model_types(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
+def key_or_inline(annotation: object) -> bool:
+    """Whether annotation is an untagged union of str and model branches.
+
+    Its JSON type is the structural selector: a string is a library key and
+    an object is the inline model, a sole model or one branch of a tagged union.
+    """
+    return str in alternatives(annotation) and bool(model_types(annotation))
+
+
 def discriminator(info: FieldInfo) -> str | None:
-    """Read a string tag through aliases/nullable wrappers; absent tags return None."""
+    """Read a string tag through aliases/nullable wrappers; absent tags return None.
+
+    A str-or-model union reads the tag of its inline part, so an inline
+    object selects its tagged branch like any tagged model field.
+    """
     if isinstance(info.discriminator, str):
         return info.discriminator
-    annotation = info.annotation
+    return union_tag(info.annotation)
+
+
+def union_tag(annotation: object) -> str | None:
+    """Read the string tag declared in annotation itself, as discriminator does.
+
+    Use this for an annotation outside a model field, such as a union alias;
+    a field's own Field(discriminator=...) needs discriminator(info).
+    """
     while True:
         annotation = _expand_alias(annotation)
         origin = get_origin(annotation)
@@ -88,6 +136,9 @@ def discriminator(info: FieldInfo) -> str | None:
             members = tuple(
                 item for item in get_args(annotation) if item is not type(None)
             )
+            if str in members and len(members) > 1:
+                # The key alternative selects no branch; the inline part may.
+                members = tuple(item for item in members if item is not str)
             if len(members) == 1:
                 annotation = members[0]
                 continue
@@ -149,6 +200,55 @@ def selected(info: FieldInfo, value: JsonValue) -> type[BaseModel] | None:
     return None
 
 
+def branch_tags(roots: tuple[object, ...]) -> dict[type[BaseModel], str]:
+    """Map each tagged-union branch model reachable from roots to its tag key.
+
+    roots are annotations, such as a form class or a tagged-union alias. Model
+    fields are followed through every reached model, so a union nested in a
+    branch (a module's waveform) contributes too; sequence and mapping items
+    are not followed. A model branched on several keys keeps the first found.
+    """
+    tags: dict[type[BaseModel], str] = {}
+    seen: set[type[BaseModel]] = set()
+    # Each pending item is an annotation with the tag key that selects it.
+    pending = [(root, union_tag(root)) for root in roots]
+    while pending:
+        annotation, key = pending.pop()
+        for model in model_types(annotation):
+            if key is not None:
+                tags.setdefault(model, key)
+            if model not in seen:
+                seen.add(model)
+                pending.extend(
+                    (info.annotation, discriminator(info))
+                    for info in model.model_fields.values()
+                )
+    return tags
+
+
+def fixed_tag(
+    model: type[BaseModel], tags: Mapping[type[BaseModel], str]
+) -> str | None:
+    """Return model's one-value structural tag field, or None.
+
+    tags is a branch_tags result. The first class in model's MRO that tags
+    lists gives the tag key, so a subclass of a branch keeps its tag. Return
+    that key when model's field under it is a Literal of exactly one value;
+    return None for an unlisted model or a tag field with several values.
+    """
+    key = next(
+        (
+            tags[base]
+            for base in model.__mro__
+            if issubclass(base, BaseModel) and base in tags
+        ),
+        None,
+    )
+    if key is None or len(_tag(model, key)) != 1:
+        return None
+    return key
+
+
 def choice_fields(model: type[BaseModel], path: FormPath) -> tuple[FieldInfo, ...]:
     """Resolve a declared model-field leaf path across possible model branches.
 
@@ -193,7 +293,9 @@ def _branch_defaults(
     model: type[BaseModel], env: FormEnv, previous: Mapping[str, JsonValue]
 ) -> dict[str, JsonValue]:
     if issubclass(model, FormModel):
-        return copy_object(model.defaults(env, copy_object(previous)))
+        from ._evaluate import evaluate_defaults
+
+        return evaluate_defaults(model, model.defaults(env, copy_object(previous)), env)
     return static_defaults(model)
 
 
@@ -265,6 +367,52 @@ def _switch(
     return True
 
 
+def _switch_inline(
+    model: type[BaseModel],
+    data: dict[str, JsonValue],
+    path: FormWritePath,
+    value: JsonValue,
+    env: FormEnv,
+) -> bool:
+    """Treat {} at a str-or-model field as the switch to its inline model.
+
+    A key or unfilled value becomes the inline defaults; an inline object
+    stays unchanged. Other values return False and remain leaf writes.
+    """
+    if value != {}:
+        return False
+    parent, key, info = _field_at(model, data, path)
+    if not key_or_inline(info.annotation):
+        return False
+    if not isinstance(parent.get(key), dict):
+        parent[key] = _inline_defaults(info, env, path)
+    return True
+
+
+def _inline_defaults(
+    info: FieldInfo, env: FormEnv, path: FormWritePath
+) -> dict[str, JsonValue]:
+    """Defaults of a str-or-model field's inline model, never its old key.
+
+    A tagged inline union starts at its first declared branch and tag. An
+    untagged choice between several models has no default branch and raises.
+    """
+    branch, *others = model_types(info.annotation)
+    tag_key = discriminator(info)
+    if others and tag_key is None:
+        raise ValueError(f"Ambiguous untagged inline model at path {path!r}")
+    try:
+        new = _branch_defaults(branch, env, {})
+    except PydanticCustomError as exc:
+        from ._sources import prefix_error
+
+        raise prefix_error(exc, path) from exc
+    if tag_key is not None:
+        tag = _tag(branch, tag_key)[0]
+        new[tag_key] = default_json(tag.value if isinstance(tag, Enum) else tag)
+    return new
+
+
 def build_candidate(
     model: type[BaseModel],
     data: dict[str, JsonValue],
@@ -282,8 +430,12 @@ def build_candidate(
     result = copy_object(data)
     pending: dict[FormWritePath, JsonValue] = {}
     for path in sorted(copied, key=len):
-        if not _switch(model, result, path, copied[path], env):
-            pending[path] = copied[path]
+        value = copied[path]
+        if not (
+            _switch(model, result, path, value, env)
+            or _switch_inline(model, result, path, value, env)
+        ):
+            pending[path] = value
     for path, value in pending.items():
         parent, key, info = _field_at(model, result, path)
         _require_leaf(info, value, path)
@@ -326,7 +478,13 @@ def leaves(
     return result
 
 
-def _compatible(info: FieldInfo, value: JsonValue) -> bool:
+def _compatible(info: FieldInfo, value: JsonValue, path: FormPath) -> bool:
+    """Whether value has a shape info's annotation accepts; path names the leaf.
+
+    A union of text and picked values raises ValueError (see
+    accepts_expression).
+    """
+    text_field = accepts_expression(info.annotation, path)
     # Containers are whole leaves, but nested selectors still require ordinary tags.
     tag = discriminator(info)
     if tag is not None and isinstance(value, dict) and isinstance(value.get(tag), dict):
@@ -334,9 +492,9 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
     types = alternatives(info.annotation)
     if value is None:
         return type(None) in types
-    if isinstance(value, dict) and accepts_expression(info.annotation):
-        if set(value) == {"expr"}:
-            return isinstance(value["expr"], str)
+    if isinstance(value, dict) and text_field:
+        if expr_text(value) is not None:
+            return True
         if set(value) == {"__complex__"} and complex in types:
             from zcu_tools.gui.cfg.codec import decode_complex
 
@@ -345,15 +503,15 @@ def _compatible(info: FieldInfo, value: JsonValue) -> bool:
             except ValueError:
                 return False
             return True
-    return any(_compatible_type(t, value) for t in types)
+    return any(_compatible_type(t, value, path) for t in types)
 
 
-def _compatible_type(annotation: object, value: JsonValue) -> bool:
+def _compatible_type(annotation: object, value: JsonValue, path: FormPath) -> bool:
     annotation = unwrap(annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return isinstance(value, dict) and all(
             name in annotation.model_fields
-            and _compatible(annotation.model_fields[name], item)
+            and _compatible(annotation.model_fields[name], item, (*path, name))
             for name, item in value.items()
         )
     if get_origin(annotation) is Literal:
@@ -365,23 +523,23 @@ def _compatible_type(annotation: object, value: JsonValue) -> bool:
         return isinstance(value, bool if annotation is bool else str)
     if get_origin(annotation) in (list, tuple, dict, Mapping):
         return (
-            _compatible_mapping(annotation, value)
+            _compatible_mapping(annotation, value, path)
             if get_origin(annotation) in (dict, Mapping)
-            else _compatible_sequence(annotation, value)
+            else _compatible_sequence(annotation, value, path)
         )
     return False
 
 
-def _compatible_mapping(annotation: object, value: JsonValue) -> bool:
+def _compatible_mapping(annotation: object, value: JsonValue, path: FormPath) -> bool:
     if not isinstance(value, dict):
         return False
-    args = get_args(annotation)
+    item_info = FieldInfo.from_annotation(get_args(annotation)[1])
     return all(
-        _compatible(FieldInfo.from_annotation(args[1]), item) for item in value.values()
+        _compatible(item_info, item, (*path, key)) for key, item in value.items()
     )
 
 
-def _compatible_sequence(annotation: object, value: JsonValue) -> bool:
+def _compatible_sequence(annotation: object, value: JsonValue, path: FormPath) -> bool:
     if not isinstance(value, list):
         return False
     args = get_args(annotation)
@@ -389,10 +547,68 @@ def _compatible_sequence(annotation: object, value: JsonValue) -> bool:
         return True
     if get_origin(annotation) is tuple and args[-1] is not Ellipsis:
         return len(value) == len(args) and all(
-            _compatible(FieldInfo.from_annotation(t), v)
-            for t, v in zip(args, value, strict=True)
+            _compatible(FieldInfo.from_annotation(t), v, (*path, index))
+            for index, (t, v) in enumerate(zip(args, value, strict=True))
         )
-    return all(_compatible(FieldInfo.from_annotation(args[0]), item) for item in value)
+    item_info = FieldInfo.from_annotation(args[0])
+    return all(
+        _compatible(item_info, item, (*path, index)) for index, item in enumerate(value)
+    )
+
+
+def _restore_child_model(
+    info: FieldInfo,
+    current: JsonValue,
+    saved: JsonValue,
+    tag: str | None,
+    path: FormPath,
+) -> type[BaseModel] | None:
+    """Select a saved branch without coercion; omitted tags keep the current branch."""
+    child = selected(info, saved)
+    if child is None and tag is None and isinstance(saved, dict):
+        # Raw shape, not evaluation/Pydantic coercion, identifies an untagged
+        # branch only when exactly one declared model is compatible.
+        matches = tuple(
+            model
+            for model in model_types(info.annotation)
+            if _compatible_type(model, saved, path)
+        )
+        if len(matches) == 1:
+            child = matches[0]
+    if isinstance(saved, dict) and tag is not None and tag not in saved:
+        child = selected(info, current)
+    return child
+
+
+def _restore_branch_seed(
+    child: type[BaseModel],
+    current: JsonValue,
+    saved: dict[str, JsonValue],
+    tag: str | None,
+    env: FormEnv,
+    path: FormPath,
+) -> dict[str, JsonValue]:
+    """Inherit current fields, using branch defaults only when the tag changes."""
+    prior = current if isinstance(current, dict) else {}
+    if tag is None or tag not in saved or saved[tag] == prior.get(tag):
+        return (
+            copy_object(prior) if isinstance(current, dict) else static_defaults(child)
+        )
+    try:
+        seed = _branch_defaults(child, env, prior)
+    except PydanticCustomError as exc:
+        from ._sources import prefix_error
+
+        raise prefix_error(exc, path) from exc
+    seed.update(
+        {
+            name: prior[name]
+            for name in child.model_fields
+            if name != tag and name in prior
+        }
+    )
+    seed[tag] = saved[tag]
+    return seed
 
 
 def _restore_field(
@@ -404,51 +620,18 @@ def _restore_field(
     dropped: list[FormPath],
 ) -> JsonValue:
     tag = discriminator(info)
-    child = selected(info, saved)
-    if child is None and tag is None and isinstance(saved, dict):
-        # Raw shape, not evaluation/Pydantic coercion, identifies an untagged
-        # branch only when exactly one declared model is compatible.
-        matches = tuple(
-            model
-            for model in model_types(info.annotation)
-            if _compatible_type(model, saved)
-        )
-        if len(matches) == 1:
-            child = matches[0]
-    if isinstance(saved, dict) and tag is not None and tag not in saved:
-        child = selected(info, current)
+    child = _restore_child_model(info, current, saved, tag, path)
     if child is not None and isinstance(saved, dict):
         # Structural selectors cannot accept Expr or complex envelopes.
         if tag is not None and isinstance(saved.get(tag), dict):
             dropped.append((*path, tag))
             saved = {name: value for name, value in saved.items() if name != tag}
-        prior = current if isinstance(current, dict) else {}
-        if tag is not None and tag in saved and saved[tag] != prior.get(tag):
-            try:
-                seed = _branch_defaults(child, env, prior)
-            except PydanticCustomError as exc:
-                from ._sources import prefix_error
-
-                raise prefix_error(exc, path) from exc
-            seed.update(
-                {
-                    name: prior[name]
-                    for name in child.model_fields
-                    if name != tag and name in prior
-                }
-            )
-            seed[tag] = saved[tag]
-        else:
-            seed = (
-                copy_object(prior)
-                if isinstance(current, dict)
-                else static_defaults(child)
-            )
+        seed = _restore_branch_seed(child, current, saved, tag, env, path)
         return _restore_model(child, seed, saved, env, path, dropped)
     if isinstance(saved, dict) and model_types(info.annotation):
         dropped.append(path)
         return current
-    if _compatible(info, saved):
+    if _compatible(info, saved, path):
         return copy_json(saved)
     dropped.append(path)
     return current
@@ -465,7 +648,8 @@ def _restore_model(
     for name, value in saved.items():
         path = (*prefix, name)
         info = model.model_fields.get(name)
-        if info is None:
+        if info is None or (library_key(model, name) and isinstance(value, dict)):
+            # A library key is a plain string, so an envelope cannot restore.
             dropped.append(path)
         else:
             previous = current.get(name)
@@ -485,3 +669,46 @@ def restore(
     dropped: list[FormPath] = []
     result = _restore_model(model, copy_object(data), saved, env, (), dropped)
     return result, tuple(dropped)
+
+
+def _object_at(
+    data: dict[str, JsonValue], names: list[str]
+) -> dict[str, JsonValue] | None:
+    for name in names:
+        value = data.get(name)
+        if not isinstance(value, dict):
+            return None
+        data = value
+    return data
+
+
+def revert_leaf(
+    model: type[BaseModel],
+    candidate: dict[str, JsonValue],
+    current: dict[str, JsonValue],
+    path: FormPath,
+) -> FormWritePath | None:
+    """Give the active candidate leaf containing path its current input value.
+
+    path may point inside a whole sequence/mapping leaf; that whole leaf reverts.
+    current is the input before restoration and is not edited. Its value at the
+    same leaf path is copied into candidate in place; when current has none, the
+    leaf key is removed. Return the reverted leaf, or None when no active leaf of
+    candidate contains path (model-wide paths and absent default fields).
+    """
+    leaf = next(
+        (key for key in leaves(model, candidate) if path[: len(key)] == key), None
+    )
+    if leaf is None:
+        return None
+    *parents, name = leaf
+    target = _object_at(candidate, parents)
+    # leaves() descends only through objects; None would mean a traversal bug.
+    if target is None:
+        raise ValueError(f"Active leaf {leaf!r} is not inside input objects")
+    source = _object_at(current, parents)
+    if source is not None and name in source:
+        target[name] = copy_json(source[name])
+    else:
+        del target[name]
+    return leaf

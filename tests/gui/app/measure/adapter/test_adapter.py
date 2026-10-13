@@ -18,6 +18,10 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.adapter.protocol import NoAnalyzeParams
+from zcu_tools.gui.app.measure.schema_builder import (
+    MeasureCfgBuilder,
+    MeasureCfgDefinition,
+)
 from zcu_tools.gui.cfg import (
     CenteredSweepSpec,
     CenteredSweepValue,
@@ -36,11 +40,7 @@ from zcu_tools.gui.cfg import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from zcu_lab.components import QubitSchema, ResonatorSchema, WiringSchema
-from zcu_lab.v2._support.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema, WiringSchema
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,7 +54,7 @@ def _schema(spec_fields: dict, val_fields: dict | None = None) -> CfgSchema:
 
 
 def _empty_cfg_definition() -> MeasureCfgDefinition:
-    return MeasureCfgBuilder().build()
+    return MeasureCfgBuilder(role_factories={}).build()
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:

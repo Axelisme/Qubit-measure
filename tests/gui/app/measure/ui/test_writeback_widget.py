@@ -43,9 +43,8 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
-from zcu_lab.components import ResonatorSchema, WiringSchema
-from zcu_lab.v2.fake.freq.core import FakeFreqRunResult, HangerSimParams
-from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter, FakeFreqAnalyzeParams
+from tests.gui.app.measure._components import ResonatorSchema, WiringSchema
+from tests.gui.app.measure._synthetic import PairAdapter, SampleParams, SampleRun
 
 
 @pytest.fixture
@@ -78,13 +77,12 @@ def _waveform_length_field(service, draft, item_id: str) -> ScalarField:
 
 
 def _make_ctx() -> SessionEnv:
-    simulation = HangerSimParams()
     parameters = parameter_capture(
         {
             "R1": ResonatorSchema(
                 kind="resonator",
-                freq=simulation.freq,
-                kappa=simulation.freq / simulation.Ql,
+                freq=6000.0,
+                kappa=2.0,
                 wiring=WiringSchema(ch=0, ro_ch=0),
                 ext={"time_of_fly": 0.0},
             )
@@ -108,14 +106,14 @@ def _parameter_values(items: list[WritebackItem]) -> dict[str, WritebackValues]:
 
 
 def _default_analyze_params(
-    adapter: FakeFreqAdapter, result: FakeFreqRunResult, ctx: SessionEnv
-) -> FakeFreqAnalyzeParams:
+    adapter: PairAdapter, result: SampleRun, ctx: SessionEnv
+) -> SampleParams:
     return adapter.get_analyze_params(result, ctx)
 
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
-    adapter = FakeFreqAdapter(fast_mode=True)
+    adapter = PairAdapter()
     schema = adapter.make_default_cfg(ctx)
     from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 
@@ -155,11 +153,32 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     selected = [it for it in items if it.selected]
     edit_buttons = [w for w in widget.findChildren(QPushButton) if w.text() == "Edit"]
 
-    # The one-tone freq fit proposes only r_f / rf_w (two MetaDict items, both
-    # editable) — no readout module / waveform writeback.
+    # The fixture supplies two editable scalar proposals.
     assert len(selected) == len(items)  # all selected by default
     assert {it.target_name for it in items} == {"r_f", "rf_w"}
     assert len(edit_buttons) == 2
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, [], [[], []], [1, 2], [[1], [2, 3]], [[{}]], [[[1]]]],
+)
+def test_non_matrix_proposals_do_not_render_matrix_table(qapp, value):
+    item = ParameterWriteback(
+        target_name="proposal", description="d", proposed_value=value
+    )
+    item.session_id = "param-1"
+    widget = WritebackWidget(MagicMock(), tab_id="tab-1", pane="analysis")
+    try:
+        widget.populate([item], _parameter_values([item]))
+        assert widget.findChildren(QTableWidget) == []
+        checks = widget.findChildren(QCheckBox)
+        assert len(checks) == 1
+        assert checks[0].isChecked()
+    finally:
+        widget.close()
+        widget.deleteLater()
+        qapp.processEvents()
 
 
 def test_writeback_widget_non_scalar_item_is_read_only(qapp):

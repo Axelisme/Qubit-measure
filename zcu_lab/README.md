@@ -1,8 +1,10 @@
 # zcu_lab
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13
 
-`zcu_lab` 擁有具體實驗與其前端附件。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。組合根取得定義，再顯式注入框架。
+`zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
+
+`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions、templates 與 migration mapping 模組。
 
 `zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
@@ -35,9 +37,7 @@ Recipe 宣告摘要欄位，框架只捕捉其 value／source／unit。回覆 ac
 
 有擬合的分析在 summary 附 `fit_quality`，建議使用 `zcu_tools.analysis.fitting.compute_fit_quality`。實驗定義者負責選擇各 fit 的資料、參數及 covariance；GE 的 joint、ground、excited 可分開回報。這是實驗定義者的約定，框架不檢查、不特別解讀品質，也不修改 optimizer 或 writeback 政策。
 
-測試在 `tests/zcu_lab`，目錄對應本套件。通用契約逐一走過 measure registry，驗證 adapter conformance、context-free spec、成品 cfg validation 與 fresh schema。新增或刪除實驗不需要維護另一份測試清單。
-
-共用 domain helpers 與 template startup policy 有各自的接縫測試。個別實驗不另寫行為測試，除非使用者要求特殊邏輯；目前保留 AllXY、ZigZag 與 ZigZagScan 的 D142 案例。共同 runtime、NotebookAdapter 與 GUI framework 行為由框架 owner 的測試驗證。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
+本套件的實驗定義不寫個別測試。Framework owner 用最小合成 workflow／adapter 驗證 runtime、NotebookAdapter、GUI、MCP 與共用工具，不 import 本套件。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow；實驗定義錯誤由 GUI 啟動或載入直接回報。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
 
 `components.params_for(component)` 依 kind 讀 qubit 元件目前值。`qubit/fluxonium` 用 EJ／EC／EL 回 FluxoniumParams，`qubit/transmon` 用 EJmax／EC／d 回 TransmonParams。兩種 schema 共用 `QubitBaseSchema` 的通用欄位，不遷移也不兼容舊的 transmon 資料。
 Notebook 傳入 point.Q1；GUI composition 傳入隔離 capture 的 component model。

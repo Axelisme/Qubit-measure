@@ -22,13 +22,14 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
 
+from tests.gui._component_fakes import Qubit as QubitSchema
+from tests.gui._component_fakes import Resonator as ResonatorSchema
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.widgets.cfg._form_support import (
     attach_draft,
     scalar_field,
     section_schema,
 )
-from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 def test_sweep_widget_publishes_incomplete_edge_in_form_snapshot(qapp, ctrl):

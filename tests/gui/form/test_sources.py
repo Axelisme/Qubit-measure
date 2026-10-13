@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 from pydantic import Field, JsonValue
 from pydantic_core import PydanticCustomError
 from zcu_tools.cfg_model import PulseSpec
-from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.device import BaseDeviceInfo, FakeDeviceInfo
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -34,6 +34,65 @@ class ModuleForm(FormModel):
     drive: Annotated[ModuleRef | ModuleInline, Field(discriminator="kind")] = Field(
         default_factory=lambda: ModuleRef(name="Q1.pulses.pi")
     )
+
+
+class RestoreModuleForm(FormModel):
+    """Fresh partial input does not require a library until a ref name is supplied."""
+
+    drive: ModuleInput
+    readout: ModuleRef
+    averages: int = 1
+    delay: float = 0.0
+
+
+@pytest.mark.parametrize("capture", ["absent", "unmatched", "matched"])
+def test_compatible_restore_reports_unmatched_sources_and_keeps_other_leaves(
+    capture: str,
+) -> None:
+    env = FormEnv(library=library() if capture != "absent" else None)
+    name = "Q1.pulses.pi" if capture != "unmatched" else "Q1.pulses.removed"
+    saved = FormInput.from_json(
+        RestoreModuleForm,
+        '{"drive": {"kind": "ref", "name": "' + name + '"}, '
+        '"readout": {"kind": "ref", "name": "' + name + '"}, '
+        '"averages": 17, "delay": "wrong type", "removed": 4}',
+    )
+    state = FormState(RestoreModuleForm.default_input(env))
+    before_base = state.base.data
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+
+    dropped = state.write_compatible(saved.data, env)
+
+    expected_names = {"name": name} if capture == "matched" else {}
+    assert state.input.data == {
+        "drive": {"kind": "ref", **expected_names},
+        "readout": {"kind": "ref", **expected_names},
+        "averages": 17,
+        "delay": 0.0,
+    }
+    expected_dropped: set[FormPath] = {("delay",), ("removed",)}
+    if capture != "matched":
+        expected_dropped.update({("drive", "name"), ("readout", "name")})
+    assert set(dropped) == expected_dropped
+    assert state.base.data == before_base
+    assert notifications == [state.input.data]
+
+
+def test_compatible_restore_keeps_current_reference_for_unmatched_saved_name() -> None:
+    env = FormEnv(library=library())
+    state = FormState(ModuleForm.default_input(env))
+    before = state.input.data
+    notifications: list[dict[str, JsonValue]] = []
+    state.subscribe(lambda: notifications.append(state.input.data))
+
+    dropped = state.write_compatible(
+        {"drive": {"kind": "ref", "name": "Q1.pulses.removed"}}, env
+    )
+
+    assert dropped == (("drive", "name"),)
+    assert state.input.data == before
+    assert notifications == []
 
 
 class DeviceChoiceForm(FormModel):
@@ -232,3 +291,30 @@ def test_captured_devices_choices_missing_source_and_no_mutation() -> None:
     assert state.input.data == current
     with pytest.raises(PydanticCustomError, match="device"):
         DeviceChoiceForm.default_input(missing_env)
+
+
+class CustomDriverInfo(BaseDeviceInfo):
+    """A custom driver's detached info, outside the native DeviceInfo union."""
+
+    type: str = "custom/attenuator"
+    attenuation_db: float = 0.0
+
+
+class SourceFreeForm(FormModel):
+    """Evaluate without reading any captured device field."""
+
+    averages: int = 1
+
+
+def test_custom_driver_info_is_a_captured_device() -> None:
+    custom = CustomDriverInfo(address="lab:attenuator", attenuation_db=3.0)
+    env = FormEnv(devices={"flux": FakeDeviceInfo(address="none"), "atten": custom})
+
+    state = FormState(DeviceChoiceForm.default_input(env))
+    state.write({("device",): "atten"}, env)
+    chosen = state.result(env)
+    assert isinstance(chosen, DeviceChoiceForm) and chosen.device == "atten"
+
+    unused = FormState(SourceFreeForm.default_input(env))
+    assert unused.result(env) == SourceFreeForm(averages=1)
+    assert env.devices["atten"] is custom

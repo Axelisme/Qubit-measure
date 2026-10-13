@@ -10,13 +10,13 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 from qtpy.QtCore import QCoreApplication
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
+    NoAnalyzeParams,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.controller import Controller
@@ -58,12 +58,9 @@ from tests.gui._completion_helpers import (
     on_device_connected,
     on_device_operation_failed,
 )
+from tests.gui._controller_adapter import InteractiveAdapter, RecordingAdapter
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure.remote._helpers import _context_root
-from zcu_lab.definitions import ALIAS_PRESET, register_all
-from zcu_lab.v2._support.measure.interactive_flux_pick import FluxPickParams
-from zcu_lab.v2.fake.stub.gui import FakeAdapter
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxResult
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -105,9 +102,8 @@ class ControllerFixture:
     ) -> None:
         self.state = State(_make_ctx())
         self.registry = Registry()
-        register_all(self.registry)
-        if not self.registry.has("fake"):
-            self.registry.register("fake", FakeAdapter)
+        self.registry.register("fake", RecordingAdapter)
+        self.registry.register("interactive", InteractiveAdapter)
         self.view = _make_view()
         from zcu_tools.gui.event_bus import BaseEventBus
 
@@ -115,7 +111,6 @@ class ControllerFixture:
         if mock_emit:
             self.bus.emit = MagicMock(wraps=self.bus.emit)
         self.ctrl = Controller(
-            alias_preset=ALIAS_PRESET,
             state=self.state,
             registry=self.registry,
             view=self.view,
@@ -149,27 +144,17 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     fixture.quiesce()
 
 
-def _start_flux_picker(cf: ControllerFixture) -> tuple[str, int]:
-    tab_id = cf.ctrl.new_tab("twotone/flux_dep")
-    values = np.linspace(-5.0, 5.0, 60)
-    freqs = np.linspace(4.0, 5.0, 30)
-    signals = np.exp(-(values[:, None] ** 2)) * np.exp(
-        1j * values[:, None] * freqs[None, :] / 10
-    )
-    cf.state.update_tab_result(
-        tab_id,
-        RunRecord(
-            cfg=None, result=FreqFluxResult(signals=signals, values=values, freqs=freqs)
-        ),
-    )
-    token = cf.ctrl.analyze(tab_id, FluxPickParams())
+def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
+    tab_id = cf.ctrl.new_tab("interactive")
+    cf.state.update_tab_result(tab_id, RunRecord(cfg=None, result=object()))
+    token = cf.ctrl.analyze(tab_id, NoAnalyzeParams())
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     return tab_id, token
 
 
 def _default_fake_schema(ctx: SessionEnv) -> CfgSchema:
-    return FakeAdapter().make_default_cfg(ctx)
+    return RecordingAdapter().make_default_cfg(ctx)
 
 
 def _wait_for(condition, timeout_ms: int = 3000, step_ms: int = 10) -> bool:
@@ -221,7 +206,7 @@ def test_get_project_root_falls_back_to_cwd_when_not_injected(qapp, tmp_path):
 def test_new_tab_adds_entry_to_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
     assert tab_id in cf.state.tabs
-    assert isinstance(cf.state.get_tab(tab_id).adapter, FakeAdapter)
+    assert isinstance(cf.state.get_tab(tab_id).adapter, RecordingAdapter)
 
 
 def test_new_tab_unknown_adapter_raises(cf):
@@ -249,7 +234,7 @@ def test_close_tab_removes_from_state(cf):
 
 
 def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
-    tab_id, _token = _start_flux_picker(cf)
+    tab_id, _token = _start_interactive_analysis(cf)
     assert cf.state.is_tab_analyzing(tab_id) is True
     # is_analyzing makes the tab busy, so closing it is rejected up front.
     with pytest.raises(RuntimeError, match="busy"):
@@ -323,7 +308,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
         assert isinstance(context.plots, Plots)
         return acquired
 
-    spy = MagicMock(spec=FakeAdapter)
+    spy = MagicMock(spec=RecordingAdapter)
     spy.capabilities = real_adapter.capabilities
     spy.experiment_tag = None
     spy.run.side_effect = _capture_run
@@ -456,7 +441,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 
     tab_id = cf.ctrl.new_tab("fake")
-    no_analysis = MagicMock(spec=FakeAdapter)
+    no_analysis = MagicMock(spec=RecordingAdapter)
     no_analysis.run.return_value = object()  # any non-NO_RESULT run result
     no_analysis.capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)
     no_analysis.experiment_tag = None
@@ -484,7 +469,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
 
 
 def test_run_failed_shows_status_message(cf):
-    bad_adapter = MagicMock(spec=FakeAdapter)
+    bad_adapter = MagicMock(spec=RecordingAdapter)
     bad_adapter.run.side_effect = RuntimeError("boom")
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
@@ -499,7 +484,7 @@ def test_run_failed_shows_status_message(cf):
 
 
 def test_run_failed_clears_run_lock(cf):
-    bad_adapter = MagicMock(spec=FakeAdapter)
+    bad_adapter = MagicMock(spec=RecordingAdapter)
     bad_adapter.run.side_effect = RuntimeError("oops")
     tab_id = cf.ctrl.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
@@ -517,7 +502,7 @@ def test_run_failed_clears_run_lock(cf):
 
 
 def test_start_run_while_running_raises(cf):
-    slow = MagicMock(spec=FakeAdapter)
+    slow = MagicMock(spec=RecordingAdapter)
     ev = threading.Event()
     slow.run.side_effect = lambda *a, **kw: ev.wait()
 
@@ -596,7 +581,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
     )
     loaded = object()
     adapter = MagicMock()
-    # Final contract requires explicit load_data capability; FakeAdapter's
+    # Final contract requires explicit load_data capability; RecordingAdapter's
     # default lacks it, so set load_data True for the driving path.
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
@@ -733,7 +718,7 @@ def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
 
 
 def test_reset_tab_cfg_while_running_raises(cf):
-    slow = MagicMock(spec=FakeAdapter)
+    slow = MagicMock(spec=RecordingAdapter)
     ev = threading.Event()
     slow.run.side_effect = lambda *a, **kw: ev.wait()
 
@@ -759,38 +744,8 @@ def test_get_adapter_names_includes_fake(cf):
     assert "fake" in cf.ctrl.get_adapter_names()
 
 
-def test_get_adapter_names_lists_six_jpa_adapters_in_bringup_order(cf):
-    # The generic remote adapter listing (view.adapter_list) serves the
-    # startup catalog in insertion order; JPA-07 pins the six family names.
-    jpa_names = [n for n in cf.ctrl.get_adapter_names() if n.startswith("jpa/")]
-    assert jpa_names == [
-        "jpa/freq",
-        "jpa/flux",
-        "jpa/power",
-        "jpa/auto_optimize",
-        "jpa/flux_onetone",
-        "jpa/check",
-    ]
-
-
-def test_get_adapter_guide_serves_complete_jpa_family(cf):
-    for name in (
-        "jpa/freq",
-        "jpa/flux",
-        "jpa/power",
-        "jpa/auto_optimize",
-        "jpa/flux_onetone",
-        "jpa/check",
-    ):
-        guide = cf.ctrl.get_adapter_guide(name)
-        assert set(guide) == {
-            "behavior",
-            "expects_md",
-            "expects_ml",
-            "typical_writeback",
-            "recommended",
-        }
-        assert all(guide[field] for field in guide)
+def test_get_adapter_names_preserves_injected_order(cf):
+    assert cf.ctrl.get_adapter_names() == ["fake", "interactive"]
 
 
 def test_persist_then_restore_app_state(tmp_path):

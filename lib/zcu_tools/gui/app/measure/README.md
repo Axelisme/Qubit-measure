@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -110,6 +110,8 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 ## Package Boundaries
 
+- `schema_builder.py`、`seeds.py`、`role_factories.py`：context-free authoring 與通用 deferred defaults。Caller 明傳角色 factory 表；角色詞彙與三個掃描範圍政策留在使用者套件。
+- `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
 - `specs/`：`experiment.cfg_editing`的main policy adapter；只綁定Arb asset choices與readout

@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback, WritebackItem
-
-from zcu_lab.v2._support.singleshot.rabi_fit import RabiJointFitResult
 
 
 def rabi_calibration_writeback(fit: RabiJointFitResult) -> Sequence[WritebackItem]:

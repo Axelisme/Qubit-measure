@@ -13,6 +13,7 @@ from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent  # type: ignore[attr-defined]
 from qtpy.QtWidgets import (
     QApplication,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTabWidget,
@@ -36,6 +37,7 @@ from zcu_tools.gui.app.measure.ui.inspect_dialog import (
 from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.cfg.binding import CfgDraft
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -44,8 +46,8 @@ from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.resources.entry.fakes import registry_state, restore_registry
-from zcu_lab.components import QubitSchema, ResonatorSchema
 
 
 @pytest.fixture(autouse=True)
@@ -410,6 +412,41 @@ def test_inspect_dialog_ml_apply_failure_keeps_live_and_draft(qapp, monkeypatch)
     assert dialog._ml_status_label.text() == "Unsaved"
 
 
+def test_inspect_refresh_clears_library_selection_when_context_is_unavailable(qapp):
+    ctrl = _make_ctrl_with_ml(_make_ml())
+    dialog = InspectDialog(ctrl, MagicMock())
+    try:
+        tree = next(
+            tree
+            for tree in dialog.findChildren(QTreeWidget)
+            if tree.topLevelItemCount() == 2
+            and (first := tree.topLevelItem(0)) is not None
+            and first.text(0) == "modules"
+        )
+        group = tree.topLevelItem(0)
+        assert group is not None
+        tree.setCurrentItem(group.child(0))
+        name = next(
+            field
+            for field in dialog.findChildren(QLineEdit)
+            if field.placeholderText() == "ModuleLibrary name"
+        )
+        assert name.text() == "R1.readout.readout_rf"
+        assert name.isEnabled()
+
+        ctrl.read_context.side_effect = FailedPreconditionError("No context")
+        dialog.refresh()
+
+        assert tree.topLevelItemCount() == 0
+        assert tree.currentItem() is None
+        assert name.text() == ""
+        assert not name.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
 def test_inspect_dialog_ml_revert_reloads_live_entry(qapp):
     ml = _make_ml()
     ctrl = _make_ctrl_with_ml(ml)
@@ -669,7 +706,7 @@ def test_inspect_dialog_ml_delete_key_does_not_intercept_name_edit(qapp):
 
 
 def _catalog():
-    from zcu_lab.templates import register_all_templates
+    from tests.gui.app.measure._templates import register_all_templates
 
     cat = TemplateCatalog()
     register_all_templates(cat)
