@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-13，決策點介面、fit 依賴、共用渲染與匯出收據、Show capture 座標基準
+**Last updated:** 2026-10-13，published spectrum list 與 Filter 排除數
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -321,7 +321,7 @@ provider I/O 與 worker failure 保留各自的 unexpected failure／operation o
   `[Frequency, Flux]`（freq 掃在外層）→ 軸反。**不是固定特性**（TwoTone 通常正、OneTone 常反），
   要看實際檔案。GUI 的「Transpose axes」toggle（`services/load.py` 的 `transpose_spectrum_data`）
   讓 user 從 preview 判斷後交換。
-- **MCP 真實資料 e2e 尚未驗收**：RPC 與 MCP 的 owner／recording transport tests 不取代實際分析驗收。真實資料 workflow 的結果與證據另由授權的 e2e 驗收提供。
+- **物理校準驗收**：真實資料的工具契約驗證不等於物理校準驗收。校準是否正確仍需另外判讀分析結果與證據。
 
 ## Entry Points
 
