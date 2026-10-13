@@ -437,7 +437,7 @@ def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
         record()
         assert "Outdated" not in expect_frame([0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0])
         ctrl.set_alignment(entry.name, 0.6 + shift, -0.4 + shift)
-        assert "Outdated: alignment changed: same-spectrum" in expect_frame(
+        assert "Outdated: same-spectrum re-aligned" in expect_frame(
             [0.2, 0.3], 0.25, [0.0, 0.2], [3.0, 4.0]
         )
         # Source changes cannot rewrite the recorded background or calibration.
