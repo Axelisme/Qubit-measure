@@ -22,12 +22,14 @@ from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
 from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
+from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._window import named
 
 
 @pytest.fixture
@@ -66,7 +68,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch
 
 
 @pytest.fixture
-def completed_search(qapp, search_input, monkeypatch, failure):
+def search_panel(qapp, search_input, monkeypatch, failure):
     from zcu_tools.gui.app.fluxdep.services import fit, viz
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
@@ -119,11 +121,8 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         lambda parent, title, message: warnings.append((title, message)),
     )
     panel = AnalyzePanelWidget(ctrl)
-    buttons = {button.text(): button for button in panel.findChildren(QPushButton)}
     try:
-        buttons["Search database"].click()
-        assert runner.quiesce()
-        yield panel, ctrl, result, facts, calls, warnings, buttons, runner
+        yield panel, ctrl, result, facts, calls, warnings, runner
     finally:
         assert runner.quiesce()
         panel.quiesce()
@@ -131,21 +130,34 @@ def completed_search(qapp, search_input, monkeypatch, failure):
         panel.deleteLater()
 
 
+def _click_search(panel: AnalyzePanelWidget, runner: BackgroundRunner) -> None:
+    """Click Search and drain the search worker and its owner delivery."""
+    named(panel, QPushButton, "fluxdep.fit.search").click()
+    assert runner.quiesce()
+
+
 @pytest.mark.parametrize("failure", [None, "builder", "present", "search", "submit"])
-def test_search_button_commits_before_rendering(completed_search, failure):
-    panel, ctrl, result, facts, calls, warnings, buttons, _runner = completed_search
-    assert buttons["Search database"].isEnabled()
+def test_search_button_commits_before_rendering(search_panel, failure):
+    panel, ctrl, result, facts, calls, warnings, runner = search_panel
+    _click_search(panel, runner)
+    assert named(panel, QPushButton, "fluxdep.fit.search").isEnabled()
+    export = named(panel, QPushButton, "fluxdep.fit.export_params")
     if failure in ("search", "submit"):
         assert calls == (["search"] if failure == "search" else [])
         assert ctrl.state.fit.params is None
         assert not any(p.has_result for p in facts)
-        assert not buttons["Export params.json"].isEnabled()
-        assert len(warnings) == 1
-        assert warnings[0][0] == "Search failed"
+        assert not export.isEnabled()
+        # A failed search is reported on the Search status line, not in a modal.
+        assert warnings == []
+        activity = ctrl.search.current
+        assert activity is not None and activity.error is not None
+        assert named(panel, QLabel, "fluxdep.fit.status").text() == (
+            friendly_fit_message("Search", activity.error)
+        )
     else:
         assert ctrl.state.fit.params == result.params
         assert [p.has_result for p in facts if p.has_result] == [True]
-        assert buttons["Export params.json"].isEnabled()
+        assert export.isEnabled()
         assert any("EJ=5.000" in label.text() for label in panel.findChildren(QLabel))
         assert calls == (
             ["search", "builder"]
@@ -163,20 +175,20 @@ def test_search_button_commits_before_rendering(completed_search, failure):
 
 @pytest.mark.parametrize("failure", [None])
 def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
-    completed_search, monkeypatch
+    search_panel, monkeypatch
 ):
     import matplotlib.pyplot as plt
     from zcu_tools.gui.app.fluxdep.services import fit
 
-    panel, ctrl, _result, _facts, _calls, _warnings, buttons, runner = completed_search
+    panel, ctrl, _result, _facts, _calls, _warnings, runner = search_panel
+    _click_search(panel, runner)
     retained = panel.figures
     first = retained["diagnostic"]
     before = BytesIO()
     first.savefig(before, format="png")
     unrelated = plt.figure()
     try:
-        buttons["Search database"].click()
-        assert runner.quiesce()
+        _click_search(panel, runner)
         second = panel.figures["diagnostic"]
         assert second is not first
         assert retained["diagnostic"] is first
@@ -190,11 +202,10 @@ def test_replacing_and_releasing_diagnostics_keeps_retained_figures(
             raise RuntimeError("numeric search failed")
 
         monkeypatch.setattr(fit, "search_database", fail_search)
-        buttons["Search database"].click()
-        assert runner.quiesce()
+        _click_search(panel, runner)
         assert panel.figures["diagnostic"] is second
         assert ctrl.state.fit.params is None
-        assert not buttons["Export params.json"].isEnabled()
+        assert not named(panel, QPushButton, "fluxdep.fit.export_params").isEnabled()
         panel.release_figures()
         saved = BytesIO()
         second.savefig(saved, format="png")

@@ -1,8 +1,10 @@
 """Headless tests for AnalyzePanelWidget — tabs, bounds preset, guards.
 
 The search worker / embedded-figure path is covered elsewhere; here we pin the
-panel-local UI behaviour: the three tabs, a bounds preset filling the EJ/EC/EL
-spin boxes, and Search being blocked when the database path is empty / missing.
+panel-local UI behaviour: the three tabs, the bounds preset and its spin boxes,
+frequency fields marked by the transitions that need them, Search being
+blocked when the database path is empty / missing, and each tab reporting on
+its own status line. Controls are located by their public objectNames.
 """
 
 from __future__ import annotations
@@ -13,21 +15,36 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 from PyQt6.QtWidgets import QDoubleSpinBox, QGroupBox, QLabel, QLineEdit, QPushButton
-from qtpy.QtWidgets import QSizePolicy, QTabWidget  # type: ignore[attr-defined]
+from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtWidgets import (  # type: ignore[attr-defined]
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QSizePolicy,
+    QTabWidget,
+)
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.state import FluxDepState
+from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
+from zcu_tools.gui.app.fluxdep.state import FitState, FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import (
     _BOUND_PRESETS,
     AnalyzePanelWidget,
 )
+from zcu_tools.gui.app.fluxdep.ui.error_messages import friendly_fit_message
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import TransitionsForm
+from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
+from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
 )
+from tests.gui.app.fluxdep._window import named
 
 
 @pytest.fixture
@@ -62,27 +79,14 @@ def test_published_fit_inputs_reach_search_and_show(
         if widget is None:
             widget = AnalyzePanelWidget(ctrl)
         widget.show_tab("search")
-        search_form = next(
-            group
-            for group in widget.findChildren(QGroupBox)
-            if group.title() == "Search parameters"
-        )
-        assert any(
-            edit.text() == ctrl.state.fit.search_db
-            for edit in search_form.findChildren(QLineEdit)
+        assert (
+            named(widget, QLineEdit, "fluxdep.fit.search_db").text()
+            == ctrl.state.fit.search_db
         ), "Search must display the currently published database"
-        assert [box.value() for box in search_form.findChildren(QDoubleSpinBox)] == [
-            3.0,
-            12.0,
-            0.3,
-            1.5,
-            0.2,
-            1.2,
-        ]
+        assert _bound_values(widget) == [3.0, 12.0, 0.3, 1.5, 0.2, 1.2]
         assert [
-            edit.text()
-            for edit in search_form.findChildren(QLineEdit)
-            if edit.placeholderText() == "(unset)"
+            named(widget, QLineEdit, f"fluxdep.fit.{field}").text()
+            for field in ("r_f", "sample_f")
         ] == ["" if value is None else f"{value:g}" for value in frequencies]
         for form in widget.findChildren(TransitionsForm):
             transitions = form.get_transitions()
@@ -144,16 +148,13 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
             np.tile(np.arange(15, dtype=float), (len(fluxs), 1)),
         ),
     )
+    search_status = named(widget, QLabel, "fluxdep.fit.status").text()
     widget.show_tab("show")
-    next(
-        button
-        for button in widget.findChildren(QPushButton)
-        if button.text() == "Apply"
-    ).click()
-    assert not any(
-        label.text().startswith("Could not draw:")
-        for label in widget.findChildren(QLabel)
-    )
+    named(widget, QPushButton, "fluxdep.show.apply").click()
+    # Show reports its own drawing problems; the Search status line is untouched.
+    assert named(widget, QLabel, "fluxdep.fit.status").text() == search_status
+    show_status = named(widget, QLabel, "fluxdep.show.status").text()
+    assert bool(show_status) == (display_edit == "missing_frequency")
     canvas = widget.findChildren(FigureCanvasQTAgg)[0]
     assert len(canvas.figure.axes) == 1
     lines = canvas.figure.axes[0].lines
@@ -169,19 +170,33 @@ def _show_title(widget: AnalyzePanelWidget) -> str:
 
 
 def _freshness(widget: AnalyzePanelWidget) -> QLabel:
-    return next(
-        label
-        for label in widget.findChildren(QLabel)
-        if label.accessibleName() == "Freshness"
-    )
+    return named(widget, QLabel, "fluxdep.fit.freshness")
 
 
 def _export_button(widget: AnalyzePanelWidget) -> QPushButton:
+    return named(widget, QPushButton, "fluxdep.fit.export_params")
+
+
+def _search_group(widget: AnalyzePanelWidget) -> QGroupBox:
     return next(
-        button
-        for button in widget.findChildren(QPushButton)
-        if button.text() == "Export params.json"
+        group
+        for group in widget.findChildren(QGroupBox)
+        if group.title() == "Search parameters"
     )
+
+
+def _bound_values(widget: AnalyzePanelWidget) -> list[float]:
+    """EJ/EC/EL lower and upper bounds as the Search form shows them."""
+    return [box.value() for box in _search_group(widget).findChildren(QDoubleSpinBox)]
+
+
+def _choose_preset(widget: AnalyzePanelWidget, name: str) -> None:
+    """Pick a bounds preset the way a user activates a combo entry."""
+    combo = named(widget, QComboBox, "fluxdep.fit.bounds_preset")
+    index = combo.findText(name)
+    assert index >= 0, f"missing preset {name!r}"
+    combo.setCurrentIndex(index)
+    combo.activated.emit(index)
 
 
 def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
@@ -337,11 +352,7 @@ def _display_group(widget: AnalyzePanelWidget) -> QGroupBox:
 def _click_auto_limits(widget: AnalyzePanelWidget) -> Limits:
     """Click Show's Auto limits and read the x/y limit boxes it filled."""
     display = _display_group(widget)
-    next(
-        button
-        for button in display.findChildren(QPushButton)
-        if button.text() == "Auto limits"
-    ).click()
+    named(display, QPushButton, "fluxdep.show.auto_limits").click()
     x_lo, x_hi, y_lo, y_hi = display.findChildren(QDoubleSpinBox)[:4]
     return (x_lo.value(), x_hi.value()), (y_lo.value(), y_hi.value())
 
@@ -444,11 +455,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         assert show_form.get_transitions() == {"transitions": [(0, 2)]}
         assert x_hi.value() == pytest.approx(0.9)
 
-        next(
-            button
-            for button in widget.findChildren(QPushButton)
-            if button.text() == "Apply"
-        ).click()
+        named(widget, QPushButton, "fluxdep.show.apply").click()
         assert labels() == ["0 -> 2"]
         assert shown.axes[0].get_xlim()[1] == pytest.approx(0.9)
     finally:
@@ -474,40 +481,83 @@ def test_presets_cover_the_notebook_ranges():
 
 def test_preset_fills_bound_spinboxes(panel):
     w, _ = panel
-    w._preset.setCurrentText("integer")
-    w._on_preset_selected(0)
+    _choose_preset(w, "integer")
     ej, ec, el = _BOUND_PRESETS["integer"]
-    assert (w._ej_lo.value(), w._ej_hi.value()) == ej
-    assert (w._ec_lo.value(), w._ec_hi.value()) == ec
-    assert (w._el_lo.value(), w._el_hi.value()) == el
+    assert _bound_values(w) == [*ej, *ec, *el]
+
+
+def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_hdf5):
+    w, ctrl = panel
+    preset = named(w, QComboBox, "fluxdep.fit.bounds_preset")
+    default = FitState()
+    assert preset.currentText() == next(
+        name
+        for name, bounds in _BOUND_PRESETS.items()
+        if bounds == (default.EJb, default.ECb, default.ELb)
+    ), "a fresh form names the preset its default bounds come from"
+    for name, (ej, ec, el) in _BOUND_PRESETS.items():
+        ctrl.set_fit_params(
+            search_database_hdf5,
+            ej,
+            ec,
+            el,
+            TransitionDict({"transitions": [(0, 1)]}),
+            None,
+            None,
+        )
+        assert preset.currentText() == name
+    ctrl.set_fit_params(
+        search_database_hdf5,
+        (2.5, 15.0),
+        (0.2, 2.0),
+        (0.1, 2.0),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    assert preset.currentText() == "custom"
+
+    _choose_preset(w, "integer")
+    assert preset.currentText() == "integer"
+    ej_lo = _search_group(w).findChildren(QDoubleSpinBox)[0]
+    ej_lo.setValue(ej_lo.value() + 0.5)
+    assert preset.currentText() == "custom", "an edited bound is no longer the preset"
+    ej_lo.setValue(_BOUND_PRESETS["integer"][0][0])
+    assert preset.currentText() == "integer"
 
 
 def test_search_blocked_on_empty_database_path(panel):
     w, ctrl = panel
-    w._db_edit.setText("")
-    w._on_search()
-    assert "database" in w._status.text().lower()
+    named(w, QLineEdit, "fluxdep.fit.search_db").setText("")
+    named(w, QPushButton, "fluxdep.fit.search").click()
+    assert named(w, QLabel, "fluxdep.fit.status").text()
     assert ctrl.state.fit.search_db == ""
+    assert ctrl.search.current is None
 
 
 def test_search_blocked_on_missing_database_file(panel):
-    w, _ = panel
-    w._db_edit.setText("/nonexistent/path/to/db.h5")
-    w._on_search()
-    assert "not found" in w._status.text().lower()
+    w, ctrl = panel
+    named(w, QLineEdit, "fluxdep.fit.search_db").setText("/nonexistent/path/to/db.h5")
+    named(w, QPushButton, "fluxdep.fit.search").click()
+    assert named(w, QLabel, "fluxdep.fit.status").text()
+    assert ctrl.state.fit.search_db == ""
+    assert ctrl.search.current is None
 
 
 def test_search_status_ignored_in_horizontal_minimum_width(panel):
     w, _ = panel
-    assert w._status.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+    status = named(w, QLabel, "fluxdep.fit.status")
+    assert status.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
 
 
 def test_show_tab_has_display_tools(panel):
     w, _ = panel
+    display = _display_group(w)
     # x/y limit boxes + const-freq toggle + a transitions-to-show form exist
-    assert hasattr(w, "_x_lo") and hasattr(w, "_y_hi")
-    assert w._show_const_freq.isChecked()  # default on
-    assert hasattr(w, "_transitions_show")
+    assert len(display.findChildren(QDoubleSpinBox)) == 4
+    toggles = display.findChildren(QCheckBox)
+    assert len(toggles) == 1 and toggles[0].isChecked()  # default on
+    assert len(display.findChildren(TransitionsForm)) == 1
 
 
 def test_auto_limits_match_visualizer(panel, qapp):
@@ -526,33 +576,92 @@ def test_auto_limits_match_visualizer(panel, qapp):
     ctrl.state.put_spectrum(
         SpectrumEntry(name="a", spec_type="TwoTone", raw=raw, points=pts, aligned=True)
     )
-    w._apply_auto_limits()
+    _x, y = _click_auto_limits(w)
     # y spans the spectrum's freq range [4, 6]
-    assert w._y_lo.value() == pytest.approx(4.0)
-    assert w._y_hi.value() == pytest.approx(6.0)
+    assert y == pytest.approx((4.0, 6.0))
 
 
-def test_missing_freq_check_blocks_mirror_without_sample_f(panel):
-    from zcu_tools.analysis.fluxdep.models import TransitionDict
-
+@pytest.mark.parametrize(
+    ("category", "needed", "other"),
+    [("mirror", "sample_f", "r_f"), ("red side", "r_f", "sample_f")],
+)
+def test_frequency_field_is_marked_while_a_transition_needs_it(
+    panel, category, needed, other
+):
     w, _ = panel
-    # mirror needs sample_f
-    msg = w._missing_freq_message(TransitionDict({"mirror": [(0, 1)]}), None, None)
-    assert msg is not None and "sample_f" in msg
-    # red side needs r_f
-    msg2 = w._missing_freq_message(TransitionDict({"red side": [(0, 1)]}), None, None)
-    assert msg2 is not None and "r_f" in msg2
-    # plain transitions need neither
-    assert (
-        w._missing_freq_message(TransitionDict({"transitions": [(0, 1)]}), None, None)
-        is None
+    form = _search_group(w).findChildren(TransitionsForm)[0]
+    required = named(w, QLabel, f"fluxdep.fit.{needed}.required")
+    field = named(w, QLineEdit, f"fluxdep.fit.{needed}")
+    form.set_transitions(TransitionDict({"transitions": [(0, 1)]}))
+    assert required.isHidden()
+    form.set_transitions(TransitionDict({category: [(0, 1)]}))
+    assert not required.isHidden()
+    assert named(w, QLabel, f"fluxdep.fit.{other}.required").isHidden()
+    field.setText("6.0")
+    assert required.isHidden()
+    field.setText("")
+    assert not required.isHidden()
+    form.set_transitions(TransitionDict({"transitions": [(0, 1)]}))
+    assert required.isHidden()
+
+
+def test_search_without_needed_sample_f_reports_the_rejection_without_a_modal(
+    qapp, spectrum_hdf5, search_database_hdf5
+):
+    runner = BackgroundRunner()
+    ctrl = Controller(
+        FluxDepState(),
+        interactive_owner=QtOwnerScheduler(),
+        search_runtime=FluxDepSearchRuntime(
+            runner, ProgressService(QtProgressTransport())
+        ),
     )
+    name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
+    widget = AnalyzePanelWidget(ctrl)
+    modals: list[str] = []
+
+    def close_modal() -> None:
+        modal = QApplication.activeModalWidget()
+        if isinstance(modal, QDialog):
+            modals.append(modal.windowTitle())
+            modal.reject()
+
+    try:
+        widget.show_tab("search")
+        required = named(widget, QLabel, "fluxdep.fit.sample_f.required")
+        assert not required.isHidden(), "the default transitions include mirror"
+        _search_group(widget).findChildren(TransitionsForm)[0].set_transitions(
+            TransitionDict({"transitions": [(0, 1)], "mirror": [(0, 1)]})
+        )
+        assert not required.isHidden()
+        named(widget, QLineEdit, "fluxdep.fit.search_db").setText(search_database_hdf5)
+        QTimer.singleShot(0, close_modal)
+        named(widget, QPushButton, "fluxdep.fit.search").click()
+        assert runner.quiesce()
+        qapp.processEvents()
+        assert modals == []
+        activity = ctrl.search.current
+        assert activity is not None and activity.status == "failed"
+        assert activity.error is not None
+        assert named(widget, QLabel, "fluxdep.fit.status").text() == (
+            friendly_fit_message("Search", activity.error)
+        )
+        assert ctrl.state.fit.params is None
+    finally:
+        ctrl.search.begin_close()
+        assert runner.quiesce()
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+        ctrl.interactive.dispose()
 
 
 def test_freq_fields_are_blank_by_default(panel):
     w, _ = panel
-    assert w._r_f.text() == ""
-    assert w._sample_f.text() == ""
+    for field in ("r_f", "sample_f"):
+        assert named(w, QLineEdit, f"fluxdep.fit.{field}").text() == ""
 
 
 @pytest.mark.parametrize("usable", [False, True])

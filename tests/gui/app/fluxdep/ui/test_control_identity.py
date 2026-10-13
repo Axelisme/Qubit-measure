@@ -43,6 +43,7 @@ from tests.gui.app.fluxdep._window import (
     command,
     current_page,
     fit_panel,
+    named,
     show_page,
     spectra_list,
 )
@@ -157,11 +158,7 @@ def test_remote_viewer_reads_fit_page_without_opening_filter(
     panel = fit_panel(view)
     assert panel is not None
     assert ctrl.interactive.current_cross_selection() is None
-    freshness = next(
-        label
-        for label in panel.findChildren(QLabel)
-        if label.accessibleName() == "Freshness"
-    )
+    freshness = named(panel, QLabel, "fluxdep.fit.freshness")
     assert freshness.text() == "Outdated: filter changed"
     form = next(
         g for g in panel.findChildren(QGroupBox) if g.title() == "Search parameters"
@@ -420,7 +417,8 @@ def pending_window(qapp, cross_controller, search_database_hdf5):
 
 def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_window):
     view, ctrl, panel, background, token, _dialogs = pending_window
-    cancel = button(panel, "Cancel search")
+    cancel = named(panel, QPushButton, "fluxdep.fit.cancel")
+    search = named(panel, QPushButton, "fluxdep.fit.search")
     assert cancel.isEnabled()
     ctrl.control_identity.connect("a", "flux-agent", "owner")
     assert not cancel.isEnabled()
@@ -439,12 +437,12 @@ def test_remote_search_cancel_disabled_reclaim_restores_domain_gate(pending_wind
     assert ctrl.search.outcome(token) is None
     assert ctrl.control_identity.status().holder == "rpc:flux-agent"
     indicator(view).click()
-    assert cancel.isEnabled() and not button(panel, "Search database").isEnabled()
+    assert cancel.isEnabled() and not search.isEnabled()
     cancel.click()
     background.complete_cancel()
     outcome = ctrl.search.outcome(token)
     assert outcome is not None and outcome.status == "cancelled"
-    assert not cancel.isEnabled() and button(panel, "Search database").isEnabled()
+    assert not cancel.isEnabled() and search.isEnabled()
 
 
 def test_remote_close_decline_has_no_lifecycle_effect_accept_waits_for_search(
