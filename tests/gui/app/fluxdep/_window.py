@@ -209,3 +209,32 @@ def choose_file(path: Path | str, activate: Callable[[], None], *, cancel=False)
     if errors:
         raise errors[0]
     assert seen, "The action must present a real modal file chooser"
+
+
+def open_chooser(activate: Callable[[], None]) -> QFileDialog:
+    """Run activate() and return the non-blocking file chooser it left open.
+
+    A chooser that blocks activate() in a nested modal loop is rejected so the
+    test cannot hang, and the call fails. The returned chooser is the active
+    modal widget, presented without the native dialog; the caller accepts or
+    rejects it.
+    """
+    blocked: list[str] = []
+
+    def reject_blocking() -> None:
+        chooser = QApplication.activeModalWidget()
+        if isinstance(chooser, QDialog):
+            blocked.append(chooser.windowTitle())
+            chooser.reject()
+
+    guard = QTimer()
+    guard.setSingleShot(True)
+    guard.timeout.connect(reject_blocking)
+    guard.start(0)
+    activate()
+    guard.stop()
+    assert not blocked, f"the chooser {blocked[0]!r} blocked its caller"
+    chooser = QApplication.activeModalWidget()
+    assert isinstance(chooser, QFileDialog), "activate() must open a file chooser"
+    assert chooser.testOption(QFileDialog.Option.DontUseNativeDialog)
+    return chooser
