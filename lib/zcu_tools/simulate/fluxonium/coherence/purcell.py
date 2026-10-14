@@ -13,6 +13,11 @@ if TYPE_CHECKING:
     from scqubits.core.oscillator import Oscillator
 
 # -----------------------------
+# Reference: Zhang et al., Universal Fast-Flux Control of a Coherent,
+# Low-Frequency Qubit, PRX 11, 011010 (2021).
+# DOI: https://doi.org/10.1103/PhysRevX.11.011010
+# https://arxiv.org/abs/2002.10653v1, Appendix G.5, Eqs. (G21)-(G22).
+# The flux sweep keeps only e→g, not the paper's higher-state channels.
 # The equations use angular frequencies/rates: omega = 2*pi*nu and
 # kappa_rate = 2*pi*kappa, where nu and the input linewidth kappa are in GHz.
 # The original frequency-selected bath uses a† for upward energy exchange and

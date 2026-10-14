@@ -316,9 +316,10 @@ def calculate_eff_t1_vs_flux_fast(
     Matches ``calculate_eff_t1_vs_flux`` to ~1e-13 relative (see tests). Combines the
     requested ``noise_channels`` as ``1/T1_eff = sum_k 1/T1_k`` and returns
     ``1 / total_rate`` in physical ns. Each spectral rate already includes its
-    angular-frequency conversion (ADR-0071). ``params=(EJ, EC, EL)`` are GHz,
-    ``fluxs`` are Φ/Φ₀, and ``Temp`` is K. The output preserves flux order and
-    shape; ``cutoff``/``qub_dim`` select oscillator basis/retained levels.
+    angular-frequency conversion (ADR-0071). ``params=(EJ, EC, EL)`` are GHz.
+    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀, and ``Temp`` is K.
+    The output has shape ``(N,)`` and preserves the input flux order.
+    ``cutoff``/``qub_dim`` select oscillator basis/retained levels.
 
     ``noise_channels`` items are ``"t1_capacitive"`` etc., or ``("t1_inductive",
     {"Q_ind": 5e8})`` with per-channel options (Q_cap / Q_ind / Y_qp / M / Z / x_qp /

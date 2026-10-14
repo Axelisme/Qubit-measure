@@ -70,10 +70,12 @@ def calculate_eff_t1_vs_flux_with(
     spectrum_data: SpectrumData | None = None,
     **other_noise_options,
 ) -> NDArray[np.float64]:
-    """Return effective 1→0 T1 in ns with the same shape/order as ``fluxs``.
+    """Return effective 1→0 T1 in ns for a one-dimensional flux grid.
 
-    ``fluxs`` are Φ/Φ₀ and ``Temp`` is K. Channel tuples and additional options
-    use scqubits conventions; ``total`` defaults to True (both directions).
+    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀. The output has shape
+    ``(N,)`` and preserves the input flux order. ``Temp`` is K.
+    Channel tuples and additional options use scqubits conventions;
+    ``total`` defaults to True (both directions).
     Optional ``spectrum_data`` must match this flux grid. This call sets
     ``fluxonium.flux`` to each successive flux, ending at the last point.
     """
@@ -115,9 +117,11 @@ def calculate_eff_t1_vs_flux(
     evals_count: int = 20,
     **other_options,
 ) -> NDArray[np.float64]:
-    """Return effective 1→0 T1 in ns with the same shape/order as ``fluxs``.
+    """Return effective 1→0 T1 in ns for a one-dimensional flux grid.
 
-    ``params=(EJ, EC, EL)`` are GHz, ``fluxs`` are Φ/Φ₀, and ``Temp`` is K.
+    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀. The output has shape
+    ``(N,)`` and preserves the input flux order.
+    ``params=(EJ, EC, EL)`` are GHz and ``Temp`` is K.
     ``cutoff``/``evals_count`` select the oscillator basis/retained levels.
     Channel tuples and additional options use scqubits conventions;
     ``total`` defaults to True (both directions).
