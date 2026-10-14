@@ -56,6 +56,7 @@ def inspector(
             arb_waveforms=_NoArbNames(),
             open_arb_waveforms=lambda: None,
             dialog_presenter=RecordingDialogPresenter(),
+            alias_presets=None,
         )
         yield dialog, control
         assert registry_state() == installed

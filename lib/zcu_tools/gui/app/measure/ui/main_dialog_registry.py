@@ -14,6 +14,7 @@ from zcu_tools.gui.widgets import DialogRefStore, widget_to_png_bytes
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller
+    from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.widgets import DialogPresenter
 
 
@@ -51,18 +52,22 @@ class MainDialogRegistry:
         dialog_refs: DialogRefStore,
         templates: Callable[[], Mapping[str, TemplateDef]],
         dialog_presenter: DialogPresenter,
+        alias_presets: AliasPresets | None,
     ) -> None:
         """Hold the factories for every named dialog.
 
         templates returns the composition's current template catalog; it is
         read each time Inspect opens, so a reloaded catalog reaches the next
         Inspect. dialog_presenter shows Inspect's questions and failures.
+        alias_presets is the composition's named alias catalog every Inspect
+        offers through Load preset; None means no catalog.
         """
         self._ctrl = ctrl
         self._parent = parent
         self._dialog_refs = dialog_refs
         self._templates = templates
         self._dialog_presenter = dialog_presenter
+        self._alias_presets = alias_presets
         self._dialog_names: dict[DialogName, None] = {}
 
     def _reclaim_for_stop(self) -> None:
@@ -123,6 +128,7 @@ class MainDialogRegistry:
                 # The named entry keeps the ARB dialog visible to screenshots.
                 open_arb_waveforms=lambda: self.open(DialogName.ARB_WAVEFORM),
                 dialog_presenter=self._dialog_presenter,
+                alias_presets=self._alias_presets,
                 parent=self._parent,
             )
             dialog.set_read_only(read_only=not writable)

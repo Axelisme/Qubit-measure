@@ -148,6 +148,7 @@ def _open(
         arb_waveforms=_ArbNames(),
         open_arb_waveforms=lambda: None,
         dialog_presenter=presenter or RecordingDialogPresenter(),
+        alias_presets=None,
     )
     session.dialogs.append(dialog)
     dialog.show()

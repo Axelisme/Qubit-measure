@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QColor
+from qtpy.QtGui import QAction, QColor
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -16,6 +17,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.alias_presets import AliasPresets
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
@@ -33,13 +35,18 @@ class AliasPanel(QWidget):
     Public child object names: inspect.aliases.table (QTableWidget with the
     columns Alias, Value and Resolves to), the QPushButtons
     inspect.aliases.add, inspect.aliases.remove and inspect.aliases.apply,
-    and inspect.aliases.error (the QLabel showing the last rejected Apply).
+    inspect.aliases.load_preset (a QPushButton whose QMenu has one action per
+    preset, titled with the preset name, in catalog order), and
+    inspect.aliases.error (the QLabel showing the last rejected Apply).
 
     Construct on the control's owner thread. The table starts with
-    control.get_alias_rows(); initial read failures propagate. Add, Remove and
-    cell edits change only this panel's draft. The read-only resolution column
-    projects the installed table when rows load and after a successful Apply,
-    never the draft. Without a selected point it stays blank; source faults
+    control.get_alias_rows(); initial read failures propagate. Add, Remove,
+    cell edits and Load preset change only this panel's draft. Choosing a
+    preset replaces every draft row with that preset's rows in order, without
+    merging, and clears the error; only Apply commits them. The read-only
+    resolution column projects the installed table when rows load and after
+    a successful Apply, never the draft, so rows from a preset stay blank there
+    until Apply. Without a selected point it stays blank; source faults
     appear as diagnostics in the column. The draft is unsaved while its rows
     differ from the rows last loaded or applied. The panel never asks questions;
     its host decides what to do with an unsaved draft.
@@ -48,11 +55,20 @@ class AliasPanel(QWidget):
     def __init__(
         self,
         control: ContextControlPort,
+        *,
+        presets: AliasPresets | None,
         parent: QWidget | None = None,
     ) -> None:
-        """Build the panel and load the installed rows from control."""
+        """Build the panel and load the installed rows from control.
+
+        presets maps preset names to ordered authored rows offered by Load
+        preset; the panel does not validate or copy them. None (or a catalog
+        without names) leaves Load preset disabled with an empty menu.
+        """
         super().__init__(parent)
         self._control = control
+        # Each menu action loads its own preset's rows, independent of its text.
+        self._preset_rows: dict[QAction, tuple[AliasRow, ...]] = {}
         self._base: tuple[AliasRow, ...] = ()
         layout = QVBoxLayout(self)
         hint = QLabel(
@@ -78,8 +94,19 @@ class AliasPanel(QWidget):
         self._add_btn.clicked.connect(self._add_row)
         self._remove_btn = self._action_button("Remove", "inspect.aliases.remove")
         self._remove_btn.clicked.connect(self._remove_rows)
+        self._preset_btn = self._action_button(
+            "Load preset", "inspect.aliases.load_preset"
+        )
+        preset_menu = QMenu(self._preset_btn)
+        if presets is not None:
+            for name, rows in presets.items():
+                self._preset_rows[preset_menu.addAction(name)] = rows
+        preset_menu.triggered.connect(self._load_preset)
+        self._preset_btn.setMenu(preset_menu)
+        self._preset_btn.setEnabled(bool(self._preset_rows))
         row_actions.addWidget(self._add_btn)
         row_actions.addWidget(self._remove_btn)
+        row_actions.addWidget(self._preset_btn)
         row_actions.addStretch()
         self._apply_btn = self._action_button("Apply", "inspect.aliases.apply")
         self._apply_btn.clicked.connect(self.apply)
@@ -131,19 +158,19 @@ class AliasPanel(QWidget):
         Apply is not undone; read failures propagate.
         """
         self._base = self._control.get_alias_rows()
-        self._table.setRowCount(0)
-        for row in self._base:
-            self._append_row(row)
-        self._error.clear()
+        self._show_rows(self._base)
         self._refresh_resolutions()
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock edits while keeping the rows selectable and scrollable.
 
-        Read-only disables Add, Remove and Apply and stops cell editing. A draft made before locking stays shown.
+        Read-only disables Add, Remove, Load preset and Apply and stops cell
+        editing. Unlocking leaves Load preset disabled without presets. A
+        draft made before locking stays shown.
         """
         for button in (self._add_btn, self._remove_btn, self._apply_btn):
             button.setEnabled(not read_only)
+        self._preset_btn.setEnabled(not read_only and bool(self._preset_rows))
         self._table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
             if read_only
@@ -163,6 +190,16 @@ class AliasPanel(QWidget):
                 raise RuntimeError("Alias editor row is missing a cell")
             rows.append(AliasRow(alias=alias.text(), value=value.text()))
         return tuple(rows)
+
+    def _show_rows(self, rows: tuple[AliasRow, ...]) -> None:
+        """Replace every draft row with rows and clear the error."""
+        self._table.setRowCount(0)
+        for row in rows:
+            self._append_row(row)
+        self._error.clear()
+
+    def _load_preset(self, action: QAction) -> None:
+        self._show_rows(self._preset_rows[action])
 
     def _append_row(self, row: AliasRow) -> None:
         index = self._table.rowCount()

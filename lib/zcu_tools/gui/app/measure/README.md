@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, named alias preset startup data and shared Inspect Aliases page
+**Last updated:** 2026-10-14, named alias preset startup data and Inspect Load preset
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -292,7 +292,8 @@ owner-thread delivery，也不另建 infrastructure bundle。
 
 Measure launcher 讀取使用者套件的具名 preset，以 `alias_presets` 經
 `MeasureGuiBehavior`、`Controller` 與 `build_app_services` 注入 default rows。
-Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，供 dialog 組裝。
+Behavior 的公開 `alias_presets` 欄位保留完整名稱與有序表，再經 `MainWindow` 與
+`MainDialogRegistry` 交給 Inspect 的 Load preset。
 框架不宣告領域初值，也不讀 preset 檔。Caller 省略或傳 None 時建立空表。
 顯式 mapping 必須含 default，否則 raise ValueError；default 的空 tuple 合法。
 ContextService 保留 authored softlinks 與空列，在第一份非空元件 snapshot 以
@@ -792,7 +793,8 @@ remote named-dialog surface delegate reference retention and `finished` /
 Inspect 是 session 的共用 `InspectDialog`。`MainDialogRegistry` 傳入它的全部必填協作者：
 `context_control`、event bus、組合根給的 `registry.templates` 讀取函式（每次開 Inspect 讀一次，
 reload 後的新範本在下次開啟生效）、`Controller.arb_waveforms`、window 的 DialogPresenter，
-以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot。
+以及開 `DialogName.ARB_WAVEFORM` 的入口，讓 ARB 對話框保有具名管理與 remote screenshot，
+加上組合根的具名 alias preset catalog。
 Measure 不再有自己的 Inspect 子類別或 ARB 實作；行為與 Modules 分頁見
 [session README](../../session/README.md)。Inspect 的唯讀 mode 由 window 在 Remote 查看時設定。
 `SetupDialog` receives `setup_control`, so project/context/SoC bootstrap UI no

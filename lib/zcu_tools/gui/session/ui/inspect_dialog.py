@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from zcu_tools.cfg_model import TemplateDef
     from zcu_tools.gui.event_bus import BaseEventBus
     from zcu_tools.gui.form import FormModel
+    from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformKeys
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter
@@ -127,7 +128,8 @@ class InspectDialog(QDialog):
     "Arb Waveforms…" calls the host's open_arb_waveforms.
 
     Aliases loads the installed alias rows when the dialog is built and
-    commits them only through its Apply. Closing with an Unsaved module entry
+    commits them only through its Apply; its Load preset menu replaces the
+    whole draft with one of alias_presets without committing. Closing with an Unsaved module entry
     or alias draft asks Save, Discard or Cancel for each in turn; a rejected
     alias Save keeps the dialog open on the Aliases page with its error.
     """
@@ -141,6 +143,7 @@ class InspectDialog(QDialog):
         arb_waveforms: ArbWaveformKeys,
         open_arb_waveforms: Callable[[], None],
         dialog_presenter: DialogPresenter,
+        alias_presets: AliasPresets | None,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog, subscribe to session facts and show the current context.
@@ -151,7 +154,9 @@ class InspectDialog(QDialog):
         template catalog New offers. arb_waveforms lists the arb asset names
         offered to arb data fields when an entry opens. open_arb_waveforms
         opens the host's ARB waveform dialog. dialog_presenter shows every
-        question and failure of this dialog.
+        question and failure of this dialog. alias_presets is the composition's
+        named alias catalog offered by the Aliases page's Load preset; None
+        means no catalog and leaves Load preset disabled.
         """
         super().__init__(parent)
         self._ctrl = ctrl
@@ -194,7 +199,7 @@ class InspectDialog(QDialog):
 
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
-        self._aliases = AliasPanel(ctrl)
+        self._aliases = AliasPanel(ctrl, presets=alias_presets)
         self._tabs.addTab(self._component_tree, "Parameters")
         self._tabs.addTab(self._build_modules_tab(), "Modules")
         self._tabs.addTab(self._aliases, "Aliases")
@@ -288,7 +293,7 @@ class InspectDialog(QDialog):
         """Lock or unlock every input while keeping the dialog readable.
 
         Read-only disables New, Delete, Arb Waveforms, Revert, Apply, the
-        component tree's edits and the Aliases page's writes; the Name, the
+        component tree's edits and the Aliases page's writes and Load preset; the Name, the
         entry form and the alias table stay readable, scrollable and foldable
         but ignore input. A draft made before locking stays shown and closing
         no longer asks about it. Call again with False to unlock.

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller, ViewSnapshot
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.writeback_control import WritebackPane
+    from zcu_tools.gui.session.alias_presets import AliasPresets
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,9 @@ class MainWindow(QMainWindow):
 
     templates returns the composition's current template catalog, read
     whenever Inspect opens. dialog_presenter shows the window's and Inspect's
-    questions and messages; None uses Qt message boxes.
+    questions and messages; None uses Qt message boxes. alias_presets is the
+    composition's named alias catalog that Inspect's Load preset offers;
+    omission or None means no catalog.
     """
 
     def __init__(
@@ -114,6 +117,7 @@ class MainWindow(QMainWindow):
         *,
         templates: Callable[[], Mapping[str, TemplateDef]],
         dialog_presenter: DialogPresenter | None = None,
+        alias_presets: AliasPresets | None = None,
     ) -> None:
         super().__init__()
         self._ctrl = controller
@@ -129,6 +133,7 @@ class MainWindow(QMainWindow):
             dialog_refs=self._dialog_refs,
             templates=templates,
             dialog_presenter=self._dialog_presenter,
+            alias_presets=alias_presets,
         )
         self._events = MainWindowEventCoordinator(self._ctrl, host=self)
         # True once _perform_close has begun the actual teardown, so the second
