@@ -50,7 +50,7 @@ class CapturedForm(FormModel):
         return {("choice",): ("alpha", "beta") if allow_beta else ("alpha",)}
 
     @classmethod
-    def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
+    def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
         return {
             ("branch",): (
                 Option(
