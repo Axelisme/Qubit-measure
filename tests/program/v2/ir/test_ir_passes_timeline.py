@@ -29,6 +29,7 @@ from zcu_tools.program.v2.ir.operands import (
     TimeOffset,
 )
 from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
+from zcu_tools.program.v2.ir.passes.timeline.timed_merge import TIMED_LIT_MAX
 from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
 
 
@@ -243,30 +244,6 @@ def test_zero_delay_dce_keeps_register_driven_inc_ref():
     time_insts = [i for i in bb.insts if isinstance(i, TimeInst)]
     assert len(time_insts) == 1
     assert time_insts[0].r1 == Register("r1")
-
-
-def test_timed_merge_merges_in_basic_block():
-    # Adjacent TIME inc_ref are merged; NopInst is a barrier so TIME is flushed before it.
-    root = BlockNode(
-        insts=[
-            BasicBlockNode(
-                insts=[
-                    TimeInst(c_op="inc_ref", lit=Immediate(2)),
-                    TimeInst(c_op="inc_ref", lit=Immediate(3)),
-                    NopInst(),
-                ]
-            ),
-        ]
-    )
-
-    out = _run_merge(root)
-
-    bb = out.insts[0]
-    assert isinstance(bb, BasicBlockNode)
-    assert len(bb.insts) == 2
-    assert isinstance(bb.insts[0], TimeInst)
-    assert str(bb.insts[0].lit) == "#5"
-    assert isinstance(bb.insts[1], NopInst)
 
 
 def test_timed_merge_skips_fixed_basic_block():
@@ -753,8 +730,6 @@ def test_pending_lit_flushed_at_end_of_block():
 # ---------------------------------------------------------------------------
 # TimedMergePass — TIMED_LIT_MAX overflow protection (8.3)
 # ---------------------------------------------------------------------------
-
-from zcu_tools.program.v2.ir.passes.timeline.timed_merge import TIMED_LIT_MAX
 
 
 def _bb_with_insts(*insts) -> BlockNode:

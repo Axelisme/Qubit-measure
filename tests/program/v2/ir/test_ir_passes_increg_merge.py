@@ -1,3 +1,4 @@
+import pytest
 from zcu_tools.program.v2.ir.factory import IRParser
 from zcu_tools.program.v2.ir.instructions import (
     CallInst,
@@ -525,41 +526,31 @@ def test_inc_reg_single_step_exceeds_max_emitted_as_is():
     assert bb.insts[0].op is not None and bb.insts[0].op.rhs == Immediate(huge)
 
 
-# ---------------------------------------------------------------------------
-# _is_const_increment filter paths (8.5 additional)
-# ---------------------------------------------------------------------------
-
-from zcu_tools.program.v2.ir.passes.dataflow.inc_reg_merge import (
-    _is_const_increment,
+@pytest.mark.parametrize(
+    ("lhs", "rhs", "uf"),
+    [
+        pytest.param("r1", Immediate(1), True, id="flag-updating"),
+        pytest.param("r1", Register("r2"), False, id="register-operand"),
+        pytest.param("r2", Immediate(1), False, id="copy-with-offset"),
+    ],
 )
-
-
-def test_is_const_increment_returns_none_for_uf_inst():
-    """Instruction with uf=True is not a plain increment → return None (line 85)."""
-    inst = RegWriteInst(
+def test_inc_reg_merge_preserves_non_plain_increment(
+    lhs: str, rhs: Immediate | Register, uf: bool
+):
+    increment = RegWriteInst(
         dst=Register("r1"),
         src=SrcKeyword.OP,
-        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(1)),
-        uf=True,
+        op=AluExpr(Register("r1"), AluOp.ADD, Immediate(2)),
     )
-    assert _is_const_increment(inst) is None
-
-
-def test_is_const_increment_returns_none_for_non_immediate_rhs():
-    """rhs is a Register, not Immediate → return None (line 91)."""
-    inst = RegWriteInst(
+    barrier = RegWriteInst(
         dst=Register("r1"),
         src=SrcKeyword.OP,
-        op=AluExpr(Register("r1"), AluOp.ADD, Register("r2")),
+        op=AluExpr(Register(lhs), AluOp.ADD, rhs),
+        uf=uf,
     )
-    assert _is_const_increment(inst) is None
-
-
-def test_is_const_increment_returns_none_for_lhs_ne_dst():
-    """lhs != dst (copy, not self-increment) → return None (line 95)."""
-    inst = RegWriteInst(
-        dst=Register("r1"),
-        src=SrcKeyword.OP,
-        op=AluExpr(Register("r2"), AluOp.ADD, Immediate(1)),
+    out = _run_chunk_pass(
+        BlockNode(insts=[BasicBlockNode(insts=[increment, barrier, increment])])
     )
-    assert _is_const_increment(inst) is None
+    bb = out.insts[0]
+    assert isinstance(bb, BasicBlockNode)
+    assert bb.insts == [increment, barrier, increment]

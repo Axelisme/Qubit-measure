@@ -4,7 +4,6 @@ import warnings
 
 import numpy as np
 import pytest
-import zcu_tools.notebook.analysis.fit_tools.flux as flux_mod
 from zcu_tools.notebook.analysis.fit_tools import (
     align_flux_to_window,
     correct_flux_from_f01,
@@ -12,92 +11,42 @@ from zcu_tools.notebook.analysis.fit_tools import (
 )
 
 
-def _monkeypatch_solver(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[float, float]]:
-    """Install a deterministic per-row solver and record (freq_mhz, guess) calls."""
-    calls: list[tuple[float, float]] = []
-
-    def fake_solve(
-        freq_mhz: float,
-        params: tuple[float, float, float],
-        *,
-        guess_flux: float,
-    ) -> float:
-        calls.append((freq_mhz, guess_flux))
-        assert params == (3.0, 1.0, 0.5)
-        return guess_flux + (freq_mhz - 1000.0) / 1000.0
-
-    monkeypatch.setattr(flux_mod, "_solve_f01_candidate_flux", fake_solve)
-    return calls
-
-
-def test_correct_flux_from_f01_takes_ghz_and_converts_to_mhz_predictor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _monkeypatch_solver(monkeypatch)
+def test_correct_flux_from_f01_takes_ghz_and_converts_to_mhz_predictor() -> None:
+    params = (3.4, 0.9, 0.6)
+    raw_fluxs = np.array([0.3, 1.3, 2.3], dtype=np.float64)
+    target_fluxs = np.array([0.31, 1.4, 2.32], dtype=np.float64)
+    freqs_ghz = 1e-3 * predict_f01_mhz(params, target_fluxs)
 
     result = correct_flux_from_f01(
-        np.array([0.5, 1.5, 2.5], dtype=np.float64),
-        np.array([1.01, 1.10, 1.02], dtype=np.float64),
-        (3.0, 1.0, 0.5),
-        max_abs_flux_correction=0.03,
+        raw_fluxs, freqs_ghz, params, max_abs_flux_correction=0.03
     )
 
-    # The MHz-based predictor must receive the explicit GHz -> MHz conversion.
-    np.testing.assert_allclose([call[0] for call in calls], [1010.0, 1100.0, 1020.0])
-    np.testing.assert_allclose(result.raw_fluxs, [0.5, 1.5, 2.5])
-    np.testing.assert_allclose(result.corrected_fluxs, [0.51, 1.5, 2.52])
+    # Real model frequencies exercise units, periodic branches and threshold rejection.
+    np.testing.assert_allclose(result.raw_fluxs, raw_fluxs)
+    np.testing.assert_allclose(result.corrected_fluxs, [0.31, 1.3, 2.32], atol=1e-5)
     np.testing.assert_array_equal(result.accepted, [True, False, True])
-    np.testing.assert_allclose(result.applied_flux_corrections, [0.01, 0.0, 0.02])
+    np.testing.assert_allclose(
+        result.applied_flux_corrections, [0.01, 0.0, 0.02], atol=1e-5
+    )
     assert result.skipped_count == 1
 
 
-def test_correct_flux_from_f01_uses_nearest_mirror_equivalent_branch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _monkeypatch_solver(monkeypatch)
-
-    # Direct candidate 0.51 would be 0.02 away, but the mirror-equivalent
-    # 0.49 is exactly the raw flux, so it must be chosen.
-    result = correct_flux_from_f01(
-        np.array([0.49], dtype=np.float64),
-        np.array([1.02], dtype=np.float64),
-        (3.0, 1.0, 0.5),
-        max_abs_flux_correction=0.03,
+def test_correct_flux_from_f01_uses_nearest_mirror_equivalent_branch() -> None:
+    params = (3.4, 0.9, 0.6)
+    raw_fluxs = np.array([0.49, 0.51], dtype=np.float64)
+    target_fluxs = np.array([0.495, 0.505], dtype=np.float64)
+    # Both rows have the same physical frequency but different nearest branches.
+    freqs_ghz = np.repeat(
+        1e-3 * predict_f01_mhz(params, np.array([0.495], dtype=np.float64)), 2
     )
 
-    np.testing.assert_allclose(result.corrected_fluxs, [0.49])
-    np.testing.assert_array_equal(result.accepted, [True])
+    result = correct_flux_from_f01(raw_fluxs, freqs_ghz, params)
 
-
-def test_correct_flux_from_f01_tie_prefers_periodic_branch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_solve(
-        freq_mhz: float,
-        params: tuple[float, float, float],
-        *,
-        guess_flux: float,
-    ) -> float:
-        assert params == (3.0, 1.0, 0.5)
-        # Direct candidate such that periodic and mirror branches tie at 0.1
-        # distance from the raw flux.
-        return guess_flux - 0.1
-
-    monkeypatch.setattr(flux_mod, "_solve_f01_candidate_flux", fake_solve)
-
-    result = correct_flux_from_f01(
-        np.array([0.5], dtype=np.float64),
-        np.array([1.0], dtype=np.float64),
-        (3.0, 1.0, 0.5),
-        max_abs_flux_correction=0.11,
+    np.testing.assert_allclose(result.corrected_fluxs, target_fluxs, atol=1e-5)
+    np.testing.assert_array_equal(result.accepted, [True, True])
+    np.testing.assert_allclose(
+        result.applied_flux_corrections, [0.005, -0.005], atol=1e-5
     )
-
-    # periodic 0.4 and mirror 0.6 are both 0.1 away; the deterministic tie rule
-    # keeps the periodic branch.
-    np.testing.assert_allclose(result.corrected_fluxs, [0.4])
-    np.testing.assert_array_equal(result.accepted, [True])
 
 
 def test_correct_flux_from_f01_rejects_invalid_shapes() -> None:
@@ -126,20 +75,18 @@ def test_correct_flux_from_f01_rejects_negative_threshold() -> None:
         )
 
 
-def test_correct_flux_from_f01_missing_frequency_keeps_raw_flux(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _monkeypatch_solver(monkeypatch)
-
+def test_correct_flux_from_f01_missing_frequency_keeps_raw_flux() -> None:
     result = correct_flux_from_f01(
         np.array([0.5], dtype=np.float64),
         np.array([np.nan], dtype=np.float64),
         (3.0, 1.0, 0.5),
     )
 
-    assert not np.isfinite(calls[0][0])
+    np.testing.assert_allclose(result.raw_fluxs, [0.5])
     np.testing.assert_allclose(result.corrected_fluxs, [0.5])
     np.testing.assert_array_equal(result.accepted, [False])
+    np.testing.assert_allclose(result.applied_flux_corrections, [0.0])
+    assert result.skipped_count == 1
 
 
 def test_correct_flux_from_f01_rejects_unreachable_frequencies() -> None:
@@ -156,32 +103,23 @@ def test_correct_flux_from_f01_rejects_unreachable_frequencies() -> None:
     np.testing.assert_array_equal(result.corrected_fluxs, raw_fluxs)
 
 
-def test_correct_flux_from_f01_rejects_non_converged_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_solve(
-        freq_mhz: float,
-        params: tuple[float, float, float],
-        *,
-        guess_flux: float,
-    ) -> float:
-        assert params == (3.0, 1.0, 0.5)
-        if freq_mhz < 0.0:
-            return np.nan  # non-converged solve produces no candidate
-        return guess_flux + 0.01
-
-    monkeypatch.setattr(flux_mod, "_solve_f01_candidate_flux", fake_solve)
-
-    result = correct_flux_from_f01(
-        np.array([0.5, 0.5], dtype=np.float64),
-        np.array([-1.0, 1.01], dtype=np.float64),
-        (3.0, 1.0, 0.5),
-        max_abs_flux_correction=0.03,
+def test_correct_flux_from_f01_failed_row_does_not_affect_reachable_row() -> None:
+    params = (3.4, 0.9, 0.6)
+    reachable_ghz = (
+        1e-3 * predict_f01_mhz(params, np.array([0.31], dtype=np.float64))[0]
     )
 
-    np.testing.assert_allclose(result.corrected_fluxs, [0.5, 0.51])
+    with pytest.warns(RuntimeWarning):
+        result = correct_flux_from_f01(
+            np.array([0.3, 0.3], dtype=np.float64),
+            np.array([100.0, reachable_ghz], dtype=np.float64),
+            params,
+            max_abs_flux_correction=0.03,
+        )
+
+    np.testing.assert_allclose(result.corrected_fluxs, [0.3, 0.31], atol=1e-5)
     np.testing.assert_array_equal(result.accepted, [False, True])
-    np.testing.assert_allclose(result.applied_flux_corrections, [0.0, 0.01])
+    np.testing.assert_allclose(result.applied_flux_corrections, [0.0, 0.01], atol=1e-5)
     assert result.skipped_count == 1
 
 

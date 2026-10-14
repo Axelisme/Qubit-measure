@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 from zcu_tools.program.v2.ir.factory import IRParser
@@ -38,7 +38,10 @@ from zcu_tools.program.v2.ir.passes.dataflow import (
 )
 from zcu_tools.program.v2.ir.passes.loop import UnrollLoopPass
 from zcu_tools.program.v2.ir.pipeline import (
+    AbsChunkListPass,
+    AbsChunkPass,
     AbsIRTreePass,
+    IRPipeLine,
     PipeLineConfig,
     PipeLineContext,
     make_default_pipeline,
@@ -62,23 +65,19 @@ def _config(**kwargs) -> PipeLineConfig:
     return PipeLineConfig(**kwargs)
 
 
-def _apply_tree_pass_to_root(
+def _transform_only_child(
     root: BlockNode, pass_: AbsIRTreePass, ctx: PipeLineContext
-) -> tuple[BlockNode, bool]:
-    """Run an AbsIRTreePass over a tree via the real pipeline post-order driver.
-
-    Returns (result, changed). `changed` is best-effort: True when the root
-    object identity changed.
-    """
-    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
-
-    result = _optimize_tree(root, [pass_], ctx)
-    if isinstance(result, BlockNode):
-        return result, result is not root
-    return BlockNode(insts=[result]), True
+) -> BlockNode:
+    """Exercise a pass's public transform contract on one prepared subtree."""
+    assert len(root.insts) == 1
+    node = root.insts[0]
+    replacement = pass_.transform(node, ctx)
+    return BlockNode(insts=[node if replacement is None else replacement])
 
 
-def _run_chunk_passes_on_root(root: BlockNode, passes: list) -> BlockNode:
+def _run_chunk_passes_on_root(
+    root: BlockNode, passes: Sequence[AbsChunkPass | AbsChunkListPass]
+) -> BlockNode:
     parser = IRParser()
     chunks = parser.unparse(root)
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
@@ -523,7 +522,7 @@ def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     )
 
     # 1. Unroll
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     # 2. Merge blocks so the linear pass sees the writes together in one block
     from zcu_tools.program.v2.ir.passes.control_flow import BlockMergePass
@@ -571,7 +570,7 @@ def test_unroll_full_expansion_keeps_counter_init_for_counter_dependent_body():
         ]
     )
 
-    out, _ = _apply_tree_pass_to_root(
+    out = _transform_only_child(
         root, UnrollLoopPass(), PipeLineContext(config=_config(), pmem_budget=512)
     )
 
@@ -670,7 +669,7 @@ def test_unroll_register_driven_jump_table_structure():
     )
 
     config = _config(max_unroll_factor=2)
-    out, _ = _apply_tree_pass_to_root(
+    out = _transform_only_child(
         root,
         UnrollLoopPass(),
         PipeLineContext(config=config, pmem_budget=512, available_regs={"r14"}),
@@ -884,49 +883,33 @@ def test_dead_test_uf_inst_kills_pending_test():
     assert len(reg_insts) == 1
 
 
-def test_dead_test_conditional_jump_in_insts_consumes_flag():
-    """JumpInst with if_cond inside the insts list (not branch) consumes pending TEST.
-
-    BasicBlockNode.__post_init__ forbids JumpInst in .insts, so we test
-    _find_dead_indices directly — the method is designed to handle arbitrary
-    instruction lists, including ones that may arrive from non-IR paths.
-    """
-    from zcu_tools.program.v2.ir.passes.dataflow.dead_test import (
-        DeadTestEliminationPass,
+def test_dead_test_conditional_branch_and_fallthrough_keep_flags():
+    first = _test_inst()
+    fallthrough = _test_inst()
+    root = BlockNode(
+        insts=[
+            BasicBlockNode(
+                insts=[first],
+                branch=JumpInst(label=LabelRef(Label("skip")), if_cond="Z"),
+            ),
+            BasicBlockNode(insts=[fallthrough]),
+        ]
     )
-
-    pass_ = DeadTestEliminationPass()
-    lbl = Label("skip")
-    insts = [
-        _test_inst(),  # alive: consumed by cond jump below
-        JumpInst(
-            label=LabelRef(lbl),
-            if_cond="Z",
-            op=AluExpr(Register("r0"), AluOp.SUB, Immediate(0)),
-        ),
-        _test_inst(),  # kept: branch=None is a possible fall-through boundary
-    ]
-    dead = pass_._find_dead_indices(insts, branch=None)  # type: ignore[attr-defined]
-    # The first TEST (index 0) should NOT be dead (consumed by cond jump at index 1)
-    # The second TEST (index 2) is also kept conservatively because branch=None
-    # means a following block may consume the flags.
-    assert 0 not in dead
-    assert 2 not in dead
-
-
-# ---------------------------------------------------------------------------
-# Pipeline — non-convergence warning and disable_opt violation (8.7)
-# ---------------------------------------------------------------------------
+    out = _run_dead_test(root)
+    blocks = list(_walk_basic_blocks(out))
+    assert len(blocks) == 2
+    assert blocks[0].insts == [first]
+    assert blocks[0].branch == JumpInst(label=LabelRef(Label("skip")), if_cond="Z")
+    assert blocks[1].insts == [fallthrough]
 
 
 def test_pipeline_non_convergence_emits_warning(caplog):
-    """_run_chunklist_opt logs a warning when passes oscillate past max_opt_iterations."""
+    """The public pipeline warns when an injected pass fails to converge."""
     import logging
 
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkListPass,
         ChunkList,
-        _run_chunklist_opt,
     )
 
     class OscillatingPass(AbsChunkListPass):
@@ -936,10 +919,10 @@ def test_pipeline_non_convergence_emits_warning(caplog):
             return chunks, True
 
     ctx = PipeLineContext(config=PipeLineConfig(max_opt_iterations=2), pmem_budget=1024)
-    chunks = IRParser().unparse(BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]))
+    insts = _flatten_root(BlockNode(insts=[BasicBlockNode(insts=[NopInst()])]))
 
     with caplog.at_level(logging.WARNING, logger="zcu_tools.program.v2.ir.pipeline"):
-        _run_chunklist_opt([], [OscillatingPass()], chunks, ctx)
+        IRPipeLine(ctx.config, [], [OscillatingPass()])(insts)
 
     assert any("did not converge" in r.message for r in caplog.records)
     assert any("OscillatingPass" in r.message for r in caplog.records)
@@ -951,30 +934,25 @@ def test_pipeline_non_convergence_diagnostic_does_not_mutate_live_chunks(caplog)
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkListPass,
         ChunkList,
-        _run_chunklist_opt,
     )
 
     class DiagnosticMutatingPass(AbsChunkListPass):
-        def __init__(self) -> None:
-            self.calls = 0
-
         def process(self, chunks: ChunkList, ctx: PipeLineContext):
-            self.calls += 1
-            if self.calls > ctx.config.max_opt_iterations:
-                block = chunks[0]
-                assert isinstance(block, BasicBlockNode)
-                block.insts.append(NopInst())
+            block = chunks[0]
+            assert isinstance(block, BasicBlockNode)
+            block.insts.append(NopInst())
             return chunks, True
 
     ctx = PipeLineContext(config=PipeLineConfig(max_opt_iterations=2), pmem_budget=1024)
     block = BasicBlockNode(insts=[NopInst()])
-    chunks: ChunkList = [block]
+    insts = _flatten_root(BlockNode(insts=[block]))
 
     with caplog.at_level(logging.WARNING, logger="zcu_tools.program.v2.ir.pipeline"):
-        out = _run_chunklist_opt([], [DiagnosticMutatingPass()], chunks, ctx)
+        out, _ = IRPipeLine(ctx.config, [], [DiagnosticMutatingPass()])(insts)
 
-    assert out is chunks
-    assert block.insts == [NopInst()]
+    # Two U-shape phases run at most two live iterations each.
+    # Diagnostic probes must not add instructions to the emitted program.
+    assert out == [NopInst()] * 5
     assert any("DiagnosticMutatingPass" in r.message for r in caplog.records)
 
 
@@ -983,7 +961,6 @@ def test_pipeline_disable_opt_violation_raises():
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkPass,
         ChunkList,
-        _run_passes,
     )
 
     class WordCountChangingPass(AbsChunkPass):
@@ -1001,17 +978,16 @@ def test_pipeline_disable_opt_violation_raises():
 
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
     fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
-    chunks: ChunkList = [fixed_bb]
-
     with pytest.raises(ValueError, match="disable_opt"):
-        _run_passes([WordCountChangingPass()], chunks, ctx)
+        IRPipeLine(ctx.config, [WordCountChangingPass()], [])(
+            _flatten_root(BlockNode(insts=[fixed_bb]))
+        )
 
 
 def test_pipeline_disable_opt_deletion_raises():
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkPass,
         ChunkList,
-        _run_passes,
     )
 
     class DeletingPass(AbsChunkPass):
@@ -1026,14 +1002,15 @@ def test_pipeline_disable_opt_deletion_raises():
     fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
 
     with pytest.raises(ValueError, match="disable_opt"):
-        _run_passes([DeletingPass()], [fixed_bb], ctx)
+        IRPipeLine(ctx.config, [DeletingPass()], [])(
+            _flatten_root(BlockNode(insts=[fixed_bb]))
+        )
 
 
 def test_pipeline_disable_opt_replacement_raises():
     from zcu_tools.program.v2.ir.pipeline import (
         AbsChunkPass,
         ChunkList,
-        _run_passes,
     )
 
     class ReplacingPass(AbsChunkPass):
@@ -1049,12 +1026,12 @@ def test_pipeline_disable_opt_replacement_raises():
     fixed_bb = BasicBlockNode(insts=[NopInst()], disable_opt=True)
 
     with pytest.raises(ValueError, match="disable_opt"):
-        _run_passes([ReplacingPass()], [fixed_bb], ctx)
+        IRPipeLine(ctx.config, [ReplacingPass()], [])(
+            _flatten_root(BlockNode(insts=[fixed_bb]))
+        )
 
 
 def test_pipeline_tree_pass_missing_disable_opt_block_raises():
-    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
-
     class DroppingTreePass(AbsIRTreePass):
         def transform(self, node: IRNode, ctx: PipeLineContext):
             if isinstance(node, BlockNode):
@@ -1065,12 +1042,10 @@ def test_pipeline_tree_pass_missing_disable_opt_block_raises():
     root = BlockNode(insts=[BasicBlockNode(insts=[NopInst()], disable_opt=True)])
 
     with pytest.raises(ValueError, match="disable_opt"):
-        _optimize_tree(root, [DroppingTreePass()], ctx)
+        IRPipeLine(ctx.config, [], [], [DroppingTreePass()])(_flatten_root(root))
 
 
 def test_pipeline_rejects_non_block_loop_body_replacement():
-    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
-
     class ReplacingLoopBodyPass(AbsIRTreePass):
         def transform(self, node: IRNode, ctx: PipeLineContext):
             if (
@@ -1091,7 +1066,7 @@ def test_pipeline_rejects_non_block_loop_body_replacement():
     ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024)
 
     with pytest.raises(TypeError, match="IRLoop.body optimization"):
-        _optimize_tree(root, [ReplacingLoopBodyPass()], ctx)
+        IRPipeLine(ctx.config, [], [], [ReplacingLoopBodyPass()])(_flatten_root(root))
 
 
 # ---------------------------------------------------------------------------
@@ -1129,7 +1104,7 @@ def _ctx_partial(pmem_capacity: int, pmem_budget: int = 10) -> PipeLineContext:
     )
 
 
-def _collect_reg_write_s15(root: BlockNode) -> list:
+def _collect_reg_write_s15(root: BlockNode) -> list[RegWriteInst]:
     """Collect all RegWriteInst with dst=s15 from the flat basic-block tree."""
     result = []
     for bb in _walk_basic_blocks(root):
@@ -1145,7 +1120,7 @@ def test_partial_unroll_suffixes_start_label_when_name_is_already_allocated():
     ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
     ctx.allocated_names.add("loop_unrolled_start")
 
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
     label_names = [
         str(label.name) for bb in _walk_basic_blocks(out) for label in bb.labels
     ]
@@ -1160,7 +1135,7 @@ def test_partial_unroll_small_pmem_no_remainder_label_jump():
     loop = _nop_loop("lp", n=100)
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     s15_writes = _collect_reg_write_s15(out)
     assert len(s15_writes) == 0  # no s15 in small-pmem mode
@@ -1182,7 +1157,7 @@ def test_partial_unroll_big_pmem_no_remainder_s15_jump():
     loop = _nop_loop("lp", n=100)
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=4096, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     s15_writes = _collect_reg_write_s15(out)
     # back-edge writes s15 in big-pmem mode
@@ -1194,7 +1169,7 @@ def test_partial_unroll_with_remainder_small_pmem():
     loop = _nop_loop("lp", n=103)  # remainder = 3
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     s15_writes = _collect_reg_write_s15(out)
     assert len(s15_writes) == 0  # no s15 in small-pmem mode
@@ -1204,7 +1179,7 @@ def test_partial_unroll_synthetic_labels_are_removable():
     loop = _nop_loop("lp", n=103)
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     synthetic_labels = [
         label
@@ -1223,7 +1198,7 @@ def test_partial_unroll_empty_body_remainder_label_is_removable():
     loop = _empty_const_loop("lp", n=103)
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=512, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     remainder_labels = [
         label
@@ -1241,7 +1216,7 @@ def test_partial_unroll_with_remainder_big_pmem():
     loop = _nop_loop("lp", n=103)  # remainder = 3
     root = BlockNode(insts=[loop])
     ctx = _ctx_partial(pmem_capacity=4096, pmem_budget=10)
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
 
     s15_writes = _collect_reg_write_s15(out)
     # init_bb (for remainder skip) + back-edge both write s15
@@ -1282,7 +1257,7 @@ def test_jump_table_body_size_zero_returns_none():
         pmem_budget=1024,
         available_regs={"r14"},
     )
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
     # No IRDispatch should appear — loop was not transformed
     from zcu_tools.program.v2.ir.node import IRDispatch
 
@@ -1299,7 +1274,7 @@ def test_jump_table_no_available_regs_returns_none():
         pmem_budget=1024,
         available_regs=set(),  # empty
     )
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
     from zcu_tools.program.v2.ir.node import IRDispatch
 
     dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
@@ -1315,7 +1290,7 @@ def test_jump_table_k_raw_le_1_returns_none():
         pmem_budget=1,  # k_budget = 1//1 = 1 → k_raw=min(max_unroll,1)=1 → skip
         available_regs={"r14"},
     )
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
     from zcu_tools.program.v2.ir.node import IRDispatch
 
     dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
@@ -1331,7 +1306,7 @@ def test_jump_table_normal_path_produces_dispatch():
         pmem_budget=1024,
         available_regs={"r14"},
     )
-    out, _ = _apply_tree_pass_to_root(root, UnrollLoopPass(), ctx)
+    out = _transform_only_child(root, UnrollLoopPass(), ctx)
     from zcu_tools.program.v2.ir.node import IRDispatch
 
     dispatches = [n for n in _walk_all_nodes(out) if isinstance(n, IRDispatch)]
@@ -1413,7 +1388,7 @@ def test_dmem_dispatch_small_pmem_uses_label_jump():
         config=PipeLineConfig(pmem_capacity=512),
         pmem_budget=1024,
     )
-    out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
+    out = _transform_only_child(root, DmemDispatchPass(), ctx)
 
     all_bbs = list(_walk_basic_blocks(out))
     guard_bbs = [
@@ -1443,7 +1418,7 @@ def test_dmem_dispatch_big_pmem_uses_s15_indirect():
         config=PipeLineConfig(pmem_capacity=4096),
         pmem_budget=1024,
     )
-    out, _ = _apply_tree_pass_to_root(root, DmemDispatchPass(), ctx)
+    out = _transform_only_child(root, DmemDispatchPass(), ctx)
 
     all_bbs = list(_walk_basic_blocks(out))
     guard_bbs = [
@@ -1481,3 +1456,49 @@ def test_dead_test_disable_opt_block_not_modified():
     assert isinstance(bb, BasicBlockNode)
     # TEST must NOT be removed (block is disable_opt)
     assert len([i for i in bb.insts if isinstance(i, TestInst)]) == 1
+
+
+def test_pipeline_chunk_passes_reach_joint_fixed_point():
+    """Label removal enables block merge, which enables increment merging."""
+    from zcu_tools.program.v2.ir.passes.control_flow import (
+        BlockMergePass,
+        DeadLabelEliminationPass,
+    )
+    from zcu_tools.program.v2.ir.passes.timeline import TimedMergePass, ZeroDelayDCEPass
+
+    insts: list[Instruction] = [
+        TimeInst(c_op="inc_ref", lit=Immediate(2)),
+        LabelInst(name=Label("unused"), can_remove=True),
+        TimeInst(c_op="inc_ref", lit=Immediate(0)),
+        TimeInst(c_op="inc_ref", lit=Immediate(3)),
+        NopInst(),
+    ]
+    pipeline = IRPipeLine(
+        PipeLineConfig(),
+        [TimedMergePass(), ZeroDelayDCEPass()],
+        [BlockMergePass(), DeadLabelEliminationPass()],
+    )
+    out, _ = pipeline(insts)
+    assert out == [TimeInst(c_op="inc_ref", lit=Immediate(5)), NopInst()]
+    again, _ = pipeline(out)
+    assert again == out
+
+
+def test_pipeline_unroll_revisits_generated_dispatch():
+    """The tree driver lowers dispatch nodes introduced by loop expansion."""
+    from zcu_tools.program.v2.ir.passes.control_flow import DmemDispatchPass
+
+    root = BlockNode(insts=[_reg_loop("lp", n_reg="r1")])
+    pipeline = IRPipeLine(
+        PipeLineConfig(pmem_capacity=512, max_unroll_factor=2),
+        [],
+        [],
+        [UnrollLoopPass(), DmemDispatchPass()],
+    )
+    out, ctx = pipeline(_flatten_root(root))
+    assert len(ctx.dmem_tables) == 1
+    labels = {inst.name for inst in out if isinstance(inst, LabelInst)}
+    assert all(label in labels for label in ctx.dmem_tables[0])
+    assert any(
+        isinstance(inst, JumpInst) and inst.addr == Register("s15") for inst in out
+    )
