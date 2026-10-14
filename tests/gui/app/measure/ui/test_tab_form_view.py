@@ -13,7 +13,6 @@ from qtpy.QtWidgets import (
     QApplication,
     QLabel,
     QLineEdit,
-    QPushButton,
     QScrollArea,
     QWidget,
 )
@@ -45,7 +44,7 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui._user_input import key_click, type_text
+from tests.gui._user_input import key_click, mouse_click, type_text
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
@@ -257,14 +256,17 @@ def test_running_tab_locks_inputs_but_keeps_the_form_readable(
     bar.setValue(bar.maximum())
     assert bar.value() == bar.maximum()
 
-    (fold,) = [b for b in editor.findChildren(QPushButton) if b.text() == "Collapse"]
+    fold = editor.findChild(QLabel, "form.fold.pulse")
+    assert isinstance(fold, QLabel)
     assert fold.isEnabled()
+    assert fold.text().startswith("\u25be ")
     gain = view.input("pulse.gain")
-    fold.click()
+    mouse_click(fold, fold.rect().center())
     assert gain.isHidden() or not gain.isVisibleTo(editor)
-    assert fold.text() == "Expand"
-    fold.click()
+    assert fold.text().startswith("\u25b8 ")
+    mouse_click(fold, fold.rect().center())
     assert gain.isVisibleTo(editor)
+    assert fold.text().startswith("\u25be ")
     assert view.resource.input.data == {
         "reps": 100,
         "rounds": 10,
