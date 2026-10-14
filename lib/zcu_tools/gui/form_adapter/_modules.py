@@ -133,7 +133,9 @@ def _inline_kinds(annotation: object) -> tuple[type[BaseModel], ...]:
 
 
 def _spec_options(
-    model: type[BaseModel], env: FormEnv
+    model: type[BaseModel],
+    env: FormEnv,
+    inline_fields: dict[tuple[type[BaseModel], type[BaseModel]], type[BaseModel]],
 ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
     declared: dict[tuple[str | int, ...], tuple[Option, ...]] = {}
     for name, info in model.model_fields.items():
@@ -178,13 +180,18 @@ def _spec_options(
             raise TypeError("Spec options require a tagged inline wrapper")
         for kind in kinds:
             tag, value = _spec_tag(kind)
+            key = (wrapper, kind)
+            fields = inline_fields.get(key)
+            if fields is None:
+                fields = create_model(
+                    f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
+                )
+                inline_fields[key] = fields
             options.append(
                 Option(
                     "Inline" if len(kinds) == 1 else f"Inline: {value}",
                     {"kind": "inline", "module": {tag: value}},
-                    fields=create_model(
-                        f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
-                    ),
+                    fields=fields,
                 )
             )
         declared[(name,)] = tuple(options)
@@ -367,10 +374,13 @@ def editable_spec(
             derived.metadata.append(display)
         namespace[name] = derived
 
+    # Each generated model owns its classes; option values and sources stay fresh.
+    inline_fields: dict[tuple[type[BaseModel], type[BaseModel]], type[BaseModel]] = {}
+
     def options(
         cls: type[FormModel], env: FormEnv
     ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
-        return _spec_options(cls, env)
+        return _spec_options(cls, env, inline_fields)
 
     def defaults(cls: type[FormModel], env: FormEnv) -> dict[str, JsonValue]:
         del env
@@ -573,6 +583,7 @@ class ModuleField:
         if not issubclass(inline, ModuleInline):
             raise TypeError("Generated inline model must implement ModuleInline")
         self.inline = inline
+        self._inline_fields: dict[type[BaseModel], type[BaseModel]] = {}
         self.annotation = (
             inline
             if self.locks
@@ -598,7 +609,8 @@ class ModuleField:
 
         Keys are limited to this field's persistent families in the fixed env.
         Inline values select only kind tags; core supplies fresh branch defaults.
-        Fields describe the selected inline wrapper and omit its structural tags.
+        Fields reuse a class per inline wrapper/kind for this field's lifetime,
+        describe the selected inline wrapper and omit its structural tags.
         Empty kinds have no editable content and do not get an Inline selection.
         """
         options = [Option("None", None)] if self.nullable else []
@@ -621,9 +633,14 @@ class ModuleField:
         kinds = _inline_kinds(union_type(self.editable))
         for kind in kinds:
             tag, value = _spec_tag(kind)
-            fields = create_model(
-                f"{kind.__name__}InlineFields", __base__=self.inline, module=(kind, ...)
-            )
+            fields = self._inline_fields.get(kind)
+            if fields is None:
+                fields = create_model(
+                    f"{kind.__name__}InlineFields",
+                    __base__=self.inline,
+                    module=(kind, ...),
+                )
+                self._inline_fields[kind] = fields
             options.append(
                 Option(
                     "Inline" if len(kinds) == 1 else f"Inline: {value}",
