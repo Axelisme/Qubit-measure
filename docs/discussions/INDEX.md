@@ -11,3 +11,7 @@
 ## Cfg 與表單
 
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 ADR draft `measure-form-derivation`。
+
+## 存檔與資料格式
+
+- 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 ADR draft `artifact-persistence`。
