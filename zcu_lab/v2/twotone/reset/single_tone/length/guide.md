@@ -4,7 +4,7 @@ Single-tone sideband-reset length sweep: holds the tested pulse-reset at its cal
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_f for the tested reset frequency. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
+Requires `$qubit.ext.reset_f` for the tested reset frequency. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
 
 ## Expects (ModuleLibrary)
 

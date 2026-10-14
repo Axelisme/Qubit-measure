@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-14，獨立 Markdown guide 與資源
+**Last updated:** 2026-10-15，Guide alias code span 寫法
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -181,7 +181,9 @@ GUI / MCP 只使用這個公開契約。
 
 GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
 行內 `$...$`、行內或獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
-想顯示字面 `$` 時寫 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。本機圖片以相對於 guide 目錄的路徑引用，例如
+Alias 引用一律寫成 code span，例如 `$qubit.freq`、`$qubit.module.readout`。
+其他字面 `$` 寫成 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。
+本機圖片以相對於 guide 目錄的路徑引用，例如
 `![Pulse sequence](pulse.png)`。GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，
 不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
 Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。

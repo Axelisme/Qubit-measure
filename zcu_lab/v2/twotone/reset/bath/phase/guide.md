@@ -4,7 +4,7 @@ Bath-reset pi/2 phase sweep: holds the tested bath reset at its calibrated cavit
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_bath_freq and $qubit.ext.reset_bath_gain for the tested cavity tone. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit/resonator frequency and wiring.
+Requires `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain` for the tested cavity tone. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit/resonator frequency and wiring.
 
 ## Expects (ModuleLibrary)
 
@@ -12,7 +12,7 @@ Builds the tested bath-reset cfg from captured defaults and needs a readout modu
 
 ## Typical writeback
 
-Proposes phases to $qubit.ext.reset_bath_max_phase and $qubit.ext.reset_bath_min_phase. With Run cfg and capture, proposes $qubit.reset.reset_bath and $qubit.reset.reset_bath_e from tested_reset, replacing only pi/2 phase with max/ground and min/excited respectively. Tested cavity frequency, gain and all other fields remain. An optional $qubit.module.reset row selects ground by default; it can be edited to excited.
+Proposes phases to `$qubit.ext.reset_bath_max_phase` and `$qubit.ext.reset_bath_min_phase`. With Run cfg and capture, proposes `$qubit.reset.reset_bath` and `$qubit.reset.reset_bath_e` from tested_reset, replacing only pi/2 phase with max/ground and min/excited respectively. Tested cavity frequency, gain and all other fields remain. An optional `$qubit.module.reset` row selects ground by default; it can be edited to excited.
 
 ## Recommended
 

@@ -4,11 +4,11 @@ Single-shot AC-Stark calibration: drives a cavity Stark tone and a qubit probe t
 
 ## Expects (parameter context)
 
-Run classification defaults reference $qubit.ext.readout_cal.g_center, $qubit.ext.readout_cal.e_center and $qubit.ext.readout_cal.radius. Probe frequency/channel use $qubit.freq and $qubit.wiring.L01.ch; probe length/mixer use $qubit.module.x180.waveform.length and $qubit.module.x180.mixer_freq. Cavity timing uses $resonator.kappa. Missing aliases or calibration leave cfg Invalid. Analyze calibration sources are not yet migrated to the historical Run contract.
+Run classification defaults reference `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center` and `$qubit.ext.readout_cal.radius`. Probe frequency/channel use `$qubit.freq` and `$qubit.wiring.L01.ch`; probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq`. Cavity timing uses `$resonator.kappa`. Missing aliases or calibration leave cfg Invalid. Analyze calibration sources are not yet migrated to the historical Run contract.
 
 ## Expects (ModuleLibrary)
 
-Uses $qubit.module.readout for SMART readout. Cavity and qubit probe tones are inline with canonical scalar calibration references; reset and init pulse start disabled.
+Uses `$qubit.module.readout` for SMART readout. Cavity and qubit probe tones are inline with canonical scalar calibration references; reset and init pulse start disabled.
 
 ## Typical writeback
 

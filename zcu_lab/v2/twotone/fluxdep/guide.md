@@ -8,7 +8,7 @@ Reads from the parameter context (all optional): 'q_f' — qubit frequency, cent
 
 ## Expects (ModuleLibrary)
 
-Needs a qubit-probe pulse module and a pulse-readout module; references a ModuleLibrary waveform named 'ro_waveform' when present. Optionally references a calibrated reset module. Also needs a flux device name 'flux_dev' ($flux_dev resolves from the alias table with no fallback) — a device, not a library entry.
+Needs a qubit-probe pulse module and a pulse-readout module; references a ModuleLibrary waveform named 'ro_waveform' when present. Optionally references a calibrated reset module. Also needs a flux device name 'flux_dev' (`$flux_dev` resolves from the alias table with no fallback) — a device, not a library entry.
 
 ## Typical writeback
 

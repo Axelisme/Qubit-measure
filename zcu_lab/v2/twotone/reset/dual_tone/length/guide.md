@@ -4,7 +4,7 @@ Dual-tone reset length sweep: holds the tested two-pulse reset at its calibrated
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_f1/reset_f2 and $qubit.ext.reset_gain1/reset_gain2 for the tested frequencies and gains. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
+Requires `$qubit.ext.reset_f1`/reset_f2 and `$qubit.ext.reset_gain1`/reset_gain2 for the tested frequencies and gains. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
 
 ## Expects (ModuleLibrary)
 

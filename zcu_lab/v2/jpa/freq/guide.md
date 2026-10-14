@@ -4,11 +4,11 @@ JPA pump-frequency tracer: with the qubit prepared in g and e (a pi pulse toggle
 
 ## Expects (parameter context)
 
-Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example $resonator.amplifier. Scalars use $jpa.pump_freq, $jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
+Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example `$resonator.amplifier`. Scalars use `$jpa.pump_freq`, `$jpa.pump_power`, `$jpa.flux` and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
 
 ## Expects (ModuleLibrary)
 
-SMART modules use $qubit.module.x180, $qubit.module.readout and optional $qubit.module.reset. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
+SMART modules use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset`. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ Proposes the signal-maximizing JPA pump frequency into parameter context 'best_j
 
 ## Recommended
 
-Review the selected RF device and the sweep bounds before every run; the seeded range around $jpa.pump_freq is only a starting point. Analysis picks the peak of the absolute signal difference.
+Review the selected RF device and the sweep bounds before every run; the seeded range around `$jpa.pump_freq` is only a starting point. Analysis picks the peak of the absolute signal difference.

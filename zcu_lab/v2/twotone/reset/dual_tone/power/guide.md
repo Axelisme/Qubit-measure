@@ -4,7 +4,7 @@ Dual-tone reset gain map: a 2D sweep of the two reset-tone gains (pulse1 × puls
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_f1 and $qubit.ext.reset_f2 for the two tested-reset frequencies. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
+Requires `$qubit.ext.reset_f1` and `$qubit.ext.reset_f2` for the two tested-reset frequencies. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit frequency and wiring.
 
 ## Expects (ModuleLibrary)
 
@@ -12,7 +12,7 @@ Builds the tested two-pulse-reset cfg from captured defaults and needs a readout
 
 ## Typical writeback
 
-Proposes the best gains to $qubit.ext.reset_gain1 and $qubit.ext.reset_gain2. With Run cfg and capture, proposes $qubit.reset.reset_120 from tested_reset, replacing only the two gains with this analysis. Tested frequencies and all other fields remain. An optional $qubit.module.reset row selects it.
+Proposes the best gains to `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`. With Run cfg and capture, proposes `$qubit.reset.reset_120` from tested_reset, replacing only the two gains with this analysis. Tested frequencies and all other fields remain. An optional `$qubit.module.reset` row selects it.
 
 ## Recommended
 

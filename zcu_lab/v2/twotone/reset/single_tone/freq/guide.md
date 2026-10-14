@@ -4,7 +4,7 @@ Single-tone sideband-reset frequency sweep: drives the tested pulse-reset tone a
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_f and $qubit.ext.reset_fwhm for the sweep centre and half-span of 1.5 FWHM. Missing, null or invalid values fail cfg lowering. Drive defaults use the captured qubit frequency and wiring; post-delay uses $resonator.kappa.
+Requires `$qubit.ext.reset_f` and `$qubit.ext.reset_fwhm` for the sweep centre and half-span of 1.5 FWHM. Missing, null or invalid values fail cfg lowering. Drive defaults use the captured qubit frequency and wiring; post-delay uses `$resonator.kappa`.
 
 ## Expects (ModuleLibrary)
 
@@ -12,7 +12,7 @@ Builds the tested pulse reset inline and needs a readout module. Optionally refe
 
 ## Typical writeback
 
-Proposes fitted frequency and FWHM to $qubit.ext.reset_f and $qubit.ext.reset_fwhm. With Run cfg and capture, proposes $qubit.reset.reset_10 from tested_reset, replacing only its frequency with this analysis. All other tested fields remain. An optional $qubit.module.reset row selects the concrete root.
+Proposes fitted frequency and FWHM to `$qubit.ext.reset_f` and `$qubit.ext.reset_fwhm`. With Run cfg and capture, proposes `$qubit.reset.reset_10` from tested_reset, replacing only its frequency with this analysis. All other tested fields remain. An optional `$qubit.module.reset` row selects the concrete root.
 
 ## Recommended
 

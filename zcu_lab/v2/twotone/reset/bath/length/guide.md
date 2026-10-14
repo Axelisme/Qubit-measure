@@ -4,7 +4,7 @@ Bath-reset length sweep: holds the tested bath reset at its calibrated cavity fr
 
 ## Expects (parameter context)
 
-Requires $qubit.ext.reset_bath_freq and $qubit.ext.reset_bath_gain for the tested cavity tone. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit/resonator frequency and wiring.
+Requires `$qubit.ext.reset_bath_freq` and `$qubit.ext.reset_bath_gain` for the tested cavity tone. Missing, null or invalid values fail cfg lowering. Other drive defaults use captured qubit/resonator frequency and wiring.
 
 ## Expects (ModuleLibrary)
 

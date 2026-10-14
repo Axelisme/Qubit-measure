@@ -4,11 +4,11 @@ JPA flux × readout-frequency 2D survey: sweeps the JPA flux device value (outer
 
 ## Expects (parameter context)
 
-Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example $resonator.amplifier. Scalars use $jpa.pump_freq, $jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
+Uses current aliases: qubit (qubit/*), resonator (resonator), and jpa (amplifier/jpa). Add a jpa alias row in the global dialog, for example `$resonator.amplifier`. Scalars use `$jpa.pump_freq`, `$jpa.pump_power`, `$jpa.flux` and canonical qubit/resonator wiring. Missing aliases or calibration leave cfg Invalid; no static fallback.
 
 ## Expects (ModuleLibrary)
 
-SMART modules use $qubit.module.x180, $qubit.module.readout and optional $qubit.module.reset. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
+SMART modules use `$qubit.module.x180`, `$qubit.module.readout` and optional `$qubit.module.reset`. Inline readout uses resonator scalar and wiring calibration; module waveforms follow their module source.
 
 ## Typical writeback
 
@@ -16,4 +16,4 @@ No writeback — this adapter has no analysis step (the underlying experiment ha
 
 ## Recommended
 
-No analysis options. Typical sweep: JPA flux device value ~101 points around the seeded centre ($jpa.flux), readout frequency ~101 points spanning 1.5 linewidths around 'r_f'. Confirm the JPA pump state yourself before every run. Survey the map wide first, then narrow the ranges around the response you want to inspect.
+No analysis options. Typical sweep: JPA flux device value ~101 points around the seeded centre (`$jpa.flux`), readout frequency ~101 points spanning 1.5 linewidths around 'r_f'. Confirm the JPA pump state yourself before every run. Survey the map wide first, then narrow the ranges around the response you want to inspect.
