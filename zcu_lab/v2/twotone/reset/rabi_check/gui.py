@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -19,21 +19,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.cfg import (
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.rabi_check.core import (
     RabiCheckCfg,
     RabiCheckExp,
     RabiCheckResult,
 )
+from zcu_lab.v2.twotone.reset.rabi_check.form import FORM
 
 RabiCheckRunResult: TypeAlias = RunRecord[RabiCheckCfg, RabiCheckResult]
 
@@ -71,7 +64,8 @@ class RabiCheckAdapter(
     experiment_tag: ClassVar[str | None] = RabiCheckExp.persistence_tag()
 
     exp_cls = RabiCheckExp
-    ExpCfg_cls: ClassVar[Any] = RabiCheckCfg
+    ExpCfg_cls = RabiCheckCfg
+    form = FORM
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=True, analysis=AnalysisMode.FIT, load_data=True
     )
@@ -89,16 +83,23 @@ class RabiCheckAdapter(
             "Runs on real hardware."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'q_f' / 'qub_ch' — "
-            "qubit frequency and channel, seeding rabi_pulse and tested_reset "
-            "defaults; 'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' "
-            "— resonator / readout defaults."
+            "Seeds 51 gain points from 0.0 to 1.0, with relax delay 1.0 us. Run "
+            "overwrites the Rabi pulse gain. Open and Reset evaluate starting expressions "
+            "once into direct input using captured sources. Inline qubit pulses read "
+            "$qubit.freq and $qubit.wiring.L01.ch. Inline readout reads $resonator.freq, "
+            "$resonator.wiring.ch, $resonator.wiring.ro_ch and $resonator.ext.time_of_fly "
+            "+ 0.05 us for trigger timing. Missing or invalid required sources leave the "
+            "affected fields empty and Invalid; supply calibration or direct values "
+            "before Run. No numeric calibration fallback is supplied."
         ),
         expects_ml=(
-            "Needs rabi_pulse (used before and after tested_reset), tested_reset "
-            "(any reset shape: none / pulse / two-pulse / bath), and a readout "
-            "module. Optionally "
-            "references a calibrated upstream reset (disabled when absent)."
+            "Rabi pulse uses $qubit.module.x180 or a fresh pi_pulse template. Tested "
+            "reset uses $qubit.module.reset or a fresh pulse-reset template; library "
+            "reset families remain selectable. $qubit.module.readout selects a captured "
+            "library link, otherwise a fresh inline readout template with a const "
+            "waveform. Its required parameter sources must still be present. Optional "
+            "$qubit.module.reset has no fallback: an unset/dangling slot or unbound alias "
+            "leaves it disabled and Valid."
         ),
         typical_writeback=(
             "No writeback. Compare relative contrast, reset-only residual "
@@ -117,27 +118,6 @@ class RabiCheckAdapter(
             "optional — omit it if no upstream reset is calibrated yet."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("rabi_pulse", role_id="pi_pulse", label="Rabi Pulse")
-            .reset("tested_reset", role_id="reset", label="Tested Reset")
-            .readout()
-            .relax_delay(1.0)
-            .sweep(
-                "gain",
-                label="Gain (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .reps(1000)
-            .rounds(10)
-            .build()
-        )
 
     def run(
         self,

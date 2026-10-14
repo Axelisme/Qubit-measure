@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -22,24 +22,16 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import path_seed
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
     PowerResult,
 )
+from zcu_lab.v2.twotone.reset.dual_tone.power.form import FORM
 
 DualTonePowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
@@ -68,7 +60,8 @@ class DualTonePowerAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
-    ExpCfg_cls: ClassVar[Any] = PowerCfg
+    ExpCfg_cls = PowerCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -78,16 +71,24 @@ class DualTonePowerAdapter(
             "gain pair that resets most completely. Runs on real hardware."
         ),
         expects_md=(
-            "Requires $qubit.ext.reset_f1 and $qubit.ext.reset_f2 for the "
-            "two tested-reset frequencies. Missing, null or invalid values "
-            "fail cfg lowering. Other drive defaults use captured qubit "
-            "frequency and wiring."
+            "Tested frequencies read $qubit.ext.reset_f1 and $qubit.ext.reset_f2. Seeds "
+            "two 51-point gain axes from 0.0 to 1.0, with relax delay 0.5 us. Open and "
+            "Reset evaluate starting expressions once into direct input using captured "
+            "sources. Inline qubit pulses read $qubit.freq and $qubit.wiring.L01.ch. "
+            "Inline readout reads $resonator.freq, $resonator.wiring.ch, "
+            "$resonator.wiring.ro_ch and $resonator.ext.time_of_fly + 0.05 us for trigger "
+            "timing. Missing or invalid required sources leave the affected fields empty "
+            "and Invalid; supply calibration or direct values before Run. No numeric "
+            "calibration fallback is supplied."
         ),
         expects_ml=(
-            "Builds the tested two-pulse-reset cfg from captured defaults and "
-            "needs a readout module. Optionally references an upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
+            "Tested reset starts inline from the two_pulse_reset template. Optional init "
+            "pulse uses $qubit.module.x180 without fallback; an unset/dangling slot or "
+            "unbound alias leaves it disabled and Valid. $qubit.module.readout selects a "
+            "captured library link, otherwise a fresh inline readout template with a "
+            "const waveform. Its required parameter sources must still be present. "
+            "Optional $qubit.module.reset has no fallback: an unset/dangling slot or "
+            "unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
             "Proposes the best gains to $qubit.ext.reset_gain1 and "
@@ -104,42 +105,6 @@ class DualTonePowerAdapter(
             "those first."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="two_pulse_reset",
-                label="Tested Reset",
-                shape="two_pulse",
-                locked={"pulse1_cfg.gain": 0.0, "pulse2_cfg.gain": 0.0},
-                overrides={
-                    "pulse1_cfg.freq": path_seed("$qubit.ext.reset_f1", fallback=0.0),
-                    "pulse2_cfg.freq": path_seed("$qubit.ext.reset_f2", fallback=0.0),
-                },
-            )
-            .readout()
-            .relax_delay(0.5)
-            .sweep(
-                "gain1",
-                label="Gain 1 (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .sweep(
-                "gain2",
-                label="Gain 2 (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .reps(100)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,

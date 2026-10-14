@@ -3,10 +3,11 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     US_TO_S,
     AxesSpec,
@@ -48,14 +49,14 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    tested_reset: TwoPulseResetCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class LengthSweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthCfg(ProgramV2Cfg, ExpCfgModel):

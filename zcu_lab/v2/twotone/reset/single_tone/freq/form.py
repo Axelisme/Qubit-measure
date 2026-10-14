@@ -1,0 +1,36 @@
+"""Core-derived starting values for reset/single_tone/freq."""
+
+from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.gui.form_adapter import Form
+
+from zcu_lab.v2.twotone.reset.single_tone.freq.core import FreqCfg
+
+FORM = Form(
+    FreqCfg,
+    tree={
+        "modules": {
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "tested_reset": Template(
+                "reset",
+                set={
+                    "pulse_cfg.gain": 0.3,
+                    "pulse_cfg.waveform.length": 5.0,
+                    "pulse_cfg.post_delay": Expr(
+                        "5.0 / (2 * 3.141592653589793 * $resonator.kappa)"
+                    ),
+                },
+            ),
+            "readout": Slot("$qubit.module.readout", fallback=Template("readout")),
+        },
+        "sweep": {
+            "freq": Range.around(
+                "$qubit.ext.reset_f", "1.5 * $qubit.ext.reset_fwhm", expts=201
+            ),
+        },
+        "relax_delay": Expr("$qubit.t1"),
+        "reps": 1000,
+        "rounds": 100,
+        "initial_delay": Hidden(),
+    },
+)

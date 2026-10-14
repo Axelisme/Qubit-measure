@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -20,31 +20,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_reset_module_spec,
-)
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ReferenceValue,
-    SweepValue,
-    make_custom_reference_key,
-    make_default_value,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainAnalyzeOptions,
@@ -52,69 +29,9 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainExp,
     FreqGainResult,
 )
+from zcu_lab.v2.twotone.ro_optimize.freq_gain.form import FORM
 
 RoOptFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
-
-
-def _best_ro_freq_range(ctx: SessionEnv) -> SweepValue:
-    """Center this experiment's frequency scan on its latest trusted optimum."""
-    parameters = ctx.parameters
-    if parameters is None:
-        return SweepValue(start=6250.0, stop=6750.0, expts=31)
-    center_path = "$qubit.ext.best_ro_freq"
-    center_value = parameters.lookup(center_path).value
-    if center_value is None:
-        center_path = "$resonator.freq"
-        center_value = parameters.lookup(center_path).value
-    width_value = parameters.lookup("$resonator.kappa").value
-    for path, value in [(center_path, center_value), ("$resonator.kappa", width_value)]:
-        if value is not None and (
-            isinstance(value, bool) or not isinstance(value, (int, float))
-        ):
-            raise TypeError(f"{path} must be a real number")
-    center = float(center_value) if isinstance(center_value, (int, float)) else 6500.0
-    width = float(width_value) if isinstance(width_value, (int, float)) else 500.0
-    if center_value is not None and width_value is not None:
-        start: float | EvalValue = EvalValue(
-            expr=f"{center_path} - 0.5 * $resonator.kappa"
-        )
-        stop: float | EvalValue = EvalValue(
-            expr=f"{center_path} + 0.5 * $resonator.kappa"
-        )
-    else:
-        half_span = 0.5 * width if width > 0.0 else 30.0
-        start = center - half_span
-        stop = center + half_span
-    return SweepValue(start=start, stop=stop, expts=31)
-
-
-def _blank_pi_pulse(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
-    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-    value.with_field("nqz", 2)
-    value.with_field("gain", 0.1)
-    value.with_field("waveform.length", 5.1)
-    return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    value.with_field("pulse_cfg.freq", frequency)
-    value.with_field(
-        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("pulse_cfg.nqz", 2)
-    value.with_field("pulse_cfg.gain", 0.1)
-    value.with_field("pulse_cfg.waveform.length", 1.0)
-    value.with_field("ro_cfg.ro_freq", frequency)
-    value.with_field(
-        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("ro_cfg.ro_length", 0.9)
-    value.with_field("ro_cfg.trig_offset", 0.55)
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -141,7 +58,8 @@ class RoOptFreqGainAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqGainExp.persistence_tag()
     exp_cls = FreqGainExp
-    ExpCfg_cls: ClassVar[Any] = FreqGainCfg
+    ExpCfg_cls = FreqGainCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -153,26 +71,31 @@ class RoOptFreqGainAdapter(
             "together once you have a rough readout frequency."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'r_f' / 'best_ro_freq' — "
-            "resonator / chosen readout frequency centring the freq sweep "
-            "(~4000–8000 MHz); 'rf_w' — linewidth, setting the freq half-span "
-            "(~5–50 MHz); 'res_ch' / 'ro_ch' — drive / ADC channels; 'timeFly' "
-            "— trigger-offset cable delay; 'q_f' / 'qub_ch' — qubit frequency "
-            "/ channel for the g↔e pi pulse."
+            "Seeds 31 frequency points at $resonator.freq +/- 0.5 * $resonator.kappa, not "
+            "$qubit.ext.best_ro_freq. Seeds 31 gain points from 0.0 to 0.2. Relax delay "
+            "reads 5.0 * $qubit.t1. Open and Reset evaluate starting expressions once "
+            "into direct input using captured sources. Inline qubit pulses read "
+            "$qubit.freq and $qubit.wiring.L01.ch. Inline readout reads $resonator.freq, "
+            "$resonator.wiring.ch, $resonator.wiring.ro_ch and $resonator.ext.time_of_fly "
+            "+ 0.05 us for trigger timing. Missing or invalid required sources leave the "
+            "affected fields empty and Invalid; supply calibration or direct values "
+            "before Run. No numeric calibration fallback is supplied."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform 'ro_waveform' "
-            "when present. Optionally references a reset module."
+            "The qubit pulse uses $qubit.module.x180 as a captured library link, "
+            "otherwise a fresh pi_pulse template with a const waveform. "
+            "$qubit.module.readout selects a captured library link, otherwise a fresh "
+            "inline readout template with a const waveform. Its required parameter "
+            "sources must still be present. Optional $qubit.module.reset has no fallback: "
+            "an unset/dangling slot or unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
-            "Proposes the SNR-maximizing readout frequency and gain into "
-            "parameter context 'best_ro_freq' (MHz) and 'best_ro_gain' (a.u.). When a "
-            "cfg snapshot with pulse readout is available and "
-            "'best_ro_freq' / 'best_ro_gain' / 'best_ro_length' are known "
-            "from this result plus parameter context, also proposes ModuleLibrary "
-            "'readout_dpm'."
+            "Proposes the SNR-maximizing readout frequency and gain into parameter "
+            "context $qubit.ext.best_ro_freq (MHz) and $qubit.ext.best_ro_gain (a.u.). "
+            "When a cfg snapshot with pulse readout is available and "
+            "$qubit.ext.best_ro_freq / $qubit.ext.best_ro_gain / "
+            "$qubit.ext.best_ro_length are known from this result plus parameter context, "
+            "also proposes $qubit.readout.readout_dpm."
         ),
         recommended=(
             "Analysis denoises the 2D SNR map before picking the peak. Wavelet "
@@ -181,58 +104,6 @@ class RoOptFreqGainAdapter(
             "the gain range modest so the 2D scan stays affordable."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.qub_pulse",
-                spec=make_pulse_module_spec(),
-                default=module_seed(
-                    "$qubit.module.x180",
-                    fallback=custom(_blank_pi_pulse, description="inline pi pulse"),
-                ),
-            )
-            .field(
-                "modules.readout",
-                spec=make_pulse_readout_module_spec()
-                .lock_literal("pulse_cfg.freq", 0.0)
-                .lock_literal("ro_cfg.ro_freq", 0.0)
-                .lock_literal("pulse_cfg.gain", 0.0),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
-            )
-            .sweep(
-                "freq",
-                label="Readout freq (MHz)",
-                default=custom(
-                    _best_ro_freq_range,
-                    description="best readout frequency range (31 points)",
-                ),
-            )
-            .sweep(
-                "gain",
-                label="Readout gain (a.u.)",
-                default=SweepValue(start=0.0, stop=0.2, expts=31),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(100)
-            .rounds(1000)
-            .build()
-        )
 
     def run(
         self,
@@ -267,12 +138,12 @@ class RoOptFreqGainAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="best_ro_freq",
+                target_name="$qubit.ext.best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
             ParameterWriteback(
-                target_name="best_ro_gain",
+                target_name="$qubit.ext.best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,
             ),
