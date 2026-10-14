@@ -21,10 +21,14 @@ def inductive_spectral_density(
 def inductive_spectral_density(
     omega: float | NDArray[np.float64], Temp: float, EL: float
 ) -> float | NDArray[np.float64]:
-    """omega: rad/ns, EL: GHz, T: K -> GHz"""
+    """Unit-Q inductive spectral rate in ns⁻¹ for omega (rad/ns), Temp (K), EL (GHz)."""
     therm_ratio = calc_therm_ratio(omega, Temp)
     return (
-        2 * EL * (1 / np.tanh(0.5 * np.abs(therm_ratio))) / (1 + np.exp(-therm_ratio))
+        2
+        * EL
+        * (2 * np.pi)  # EL/h in GHz -> EL/ħ in ns⁻¹ (ADR-0071).
+        * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
+        / (1 + np.exp(-therm_ratio))
     )
 
 
@@ -36,7 +40,7 @@ def calc_ind_dipole(
 ) -> NDArray[np.float64]:
     """Calculate the dipole of the inductive operator.
 
-    params: GHz, omega: rad/ns, T: K, EL: GHz -> GHz
+    params: (EJ, EC, EL) in GHz, omegas: rad/ns, Temp: K -> unit-Q rate in ns⁻¹.
     """
     _EJ, _EC, EL = params
 

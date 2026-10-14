@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-11 — JSONL sample consumers
+**Last updated:** 2026-10-14，physical ns 與標準 loss parameters
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -13,7 +13,8 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - 溫度 `Temp`: K (典型 ~20 mK)。
 - Purcell 參數 `bare_rf` / `g` / `kappa_ghz`: GHz。
 - 能量 `params = (EJ, EC, EL)`: GHz。
-- Dipole / spectral density: GHz，Q = T1 × dipole → 無量綱。
+- Dipole / spectral density 是包含 coupling prefactor 的 rate，單位 ns⁻¹。Q = T1 × dipole 為無量綱。Q_cap／Q_ind 是標準 loss quality factor，Q_qp = 1/x_qp。
+- Forward T1、pointwise Q 與 combined fit 使用同一套 rate prefactor。scqubits 在 energy/h=GHz 設定下已回傳 ns，不再外乘 2π，見 [ADR-0071](../../../../../docs/adr/0071-coherence-units.md)。
 
 ## 檔案與角色
 
@@ -60,20 +61,20 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ### `Qcap.py` — 介電耗散 (電容通道)
 
-- `charge_spectral_density(ω, T, EC)`：`16·EC·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`（對應 scqubits `t1_capacitive`）。
+- `charge_spectral_density(ω, T, EC)`：`32π·EC·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`，是 unit-Q rate prefactor，對應 scqubits `t1_capacitive`。
 - `calc_cap_dipole(params, n_elements, ω, T)`：`|⟨0|n̂|1⟩|² · [S(ω)+S(-ω)]`。
 - `calc_Qcap_vs_omega(params, ω, T1s, n_elements, T1errs=None, Temp=20mK)`：`Q_cap = T1 · dipole`，可選回傳誤差。
 
 ### `Qind.py` — 電感耗散
 
-- `inductive_spectral_density(ω, T, EL)`：`2·EL·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`。
+- `inductive_spectral_density(ω, T, EL)`：`4π·EL·coth(|ℏω/2kT|)/(1+e^{-ℏω/kT})`，是 unit-Q rate prefactor。
 - `calc_ind_dipole(params, phi_elements, ω, T)`：用 `|⟨0|φ̂|1⟩|²`。
 - `calc_Qind_vs_omega(...)`：結構同 Qcap。
 
 ### `Qqp.py` — 準粒子穿隧 (quasiparticle)
 
 - `DELTA_ALUMINUM = 3.4e-4` eV：鋁超導能隙預設值。
-- `qp_spectral_density(ω, T, EJ, Delta_eV)`：依 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp` 公式（含 `sp_special.kv(0, ...)` 修飾 Bessel）；對齊 scqubits：`Re Y_qp` 只依 `|ω|`，但 spectral-density 前因子保留 signed `ω`，讓 `S(ω)+S(-ω)` 正確。
+- `qp_spectral_density(ω, T, EJ, Delta_eV)` 使用 Smith et al. (2020) Eq. S23/19 的 `Re Y_qp / x_qp`，回傳每 unit x_qp 的 rate prefactor。Admittance 依 |ν| 計算，ν = ω/(2π)。Spectral prefactor 則用 signed angular ω，與 scqubits 的 `S(ω)+S(-ω)` 一致。
 - `calc_qp_oper(params, flux, return_dim=4, esys=None)`：回傳 `sin(φ/2)` 運算子矩陣；⚠ 假設 flux 併入 *cosine* 項（與某些文獻不同），故透過 `α=0.5, β=πflux` 做 `φ → φ + 2π·flux` 的平移。
 - `calc_qp_dipole(params, sin2_elements, ω, T, Delta_eV)`：`|⟨0|sin(φ/2)|1⟩|² · [S_qp(ω)+S_qp(-ω)]`。
 - `calc_Qqp_vs_omega(...)`：回傳的「Q_qp」實際上是 `1/x_qp`，代入 `plot_t1_with_sample(name="x_qp", ...)` 時要注意此反比關係。
@@ -86,6 +87,12 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 4. 依序跑 capacitive、quasiparticle、inductive probe，檢查每個機制的 pointwise Q 與單機制 T1 上限。
 5. 用 probe 結果建立 combined-fit 初值；用 `active_mechanisms` / `fixed_mechanisms` 控制納入與固定的通道。
 6. 在 uniform `t_fluxs` 上畫 effective T1 與各獨立機制曲線；需要交給 T2 分析時再顯式 `write_t1_curve_fit()`。
+
+## 歷史 fit
+
+舊 helper 曾在 forward T1 外乘 2π，pointwise spectrum 也缺少對應的 rate 轉換。舊 fitted parameters 可能靠這些偏差抵消而得到吻合曲線，不能直接視為標準 Q_cap／Q_ind／x_qp。使用者須重新擬合或審核來源，不要批次套用常數換算。本修正不改寫 measured T1、samples 或已保存的 fit，也不提供 legacy scale 開關。
+
+T1 channel curves 現在以修正後的 ns 作圖。T2 使用 model T1 計算 relaxation ceiling 時也會採用修正結果；使用 measured T1 的路徑不受這個理論單位修正影響。
 
 ## 注意事項
 
