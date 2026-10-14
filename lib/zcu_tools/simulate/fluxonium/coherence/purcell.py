@@ -13,7 +13,10 @@ if TYPE_CHECKING:
     from scqubits.core.oscillator import Oscillator
 
 # -----------------------------
-# The equations:
+# The equations use angular frequencies/rates: omega = 2*pi*nu and
+# kappa_rate = 2*pi*kappa, where nu and the input linewidth kappa are in GHz.
+# The original frequency-selected bath uses a† for upward energy exchange and
+# a for downward exchange, not the full quadrature a+a† (ADR-0071).
 # $$
 # Thermal resonator occupation probability: P_{res} (n) = (1 - exp(-\beta \hbar \omega_r)) exp(-n \beta \hbar \omega_r) \\
 # Thermal mean photon number: n_{th}(\omega_j) = \frac{1}{exp(\beta \hbar \omega_j) - 1} \\
@@ -36,23 +39,45 @@ def purcell(
     fluxonium: Fluxonium,
     resonator: Oscillator,
 ) -> NDArray[np.float64]:
-    """
-    Calculate the Purcell-limited T1 for the 0-1 transition.
+    """Return a thermal-averaged escape lifetime from the initial to final group.
 
-    Egn, Een, bare_rf, kappa: GHz, Temp: K
+    Egn and Vec_gn describe final dressed states; Een and Vec_en describe
+    initial dressed states. Energies are energy/h in GHz, indexed by resonator
+    photon labels ns. The vector arrays contain composite QuTiP eigenstates;
+    Vec_n contains the bare resonator eigenvectors used to wrap its operators.
+    fluxonium and resonator define the composite space in that order.
+
+    bare_rf is the positive bare resonator frequency in GHz. kappa is the
+    linewidth kappa_rate/(2*pi) in GHz (0.001 means 1 MHz), not a decay rate;
+    the rate sum uses 2*pi*kappa in ns^-1. Temp is the bath temperature in K,
+    including zero. Thermal populations use h*nu/(k_B*Temp).
+
+    Positive final-minus-initial energy differences use a† and n_B; negative
+    differences use a and n_B+1. Only the initial group is thermally averaged
+    over resonator photons. Swapping groups evaluates the reverse escape.
+    The sweep supplies e as initial and g as final: the result is not the
+    equilibrium relaxation time 1/(Gamma_eg+Gamma_ge). Return a float64 scalar
+    array in physical ns, or infinity when no allowed decay rate remains.
+    Missing dressed labels (NaN energies) contribute no rate.
     """
 
     from scqubits.utils.spectrum_utils import identity_wrap
 
-    beta_hbar = sc.hbar / (sc.k * Temp) * 1e9
+    beta_h = sc.h / (sc.k * Temp) * 1e9 if Temp != 0 else np.inf
+    kappa_rate = 2 * np.pi * kappa
 
-    def P_res(n: NDArray[np.int64]) -> NDArray[np.float64]:
-        return (1 - np.exp(-beta_hbar * bare_rf)) * np.exp(-n * beta_hbar * bare_rf)
+    if Temp == 0:
+        P_res_ns = np.asarray(ns == 0, dtype=np.float64)
+    else:
+        resonator_exponent = beta_h * bare_rf
+        P_res_ns = -np.expm1(-resonator_exponent) * np.exp(-ns * resonator_exponent)
 
-    def n_th(w_j: NDArray[np.float64]) -> NDArray[np.float64]:
-        return 1 / (np.exp(beta_hbar * w_j) - 1)
-
-    P_res_ns = P_res(ns)
+    def n_th(frequency: NDArray[np.float64]) -> NDArray[np.float64]:
+        if Temp == 0:
+            return np.zeros_like(frequency)
+        # Equivalent to 1/expm1(x), without overflow for a cold bath.
+        exponent = beta_h * frequency
+        return np.exp(-exponent) / -np.expm1(-exponent)
 
     E_1n0m = Egn[:, None] - Een[None, :]  # (ns, ns), from |1, n> to |0, m>
 
@@ -73,7 +98,9 @@ def purcell(
             # Vec_gn entries are QuTiP Qobj (not plain ndarray); .dag() is valid
             # at runtime but scqubits/qutip lack typed stubs.
 
-    purcell_up = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(ad_1n0n) ** 2)
+    purcell_up = np.nansum(
+        P_res_ns[None, :] * kappa_rate * n_ths * np.abs(ad_1n0n) ** 2
+    )
 
     # calculate the transition rate of 0-1 caused by down Purcell effect
 
@@ -91,9 +118,14 @@ def purcell(
             a_1n0n[ng, ne] = Vec_gn[ng].dag() * a_op * Vec_en[ne]  # type: ignore[attr-defined]
             # Vec_gn entries are QuTiP Qobj; .dag() is valid at runtime.
 
-    purcell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
+    # The spontaneous +1 belongs only to downward dressed-energy channels.
+    downward_population = np.where(down_mask, n_ths + 1, 0.0)
+    purcell_down = np.nansum(
+        P_res_ns[None, :] * kappa_rate * downward_population * np.abs(a_1n0n) ** 2
+    )
 
-    return np.asarray(1 / (purcell_up + purcell_down), dtype=np.float64)
+    escape_rate = purcell_up + purcell_down
+    return np.asarray(np.inf if escape_rate == 0 else 1 / escape_rate, dtype=np.float64)
 
 
 def calculate_purcell_t1_vs_flux(
@@ -105,8 +137,23 @@ def calculate_purcell_t1_vs_flux(
     params: tuple[float, float, float],
     progress: bool = True,
 ) -> NDArray[np.float64]:
-    """
-    bare_rf, kappa, g: GHz, Temp: K, params: GHz -> ns
+    """Return e-to-g Purcell escape lifetimes along normalized flux Phi/Phi0.
+
+    fluxs is a one-dimensional flux array; params is (EJ, EC, EL) in GHz.
+    bare_rf is the positive bare resonator frequency and g is the charge-mode
+    coupling in GHz. kappa is the resonator linewidth kappa_rate/(2*pi) in GHz,
+    so 0.001 denotes 1 MHz and contributes 2*pi*0.001 ns^-1 to the rate sum.
+    Temp is the bath temperature in K, including zero.
+
+    Average over initial resonator thermal populations using h*nu/(k_B*Temp).
+    Dressed-energy upward channels use a†/n_B; downward channels use a/(n_B+1),
+    retaining spontaneous decay at zero temperature. This is an e-to-g escape
+    lifetime, not equilibrium relaxation 1/(Gamma_eg+Gamma_ge).
+
+    Return float64 lifetimes in physical ns with the same shape as fluxs;
+    no allowed decay gives infinity. Missing dressed labels contribute no
+    rate. progress controls scqubits sweep progress and restores its prior
+    global setting on return or failure. Diagonalization errors propagate.
     """
 
     Nf = 10

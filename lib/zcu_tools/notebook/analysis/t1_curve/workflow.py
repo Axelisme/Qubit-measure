@@ -112,6 +112,15 @@ _CACHE_FLOAT_DECIMALS = 12
 
 @dataclass(frozen=True, slots=True)
 class PurcellEffectParams:
+    """Positive, finite GHz inputs for the Purcell escape-lifetime model.
+
+    kappa_ghz is the resonator linewidth kappa_rate/(2*pi), not a decay rate;
+    0.001 means 1 MHz and the kernel uses 2*pi*kappa_ghz in ns^-1.
+    bare_rf is the bare resonator frequency; g is its charge-mode coupling.
+    The kernel returns thermal-resonator-averaged e-to-g escape times, not
+    equilibrium relaxation times 1/(Gamma_eg+Gamma_ge).
+    """
+
     kappa_ghz: float
     bare_rf: float
     g: float
