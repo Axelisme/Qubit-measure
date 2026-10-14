@@ -37,7 +37,7 @@ def qp_spectral_density(
 
     Based on Smith et al (2020), Eq. S23 and Eq. 19.
 
-    omega: rad/ns, EJ: GHz, Delta: GHz, Temp: K -> GHz
+    omega: rad/ns, EJ: GHz, Delta_eV: eV, Temp: K -> ns⁻¹ per unit x_qp.
     """
     therm_ratio = calc_therm_ratio(omega, Temp)
     abs_therm = calc_therm_ratio(abs(omega), Temp)
@@ -63,7 +63,7 @@ def qp_spectral_density(
     return (
         2e-9
         * sp.hbar
-        * omega_Hz
+        * (omega * 1e9)  # Angular rad/s, not cycles/s, in the rate prefactor.
         / sp.e**2
         * Y_qp_norm
         * (1 / np.tanh(0.5 * therm_ratio))
@@ -96,7 +96,8 @@ def calc_qp_dipole(
 ) -> NDArray[np.float64]:
     """Calculate the dipole of the quasiparticle operator.
 
-    params: GHz, omega: rad/ns, T: K, Delta: GHz -> GHz
+    params: (EJ, EC, EL) in GHz, omegas: rad/ns, Temp: K, Delta_eV: eV.
+    Returns the rate in ns⁻¹ per unit x_qp; T1 times this rate equals 1/x_qp.
     """
     EJ, _EC, _EL = params
 
