@@ -253,11 +253,38 @@ def test_inline_and_display_math_render_as_images(open_guide) -> None:
         assert image.width() > 0
 
 
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "Before $ x$ after.",
+        "Before $x $ after.",
+        "1$x$",
+        "$x$2",
+        "Before $$y$$ after.",
+    ],
+    ids=[
+        "leading-space",
+        "trailing-space",
+        "preceding-digit",
+        "following-digit",
+        "inline-double",
+    ],
+)
+def test_dollar_math_renders_with_library_boundaries(open_guide, markdown: str) -> None:
+    browser = open_guide(AdapterGuide(markdown=markdown, resource_dir=None))
+
+    formats = _image_formats(_document(browser))
+    assert len(formats) == 1
+    image = _loaded_image(browser, formats[0].name())
+    assert image is not None
+    assert image.width() > 0
+    assert "$" not in browser.toPlainText()
+
+
 def test_unsupported_math_and_escaped_dollars_stay_literal(open_guide) -> None:
     markdown = (
         "Costs \\$5 or \\$10 per run.\n\n"
         "Broken $\\notacommand{x}$ stays.\n\n"
-        "Inline $$y$$ stays.\n\n"
         "Code `$z$` stays."
     )
     browser = open_guide(AdapterGuide(markdown=markdown, resource_dir=None))
@@ -265,7 +292,6 @@ def test_unsupported_math_and_escaped_dollars_stay_literal(open_guide) -> None:
     text = browser.toPlainText()
     assert "Costs $5 or $10 per run." in text
     assert "Broken $\\notacommand{x}$ stays." in text
-    assert "Inline $$y$$ stays." in text
     assert "Code $z$ stays." in text
     assert _image_formats(_document(browser)) == []
 
