@@ -245,7 +245,9 @@ class LookbackGui:
 
         if self._owner is None:
             self.owner = TabFormResource(
-                self.make_form(), capture=sources, mutation_allowed=lambda: True
+                lambda _ctx: self.make_form(),
+                capture=sources,
+                mutation_allowed=lambda: True,
             )
         self.owner.reset(aliases=aliases)
         self.publication = dict(observe_form(self.owner))

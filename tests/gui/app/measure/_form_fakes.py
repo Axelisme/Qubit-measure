@@ -48,7 +48,7 @@ def form_resources(state: State) -> resource_api.TabFormResources:
 def make_form[C: ConfigBase](form: Form[C], *, state: State) -> TabFormResource:
     """Prepare one form resource with owner-sequence fixed current sources."""
     resource = TabFormResource(
-        form,
+        lambda _ctx: form,
         capture=lambda aliases: form_sources(state, aliases),
         mutation_allowed=lambda: (
             not any(

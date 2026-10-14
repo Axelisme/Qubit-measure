@@ -46,7 +46,7 @@ class FormAdapter(BaseAdapter[MeasurementCfg, float]):
 
 def test_accepted_form_dump_runs_with_core_validation() -> None:
     resource = TabFormResource(
-        FormAdapter.form,
+        lambda _ctx: FormAdapter.form,
         capture=lambda _aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
     )

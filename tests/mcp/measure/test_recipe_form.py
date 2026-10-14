@@ -62,7 +62,7 @@ class FormGui(LookbackGui):
             },
         )
         self.owner = TabFormResource(
-            form,
+            lambda _ctx: form,
             capture=lambda aliases: TabFormSources(FormEnv(library=library)),
             mutation_allowed=lambda: True,
         )
@@ -163,7 +163,7 @@ def test_unoffered_library_key_reports_available_options_without_writing(
     gui = FormGui()
     if not captured:
         gui.owner = TabFormResource(
-            Form(AuthorCfg, {}),
+            lambda _ctx: Form(AuthorCfg, {}),
             capture=lambda aliases: TabFormSources(FormEnv()),
             mutation_allowed=lambda: True,
         )
@@ -267,7 +267,9 @@ def test_use_library_switches_required_inline_slot_to_actual_key(
         adapter="lookback",
     )
     gui.owner = TabFormResource(
-        form, capture=lambda aliases: TabFormSources(env), mutation_allowed=lambda: True
+        lambda _ctx: form,
+        capture=lambda aliases: TabFormSources(env),
+        mutation_allowed=lambda: True,
     )
     with recipe_client(tmp_path, gui) as client:
         tab = RecipeSession(client.context).open_tab("lookback")

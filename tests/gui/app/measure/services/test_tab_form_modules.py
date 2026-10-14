@@ -58,7 +58,9 @@ def test_module_read_and_conversion_use_capture_until_reset() -> None:
         return TabFormSources(module_env(latest))
 
     resource = TabFormResource(
-        Form(ModuleCore, {}), capture=capture, mutation_allowed=lambda: True
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=capture,
+        mutation_allowed=lambda: True,
     )
     resource.write({("pulse", "kind"): "ref", ("pulse", "name"): "Q1.pulses.pi"})
     assert hasattr(resource, "read_module"), "Missing resource execution module read"
@@ -88,7 +90,7 @@ def shift_frequency(extras: ModuleExtras, cfg: ModuleCore) -> ModuleCore:
 
 def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
     resource = TabFormResource(
-        Form(ModuleCore, {}, extras=ModuleExtras, lower=shift_frequency),
+        lambda _ctx: Form(ModuleCore, {}, extras=ModuleExtras, lower=shift_frequency),
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
         mutation_allowed=lambda: True,
     )
@@ -101,7 +103,7 @@ def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
 
 def test_module_read_allows_other_invalid_input_but_rejects_own_errors() -> None:
     resource = TabFormResource(
-        Form(ModuleCore, {}),
+        lambda _ctx: Form(ModuleCore, {}),
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
         mutation_allowed=lambda: True,
     )
@@ -126,7 +128,9 @@ def test_option_command_copies_fixed_capture_and_publishes_once() -> None:
         return TabFormSources(module_env(latest))
 
     resource = TabFormResource(
-        Form(ModuleCore, {}), capture=capture, mutation_allowed=lambda: True
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=capture,
+        mutation_allowed=lambda: True,
     )
     resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     notifications: list[str] = []
@@ -164,8 +168,8 @@ def test_option_command_guards_busy_lifetime_and_peer_reentry() -> None:
     def capture(_aliases: object) -> TabFormSources:
         return TabFormSources(module_env(100.0))
 
-    resource = pool.create("target", form, capture=capture)
-    peer = pool.create("peer", form, capture=capture)
+    resource = pool.create("target", lambda _ctx: form, capture=capture)
+    peer = pool.create("peer", lambda _ctx: form, capture=capture)
     resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     assert hasattr(resource, "run_command"), "Missing guarded option command host"
     before = resource.input.data
@@ -210,7 +214,7 @@ def test_option_command_guards_busy_lifetime_and_peer_reentry() -> None:
 )
 def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) -> None:
     resource = TabFormResource(
-        Form(ModuleCore, {}),
+        lambda _ctx: Form(ModuleCore, {}),
         capture=lambda _aliases: TabFormSources(module_env(100.0)),
         mutation_allowed=lambda: True,
     )

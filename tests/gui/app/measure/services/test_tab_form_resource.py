@@ -18,7 +18,11 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry import component_registry, role_registry
-from zcu_tools.resources.entry.schema import ComponentSchema, PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import (
+    ComponentSchema,
+    PointDocument,
+    PointGeneral,
+)
 
 
 class ScalarCore(ConfigBase):
@@ -64,9 +68,12 @@ def factory_component() -> Generator[None]:
         assert {
             kind: component_registry.get(kind) for kind in component_registry.kinds()
         } == models
-        assert {name: role_registry.get(name) for name in role_registry.names()} == roles
+        assert {
+            name: role_registry.get(name) for name in role_registry.names()
+        } == roles
         assert (role_registry.shorthand, role_registry.focus_kinds) == (
-            shorthand, focus_kinds,
+            shorthand,
+            focus_kinds,
         )
 
 
@@ -75,17 +82,25 @@ def factory_env(amount: float, *, library: LibrarySnapshot | None = None) -> For
     env = captured_env(amount)
     parameters = env.parameters
     assert parameters is not None
-    point = PointDocument.model_validate({
-        "format": "zcu.parameter-container",
-        "format_version": "2.0",
-        "components": {"Q1": {"kind": "factory/shape"}},
-        "general": {"created_at": "2026-10-14T00:00:00Z", "ext": {"amount": amount}},
-    })
+    point = PointDocument.model_validate(
+        {
+            "format": "zcu.parameter-container",
+            "format_version": "2.0",
+            "components": {"Q1": {"kind": "factory/shape"}},
+            "general": {
+                "created_at": "2026-10-14T00:00:00Z",
+                "ext": {"amount": amount},
+            },
+        }
+    )
     fixed_library = env.library if library is None else library
     assert fixed_library is not None
     return FormEnv(
         parameters=ParameterContext(
-            point=point, library=fixed_library, target=parameters.target, roles=None,
+            point=point,
+            library=fixed_library,
+            target=parameters.target,
+            roles=None,
         ),
         library=fixed_library,
     )
@@ -122,7 +137,10 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
                 "Q1": ComponentLibrary(
                     pulses={
                         "pi": PulseSpec(
-                            ch=0, nqz=1, freq=100.0, gain=0.25,
+                            ch=0,
+                            nqz=1,
+                            freq=100.0,
+                            gain=0.25,
                             waveform="Q1.waveforms.unresolved",
                         )
                     }
@@ -162,7 +180,7 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
         return resource_api.TabFormSources(env=captured_env(latest))
 
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {"amount": Expr("general.ext.amount * 2")}),
+        lambda _ctx: Form(ScalarCore, {"amount": Expr("general.ext.amount * 2")}),
         capture=capture,
         mutation_allowed=lambda: True,
     )
@@ -186,7 +204,7 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
 
 def test_rejected_batch_preserves_input_without_publication() -> None:
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {}),
+        lambda _ctx: Form(ScalarCore, {}),
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )
@@ -206,7 +224,7 @@ def test_compatible_restore_preserves_unfinished_input_and_reports_dropped_paths
     None
 ):
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {}),
+        lambda _ctx: Form(ScalarCore, {}),
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )
@@ -227,7 +245,7 @@ def test_subscriber_failure_keeps_committed_result_and_notifies_other_subscriber
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {}),
+        lambda _ctx: Form(ScalarCore, {}),
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )
@@ -266,8 +284,8 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     def capture(_aliases: Mapping[str, str] | None) -> resource_api.TabFormSources:
         return resource_api.TabFormSources(captured_env(2.0))
 
-    first = pool.create("first", form, capture=capture)
-    second = pool.create("second", form, capture=capture)
+    first = pool.create("first", lambda _ctx: form, capture=capture)
+    second = pool.create("second", lambda _ctx: form, capture=capture)
     failures: list[CfgPreconditionReason] = []
 
     def notification() -> None:
@@ -276,7 +294,7 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
             second.reset,
             second.accept,
             lambda: pool.retire("second"),
-            lambda: pool.create("third", form, capture=capture),
+            lambda: pool.create("third", lambda _ctx: form, capture=capture),
         ):
             try:
                 command()
@@ -302,9 +320,9 @@ def test_pool_guards_peer_notification_busy_commands_and_revoked_handles() -> No
     with pytest.raises(CfgPreconditionError) as caught:
         second.write({("amount",): 9.0})
     assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
-    assert pool.create("second", form, capture=capture).result() == ScalarCore(
-        amount=1.0
-    )
+    assert pool.create(
+        "second", lambda _ctx: form, capture=capture
+    ).result() == ScalarCore(amount=1.0)
 
 
 def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> None:
@@ -324,7 +342,9 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
 
     pool = resource_api.TabFormResources(mutation_allowed=lambda _tab: True)
     resource = pool.create(
-        "tab", Form(ScalarCore, {"amount": Expr("general.ext.amount")}), capture=capture
+        "tab",
+        lambda _ctx: Form(ScalarCore, {"amount": Expr("general.ext.amount")}),
+        capture=capture,
     )
     resource.write({("amount",): 5.0})
     amount, fail_capture = 2.0, True
@@ -344,7 +364,7 @@ def test_pool_reset_capture_failure_keeps_authored_input_and_old_sources() -> No
 
 def test_editor_state_borrows_the_same_input_for_reading_and_subscribing() -> None:
     resource = resource_api.TabFormResource(
-        Form(ScalarCore, {}),
+        lambda _ctx: Form(ScalarCore, {}),
         capture=lambda _aliases: resource_api.TabFormSources(captured_env(2.0)),
         mutation_allowed=lambda: True,
     )

@@ -70,7 +70,7 @@ class SweepGui(LookbackGui):
             )
 
         self.owner = TabFormResource(
-            form, capture=capture, mutation_allowed=lambda: True
+            lambda _ctx: form, capture=capture, mutation_allowed=lambda: True
         )
 
     def __call__(self, method, params):

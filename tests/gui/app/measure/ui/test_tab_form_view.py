@@ -334,7 +334,9 @@ def test_option_command_runs_through_the_resource_and_locks_while_busy(
     open_tab: Callable[..., TabView],
 ) -> None:
     resource = TabFormResource(
-        Form(ModuleCore, {}), capture=module_sources, mutation_allowed=lambda: True
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=module_sources,
+        mutation_allowed=lambda: True,
     )
     resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     view = open_tab(resource=resource)
