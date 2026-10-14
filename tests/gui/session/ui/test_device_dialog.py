@@ -1092,3 +1092,29 @@ def test_device_hint_hides_when_a_device_is_listed(qapp):
         assert hint is not None and not hint.isVisibleTo(dialog)
     finally:
         dialog.close()
+
+
+def test_selected_device_address_is_mouse_selectable(qapp):
+    from qtpy.QtCore import Qt
+    from qtpy.QtWidgets import QLabel, QListWidget
+    from zcu_tools.device.yoko import YOKOGS200Info
+
+    ctrl = _make_ctrl()
+    ctrl.list_devices.return_value = [_entry("yoko", "YOKOGS200")]
+    info = YOKOGS200Info(address="GPIB::7", mode="voltage")
+    ctrl.get_device_snapshot.return_value = _connected_snapshot("yoko", info)
+    dialog = _make_dialog(ctrl)
+    device_list = dialog.findChild(QListWidget)
+    assert device_list is not None
+
+    device_list.setCurrentRow(0)
+
+    address_labels = [
+        label for label in dialog.findChildren(QLabel) if label.text() == "GPIB::7"
+    ]
+    assert len(address_labels) == 1
+    flags = address_labels[0].textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+    dialog.close()
+    dialog.deleteLater()
+    qapp.processEvents()
