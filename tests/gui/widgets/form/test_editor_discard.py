@@ -6,6 +6,8 @@ from qtpy.QtWidgets import QApplication, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui.widgets.form._text_input import commit_text
+
 
 class NumericForm(FormModel):
     """One parsed numeric draft value independent of view-local text."""
@@ -26,7 +28,7 @@ def test_discard_local_text_keeps_parsed_draft_and_restores_display() -> None:
         state.write({("value",): 4.0}, env)
         control = editor.findChild(QLineEdit, "form.input.value")
         assert isinstance(control, QLineEdit)
-        control.setText("-")
+        commit_text(control, "-")
         assert editor.local_parse_errors() is not None
         editor.discard_local_text()
         assert editor.local_parse_errors() is None

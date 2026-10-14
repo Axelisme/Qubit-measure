@@ -9,6 +9,8 @@ from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui.widgets.form._text_input import commit_text
+
 
 class DriveModule(BaseModel):
     """Inline drive Spec: a single-model member of the module union."""
@@ -140,7 +142,7 @@ def test_nested_module_union_shows_and_edits_the_selected_inline_branch(
     assert selector(editor, "qub_pulse.module").currentText() == "pulse"
     assert text(editor, "qub_pulse.module.gain").text() == "0.4"
 
-    gain.setText("0.3")
+    commit_text(gain, "0.3")
     assert state.input.data["readout"] == {
         "kind": "inline",
         "module": {"type": "readout/pulse", "ro_length": 3.0, "ro_gain": 0.3},

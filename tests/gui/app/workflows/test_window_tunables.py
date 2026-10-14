@@ -26,6 +26,7 @@ from zcu_tools.resources.entry import (
 )
 
 from tests.gui.app.workflows._start_fakes import StartHarness
+from tests.gui.widgets.form._text_input import commit_text
 
 from ._reload_source import InjectedCatalog
 from ._sample_input import sample_input
@@ -68,7 +69,7 @@ def test_rpc_tunables_running_submits_shared_draft_but_keeps_current_step_captur
                 QLineEdit, "form.input.sample.factor"
             )
             assert isinstance(control, QLineEdit)
-            control.setText("-")
+            commit_text(control, "-")
             replies.append(
                 rpc(
                     "workflow.tunables",
@@ -400,7 +401,7 @@ def test_rpc_tunables_native_failure_keeps_base_revision_and_local_text(
     accepted = panel.host.accepted_input.data
     control = panel.panel.editor.findChild(QLineEdit, "form.input.sample.factor")
     assert isinstance(control, QLineEdit)
-    control.setText("-")
+    commit_text(control, "-")
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original_journal = journal.read_bytes()
     if failure == "terminal":
@@ -472,7 +473,7 @@ def test_apply_click_isolates_native_journal_failure_without_accepting_draft(
     message = panel.findChild(QLabel, "workflow.tuning.message")
     assert isinstance(control, QLineEdit) and isinstance(button, QPushButton)
     assert isinstance(message, QLabel)
-    control.setText("8.00")
+    commit_text(control, "8.00")
     before_click_text = control.text()
     journal = entry.result_path / "workflows/tuning/journal.jsonl"
     original = journal.read_bytes()

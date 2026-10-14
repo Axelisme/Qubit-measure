@@ -28,6 +28,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui.widgets.form._text_input import commit_text
 
 
 class StaticBranch(FormModel):
@@ -169,13 +170,13 @@ def test_direct_numeric_and_expression_controls_write_only_parsed_input(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "amount").setText("3.5")
+    commit_text(line(editor, "amount"), "3.5")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.amount == 3.5
 
     mode(editor, "amount").trigger()
-    line(editor, "amount").setText("general.ext.seed / 2")
+    commit_text(line(editor, "amount"), "general.ext.seed / 2")
     assert state.input.data["amount"] == {"expr": "general.ext.seed / 2"}
     result = state.result(env)
     assert isinstance(result, SampleForm)
@@ -210,7 +211,7 @@ def test_partial_text_stays_local_and_validity_recovers_after_correction(
     observed: list[bool] = []
     editor.validity_changed.connect(observed.append)
     before = state.input.data
-    line(editor, "amount").setText("-")
+    commit_text(line(editor, "amount"), "-")
     assert state.input.data == before
     local = editor.local_parse_errors()
     assert isinstance(local, FormErrors)
@@ -222,7 +223,7 @@ def test_partial_text_stays_local_and_validity_recovers_after_correction(
     editor.refresh(environment(8.0))
     assert line(editor, "amount").text() == "-"
     assert state.input.data == before
-    line(editor, "amount").setText("5")
+    commit_text(line(editor, "amount"), "5")
     assert state.input.data["amount"] == 5.0
     assert editor.local_parse_errors() is None
     assert editor.errors() is None
@@ -236,7 +237,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "amount").setText("-2")
+    commit_text(line(editor, "amount"), "-2")
     assert state.input.data["amount"] == -2.0
     assert editor.local_parse_errors() is None
     errors = editor.errors()
@@ -245,7 +246,7 @@ def test_model_invalid_value_and_expression_remain_in_state_with_errors(
     assert label(editor, "form.error.amount").text()
 
     mode(editor, "amount").trigger()
-    line(editor, "amount").setText("absent_name")
+    commit_text(line(editor, "amount"), "absent_name")
     assert state.input.data["amount"] == {"expr": "absent_name"}
     assert editor.local_parse_errors() is None
     errors = editor.errors()
@@ -261,8 +262,8 @@ def test_integer_expression_and_direct_complex_keep_their_input_forms(
     editor = FormEditor(state, env)
     views.append(editor)
     mode(editor, "count").trigger()
-    line(editor, "count").setText("general.ext.seed + 1")
-    line(editor, "amplitude").setText("1+2j")
+    commit_text(line(editor, "count"), "general.ext.seed + 1")
+    commit_text(line(editor, "amplitude"), "1+2j")
     assert state.input.data["count"] == {"expr": "general.ext.seed + 1"}
     assert state.input.data["amplitude"] == {"__complex__": [1.0, 2.0]}
     result = state.result(env)
@@ -279,7 +280,7 @@ def test_branch_dropdown_switches_to_fresh_core_defaults(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "branch.shared").setText("6")
+    commit_text(line(editor, "branch.shared"), "6")
     selector = combo(editor, "form.input.branch")
     selector.setCurrentIndex(selector.findText("alternate"))
     qapp.processEvents()
@@ -304,7 +305,7 @@ def test_nullable_section_activation_child_edit_and_deactivation(
     assert isinstance(enabled, QCheckBox)
     enabled.setChecked(True)
     qapp.processEvents()
-    line(editor, "section.stop").setText("5")
+    commit_text(line(editor, "section.stop"), "5")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.section == Section(start=1.0, stop=5.0)
@@ -330,7 +331,7 @@ def test_nested_and_root_model_errors_are_visible_in_public_labels(
     assert isinstance(errors, FormErrors)
     assert ("section", "stop") in errors.messages
     assert label(editor, "form.error.section.stop").text()
-    line(editor, "section.stop").setText("3")
+    commit_text(line(editor, "section.stop"), "3")
     state.write({("amount",): 90.0, ("count",): 20}, env)
     errors = editor.errors()
     assert isinstance(errors, FormErrors)
@@ -345,19 +346,20 @@ def test_whole_sequence_and_mapping_text_support_replacement_and_clear(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "samples").setText("[2, 3]")
-    line(editor, "offsets").setText(
-        '{"rack.left": {"expr": "general.ext.seed"}, "remove": 1}'
+    commit_text(line(editor, "samples"), "[2, 3]")
+    commit_text(
+        line(editor, "offsets"),
+        '{"rack.left": {"expr": "general.ext.seed"}, "remove": 1}',
     )
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.samples == (2.0, 3.0)
     assert result.offsets == {"rack.left": 4.0, "remove": 1.0}
-    line(editor, "offsets").setText('{"renamed": 4}')
+    commit_text(line(editor, "offsets"), '{"renamed": 4}')
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.offsets == {"renamed": 4.0}
-    line(editor, "offsets").setText("{}")
+    commit_text(line(editor, "offsets"), "{}")
     result = state.result(env)
     assert isinstance(result, SampleForm)
     assert result.offsets == {}
@@ -374,12 +376,12 @@ def test_incomplete_container_json_stays_local_until_it_parses(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "offsets").setText('{"unfinished":')
+    commit_text(line(editor, "offsets"), '{"unfinished":')
     assert state.input.data["offsets"] == {}
     errors = editor.local_parse_errors()
     assert isinstance(errors, FormErrors)
     assert ("offsets",) in errors.messages
-    line(editor, "offsets").setText('{"finished": 2}')
+    commit_text(line(editor, "offsets"), '{"finished": 2}')
     assert state.input.data["offsets"] == {"finished": 2}
     assert editor.local_parse_errors() is None
 
@@ -544,7 +546,7 @@ def test_invalid_complex_envelope_is_displayed_without_breaking_construction(
     assert isinstance(editor.errors(), FormErrors)
     assert label(editor, "form.error.amplitude").text()
     assert label(editor, "form.value.amplitude").text() == ""
-    line(editor, "amplitude").setText("2+3j")
+    commit_text(line(editor, "amplitude"), "2+3j")
     assert state.input.data["amplitude"] == {"__complex__": [2.0, 3.0]}
     assert editor.errors() is None
 
@@ -556,8 +558,8 @@ def test_inactive_branch_discards_only_its_local_unparsed_text(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
-    line(editor, "branch.old_only").setText("-")
-    line(editor, "amount").setText("-")
+    commit_text(line(editor, "branch.old_only"), "-")
+    commit_text(line(editor, "amount"), "-")
     selector = combo(editor, "form.input.branch")
     selector.setCurrentIndex(selector.findText("alternate"))
     local = editor.local_parse_errors()
@@ -591,18 +593,18 @@ def test_nullable_numeric_direct_partial_null_and_expression(
     assert action.isChecked()
     assert text.text() == "general.ext.seed"
     action.trigger()
-    text.setText(str(direct))
+    commit_text(text, str(direct))
     assert state.input.data[path] == direct
     assert type(state.input.data[path]) is type(direct)
     before = state.input.data
-    text.setText("-")
+    commit_text(text, "-")
     assert state.input.data == before
     assert isinstance(editor.local_parse_errors(), FormErrors)
-    text.setText("")
+    commit_text(text, "")
     assert state.input.data[path] is None
     assert editor.local_parse_errors() is None
     action.trigger()
-    text.setText("general.ext.seed + 1")
+    commit_text(text, "general.ext.seed + 1")
     assert state.input.data[path] == {"expr": "general.ext.seed + 1"}
     notices: list[int] = []
     state.subscribe(lambda: notices.append(1))

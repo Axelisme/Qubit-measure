@@ -75,7 +75,9 @@ class FieldView:
     schema's x-form-group name: the editor draws the row in that foldable
     group of its model level, or ungrouped for None. children are current
     model rows, never container keys/indexes; an option row's children come
-    from its selected option's fields. Only kind=model can have children.
+    from its selected option's fields, except that fields holding only one
+    ordinary model (not nullable, without options) give that model's rows,
+    whose paths still pass through it. Only kind=model can have children.
     """
 
     path: FormWritePath
@@ -278,7 +280,27 @@ def _field(
     if kind != "model" or not field.active:
         return field
     # Recursion through _children: each nested model level projects its rows.
-    return replace(field, children=_children(children_schema, path, raw, preview))
+    children = _children(children_schema, path, raw, preview)
+    if options is not None:
+        children = _without_lone_model(children)
+    return replace(field, children=children)
+
+
+def _without_lone_model(children: tuple[FieldView, ...]) -> tuple[FieldView, ...]:
+    """A selected option's rows, with a lone ordinary model's rows in its place.
+
+    When the option's drawn fields are one model that is not nullable and
+    has no options, its own titled row would only repeat the option row's
+    level, so its rows take its place; their paths still pass through it and
+    errors at its own path go to the option row. A nullable model keeps its
+    Enabled box and a model with options keeps its dropdown.
+    """
+    if len(children) != 1:
+        return children
+    (only,) = children
+    if only.kind != "model" or only.options is not None or only.nullable:
+        return children
+    return only.children
 
 
 def _children(
@@ -306,7 +328,8 @@ def project_fields(
     """Project a public input schema and detached data/preview into active rows.
 
     Preserve declaration order and metadata. A field with x-form-options
-    shows the children of its selected option's fields only; a tagged union
+    shows the children of its selected option's fields only (the rows of
+    their one ordinary model when that is all they hold); a tagged union
     without that list raises ValueError instead of guessing a branch. Fields
     the schema marks hidden have no rows; their input and errors stay with
     the state. Do not evaluate, validate, write or generate defaults.

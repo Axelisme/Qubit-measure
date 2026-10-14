@@ -15,6 +15,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui.widgets.form._text_input import commit_text
+
 
 class Section(FormModel):
     """An optional nested section toggled by its Enabled box."""
@@ -77,7 +79,7 @@ def new_state() -> FormState[HostForm]:
 def test_without_write_parsed_input_goes_to_the_state(build: Build) -> None:
     state = new_state()
     editor = build(state, None)
-    child(editor, QLineEdit, "form.input.amount").setText("3.5")
+    commit_text(child(editor, QLineEdit, "form.input.amount"), "3.5")
     child(editor, QCheckBox, "form.input.flag").setChecked(True)
     assert state.input.data["amount"] == 3.5
     assert state.input.data["flag"] is True
@@ -91,7 +93,7 @@ def test_write_receives_every_parsed_batch_and_the_editor_still_shows_state(
     before = state.input.data
     received: list[dict[FormWritePath, JsonValue]] = []
     editor = build(state, lambda batch: received.append(dict(batch)))
-    child(editor, QLineEdit, "form.input.amount").setText("3.5")
+    commit_text(child(editor, QLineEdit, "form.input.amount"), "3.5")
     child(editor, QCheckBox, "form.input.flag").setChecked(True)
     assert received == [{("amount",): 3.5}, {("flag",): True}]
     # This host installs nothing, and the editor does not write the state itself.
@@ -120,7 +122,7 @@ def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
     editor.validity_changed.connect(observed.append)
     text = child(editor, QLineEdit, f"form.input.{path}")
     error = child(editor, QLabel, f"form.error.{path}")
-    text.setText("@{gain}")
+    commit_text(text, "@{gain}")
     assert text.text() == "@{gain}"
     assert state.input.data[path] == ""
     assert error.text() == "Unknown capture key @{gain}"
@@ -130,13 +132,13 @@ def test_rejected_text_stays_typed_with_the_host_message_until_accepted(
     assert observed == [False]
 
     # An accepted write elsewhere and a refresh redraw state; the text stays.
-    child(editor, QLineEdit, "form.input.amount").setText("2")
+    commit_text(child(editor, QLineEdit, "form.input.amount"), "2")
     editor.refresh(FormEnv())
     assert state.input.data["amount"] == 2.0
     assert text.text() == "@{gain}"
     assert error.text() == "Unknown capture key @{gain}"
 
-    text.setText("plain")
+    commit_text(text, "plain")
     assert state.input.data[path] == "plain"
     assert error.text() == ""
     assert editor.errors() is None
