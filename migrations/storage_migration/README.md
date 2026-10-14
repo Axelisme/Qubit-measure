@@ -19,4 +19,4 @@
 
 `state.py` 集中 report／manifest encoding 與 copy、native、move 共用的 publication recovery。ModuleLibrary 的單檔提交與 manifest 不是跨檔原子。Library 已寫入但未記錄完成的窗口沒有專門 recovery，需取得清理授權後刪目的地重跑。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
-`migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於 `zcu_lab`，沒有動態 discovery 或新 runtime registry。Parameters 模式不執行 data 搬移或來源刪除。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../docs/storage-migration.md)。
+`migrations/migrate_storage.py` 是離線組合根。具體 mapping 與固定 native declarations 位於同目錄上層的 `migrations/storage_mapping.py` 與 `migrations/migration_experiments.py`，沒有動態 discovery 或新 runtime registry。Parameters 模式不執行 data 搬移或來源刪除。操作授權、來源保全、pending／resume 與修改 kind 的步驟見 [Agent 離線遷移說明書](../../docs/storage-migration.md)。

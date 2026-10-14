@@ -106,7 +106,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 | C16 | `forbidden` | `zcu_tools` 不 import `zcu_lab` |
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由刪除 `zcu_lab/` 後的整套 pytest 驗收，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。萬用字元只用於合法例外，例如 C1 的 `cfg_editing → gui.cfg`，註解寫明「不是債務」。`ignore_imports` 只減不增。
 

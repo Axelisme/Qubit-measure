@@ -2,11 +2,13 @@
 
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。
 
+只為遷移存在的程式、對照表與宣告都放在本目錄，不放進 `zcu_lab` 或 `lib`。遷移完成後，刪除整個 `migrations/`（連同 `tests/migrations/` 與 `docs/storage-migration.md`）即可，不需要到其他目錄找殘留。使用者於 2026-10-14 表示：「我自己會預期，我遷移完後刪除migrations就可以了」。
+
 ## Legacy result／Database → native storage
 
 `migrations.storage_migration` 擁有離線轉換、歷史 evidence 與可續跑 publication。Caller 明填 mapping 與 native 驗證，不接正常 runtime。`migrations.legacy_labber.load_legacy_labber_payload` 以明確 disk schema 讀取 single 或 marker-qualified grouped Labber，不猜 variable identity 或單位。
 
-CLI 以 `python -m migrations.migrate_storage` 執行。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 與 native declarations 仍由 `zcu_lab` 擁有。`lib` 不 import 本目錄。
+CLI 以 `python -m migrations.migrate_storage` 執行。操作授權、dry-run、pending 與 resume 步驟見 [Agent 離線遷移說明書](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
 ## Sample CSV → JSONL
 
