@@ -180,8 +180,8 @@ guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 GUI / MCP 只使用這個公開契約。
 
 GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
-行內 `$...$` 與獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
-`\$` 表示字面金錢符號。Code span、code block 與連結網址內的 `$` 保留原文。本機圖片以相對於 guide 目錄的路徑引用，例如
+行內 `$...$`、行內或獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
+想顯示字面 `$` 時寫 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。本機圖片以相對於 guide 目錄的路徑引用，例如
 `![Pulse sequence](pulse.png)`。GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，
 不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
 Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。

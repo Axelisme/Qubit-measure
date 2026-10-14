@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import html
 import io
-from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from markdown_it import MarkdownIt
-from markdown_it.renderer import RendererProtocol
-from markdown_it.token import Token
-from markdown_it.utils import EnvType, OptionsDict
 from matplotlib import mathtext, rc_context
 from matplotlib.font_manager import FontProperties
 from mdit_py_plugins.dollarmath import dollarmath_plugin
@@ -56,12 +52,12 @@ class GuideView(QTextBrowser):
     to ``QDesktopServices.openUrl`` unchanged and never navigates this view; a
     bare URL is plain text, not a link.
 
-    TeX between ``$...$`` inside a line, and a ``$$...$$`` block on its own
-    lines, renders through matplotlib mathtext as an image in the view's font
-    size and text color. An opening ``$`` must be followed by a non-space and
-    must not follow a digit; a closing ``$`` must follow a non-space and must
-    not be followed by a digit. ``\\$`` is a literal dollar. Expressions
-    mathtext rejects and ``$$...$$`` inside a line stay as written.
+    TeX between ``$...$`` or ``$$...$$`` inside a line, and a ``$$...$$``
+    block on its own lines, renders through matplotlib mathtext as an image
+    in the view's font size and text color. The dollarmath library's default
+    boundaries allow spaces inside the delimiters and adjacent digits.
+    Inline ``$$...$$`` and block math use the same image hook in display mode.
+    ``\\$`` is a literal dollar. Expressions mathtext rejects stay as written.
 
     A relative image path that names a PNG or JPG file directly inside
     ``guide.resource_dir`` is shown, with or without alt text, scaled down to
@@ -85,12 +81,9 @@ class GuideView(QTextBrowser):
         parser = MarkdownIt("commonmark", {"html": False}).enable("table")
         parser.use(
             dollarmath_plugin,
-            allow_space=False,
-            allow_digits=False,
             double_inline=True,
             renderer=self._math_html,
         )
-        parser.add_render_rule("math_inline_double", _inline_double_source)
         self.setHtml(parser.render(guide.markdown))
         self._fit_images()
 
@@ -205,19 +198,3 @@ class GuideView(QTextBrowser):
             cursor.setPosition(position)
             cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
             cursor.setCharFormat(image_format)
-
-
-def _inline_double_source(
-    _renderer: RendererProtocol,
-    tokens: Sequence[Token],
-    idx: int,
-    _options: OptionsDict,
-    _env: EnvType,
-) -> str:
-    """markdown-it render rule that shows ``$$...$$`` inside a line as written.
-
-    dollarmath tokenizes inline ``$$`` only so its dollars cannot pair as
-    ``$...$`` math; display math is a ``$$`` block on its own lines.
-    """
-    token = tokens[idx]
-    return html.escape(f"{token.markup}{token.content}{token.markup}")
