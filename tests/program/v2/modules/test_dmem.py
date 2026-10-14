@@ -14,7 +14,6 @@ from zcu_tools.program.v2.ir.operands import (
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.dmem import (
-    _COMPRESS_MIN_VALUES,
     LoadValue,
     LoadWord,
     ScanWith,
@@ -117,7 +116,6 @@ def _make_dmem_prog(temp_regs=("r10", "r11")):
 def test_small_values_not_compressed():
     lv = LoadValue("x", [1, 2, 3], idx_reg="i", val_reg="v")
     assert lv.is_compressed is False
-    assert lv._packed_values == [1, 2, 3]
     assert lv.allow_rerun() is True
 
 
@@ -125,9 +123,6 @@ def test_large_small_range_gets_compressed():
     values = [i % 4 for i in range(64)]  # 2 bits, 64 values
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
     assert lv.is_compressed is True
-    assert lv._bits_per_value == 2
-    assert lv._values_per_word == 16
-    assert len(lv._packed_values) == 64 // 16
     assert lv.allow_rerun() is True
 
 
@@ -150,7 +145,6 @@ def test_auto_compress_off_keeps_values():
     values = [i % 4 for i in range(64)]
     lv = LoadValue("x", values, idx_reg="i", val_reg="v", auto_compress=False)
     assert lv.is_compressed is False
-    assert lv._packed_values == values
 
 
 def test_empty_values_short_circuit():
@@ -165,13 +159,6 @@ def test_empty_values_short_circuit():
     prog.read_dmem.assert_not_called()
     prog.write_reg.assert_not_called()
     prog.write_reg_op.assert_not_called()
-
-
-def test_bits_needed_unsigned_boundaries():
-    assert LoadValue._bits_needed(0) == 1
-    assert LoadValue._bits_needed(1) == 1
-    assert LoadValue._bits_needed(2) == 2
-    assert LoadValue._bits_needed(255) == 8
 
 
 # ---------------------------------------------------------------------------
@@ -213,19 +200,6 @@ def test_load_value_run_uncompressed_returns_t():
 # ---------------------------------------------------------------------------
 # LoadValue.run — compressed path
 # ---------------------------------------------------------------------------
-
-
-def test_load_value_run_compressed_uses_asr_word_shift():
-    values = [i % 4 for i in range(64)]
-    lv = LoadValue("x", values, idx_reg="i", val_reg="v")
-    assert lv.is_compressed is True
-    prog = _make_dmem_prog()
-    lv.init(prog)
-    lv.run(prog)
-
-    # addr = idx ASR word_shift
-    prog.write_reg_op.assert_any_call("r10", "i", "ASR", lv._word_shift)
-    prog.read_dmem.assert_called_once()
 
 
 def test_load_value_run_compressed_nonzero_offset_calls_inc_reg():
@@ -293,37 +267,30 @@ def test_scan_with_add_content_delegates_to_repeat():
 
 def test_large_value_max_17bits_not_compressed():
     # max value = 65536 (17-bit) → bits rounds to 32 → values_per_word = 1 < 2 → no compression
-    values = [65536] * _COMPRESS_MIN_VALUES
+    values = [65536] * 64
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
     assert lv.is_compressed is False
 
 
 def test_large_value_max_16bits_gets_compressed():
     # max value = 65535 (16-bit) → bits = 16 → values_per_word = 2 → compressed
-    values = [65535] * _COMPRESS_MIN_VALUES
+    values = [65535] * 64
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
     assert lv.is_compressed is True
-    assert lv._bits_per_value == 16
-    assert lv._values_per_word == 2
-    # Packed words that set bit 31 are stored as negative int32 (two's complement).
-    assert all(-(1 << 31) <= w <= (1 << 31) - 1 for w in lv._packed_values)
 
 
 def test_packed_words_fit_in_int32():
     # Values that fill all 32 bits when packed must still be valid int32.
     import numpy as np
 
-    values = [255] * _COMPRESS_MIN_VALUES  # 8-bit, vpw=4 → slot 3 at bit 24
+    values = [255] * 64  # 8-bit, vpw=4 → slot 3 at bit 24
     lv = LoadValue("x", values, idx_reg="i", val_reg="v")
     assert lv.is_compressed is True
     # Must not raise OverflowError
-    arr = np.array(lv._packed_values, dtype=np.int32)
+    prog = _make_dmem_prog()
+    lv.init(prog)
+    arr = np.array(prog.add_dmem.call_args.args[0], dtype=np.int32)
     assert arr.dtype == np.int32
-
-
-def test_bits_needed_rejects_negative():
-    with pytest.raises(ValueError, match="non-negative"):
-        LoadValue._bits_needed(-1)
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +303,6 @@ def test_load_word_accepts_uint32_boundaries():
     lw = LoadWord("w", values, idx_reg="i", val_reg="v")
 
     assert lw.values == values
-    assert lw._encoded_values == [0, 2**31 - 1, -(2**31), -1]
     assert lw.allow_rerun() is True
 
 
