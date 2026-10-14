@@ -59,6 +59,7 @@ from zcu_tools.gui.app.dispersive.services.viz import (
 )
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.project_dialog import ProjectDialog
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .error_messages import friendly_fit_message, friendly_io_message
 from .tune_canvas import TuneCanvasWidget
@@ -202,8 +203,10 @@ class PipelinePanelWidget(QWidget):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(4, 0, 4, 0)
         self._inputs_label = QLabel("Load the fluxonium fit (fluxdep_fit) first.")
+        make_label_selectable(self._inputs_label)
         self._inputs_label.setWordWrap(True)
         self._onetone_label = QLabel("(no one-tone loaded)")
+        make_label_selectable(self._onetone_label)
         layout.addWidget(self._inputs_label, stretch=3)
         layout.addWidget(self._onetone_label, stretch=1)
         return bar
@@ -242,6 +245,7 @@ class PipelinePanelWidget(QWidget):
         bottom.addWidget(self._tune_btn)
         bottom.addStretch(1)
         self._export_label = QLabel("")
+        make_label_selectable(self._export_label)
         bottom.addWidget(self._export_label)
         self._export_btn = QPushButton("Export to params.json")
         self._export_btn.clicked.connect(self._on_export)
@@ -254,13 +258,14 @@ class PipelinePanelWidget(QWidget):
         return self._tune_box
 
     def _slider_row(self, name: str, slider: QWidget, value_label: QLabel):
-        """A horizontal row: a fixed-width name label, the slider, and its value."""
+        """A horizontal row: a fixed-width name label, the slider, and its selectable value."""
         row = QHBoxLayout()
         label = QLabel(name)
         label.setFixedWidth(60)
         row.addWidget(label)
         row.addWidget(slider, stretch=1)
         value_label.setFixedWidth(80)
+        make_label_selectable(value_label)
         row.addWidget(value_label)
         return row
 

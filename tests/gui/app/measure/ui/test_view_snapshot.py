@@ -65,7 +65,7 @@ def _make_snapshot_shell(
         _tabs=tabs_stub,
         _entry_label=types.SimpleNamespace(text=lambda: "No entry open"),
         _point_label=types.SimpleNamespace(text=lambda: "No point selected"),
-        _status_bar=None,
+        _status_label=types.SimpleNamespace(text=lambda: ""),
         list_open_dialogs=lambda: list(open_dialogs or []),
     )
 

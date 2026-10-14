@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-11，離線工具與 CLI 移至 root migrations
 
-此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行。它不控制硬體，也不改正常 loader。`migrations/storage_migration/README.md` 說明框架邊界，具體對照位於 `zcu_lab/storage_migration.py`。
+此文件供執行舊 `result/`、Database 遷移，以及修改 component kind 的 agent 使用。入口是 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行。它不控制硬體，也不改正常 loader。`migrations/storage_migration/README.md` 說明框架邊界，具體對照位於 `migrations/storage_mapping.py`，native declarations 位於 `migrations/migration_experiments.py`。
 
 ## 執行前
 

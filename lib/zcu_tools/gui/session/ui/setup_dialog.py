@@ -37,6 +37,7 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.services.project_settings import ConnectionPreferences
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.program import describe_soc
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ def _wrapping_label(object_name: str = "") -> QLabel:
     if object_name:
         label.setObjectName(object_name)
     label.setWordWrap(True)
-    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    make_label_selectable(label)
     # Minimum height: wrapped lines are never squeezed out by the layout.
     label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum)
     return label
@@ -76,6 +77,7 @@ class _ElidedPathLabel(QLabel):
     def __init__(self, object_name: str) -> None:
         super().__init__("")
         self.setObjectName(object_name)
+        make_label_selectable(self)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._path = ""
 

@@ -26,6 +26,7 @@ from zcu_tools.gui.app.measure.artifact_tracker import (
     OutputSnapshot,
     SaveStatus,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import ArtifactKey
 
 if TYPE_CHECKING:
@@ -233,6 +234,7 @@ class ArtifactSaveCenter(QWidget):
         layout.setSpacing(2)
         row = QHBoxLayout()
         name = QLabel()
+        make_label_selectable(name)
         row.addWidget(name)
         edit = _ElidedPathEdit()
         row.addWidget(edit, stretch=1)
@@ -246,6 +248,7 @@ class ArtifactSaveCenter(QWidget):
         layout.addLayout(row)
         # A failure message needs the full width to wrap readably.
         error = QLabel()
+        make_label_selectable(error)
         error.setTextFormat(Qt.TextFormat.PlainText)
         error.setWordWrap(True)
         error.setStyleSheet("color: #b00020;")

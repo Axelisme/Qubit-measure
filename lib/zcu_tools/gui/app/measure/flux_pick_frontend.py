@@ -29,6 +29,7 @@ from zcu_tools.gui.app.measure.ui.interactive_frontend import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.plots import Plots
 
 
@@ -83,6 +84,7 @@ class FluxPickFrontend(InteractiveFrontend):
         buttons = QVBoxLayout(controls)
         controls.setFixedWidth(200)
         self._info = QLabel(self._picker.info_text())
+        make_label_selectable(self._info)
         self._info.setWordWrap(True)
         self._conjugate = QCheckBox("Conjugate Line")
         self._conjugate.setChecked(state.conjugate)

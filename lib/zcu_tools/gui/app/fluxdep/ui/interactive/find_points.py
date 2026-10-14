@@ -28,6 +28,7 @@ from zcu_tools.analysis.fluxdep.twotone import (
 from zcu_tools.gui.app.fluxdep.interactive import TwoTonePickContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.twotone import TwoTonePickPlot
 
 from .base import InteractiveMplWidget, picker_object_name
@@ -155,6 +156,7 @@ class FindPointsWidget(InteractiveMplWidget):
             lambda: context.plugin.perform_on_all.execute(context.session, None),
         )
         self._status = QtWidgets.QLabel()
+        make_label_selectable(self._status)
         self._status.setObjectName(picker_object_name("status"))
         self._status.setAccessibleName("Status")
         self._status.setWordWrap(True)

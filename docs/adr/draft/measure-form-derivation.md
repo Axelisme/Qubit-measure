@@ -5,7 +5,7 @@ status: draft
 # Measure 表單從 core cfg 推導，起始值寫在 form.py
 
 **狀態：** draft。使用者已採用設計方向（2026-10-13），由 measure-form task 實作；實作完成並驗收後轉正式 ADR 並編號，完成前 [[0012]] 的 builder 仍是現行機制。
-**關聯：** [[0012]] 的 context-free definition（實作完成後由本篇接替）、[[0009]] 的角色 default 表（由本篇的範本目錄接替）、[[0065]] 的 cfg 編輯與 `dev` 對應、[[0069]] 的核心與前端分工、[[0051]] 的 program shape catalog、[module-boundaries](draft/module-boundaries.md) 的分層。
+**關聯：** [[0012]] 的 context-free definition（實作完成後由本篇接替）、[[0009]] 的角色 default 表（由本篇的範本目錄接替）、[[0065]] 的 cfg 編輯與 `dev` 對應、[[0069]] 的核心與前端分工、[[0051]] 的 program shape catalog、[[0072]] 的分層。
 
 ## 問題
 

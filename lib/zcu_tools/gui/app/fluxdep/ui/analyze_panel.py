@@ -88,6 +88,7 @@ from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.figures import NamedFigures
 from zcu_tools.plotting.fluxdep import make_search_diagnostic_figure
 from zcu_tools.plotting.plots import Plots
@@ -142,8 +143,9 @@ def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
 
 
 def _message_label(accessible_name: str, object_name: str) -> QLabel:
-    """A wrapping message label that never widens the form (Ignored horizontal)."""
+    """A selectable, wrapping message label that never widens the form (Ignored horizontal)."""
     label = QLabel("")
+    make_label_selectable(label)
     label.setAccessibleName(accessible_name)
     label.setObjectName(object_name)
     label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)

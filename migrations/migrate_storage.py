@@ -12,6 +12,8 @@ from pathlib import Path
 from zcu_tools.datafile import CfgSnapshot
 from zcu_tools.resources.entry import component_registry
 
+from migrations.migration_experiments import MIGRATION_EXPERIMENTS
+from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
     MigrationInputError,
     MigrationRequest,
@@ -20,8 +22,6 @@ from migrations.storage_migration import (
     report_json,
 )
 from zcu_lab.components import register_all
-from zcu_lab.migration_experiments import MIGRATION_EXPERIMENTS
-from zcu_lab.storage_migration import build_mapping
 
 # Fixed declarations, keyed by both proven identities. This is not registration
 # or discovery; data schemas and readers come from the same declaration objects.

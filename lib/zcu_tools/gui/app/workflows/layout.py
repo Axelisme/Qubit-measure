@@ -15,6 +15,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
+
 from ._palette import PRIMARY_COLOR
 from .run_status import WorkflowRunStatus
 
@@ -146,6 +148,7 @@ def _figure_column(
     status = WorkflowRunStatus(column)
     layout.addWidget(status)
     message = QLabel(column)
+    make_label_selectable(message)
     message.setObjectName("workflow.run.message")
     message.setWordWrap(True)
     layout.addWidget(message)

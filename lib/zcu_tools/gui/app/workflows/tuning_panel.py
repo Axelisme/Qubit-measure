@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows import Actor, TunablesSnapshot
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, FormWritePath
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .panel import WorkflowFormPanel
 
@@ -66,6 +67,7 @@ class WorkflowTuningPanel[F: FormModel, C](QWidget):
             else panel_factory(self.host.state, self.host.env, self)
         )
         self._message = QLabel(self)
+        make_label_selectable(self._message)
         self._message.setObjectName("workflow.tuning.message")
         apply_button = QPushButton("Apply", self)
         apply_button.setObjectName("workflow.tuning.apply")

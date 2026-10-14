@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-14，可選取的 QMessageBox 文字與資料值 label
 
 High-level map of the shared GUI layer. App-specific detail lives in each app's
 own README under `app/<name>/`; cross-cutting subpackages (`event_bus`,
@@ -199,6 +199,19 @@ declares shared logging/control/project flags and converts parser output into
 matplotlib or app modules at module import time. Runtime initializes the explicit
 plot host, shutdown callback and mathtext support after QApplication exists;
 it does not select a process-wide Matplotlib backend.
+
+When runtime gets or creates the `QApplication`, it calls
+`gui.widgets.selectable_text.install_selectable_message_boxes(app)`. The call
+installs one idempotent application event filter. Every `QMessageBox` shown in
+the process then lets users select its main text, informative text and detailed
+text with the mouse or keyboard. Call sites keep using plain `QMessageBox`; all
+four launchers get the filter because runtime is their only `QApplication`
+factory.
+
+A `QLabel` that shows a data value (device address, name, path, computed value,
+status or error message) calls `make_label_selectable(label)` from the same
+module, so users can select and copy it with the mouse. Labels for field names,
+hints, placeholders and decoration stay unselectable.
 
 ## Project / Result Scope
 
