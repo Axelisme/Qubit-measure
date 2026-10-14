@@ -57,14 +57,14 @@ def test_describe_soc_handles_gen_without_envelope() -> None:
 
 def test_describe_soc_accepts_qickconfig_from_dict() -> None:
     # describe_soc must work on a plain QickConfig, not only MockQickSoc
-    cfg = QickConfig(make_mock_soccfg()._cfg)
+    cfg = QickConfig(make_mock_soccfg().get_cfg())
     assert "Generators" in describe_soc(cfg)
 
 
 def test_describe_soc_accepts_plain_dict() -> None:
     # SocCfgLike is structural (__getitem__ only): a raw cfg dict — like the
     # GUI's thinner SocCfgProtocol handle — must work without a QickConfig wrapper
-    cfg = make_mock_soccfg()._cfg
+    cfg = make_mock_soccfg().get_cfg()
     assert "Generators" in describe_soc(cfg)
 
 
