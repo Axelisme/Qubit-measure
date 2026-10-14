@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -953,20 +955,26 @@ def test_soc_connect_remote_returns_summary_directly(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_adapter_guide_returns_five_fields(fx):
+@pytest.mark.parametrize("declared", [True, False])
+def test_adapter_guide_returns_markdown_and_absolute_resource_directory(
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declared: bool
+) -> None:
+    markdown = "# 自由 guide\n\n![pulse](not-read.png)\n"
+    (tmp_path / "guide.md").write_text(markdown, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    class GuideAdapter(SampleAdapter):
+        guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
+
+    fx.registry.register("guide-test", GuideAdapter)
     sock = open_client(fx.service.port)
     try:
-        resp = call(sock, "adapter.guide", {"adapter_name": "fake/freq"})
+        resp = call(sock, "adapter.guide", {"adapter_name": "guide-test"})
         assert resp["ok"] is True
-        guide = resp["result"]["guide"]
-        assert set(guide) == {
-            "behavior",
-            "expects_md",
-            "expects_ml",
-            "typical_writeback",
-            "recommended",
+        assert resp["result"]["guide"] == {
+            "markdown": markdown if declared else "(no guide written yet)",
+            "resource_dir": str(tmp_path) if declared else None,
         }
-        assert all(isinstance(value, str) for value in guide.values())
     finally:
         sock.close()
 
@@ -979,15 +987,3 @@ def test_adapter_guide_unknown_rejected(fx):
         assert resp["error"]["code"] == "invalid_params"
     finally:
         sock.close()
-
-
-def test_base_adapter_guide_default_is_honest():
-    # Every registered adapter defines local guide_text, so the honest default is
-    # tested directly on BaseAdapter: an adapter with no guide says so plainly
-    # rather than faking content.
-    from tests.gui.app.measure._synthetic import SampleAdapter
-
-    guide = SampleAdapter.guide()
-    assert guide.behavior == "(no guide written yet)"
-    assert guide.expects_md == ""
-    assert guide.recommended == ""

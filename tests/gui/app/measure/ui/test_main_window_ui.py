@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.experiment.run_saving import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     AnalysisMode,
     ParameterWriteback,
 )
@@ -92,6 +93,9 @@ def control_factory(qapp: QApplication) -> Iterator[Callable[[], ControlIdentity
 def _mock_ctrl(control_factory: Callable[[], ControlIdentity]) -> MagicMock:
     ctrl = MagicMock()
     ctrl.control_identity = control_factory()
+    ctrl.get_adapter_guide.return_value = AdapterGuide(
+        markdown="# Synthetic guide\n", resource_dir=None
+    )
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.writeback_control.get_writeback_values_for_pane.return_value.__getitem__.return_value.actual_path = "r_f"

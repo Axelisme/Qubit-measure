@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-11，參數容器 guide 名稱
+**Last updated:** 2026-10-15，Guide alias code span 寫法
 
 `zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
 
@@ -32,8 +32,8 @@ Reload 是開發便利功能，依賴處理採 best-effort。允許函式內 imp
 
 每個 adapter 實作 context-free `cfg_definition()`（static shape + deferred fresh-default recipe）、
 `run` / `analyze` / `get_writeback_items`，並在同一 class 以
-`guide_text: ClassVar[AdapterGuide]` 宣告 operator-facing prose；framework-facing `guide()`
-入口由 `BaseAdapter` 統一提供。每個 adapter 都透過 Base 具備 mandatory
+`guide_path: ClassVar[Path | None]` 宣告 operator-facing Markdown 檔案；framework-facing
+`guide()` 入口由 `BaseAdapter` 統一提供。每個 adapter 都透過 Base 具備 mandatory
 `validate_run_request(req, raw_cfg)` preflight；只有需要 SoC-dependent
 但可預測的 run-time cfg 檢查時才覆寫，並維持純 preflight
 （例如 `len_rabi` 先確認 length sweep 在 ZCU 時間格點上不會量化成 zero-step）。詳細框架契約見
@@ -163,9 +163,37 @@ cfg 校正值，沿用 BaseAdapter.run；RunRecord.cfg 保留本次使用的值�
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
 `singleshot/amp_rabi`共用Len Rabi的raw-IQ joint fit，固定無衰減／零相位，提供Initial State與相同的IQ校準writeback。
 
-Adapter guide 是 prose，不是 machine contract。Guide prose 放在各 adapter 檔案內，避免
-新增或刪除實驗時跨檔同步；adapter 以 local `guide_text` class var 提供內容，
-GUI / MCP 只呼叫 `guide()`。
+Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄的 UTF-8 Markdown 檔，
+章節可自由安排。Adapter 明確宣告檔案，不依 class 名稱推導路徑：
+
+```python
+from pathlib import Path
+from typing import ClassVar
+
+# Inside the adapter class:
+guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+```
+
+同目錄的 gain／freq adapters 各自指定 `guide.gain.md`／`guide.freq.md`。
+`BaseAdapter.guide()` 回傳全文 `markdown` 與圖片解析目錄 `resource_dir`。
+未宣告路徑時回「尚未撰寫」預設文字，目錄為 `None`；已宣告但缺檔時 raise。
+GUI / MCP 只使用這個公開契約。
+
+GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
+行內 `$...$`、行內或獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
+Alias 引用一律寫成 code span，例如 `$qubit.freq`、`$qubit.module.readout`。
+其他字面 `$` 寫成 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。
+本機圖片以相對於 guide 目錄的路徑引用，例如
+`![Pulse sequence](pulse.png)`。GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，
+不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
+Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。
+
+撰寫 guide 時注意兩項限制：
+
+- 網址寫成 `<https://...>` 或 `[文字](網址)`。GUI 不把裸網址當成連結，裸網址內的 `$...$` 會被當成數學式。
+- GUI 只把外部連結交給系統瀏覽器；相對的 `.md` 連結不解析。
+
+Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時同步維護 guide 與資源。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
 選擇，預設 `wavelet`；`smooth` 在 GUI 標為 smoothing strength，不再只代表 Gaussian sigma。

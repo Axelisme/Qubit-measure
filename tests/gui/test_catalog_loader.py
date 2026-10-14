@@ -79,7 +79,7 @@ def source_catalog(
             class Adapter(Base):
                 @classmethod
                 def guide(cls):
-                    return AdapterGuide(Experiment().label(), "", "", "", "")
+                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
         """,
         "catalog.py": """
             from .adapters import Adapter
@@ -131,7 +131,7 @@ def test_modified_experiment_reexports_and_fixed_child_identity(
     """,
     )
     registry = source_catalog.reload()
-    assert registry.create("demo").guide().behavior == "v2"
+    assert registry.create("demo").guide().markdown == "v2"
     domain = importlib.import_module("reload_fixture.domain")
     assert domain is not source_catalog.original
     assert domain.fixed is fixed
@@ -146,7 +146,7 @@ def test_same_timestamp_same_size_edits_bypass_old_bytecode(
     stat = path.stat()
     path.write_text(path.read_text().replace('"v1"', '"v2"'), encoding="utf-8")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    assert source_catalog.reload().create("demo").guide().behavior == "v2"
+    assert source_catalog.reload().create("demo").guide().markdown == "v2"
 
 
 def test_deferred_import_cannot_use_previous_bytecode(
@@ -162,14 +162,14 @@ def test_deferred_import_cannot_use_previous_bytecode(
             @classmethod
             def guide(cls):
                 from reload_fixture.domain.experiment import Experiment
-                return AdapterGuide(Experiment().label(), "", "", "", "")
+                return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
     """,
     )
     path = source_catalog.root / "domain/experiment.py"
     stat = path.stat()
     path.write_text(path.read_text().replace('"v1"', '"v2"'), encoding="utf-8")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    assert source_catalog.reload().create("demo").guide().behavior == "v2"
+    assert source_catalog.reload().create("demo").guide().markdown == "v2"
 
 
 def test_fixed_module_corruption_during_failed_import_requires_restart(
@@ -199,7 +199,7 @@ def test_new_adapter_and_shared_helper(source_catalog: CatalogFixture) -> None:
         class NewAdapter(Adapter):
             @classmethod
             def guide(cls):
-                return AdapterGuide(LABEL, "", "", "", "")
+                return AdapterGuide(markdown=LABEL, resource_dir=None)
     """,
     )
     source_catalog.write(
@@ -214,9 +214,9 @@ def test_new_adapter_and_shared_helper(source_catalog: CatalogFixture) -> None:
     )
     registry = source_catalog.reload()
     assert registry.list_names() == ["demo", "new"]
-    assert registry.create("new").guide().behavior == "new"
+    assert registry.create("new").guide().markdown == "new"
     source_catalog.write("domain/seed.py", 'LABEL = "changed"\n')
-    assert source_catalog.reload().create("new").guide().behavior == "changed"
+    assert source_catalog.reload().create("new").guide().markdown == "changed"
 
 
 def test_removed_export_cannot_silently_use_stale_class(
@@ -233,7 +233,7 @@ def test_removed_export_cannot_silently_use_stale_class(
                 return "fixed"
     """,
     )
-    assert source_catalog.reload().create("demo").guide().behavior == "fixed"
+    assert source_catalog.reload().create("demo").guide().markdown == "fixed"
 
 
 def test_removed_source_cannot_fall_back_to_cached_module(
@@ -411,7 +411,7 @@ def dual_catalog(
             class Adapter(Base):
                 @classmethod
                 def guide(cls):
-                    return AdapterGuide(Experiment().label(), "", "", "", "")
+                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
             def register_all(registry):
                 registry.register("demo", Adapter)
         """,
@@ -464,7 +464,7 @@ def test_user_catalog_reloads_without_replacing_framework_identity(
         """,
     )
     registry = user.reload()
-    assert registry.create("demo").guide().behavior == "v2"
+    assert registry.create("demo").guide().markdown == "v2"
     assert isinstance(registry.create("demo"), dual_catalog.fixed_module.Base)
     assert importlib.import_module("loader_framework.core") is dual_catalog.fixed_module
     domain = importlib.import_module("loader_user.domain")
@@ -561,7 +561,7 @@ def leaf_catalog(
                 capabilities = AdapterCapabilities()
                 @classmethod
                 def guide(cls):
-                    return AdapterGuide(Experiment().label(), "", "", "", "")
+                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
         """,
         "definitions.py": """
             from .v2.family.demo.gui import Adapter
@@ -637,7 +637,7 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
         pytest.fail(f"Reload rejected existing source packages: {exc}")
     adapter = registry.create("demo")
     core = importlib.import_module("loader_leaf.v2.family.demo.core")
-    assert adapter.guide().behavior == "v2"
+    assert adapter.guide().markdown == "v2"
     assert isinstance(adapter, ExpAdapterProtocol)
     assert type(adapter) is not old_adapter
     assert core.Experiment is not leaf_catalog.original.Experiment

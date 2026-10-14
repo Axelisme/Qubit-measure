@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 from matplotlib.figure import Figure
@@ -16,7 +17,6 @@ from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -78,50 +78,7 @@ class JpaAutoOptimizeAdapter(
     exp_cls = AutoOptimizeExp
     ExpCfg_cls: ClassVar[Any] = JPAOptCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "JPA joint optimization: with the qubit prepared in g and e (a pi "
-            "pulse toggles it), a multi-phase optimizer searches the JPA flux "
-            "device value, pump frequency and pump power jointly to maximize "
-            "the g/e signal difference. Runs on real hardware and commands "
-            "the selected RF and flux devices at every evaluated point, "
-            "leaving them at the last evaluated point. WARNING: review the "
-            "selected devices and the search bounds before running — the "
-            "seeded bounds are bring-up defaults, not certified safety "
-            "limits."
-        ),
-        expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
-        ),
-        expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
-        ),
-        typical_writeback=(
-            "Proposes the signal-maximizing flux device value, pump frequency "
-            "and pump power into three separate parameter context drafts — "
-            "'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' "
-            "(dBm) — so you can accept, cancel or retarget each one "
-            "independently. Nothing is written without your acceptance, "
-            "writeback never commands a device, and it never touches "
-            "'cur_jpa_A'."
-        ),
-        recommended=(
-            "For each sweep, start/stop are SEARCH BOUNDS and expts is a "
-            "RELATIVE RESOLUTION HINT — expts is not a Cartesian or exact "
-            "sample count. The optimizer compares all three hints when "
-            "allocating its phase-1 flux slices and points per slice. "
-            "'Global optimizer points' (num_points, at least 4, default "
-            "1001) remains the total evaluation budget: raise it for wider "
-            "bounds, lower it for a quick search. Analysis reports the best "
-            "evaluated point with no tuning knobs."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

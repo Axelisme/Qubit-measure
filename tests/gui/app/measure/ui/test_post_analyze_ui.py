@@ -17,7 +17,11 @@ import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QLabel, QPushButton, QTabWidget
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+)
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -58,6 +62,9 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
 
     def create_ctrl() -> MagicMock:
         ctrl = MagicMock()
+        ctrl.get_adapter_guide.return_value = AdapterGuide(
+            markdown="# Synthetic guide\n", resource_dir=None
+        )
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
         configure_cfg_lookup(ctrl)

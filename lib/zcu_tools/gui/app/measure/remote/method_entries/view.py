@@ -25,12 +25,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "view:h_adapter_guide",
         MethodSpec(
             5.0,
-            "Read an adapter's human-facing orientation guide BEFORE running it: "
-            "prose (not a contract) on {behavior, expects_md, expects_ml, "
-            "typical_writeback, recommended} — what the experiment measures, what it "
-            "assumes is already in the parameter context/ModuleLibrary, what a run tends to "
-            "write back, and recommended analysis settings. How you actually use it "
-            "is your call. Empty fields mean the adapter has no guide written yet.",
+            "Read an adapter's human-facing Markdown guide before running it. "
+            "Returns {guide: {markdown, resource_dir}}, with the complete text and "
+            "an absolute resource directory string or null for an undeclared guide. "
+            "Images are referenced by relative paths; read them yourself from "
+            "resource_dir when needed. This query does not read or attach images.",
             (required_string("adapter_name", "Adapter to introspect"),),
             readonly=True,
         ),

@@ -21,7 +21,11 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     """The measure tab renders the attached cfg resource as editable rows."""
     import zcu_tools.gui.app.measure.ui.exp_tab_widget as mod
     from matplotlib.figure import Figure
-    from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+    from zcu_tools.gui.app.measure.adapter import (
+        AdapterCapabilities,
+        AdapterGuide,
+        AnalysisMode,
+    )
     from zcu_tools.gui.app.measure.services import TabSnapshot
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
@@ -40,7 +44,7 @@ def test_measure_tab_renders_cfg_resource_rows(qapp, monkeypatch):
     ctrl = MagicMock()
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
     ctrl.get_session_env.return_value = SessionEnv(

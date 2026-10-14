@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTableWidget,
 )
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.ports import SavePaneSnapshot, TabSnapshot
 from zcu_tools.gui.app.measure.services.save_control import SavedRunInfo
@@ -120,6 +120,9 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     action: str,
 ) -> None:
     ctrl = MagicMock(control_identity=ControlIdentity())
+    ctrl.get_adapter_guide.return_value = AdapterGuide(
+        markdown="# Synthetic guide\n", resource_dir=None
+    )
     configure_cfg_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.get_bus.return_value = BaseEventBus()

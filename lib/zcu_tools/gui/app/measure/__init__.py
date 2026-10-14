@@ -18,6 +18,7 @@ from zcu_tools.gui.cfg import (
 )
 
 from .adapter import (
+    AdapterGuide,
     ExpAdapterProtocol,
     ModuleWriteback,
     ParameterWriteback,
@@ -43,6 +44,7 @@ from .state import (
 )
 
 __all__ = [
+    "AdapterGuide",
     "CfgNodeSpec",
     "CfgNodeValue",
     "CfgSchema",

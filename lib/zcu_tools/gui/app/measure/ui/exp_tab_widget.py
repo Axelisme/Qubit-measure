@@ -41,6 +41,7 @@ from zcu_tools.gui.widgets.cfg.resource_form import ResourceCfgFormWidget
 
 from .analyze_form import AnalyzeFormWidget
 from .data_figure_preview_gallery import DataFigurePreviewGallery
+from .guide_view import GuideView
 from .writeback_widget import WritebackWidget
 
 logger = logging.getLogger(__name__)
@@ -484,17 +485,9 @@ class ExpTabWidget(QWidget):
 
     def _build_guide_panel(self) -> None:
         # ── Tab: Guide (always) ──────────────────────────────────
-        guide_scroll = QScrollArea()
-        guide_scroll.setWidgetResizable(True)
-        guide_label = QLabel()
-        guide_label.setWordWrap(True)
-        guide_label.setTextFormat(Qt.RichText)  # type: ignore[attr-defined]
-        guide_label.setAlignment(Qt.AlignTop)  # type: ignore[attr-defined]
-        guide_label.setContentsMargins(8, 8, 8, 8)
-        guide_label.setText(self._render_guide_html())
-        guide_scroll.setWidget(guide_label)
-        self._guide_panel = guide_scroll
-        self._left_tabs.addTab(guide_scroll, "Guide")
+        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
+        self._guide_panel = GuideView(self._ctrl.get_adapter_guide(adapter_name))
+        self._left_tabs.addTab(self._guide_panel, "Guide")
 
     def _build_analysis_figure_pane(self) -> None:
         # Analysis figure pane (only when analysis present)
@@ -596,28 +589,6 @@ class ExpTabWidget(QWidget):
         super().resizeEvent(a0)
         self._fix_splitter_on_resize()
         self._schedule_handle_layout()
-
-    def _render_guide_html(self) -> str:
-        """Render this adapter's static AdapterGuide as read-only rich text."""
-        import html
-
-        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
-        guide = self._ctrl.get_adapter_guide(adapter_name)
-        sections = [
-            ("Behavior", guide.get("behavior", "")),
-            ("Expects (parameter context)", guide.get("expects_md", "")),
-            ("Expects (ModuleLibrary)", guide.get("expects_ml", "")),
-            ("Typical writeback", guide.get("typical_writeback", "")),
-            ("Recommended", guide.get("recommended", "")),
-        ]
-        parts = [
-            f"<p><b>{title}</b><br>{html.escape(body)}</p>"
-            for title, body in sections
-            if body
-        ]
-        if not parts:
-            return "<p><i>No guide written for this adapter yet.</i></p>"
-        return "".join(parts)
 
     def _fix_splitter_on_resize(self) -> None:
         if self._left_panel_collapsed:

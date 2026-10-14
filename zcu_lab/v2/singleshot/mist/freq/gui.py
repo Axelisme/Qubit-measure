@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -57,38 +57,7 @@ class MistFreqAdapter(
     exp_cls = FreqDepExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "MIST probe-frequency sweep: drives a probe pulse whose frequency "
-            "is swept and classifies each shot in-program against the |g>/|e> "
-            "single-shot centres, plotting the ground/excited/other populations "
-            "versus probe frequency. Runs on real hardware; the result is "
-            "already populations (no per-point fit)."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. The run classifies each "
-            "shot using these values; missing or invalid cfg calibration fails "
-            "before hardware. Optionally reads 'confusion_matrix' (the GE 3x3 matrix) "
-            "to readout-correct the populations at analyze time, and 't1' to "
-            "set the relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' "
-            "seed the probe drive and frequency sweep."
-        ),
-        expects_ml=(
-            "Needs a probe pulse and a readout module. Optionally references a "
-            "calibrated reset and an init pulse — both disabled when no library "
-            "entry exists."
-        ),
-        typical_writeback=(
-            "No writeback — the population curves are read off the plot by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. A "
-            "frequency span around the qubit drive captures the MIST response; "
-            "use a large enough shot count (reps) for clean populations."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

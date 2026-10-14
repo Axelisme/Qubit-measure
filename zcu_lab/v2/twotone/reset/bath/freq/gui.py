@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
@@ -86,41 +86,7 @@ class BathFreqGainAdapter(
     exp_cls = FreqGainExp
     ExpCfg_cls: ClassVar[Any] = FreqGainCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Bath-reset cavity frequency–gain map: a 2D sweep of the bath "
-            "reset's cavity-tone frequency × gain, with an internal 4-point "
-            "pi/2 tomography phase axis the experiment drives itself, imaging "
-            "the residual coherence to locate the (freq, gain) pair that best "
-            "dumps the excitation into the cavity bath. Runs on real hardware."
-        ),
-        expects_md=(
-            "Requires $resonator.freq and $qubit.ext.rabi_freq for the "
-            "cavity sweep from resonator frequency minus 1.2 Rabi frequency "
-            "to minus 0.8 Rabi frequency. Other drive defaults use captured "
-            "qubit/resonator frequency and wiring. Missing, null or invalid "
-            "seed values fail cfg lowering."
-        ),
-        expects_ml=(
-            "Builds the tested bath-reset cfg with cavity, qubit and pi/2 "
-            "tones from captured defaults and needs a readout module. "
-            "Optionally references an upstream reset and an init pulse "
-            "(a library pi pulse when present), both disabled when no "
-            "library entry exists."
-        ),
-        typical_writeback=(
-            "Proposes the best cavity gain and frequency to "
-            "$qubit.ext.reset_bath_gain and $qubit.ext.reset_bath_freq only. "
-            "BathPhase proposes the tested ground/excited reset modules; "
-            "length analysis has no automatic writeback."
-        ),
-        recommended=(
-            "Analysis denoises the 2D map before picking the peak; wavelet "
-            "smoothing is the default and Gaussian remains available for "
-            "comparison. Save writes one 3D HDF5 file with the tomography phase "
-            "stored as an internal sweep axis."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

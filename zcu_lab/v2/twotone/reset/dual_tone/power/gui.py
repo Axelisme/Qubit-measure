@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ModuleWriteback,
@@ -70,40 +70,7 @@ class DualTonePowerAdapter(
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Dual-tone reset gain map: a 2D sweep of the two reset-tone gains "
-            "(pulse1 × pulse2 of the tested two-pulse reset) at the calibrated "
-            "sideband frequencies, imaging the residual excitation to pick the "
-            "gain pair that resets most completely. Runs on real hardware."
-        ),
-        expects_md=(
-            "Requires $qubit.ext.reset_f1 and $qubit.ext.reset_f2 for the "
-            "two tested-reset frequencies. Missing, null or invalid values "
-            "fail cfg lowering. Other drive defaults use captured qubit "
-            "frequency and wiring."
-        ),
-        expects_ml=(
-            "Builds the tested two-pulse-reset cfg from captured defaults and "
-            "needs a readout module. Optionally references an upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
-        ),
-        typical_writeback=(
-            "Proposes the best gains to $qubit.ext.reset_gain1 and "
-            "$qubit.ext.reset_gain2. With Run cfg and capture, proposes "
-            "$qubit.reset.reset_120 from tested_reset, replacing only the "
-            "two gains with this analysis. Tested frequencies and all other "
-            "fields remain. An optional $qubit.module.reset row selects it."
-        ),
-        recommended=(
-            "Sweep each gain across its full usable range. Analysis denoises "
-            "the map before picking the optimum; wavelet smoothing is the "
-            "default and Gaussian remains available for comparison. The "
-            "frequencies are held at 'reset_f1' / 'reset_f2', so calibrate "
-            "those first."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

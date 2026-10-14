@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -57,37 +57,7 @@ class SingleToneLengthAdapter(
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-tone sideband-reset length sweep: holds the tested "
-            "pulse-reset at its calibrated sideband frequency and sweeps its "
-            "duration, showing how the residual excitation decays with reset "
-            "length. Runs on real hardware. Run after the reset frequency is "
-            "found, to pick the shortest length that fully resets the qubit."
-        ),
-        expects_md=(
-            "Requires $qubit.ext.reset_f for the tested reset frequency. "
-            "Missing, null or invalid values fail cfg lowering. Other drive "
-            "defaults use captured qubit frequency and wiring."
-        ),
-        expects_ml=(
-            "Builds the tested pulse reset inline and needs a readout "
-            "module. Optionally references a calibrated upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
-        ),
-        typical_writeback=(
-            "No automatic writeback. Analysis plots the length response "
-            "without fitting a length. Choose the length manually; "
-            "SingleToneFreq proposes the tested reset module."
-        ),
-        recommended=(
-            "A length sweep from ~0.1 us to a few times the expected reset "
-            "time captures the full decay; shorten the span once the plateau "
-            "is clear. Allow a long relax delay between shots so the qubit "
-            "fully relaxes before each reset."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

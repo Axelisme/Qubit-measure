@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     ParameterWriteback,
     ParamMeta,
@@ -123,43 +123,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
     experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
     ExpCfg_cls: ClassVar[Any] = T1Cfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "T1 energy relaxation: applies a pi pulse to excite the qubit, "
-            "then sweeps a wait delay before readout and fits the exponential "
-            "decay to extract T1. Runs on real hardware. Run after a pi pulse "
-            "has been calibrated (amplitude/length Rabi)."
-        ),
-        expects_md=(
-            "Requires a qubit and its referenced resonator. Defaults read "
-            "qubit.t1 (us), qubit.freq (MHz), qubit.wiring.L01.ch, "
-            "resonator.freq (MHz), and resonator.wiring.ch/ro_ch from the "
-            "tab's fixed capture. Missing T1 seeds relax_delay at 100 us "
-            "and the delay sweep stop at 500 us."
-        ),
-        expects_ml=(
-            "Uses qubit.module.x180 and qubit.module.readout from the fixed "
-            "capture. Unset or dangling slots seed inline pulse/readout "
-            "defaults. Optional qubit.module.reset stays disabled when absent. "
-            "Inline readout trigger offset defaults to 0.55 us; verify wiring "
-            "and timing before running."
-        ),
-        typical_writeback=(
-            "Proposes fitted qubit.t1 and its standard error (us) to the "
-            "captured qubit and working point. Also offers an independent sample "
-            "with t1_us/t1_err_us at the Run bias when captured device evidence "
-            "is available. No module writeback."
-        ),
-        recommended=(
-            "Analysis defaults to a single-exponential fit; enable "
-            "dual-exponential only when the decay clearly shows two timescales "
-            "(a fast component on top of the slow relaxation). A delay sweep "
-            "reaching ~5*T1 lets the decay flatten so the fit is "
-            "well-constrained; with no prior qubit.t1 it spans 0–500 us. "
-            "Set 'uniform=False' to cluster more points on the exponential "
-            "decay while keeping the configured start/stop window."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

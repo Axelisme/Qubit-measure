@@ -14,7 +14,11 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTabWidget,
 )
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, ParameterWriteback
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    ParameterWriteback,
+)
 from zcu_tools.gui.app.measure.services.writeback import WritebackValues
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.writeback_widget import WritebackWidget
@@ -144,7 +148,7 @@ def test_analysis_parameter_hint_tracks_empty_and_populated_forms(qapp):
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_adapter_guide.return_value = {}
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     tab = ExpTabWidget("t", ctrl, AdapterCapabilities())
     tab.show()
     try:
@@ -215,7 +219,7 @@ def _post_tab(qapp):
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_adapter_guide.return_value = {}
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     tab = ExpTabWidget(
         "t",
         ctrl,

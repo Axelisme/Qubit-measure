@@ -92,7 +92,12 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
 
     @classmethod
     def guide(cls) -> AdapterGuide:
-        """Return the static human-facing orientation guide (no instance state)."""
+        """Return complete Markdown and its optional relative-resource directory.
+
+        No instance state is needed. Source I/O and decoding errors propagate;
+        an undeclared guide returns an unwritten-guide notice with no directory.
+        Consumers decide how to render Markdown and whether to read images.
+        """
         ...
 
     def make_default_cfg(self, ctx: SessionEnv) -> CfgSchema:
