@@ -33,7 +33,7 @@ from zcu_tools.gui.session.services.device import ActiveDeviceOperation
 from zcu_tools.gui.session.services.predictor import ParamsFor
 from zcu_tools.gui.session.types import ParameterContext
 
-from .adapter import SessionEnv
+from .adapter import AdapterGuide, SessionEnv
 from .events.completion import (
     AnalyzeFailedPayload,
     SaveArtifactsFinishedPayload,
@@ -1142,6 +1142,10 @@ class Controller(SessionControllerMixin):
     def get_adapter_names(self) -> list[str]:
         return self._tab_svc.list_adapter_names()
 
-    def get_adapter_guide(self, adapter_name: str) -> dict[str, str]:
-        """Static human-facing orientation guide of an adapter (no tab needed)."""
+    def get_adapter_guide(self, adapter_name: str) -> AdapterGuide:
+        """Read Markdown and resource directory for a registered adapter name.
+
+        No tab is needed. Unknown names raise KeyError; adapter construction,
+        guide I/O and decoding errors propagate unchanged.
+        """
         return self._tab_svc.adapter_guide(adapter_name)

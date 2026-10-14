@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-14，Markdown guide contract
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -944,6 +944,15 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
+- `AdapterGuide(markdown, resource_dir)` carries complete free-format Markdown
+  and a `Path | None` for resolving relative image paths. `BaseAdapter` authors
+  declare `guide_path = Path(__file__).with_name("guide.md")`, or an explicit
+  sibling filename when adapters share a directory. The base reads UTF-8 on
+  each `guide()` call. No declaration returns an unwritten-guide notice and
+  `None`; a declared missing file raises. `guide_path` is a base-class authoring
+  choice, not a member of `ExpAdapterProtocol`. TabService and Controller return
+  the same named guide; only the remote adapter converts the directory to JSON.
+  The framework does not parse sections or read referenced images.
 - Adapter `cfg_definition()` is context-free authoring; only fresh
   `make_default_cfg(ctx)` materializes deferred defaults and validates the schema.
 - `validate_run_request(req, raw_cfg)` is a mandatory framework member that

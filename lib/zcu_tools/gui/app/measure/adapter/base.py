@@ -59,13 +59,7 @@ if TYPE_CHECKING:
 # Index of T_AnalyzeParams in BaseAdapter's generic parameter list
 # (Cfg, Result, AnalyzeResult, AnalyzeParams).
 _ANALYZE_PARAMS_GENERIC_INDEX = 3
-_NO_GUIDE = AdapterGuide(
-    behavior="(no guide written yet)",
-    expects_md="",
-    expects_ml="",
-    typical_writeback="",
-    recommended="",
-)
+_NO_GUIDE = AdapterGuide(markdown="(no guide written yet)", resource_dir=None)
 
 
 def _analyze_params_generic_arg(cls: type) -> type:
@@ -125,7 +119,9 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # Most registered adapters use the canonical PersistableExperiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
-    guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
+    # Explicit UTF-8 Markdown source. None returns the unwritten-guide notice;
+    # a declared path is read on each guide() call and I/O errors propagate.
+    guide_path: ClassVar[Path | None] = None
 
     # Experiment cfg dataclass used by the default build_exp_cfg. Adapters whose
     # raw → cfg mapping is the common "flat dict through make_cfg" shape just
@@ -298,16 +294,21 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     @classmethod
     def guide(cls) -> AdapterGuide:
-        """Static human-facing orientation guide.
+        """Read the declared UTF-8 Markdown guide without parsing its contents.
 
-        Concrete adapters keep the guide prose local as ``guide_text``. The
-        method remains the framework-facing protocol entry point so GUI/MCP
-        consumers do not need to know how each adapter stores its prose.
-
-        Honest default: an adapter that has not written prose says so plainly
-        (Fast-Fail spirit — surface the gap, do not fake content).
+        guide_path names the source file; its parent is the resource directory
+        for relative image references. Relative guide paths use the current
+        working directory. None returns an unwritten-guide notice and no
+        resource directory. Each call reads the file afresh. A declared missing
+        file raises FileNotFoundError; other I/O and decoding errors propagate.
+        Images are not read here.
         """
-        return cls.guide_text
+        if cls.guide_path is None:
+            return _NO_GUIDE
+        return AdapterGuide(
+            markdown=cls.guide_path.read_text(encoding="utf-8"),
+            resource_dir=cls.guide_path.parent,
+        )
 
     def build_exp_cfg(
         self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest

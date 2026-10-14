@@ -1,6 +1,6 @@
 # `gui.app.measure.remote` — measure-gui RemoteControlAdapter
 
-**Last updated:** 2026-10-12，主視窗可寫狀態與 Local modal admission
+**Last updated:** 2026-10-14，Markdown guide contract
 
 This package is the GUI-process side of measure-gui remote control. It exposes a
 local NDJSON RPC surface over the live `Controller`, injects the application's control identity into shared remote dispatch,
@@ -50,6 +50,14 @@ Their draft-local IDs use `param-<n>`. Apply receipts list parameter paths in
 before/after, including accepted metadata. Preview exposes unavailable_reasons
 for omitted sample proposals. The existing preview/set/apply/write methods own
 these projections; no sample-specific RPC is added.
+
+`adapter.guide(adapter_name)` returns
+`{guide: {markdown: string, resource_dir: string | null}}`. Markdown is the full
+source text. The directory is an absolute path on the GUI host for resolving
+relative image references. An undeclared guide returns an unwritten-guide
+notice and null; a declared source file error propagates through RPC. The query
+does not read or attach images. Agents read relative images from that directory
+when needed; a different host may not have access to the path.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
@@ -174,9 +182,9 @@ Agent-visible async completion comes from operation request/reply, not pushes.
 
 The launch/connect note reports three numbers:
 
-- `WIRE_VERSION = 99`: GUI RPC contract. MCP pins and compares this value.
-- `GUI_VERSION = 132`: GUI process code revision. It is displayed, not compared.
-- `MCP_VERSION = 117`: MCP bridge code revision. The bridge displays this value.
+- `WIRE_VERSION`: GUI RPC contract. MCP pins and compares this value.
+- `GUI_VERSION`: GUI process code revision. It is displayed, not compared.
+- `MCP_VERSION`: MCP bridge code revision. The bridge displays this value.
 
 The first two constants live in this package's `wire_version.py`.
 `MCP_VERSION` lives in `zcu_tools.mcp.measure.server`.

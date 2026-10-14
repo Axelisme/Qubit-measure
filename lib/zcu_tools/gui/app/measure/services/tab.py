@@ -16,7 +16,7 @@ from zcu_tools.gui.cfg.resource import (
 )
 from zcu_tools.gui.session.types import ParameterContext
 
-from ..adapter import AnalysisMode, WritebackItem
+from ..adapter import AdapterGuide, AnalysisMode, WritebackItem
 from .plot_lifecycle import release_retired_plots
 from .ports import (
     AnalysisPaneSnapshot,
@@ -261,11 +261,13 @@ class TabService:
     def list_adapter_names(self) -> list[str]:
         return self._registry.list_names()
 
-    def adapter_guide(self, adapter_name: str) -> dict[str, str]:
-        """Static human-facing orientation guide of an adapter (five fields)."""
-        import dataclasses
+    def adapter_guide(self, adapter_name: str) -> AdapterGuide:
+        """Read a registered adapter's Markdown and resource directory, without a tab.
 
-        return dataclasses.asdict(self._registry.create(adapter_name).guide())
+        adapter_name is a registry name. Unknown names raise KeyError; adapter
+        construction and guide source errors propagate unchanged.
+        """
+        return self._registry.create(adapter_name).guide()
 
     def analyze_param_definitions(
         self, adapter_name: str, *, stage: Literal["primary", "post"]
