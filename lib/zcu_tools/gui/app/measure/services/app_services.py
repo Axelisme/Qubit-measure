@@ -8,6 +8,7 @@ from zcu_tools.gui.app.measure.catalog import ExperimentAccess, ExperimentCatalo
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import OwnerScheduler, ProgressTransport
@@ -124,7 +124,7 @@ def build_app_services(
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
     params_for: ParamsFor | None = None,
-    alias_preset: tuple[AliasRow, ...] = (),
+    alias_presets: AliasPresets | None = None,
 ) -> AppServices:
     """Construct and wire every domain service into a frozen bundle.
 
@@ -133,14 +133,18 @@ def build_app_services(
     called during construction, so passing the still-initialising Controller is
     safe and keeps the bundle complete (no service built outside this function).
 
-    ``alias_preset`` supplies ordered caller-owned session-memory rows. Omitted
-    or empty presets create an empty table. Softlinks and unbound rows are kept;
+    ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
+    means no catalog and an empty initial table. A supplied mapping must contain
+    "default" (possibly empty), or raise ValueError. All tables are validated;
+    default initializes entries only when no saved aliases exist. Saved empty
+    and nonempty tables take precedence. Softlinks and unbound rows are kept;
     the first nonempty component snapshot uses the role registry's unique focus
     candidate for the primary empty row. Explicit table edits disable that
     one-time initialization. Invalid syntax, duplicate aliases or forward links
     raise InvalidInputError(alias_invalid) during construction. No device or
     cache lookup is performed, and each bundle owns its own alias table.
     """
+    validate_alias_presets(alias_presets)
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
     handles = OperationHandles()
@@ -160,7 +164,7 @@ def build_app_services(
         runner=runner,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
-        alias_rows=alias_preset,
+        alias_rows=() if alias_presets is None else alias_presets["default"],
         params_for=params_for,
     )
     context = session.context

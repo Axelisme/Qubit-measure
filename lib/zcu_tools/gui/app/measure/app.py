@@ -17,6 +17,7 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
+from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.services.predictor import ParamsFor
 
 RegistryFactory = Callable[[], tuple["Registry", "ExperimentCatalogLoader"]]
@@ -59,30 +59,34 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
         clean: bool = False,
         project_root: str | None = None,
         params_for: ParamsFor | None = None,
-        alias_preset: tuple[AliasRow, ...] = (),
+        alias_presets: AliasPresets | None = None,
     ) -> None:
-        """Build caller catalogs now and retain initial session rows for assemble.
+        """Build caller catalogs and retain complete alias data for assembly.
 
         ``registry_factory`` returns the registry (including templates) and reload loader
         after runtime setup. ``clean`` skips restoring persisted preferences;
         ``project_root`` anchors default paths, or uses the working directory.
-        ``alias_preset`` is an ordered caller-owned table; omitted or empty means
-        no aliases. Softlinks and unbound rows are preserved. Assemble applies
-        the session's one-time unique-focus initialization and rejects invalid
-        syntax, duplicate names or forward links with InvalidInputError.
-        Presets do not bind devices from remembered settings or hardware.
+        ``alias_presets`` maps preset names to ordered authored rows. Omitted
+        or None means no catalog and an empty initial table. An explicit mapping
+        must contain "default" (its rows may be empty), or raise ValueError.
+        Invalid table syntax, duplicates or forward links raise InvalidInputError.
+        The public ``alias_presets`` field retains the complete catalog for dialog
+        composition, not a file location. Assembly uses default rows for the
+        session's one-time unique-focus initialization. Saved entry tables take
+        precedence, including empty tables. No device or cache binding occurs.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
             install_global_exception_hook,
         )
 
+        validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
         self._registry, self._catalog_loader = registry_factory()
         self._clean = clean
         self._project_root = project_root
         self._params_for = params_for
-        self._alias_preset = alias_preset
+        self.alias_presets: AliasPresets | None = alias_presets
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.measure.state import State
@@ -94,7 +98,7 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             self._project_root,
             catalog_loader=self._catalog_loader,
             params_for=self._params_for,
-            alias_preset=self._alias_preset,
+            alias_presets=self.alias_presets,
         )
 
         adapter = None
@@ -161,7 +165,7 @@ def _build_window(
     *,
     catalog_loader: ExperimentCatalogLoader | None = None,
     params_for: ParamsFor | None = None,
-    alias_preset: tuple[AliasRow, ...] = (),
+    alias_presets: AliasPresets | None = None,
 ) -> tuple[Controller, MainWindow]:
     """Create Controller + MainWindow in the correct order."""
 
@@ -179,7 +183,7 @@ def _build_window(
         project_root=project_root,
         catalog_loader=catalog_loader,
         params_for=params_for,
-        alias_preset=alias_preset,
+        alias_presets=alias_presets,
     )
 
     window = MainWindow(ctrl, templates=lambda: registry.templates)

@@ -180,7 +180,7 @@ class Fixture:
         self.bus = EventBus()
         fixture_root = str(_context_root()) if project_root is None else project_root
         self.ctrl = FixtureController(
-            alias_preset=ALIAS_PRESET,
+            alias_presets={"default": ALIAS_PRESET},
             state=self.state,
             registry=self.registry,
             view=self.view,

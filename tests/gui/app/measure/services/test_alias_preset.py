@@ -64,7 +64,7 @@ def composed_context(
                     project_root=str(root),
                     progress_transport=DirectProgressTransport(),
                     owner_scheduler=QtOwnerScheduler(),
-                    alias_preset=rows,
+                    alias_presets={"default": rows},
                 )
                 context = controller.context_control
             else:
@@ -78,7 +78,7 @@ def composed_context(
                     render_host=lambda: None,
                     owner_scheduler=QtOwnerScheduler(),
                     project_root=str(root),
-                    alias_preset=rows,
+                    alias_presets={"default": rows},
                 )
                 context = services.context_control
         yield context

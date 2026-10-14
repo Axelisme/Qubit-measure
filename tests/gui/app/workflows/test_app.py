@@ -74,7 +74,7 @@ def app(qapp: QApplication, tmp_path: Path) -> Iterator[WorkflowsGuiBehavior[Con
         installed = registry_state()
         behavior = WorkflowsGuiBehavior(
             registrations=build_registry(),
-            alias_rows=ALIAS_PRESET,
+            alias_presets={"default": ALIAS_PRESET},
             project_root=str(tmp_path),
         )
         try:

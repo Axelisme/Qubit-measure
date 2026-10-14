@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.run_saving import SaveReport
     from zcu_tools.gui.cfg.binding import SettableTarget
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
-    from zcu_tools.gui.session.aliases import AliasRow
+    from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -277,12 +277,16 @@ class Controller(SessionControllerMixin):
         owner_scheduler: OwnerScheduler | None = None,
         params_for: ParamsFor | None = None,
         *,
-        alias_preset: tuple[AliasRow, ...] = (),
+        alias_presets: AliasPresets | None = None,
     ) -> None:
         """Compose services for state/registry with an optional view and adapters.
 
-        ``alias_preset`` is the ordered caller-owned initial alias table, empty
-        when omitted. Softlinks and empty bindings stay authored. The session
+        ``alias_presets`` maps names to ordered caller-owned alias rows. None
+        or omission means no catalog and an empty initial table. A supplied
+        mapping must contain "default" (possibly empty), or raise ValueError.
+        Invalid table syntax raises InvalidInputError. Default rows initialize
+        entries without saved aliases; saved tables, including empty ones, win.
+        Softlinks and empty bindings stay authored. The session
         uses the role registry's unique focus candidate once for the primary
         empty row on the first nonempty component snapshot; later point changes
         do not reset rows. Explicit table edits disable that initialization.
@@ -344,7 +348,7 @@ class Controller(SessionControllerMixin):
             project_root=self._project_root,
             catalog_loader=catalog_loader,
             params_for=params_for,
-            alias_preset=alias_preset,
+            alias_presets=alias_presets,
         )
         self._bind_services(services)
         # App-level PersistenceCaretaker, injected by runtime behavior via

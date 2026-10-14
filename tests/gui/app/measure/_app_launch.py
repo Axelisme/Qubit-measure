@@ -67,7 +67,7 @@ def launched_measure_app(
     try:
         behavior = MeasureGuiBehavior(
             lambda: (Registry(), Loader()),
-            alias_preset=ALIAS_PRESET,
+            alias_presets={"default": ALIAS_PRESET},
             clean=True,
             project_root=str(tmp_path),
         )

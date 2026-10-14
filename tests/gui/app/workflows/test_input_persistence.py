@@ -104,7 +104,9 @@ def test_open_restore_and_close_flush(qapp: QApplication, tmp_path: Path) -> Non
         )
     )
     app = WorkflowsGuiBehavior(
-        registrations=build_registry(), alias_rows=ALIAS_PRESET, cache_dir=tmp_path
+        registrations=build_registry(),
+        alias_presets={"default": ALIAS_PRESET},
+        cache_dir=tmp_path,
     )
     app.assemble(None)
     try:
@@ -136,7 +138,9 @@ def test_unreadable_snapshot_reports_and_uses_defaults(
 ) -> None:
     (tmp_path / "t1_workflow_state_v1.json").write_text(payload)
     app = WorkflowsGuiBehavior(
-        registrations=build_registry(), alias_rows=ALIAS_PRESET, cache_dir=tmp_path
+        registrations=build_registry(),
+        alias_presets={"default": ALIAS_PRESET},
+        cache_dir=tmp_path,
     )
     app.assemble(None)
     try:
@@ -166,7 +170,7 @@ def test_clean_skips_read_but_close_replaces_snapshot(
     path.write_text("deliberately invalid JSON")
     app = WorkflowsGuiBehavior(
         registrations=build_registry(),
-        alias_rows=ALIAS_PRESET,
+        alias_presets={"default": ALIAS_PRESET},
         clean=True,
         cache_dir=tmp_path,
     )
