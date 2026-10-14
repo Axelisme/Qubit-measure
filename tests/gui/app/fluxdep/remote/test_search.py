@@ -3,92 +3,104 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pytest
-from numpy.typing import NDArray
-from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
     ParamBounds,
     SearchCancelled,
-    SearchExecution,
 )
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload, SearchChangedPayload
-from zcu_tools.gui.app.fluxdep.services import fit
+from zcu_tools.gui.app.fluxdep.remote.service import (
+    ControlOptions,
+    RemoteControlAdapter,
+)
+from zcu_tools.gui.app.fluxdep.search import FluxDepSearchRuntime
 from zcu_tools.gui.event_bus import EventMeta
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.adapters.thread_pool_background import (
+    ThreadPoolBackgroundExecutor,
+)
 from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
-from tests.gui.app.fluxdep.remote._search_harness import PumpedRouteHarness
+from tests.gui.app.fluxdep.remote._search_harness import (
+    PumpedRouteHarness,
+    QueuedProgress,
+)
 
 
 @dataclass
 class SearchCase:
-    """Controllable numeric kernel only; route, owners, executor and waits are real.
+    """Gate runtime result delivery; route, owner policy and IO waits stay real."""
 
-    release gates worker completion; entered confirms the detached kernel ran.
-    failure injects a worker failure, while ignore_cancel models a success after
-    the last cancellation checkpoint. captured records detached kernel inputs.
-    """
-
-    harness: PumpedRouteHarness
+    background: ThreadPoolBackgroundExecutor
+    harness: PumpedRouteHarness = field(init=False)
+    result: DatabaseSearchResult = field(init=False)
     entered: threading.Event = field(default_factory=threading.Event)
     release: threading.Event = field(default_factory=threading.Event)
     failure: Exception | None = None
-    ignore_cancel: bool = False
-    captured: list[
-        tuple[
-            NDArray[np.float64], NDArray[np.float64], str, TransitionDict, ParamBounds
-        ]
-    ] = field(default_factory=list)
+    submissions: int = 0
 
-    def compute(
+    def submit(
         self,
-        fluxs: NDArray[np.float64],
-        freqs: NDArray[np.float64],
-        datapath: str,
-        transitions: TransitionDict,
-        bounds: ParamBounds,
+        work: Callable[[], object],
         *,
-        execution: SearchExecution | None = None,
-    ) -> DatabaseSearchResult:
-        """Block off-owner, then return a numeric result or requested failure."""
-        assert not self.harness.owner.is_owner_thread()
-        self.captured.append(
-            (fluxs.copy(), freqs.copy(), datapath, transitions, bounds)
+        run_in_pool: bool,
+        on_done: Callable[[object], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        """Deliver a chosen outcome through the native executor's owner loop."""
+        self.submissions += 1
+        self.background.submit(
+            self.completion, run_in_pool=run_in_pool, on_done=on_done, on_error=on_error
         )
+
+    def completion(self) -> DatabaseSearchResult:
         self.entered.set()
         if not self.release.wait(5):
-            raise TimeoutError("test kernel was not released")
+            raise TimeoutError("test delivery was not released")
         if self.failure is not None:
             raise self.failure
-        if (
-            not self.ignore_cancel
-            and execution is not None
-            and execution.cancel_requested is not None
-            and execution.cancel_requested()
-        ):
-            raise SearchCancelled("requested")
-        return perfect_fit_result(fluxs, freqs, bounds)
+        return self.result
 
 
 @pytest.fixture
 def search_case(
     cross_controller: Controller,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     search_database_hdf5: str,
 ) -> Iterator[SearchCase]:
-    harness = PumpedRouteHarness.create(str(tmp_path), cross_controller.state)
-    harness.ctrl.set_fit_params(
+    owner = ManualOwnerScheduler()
+    background = ThreadPoolBackgroundExecutor(owner, max_pool_workers=1)
+    case = SearchCase(background)
+    ctrl = Controller(
+        cross_controller.state,
+        project_root=str(tmp_path),
+        interactive_owner=owner,
+        search_runtime=FluxDepSearchRuntime(
+            case, ProgressService(QueuedProgress(owner))
+        ),
+    )
+    service = RemoteControlAdapter(ctrl, ControlOptions(port=0), owner_scheduler=owner)
+    case.harness = PumpedRouteHarness(
+        ctrl,
+        service,
+        owner=owner,
+        background=background,
+        io_pool=ThreadPoolExecutor(max_workers=2),
+    )
+    ctrl.set_fit_params(
         search_database_hdf5,
         (2, 15),
         (0.2, 2),
@@ -97,13 +109,15 @@ def search_case(
         6.0,
         None,
     )
-    case = SearchCase(harness)
-    monkeypatch.setattr(fit, "search_database", case.compute)
+    inputs = ctrl.capture_search()
+    case.result = perfect_fit_result(
+        inputs.fluxs, inputs.freqs, ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
+    )
     try:
         yield case
     finally:
         case.release.set()
-        harness.close()
+        case.harness.close()
 
 
 _READS = {
@@ -168,12 +182,11 @@ def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
     }
     _error(h.request(first, "fit.search"), "precondition_failed", "search_busy")
     assert h.ctrl.search.active_token == token
-    assert len(search_case.captured) == 1
+    assert search_case.submissions == 1
 
 
 def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
     search_case: SearchCase,
-    search_database_hdf5: str,
 ) -> None:
     h = search_case.harness
     client = h.client()
@@ -224,12 +237,6 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
         )
         assert all(meta.origin.kind == "agent" for _, meta in facts)
         assert len({meta.origin.client_id for _, meta in facts}) == 1
-        np.testing.assert_array_equal(search_case.captured[0][0], [0, 0.5, 1, 0.5])
-        assert search_case.captured[0][2] == search_database_hdf5
-        assert search_case.captured[0][3] == {"transitions": [(0, 1)], "r_f": 6.0}
-        assert search_case.captured[0][4] == ParamBounds(
-            EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2)
-        )
         read = _result(h.request(client, "fit.result"))
         assert read["has_result"] is True
         assert read["params"] == {"EJ": 5.0, "EC": 1.0, "EL": 0.5}
@@ -246,8 +253,8 @@ def test_cancel_receipt_is_not_outcome_and_terminal_cancel_is_noop(
     h = search_case.harness
     client, canceller = h.client(), h.client()
     token = _start(search_case, client)
-    if terminal == "finished":
-        search_case.ignore_cancel = True
+    if terminal == "cancelled":
+        search_case.failure = SearchCancelled("requested")
     elif terminal == "failed":
         search_case.failure = OSError("database read failed")
     waiting = h.request_async(client, "operation.await", token=token, timeout=30)

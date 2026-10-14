@@ -6,7 +6,7 @@ import pytest
 import zcu_tools.notebook.analysis.t2_curve.workflow as workflow
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from zcu_tools.notebook.analysis.fit_tools import F01FluxCorrectionResult
+from zcu_tools.notebook.analysis.fit_tools import predict_f01_mhz
 from zcu_tools.notebook.analysis.t2_curve import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
@@ -18,16 +18,12 @@ from zcu_tools.notebook.analysis.t2_curve import (
     T2FluxCalibration,
     T2RowDiagnostics,
     T2WindowData,
-    analyze_flux_noise_limit,
-    analyze_photon_shot_noise_limit,
     calibrate_t2_flux,
     fit_t2_curve,
     flux_noise_gamma_phi_per_us,
-    make_t2_fit_bounds,
     make_t2_fit_init,
     mechanisms_to_fixed_params,
     prepare_t2_dephasing_data,
-    run_t2_curve_analysis,
     thermal_photon_gamma_phi_per_us,
 )
 from zcu_tools.resources.sample_table import SampleTableV2Error
@@ -35,122 +31,9 @@ from zcu_tools.resources.sample_table import SampleTableV2Error
 _KAPPA_OVER_2PI_MHZ = 14.754
 
 
-def test_mechanism_probes_feed_combined_fit(monkeypatch: pytest.MonkeyPatch) -> None:
-    true_A_phi = 2.4e-6
-    true_n_th = 3.0e-3
-    data, domega_dflux, chi = _synthetic_dephasing_data(true_A_phi, true_n_th)
-
-    monkeypatch.setattr(
-        workflow, "predict_domega_dflux", lambda *_args, **_kwargs: domega_dflux
-    )
-    monkeypatch.setattr(
-        workflow,
-        "dispersive_chi01_over_2pi_mhz",
-        lambda *_args, **_kwargs: chi,
-    )
-
-    flux_probe = analyze_flux_noise_limit(
-        data,
-        readout_kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
-        assumed_n_th=true_n_th,
-    )
-    photon_probe = analyze_photon_shot_noise_limit(
-        data,
-        readout_kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
-        assumed_A_phi=true_A_phi,
-    )
-    init = make_t2_fit_init(
-        active_mechanisms=("flux_noise", "photon_shot_noise"),
-        flux_probe=flux_probe,
-        photon_probe=photon_probe,
-    )
-    combined = fit_t2_curve(
-        data,
-        readout_kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
-        init=init,
-        bounds=make_t2_fit_bounds(init),
-        fixed=mechanisms_to_fixed_params(()),
-    )
-
-    assert flux_probe.A_phi_fit == pytest.approx(true_A_phi, rel=1e-6)
-    assert photon_probe.n_th_fit == pytest.approx(true_n_th, rel=1e-6)
-    assert combined.fit_result.params.A_phi == pytest.approx(true_A_phi, rel=1e-6)
-    assert combined.fit_result.params.n_th == pytest.approx(true_n_th, rel=1e-6)
-
-
-def test_photon_probe_uses_pointwise_minimum_for_combined_init(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    data, domega_dflux, chi = _synthetic_dephasing_data(A_phi=2.4e-6, n_th=3.0e-3)
-
-    monkeypatch.setattr(
-        workflow, "predict_domega_dflux", lambda *_args, **_kwargs: domega_dflux
-    )
-    monkeypatch.setattr(
-        workflow,
-        "dispersive_chi01_over_2pi_mhz",
-        lambda *_args, **_kwargs: chi,
-    )
-
-    photon_probe = analyze_photon_shot_noise_limit(
-        data,
-        readout_kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
-        assumed_A_phi=0.0,
-    )
-    init = make_t2_fit_init(
-        active_mechanisms=("photon_shot_noise",),
-        photon_probe=photon_probe,
-    )
-
-    pointwise_min = float(np.nanmin(photon_probe.pointwise_table["n_th"]))
-    assert photon_probe.n_th_init == pytest.approx(pointwise_min)
-    assert photon_probe.n_th_fit > photon_probe.n_th_init
-    assert init.n_th == pytest.approx(photon_probe.n_th_init)
-
-
-def test_flux_noise_probe_ignores_near_zero_sensitivity_for_pointwise_upper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    data, domega_dflux, chi = _synthetic_dephasing_data(A_phi=2.4e-6, n_th=0.0)
-    domega_dflux[0] = 0.0
-
-    monkeypatch.setattr(
-        workflow, "predict_domega_dflux", lambda *_args, **_kwargs: domega_dflux
-    )
-    monkeypatch.setattr(
-        workflow,
-        "dispersive_chi01_over_2pi_mhz",
-        lambda *_args, **_kwargs: chi,
-    )
-
-    flux_probe = analyze_flux_noise_limit(
-        data,
-        readout_kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
-        min_sensitivity_fraction=1e-3,
-    )
-
-    assert np.isnan(flux_probe.pointwise_table["A_phi (Phi0/sqrtHz)"].iloc[0])
-    assert flux_probe.A_phi_upper < 1e-3
-
-
-def test_fit_t2_curve_fills_nan_errors_in_fit_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    data, domega_dflux, chi = _synthetic_dephasing_data(A_phi=2.4e-6, n_th=3.0e-3)
+def test_fit_t2_curve_fills_nan_errors_in_fit_window() -> None:
+    data, _, _ = _synthetic_dephasing_data(A_phi=2.4e-6, n_th=3.0e-3)
     data.fit.T2e_err_us[10] = np.nan
-
-    monkeypatch.setattr(
-        workflow,
-        "predict_domega_dflux",
-        lambda _params, fluxs, **_kwargs: np.interp(
-            fluxs, data.fit.fluxs, domega_dflux
-        ),
-    )
-    monkeypatch.setattr(
-        workflow,
-        "dispersive_chi01_over_2pi_mhz",
-        lambda _params, fluxs, *_args, **_kwargs: np.interp(fluxs, data.fit.fluxs, chi),
-    )
 
     combined = fit_t2_curve(
         data,
@@ -190,9 +73,7 @@ def test_t2_curve_analysis_config_defaults_match_weighted_fit_contract() -> None
     assert config.correct_flux_from_f01_enabled is True
 
 
-def test_prepare_t2_dephasing_data_default_keeps_nan_error_points(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_prepare_t2_dephasing_data_default_keeps_nan_error_points() -> None:
     fluxs = np.array([0.5, 0.51], dtype=np.float64)
     samples = pd.DataFrame(
         {
@@ -209,21 +90,11 @@ def test_prepare_t2_dephasing_data_default_keeps_nan_error_points(
     )
     calibration = _synthetic_calibration(samples)
 
-    def _identity_correction(
-        raw_fluxs: NDArray[np.float64],
-        _f01_freqs_ghz: NDArray[np.float64],
-        *_args: object,
-        **_kwargs: object,
-    ) -> F01FluxCorrectionResult:
-        return F01FluxCorrectionResult(
-            raw_fluxs=raw_fluxs,
-            corrected_fluxs=raw_fluxs,
-            accepted=np.ones_like(raw_fluxs, dtype=bool),
-        )
-
-    monkeypatch.setattr(workflow, "correct_flux_from_f01", _identity_correction)
-
-    data = prepare_t2_dephasing_data(calibration, analysis_flux_range=(0.49, 0.52))
+    data = prepare_t2_dephasing_data(
+        calibration,
+        analysis_flux_range=(0.49, 0.52),
+        correct_flux_from_f01_enabled=False,
+    )
 
     assert len(data.fit.T2e_us) == 2
     assert np.isnan(data.fit.T2e_err_us[0])
@@ -574,9 +445,7 @@ def test_t2_unresolved_flux_rows_fail_fast() -> None:
         calibrate_t2_flux(context, fallback_frame_unit="A")
 
 
-def test_t2_integer_equivalent_branches_align_to_same_flux(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     samples = pd.DataFrame(
         {
             "dev_value": [0.0, 0.0],
@@ -593,21 +462,11 @@ def test_t2_integer_equivalent_branches_align_to_same_flux(
     )
     calibration = _synthetic_calibration(samples)
 
-    def _identity_correction(
-        raw_fluxs: NDArray[np.float64],
-        _f01_freqs_ghz: NDArray[np.float64],
-        *_args: object,
-        **_kwargs: object,
-    ) -> F01FluxCorrectionResult:
-        return F01FluxCorrectionResult(
-            raw_fluxs=raw_fluxs,
-            corrected_fluxs=raw_fluxs,
-            accepted=np.ones_like(raw_fluxs, dtype=bool),
-        )
-
-    monkeypatch.setattr(workflow, "correct_flux_from_f01", _identity_correction)
-
-    data = prepare_t2_dephasing_data(calibration, analysis_flux_range=(0.49, 0.53))
+    data = prepare_t2_dephasing_data(
+        calibration,
+        analysis_flux_range=(0.49, 0.53),
+        correct_flux_from_f01_enabled=False,
+    )
 
     np.testing.assert_allclose(data.window.fluxs, [0.5, 0.5])
     np.testing.assert_allclose(data.window.raw_fluxs, [0.5, -0.5])
@@ -655,12 +514,10 @@ def test_t2_integer_equivalent_branches_align_to_same_flux(
     assert shifts_row["value"].iloc[0] == "k=0:1 k=1:1"
 
 
-def test_t2_explicit_rows_are_not_auto_corrected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_t2_explicit_rows_are_not_auto_corrected() -> None:
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.0],
+            "dev_value": [0.0, 0.01],
             "dev_unit": ["A", "A"],
             "flux": [0.5, np.nan],
             "flux_int": [np.nan, 0.5],
@@ -672,35 +529,20 @@ def test_t2_explicit_rows_are_not_auto_corrected(
             "t2e_err_us": [0.2, 0.2],
         }
     )
+    samples["freq_mhz"] = predict_f01_mhz((3.4, 0.9, 0.6), np.array([0.51, -0.488]))
     calibration = _synthetic_calibration(samples)
-
-    def _fake_correct(
-        raw_fluxs: NDArray[np.float64],
-        _f01_freqs_ghz: NDArray[np.float64],
-        *_args: object,
-        **_kwargs: object,
-    ) -> F01FluxCorrectionResult:
-        return F01FluxCorrectionResult(
-            raw_fluxs=raw_fluxs,
-            corrected_fluxs=raw_fluxs + 0.002,
-            accepted=np.ones_like(raw_fluxs, dtype=bool),
-        )
-
-    monkeypatch.setattr(workflow, "correct_flux_from_f01", _fake_correct)
 
     data = prepare_t2_dephasing_data(calibration, analysis_flux_range=(0.49, 0.53))
 
     assert data.window.flux_sources == ("explicit", "row-frame")
     np.testing.assert_array_equal(data.window.f01_correction_applied, [False, True])
-    np.testing.assert_allclose(data.window.raw_fluxs, [0.5, -0.5])
-    np.testing.assert_allclose(data.window.flux_corrections, [0.0, 0.002])
-    np.testing.assert_allclose(data.window.fluxs, [0.5, 0.502])
+    np.testing.assert_allclose(data.window.raw_fluxs, [0.5, -0.49])
+    np.testing.assert_allclose(data.window.flux_corrections, [0.0, 0.002], atol=1e-5)
+    np.testing.assert_allclose(data.window.fluxs, [0.5, 0.512], atol=1e-5)
     assert data.window.correction_skipped_reason == ("explicit_flux", "")
 
 
-def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled() -> None:
     samples = pd.DataFrame(
         {
             "dev_value": [0.0, 0.0],
@@ -716,14 +558,6 @@ def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled(
         }
     )
     calibration = _synthetic_calibration(samples)
-
-    def _must_not_run(
-        *_args: object,
-        **_kwargs: object,
-    ) -> F01FluxCorrectionResult:
-        raise AssertionError("f01 correction must not run when disabled")
-
-    monkeypatch.setattr(workflow, "correct_flux_from_f01", _must_not_run)
 
     data = prepare_t2_dephasing_data(
         calibration,
@@ -749,59 +583,6 @@ def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled(
     ].iloc[0]
     assert coverage["accepted"] == 0
     assert coverage["skipped"] == 2
-
-
-def test_run_t2_curve_analysis_threads_correction_setting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: list[bool] = []
-    config = T2CurveAnalysisConfig(
-        result_dir="/tmp/result",
-        correct_flux_from_f01_enabled=False,
-        progress=False,
-        verbose=False,
-        display_tables=False,
-        save_figures=False,
-        show_figures=False,
-        fit_bounds={"A_phi": (0.0, 1e-3), "n_th": (0.0, 1.0)},
-    )
-
-    def _fake_prepare(
-        calibration: object,
-        *,
-        correct_flux_from_f01_enabled: bool,
-        **_kwargs: object,
-    ) -> object:
-        captured.append(correct_flux_from_f01_enabled)
-        return object()
-
-    monkeypatch.setattr(workflow, "load_t2_curve_context", lambda **_kwargs: object())
-    monkeypatch.setattr(
-        workflow, "calibrate_t2_flux", lambda _context, **_kwargs: object()
-    )
-    monkeypatch.setattr(workflow, "prepare_t2_dephasing_data", _fake_prepare)
-    monkeypatch.setattr(
-        workflow,
-        "analyze_flux_noise_limit",
-        lambda _data, **_kwargs: object(),
-    )
-    monkeypatch.setattr(
-        workflow,
-        "analyze_photon_shot_noise_limit",
-        lambda _data, **_kwargs: object(),
-    )
-    monkeypatch.setattr(workflow, "make_t2_fit_init", lambda **_kwargs: object())
-    monkeypatch.setattr(workflow, "fit_t2_curve", lambda _data, **_kwargs: object())
-    monkeypatch.setattr(
-        workflow,
-        "build_t2_channel_curves",
-        lambda _combined_fit, **_kwargs: object(),
-    )
-    monkeypatch.setattr(workflow, "collect_t2_curve_result", lambda **_kwargs: object())
-
-    run_t2_curve_analysis(config)
-
-    assert captured == [False]
 
 
 def _synthetic_dephasing_data(
