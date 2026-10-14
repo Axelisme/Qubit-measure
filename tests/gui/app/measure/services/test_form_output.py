@@ -1,5 +1,7 @@
 """Guard and Run forward the adapter's opaque Form output unchanged."""
 
+from typing import ClassVar
+
 import pytest
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
@@ -29,7 +31,7 @@ class ChoiceCfg(ConfigBase):
 
 
 class ChoiceAdapter(BaseAdapter[ChoiceCfg, str]):
-    capabilities = AdapterCapabilities(
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, analysis=AnalysisMode.NONE, load_data=False
     )
 
