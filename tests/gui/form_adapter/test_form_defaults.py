@@ -2,6 +2,7 @@
 
 import pytest
 from zcu_tools.cfg_model import (
+    AliasName,
     BathResetSpec,
     ConfigBase,
     Expr,
@@ -11,6 +12,7 @@ from zcu_tools.cfg_model import (
     Template,
     TemplateDef,
 )
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.form import FormEnv, FormErrors, FormState, ModuleInline
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
@@ -613,3 +615,74 @@ def test_unsupported_template_seed_names_template_and_seed_path(nested: bool) ->
         form.bind_templates({"noisy": definition}, adapter="synthetic")
 
     assert path in str(caught.value), caught.value
+
+
+class DefaultedDeviceNames(ConfigBase):
+    """Device aliases retain their own static defaults, including nonempty ones."""
+
+    device: str = ""
+    nullable_device: str | None = "standby"
+
+
+@pytest.mark.parametrize("binding", [None, "", "rf_source"])
+def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> None:
+    captured = environment()
+    parameters = captured.parameters
+    assert parameters is not None
+    env = FormEnv(
+        parameters=(
+            None
+            if binding is None
+            else parameters.bind_aliases((AliasRow("rf_dev", binding),), {})
+        ),
+        devices={
+            name: BaseDeviceInfo(address=name, type="synthetic")
+            for name in (
+                () if binding is None else ("rf_source", "other_source", "standby")
+            )
+        },
+    )
+    form = Form(
+        DefaultedDeviceNames,
+        {"device": AliasName("rf_dev"), "nullable_device": AliasName("rf_dev")},
+    )
+    state = FormState(form.default_input(env))
+    assert state.input.data == (
+        {"device": binding, "nullable_device": binding} if binding else {}
+    )
+    result = state.result(env)
+    assert not isinstance(result, FormErrors), result
+    expected = (
+        DefaultedDeviceNames(device=binding, nullable_device=binding)
+        if binding
+        else DefaultedDeviceNames()
+    )
+    assert form.to_cfg(result, env) == expected
+
+    properties = form.model.input_schema(env)["properties"]
+    assert isinstance(properties, dict)
+    for name, default in (("device", ""), ("nullable_device", "standby")):
+        field = properties[name]
+        assert isinstance(field, dict)
+        options = field["x-form-options"]
+        assert isinstance(options, list)
+        values = [option["value"] for option in options if isinstance(option, dict)]
+        assert default in values, "The core static default must be selectable"
+        assert values.count(default) == 1
+        assert all(device in values for device in env.devices)
+        assert (None in values) == (name == "nullable_device")
+        assert tuple(values) == form.model.choices(env)[(name,)]
+        for value in values:
+            state.write({(name,): value}, env)
+            result = state.result(env)
+            if isinstance(result, FormErrors):
+                pytest.fail(str(result.messages))
+            cfg = form.to_cfg(result, env)
+            if isinstance(cfg, FormErrors):
+                pytest.fail(str(cfg.messages))
+            assert getattr(cfg, name) == value
+        state.write({(name,): "unknown_device"}, env)
+        rejected = state.result(env)
+        assert isinstance(rejected, FormErrors)
+        assert rejected.messages == {(name,): "Value is not among current choices"}
+        state.write({(name,): default}, env)
