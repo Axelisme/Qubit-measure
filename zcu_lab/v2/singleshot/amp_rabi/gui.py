@@ -85,8 +85,9 @@ class SsAmpRabiAdapter(
         ),
         typical_writeback=(
             "Reports pi/pi2 gain, frequency and amplitude. A valid joint fit proposes "
-            "g_center, e_center, ge_radius and confusion_matrix using the same "
-            "calibration gate as Len Rabi."
+            "$qubit.ext.readout_cal.g_center, $qubit.ext.readout_cal.e_center, "
+            "$qubit.ext.readout_cal.radius and $qubit.ext.readout_cal.confusion_matrix "
+            "using the same calibration gate as Len Rabi."
         ),
         recommended=(
             "Sweep a full Rabi period. Initial State describes the predominant state "

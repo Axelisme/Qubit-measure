@@ -20,22 +20,22 @@ def rabi_calibration_writeback(fit: RabiJointFitResult) -> Sequence[WritebackIte
 
     return [
         ParameterWriteback(
-            target_name="g_center",
+            target_name="$qubit.ext.readout_cal.g_center",
             description="Rabi fitted |g> IQ cluster centre (complex)",
             proposed_value=fit.g_center,
         ),
         ParameterWriteback(
-            target_name="e_center",
+            target_name="$qubit.ext.readout_cal.e_center",
             description="Rabi fitted |e> IQ cluster centre (complex)",
             proposed_value=fit.e_center,
         ),
         ParameterWriteback(
-            target_name="ge_radius",
+            target_name="$qubit.ext.readout_cal.radius",
             description="Rabi fitted single-shot classification radius",
             proposed_value=fit.radius,
         ),
         ParameterWriteback(
-            target_name="confusion_matrix",
+            target_name="$qubit.ext.readout_cal.confusion_matrix",
             description="Rabi fitted 3x3 confusion matrix",
             proposed_value=fit.confusion_matrix.tolist(),
         ),

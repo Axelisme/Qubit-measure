@@ -91,7 +91,7 @@ class SsAcStarkAdapter(
         ),
         typical_writeback=(
             "Proposes the fitted AC-Stark coefficient into parameter context "
-            "'ac_stark_coeff' (photon number per gain²); the MIST experiments read it to "
+            "'$qubit.ext.ac_stark_coeff' (photon number per gain²); MIST reads it to "
             "rescale their x-axis to photon number."
         ),
         recommended=(
@@ -138,7 +138,7 @@ class SsAcStarkAdapter(
         # Key ``ac_stark_coeff`` per single_qubit.md:3329.
         return [
             ParameterWriteback(
-                target_name="ac_stark_coeff",
+                target_name="$qubit.ext.ac_stark_coeff",
                 description="AC-Stark coefficient (photon number per gain²)",
                 proposed_value=req.analyze_result.ac_stark_coeff,
             ),

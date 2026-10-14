@@ -84,8 +84,8 @@ class MistPowerAdapter(
         ),
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep the "
-            "probe gain across the MIST onset; provide 'ac_stark_coeff' (from the "
-            "AC-Stark experiment) for a photon-number x-axis."
+            "probe gain across the MIST onset; provide '$qubit.ext.ac_stark_coeff' "
+            "(from the AC-Stark experiment) for a photon-number x-axis."
         ),
     )
 

@@ -153,7 +153,8 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'. Keep the gain "
             "sweep coarse (the inner length sweep multiplies the run time). Provide "
-            "'ac_stark_coeff' for a photon-number x-axis. 'uniform=True' (default) uses a "
+            "'$qubit.ext.ac_stark_coeff' for a photon-number x-axis. "
+            "'uniform=True' (default) uses a "
             "linear length sweep; set False to cluster points along the expected "
             "exponential decay while preserving the configured window and count."
         ),

@@ -88,8 +88,9 @@ class SsLenRabiAdapter(
         ),
         typical_writeback=(
             "When the joint fit is valid and its complete calibration is finite, proposes "
-            "g_center, e_center, ge_radius, and confusion_matrix as four independent "
-            "items. The four-item proposal is all-or-none."
+            "$qubit.ext.readout_cal.g_center, $qubit.ext.readout_cal.e_center, "
+            "$qubit.ext.readout_cal.radius, and $qubit.ext.readout_cal.confusion_matrix "
+            "as four independent items. The four-item proposal is all-or-none."
         ),
         recommended=(
             "Set Initial State to the predominant state before the swept drive pulse even "

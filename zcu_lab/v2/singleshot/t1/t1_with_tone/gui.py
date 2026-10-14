@@ -62,7 +62,8 @@ class SsT1ToneAdapter(
             "during the wait, sweeps the wait-plus-probe length, and classifies each shot "
             "in-program against the |g>/|e> IQ-cluster centres. Plots the ground / "
             "excited / other populations versus delay time with dual-transition-rate fits "
-            "for T1 and T1_b. The fitted T1 value is written back to 't1_with_tone' in "
+            "for T1 and T1_b. The fitted T1 value is written back to "
+            "'$qubit.ext.t1_with_tone' in "
             "the parameter context. Runs on real hardware."
         ),
         expects_md=(
@@ -84,7 +85,7 @@ class SsT1ToneAdapter(
         ),
         typical_writeback=(
             "Proposes the fitted T1 relaxation time under the probe tone into parameter "
-            "context 't1_with_tone' (us)."
+            "context '$qubit.ext.t1_with_tone' (us)."
         ),
         recommended=(
             "Set calibration cfg directly or seed it with 'singleshot/ge'. Use "
@@ -124,7 +125,7 @@ class SsT1ToneAdapter(
         # Key ``t1_with_tone`` per single_qubit.md:3079.
         return [
             ParameterWriteback(
-                target_name="t1_with_tone",
+                target_name="$qubit.ext.t1_with_tone",
                 description="T1 with probe tone (us)",
                 proposed_value=req.analyze_result.t1,
             ),
