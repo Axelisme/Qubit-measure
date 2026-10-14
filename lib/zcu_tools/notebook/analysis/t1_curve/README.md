@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-14，physical ns 與標準 loss parameters
+**Last updated:** 2026-10-14，physical ns、標準 loss parameters 與 Purcell equilibrium T1
 
 Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
@@ -52,7 +52,9 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`kappa_ghz=0.001` 表示 1 MHz linewidth，不是 decay rate κ。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
-- `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，回傳 thermal-resonator-averaged e→g escape lifetime，不自動合併 qubit g→e rate。其作為 T1 loss contribution 的用法不是一般有限溫度 equilibrium relaxation 的完整模型。它對 Purcell sweep 使用 bounded LRU cache，並在 notebook workflow 內部關閉 scqubits sweep progress；cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
+- `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，分別對 e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。逐項 probe、combined fit 與 channel curves 都使用此 total rate。
+  - 模型只納入 0↔1，不包含高能態 leakage，也不代表來源論文的完整 loss 模型。底層 module-public `purcell` 保留 directional escape lifetime。
+  - Workflow 對 Purcell sweep 使用 bounded LRU cache，並在內部關閉 scqubits sweep progress。Cache key 包含 flux grid、`Temp`、fluxonium params、`bare_rf`、`g` 與 `kappa_ghz`，避免不同 qubit / dispersive 設定交叉命中。需要釋放或強制重算時呼叫 `clear_t1_purcell_cache()`。
 - `estimate_purcell_Temp_upper_bound(data, purcell, Temp_range=(10e-3, 300e-3), progress=False)` 用 `T1_Purcell(flux, Temp) >= T1_observed` 作為所有 fit 點的可行性條件，估算 Purcell 允許的最高 `Temp`；Purcell 不提供可正常推導的溫度下限。`progress=True` 只顯示外層 Temp bracket/bisection 進度，內部 Purcell sweep 仍關閉 scqubits progress。`plot_purcell_Temp_upper_bound(data, purcell, Temp=upper)` 用 T1 over flux 疊加 upper-bound Purcell curve，供檢查是哪個 flux 點限制溫度上限。
 - `analyze_t1_{capacitive,quasiparticle,inductive}_limit(..., purcell=None, fit_temperature=False, Temp_bounds=(10e-3, 300e-3))` 是逐項機制 probe；若提供 Purcell，會先以 rate domain 扣除 Purcell relaxation，再用 intrinsic T1 反推 pointwise Q、建議初值、上下界參考與 summary table。`fit_temperature=True` 時，Temp search 會使用 `Temp_bounds`，可傳 `(None, upper)` 只限制 Purcell 推得的上限，Purcell T1 也會以 candidate Temp 重算。`plot_t1_mechanism_dipole(probe)` 會用同一組 T1 口徑畫 T1 over dipole。
 - `make_t1_fit_init()` / `make_t1_fit_bounds()` / `fit_t1_curve(..., purcell=None)` 是綜合擬合階段；`active_mechanisms` 決定納入哪些通道，`mechanisms_to_fixed_params()` 決定哪些 active parameter 只固定不擬合。`make_t1_fit_bounds(..., Temp_bounds=(None, upper))` 會把 `None` 解析成預設正下限後交給底層 fit；Purcell 在 combined fit 中以 `1/T1_Purcell(Temp)` 加到總 relaxation rate，因此 `Temp` 若是 free parameter，Purcell 也會跟著更新。

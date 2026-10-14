@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 # Low-Frequency Qubit, PRX 11, 011010 (2021).
 # DOI: https://doi.org/10.1103/PhysRevX.11.011010
 # https://arxiv.org/abs/2002.10653v1, Appendix G.5, Eqs. (G21)-(G22).
-# The flux sweep keeps only e→g, not the paper's higher-state channels.
+# The flux sweep keeps only 0↔1, not the paper's higher-state channels.
 # The equations use angular frequencies/rates: omega = 2*pi*nu and
 # kappa_rate = 2*pi*kappa, where nu and the input linewidth kappa are in GHz.
 # The original frequency-selected bath uses a† for upward energy exchange and
@@ -60,9 +60,10 @@ def purcell(
     Positive final-minus-initial energy differences use a† and n_B; negative
     differences use a and n_B+1. Only the initial group is thermally averaged
     over resonator photons. Swapping groups evaluates the reverse escape.
-    The sweep supplies e as initial and g as final: the result is not the
-    equilibrium relaxation time 1/(Gamma_eg+Gamma_ge). Return a float64 scalar
-    array in physical ns, or infinity when no allowed decay rate remains.
+    This directional lifetime is not equilibrium relaxation 1/(Gamma_eg+Gamma_ge).
+    The sweep combines both directional rates to obtain equilibrium T1.
+    Return a float64 scalar array in physical ns, or infinity when no allowed
+    decay rate remains.
     Missing dressed labels (NaN energies) contribute no rate.
     """
 
@@ -84,7 +85,7 @@ def purcell(
         exponent = beta_h * frequency
         return np.exp(-exponent) / -np.expm1(-exponent)
 
-    E_1n0m = Egn[:, None] - Een[None, :]  # (ns, ns), from |1, n> to |0, m>
+    E_1n0m = Egn[:, None] - Een[None, :]  # (final photons, initial photons)
 
     # calculate the transition rate of 0-1 caused by up Purcell effect
 
@@ -92,7 +93,7 @@ def purcell(
     E_1n0m_up = E_1n0m.copy()
     E_1n0m_up[~up_mask] = np.inf
     n_ths = n_th(E_1n0m_up)  # (ns, ns)
-    # calculate <0, n'|a^dag|1, n>
+    # calculate <final, n'|a^dag|initial, n>
     ad_op = identity_wrap(
         resonator.creation_operator, resonator, [fluxonium, resonator], evecs=Vec_n
     )
@@ -113,7 +114,7 @@ def purcell(
     E_1n0n_down = -E_1n0m.copy()
     E_1n0n_down[~down_mask] = np.inf
     n_ths = n_th(E_1n0n_down)  # (ns, ns)
-    # calculate <0, n'|a|1, n>
+    # calculate <final, n'|a|initial, n>
     a_op = identity_wrap(
         resonator.annihilation_operator, resonator, [fluxonium, resonator], evecs=Vec_n
     )
@@ -142,7 +143,7 @@ def calculate_purcell_t1_vs_flux(
     params: tuple[float, float, float],
     progress: bool = True,
 ) -> NDArray[np.float64]:
-    """Return e-to-g Purcell escape lifetimes along normalized flux Phi/Phi0.
+    """Return two-level Purcell equilibrium T1 along normalized flux Phi/Phi0.
 
     fluxs is a one-dimensional flux array; params is (EJ, EC, EL) in GHz.
     bare_rf is the positive bare resonator frequency and g is the charge-mode
@@ -150,10 +151,12 @@ def calculate_purcell_t1_vs_flux(
     so 0.001 denotes 1 MHz and contributes 2*pi*0.001 ns^-1 to the rate sum.
     Temp is the bath temperature in K, including zero.
 
-    Average over initial resonator thermal populations using h*nu/(k_B*Temp).
-    Dressed-energy upward channels use a†/n_B; downward channels use a/(n_B+1),
-    retaining spontaneous decay at zero temperature. This is an e-to-g escape
-    lifetime, not equilibrium relaxation 1/(Gamma_eg+Gamma_ge).
+    Average e-to-g and g-to-e rates separately over initial resonator thermal
+    populations using h*nu/(k_B*Temp). Return T1=1/(Gamma_eg+Gamma_ge) for the
+    0↔1 subset, excluding leakage to higher qubit states. Dressed-energy upward
+    channels use a†/n_B; downward channels use a/(n_B+1), retaining spontaneous
+    decay at zero temperature. These bath directions describe dressed energy
+    exchange, not the qubit transition direction.
 
     Return float64 lifetimes in physical ns with the same shape as fluxs;
     no allowed decay gives infinity. Missing dressed labels contribute no
@@ -220,11 +223,11 @@ def calculate_purcell_t1_vs_flux(
 
                 return En, Vec_n
 
-            # calculate the transition rate of 0-1 caused by Purcell effect
+            # Reuse these dressed states for both qubit directions.
             Egn, Vec_gn = get_esys(0)
             Een, Vec_en = get_esys(1)
 
-            return purcell(
+            t1_eg = purcell(
                 Egn,
                 Vec_gn,
                 Een,
@@ -236,6 +239,25 @@ def calculate_purcell_t1_vs_flux(
                 ns=ns,
                 fluxonium=fluxonium,
                 resonator=resonator,
+            )
+            t1_ge = purcell(
+                Een,
+                Vec_en,
+                Egn,
+                Vec_gn,
+                Vec_n,
+                bare_rf=bare_rf,
+                kappa=kappa,
+                Temp=Temp,
+                ns=ns,
+                fluxonium=fluxonium,
+                resonator=resonator,
+            )
+            # An infinite directional lifetime contributes zero rate.
+            equilibrium_rate = 1 / t1_eg + 1 / t1_ge
+            return np.asarray(
+                np.inf if equilibrium_rate == 0 else 1 / equilibrium_rate,
+                dtype=np.float64,
             )
 
         sweep.add_sweep(get_purcell_t1, sweep_name="purcell_t1")
