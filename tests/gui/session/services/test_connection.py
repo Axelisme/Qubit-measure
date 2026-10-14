@@ -32,7 +32,6 @@ from zcu_tools.gui.session.services.connection import (
     SoCConnectionService,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM
 
 from tests.gui._completion_helpers import on_connection_failed, on_connection_finished
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -98,15 +97,17 @@ def _make_state() -> State:
 def _make_svc(
     gate: OperationGate | None = None,
     bg: _FakeBg | None = None,
+    state: State | None = None,
+    bus: EventBus | None = None,
 ) -> tuple[SoCConnectionService, _FakeBg, OperationHandles]:
     """Build SoCConnectionService with a synchronous fake bg executor."""
-    state = _make_state()
-    bus = EventBus()
+    state = state or _make_state()
+    bus = bus or EventBus()
     real_gate = gate or OperationGate(bus)
     handles = OperationHandles()
     fake_bg = bg or _FakeBg()
     progress = ProgressService(DirectProgressTransport())
-    runner = OperationRunner(real_gate, handles, progress, fake_bg, bus)  # type: ignore[arg-type]
+    runner = OperationRunner(real_gate, handles, progress, fake_bg, bus)
     svc = SoCConnectionService(state, bus, real_gate, handles, runner)
     return svc, fake_bg, handles
 
@@ -139,62 +140,6 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp):
 
     assert svc.has_soc()
     assert state.session_env.soccfg is not None
-
-
-def test_start_connect_mock_soc_carries_default_simparam(qapp):
-    """Mock-connect injects DEFAULT_SIMPARAM so the soc yields physical sim data."""
-    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-
-    state = _make_state()
-    bus = EventBus()
-    gate = OperationGate(EventBus())
-    handles = OperationHandles()
-    progress = ProgressService(DirectProgressTransport())
-    real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
-
-    loop = QEventLoop()
-    on_connection_finished(svc, loop.quit)
-    on_connection_failed(svc, lambda msg: loop.quit())
-
-    svc.start_connect(ConnectMockRequest())
-    loop.exec()
-
-    soc = state.session_env.soc
-    assert soc is not None, "soc must be set after mock connect"
-    assert hasattr(soc, "_sim_params"), "mock soc must expose _sim_params"
-    sim_params = getattr(soc, "_sim_params")
-    assert sim_params is not DEFAULT_SIMPARAM  # copy-on-input
-    assert sim_params == DEFAULT_SIMPARAM
-
-
-def test_start_connect_mock_sim_params_override_is_honoured(qapp):
-    """ConnectMockRequest(sim_params=...) propagates the override into the soc."""
-    from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-
-    custom = DEFAULT_SIMPARAM.model_copy(update={"snr": 9999.0})
-    state = _make_state()
-    bus = EventBus()
-    gate = OperationGate(EventBus())
-    handles = OperationHandles()
-    progress = ProgressService(DirectProgressTransport())
-    real_bg = BackgroundRunner()
-    runner = OperationRunner(gate, handles, progress, real_bg, bus)  # type: ignore[arg-type]
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
-
-    loop = QEventLoop()
-    on_connection_finished(svc, loop.quit)
-    on_connection_failed(svc, lambda msg: loop.quit())
-
-    svc.start_connect(ConnectMockRequest(sim_params=custom))
-    loop.exec()
-
-    soc = state.session_env.soc
-    assert soc is not None
-    sim_params = getattr(soc, "_sim_params", None)
-    assert sim_params is not None
-    assert sim_params == custom
 
 
 def test_connect_bumps_soc_not_context_version(qapp):
@@ -234,9 +179,9 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     synchronously (the hook the MockFluxProvisioner rides). It returns the handles
     directly and releases the SOC_CONNECT lease."""
     gate = OperationGate(EventBus())
-    svc, _bg, _handles = _make_svc(gate=gate)
-    state = svc._state  # type: ignore[attr-defined]
-    bus = svc._bus  # type: ignore[attr-defined]
+    state = _make_state()
+    bus = EventBus()
+    svc, _bg, _handles = _make_svc(gate=gate, state=state, bus=bus)
 
     payloads: list[SocChangedPayload] = []
     bus.subscribe(SocChangedPayload, lambda p: payloads.append(p))

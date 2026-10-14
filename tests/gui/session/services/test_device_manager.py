@@ -78,14 +78,16 @@ def _drain_until(
     raise AssertionError(f"timed out waiting for {label}")
 
 
-def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock]:
+def _make_svc(
+    driver: MagicMock | None = None, bus: EventBus | None = None
+) -> tuple[DeviceService, MagicMock]:
     device = driver or MagicMock()
     device.get_info.return_value = FakeDeviceInfo(address="none")
     gate = OperationGate(EventBus())
     bg = _bg()
     handles = OperationHandles()
     progress = ProgressService(QtProgressTransport())
-    bus = EventBus()
+    bus = bus or EventBus()
     runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = DeviceService(
         bus,
@@ -94,7 +96,7 @@ def _make_svc(driver: MagicMock | None = None) -> tuple[DeviceService, MagicMock
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: device,  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: device,
         device_registry=FakeDeviceRegistry(),
     )
     return svc, device
@@ -151,12 +153,13 @@ def test_device_setup_cancel_emits_setup_cancelled(qapp):
 
 
 def test_device_service_emits_started_and_finished_events(qapp):
-    svc, _device = _make_svc()
+    bus = EventBus()
+    svc, _device = _make_svc(bus=bus)
     _connect(svc)
     started: list[DeviceSetupStartedPayload] = []
     finished: list[DeviceSetupFinishedPayload] = []
-    svc._bus.subscribe(DeviceSetupStartedPayload, started.append)
-    svc._bus.subscribe(DeviceSetupFinishedPayload, finished.append)
+    bus.subscribe(DeviceSetupStartedPayload, started.append)
+    bus.subscribe(DeviceSetupFinishedPayload, finished.append)
     loop = QEventLoop()
     on_setup_finished(svc, lambda _name: loop.quit())
 
