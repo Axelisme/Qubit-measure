@@ -42,6 +42,7 @@ def test_fit_local_fluxonium_model_returns_rejected_result_on_solver_limit(
         solver_results.append(result)
         return result
 
+    # Finite spectra cannot reliably exhaust the unexposed SciPy evaluation budget.
     monkeypatch.setattr(physical_fit, "least_squares", limited_solver)
     fit = fit_local_fluxonium_model(base, zip(values, measured, strict=True))
 
