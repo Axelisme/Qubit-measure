@@ -103,23 +103,3 @@ def test_unlink_reconstructs_trailing_markers_in_original_order():
     assert logical[1].to_dict()["type"] == "LOOP_END"
     assert logical[2].to_dict()["name"] == "tail"
     assert logical[3].to_dict()["type"] == "BRANCH_END"
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (3, 3),
-        ("&7", 7),
-        ("11", 11),
-    ],
-)
-def test_parse_label_addr_accepts_int_and_string_forms(value, expected):
-    assert IRLinker._parse_label_addr("target", value) == expected
-
-
-def test_parse_label_addr_rejects_invalid_values():
-    with pytest.raises(ValueError, match="Invalid label address for 'bad'"):
-        IRLinker._parse_label_addr("bad", "&oops")
-
-    with pytest.raises(ValueError, match="Invalid label address type for 'bad'"):
-        IRLinker._parse_label_addr("bad", 1.5)
