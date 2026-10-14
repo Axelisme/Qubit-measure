@@ -9,12 +9,15 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
+    QGroupBox,
     QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QPushButton,
+    QSpinBox,
 )
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.measure.controller import Controller
@@ -76,12 +79,12 @@ def test_setup_dialog_connect_mock_dispatches_request(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
-    dialog._mock_check.setChecked(True)
     next(
-        button
-        for button in dialog.findChildren(QPushButton)
-        if button.text() == "Connect"
-    ).click()
+        check
+        for check in dialog.findChildren(QCheckBox)
+        if check.text() == "Use Simulate Env"
+    ).setChecked(True)
+    entry_button(dialog, "Connect").click()
 
     ctrl.start_simulated_environment.assert_called_once_with()
 
@@ -90,10 +93,17 @@ def test_setup_dialog_connect_remote_dispatches_request(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
-    dialog._mock_check.setChecked(False)
-    dialog._ip_edit.setText("10.0.0.1")
-    dialog._port_spin.setValue(7000)
-    dialog._on_connect_clicked()
+    connection = next(
+        group
+        for group in dialog.findChildren(QGroupBox)
+        if group.title() == "ZCU Connection"
+    )
+    ip = connection.findChild(QLineEdit)
+    port = connection.findChild(QSpinBox)
+    assert ip is not None and port is not None
+    ip.setText("10.0.0.1")
+    port.setValue(7000)
+    entry_button(dialog, "Connect").click()
 
     ctrl.start_connect.assert_called_once()
     (req,) = ctrl.start_connect.call_args.args
@@ -109,13 +119,19 @@ def test_setup_dialog_connect_failure_signal_updates_status(qapp):
     ctrl = _make_ctrl()
     dialog = SetupDialog(ctrl)
 
-    dialog._mock_check.setChecked(True)
-    dialog._on_connect_clicked()
+    next(
+        check
+        for check in dialog.findChildren(QCheckBox)
+        if check.text() == "Use Simulate Env"
+    ).setChecked(True)
+    connect = entry_button(dialog, "Connect")
+    connect.click()
+    assert not connect.isEnabled()
     on_failed = ctrl.bind_connection_outcome.call_args.args[1]
     on_failed("network bad")
 
-    assert "network bad" in dialog._conn_status.text()
-    assert dialog._connect_btn.isEnabled()
+    assert any("network bad" in label.text() for label in dialog.findChildren(QLabel))
+    assert connect.isEnabled()
 
 
 class SetupController(Controller):

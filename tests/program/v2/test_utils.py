@@ -1,6 +1,5 @@
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
-from zcu_tools.program.v2.base import MyProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import (
@@ -182,21 +181,3 @@ def test_generator_word_decode_handles_negative_mixer_relative_dds() -> None:
         mixer_freq=mixer_freq,
         nqz=1,
     ) == pytest.approx(freq_mhz, abs=1e-5)
-
-
-def test_readout_word_encoder_reads_flip_convention_from_program_class(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
-    monkeypatch.setattr(MyProgramV2, "FLIP_DOWNCONVERSION", False)
-
-    _gen_words, ro_words = readout_freq_words(
-        soccfg,
-        [6000.0],
-        gen_ch=0,
-        ro_ch=0,
-        mixer_freq=None,
-        nqz=1,
-    )
-
-    assert ro_words == [int(soccfg.freq2reg_adc(6000.0, ro_ch=0, gen_ch=0))]

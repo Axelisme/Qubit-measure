@@ -22,6 +22,7 @@ from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.ports import DeviceMemoryInfo
 from zcu_tools.gui.session.services.device import (
     ConnectDeviceRequest,
+    DeviceProtocol,
     DeviceService,
 )
 from zcu_tools.gui.session.services.progress import ProgressService
@@ -65,7 +66,9 @@ def _drain_until(
     raise AssertionError(f"timed out waiting for {label}")
 
 
-def _make_svc(driver: object | None = None) -> DeviceService:
+def _make_svc(
+    driver: DeviceProtocol | None = None, state: State | None = None
+) -> DeviceService:
     fake = driver if driver is not None else FakeDevice()
     gate = OperationGate(EventBus())
     bg = _bg()
@@ -75,12 +78,12 @@ def _make_svc(driver: object | None = None) -> DeviceService:
     runner = OperationRunner(gate, handles, progress, bg, bus)
     return DeviceService(
         bus,
-        State(MagicMock()),
+        state or State(MagicMock()),
         gate,
         bg,
         runner,
         handles,
-        driver_factory=lambda _type, _address: fake,  # type: ignore[arg-type]
+        driver_factory=lambda type_name, address: fake,
         device_registry=FakeDeviceRegistry(),
     )
 
@@ -149,8 +152,8 @@ def test_get_cached_device_value_rejects_unsupported_device_type(qapp):
 
 
 def test_get_cached_device_value_rejects_non_connected_or_missing_info(qapp):
-    svc = _make_svc()
-    state = svc._state
+    state = State(MagicMock())
+    svc = _make_svc(state=state)
     state.put_device(
         DeviceState(
             name="memory",

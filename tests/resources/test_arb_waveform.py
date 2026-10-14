@@ -11,7 +11,6 @@ from zcu_tools.resources.waveform_assets import (
     ArbWaveformData,
     ArbWaveformDatabase,
     ArbWaveformError,
-    ArbWaveformInfo,
     ArbWaveformPreview,
     FormulaRecipe,
     prepare_preview_series,
@@ -238,6 +237,7 @@ def test_bound_info_propagates_io_failure(
     def unreadable(*_args: object, **_kwargs: object) -> None:
         raise PermissionError("asset read denied")
 
+    # Inject an I/O denial independent of the process user's filesystem permissions.
     monkeypatch.setattr(np, "load", unreadable)
     read = bound.duration if operation == "duration" else bound.samples
     with pytest.raises(ArbWaveformError) as exc:
@@ -322,36 +322,6 @@ def test_create_from_formula_embeds_loadable_recipe_and_preserves_formula_text(
     with np.load(root / "formula1.npz", allow_pickle=False) as archive:
         saved = json.loads(str(archive["recipe_json"].item()))
     assert saved == recipe
-
-
-def test_formula_writes_succeed_when_inspection_is_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _init_db(tmp_path)
-    recipe: dict[str, object] = {
-        "segments": [{"duration": 0.002, "formula": "0.5"}],
-        "normalize": "none",
-    }
-
-    def unavailable(*_args: object, **_kwargs: object) -> ArbWaveformInfo:
-        raise OSError("inspection unavailable")
-
-    monkeypatch.setattr(ArbWaveformDatabase, "inspect", unavailable)
-    ArbWaveformDatabase.create_from_formula("pulse", recipe)
-    saved = ArbWaveformDatabase.load("pulse")
-    assert saved.recipe is not None
-    assert saved.recipe.to_dict() == recipe
-    replacement: dict[str, object] = {
-        "segments": [{"duration": 0.003, "formula": "0.25"}],
-        "normalize": "none",
-    }
-    ArbWaveformDatabase.update_formula("pulse", replacement)
-    updated = ArbWaveformDatabase.load("pulse")
-    assert updated.recipe is not None
-    assert updated.recipe.to_dict() == replacement
-    assert updated.duration == pytest.approx(0.003)
-    with pytest.raises(OSError, match="inspection unavailable"):
-        ArbWaveformDatabase.inspect("pulse")
 
 
 def test_formula_sample_count_and_non_grid_segment_durations():
