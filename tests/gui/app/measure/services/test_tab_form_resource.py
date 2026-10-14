@@ -1,7 +1,6 @@
 """Headless form resources fix sources until explicit Reset and guard lifetime."""
 
 from collections.abc import Generator, Mapping
-from dataclasses import replace
 from inspect import signature
 
 import pytest
@@ -71,7 +70,7 @@ def factory_component() -> Generator[None]:
         )
 
 
-def factory_env(amount: float) -> FormEnv:
+def factory_env(amount: float, *, library: LibrarySnapshot | None = None) -> FormEnv:
     """Capture a known component with no pulse entry in the library."""
     env = captured_env(amount)
     parameters = env.parameters
@@ -82,7 +81,14 @@ def factory_env(amount: float) -> FormEnv:
         "components": {"Q1": {"kind": "factory/shape"}},
         "general": {"created_at": "2026-10-14T00:00:00Z", "ext": {"amount": amount}},
     })
-    return FormEnv(parameters=replace(parameters, point=point), library=env.library)
+    fixed_library = env.library if library is None else library
+    assert fixed_library is not None
+    return FormEnv(
+        parameters=ParameterContext(
+            point=point, library=fixed_library, target=parameters.target, roles=None,
+        ),
+        library=fixed_library,
+    )
 
 
 @pytest.mark.usefixtures("factory_component")
@@ -126,7 +132,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
     )
     parameters = factory_env(5.0).parameters
     assert parameters is not None
-    latest = FormEnv(parameters=replace(parameters, library=library), library=library)
+    latest = factory_env(5.0, library=library)
     assert resource.result() == ScalarCore(amount=7.0)
     assert calls == [False]
     published: list[dict[str, JsonValue]] = []
