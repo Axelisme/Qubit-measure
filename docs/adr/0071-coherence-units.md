@@ -8,7 +8,7 @@ status: accepted
 
 2026-10-14，使用者要求「這個報告值得建立一個adr錨定，helper問題一起修」。本篇確立 simulate 與 notebook analysis 共用的物理單位契約。修正範圍包含 T1 forward helpers、pointwise Q extraction 與 Purcell，不包含 FTF 模擬環境實作。
 
-Forward helpers、pointwise Q 與 Purcell 實作遵循本篇契約。T1 由 SI 絕對時間及 raw scqubits regressions 驗證；Purcell 由弱耦合 LC escape lifetime、零溫極限及 matched-pair detailed balance 驗證。Purcell 修正包含熱因子與 spontaneous decay，不只是常數換算。其後核准的高階雙向 equilibrium T1 擴充尚待實作，目標契約見下文。
+Forward helpers、pointwise Q 與 Purcell 實作遵循本篇契約。T1 由 SI 絕對時間及 raw scqubits regressions 驗證。Purcell 高階 sweep 回傳雙向 equilibrium T1，底層保留 directional escape lifetime。驗證涵蓋獨立 SI／LC 弱耦合 equilibrium T1、零溫極限及 matched-pair detailed balance；40 mK 與 80 mK 的 regression 均能拒絕只算 e→g 的舊結果。Purcell 修正包含熱因子、spontaneous decay 與雙向 rate sum。
 
 ## 共用單位契約
 
