@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -49,22 +49,34 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagScanModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    X90_pulse: PulseCfg
-    X180_pulse: PulseCfg | None = None
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class ZigZagScanSweepCfg(ConfigBase):
-    gain: SweepCfg | None = None
-    freq: SweepCfg | None = None
+    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
 
 
 class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
     modules: ZigZagScanModuleCfg
     sweep: ZigZagScanSweepCfg
-    n_times: int
-    repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse"
+    n_times: Annotated[
+        int,
+        FieldMeta(
+            label="Max repetitions",
+            description="Repetition counts run from zero to this value.",
+        ),
+    ]
+    repeat_on: Annotated[
+        Literal["X90_pulse", "X180_pulse"],
+        FieldMeta(
+            label="Repeat pulse",
+            description="X90 repeats in pairs; each count adds one pi rotation.",
+        ),
+    ] = "X180_pulse"
 
 
 @dataclass(frozen=True)

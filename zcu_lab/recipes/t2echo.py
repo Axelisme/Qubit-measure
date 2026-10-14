@@ -120,7 +120,7 @@ def t2echo(  # noqa: PLR0913 - Typed keywords preserve the public tool inputs.
     )
     tab.set("reps", reps, source="explicit")
     tab.set("rounds", rounds, source="explicit")
-    tab.set("detune_ratio", detune_ratio, source="explicit")
+    tab.set("extras.detune_ratio", detune_ratio, source="explicit")
 
     run, status = yield tab.run()
     if status == "cancelled":
@@ -169,15 +169,19 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/t2echo",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
-        SummaryParameter("ro_frequency_mhz", "modules.readout.ro_cfg.ro_freq", "MHz"),
+        SummaryParameter(
+            "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
+        ),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("use_reset", "modules.reset"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),
         SummaryParameter("delay", "sweep.length", "us"),
-        SummaryParameter("detune_ratio", "detune_ratio"),
+        SummaryParameter("detune_ratio", "extras.detune_ratio"),
         SummaryParameter("pi_ref", "modules.pi_pulse"),
         SummaryParameter("pi2_ref", "modules.pi2_pulse"),
     ),

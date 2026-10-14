@@ -23,20 +23,16 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.allxy.core import (
     AllXY_Exp,
     AllXY_Result,
     AllXYAnalyzeOptions,
     AllXYCfg,
 )
+
+from .form import FORM
 
 AllXYRunResult: TypeAlias = RunRecord[AllXYCfg, AllXY_Result]
 
@@ -58,68 +54,52 @@ class AllXYAnalyzeResult(AnalyzeResultBase):
 class AllXYAdapter(
     BaseAdapter[AllXYCfg, AllXYRunResult, AllXYAnalyzeResult, AllXYAnalyzeParams]
 ):
+    form = FORM
     experiment_tag: ClassVar[str | None] = AllXY_Exp.persistence_tag()
     exp_cls = AllXY_Exp
     ExpCfg_cls: ClassVar[Any] = AllXYCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "AllXY: runs the 21 standard pairs of I, X90, Y90, X180 and Y180 "
-            "gates before readout. A calibrated qubit gives a staircase of "
-            "ground, equator and excited levels; amplitude and detuning errors "
-            "bend it in distinct patterns. Y gates are the X pulses with phase "
-            "+90 deg. Runs on real hardware. Run after amplitude Rabi and "
-            "Ramsey have calibrated the pi and pi/2 pulses and the frequency."
+            "AllXY: runs the 21 standard pairs of I, X90, Y90, X180 and Y180 gates "
+            "before readout. A calibrated qubit gives a staircase of ground, equator "
+            "and excited levels; amplitude and detuning errors bend it in distinct "
+            "patterns. Y gates are the X pulses with phase +90 deg. Runs on real "
+            "hardware. Run after amplitude Rabi and Ramsey have calibrated the pi and "
+            "pi/2 pulses and the frequency."
         ),
         expects_md=(
-            "Reads 't1' (us) to seed relax_delay as 5*t1 (fallback ~30 us). "
-            "Pulse modules pull 'q_f' (~2000–6000 MHz) and 'qub_ch'; readout "
-            "pulls 'r_f', 'res_ch' / 'ro_ch' and 'timeFly'."
+            "AllXY uses the captured gate slots. Relax delay is 5 * qubit.t1 us. "
+            "Missing calibration leaves the affected fields empty and Invalid; no "
+            "numeric fallback."
         ),
         expects_ml=(
-            "Needs an X90 pulse module (prefers the calibrated library pi/2 "
-            "pulse 'pi2_amp' / 'pi2_len'), an X180 pulse module (prefers "
-            "'pi_amp' / 'pi_len'), and a readout module (calibrated "
-            "'readout_dpm' / 'readout_rf' / 'readout' / 'res_readout', else a "
-            "blank pulse-readout). Optional reset references a library reset "
-            "when present, else stays disabled. The identity gate is the X90 "
-            "pulse at zero gain."
+            "Uses captured qubit.module.readout with a readout template fallback, and "
+            "qubit.module.reset with no fallback (disabled when absent). Drive slots "
+            "use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. "
+            "Unset or dangling slots use the named template, not a legacy blank. Key "
+            "choices remain available. Inline templates read qubit.freq, "
+            "qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and "
+            "resonator.ext.time_of_fly + 0.05 us; missing required calibration remains "
+            "Invalid."
         ),
         typical_writeback=(
-            "No writeback. The summary reports 'amplitude_error', the "
-            "relative drive amplitude error (+0.02 means 2% too much "
-            "rotation), and 'detune_param', the dimensionless detuning "
-            "parameter of the fit model. 'power_err' and 'detune_err' are the "
-            "mean Bloch-z deviation (ground +1, excited -1) each error causes "
-            "over the 21 pairs; they are not gate infidelities. "
+            "No writeback. The summary reports 'amplitude_error', the relative drive "
+            "amplitude error (+0.02 means 2% too much rotation), and 'detune_param', "
+            "the dimensionless detuning parameter of the fit model. 'power_err' and "
+            "'detune_err' are the mean Bloch-z deviation (ground +1, excited -1) each "
+            "error causes over the 21 pairs; they are not gate infidelities. "
             "'residual_rms' is the fit residual in the same units; a residual "
-            "comparable to those deviations means the model does not fit, "
-            "for example because T1/T2 decay matters. Fix power errors with "
-            "amplitude Rabi or zig-zag and detuning errors with Ramsey."
+            "comparable to those deviations means the model does not fit, for example "
+            "because T1/T2 decay matters. Fix power errors with amplitude Rabi or "
+            "zig-zag and detuning errors with Ramsey."
         ),
         recommended=(
-            "Leave 'Fit g/e levels' off to take the ground and excited levels "
-            "from the data range; turn it on when the measured levels are "
-            "noisy or do not reach both states. Use many reps and rounds: "
-            "each point is a single gate pair."
+            "Leave 'Fit g/e levels' off to take the ground and excited levels from the "
+            "data range; turn it on when the measured levels are noisy or do not reach "
+            "both states. Use many reps and rounds: each point is a single gate pair."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
-            .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
-            .readout()
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,

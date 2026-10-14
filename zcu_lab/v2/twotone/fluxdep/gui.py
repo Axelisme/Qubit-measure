@@ -31,23 +31,12 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    alias_name_seed,
-)
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import (
-    flux_range,
-    qub_freq_range,
-)
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
+
+from .form import FORM
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
@@ -62,6 +51,7 @@ FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
+    form = FORM
     experiment_tag: ClassVar[str | None] = FreqFluxExp.persistence_tag()
     exp_cls = FreqFluxExp
     ExpCfg_cls = FreqFluxCfg
@@ -71,59 +61,52 @@ class FluxDepAdapter(
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Two-tone qubit flux dependence: a 2D scan stepping an external "
-            "flux device (outer) against the qubit-drive frequency (inner), "
-            "reading out the resonator at each point, to map the qubit "
-            "spectrum versus flux (the Fluxonium flux-dispersion arcs). Runs "
-            "on real hardware and needs a connected flux device. No automated "
-            "fit in the GUI — points are extracted interactively. This is not "
-            "the early flux-finder; use it only after readout and qubit "
-            "spectroscopy are already credible."
+            "Two-tone qubit flux dependence: a 2D scan stepping an external flux device "
+            "(outer) against the qubit-drive frequency (inner), reading out the "
+            "resonator at each point, to map the qubit spectrum versus flux (the "
+            "Fluxonium flux-dispersion arcs). Runs on real hardware and needs a "
+            "connected flux device. No automated fit in the GUI — points are extracted "
+            "interactively. This is not the early flux-finder; use it only after "
+            "readout and qubit spectroscopy are already credible."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
-            "centring the inner sweep (~2000–6000 MHz); 'qf_w' — qubit "
-            "linewidth, half-span ±qf_w (~1–50 MHz); 'qub_ch' — qubit-drive "
-            "channel; 'r_f' — resonator frequency for the readout tone "
-            "(~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
-            "channels; 'timeFly' — readout trigger offset (~0–1 us); "
-            "'flx_half' / 'flx_int' — calibrated half-flux / integer-flux "
-            "device values that set the flux bounds (device-specific units; "
-            "absent → fixed [-4e-3, 4e-3])."
+            "Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, "
+            "resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the "
+            "fixed capture. Missing required calibration remains Invalid; no numeric "
+            "fallback. Frequency sweep is qubit.freq ± qubit.kappa over 1001 points. "
+            "Flux spans 10% beyond qubit.flux_int and qubit.flux_half; missing "
+            "endpoints remain Invalid."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module and a pulse-readout module; "
-            "references a ModuleLibrary waveform named 'ro_waveform' when "
-            "present. Optionally references a calibrated reset module. Also "
-            "needs a flux device name 'flux_dev' ($flux_dev resolves "
-            "from the alias table with no fallback) — "
-            "a device, not a library entry."
+            "Uses captured qubit.module.readout with a fresh readout template when "
+            "unset or dangling. Optional qubit.module.reset stays disabled without a "
+            "source. Library references remain selectable; sweeps overwrite their "
+            "controlled fields only at Run. flux_dev resolves the captured flux_dev "
+            "alias to a direct device name on Open/Reset; missing or unbound alias "
+            "remains Invalid. flux_unit stays explicit and is never converted."
         ),
         typical_writeback=(
-            "Interactive analysis (not a fit): after the run, the user drags "
-            "two lines on the 2D map to mark the half-flux and integer-flux "
-            "sweet spots, then clicks Done. The result writes back 'flx_half', "
-            "'flx_int' and 'flx_period' (= 2·|flx_int − flx_half|) to the "
-            "parameter context as a preview. Picking is user/agent judgement from the "
-            "measured map; do not use this preview to replace the earlier "
-            "onetone/flux_dep flux calibration unless the map is clearly "
-            "trustworthy."
+            "Interactive analysis (not a fit): after the run, the user drags two lines "
+            "on the 2D map to mark the half-flux and integer-flux sweet spots, then "
+            "clicks Done. The result writes back 'qubit.flux_half', 'qubit.flux_int' "
+            "and 'qubit.flux_period' (= 2·|flx_int − flx_half|) to the parameter "
+            "context as a preview. Picking is user/agent judgement from the measured "
+            "map; do not use this preview to replace the earlier onetone/flux_dep flux "
+            "calibration unless the map is clearly trustworthy."
         ),
         recommended=(
-            "No fit options. Use after onetone/flux_dep has established the "
-            "flux period and twotone/freq has found 'q_f'. Do not run this "
-            "early to find flux: with uncalibrated readout or an unknown "
-            "qubit-drive window the arc is usually invisible. Default sweep: "
-            "flux ~101 points across roughly one period (bracketed by "
-            "'flx_int'/'flx_half' when calibrated), frequency ~101 points "
-            "spanning ±qf_w around 'q_f'. For a later model survey use a wide "
-            "flux range and a broad frequency window at moderate drive gain "
-            "to capture the full arc, then narrow both. "
-            "For consecutive flux sweeps, reverse the sweep direction (swap "
-            "start/stop) on the next run so the flux source need not ramp "
-            "back across the full range first. Inspect the 2D map with "
-            "gui_tab_get_figure (subtab_id='run'). Confirm 'flux_dev' points at a "
-            "connected device before running."
+            "No fit options. Use after onetone/flux_dep has established the flux period "
+            "and twotone/freq has found 'qubit.freq'. Do not run this early to find "
+            "flux: with uncalibrated readout or an unknown qubit-drive window the arc "
+            "is usually invisible. Default sweep: flux ~101 points across roughly one "
+            "period (bracketed by 'qubit.flux_int'/'qubit.flux_half' when calibrated), "
+            "frequency ~1001 points spanning ±qubit.kappa around 'qubit.freq'. For a "
+            "later model survey use a wide flux range and a broad frequency window at "
+            "moderate drive gain to capture the full arc, then narrow both. For "
+            "consecutive flux sweeps, reverse the sweep direction (swap start/stop) on "
+            "the next run so the flux source need not ramp back across the full range "
+            "first. Inspect the 2D map with gui_tab_get_figure (subtab_id='run'). "
+            "Confirm 'flux_dev' points at a connected device before running."
         ),
     )
 
@@ -137,49 +120,6 @@ class FluxDepAdapter(
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = FreqFluxExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                init=ModuleInit.INLINE,
-                locked={"freq": 0.0},
-            )
-            .readout()
-            .device(
-                "flux_dev",
-                label="Flux Device",
-                default=alias_name_seed("flux_dev"),
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .relax_delay(1.0)
-            .sweep(
-                "flux",
-                label="Flux device value",
-                default=flux_range(expts=101),
-                decimals=6,
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=qub_freq_range(expts=1001, span_factor=1.0),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def make_interactive_plugin(
         self, req: AnalyzeRequest[FluxDepRunResult, FluxPickParams], *, plots: Plots
