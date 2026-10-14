@@ -32,17 +32,34 @@ from zcu_lab.v2.onetone.freq.form import FORM as ONETONE_FREQ_FORM
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
 from zcu_lab.v2.onetone.power_dep.form import FORM as ONETONE_POWER_DEP_FORM
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
+from zcu_lab.v2.singleshot.ac_stark.form import FORM as SS_AC_STARK_FORM
 from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
+from zcu_lab.v2.singleshot.amp_rabi.form import FORM as SS_AMP_RABI_FORM
 from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
+from zcu_lab.v2.singleshot.check.form import FORM as SS_CHECK_FORM
 from zcu_lab.v2.singleshot.check.gui import CheckAdapter
+from zcu_lab.v2.singleshot.ge.form import FORM as SS_GE_FORM
 from zcu_lab.v2.singleshot.ge.gui import GEAdapter
+from zcu_lab.v2.singleshot.len_rabi.form import FORM as SS_LEN_RABI_FORM
 from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
+from zcu_lab.v2.singleshot.mist.freq.form import FORM as SS_MIST_FREQ_FORM
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
+from zcu_lab.v2.singleshot.mist.power.form import FORM as SS_MIST_POWER_FORM
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
+from zcu_lab.v2.singleshot.mist.power_freq.form import FORM as SS_MIST_POWER_FREQ_FORM
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
+from zcu_lab.v2.singleshot.reset_check.form import FORM as SS_RESET_CHECK_FORM
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
+from zcu_lab.v2.singleshot.t1.t1.form import FORM as SS_T1_FORM
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
+from zcu_lab.v2.singleshot.t1.t1_with_tone.form import FORM as SS_T1_TONE_FORM
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
+from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
+    FORM_FREQ as SS_T1_TONE_SWEEP_FREQ_FORM,
+)
+from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
+    FORM_GAIN as SS_T1_TONE_SWEEP_GAIN_FORM,
+)
 from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
@@ -212,6 +229,19 @@ FORMS: dict[str, Form[ConfigBase]] = {
     "twotone/ro_optimize/length": RO_OPT_LENGTH_FORM,
     "twotone/ro_optimize/freq_gain": RO_OPT_FREQ_GAIN_FORM,
     "twotone/ro_optimize/auto": RO_OPT_AUTO_FORM,
+    "singleshot/ge": SS_GE_FORM,
+    "singleshot/check": SS_CHECK_FORM,
+    "singleshot/reset_check": SS_RESET_CHECK_FORM,
+    "singleshot/len_rabi": SS_LEN_RABI_FORM,
+    "singleshot/amp_rabi": SS_AMP_RABI_FORM,
+    "singleshot/t1": SS_T1_FORM,
+    "singleshot/t1_tone": SS_T1_TONE_FORM,
+    "singleshot/t1_tone_sweep_gain": SS_T1_TONE_SWEEP_GAIN_FORM,
+    "singleshot/t1_tone_sweep_freq": SS_T1_TONE_SWEEP_FREQ_FORM,
+    "singleshot/ac_stark": SS_AC_STARK_FORM,
+    "singleshot/mist/freq": SS_MIST_FREQ_FORM,
+    "singleshot/mist/power": SS_MIST_POWER_FORM,
+    "singleshot/mist/power_freq": SS_MIST_POWER_FREQ_FORM,
     "jpa/freq": JPA_FREQ_FORM,
     "jpa/flux": JPA_FLUX_FORM,
     "jpa/power": JPA_POWER_FORM,
