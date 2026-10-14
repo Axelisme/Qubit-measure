@@ -1,17 +1,23 @@
 """Headless form resources fix sources until explicit Reset and guard lifetime."""
 
 from collections.abc import Mapping
+from dataclasses import replace
+from inspect import signature
 
 import pytest
 from pydantic import JsonValue
-from zcu_tools.cfg_model import ConfigBase, Expr
+from zcu_tools.cfg_model import ConfigBase, Expr, Hidden, PulseSpec
 from zcu_tools.gui.app.measure.services import tab_cfg as resource_api
 from zcu_tools.gui.cfg.resource import CfgPreconditionError, CfgPreconditionReason
 from zcu_tools.gui.form import FormEnv, FormErrors
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
+from zcu_tools.resources.context.library import (
+    ComponentLibrary,
+    LibrarySnapshot,
+    ModuleLibraryDocument,
+)
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
@@ -39,6 +45,63 @@ def captured_env(amount: float) -> FormEnv:
         roles=None,
     )
     return FormEnv(parameters=parameters, library=library)
+
+
+def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() -> None:
+    assert "make_form" in signature(resource_api.TabFormResource).parameters, (
+        "Missing captured Open/Reset form factory"
+    )
+    latest = captured_env(2.0)
+    calls: list[bool] = []
+
+    def make_form(ctx: FormContext) -> Form[ScalarCore]:
+        has_pulse = ctx.has("Q1.pulses.pi")
+        calls.append(has_pulse)
+        return Form(
+            ScalarCore,
+            {"amount": Hidden() if has_pulse else Expr("general.ext.amount")},
+        )
+
+    resource = resource_api.TabFormResource(
+        make_form=make_form,
+        capture=lambda _aliases: resource_api.TabFormSources(latest),
+        mutation_allowed=lambda: True,
+    )
+    assert resource.input.data == {"amount": 2.0}
+    resource.write({("amount",): 7.0})
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="1.0",
+            components={
+                "Q1": ComponentLibrary(
+                    pulses={
+                        "pi": PulseSpec(
+                            ch=0, nqz=1, freq=100.0, gain=0.25,
+                            waveform="Q1.waveforms.unresolved",
+                        )
+                    }
+                )
+            },
+        )
+    )
+    parameters = captured_env(5.0).parameters
+    assert parameters is not None
+    latest = FormEnv(parameters=replace(parameters, library=library), library=library)
+    assert resource.result() == ScalarCore(amount=7.0)
+    assert calls == [False]
+    published: list[dict[str, JsonValue]] = []
+    resource.subscribe(lambda: published.append(resource.input.data))
+    resource.reset()
+    assert resource.input.data == {}
+    assert resource.result() == ScalarCore(amount=1.0)
+    assert published == [{}]
+    assert calls == [False, True]
+    latest = captured_env(9.0)
+    resource.reset()
+    assert resource.input.data == {"amount": 9.0}
+    assert resource.result() == ScalarCore(amount=9.0)
+    assert calls == [False, True, False]
 
 
 def test_resource_edit_preview_run_use_capture_until_reset() -> None:
