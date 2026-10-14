@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -81,8 +79,13 @@ class FluxDepSweepCfg(ConfigBase):
 class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
-    # Map flux_dev to a connected driver name.
-    dev: Mapping[str, str] = Field(...)
+    flux_dev: Annotated[
+        str,
+        FieldMeta(
+            label="Flux device",
+            description="Connected flux device driven by the sweep.",
+        ),
+    ]
     sweep: FluxDepSweepCfg
 
 
@@ -98,6 +101,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="mist/flux_dep",
+        cfg_schema_version="2.0",
     )
 
     def run(
@@ -133,7 +137,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for flux, step in sched.scan("flux", values.tolist()):
                 set_flux(
-                    context.devices[step.cfg.dev["flux_dev"]],
+                    context.devices[step.cfg.flux_dev],
                     flux,
                     unit=step.cfg.flux_unit,
                     stop=context.cancel_signal,

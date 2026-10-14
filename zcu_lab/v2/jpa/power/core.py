@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Annotated
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -50,21 +50,33 @@ class PowerAnalysis:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
-    jpa_power: SweepCfg
+    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
 
 
 class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    # Map jpa_rf_dev to a connected driver name.
-    dev: Mapping[str, str] = Field(...)
+    jpa_rf_dev: Annotated[
+        str,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected RF device driven by the pump-power sweep.",
+        ),
+    ] = ""
     sweep: PowerSweepCfg
-    skew_penalty: float = Field(default=0.0, ge=0.0)
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
 
 class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
@@ -75,6 +87,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         result_type=PowerResult,
         cfg_type=PowerCfg,
         tag="jpa/power",
+        cfg_schema_version="2.0",
     )
 
     def run(self, cfg: PowerCfg, *, context: RunContext) -> PowerResult:
@@ -100,7 +113,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
-                set_rf_power(context.devices[step.cfg.dev["jpa_rf_dev"]], jpa_power)
+                set_rf_power(context.devices[step.cfg.jpa_rf_dev], jpa_power)
                 modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (

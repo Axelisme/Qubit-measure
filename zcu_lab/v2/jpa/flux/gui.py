@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from matplotlib.figure import Figure
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -27,24 +27,15 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import alias_name_seed, custom
 from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
+from zcu_lab.v2.jpa.flux.form import FORM
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
 
 _JPA_FLUX_SWEEP_EXPTS = 101
-# Bring-up survey: ±5e-3 around the centre, taken from the notebook's JPA flux
-# sweep (single_qubit.md, -5e-3..5e-3) and compressed to 101 points. These are
-# inspectable starting bounds, NOT safety certification — the operator must
-# review device and sweep.
 _JPA_FLUX_SEED_SPAN = 5.0e-3
 
 
@@ -56,7 +47,7 @@ def jpa_flux_sweep_seed(
     Values use the selected device's working unit, not a unit conversion.
     Missing aliases/calibration become Invalid during cfg resolution.
     """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
+    del ctx
     return SweepValue(
         start=EvalValue(expr=f"$jpa.flux - {_JPA_FLUX_SEED_SPAN}"),
         stop=EvalValue(expr=f"$jpa.flux + {_JPA_FLUX_SEED_SPAN}"),
@@ -94,7 +85,8 @@ class JpaFluxAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
     exp_cls = FluxExp
-    ExpCfg_cls: ClassVar[Any] = FluxCfg
+    ExpCfg_cls = FluxCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -107,16 +99,19 @@ class JpaFluxAdapter(
             "safety limits, and the run commands the selected device."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The "
+            "flux bounds use $jpa.flux. The optional JPA flux device resolves the "
+            "flux_dev alias once at Open or Reset; an unbound alias leaves bias "
+            "control disabled. flux_unit starts as A with no conversion. Missing "
+            "required calibration leaves the form Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Module slots use $qubit.module.x180, $qubit.module.readout and optional "
+            "$qubit.module.reset. Missing pi/readout slots fall back to the "
+            "pi_pulse/readout templates. Inline pulse calibration uses $qubit.freq and "
+            "$qubit.wiring.L01.ch; inline readout uses resonator frequency/wiring and "
+            "$resonator.ext.time_of_fly + 0.05. An unset reset slot disables reset. "
+            "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA flux device value into "
@@ -131,43 +126,6 @@ class JpaFluxAdapter(
             "difference."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_flux_dev",
-                label="JPA flux device",
-                default=alias_name_seed("flux_dev"),
-                required=False,
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .sweep(
-                "jpa_flux",
-                label="JPA flux device value",
-                default=custom(
-                    jpa_flux_sweep_seed,
-                    description="jpa flux device value range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,

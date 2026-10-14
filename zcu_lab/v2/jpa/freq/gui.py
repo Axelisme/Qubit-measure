@@ -36,6 +36,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.freq.core import FreqCfg, FreqExp, FreqResult
+from zcu_lab.v2.jpa.freq.form import FORM
 
 JpaFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
@@ -71,6 +72,7 @@ class JpaFreqAdapter(
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     ExpCfg_cls: ClassVar[Any] = FreqCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -83,16 +85,18 @@ class JpaFreqAdapter(
             "and the run commands the selected device."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The "
+            "pump-frequency bounds use $jpa.pump_freq. Select the connected JPA RF "
+            "device in the form. Missing required aliases or calibration leave the "
+            "form Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Module slots use $qubit.module.x180, $qubit.module.readout and optional "
+            "$qubit.module.reset. Missing pi/readout slots fall back to the "
+            "pi_pulse/readout templates. Inline pulse calibration uses $qubit.freq and "
+            "$qubit.wiring.L01.ch; inline readout uses resonator frequency/wiring and "
+            "$resonator.ext.time_of_fly + 0.05. An unset reset slot disables reset. "
+            "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA pump frequency into parameter context "

@@ -40,6 +40,7 @@ from zcu_lab.v2.jpa.auto_optimize.core import (
     JPAOptCfg,
     JPAOptimizeResult,
 )
+from zcu_lab.v2.jpa.auto_optimize.form import FORM
 from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
 from zcu_lab.v2.jpa.freq.gui import jpa_freq_sweep_seed
 from zcu_lab.v2.jpa.power.gui import jpa_power_sweep_seed
@@ -77,6 +78,7 @@ class JpaAutoOptimizeAdapter(
     experiment_tag: ClassVar[str | None] = AutoOptimizeExp.persistence_tag()
     exp_cls = AutoOptimizeExp
     ExpCfg_cls: ClassVar[Any] = JPAOptCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -91,16 +93,20 @@ class JpaAutoOptimizeAdapter(
             "limits."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. "
+            "Search bounds use $jpa.flux, $jpa.pump_freq and $jpa.pump_power. The "
+            "required JPA flux device resolves flux_dev once at Open or Reset; select "
+            "the connected RF device in the form. flux_unit starts as A with no "
+            "conversion. Missing required aliases or calibration leave the form "
+            "Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Module slots use $qubit.module.x180, $qubit.module.readout and optional "
+            "$qubit.module.reset. Missing pi/readout slots fall back to the "
+            "pi_pulse/readout templates. Inline pulse calibration uses $qubit.freq and "
+            "$qubit.wiring.L01.ch; inline readout uses resonator frequency/wiring and "
+            "$resonator.ext.time_of_fly + 0.05. An unset reset slot disables reset. "
+            "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
