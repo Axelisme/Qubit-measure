@@ -244,24 +244,22 @@ class _Section:
             cls: type[FormModel], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[JsonValue, ...]]:
             del cls
-            return {
-                (name,): (
-                    (None, *env.devices)
-                    if type(None)
-                    in _members(section.core.model_fields[name].annotation)
-                    else tuple(env.devices)
-                )
-                for name, node in section.tree.items()
-                if isinstance(node, AliasName) and node.choices_source == "devices"
-            }
+            return section._alias_choices(env)
 
         def options(
             cls: type[FormModel], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
-            del cls
-            return {
+            result: dict[tuple[str | int, ...], tuple[Option, ...]] = {
                 (name,): field.options(env) for name, field in section.modules.items()
             }
+            # Empty device defaults need a label; choices remains the value policy.
+            result.update(
+                {
+                    path: tuple(Option(str(value) or "None", value) for value in values)
+                    for path, values in cls.choices(env).items()
+                }
+            )
+            return result
 
         namespace.update(
             __annotations__=annotations,
@@ -277,6 +275,26 @@ class _Section:
         if not issubclass(model, FormModel):
             raise TypeError("Generated model must implement FormModel")
         self.model = model
+
+    def _alias_choices(
+        self, env: FormEnv
+    ) -> dict[tuple[str | int, ...], tuple[JsonValue, ...]]:
+        """Share core device defaults and captured names with schema and validation."""
+        result: dict[tuple[str | int, ...], tuple[JsonValue, ...]] = {}
+        for name, node in self.tree.items():
+            if not isinstance(node, AliasName) or node.choices_source != "devices":
+                continue
+            info = self.core.model_fields[name]
+            values: tuple[JsonValue, ...] = (
+                (None, *env.devices)
+                if type(None) in _members(info.annotation)
+                else tuple(env.devices)
+            )
+            # Unresolved aliases use the core default without writing input.
+            if isinstance(info.default, str) and info.default not in values:
+                values = (info.default, *values)
+            result[(name,)] = values
+        return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
         if isinstance(node, Locked):
