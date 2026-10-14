@@ -81,6 +81,12 @@ Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜�
 替身保留被測行為，只替換不屬於這次驗證的協作者。若測試把目標邏輯也 mock 掉，改回經由
 interface 驗證結果。只有呼叫順序本身屬於契約時，才把順序當作驗收條件。
 
+Production 只暴露實際呼叫端會用到的介面。測試需要替身，不構成新增建構參數、Protocol、factory 或
+hook 的理由。外部邊界（Qt modal dialog、時鐘、環境變數、`subprocess`、網路）沒有既有注入點時，
+測試用 pytest `monkeypatch` 替換；`monkeypatch.setenv`、`monkeypatch.chdir` 這類環境隔離一律可用。
+協作者已有公開注入點時走注入。不 patch 被測模組自己的函式或私有 helper，也不用 `vars(obj)` 之類的
+寫法讀寫私有狀態；需要這樣做時，把驗證點移到公開介面。
+
 例如，驗證量測取消應檢查約定的終止狀態與資源釋放，而不是固定私有 helper 的呼叫次數。
 測試行數、mock 數量、coverage 或有無 `assert` 都不能單獨證明測試有效。
 

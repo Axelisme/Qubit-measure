@@ -63,6 +63,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 ## Draft
 
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：核准方向、尚未實作。啟動固定 Python environment，FTF 用 YAML 調參；同步 acquire 固定量測要求、逐 round 捕捉環境，backend 固定輸入輸出。物理與依賴邊界已定，具體型別、schema、遷移與驗收待完成。
+
 - [Measure 表單從 core cfg 推導](draft/measure-form-derivation.md)：表單形狀從 core 的 pydantic cfg 推導，欄位說明用 `Annotated[..., FieldMeta]` 放 core，起始值與偏差寫在每個實驗的 `form.py` 樹；module 節點只有 `Slot` 與 `Template`，角色表改為組合根注入的範本目錄；`dev` 改為 core 的具名裝置欄位。設計已採用，measure-form task 實作完成後轉正式 ADR。
 
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
