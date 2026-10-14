@@ -32,20 +32,24 @@ def test_inline_fields_reuse_is_scoped_to_wrapper_and_kind(owner: str) -> None:
     elif owner == "core_form":
         form = Form(ResetCfg, {})
 
-        def read(env: FormEnv) -> tuple[Option, ...]:
+        def read_core(env: FormEnv) -> tuple[Option, ...]:
             return form.model.options(env)[("reset",)]
 
-        def other(env: FormEnv) -> tuple[Option, ...]:
+        def other_core(env: FormEnv) -> tuple[Option, ...]:
             return form.model.options(env)[("other",)]
+
+        read, other = read_core, other_core
     else:
         first_form = module_form(PulseSpec)
         second_form = module_form(PulseSpec)
 
-        def read(env: FormEnv) -> tuple[Option, ...]:
+        def read_spec(env: FormEnv) -> tuple[Option, ...]:
             return first_form.model.options(env)[("waveform",)]
 
-        def other(env: FormEnv) -> tuple[Option, ...]:
+        def other_spec(env: FormEnv) -> tuple[Option, ...]:
             return second_form.model.options(env)[("waveform",)]
+
+        read, other = read_spec, other_spec
 
     first_options = read(FormEnv())
     initial = inline_fields(first_options)
