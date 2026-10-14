@@ -723,7 +723,7 @@ def _project(
 ) -> _Projection:
     check_form_shape(model)
     raw = copy_object(model.model_json_schema(schema_generator=_InputJsonSchema))
-    root = copy_object(_partial(raw))
+    root = _partial(raw)
     tags = branch_tags((model, ModuleInput))
     # The stored range kind stays structural without a range/list selector.
     tags[LinRange] = "kind"

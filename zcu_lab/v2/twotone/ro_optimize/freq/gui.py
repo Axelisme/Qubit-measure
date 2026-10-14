@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -20,15 +20,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqAnalyzeOptions,
@@ -36,6 +29,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq.core import (
     FreqExp,
     FreqResult,
 )
+from zcu_lab.v2.twotone.ro_optimize.freq.form import FORM
 
 RoOptFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
@@ -63,7 +57,8 @@ class RoOptFreqAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
-    ExpCfg_cls: ClassVar[Any] = FreqCfg
+    ExpCfg_cls = FreqCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -75,25 +70,29 @@ class RoOptFreqAdapter(
             "qubit and a pi pulse are calibrated."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'r_f' — resonator "
-            "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
-            "setting the span as r_f ± 1.5*rf_w (~5–50 MHz; falls back to ±30 "
-            "MHz when absent); 'res_ch' / 'ro_ch' — drive / ADC channels; "
-            "'timeFly' — cable time-of-flight for the trigger offset; 'q_f' / "
-            "'qub_ch' — qubit frequency / drive channel for the g↔e pi pulse."
+            "Seeds 301 frequency points at $resonator.freq +/- $resonator.kappa. Relax "
+            "delay reads 5.0 * $qubit.t1. Open and Reset evaluate starting expressions "
+            "once into direct input using captured sources. Inline qubit pulses read "
+            "$qubit.freq and $qubit.wiring.L01.ch. Inline readout reads $resonator.freq, "
+            "$resonator.wiring.ch, $resonator.wiring.ro_ch and $resonator.ext.time_of_fly "
+            "+ 0.05 us for trigger timing. Missing or invalid required sources leave the "
+            "affected fields empty and Invalid; supply calibration or direct values "
+            "before Run. No numeric calibration fallback is supplied."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module (typically a calibrated pi "
-            "pulse, e.g. 'pi_amp') and a pulse-readout module (e.g. "
-            "'readout_rf'); references a ModuleLibrary waveform named "
-            "'ro_waveform' when present. Optionally references a reset module."
+            "The qubit pulse uses $qubit.module.x180 as a captured library link, "
+            "otherwise a fresh pi_pulse template with a const waveform. "
+            "$qubit.module.readout selects a captured library link, otherwise a fresh "
+            "inline readout template with a const waveform. Its required parameter "
+            "sources must still be present. Optional $qubit.module.reset has no fallback: "
+            "an unset/dangling slot or unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
             "Proposes the SNR-maximizing readout frequency into parameter context "
-            "'best_ro_freq' (MHz). When a cfg snapshot with pulse readout is "
-            "available and 'best_ro_freq' / 'best_ro_gain' / "
-            "'best_ro_length' are known from this result plus parameter context, also "
-            "proposes ModuleLibrary 'readout_dpm'."
+            "$qubit.ext.best_ro_freq (MHz). When a cfg snapshot with pulse readout is "
+            "available and $qubit.ext.best_ro_freq / $qubit.ext.best_ro_gain / "
+            "$qubit.ext.best_ro_length are known from this result plus parameter context, "
+            "also proposes $qubit.readout.readout_dpm."
         ),
         recommended=(
             "Analysis denoises the SNR curve before picking the peak. "
@@ -103,30 +102,6 @@ class RoOptFreqAdapter(
             "feature."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("qub_pulse", role_id="pi_pulse")
-            .readout(
-                pulse_only=True,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-            )
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
-            .sweep(
-                "freq",
-                label="Readout freq (MHz)",
-                default=res_freq_range(expts=301, span_factor=1.0),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,
@@ -160,7 +135,7 @@ class RoOptFreqAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="best_ro_freq",
+                target_name="$qubit.ext.best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),

@@ -28,16 +28,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.fake.freq.core import (
     FakeFreqCfg,
     FakeFreqExp,
@@ -46,15 +38,8 @@ from zcu_lab.v2.fake.freq.core import (
     Param,
     TransmissionSimParams,
 )
+from zcu_lab.v2.fake.freq.form import FORM
 from zcu_lab.v2.onetone.freq.core import FreqAnalyzeOptions
-
-
-def _freq_sweep_default(_ctx: SessionEnv) -> SweepValue:
-    return SweepValue(
-        start=EvalValue("$resonator.freq - 5.0 * $resonator.kappa"),
-        stop=EvalValue("$resonator.freq + 5.0 * $resonator.kappa"),
-        expts=201,
-    )
 
 
 @dataclass
@@ -94,6 +79,7 @@ class FakeFreqAdapter(
     )
     exp_cls = FakeFreqExp
     ExpCfg_cls = FakeFreqCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -103,20 +89,21 @@ class FakeFreqAdapter(
             "writeback flow so you can rehearse the analysis offline."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'r_f' — resonator "
-            "frequency, the sweep centre (~4000–8000 MHz); 'rf_w' — linewidth, "
-            "used to set the sweep span and a loaded-Q guess (~0.1–5 MHz); "
-            "'res_ch' / 'ro_ch' — drive / readout channel indices; 'timeFly' "
-            "— cable time-of-flight feeding the trigger offset (~0–1 us)."
+            "Uses the fixed resonator capture: resonator.freq is the sweep "
+            "center and initial pulse/ADC frequency; resonator.kappa sets "
+            "the half-span to five linewidths. resonator.wiring.ch/ro_ch "
+            "supply generator/ADC channels. resonator.ext.time_of_fly plus "
+            "0.05 us seeds trigger offset. Missing or null values leave "
+            "required fields Invalid; no numeric fallback is substituted."
         ),
         expects_ml=(
-            "Needs a readout module to shape the probe pulse, and references a "
-            "ModuleLibrary waveform named 'ro_waveform' when one exists "
-            "(optional)."
+            "Starts with a fresh inline pulse readout from the readout "
+            "template and a const waveform. It does not adopt a calibrated "
+            "readout slot or a named waveform. A library readout remains selectable."
         ),
         typical_writeback=(
             "Proposes the fitted resonator frequency and linewidth back into "
-            "parameter context 'r_f' / 'rf_w'. The readout module / waveform are left "
+            "resonator.freq / resonator.kappa. The readout module / waveform are left "
             "to the user — a frequency fit alone does not justify rewriting "
             "the whole readout config."
         ),
@@ -157,29 +144,6 @@ class FakeFreqAdapter(
         # save should produce a file and "data saved to <path>" stays honest. Pass
         # False for a pure no-op (no file). See save().
         self._persist_data = persist_data
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .readout(
-                init=ModuleInit.INLINE,
-                locked={"pulse_cfg.freq": 0.0, "ro_cfg.ro_freq": 0.0},
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=custom(
-                    _freq_sweep_default,
-                    description="fake resonator blind frequency range",
-                ),
-            )
-            .reps(100)
-            .rounds(100)
-            .build()
-        )
 
     def build_exp_cfg(
         self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest

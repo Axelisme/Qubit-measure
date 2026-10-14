@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -20,44 +20,17 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import Seed, custom, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
     FreqGainResult,
 )
+from zcu_lab.v2.twotone.reset.bath.freq.form import FORM
 
 BathFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
-
-# The pi/2 readout tomography pulse sits at a fixed phase offset; the domain
-# adds a 4-point QickSweep1D("phase", 0, 270) on top of pi2_cfg.phase, so the
-# form value is the *base* offset (notebook: phase=90), not a swept axis.
-_PI2_PHASE_OFFSET_DEG: float = 90.0
-
-
-def _cavity_freq_range(expts: int) -> Seed[SweepValue]:
-    """Store cavity frequency minus 0.8–1.2 times calibrated Rabi frequency."""
-
-    def resolve(_ctx: SessionEnv) -> SweepValue:
-        return SweepValue(
-            start=EvalValue("$resonator.freq - 1.2 * $qubit.ext.rabi_freq"),
-            stop=EvalValue("$resonator.freq - 0.8 * $qubit.ext.rabi_freq"),
-            expts=expts,
-        )
-
-    return custom(resolve, description="bath cavity frequency range")
 
 
 @dataclass
@@ -84,7 +57,8 @@ class BathFreqGainAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqGainExp.persistence_tag()
     exp_cls = FreqGainExp
-    ExpCfg_cls: ClassVar[Any] = FreqGainCfg
+    ExpCfg_cls = FreqGainCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -95,18 +69,28 @@ class BathFreqGainAdapter(
             "dumps the excitation into the cavity bath. Runs on real hardware."
         ),
         expects_md=(
-            "Requires $resonator.freq and $qubit.ext.rabi_freq for the "
-            "cavity sweep from resonator frequency minus 1.2 Rabi frequency "
-            "to minus 0.8 Rabi frequency. Other drive defaults use captured "
-            "qubit/resonator frequency and wiring. Missing, null or invalid "
-            "seed values fail cfg lowering."
+            "Seeds 51 frequency points from $resonator.freq - 1.2 * $qubit.ext.rabi_freq "
+            "to $resonator.freq - 0.8 * $qubit.ext.rabi_freq, and 51 gain points from 0.4 "
+            "to 1.0. Relax delay reads 5.0 * $qubit.t1. The pi/2 phase offset stays "
+            "locked at 90 degrees; Run adds its tomography phase cycle. Open and Reset "
+            "evaluate starting expressions once into direct input using captured sources. "
+            "Inline qubit pulses read $qubit.freq and $qubit.wiring.L01.ch. Inline "
+            "readout reads $resonator.freq, $resonator.wiring.ch, $resonator.wiring.ro_ch "
+            "and $resonator.ext.time_of_fly + 0.05 us for trigger timing. Missing or "
+            "invalid required sources leave the affected fields empty and Invalid; supply "
+            "calibration or direct values before Run. No numeric calibration fallback is "
+            "supplied."
         ),
         expects_ml=(
-            "Builds the tested bath-reset cfg with cavity, qubit and pi/2 "
-            "tones from captured defaults and needs a readout module. "
-            "Optionally references an upstream reset and an init pulse "
-            "(a library pi pulse when present), both disabled when no "
-            "library entry exists."
+            "Tested reset starts inline from the bath_reset template. Optional init pulse "
+            "uses $qubit.module.x180 without fallback; an unset/dangling slot or unbound "
+            "alias leaves it disabled and Valid. The pi/2 tone uses $qubit.module.x90, "
+            "otherwise a fresh pi2_pulse template. It is copied inline so the fixed "
+            "90-degree offset can be applied without changing the library. "
+            "$qubit.module.readout selects a captured library link, otherwise a fresh "
+            "inline readout template with a const waveform. Its required parameter "
+            "sources must still be present. Optional $qubit.module.reset has no fallback: "
+            "an unset/dangling slot or unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
             "Proposes the best cavity gain and frequency to "
@@ -121,44 +105,6 @@ class BathFreqGainAdapter(
             "stored as an internal sweep axis."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset("reset", optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="bath_reset",
-                label="Tested Reset",
-                shape="bath",
-                locked={
-                    "cavity_tone_cfg.freq": 0.0,
-                    "cavity_tone_cfg.gain": 0.0,
-                    "pi2_cfg.phase": _PI2_PHASE_OFFSET_DEG,
-                },
-            )
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
-            )
-            .sweep(
-                "freq",
-                label="Cavity freq (MHz)",
-                default=_cavity_freq_range(51),
-            )
-            .sweep(
-                "gain",
-                label="Cavity gain (a.u.)",
-                default=SweepValue(start=0.4, stop=1.0, expts=51),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def run(
         self,
