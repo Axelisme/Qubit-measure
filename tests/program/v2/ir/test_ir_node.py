@@ -17,8 +17,6 @@ from zcu_tools.program.v2.ir.node import (
     IRDispatch,
     IRLoop,
     IRNode,
-    _clone_node,
-    _collect_subtree_names,
     clone_renamed,
 )
 from zcu_tools.program.v2.ir.operands import (
@@ -134,7 +132,7 @@ def test_irbranch_and_irdispatch_tree_api_and_string():
         dispatch.replace_child(case1, case0)
 
 
-def test_collect_subtree_names_includes_branch_and_dispatch_nodes():
+def test_clone_renamed_allocates_label_branch_and_dispatch_names():
     inner_dispatch = IRDispatch(
         name="dispatch",
         value_reg=Register("r2"),
@@ -160,9 +158,9 @@ def test_collect_subtree_names_includes_branch_and_dispatch_nodes():
         ]
     )
 
-    labels, structs = _collect_subtree_names(tree)
-    assert labels == {"entry"}
-    assert structs == {"branch", "dispatch"}
+    allocated: set[str] = set()
+    clone_renamed(tree, allocated)
+    assert allocated == {"entry", "branch", "dispatch"}
 
 
 def test_clone_renamed_remaps_regwrite_label_and_dispatch_structure_names():
@@ -223,6 +221,6 @@ def test_clone_renamed_remaps_regwrite_label_and_dispatch_structure_names():
     assert cloned_dispatch.target_labels == [cloned_label]
 
 
-def test_clone_node_rejects_unexpected_irnode_type():
+def test_clone_renamed_rejects_unexpected_irnode_type():
     with pytest.raises(TypeError, match="unexpected node type DummyNode"):
-        _clone_node(DummyNode(), {}, {})
+        clone_renamed(DummyNode(), set())
