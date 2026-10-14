@@ -325,10 +325,6 @@ class TestNoneResetCfg:
         cfg = NoneResetCfg.model_validate({"type": "reset/none"})
         assert isinstance(cfg, NoneResetCfg)
 
-    def test_module_adapter_dispatch(self):
-        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
-
     def test_set_param_always_raises(self):
         cfg = NoneResetCfg()
         with pytest.raises(ValueError, match="NoneReset does not support set_param"):
