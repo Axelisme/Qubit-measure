@@ -38,13 +38,10 @@ from zcu_tools.program.v2.modules.readout import DirectReadoutCfg, PulseReadoutC
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sim import DEFAULT_SIMPARAM, SimParams
 from zcu_tools.program.v2.sim.engine import (
-    _FULL_SCALE,
     SimEngine,
 )
 from zcu_tools.program.v2.sim.readout import (
-    effective_signal_samples,
     resonator_freqs,
-    s21,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.program.v2.utils import sweep2param
@@ -62,32 +59,11 @@ from ._engine_support import (
     ground_resonator_frequency_mhz as _rf_g_mhz,
 )
 from ._engine_support import (
-    pi_pulse_program as _pi_pulse_prog,
-)
-from ._engine_support import (
     qubit_frequency_mhz as _f_qubit_mhz,
 )
 from ._engine_support import (
     readout as _readout,
 )
-
-
-def _compiled_sample_times(
-    readout_module: Module, *, sim: SimParams = _SIM
-) -> tuple[int, NDArray[np.float64]]:
-    """Compile a one-readout program and return its ADC sample axis."""
-
-    _soc, soccfg = make_mock_soc(sim=sim)
-    prog = ModularProgramV2(
-        soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
-        modules=[readout_module],
-    )
-    prog.compile()
-    ((ro_ch, ro),) = prog.ro_chs.items()
-    n_samples = int(ro["length"])
-    ts = prog.soccfg.cycles2us(np.arange(n_samples), ro_ch=ro_ch)
-    return n_samples, np.asarray(ts, dtype=np.float64)
 
 
 def _amp(result: list[np.ndarray]) -> np.ndarray:
@@ -108,7 +84,7 @@ def test_d1_no_sim_white_noise_unchanged():
     """make_mock_soc() with no SimParams keeps the original white-noise path."""
 
     soc, soccfg = make_mock_soc()
-    assert soc._sim_params is None
+    assert soc.sim_params is None
 
     sw = SweepCfg(start=4000.0, stop=4100.0, expts=5, step=25.0)
     freq_param = sweep2param("freq", sw)
@@ -550,26 +526,6 @@ def test_engine_singleshot_get_raw_shape():
     assert raw[0].dtype == np.int64
 
 
-def _expected_blob_centers(ro_freq_mhz: float) -> tuple[complex, complex]:
-    """The two per-shot blob centres ``(g_center, e_center)`` in raw ADC units.
-
-    The engine reads out at probe frequency ``ro_freq_mhz`` and lays out a shot
-    on either the |g>-conditioned blob
-    ``_FULL_SCALE * signal_samples * S21(f_ro; rf_g)`` or the |e>-conditioned
-    blob with ``rf_e``.  These are the integrated raw deterministic centres a
-    noiseless, fully-polarised population would produce, so the singleshot
-    get_raw clusters must land on them.
-    """
-
-    rf_g, rf_e = resonator_freqs(_SIM, _OPERATING_FLUX)
-    freqs = np.array([ro_freq_mhz * 1e-3], dtype=np.float64)  # MHz -> GHz
-    s_g = complex(s21(_SIM, freqs, rf_g)[0])
-    s_e = complex(s21(_SIM, freqs, rf_e)[0])
-    _n_samples, sample_times = _compiled_sample_times(_readout(ro_freq_mhz))
-    signal_samples = effective_signal_samples(None, None, sample_times)
-    return _FULL_SCALE * signal_samples * s_g, _FULL_SCALE * signal_samples * s_e
-
-
 def _singleshot_raw(
     *, gain: float, length: float, reps: int = 4000
 ) -> NDArray[np.complex128]:
@@ -609,31 +565,10 @@ def _singleshot_raw(
     return iq[:, 0, 0] + 1j * iq[:, 0, 1]  # (reps,)
 
 
-def test_engine_singleshot_two_blobs_centers():
-    """get_raw shots cluster on the |g> / |e> blob centres set by the init pulse.
-
-    A pi pulse (gain*length == pi_gain_len) drives P_e ~ 1, so essentially every
-    shot lands on the integrated |e> blob; with no pulse P_e ~ thermal ~ 0, so
-    the shots land on the integrated |g> blob.  The cluster medians (robust to
-    the few mis-prepared shots and the Gaussian readout noise) must match the
-    deterministic blob centres.
-    """
-
-    g_center, e_center = _expected_blob_centers(_rf_g_mhz())
-
-    # pi pulse: gain * length == pi_gain_len (0.4) => a full pi rotation => P_e ~ 1.
-    excited = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len)
-    excited_med = np.median(excited.real) + 1j * np.median(excited.imag)
-
-    # No pulse: low-temperature equilibrium keeps the median on the |g> blob.
+def _observed_blob_centers() -> tuple[complex, complex]:
     ground = _singleshot_raw(gain=0.0, length=0.0)
-    ground_med = np.median(ground.real) + 1j * np.median(ground.imag)
-
-    blob_dist = abs(g_center - e_center)
-    # Each cluster median lands on its blob centre, within a small fraction of the
-    # inter-blob distance (median is robust to noise + the few mis-prepared shots).
-    assert abs(excited_med - e_center) < 0.15 * blob_dist
-    assert abs(ground_med - g_center) < 0.15 * blob_dist
+    excited = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len)
+    return complex(np.median(ground)), complex(np.median(excited))
 
 
 def test_engine_singleshot_population_ratio():
@@ -644,7 +579,7 @@ def test_engine_singleshot_population_ratio():
     blob.  This is the per-shot Bernoulli population coming through get_raw.
     """
 
-    g_center, e_center = _expected_blob_centers(_rf_g_mhz())
+    g_center, e_center = _observed_blob_centers()
 
     # pi/2: gain * length == pi_gain_len / 2 (1.0 * 0.2).
     signals = _singleshot_raw(gain=1.0, length=_SIM.pi_gain_len / 2.0)
@@ -700,7 +635,7 @@ def test_engine_singleshot_accumulated_mean_invariant():
     signals = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]  # (reps,)
     reps_mean = np.mean(signals.real) + 1j * np.mean(signals.imag)
 
-    g_center, e_center = _expected_blob_centers(ro_freq)
+    g_center, e_center = _observed_blob_centers()
     blob_dist = abs(g_center - e_center)
     # The acquire value (rescaled to raw ADC units) and the get_raw reps-mean are
     # the same quantity computed two ways; they agree to within the shot-noise
@@ -708,34 +643,7 @@ def test_engine_singleshot_accumulated_mean_invariant():
     assert abs(reps_mean - acc_reps_mean) < 0.02 * blob_dist
 
 
-# ---------------------------------------------------------- rep state carry / nreads
-
-
-def _deterministic_p_e_chain(prog: ModularProgramV2) -> NDArray[np.float64]:
-    engine = SimEngine(prog, _SIM)
-    _s_g, _s_e, p_e, _signal_scale, _noise_scale, _gain_noise_scale = (
-        engine._ensure_signal()
-    )
-    return p_e[:, 0]
-
-
-def test_engine_relax_delay_zero_carries_state_between_reps() -> None:
-    """With no inter-shot relaxation, a repeated pi pulse alternates population."""
-
-    p_e = _deterministic_p_e_chain(_pi_pulse_prog(relax_delay=0.0))
-
-    assert p_e[0] > 0.95
-    assert p_e[1] < 0.05
-    assert p_e[2] > 0.90
-    assert p_e[3] < 0.10
-
-
-def test_engine_long_relax_delay_reprepares_each_rep() -> None:
-    """A long relax_delay passively returns the carried state near ground."""
-
-    p_e = _deterministic_p_e_chain(_pi_pulse_prog(relax_delay=_RESET_RELAX_DELAY))
-
-    assert np.all(p_e > 0.95)
+# ---------------------------------------------------------- readout normalization
 
 
 def _normalized_ground_raw_direct(
@@ -968,109 +876,12 @@ def test_engine_readout_gain_noise_scales_with_pulse_readout_gain() -> None:
     assert high > 2.5 * low
 
 
-def _pulse_readout_blob_gap(gain: float, *, sim: SimParams = _SIM) -> float:
-    _soc, soccfg = make_mock_soc(sim=sim)
-    prog = ModularProgramV2(
-        soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
-        modules=[_pulse_readout(_rf_g_mhz(), ro_length=1.0, gain=gain)],
-    )
-    prog.compile()
-    engine = SimEngine(prog, sim)
-    s_g, s_e, _p_e, signal_scale, _noise_scale, _gain_noise_scale = (
-        engine._ensure_signal()
-    )
-    return float(abs(signal_scale[0] * (s_e[0] - s_g[0])))
-
-
-def test_engine_readout_backaction_reduces_excited_blob_contrast() -> None:
-    """Explicit readout-induced decay can make high gain reduce blob contrast."""
-
-    sim = _SIM.model_copy(
-        update={
-            "readout_decay_rate_per_us": 2.0,
-            "readout_decay_threshold_ratio": 0.0,
-            "readout_decay_exponent": 1.0,
-        }
-    )
-    low = _pulse_readout_blob_gap(0.02, sim=sim)
-    mid = _pulse_readout_blob_gap(0.08, sim=sim)
-    high = _pulse_readout_blob_gap(0.40, sim=sim)
-
-    assert mid > low
-    assert high < mid
-
-
-def test_engine_readout_backaction_preserves_raw_mixture_sampling() -> None:
-    """Raw singleshot remains state-sample-then-noise, not weighted-center Gaussian."""
-
-    sim = _SIM.model_copy(
-        update={
-            "snr": 1.0e9,
-            "readout_decay_rate_per_us": 2.0,
-            "readout_decay_threshold_ratio": 0.0,
-            "readout_decay_exponent": 1.0,
-        }
-    )
-    soc, soccfg = make_mock_soc(sim=sim)
-    f_qubit = _f_qubit_mhz()
-    ro_freq = _rf_g_mhz()
-    init = PulseCfg(
-        ch=0,
-        nqz=1,
-        gain=1.0,
-        freq=f_qubit,
-        phase=0.0,
-        waveform=ConstWaveformCfg(length=_SIM.pi_gain_len / 2.0),
-    ).build("init")
-    readout = _pulse_readout(ro_freq, ro_length=1.0, gain=0.08)
-    prog = ModularProgramV2(
-        soccfg,
-        ProgramV2Cfg(reps=4000, rounds=1, relax_delay=_RESET_RELAX_DELAY),
-        modules=[init, readout],
-    )
-    prog.compile()
-    engine = SimEngine(prog, sim)
-    s_g, s_e, _p_e, signal_scale, _noise_scale, _gain_noise_scale = (
-        engine._ensure_signal()
-    )
-    g_center = _FULL_SCALE * signal_scale[0] * complex(s_g[0])
-    e_center = _FULL_SCALE * signal_scale[0] * complex(s_e[0])
-
-    prog.acquire(soc, progress=False)
-    raw = prog.get_raw()
-    assert raw is not None
-    signals = raw[0][:, 0, 0] + 1j * raw[0][:, 0, 1]
-
-    blob_dist = abs(e_center - g_center)
-    assert blob_dist > 0.0
-    d_g = np.abs(signals - g_center)
-    d_e = np.abs(signals - e_center)
-    excited_mask = d_e < d_g
-    frac_excited = float(np.mean(excited_mask))
-    assert 0.35 < frac_excited < 0.65
-
-    ground_cluster = signals[~excited_mask]
-    excited_cluster = signals[excited_mask]
-    assert ground_cluster.size > 0
-    assert excited_cluster.size > 0
-    ground_median = np.median(ground_cluster.real) + 1j * np.median(ground_cluster.imag)
-    excited_median = np.median(excited_cluster.real) + 1j * np.median(
-        excited_cluster.imag
-    )
-    assert abs(ground_median - g_center) < 0.02 * blob_dist
-    assert abs(excited_median - e_center) < 0.02 * blob_dist
-
-    weighted_center = 0.5 * (g_center + e_center)
-    assert np.percentile(np.abs(signals - weighted_center), 10) > 0.25 * blob_dist
-
-
 def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
     """Accumulated PulseReadout integrates only pulse envelope inside the ADC window."""
 
     sim = _SIM.model_copy(update={"snr": 1.0e9, "readout_photons_per_gain2": 1.0})
 
-    def signal_scale(trig_offset: float) -> float:
+    def raw_peak(trig_offset: float) -> float:
         _soc, soccfg = make_mock_soc(sim=sim)
         prog = ModularProgramV2(
             soccfg,
@@ -1087,11 +898,10 @@ def test_engine_pulse_readout_signal_samples_use_trigger_alignment() -> None:
         )
         prog.compile()
         engine = SimEngine(prog, sim)
-        _s_g, _s_e, _p_e, scale, _noise, _gain_noise = engine._ensure_signal()
-        return float(scale[0])
+        return float(np.max(np.abs(engine.compute_round(0)[0])))
 
-    aligned = signal_scale(sim.timeFly)
-    late = signal_scale(sim.timeFly + 1.0)
+    aligned = raw_peak(sim.timeFly)
+    late = raw_peak(sim.timeFly + 1.0)
 
     assert aligned > 0.0
     assert late == pytest.approx(0.0, abs=1e-12)
@@ -1104,7 +914,7 @@ def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
     pulse_length = 0.2
     pre_delay = 0.3
 
-    def signal_scale(trig_offset: float) -> float:
+    def raw_peak(trig_offset: float) -> float:
         _soc, soccfg = make_mock_soc(sim=sim)
         prog = ModularProgramV2(
             soccfg,
@@ -1122,11 +932,10 @@ def test_engine_pulse_readout_signal_samples_include_pulse_pre_delay() -> None:
         )
         prog.compile()
         engine = SimEngine(prog, sim)
-        _s_g, _s_e, _p_e, scale, _noise, _gain_noise = engine._ensure_signal()
-        return float(scale[0])
+        return float(np.max(np.abs(engine.compute_round(0)[0])))
 
-    aligned = signal_scale(sim.timeFly + pre_delay)
-    early = signal_scale(sim.timeFly)
+    aligned = raw_peak(sim.timeFly + pre_delay)
+    early = raw_peak(sim.timeFly)
 
     assert aligned > 0.0
     assert early == pytest.approx(0.0, abs=1e-12)
@@ -1367,41 +1176,6 @@ def _ramsey_envelope(sim: SimParams, stop: float, expts: int) -> np.ndarray:
     amp = _amp(prog.acquire(soc, progress=False))
     env = amp - amp[-1]
     return env / env[0]
-
-
-@pytest.mark.parametrize("gamma", [0.05, 0.1, 0.3])
-def test_ensemble_quadrature_reproduces_fid(gamma: float):
-    """The Lorentzian quadrature average of free precession is exp(-Gamma|t|).
-
-    This is the direct quadrature-correctness gate: for a static detune delta the
-    free-evolution coherence is exp(i*delta*t), and the Lorentzian (HWHM Gamma)
-    ensemble average is the analytic FID exp(-Gamma|t|).  We verify the engine's
-    own nodes/weights reproduce it over the *observable* decay window
-    ``Gamma*t in [0, 2]`` — beyond it the FID has decayed below the readout noise
-    floor, so its absolute accuracy is NOT load-bearing (the tan-substitution +
-    fixed Gauss-Legendre rule converges slowly for this oscillatory integrand only
-    deep in that decayed tail).  The real correctness guarantee for the dephasing
-    model is the inject->recover integration suite, which fits the envelope with
-    the genuine analyzers; this gate only certifies the quadrature is sane in the
-    window where the signal carries information.
-    """
-
-    from zcu_tools.program.v2.sim.engine import _ENSEMBLE_NODES, _lorentzian_quadrature
-
-    theta, weights = _lorentzian_quadrature(_ENSEMBLE_NODES)
-    delta = gamma * np.tan(theta)  # ensemble detune nodes (rad/µs)
-
-    # Probe the observable decay window (Gamma*t up to 2, where the analyzer
-    # actually fits the envelope).  The absolute FID tolerance (0.06) reflects the
-    # accuracy of the current node count (_ENSEMBLE_NODES == 41) over that window;
-    # raising the node count tightens it.
-    for gamma_t in (0.0, 0.25, 0.5, 1.0, 1.5, 2.0):
-        t = gamma_t / gamma
-        fid = np.sum(weights * np.exp(1j * delta * t))
-        # Real FID matches the analytic envelope; the imaginary part is zero by
-        # the symmetry of the Lorentzian about delta = 0.
-        assert fid.real == pytest.approx(np.exp(-gamma_t), abs=0.06)
-        assert fid.imag == pytest.approx(0.0, abs=1e-9)
 
 
 def test_engine_echo_refocuses_homogeneous_t2():

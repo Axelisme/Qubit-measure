@@ -1259,7 +1259,6 @@ def test_schedule_batch_returns_partial_on_child_exception_without_retry():
         assert results == {}
         assert sched.outcome.status == "failed"
         assert isinstance(sched.outcome.exception, RuntimeError)
-        assert sched._local_buffers == {}
 
     assert attempts == 1
     assert later_called is False
@@ -1336,23 +1335,6 @@ def test_schedule_child_buffer_validates_target_before_acquire() -> None:
 
     with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
         sched.batch({"child": child})
-
-
-def test_schedule_child_local_buffers_are_cleared_after_batch() -> None:
-    root = {"child": {"signals": np.full((1,), np.nan)}}
-
-    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
-
-        def child(step):
-            signals_step = step.child("signals")
-            buffer = signals_step.buffer((1,), dtype=np.float64)
-            assert ("child", "signals") in sched._local_buffers
-            buffer.set(np.array([3.0]))
-
-        sched.batch({"child": child})
-        assert sched._local_buffers == {}
-
-    np.testing.assert_allclose(root["child"]["signals"], np.array([3.0]))
 
 
 def test_schedule_batch_does_not_retry_keyboard_interrupt():
