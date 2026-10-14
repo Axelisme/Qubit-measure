@@ -215,9 +215,8 @@ def test_measure_behavior_rejects_catalog_without_default(
     original_sys, original_thread = sys.excepthook, threading.excepthook
     try:
         with pytest.raises(ValueError, match="default"):
-            try:
-                MeasureGuiBehavior(registry_factory, alias_presets=presets)
-            except TypeError as error:
-                pytest.fail(f"Named alias preset admission is missing: {error}")
+            MeasureGuiBehavior(registry_factory, alias_presets=presets)
+    except TypeError as error:
+        pytest.fail(f"Named alias preset admission is missing: {error}")
     finally:
         sys.excepthook, threading.excepthook = original_sys, original_thread

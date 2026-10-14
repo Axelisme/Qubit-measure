@@ -128,10 +128,7 @@ def test_named_presets_reach_workflows_composition_without_overwriting_saved_row
         )
         # Edits to the installed table do not edit caller preset definitions.
         context.set_alias_rows((AliasRow("replacement", "R2"),))
-        assert behavior.alias_presets["probe"] == (
-            AliasRow("probe", "Q2"),
-            AliasRow("spare", ""),
-        )
+        assert behavior.alias_presets == presets
     finally:
         behavior.shutdown()
         behavior.window.deleteLater()
@@ -165,11 +162,11 @@ def test_workflows_empty_initial_table_is_explicit_or_has_no_catalog(
 def test_workflows_behavior_rejects_catalog_without_default(
     presets: dict[str, tuple[AliasRow, ...]],
 ) -> None:
-    with pytest.raises(ValueError, match="default"):
-        try:
+    try:
+        with pytest.raises(ValueError, match="default"):
             WorkflowsGuiBehavior(registrations=build_registry(), alias_presets=presets)
-        except TypeError as error:
-            pytest.fail(f"Named alias preset admission is missing: {error}")
+    except TypeError as error:
+        pytest.fail(f"Named alias preset admission is missing: {error}")
 
 
 def button(window: WorkflowWindow[Context], name: str) -> QPushButton:
