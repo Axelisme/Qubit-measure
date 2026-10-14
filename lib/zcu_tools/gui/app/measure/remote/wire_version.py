@@ -11,4 +11,4 @@ WIRE_VERSION = 100
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 133
+GUI_VERSION = 134
