@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,7 +13,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
 )
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     US_TO_S,
     AxesSpec,
@@ -57,13 +57,13 @@ class T2RamseyResult:
 
 
 class T2RamseyModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi2_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Pi/2 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class T2RamseySweepCfg(ConfigBase):
-    length: SweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
 
 class T2RamseyCfg(ProgramV2Cfg, ExpCfgModel):

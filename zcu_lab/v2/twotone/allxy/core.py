@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib import rcParams
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -148,11 +148,11 @@ def _configure_allxy_axes(ax: Axes) -> None:
 
 
 class AllXYModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    I_pulse: PulseCfg | None = None
-    X180_pulse: PulseCfg
-    X90_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
+    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class AllXYCfg(ProgramV2Cfg, ExpCfgModel):

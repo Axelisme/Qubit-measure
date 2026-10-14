@@ -1,39 +1,4 @@
-"""Shared detune-ratio plumbing for the T2 Ramsey / T2 Echo adapters.
-
-Both adapters carry a run-only ``detune_ratio`` knob (fringes-per-step, not part
-of their experiment Cfg): it is stripped before lowering, and converted to the
-absolute applied detune (MHz) as ``detune_ratio / sweep_step``. These three
-pieces are identical between the two adapters; the per-adapter differences (the
-Cfg type, Ramsey's ``true_detune`` stash + ``q_f`` writeback) stay in each
-adapter.
-"""
-
-from __future__ import annotations
-
-from collections.abc import Mapping
-
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
-
-
-def detune_ratio_of(raw_cfg: Mapping[str, ExperimentCfgValue]) -> float:
-    """Read and validate the run-only ``detune_ratio`` knob from the raw cfg."""
-    value = raw_cfg.get("detune_ratio")
-    if not isinstance(value, (int, float)):
-        raise ValueError("detune_ratio must be a number")
-    return float(value)
-
-
-def strip_detune_ratio(
-    raw_cfg: Mapping[str, ExperimentCfgValue],
-) -> dict[str, ExperimentCfgValue]:
-    """Return a copy of ``raw_cfg`` without the run-only ``detune_ratio`` key.
-
-    The experiment Cfg has no ``detune_ratio`` field and rejects unknown keys, so
-    it must be stripped before ``ml.make_cfg`` (mirrors ro_optimize/auto's
-    num_points)."""
-    cfg_raw = dict(raw_cfg)
-    cfg_raw.pop("detune_ratio", None)
-    return cfg_raw
+"""Scientific detune-ratio conversion shared by Ramsey and Echo Forms."""
 
 
 def resolve_detune(detune_ratio: float, sweep_step: float) -> float:

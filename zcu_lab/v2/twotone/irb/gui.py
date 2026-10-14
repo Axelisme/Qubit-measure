@@ -19,15 +19,11 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import SweepDefault, scaled_path_seed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.irb.core import IRB_Exp, IRBCfg, IRBResult
+
+from .form import FORM
 
 IRBRunResult: TypeAlias = RunRecord[IRBCfg, IRBResult]
 
@@ -50,6 +46,7 @@ class IRBAnalyzeResult(AnalyzeResultBase):
 
 
 class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult, NoAnalyzeParams]):
+    form = FORM
     """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
     experiment_tag: ClassVar[str | None] = IRB_Exp.persistence_tag()
@@ -61,56 +58,37 @@ class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult, NoAnalyzePa
             "Paired single-qubit IRB: reference and interleaved arms share random "
             "Cliffords, each with its own full inverse. Depth counts random Cliffords; "
             "interleaved inserts one target per Clifford. Hardware sweeps depth and "
-            "repetitions; software visits rounds, seeds and alternating arm order. "
-            "Raw IQ has fixed axes round/seed/arm/depth, arm 0=reference, 1=interleaved."
+            "repetitions; software visits rounds, seeds and alternating arm order. Raw "
+            "IQ has fixed axes round/seed/arm/depth, arm 0=reference, 1=interleaved."
         ),
-        expects_md="Uses 5*t1 relaxation (us), fallback 200 us.",
-        expects_ml="Uses calibrated X90/X180 and readout modules. Y gates use phase-shifted X pulses.",
+        expects_md=(
+            "Depth runs 0 to 100 random Cliffords over 21 points, seed 42 and 20 paired "
+            "sequences. Relax delay is 5 * qubit.t1 us. Missing calibration leaves the "
+            "affected fields empty and Invalid; no numeric fallback."
+        ),
+        expects_ml=(
+            "Uses captured qubit.module.readout with a readout template fallback, and "
+            "qubit.module.reset with no fallback (disabled when absent). Drive slots "
+            "use qubit.module.x180/x90 with pi_pulse/pi2_pulse template fallbacks. "
+            "Unset or dangling slots use the named template, not a legacy blank. Key "
+            "choices remain available. Inline templates read qubit.freq, "
+            "qubit.wiring.L01.ch, resonator.freq, resonator.wiring.ch/ro_ch and "
+            "resonator.ext.time_of_fly + 0.05 us; missing required calibration remains "
+            "Invalid."
+        ),
         typical_writeback=(
             "No writeback. Fits both A*p**depth+B curves on a common IQ projection. "
-            "Reports target error=(1-p_interleaved/p_reference)/2 and fidelity. "
-            "95% paired-seed bootstrap is statistical only; coherent or gate-dependent "
-            "noise can bias this estimate. Nonphysical estimates are reported unclipped."
+            "Reports target error=(1-p_interleaved/p_reference)/2 and fidelity. 95% "
+            "paired-seed bootstrap is statistical only; coherent or gate-dependent "
+            "noise can bias this estimate. Nonphysical estimates are reported "
+            "unclipped."
         ),
         recommended=(
-            "Default target X90. Use at least 4 distinct depths spanning decay and "
-            "20 or more seeds for uncertainty. Start with a short execution check. "
+            "Default target X90. Use at least 4 distinct depths spanning decay and 20 "
+            "or more seeds for uncertainty. Start with a short execution check. "
             "Analysis uses complete round/seed pairs; unfinished raw IQ is still saved."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        """Declare calibrated modules, integer depths, random seeds and averaging."""
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .choice(
-                "target_gate",
-                label="Target gate",
-                choices=("X90", "X180", "Y90", "Y180"),
-                default="X90",
-            )
-            .reset(optional=True)
-            .pulse("X90_pulse", role_id="pi2_pulse", label="X90 Pulse")
-            .pulse("X180_pulse", role_id="pi_pulse", label="X180 Pulse")
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=200.0)
-            )
-            .sweep(
-                "depth",
-                label="Clifford depth",
-                decimals=0,
-                default=SweepDefault(start=0, stop=100, expts=21),
-            )
-            .int("seed", label="Random seed", default=42)
-            .int("n_seeds", label="Number of sequences", default=20)
-            .reps(1000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,
