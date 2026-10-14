@@ -1,6 +1,5 @@
 """Local schemas for container behavior, independent of lab definitions."""
 
-from copy import deepcopy
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,6 +10,7 @@ from zcu_tools.resources.entry import (
     component_registry,
     role_registry,
 )
+from zcu_tools.resources.entry.registry import RoleRegistry
 
 type Number = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
 
@@ -125,24 +125,37 @@ def register_fakes() -> None:
     )
 
 
-def registry_state() -> tuple[dict[str, object], dict[str, object]]:
-    """Snapshot mutable tables without comparing a copied registry by identity."""
-    return deepcopy(
-        (
-            {
-                key: value
-                for key, value in vars(component_registry).items()
-                if key != "roles"
-            },
-            vars(role_registry),
-        )
+type RegistryState = tuple[
+    tuple[tuple[str, type[ComponentSchema]], ...],
+    tuple[tuple[str, RoleSpec], ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    RoleRegistry,
+]
+
+
+def registry_state() -> RegistryState:
+    """Capture declarations in registration order and the public role settings."""
+    return (
+        tuple(
+            (kind, component_registry.get(kind)) for kind in component_registry.kinds()
+        ),
+        tuple((name, role_registry.get(name)) for name in role_registry.names()),
+        role_registry.shorthand,
+        role_registry.focus_kinds,
+        component_registry.roles,
     )
 
 
-def restore_registry(state: tuple[dict[str, object], dict[str, object]]) -> None:
-    components, roles = state
-    vars(component_registry).clear()
-    vars(component_registry).update(components)
-    component_registry.roles = role_registry
-    vars(role_registry).clear()
-    vars(role_registry).update(roles)
+def restore_registry(state: RegistryState) -> None:
+    components, roles, shorthand, focus_kinds, bound_roles = state
+    component_registry.roles = bound_roles
+    for kind in component_registry.kinds():
+        component_registry.unregister(kind)
+    for kind, model in components:
+        component_registry.register(kind, model)
+    for name in role_registry.names():
+        role_registry.unregister(name)
+    for name, spec in roles:
+        role_registry.register(name, spec)
+    role_registry.configure(shorthand=shorthand, focus_kinds=focus_kinds)
