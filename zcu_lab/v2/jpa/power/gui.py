@@ -88,10 +88,10 @@ class JpaPowerAdapter(
             "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
-            "Proposes the signal-maximizing JPA pump power into parameter context "
-            "'best_jpa_power' (dBm) as a draft — it never writes it back "
-            "without your acceptance, never commands a device from the "
-            "writeback, and never touches 'cur_jpa_A'."
+            "Proposes the signal-maximizing JPA pump power into "
+            "$jpa.pump_power (dBm) as a draft. Nothing is written without your "
+            "acceptance. Writeback never commands a device or changes the "
+            "current-source value."
         ),
         recommended=(
             "Review the selected RF device and the power sweep bounds before "
@@ -123,7 +123,7 @@ class JpaPowerAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_power",
+                target_name="$jpa.pump_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=req.analyze_result.best_power,
             )

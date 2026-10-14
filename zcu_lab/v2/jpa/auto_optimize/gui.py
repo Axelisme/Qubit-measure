@@ -100,12 +100,11 @@ class JpaAutoOptimizeAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
-            "and pump power into three separate parameter context drafts — "
-            "'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' "
-            "(dBm) — so you can accept, cancel or retarget each one "
-            "independently. Nothing is written without your acceptance, "
-            "writeback never commands a device, and it never touches "
-            "'cur_jpa_A'."
+            "and pump power into three separate drafts: $jpa.flux in "
+            "$jpa.flux_unit coordinates, $jpa.pump_freq (MHz) and "
+            "$jpa.pump_power (dBm). You can accept, cancel or retarget each "
+            "independently. Nothing is written without your acceptance. "
+            "Writeback never commands a device or changes the current-source value."
         ),
         recommended=(
             "For each sweep, start/stop are SEARCH BOUNDS and expts is a "
@@ -152,17 +151,17 @@ class JpaAutoOptimizeAdapter(
         result = req.analyze_result
         return [
             ParameterWriteback(
-                target_name="best_jpa_flux",
+                target_name="$jpa.flux",
                 description="Best JPA flux device value",
                 proposed_value=result.best_flux,
             ),
             ParameterWriteback(
-                target_name="best_jpa_freq",
+                target_name="$jpa.pump_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
             ParameterWriteback(
-                target_name="best_jpa_power",
+                target_name="$jpa.pump_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=result.best_power,
             ),

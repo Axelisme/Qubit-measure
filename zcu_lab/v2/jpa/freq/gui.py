@@ -74,9 +74,9 @@ class JpaFreqAdapter(
             "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
-            "Proposes the signal-maximizing JPA pump frequency into parameter context "
-            "'best_jpa_freq' (MHz) as a draft — it never writes it back without "
-            "your acceptance and never touches 'cur_jpa_A'."
+            "Proposes the signal-maximizing JPA pump frequency into "
+            "$jpa.pump_freq (MHz) as a draft. Nothing is written without your "
+            "acceptance, and writeback never changes the current-source value."
         ),
         recommended=(
             "Review the selected RF device and the sweep bounds before every "
@@ -106,7 +106,7 @@ class JpaFreqAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_freq",
+                target_name="$jpa.pump_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=req.analyze_result.best_freq,
             )

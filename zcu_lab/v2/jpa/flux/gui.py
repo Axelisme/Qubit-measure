@@ -95,9 +95,9 @@ class JpaFluxAdapter(
         ),
         typical_writeback=(
             "Proposes the signal-maximizing JPA flux device value into "
-            "parameter context 'best_jpa_flux' as a draft — it never writes it back "
-            "without your acceptance, never commands the device from the "
-            "writeback, and never touches 'cur_jpa_A'."
+            "$jpa.flux, in $jpa.flux_unit coordinates, as a draft. Nothing is "
+            "written without your acceptance. Writeback never commands the "
+            "device or changes the current-source value."
         ),
         recommended=(
             "Review the selected flux device and the sweep bounds before every "
@@ -129,7 +129,7 @@ class JpaFluxAdapter(
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(
-                target_name="best_jpa_flux",
+                target_name="$jpa.flux",
                 description="Best JPA flux device value",
                 proposed_value=req.analyze_result.best_flux,
             )
