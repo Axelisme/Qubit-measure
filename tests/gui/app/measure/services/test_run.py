@@ -271,7 +271,9 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
-    cfg = make_form(adapter.form, state=state)
+    cfg = make_form(
+        adapter.make_form(FormContext(state.session_env.parameters)), state=state
+    )
     state.get_tab(tab_id).adapter = adapter
     state.get_tab(tab_id).cfg = cfg
     inputs = make_inputs(state, tab_id, adapter)
