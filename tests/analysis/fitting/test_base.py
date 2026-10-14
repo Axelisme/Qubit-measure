@@ -164,6 +164,7 @@ def test_fit_func_warns_when_falling_back_to_init_p(
     def fail_curve_fit(*args, **kwargs):
         raise RuntimeError("no convergence")
 
+    # Valid inputs cannot reliably exhaust SciPy\'s unexposed iteration budget.
     monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fail_curve_fit)
 
     with pytest.warns(RuntimeWarning, match="returning init_p fallback"):
