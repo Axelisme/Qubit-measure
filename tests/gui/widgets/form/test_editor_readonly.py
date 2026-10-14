@@ -244,6 +244,7 @@ def test_text_fields_ignore_typing_but_select_and_copy(
             assert field.isEnabled(), f"{path} must not be greyed out"
             type_text(field, "9")
             key_click(field, Qt.Key.Key_Backspace)
+            key_click(field, Qt.Key.Key_Return)
             assert field.text() == text
             key_click(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             assert field.selectedText() == text
@@ -333,6 +334,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     amount = child(editor, QLineEdit, "form.input.amount")
     key_click(amount, Qt.Key.Key_End)
     type_text(amount, "5")
+    key_click(amount, Qt.Key.Key_Return)
     assert state.input.data["amount"] == 2.05
     # The write keeps the form's shape, so the typed-into field stays.
     assert child(editor, QLineEdit, "form.input.amount") is amount
@@ -342,6 +344,7 @@ def test_enabling_again_restores_every_edit_and_mode_switch(
     label = child(editor, QLineEdit, "form.input.label")
     key_click(label, Qt.Key.Key_End)
     key_click(label, Qt.Key.Key_Backspace)
+    key_click(label, Qt.Key.Key_Return)
     assert state.input.data["label"] == "prob"
 
     choice = child(editor, QComboBox, "form.input.mode")

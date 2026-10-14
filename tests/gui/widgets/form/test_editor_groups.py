@@ -374,9 +374,10 @@ def test_typing_keeps_the_text_field_whatever_the_declaration_order(
     typed = field.text() + "55"
     key_click(field, Qt.Key.Key_End)
     type_text(field, "55")
+    key_click(field, Qt.Key.Key_Return)
     qapp.processEvents()
 
-    # Each key writes the state; a write that keeps the form's shape updates
+    # Enter writes the state; a write that keeps the form's shape updates
     # the row in place, so the field the user types into stays and keeps focus.
     assert child(view, QLineEdit, f"form.input.{path}") is field
     assert field.hasFocus()

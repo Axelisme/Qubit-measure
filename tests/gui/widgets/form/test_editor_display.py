@@ -25,6 +25,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui.widgets.form._text_input import commit_text
+
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
 type Build = Callable[[type[FormModel], dict[str, JsonValue] | None], View]
 
@@ -128,7 +130,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     assert state.input.data["delay"] == 1.23456789
 
     # Typed digits beyond decimals stay as typed and reach the state whole.
-    delay.setText("2.34567")
+    commit_text(delay, "2.34567")
     assert state.input.data["delay"] == 2.34567
     assert delay.text() == "2.34567"
     state.write({("delay",): 4.0}, FormEnv())
@@ -137,7 +139,7 @@ def test_decimals_round_the_shown_number_without_rounding_input(build: Build) ->
     mode = view.findChild(QAction, "form.mode.delay")
     assert isinstance(mode, QAction)
     mode.trigger()
-    child(view, QLineEdit, "form.input.delay").setText("1 / 3")
+    commit_text(child(view, QLineEdit, "form.input.delay"), "1 / 3")
     assert child(view, QLabel, "form.value.delay").text() == "0.333"
 
 
@@ -173,7 +175,7 @@ def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:
 
     view, state = build(HiddenForm, None)
     assert row_names(view, "gain") == []
-    child(view, QLineEdit, "form.input.shown").setText("2.0")
+    commit_text(child(view, QLineEdit, "form.input.shown"), "2.0")
     assert state.input.data == {"shown": 2.0, "gain": 0.5}
     assert view.errors() is None
 
@@ -226,7 +228,9 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_label(view, "ro_cfg") == "Ro cfg"
     assert row_label(view, "labelled") == "Readout"
     assert row_label(view, "drive") == "Drive"
-    assert row_label(view, "drive.module") == "Module"
+    # The inline option holds only an ordinary model, which draws no row.
+    assert row_names(view, "drive.module") == []
+    assert row_label(view, "drive.module.level") == "Level"
     assert row_label(view, "choice") == "Choice"
     state.write({("choice", "kind"): "alpha"}, FormEnv())
     assert row_label(view, "choice") == "Choice"

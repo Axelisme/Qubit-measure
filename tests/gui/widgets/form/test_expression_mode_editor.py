@@ -6,8 +6,8 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, QPoint, Qt, QTimer
-from qtpy.QtGui import QColor, QContextMenuEvent, QKeyEvent
+from qtpy.QtCore import QPoint, QTimer
+from qtpy.QtGui import QColor, QContextMenuEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -30,6 +30,8 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_context import captured_ext_env
+from tests.gui._user_input import type_text
+from tests.gui.widgets.form._text_input import commit_text
 
 
 class Alpha(BaseModel):
@@ -303,16 +305,6 @@ def seed_env() -> FormEnv:
     return captured_ext_env(seed=4321.5)
 
 
-def type_text(edit: QLineEdit, text: str) -> None:
-    """Replace edit's whole text by typing text key by key, without Enter."""
-    edit.selectAll()
-    for char in text:
-        code = Qt.Key(ord(char.upper()))
-        for kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-            event = QKeyEvent(kind, code, Qt.KeyboardModifier.NoModifier, char)
-            QApplication.sendEvent(edit, event)
-
-
 @pytest.mark.parametrize(
     ("path", "expression", "direct", "text"),
     [
@@ -408,6 +400,7 @@ def test_direct_mode_ignores_the_value_of_uncommitted_expression_text(
     state.write({("amount",): {"expr": "1 / 4"}}, seed_env())
     amount = child(view, QLineEdit, "form.input.amount")
 
+    amount.selectAll()
     type_text(amount, "1 / 8")
     batches.clear()
     mode(view, "amount").trigger()
@@ -430,10 +423,7 @@ def test_direct_mode_ignores_the_value_of_rejected_expression_text(
     view, state, batches = fill(seed_env(), reject_doubling)
     state.write({("amount",): {"expr": "1 / 4"}}, seed_env())
     amount = child(view, QLineEdit, "form.input.amount")
-    amount.setText("2 * 4")
-    for kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-        event = QKeyEvent(kind, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
-        QApplication.sendEvent(amount, event)
+    commit_text(amount, "2 * 4")
     batches.clear()
 
     mode(view, "amount").trigger()

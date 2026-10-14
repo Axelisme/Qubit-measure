@@ -26,9 +26,9 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.cfg.codec import decode_complex, encode_complex
-from zcu_tools.gui.form import FormWritePath
+from zcu_tools.gui.form import FormValue, FormWritePath
 from zcu_tools.gui.widgets.cfg.fields.common import (
-    connect_value_widget,
+    connect_committed_value_widget,
     make_value_widget,
     write_value_widget,
 )
@@ -188,6 +188,16 @@ def _parse(field: FieldView, text: str, *, expression: bool) -> JsonValue:
     return _JSON.validate_json(text) if field.kind == "json" else text
 
 
+def _direct_input(value: FormValue) -> JsonValue:
+    """The Direct JSON input of a computed value, complex in its input codec.
+
+    Raises ValueError for a value that has no JSON input, such as infinity.
+    """
+    if isinstance(value, complex):
+        return _JSON.validate_python(encode_complex(value))
+    return _JSON.validate_python(value)
+
+
 def _mixed(base: QColor, accent: QColor, share: float) -> QColor:
     """base moved toward accent by share (0 keeps base, 1 gives accent)."""
     return QColor(
@@ -283,6 +293,9 @@ class FieldRow:
     other rows). value/error are public-named presentation labels, hidden
     while empty: value shows only an Expression-mode resolved value, error
     shows below the header. These controls never own or evaluate form state.
+    Typed text is written when Enter is pressed or the field loses focus,
+    unless it already shows state's input; switching mode writes at once,
+    and switching a computed Expression to Direct writes its computed value.
     While display is called with editable=False the row is read-only: see
     display.
     """
@@ -302,7 +315,9 @@ class FieldRow:
         path is this row's field path. batch maps write paths to JSON input:
         one entry at path (an option row writes its chosen option's value).
         command receives the name of a triggered option command.
-        Callbacks run synchronously for user input, never during display.
+        Callbacks run synchronously for user input, never during display:
+        for text, on Enter or focus loss while the row is editable, and not
+        for text that already shows state's input.
         Child-model rows are built by the editor inside rows.
         folds is the editor's record of user folds by model path (True is
         expanded): a model row starts as folds says, else as the field's
@@ -316,6 +331,8 @@ class FieldRow:
         # The selected option's command actions on the dropdown, in order.
         self._commands: list[QAction] = []
         self._displaying = False
+        # The view-local input this row shows instead of state's, if any.
+        self._local: LocalText | None = None
         self.widget = QWidget(parent)
         # Installed on this row's dropdowns and checkboxes; display sets it.
         self._block = _UserInputBlock(self.widget)
@@ -447,7 +464,9 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
-        connect_value_widget(widget, self._input_changed)
+        # Text commits on Enter or focus loss, not per keystroke; a checkbox
+        # commits each toggle.
+        connect_committed_value_widget(widget, self._input_changed)
 
     def _build_mode(self, widget: QLineEdit) -> QAction:
         """Return the Expression action, listed on widget and after its menu."""
@@ -470,9 +489,47 @@ class FieldRow:
     def _mode_changed(self) -> None:
         if self._displaying:
             return
+        expression = self._expression_selected()
+        self._show_mode(expression=expression)
+        if not expression and self._shows_computed_expression():
+            try:
+                direct = _direct_input(self.field.value)
+            except ValueError:
+                # No JSON input for this value: keep the text, as when the
+                # expression does not compute.
+                pass
+            else:
+                # Direct mode starts from the value the core computed.
+                self._write(direct)
+                return
         # The text stays; it is written again in the new mode.
-        self._show_mode(expression=self._expression_selected())
         self._input_changed()
+
+    def _shows_computed_expression(self) -> bool:
+        """Whether the text field shows state's Expression input, computed.
+
+        Only then is field.value the value of the shown text: uncommitted,
+        unparseable or rejected text differs from state's input, and an
+        expression that does not compute has no preview value.
+        """
+        widget = self.input
+        return (
+            isinstance(widget, QLineEdit)
+            and self._local is None
+            and _expression(self.field)
+            and self.field.has_value
+            and widget.text() == _input_text(self.field)
+        )
+
+    def _shows_state(self, text: str, *, expression: bool) -> bool:
+        """Whether text in the given mode already shows state's input.
+
+        Committing it would write the same input again. A decimals field's
+        rounded text, or typed text equal to its number, also counts.
+        """
+        if self._local is not None or expression != _expression(self.field):
+            return False
+        return text == _input_text(self.field) or _shows_raw(self.field, text)
 
     def _expression_selected(self) -> bool:
         return self.mode is not None and self.mode.isChecked()
@@ -505,10 +562,19 @@ class FieldRow:
         elif isinstance(widget, QLineEdit):
             expression = self._expression_selected()
             text = widget.text()
+            # Focus also leaves when the editor is detached (disabled) or
+            # while the row is read-only; those commit nothing.
+            if (
+                widget.isReadOnly()
+                or not widget.isEnabled()
+                or self._shows_state(text, expression=expression)
+            ):
+                return
             try:
                 parsed = _parse(self.field, text, expression=expression)
             except ValueError as exc:
                 local = LocalText(text, str(exc), expression, section=False)
+                self._local = local
                 self._unparsed(self.field.path, local)
                 return
             self._write(parsed)
@@ -544,6 +610,7 @@ class FieldRow:
         fold stays as built or as the user last set it.
         """
         self.field = field
+        self._local = local
         self._displaying = True
         try:
             self._display_input(local, editable=editable)

@@ -6,8 +6,7 @@ from typing import Annotated
 import pytest
 from pydantic import Field, JsonValue
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent, Qt
-from qtpy.QtGui import QKeyEvent
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QWidget
 from zcu_tools.gui.form import (
     Display,
@@ -18,6 +17,9 @@ from zcu_tools.gui.form import (
     WriteRejected,
 )
 from zcu_tools.gui.widgets.form import FormEditor
+
+from tests.gui._user_input import key_click
+from tests.gui._user_input import type_text as type_keys
 
 
 class CommitForm(FormModel):
@@ -87,23 +89,15 @@ def label(view: QWidget, name: str) -> QLabel:
     return widget
 
 
-def key(widget: QWidget, code: Qt.Key, text: str = "") -> None:
-    """Press and release one key on widget, as a keyboard would."""
-    for kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-        event = QKeyEvent(kind, code, Qt.KeyboardModifier.NoModifier, text)
-        QApplication.sendEvent(widget, event)
-
-
 def type_text(edit: QLineEdit, text: str) -> None:
     """Replace edit's whole text by typing text key by key, without Enter."""
     edit.selectAll()
-    for char in text:
-        key(edit, Qt.Key(ord(char.upper())), char)
+    type_keys(edit, text)
 
 
 def press_enter(edit: QLineEdit) -> None:
     """Press Enter in edit."""
-    key(edit, Qt.Key.Key_Return)
+    key_click(edit, Qt.Key.Key_Return)
 
 
 def focus(widget: QWidget) -> None:
