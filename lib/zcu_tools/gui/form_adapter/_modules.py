@@ -132,6 +132,30 @@ def _inline_kinds(annotation: object) -> tuple[type[BaseModel], ...]:
     )
 
 
+def _module_options(
+    keys: tuple[tuple[str, OptionCommand], ...],
+    kinds: list[tuple[type[BaseModel], type[BaseModel]]],
+    *,
+    nullable: bool,
+) -> tuple[Option, ...]:
+    """Format ordered None/ref/inline selections from caller-owned fields/commands."""
+    options = [Option("None", None)] if nullable else []
+    options.extend(
+        Option(key, {"kind": "ref", "name": key}, commands=(command,))
+        for key, command in keys
+    )
+    for kind, fields in kinds:
+        tag, value = _spec_tag(kind)
+        options.append(
+            Option(
+                "Inline" if len(kinds) == 1 else f"Inline: {value}",
+                {"kind": "inline", "module": {tag: value}},
+                fields=fields,
+            )
+        )
+    return tuple(options)
+
+
 def _spec_options(
     model: type[BaseModel],
     env: FormEnv,
@@ -142,9 +166,7 @@ def _spec_options(
         specs = _key_specs(info.annotation)
         if not specs:
             continue
-        options = (
-            [Option("None", None)] if type(None) in members(info.annotation) else []
-        )
+        key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if env.library is not None and any(
             isinstance(member, type) and issubclass(member, KeyRef)
             for member in members(info.annotation)
@@ -154,20 +176,17 @@ def _spec_options(
                 env.library.waveform_keys() if waveform else env.library.module_keys()
             )
             read = env.library.waveform_spec if waveform else env.library.module_spec
-            options.extend(
-                Option(
+            key_commands = tuple(
+                (
                     key,
-                    {"kind": "ref", "name": key},
-                    commands=(
-                        OptionCommand(
-                            "to_inline",
-                            "Convert to inline",
-                            partial(
-                                _copy_spec,
-                                key,
-                                _inline_kinds(spec_annotation(info.annotation)),
-                                waveform=waveform,
-                            ),
+                    OptionCommand(
+                        "to_inline",
+                        "Convert to inline",
+                        partial(
+                            _copy_spec,
+                            key,
+                            _inline_kinds(spec_annotation(info.annotation)),
+                            waveform=waveform,
                         ),
                     ),
                 )
@@ -178,8 +197,8 @@ def _spec_options(
         wrapper = inline_wrapper(info.annotation)
         if wrapper is None:
             raise TypeError("Spec options require a tagged inline wrapper")
+        kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
         for kind in kinds:
-            tag, value = _spec_tag(kind)
             key = (wrapper, kind)
             fields = inline_fields.get(key)
             if fields is None:
@@ -187,14 +206,10 @@ def _spec_options(
                     f"{kind.__name__}Fields", __base__=wrapper, module=(kind, ...)
                 )
                 inline_fields[key] = fields
-            options.append(
-                Option(
-                    "Inline" if len(kinds) == 1 else f"Inline: {value}",
-                    {"kind": "inline", "module": {tag: value}},
-                    fields=fields,
-                )
-            )
-        declared[(name,)] = tuple(options)
+            kind_fields.append((kind, fields))
+        declared[(name,)] = _module_options(
+            key_commands, kind_fields, nullable=type(None) in members(info.annotation)
+        )
     return declared
 
 
@@ -613,26 +628,22 @@ class ModuleField:
         describe the selected inline wrapper and omit its structural tags.
         Empty kinds have no editable content and do not get an Inline selection.
         """
-        options = [Option("None", None)] if self.nullable else []
+        key_commands: tuple[tuple[str, OptionCommand], ...] = ()
         if not self.locks and env.library is not None:
-            options.extend(
-                Option(
+            key_commands = tuple(
+                (
                     key,
-                    {"kind": "ref", "name": key},
-                    commands=(
-                        OptionCommand(
-                            "to_inline",
-                            "Convert to inline",
-                            partial(self.copy_input, key),
-                        ),
+                    OptionCommand(
+                        "to_inline",
+                        "Convert to inline",
+                        partial(_copy_spec, key, self.editable, waveform=False),
                     ),
                 )
                 for key in env.library.module_keys()
                 if isinstance(env.library.module_spec(key), self.ref_specs)
             )
-        kinds = _inline_kinds(union_type(self.editable))
-        for kind in kinds:
-            tag, value = _spec_tag(kind)
+        kind_fields: list[tuple[type[BaseModel], type[BaseModel]]] = []
+        for kind in _inline_kinds(union_type(self.editable)):
             fields = self._inline_fields.get(kind)
             if fields is None:
                 fields = create_model(
@@ -641,30 +652,8 @@ class ModuleField:
                     module=(kind, ...),
                 )
                 self._inline_fields[kind] = fields
-            options.append(
-                Option(
-                    "Inline" if len(kinds) == 1 else f"Inline: {value}",
-                    {"kind": "inline", "module": {tag: value}},
-                    fields=fields,
-                )
-            )
-        return tuple(options)
-
-    def copy_input(self, key: str, env: FormEnv) -> dict[str, JsonValue]:
-        """Copy an allowed captured key into inline input, without prior draft data.
-
-        Child keys remain references. Unsupported fields are discarded and locks
-        restored. Missing or incompatible sources fail before any write.
-        """
-        copied = _copy_spec(key, self.editable, env, waveform=False)
-        module = copied["module"]
-        if not isinstance(module, dict):
-            raise TypeError("Copied module input must be an object")
-        selected = selected_model(union_type(self.editable), module)
-        raw = persistent_input(selected, module)
-        for path, value in self.locks.items():
-            set_path(raw, path, scalar_seed(value))
-        return {"kind": "inline", "module": supported_input(selected, raw)}
+            kind_fields.append((kind, fields))
+        return _module_options(key_commands, kind_fields, nullable=self.nullable)
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
         template = (
@@ -722,7 +711,9 @@ class ModuleField:
                 )
             if not self.node.copy and not self.locks:
                 return {"kind": "ref", "name": key}
-            model = self._editable_for(spec.type)
+            model = next(
+                model for model in self.editable if type_tag(model) == spec.type
+            )
             module = persistent_input(
                 model,
                 supported_input(model, spec.model_dump(mode="json", exclude_none=True)),
@@ -749,9 +740,6 @@ class ModuleField:
         return supported_input(
             selected_model(union_type(self.editable), module), module
         )
-
-    def _editable_for(self, tag: str) -> type[BaseModel]:
-        return next(model for model in self.editable if type_tag(model) == tag)
 
     def read(self, raw: JsonValue, env: FormEnv) -> ModuleValues | FormErrors:
         """Evaluate only this module, then materialize against its fixed capture.
