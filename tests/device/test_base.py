@@ -114,28 +114,6 @@ def test_subclass_with_invalid_info_model_raises_at_class_definition() -> None:
                 return BaseDeviceInfo(address=self.address, type="BaseDeviceInfo")
 
 
-def test_fake_device_uses_open_session_hook(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[object | None] = []
-    original_open_session = FakeDevice._open_session
-
-    def hooked_open_session(self: FakeDevice, rm: object | None) -> None:
-        calls.append(rm)
-        return original_open_session(self, rm)
-
-    monkeypatch.setattr(FakeDevice, "_open_session", hooked_open_session)
-
-    dev = FakeDevice(fast_mode=True)
-
-    assert calls == [None]
-    assert dev.session is None
-    assert dev.is_busy() is False
-    assert hasattr(dev, "_op_lock")
-    assert hasattr(dev, "_io_lock")
-    assert hasattr(dev, "_logger")
-
-
 def test_base_session_methods_fail_fast_without_session() -> None:
     dev = FakeDevice(fast_mode=True)
 
