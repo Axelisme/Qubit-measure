@@ -15,6 +15,18 @@ measure adapter 的表單由 `cfg_definition()` 用 builder 逐欄宣告。core 
 
 ## 決策
 
+### Adapter 黑箱與捕捉來源
+
+使用者於 2026-10-14 定案：「感覺怪怪的，理論上對框架來說，adapter內是黑盒子，不該知道裡面是實驗」「兩個都同意，adaper就是一個黑盒子」。
+
+框架只要求 adapter 的 `make_form(ctx)` 回傳 `Form[C]`，並把該 Form 驗證後的輸出原封不動交給 `run` 與 `validate_run_request`。泛型連起 Form 輸出與 consumer 參數。框架不知道這份輸出是實驗 cfg，不檢查具體型別，也不重新驗證。`ExpCfg_cls` 與 `BaseAdapter.build_exp_cfg` 的重複驗證退休。Adapter 自己處理輸出與 extras。框架保存快照時只把輸出當可序列化模型。
+
+`form.py` 統一提供 `make_form(ctx)`，取代固定 `FORM`。`ctx.has(ref)` 只查詢捕捉的 library 或 alias 參照是否存在。缺來源、缺 key 或未綁 alias 回 False，來源故障仍 raise。Ctx 只持有這個查詢需要的來源，不帶 adapter 名稱，也不提供 has_value。函式使用一般 Python if／else 決定初值與形狀，取代 Slot fallback 節點。
+
+Make_form 照常回傳 `Form(Cfg, tree)`，不把 ctx 傳進 Form。框架在 Open 與 Reset 捕捉來源、呼叫 make_form，再綁定範本目錄並驗證。Edit、preview 與 Run 使用既有捕捉，不呼叫 make_form 或 refresh。啟動與 registry register 不做範本預檢。Reset 可同時換形狀與初值，memento 不符時沿既有 best-effort 規則丟棄。
+
+持久範本目錄仍是固定資料。`bath_reset.pi2_cfg` 使用 `Slot("{qubit}.module.x90")`，有 x90 時保留引用，缺 x90 時留空並標 Invalid。使用者於 2026-10-14 接受這個差異：「A是理想，但目前沒有用的話就C」。目前不加入函式型範本，第二個需要依 ctx 選來源的範本出現時再討論。
+
 ### 一個實驗三個檔
 
 | 檔案 | 內容 | 依賴 |

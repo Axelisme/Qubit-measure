@@ -401,6 +401,33 @@ class ParameterContext:
             # Direct roots are valid keys even before an entry is created.
         return resolved
 
+    def has_library_key(self, path: str) -> bool:
+        """Test a captured library root or module slot without materializing it.
+
+        path uses the same direct-key, slot and $alias grammar as library_key.
+        Missing roots, unset/dangling slots and missing/unbound aliases return
+        False. Invalid syntax, other alias errors and source failures propagate.
+        The fixed point/library are never refreshed, changed or expanded.
+        """
+        try:
+            key = self.library_key(path)
+        except ModuleSlotError:
+            return False
+        except RoleResolutionError as exc:
+            if exc.reason in (
+                "Unknown alias",
+                "Alias is not bound",
+                "Role is not bound",
+            ):
+                return False
+            raise
+        kind = "waveform" if key.split(".")[1] == "waveforms" else "module"
+        try:
+            self._library.entry_value(key, kind=kind)
+        except KeyError:
+            return False
+        return True
+
     def _library_path(self, resolved: str) -> str | None:
         parts = resolved.split(".")
         if len(parts) < 2 or parts[0] == "general":
