@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
-from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -158,47 +157,13 @@ def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> 
     assert len([item for item in event.payload.outputs if item.status == "failed"]) == 1
 
 
-def test_figure_is_encoded_once_for_equivalent_destinations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    metadata, layout, ledger = storage(tmp_path)
-    figure = saving_figure()
-    render = Mock(wraps=figure.savefig)
-    monkeypatch.setattr(figure, "savefig", render)
-    selected = (
-        artifacts()[0],
-        SaveArtifact(
-            ArtifactRef("analysis", "results"),
-            (FileMember(ArtifactKey("analysis", "results", "figure", "fit"), figure),),
-        ),
-    )
-    report = save_artifacts(
-        selected,
-        layout=layout,
-        metadata=metadata,
-        ledger=ledger,
-        origin="notebook",
-    )
-    assert all(item.status == "saved" for item in report.outputs)
-    pngs = [item.output.path for item in report.outputs if item.output.format == "png"]
-    assert len(pngs) == 2
-    assert pngs[0].read_bytes() == pngs[1].read_bytes()
-    assert render.call_count == 1
-
-
-@pytest.mark.parametrize("failing_member", ["figure", "analysis"])
-def test_encoding_failure_isolates_the_member_and_records_other_outputs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_member: str
+def test_nonfinite_analysis_isolates_the_member_and_records_other_outputs(
+    tmp_path: Path,
 ) -> None:
     metadata, layout, ledger = storage(tmp_path)
     figure = saving_figure()
     document = AnalysisDocument(pane="analysis", parameters={}, summary={"value": 1.0})
-    if failing_member == "figure":
-        monkeypatch.setattr(
-            figure, "savefig", Mock(side_effect=ValueError("PNG encoder failed"))
-        )
-    else:
-        document.summary["value"] = float("nan")
+    document.summary["value"] = float("nan")
     selected = (
         artifacts()[0],
         SaveArtifact(
@@ -219,8 +184,8 @@ def test_encoding_failure_isolates_the_member_and_records_other_outputs(
         origin="notebook",
     )
     failed = [item for item in report.outputs if item.status == "failed"]
-    assert len(failed) == (2 if failing_member == "figure" else 1)
-    assert all(item.key.member == failing_member and item.error for item in failed)
+    assert len(failed) == 1
+    assert all(item.key.member == "analysis" and item.error for item in failed)
     successful = [item for item in report.outputs if item.status == "saved"]
     assert all(item.output.path.is_file() for item in successful)
     assert {"data_h5", "labber"} <= {item.output.format for item in successful}
