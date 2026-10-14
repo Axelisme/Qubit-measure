@@ -12,11 +12,17 @@ from zcu_tools.resources.entry.registry import ComponentRegistry
 from zcu_lab.components import register_all as register_components
 from zcu_lab.v2.fake.freq.form import FORM as FAKE_FREQ_FORM
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
+from zcu_lab.v2.jpa.auto_optimize.form import FORM as JPA_AUTO_OPTIMIZE_FORM
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
+from zcu_lab.v2.jpa.check.form import FORM as JPA_CHECK_FORM
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
+from zcu_lab.v2.jpa.flux.form import FORM as JPA_FLUX_FORM
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
+from zcu_lab.v2.jpa.flux_onetone.form import FORM as JPA_FLUX_ONETONE_FORM
 from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
+from zcu_lab.v2.jpa.freq.form import FORM as JPA_FREQ_FORM
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
+from zcu_lab.v2.jpa.power.form import FORM as JPA_POWER_FORM
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
 from zcu_lab.v2.lookback.form import FORM as LOOKBACK_FORM
 from zcu_lab.v2.lookback.gui import LookbackAdapter
@@ -140,6 +146,12 @@ FORMS: dict[str, Form[ConfigBase]] = {
     "onetone/power_dep": ONETONE_POWER_DEP_FORM,
     "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
     "twotone/freq": TWOTONE_FREQ_FORM,
+    "jpa/freq": JPA_FREQ_FORM,
+    "jpa/flux": JPA_FLUX_FORM,
+    "jpa/power": JPA_POWER_FORM,
+    "jpa/auto_optimize": JPA_AUTO_OPTIMIZE_FORM,
+    "jpa/flux_onetone": JPA_FLUX_ONETONE_FORM,
+    "jpa/check": JPA_CHECK_FORM,
 }
 
 

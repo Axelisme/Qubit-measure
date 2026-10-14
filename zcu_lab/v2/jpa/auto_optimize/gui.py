@@ -27,27 +27,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import alias_name_seed, custom
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
     JPAOptimizeResult,
 )
-from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
-from zcu_lab.v2.jpa.freq.gui import jpa_freq_sweep_seed
-from zcu_lab.v2.jpa.power.gui import jpa_power_sweep_seed
+from zcu_lab.v2.jpa.auto_optimize.form import FORM
 
 JpaAutoRunResult = RunRecord[JPAOptCfg, JPAOptimizeResult]
-
-# Bring-up iteration budget (contract: GUI default may use 1001).
-_JPA_AUTO_NUM_POINTS_DEFAULT = 1001
 
 
 def _relabel_auto_figure(fig: Figure) -> None:
@@ -77,6 +66,7 @@ class JpaAutoOptimizeAdapter(
     experiment_tag: ClassVar[str | None] = AutoOptimizeExp.persistence_tag()
     exp_cls = AutoOptimizeExp
     ExpCfg_cls: ClassVar[Any] = JPAOptCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -91,25 +81,30 @@ class JpaAutoOptimizeAdapter(
             "limits."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. "
+            "Search bounds use $jpa.flux, $jpa.pump_freq and $jpa.pump_power. The "
+            "required JPA flux device resolves flux_dev once at Open or Reset; select "
+            "the connected RF device in the form. RF defaults capture jpa_rf_dev "
+            "at Open or Reset; an unbound alias leaves the optional field empty. "
+            "flux_unit starts as A with no "
+            "conversion. Missing required aliases or calibration leave the form "
+            "Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Module slots use $qubit.module.x180, $qubit.module.readout and optional "
+            "$qubit.module.reset. Missing pi/readout slots fall back to the "
+            "pi_pulse/readout templates. Inline pulse calibration uses $qubit.freq and "
+            "$qubit.wiring.L01.ch; inline readout uses resonator frequency/wiring and "
+            "$resonator.ext.time_of_fly + 0.05. An unset reset slot disables reset. "
+            "Missing required fallback calibration leaves the form Invalid."
         ),
         typical_writeback=(
             "Proposes the signal-maximizing flux device value, pump frequency "
-            "and pump power into three separate parameter context drafts — "
-            "'best_jpa_flux', 'best_jpa_freq' (MHz) and 'best_jpa_power' "
-            "(dBm) — so you can accept, cancel or retarget each one "
-            "independently. Nothing is written without your acceptance, "
-            "writeback never commands a device, and it never touches "
-            "'cur_jpa_A'."
+            "and pump power into three separate drafts: $jpa.flux in "
+            "$jpa.flux_unit coordinates, $jpa.pump_freq (MHz) and "
+            "$jpa.pump_power (dBm). You can accept, cancel or retarget each "
+            "independently. Nothing is written without your acceptance. "
+            "Writeback never commands a device or changes the current-source value."
         ),
         recommended=(
             "For each sweep, start/stop are SEARCH BOUNDS and expts is a "
@@ -122,82 +117,6 @@ class JpaAutoOptimizeAdapter(
             "evaluated point with no tuning knobs."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        sweep_label = "Search bounds + relative resolution hints"
-        sweep_tooltip = (
-            "Start/stop set this axis's search bounds. Expts is a relative "
-            "resolution hint compared with the other axes when allocating "
-            "phase-1 flux slices; it is not a Cartesian or exact sample count."
-        )
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(30.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .device(
-                "jpa_flux_dev",
-                label="JPA flux device",
-                default=alias_name_seed("flux_dev"),
-                required=False,
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .sweep(
-                "jpa_flux",
-                label="JPA flux device value",
-                default=custom(
-                    jpa_flux_sweep_seed,
-                    description="jpa flux device value search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .sweep(
-                "jpa_freq",
-                label="JPA pump freq (MHz)",
-                default=custom(
-                    jpa_freq_sweep_seed,
-                    description="jpa pump frequency search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .sweep(
-                "jpa_power",
-                label="JPA pump power (dBm)",
-                default=custom(
-                    jpa_power_sweep_seed,
-                    description="jpa pump power search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .int(
-                "num_points",
-                label="Global optimizer points",
-                default=_JPA_AUTO_NUM_POINTS_DEFAULT,
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(1000)
-            .rounds(1)
-            .build()
-        )
 
     def validate_run_request(
         self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
@@ -232,17 +151,17 @@ class JpaAutoOptimizeAdapter(
         result = req.analyze_result
         return [
             ParameterWriteback(
-                target_name="best_jpa_flux",
+                target_name="$jpa.flux",
                 description="Best JPA flux device value",
                 proposed_value=result.best_flux,
             ),
             ParameterWriteback(
-                target_name="best_jpa_freq",
+                target_name="$jpa.pump_freq",
                 description="Best JPA pump frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
             ParameterWriteback(
-                target_name="best_jpa_power",
+                target_name="$jpa.pump_power",
                 description="Best JPA pump power (dBm)",
                 proposed_value=result.best_power,
             ),
