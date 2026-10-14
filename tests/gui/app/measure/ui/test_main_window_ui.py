@@ -53,6 +53,7 @@ from zcu_tools.resources.entry import (
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import configure_form_lookup, make_form
 from tests.gui.app.measure.ui._artifact_snapshots import ready_figures, with_artifacts
+from tests.gui.widgets.form._text_input import commit_text
 
 
 @pytest.fixture
@@ -473,7 +474,7 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(control_factory, qapp):
     )
     reps = tab.findChild(QLineEdit, "form.input.reps")
     assert reps is not None
-    reps.setText("many")
+    commit_text(reps, "many")
     tab.update_interaction_state(
         _snapshot(
             "tab-1",
@@ -2468,12 +2469,12 @@ def run_form(
 
 
 def edit_run_input(fx: RunFormFixture, text: str) -> None:
-    """Replace the Value text; the editor parses each text change."""
+    """Replace the Value text and press Enter; the editor parses each commit."""
     fx.line.setFocus()
-    fx.line.setText(text)
+    commit_text(fx.line, text)
 
 
-def test_run_uses_the_input_published_while_typing(
+def test_run_uses_the_input_published_on_commit(
     run_form: RunFormFixture,
 ) -> None:
     fx = run_form
@@ -2570,7 +2571,7 @@ def test_reset_replaces_published_input_with_defaults(
     tab = fx.window.findChildren(ExpTabWidget)[0]
     line = tab.findChild(QLineEdit, "form.input.value")
     assert line is not None
-    line.setText("3.5")
+    commit_text(line, "3.5")
     assert fx.owner.accept().values == {"value": 3.5}
     tab.reset_btn.click()
     line = tab.findChild(QLineEdit, "form.input.value")

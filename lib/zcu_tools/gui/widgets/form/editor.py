@@ -31,11 +31,16 @@ type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None]
 class FormEditor[F: FormModel](QWidget):
     """Edit a caller-owned FormState on the Qt GUI thread, without submitting it.
 
-    The editor borrows state and the host-captured env. Parsed input writes the
-    state immediately, or goes to the host's write callable (see __init__);
-    unparseable text and host-rejected input remain local and block editor
-    validity. Evaluation, choices, branch defaults and model validation belong
-    to state.
+    The editor borrows state and the host-captured env. A text field commits
+    its text when the user presses Enter or the field loses focus, not on each
+    keystroke; text that already shows the state's input writes nothing, and
+    read-only rows commit nothing. Checkboxes, dropdowns, Enabled boxes and the
+    Expression action write at once. Committed parsed input writes the state,
+    or goes to the host's write callable (see __init__); committed unparseable
+    text and host-rejected input remain local and block editor validity.
+    Uncommitted text changes neither state nor validity, and an external state
+    publication redraws it with the state's input. Evaluation, choices, branch
+    defaults and model validation belong to state.
     No Engine update, revision check, source capture, persistence or I/O occurs.
 
     Public child object names use model-field paths joined by dots:

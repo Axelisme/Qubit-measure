@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import JsonValue
 from PyQt6.QtGui import QAction
-from qtpy.QtCore import QEvent
+from qtpy.QtCore import QEvent, Qt
 from qtpy.QtWidgets import (
     QApplication,
     QLabel,
@@ -45,13 +45,14 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui._user_input import type_text
+from tests.gui._user_input import key_click, type_text
 from tests.gui.app.measure._form_fakes import (
     LookupCfg,
     configure_form_lookup,
     make_form,
 )
 from tests.gui.app.measure.ui._artifact_snapshots import with_artifacts
+from tests.gui.widgets.form._text_input import commit_text
 
 CAPABILITIES = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
 
@@ -157,13 +158,13 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     assert view.input("gain").text() == "0.1"
     assert view.tab.run_btn.isEnabled()
 
-    view.input("gain").setText("0.45")
+    commit_text(view.input("gain"), "0.45")
 
     assert view.resource.input.data["gain"] == 0.45
     assert view.resource.result() == LookupCfg(gain=0.45)
     assert published == [{"reps": 100, "rounds": 10, "gain": 0.45}]
 
-    view.input("reps").setText("many")
+    commit_text(view.input("reps"), "many")
     view.actions.refresh_interaction.assert_called_with("tab-1")
     view.tab.update_interaction_state(snapshot())
 
@@ -174,7 +175,7 @@ def test_editor_input_reaches_the_resource_and_validity_gates_run(
     reason = view.tab.cfg_invalid_reason()
     assert reason is not None and "reps" in reason
 
-    view.input("reps").setText("7")
+    commit_text(view.input("reps"), "7")
     view.tab.update_interaction_state(snapshot())
 
     assert view.resource.result() == LookupCfg(reps=7, gain=0.45)
@@ -195,6 +196,7 @@ def test_busy_tab_locks_editing_and_reset_until_idle(
     assert gain.isEnabled() and gain.isReadOnly()
     gain.selectAll()
     type_text(gain, "0.9")
+    key_click(gain, Qt.Key.Key_Return)
     assert gain.selectedText() == original
     assert gain.text() == original
     assert view.resource.input.data["gain"] == original_gain
@@ -209,7 +211,7 @@ def test_busy_tab_locks_editing_and_reset_until_idle(
 
     assert gain.isEnabled() and not gain.isReadOnly()
     assert view.tab.reset_btn.isEnabled()
-    gain.setText("0.3")
+    commit_text(gain, "0.3")
     assert view.resource.input.data["gain"] == 0.3
 
 
@@ -275,8 +277,8 @@ def test_reset_shows_fresh_defaults_and_later_edits_still_reach_the_resource(
 ) -> None:
     presenter = RecordingDialogPresenter(confirm_answers=[True])
     view = open_tab(presenter)
-    view.input("gain").setText("0.45")
-    view.input("rounds").setText("3")
+    commit_text(view.input("gain"), "0.45")
+    commit_text(view.input("rounds"), "3")
 
     view.tab.reset_btn.click()
 
@@ -286,7 +288,7 @@ def test_reset_shows_fresh_defaults_and_later_edits_still_reach_the_resource(
     assert view.input("rounds").text() == "10"
     view.actions.refresh_interaction.assert_called_with("tab-1")
 
-    view.input("gain").setText("0.2")
+    commit_text(view.input("gain"), "0.2")
 
     assert view.resource.input.data["gain"] == 0.2
     assert view.resource.result() == LookupCfg(gain=0.2)

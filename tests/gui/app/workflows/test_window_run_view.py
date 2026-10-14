@@ -328,7 +328,9 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
             return
         wait_for(qapp, lambda: badge(window) == "running")
         before = (plan.state.input.data, knobs.state.input.data)
-        type_text(child(plan, QLineEdit, "form.input.count"), "9")
+        locked_count = child(plan, QLineEdit, "form.input.count")
+        type_text(locked_count, "9")
+        key_click(locked_count, Qt.Key.Key_Return)
         alpha = child(plan, QLineEdit, "form.input.first.alpha")
         folded_before = not alpha.isVisibleTo(plan)
         model_fold(plan, "first").click()
@@ -366,6 +368,7 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
     count = child(plan, QLineEdit, "form.input.count")
     key_click(count, Qt.Key.Key_End)
     type_text(count, "9")
+    key_click(count, Qt.Key.Key_Return)
     assert plan.state.input.data["count"] == int(count.text())
 
 
