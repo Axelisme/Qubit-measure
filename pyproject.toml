@@ -93,6 +93,9 @@ where = ["lib", "."]
 include = ["zcu_tools", "zcu_tools.*", "zcu_lab", "zcu_lab.*"]
 namespaces = true
 
+[tool.setuptools.package-data]
+"zcu_lab" = ["**/*.md", "**/*.png", "**/*.jpg"]
+
 [tool.ruff.lint]
 # E402 is checked incrementally like other existing debt. Entry points with
 # intentional import ordering retain their local, reviewable suppressions.

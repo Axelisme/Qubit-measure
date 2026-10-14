@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -56,37 +56,7 @@ class DualToneLengthAdapter(
     exp_cls = LengthExp
     ExpCfg_cls: ClassVar[Any] = LengthCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Dual-tone reset length sweep: holds the tested two-pulse reset at "
-            "its calibrated sideband frequencies and gains and sweeps its "
-            "duration (both tones together), showing how the residual "
-            "excitation decays with reset length. Runs on real hardware. Run "
-            "last, to pick the shortest length that fully resets the qubit."
-        ),
-        expects_md=(
-            "Requires $qubit.ext.reset_f1/reset_f2 and "
-            "$qubit.ext.reset_gain1/reset_gain2 for the tested frequencies "
-            "and gains. Missing, null or invalid values fail cfg lowering. "
-            "Other drive defaults use captured qubit frequency and wiring."
-        ),
-        expects_ml=(
-            "Builds the tested two-pulse-reset cfg from captured defaults and "
-            "needs a readout module. Optionally references an upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
-        ),
-        typical_writeback=(
-            "No automatic writeback. Analysis plots the length response "
-            "without fitting a length. Choose the length manually; "
-            "DualTonePower proposes the tested reset module."
-        ),
-        recommended=(
-            "A length sweep from ~0.05 us to a few times the expected reset "
-            "time captures the full decay; shorten the span once the plateau "
-            "is clear."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

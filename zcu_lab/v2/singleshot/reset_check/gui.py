@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -54,13 +54,7 @@ class SsResetCheckAdapter(
     experiment_tag: ClassVar[str | None] = ResetCheckExp.persistence_tag()
     exp_cls = ResetCheckExp
     ExpCfg_cls: ClassVar[Any] = ResetCheckCfg
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior="Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves classified G/E populations; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.",
-        expects_md="Freezes g_center / e_center / radius from resolved cfg. Set calibration directly or seed defaults with singleshot/ge writeback; invalid calibration fails before hardware. Optionally uses confusion_matrix for analysis correction. Reads pi_gain and t1 for defaults.",
-        expects_ml="Needs rabi_pulse, tested_reset and readout. Optional upstream reset prepares the initial state.",
-        typical_writeback="No writeback. Reports reset-only mean and worst sampled excited population and maximum Other fraction. No raw-IQ readout refit or histogram confidence intervals.",
-        recommended="Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other is not calibrated leakage; population estimates are not reset-channel fidelity.",
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

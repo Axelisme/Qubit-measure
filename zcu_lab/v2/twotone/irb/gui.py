@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -56,28 +56,7 @@ class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult, NoAnalyzePa
 
     exp_cls = IRB_Exp
     ExpCfg_cls: ClassVar[type[IRBCfg]] = IRBCfg
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Paired single-qubit IRB: reference and interleaved arms share random "
-            "Cliffords, each with its own full inverse. Depth counts random Cliffords; "
-            "interleaved inserts one target per Clifford. Hardware sweeps depth and "
-            "repetitions; software visits rounds, seeds and alternating arm order. "
-            "Raw IQ has fixed axes round/seed/arm/depth, arm 0=reference, 1=interleaved."
-        ),
-        expects_md="Uses 5*t1 relaxation (us), fallback 200 us.",
-        expects_ml="Uses calibrated X90/X180 and readout modules. Y gates use phase-shifted X pulses.",
-        typical_writeback=(
-            "No writeback. Fits both A*p**depth+B curves on a common IQ projection. "
-            "Reports target error=(1-p_interleaved/p_reference)/2 and fidelity. "
-            "95% paired-seed bootstrap is statistical only; coherent or gate-dependent "
-            "noise can bias this estimate. Nonphysical estimates are reported unclipped."
-        ),
-        recommended=(
-            "Default target X90. Use at least 4 distinct depths spanning decay and "
-            "20 or more seeds for uncertainty. Start with a short execution check. "
-            "Analysis uses complete round/seed pairs; unfinished raw IQ is still saved."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

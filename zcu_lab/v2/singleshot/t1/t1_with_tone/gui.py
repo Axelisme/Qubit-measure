@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -70,47 +70,7 @@ class SsT1ToneAdapter(
     exp_cls = T1WithToneExp
     ExpCfg_cls: ClassVar[Any] = T1WithToneCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot T1-with-tone: applies a π pulse and a simultaneous "
-            "probe tone during the wait, sweeps the wait-plus-probe length, "
-            "and classifies each shot in-program against the |g>/|e> IQ-cluster "
-            "centres. Plots the ground / excited / other populations versus "
-            "delay time with dual-transition-rate fits for T1 and T1_b. The "
-            "fitted T1 value is written back to 't1_with_tone' in the parameter context. "
-            "Runs on real hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. "
-            "Optionally reads 'confusion_matrix' to readout-correct populations "
-            "at analyze time; 't1_with_tone' or 't1' to seed the sweep stop "
-            "(5*t1_with_tone when present, else 5*t1; fallback 500 us); "
-            "'t1' seeds relax delay (5*t1; fallback 100 us); 'q_f' / "
-            "'qub_ch' for the pi pulse; 'readout_f' or 'r_f' plus "
-            "'res_ch' seed the probe tone; "
-            "'r_f' / 'res_ch' / 'ro_ch' / 'timeFly' for readout."
-        ),
-        expects_ml=(
-            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-            "readout module. Optional reset and optional init pulse (both "
-            "disabled when no library entry exists)."
-        ),
-        typical_writeback=(
-            "Proposes the fitted T1 relaxation time under the probe tone into "
-            "parameter context 't1_with_tone' (us)."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "Use 'uniform=False' (default) to "
-            "cluster points along the expected exponential decay while preserving "
-            "the configured window and point count; use 'uniform=True' for a "
-            "linear sweep. The probe-tone gain and frequency are set inside the "
-            "probe_pulse module."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
