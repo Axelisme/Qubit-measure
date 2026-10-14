@@ -5,7 +5,10 @@ from collections.abc import Iterator
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QObject, Qt
 from qtpy.QtWidgets import QApplication, QLabel, QMessageBox, QTextEdit, QWidget
-from zcu_tools.gui.widgets.selectable_text import install_selectable_message_boxes
+from zcu_tools.gui.widgets.selectable_text import (
+    install_selectable_message_boxes,
+    make_label_selectable,
+)
 
 SELECTABLE = (
     Qt.TextInteractionFlag.TextSelectableByMouse
@@ -84,3 +87,25 @@ def test_repeated_install_returns_the_installed_selector(
     qapp: QApplication, selector: QObject
 ) -> None:
     assert install_selectable_message_boxes(qapp) is selector
+
+
+def test_made_selectable_label_accepts_mouse_selection(qapp: QApplication) -> None:
+    del qapp
+    label = QLabel("192.168.0.10")
+
+    make_label_selectable(label)
+
+    flags = label.textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+
+
+def test_made_selectable_label_keeps_existing_link_access(qapp: QApplication) -> None:
+    del qapp
+    label = QLabel('<a href="https://example.com">link</a>')
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
+
+    make_label_selectable(label)
+
+    flags = label.textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert flags & Qt.TextInteractionFlag.LinksAccessibleByMouse
