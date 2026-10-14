@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,6 +11,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
+from zcu_tools.gui.app.measure.catalog_loader import (
+    SourceExperimentCatalogLoader,
+    SourcePackage,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
@@ -19,9 +26,14 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
+from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry.aliases import EntryAliases
 
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui.app.measure.remote._helpers import FixtureController
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
 @contextmanager
@@ -112,3 +124,100 @@ def test_invalid_caller_preset_fails_at_composition(
         ),
     ):
         pytest.fail("Duplicate caller aliases must not construct a session")
+
+
+NAMED_PRESETS = {
+    "default": (AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
+    "probe": (AliasRow("probe", "Q2"), AliasRow("spare", "")),
+}
+
+
+@pytest.mark.parametrize("saved", [None, (), (AliasRow("saved", "R1"),)])
+def test_named_default_initializes_only_entries_without_saved_aliases(
+    saved: tuple[AliasRow, ...] | None, tmp_path: Path, qapp: QApplication
+) -> None:
+    before = registry_state()
+    try:
+        register_fakes()
+        installed = registry_state()
+        entry = ResultEntry.create(
+            "sample",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        entry.setup.add_component("Q1", kind="fake/drive/a", sense="R1")
+        entry.setup.add_component("R1", kind="fake/sensor")
+        entry.new_point("first")
+        if saved is not None:
+            entry.save_aliases(
+                EntryAliases(aliases={row.alias: row.value for row in saved})
+            )
+        try:
+            controller = FixtureController(
+                state=State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+                registry=Registry(),
+                view=None,
+                bus=BaseEventBus(),
+                project_root=str(tmp_path),
+                alias_presets=NAMED_PRESETS,
+            )
+        except TypeError as error:
+            pytest.fail(f"Public composition must accept named alias presets: {error}")
+        try:
+            context = controller.context_control
+            assert context.get_alias_rows() == NAMED_PRESETS["default"]
+            controller.setup_control.open_entry(EntryRequest("sample"))
+            assert context.get_alias_rows() == (
+                NAMED_PRESETS["default"] if saved is None else saved
+            )
+            context.use_point(PointUseRequest("first"))
+            expected = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
+            assert context.get_alias_rows() == (expected if saved is None else saved)
+        finally:
+            controller.quiesce()
+            qapp.processEvents()
+        assert registry_state() == installed
+    finally:
+        restore_registry(before)
+
+
+def registry_factory() -> tuple[Registry, SourceExperimentCatalogLoader]:
+    registry = Registry()
+    loader = SourceExperimentCatalogLoader(
+        sources=(SourcePackage("tests.gui.app.measure", Path(__file__).parents[1]),),
+        reload_modules=("tests.gui.app.measure._synthetic",),
+        preserved_modules=(),
+        catalog_module="tests.gui.app.measure._synthetic",
+        current_registry=registry,
+    )
+    return registry, loader
+
+
+@pytest.mark.parametrize("presets", [NAMED_PRESETS, {"default": ()}, None])
+def test_measure_behavior_retains_complete_named_presets(
+    presets: dict[str, tuple[AliasRow, ...]] | None,
+) -> None:
+    original_sys, original_thread = sys.excepthook, threading.excepthook
+    try:
+        try:
+            behavior = MeasureGuiBehavior(registry_factory, alias_presets=presets)
+        except TypeError as error:
+            pytest.fail(f"Public composition must accept named alias presets: {error}")
+        assert behavior.alias_presets == presets
+    finally:
+        sys.excepthook, threading.excepthook = original_sys, original_thread
+
+
+@pytest.mark.parametrize("presets", [{}, {"probe": (AliasRow("probe", "Q2"),)}])
+def test_measure_behavior_rejects_catalog_without_default(
+    presets: dict[str, tuple[AliasRow, ...]],
+) -> None:
+    original_sys, original_thread = sys.excepthook, threading.excepthook
+    try:
+        with pytest.raises(ValueError, match="default"):
+            try:
+                MeasureGuiBehavior(registry_factory, alias_presets=presets)
+            except TypeError as error:
+                pytest.fail(f"Named alias preset admission is missing: {error}")
+    finally:
+        sys.excepthook, threading.excepthook = original_sys, original_thread
