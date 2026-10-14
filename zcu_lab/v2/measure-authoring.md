@@ -179,17 +179,16 @@ guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 未宣告路徑時回「尚未撰寫」預設文字，目錄為 `None`；已宣告但缺檔時 raise。
 GUI / MCP 只使用這個公開契約。
 
-GUI 以 GitHub Markdown 顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
-行內 `$...$` 與獨立一行的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
-`\$` 表示字面金錢符號。本機圖片以相對於 guide 目錄的路徑引用，例如
+GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
+行內 `$...$` 與獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
+`\$` 表示字面金錢符號。Code span、code block 與連結網址內的 `$` 保留原文。本機圖片以相對於 guide 目錄的路徑引用，例如
 `![Pulse sequence](pulse.png)`。GUI 支援 PNG／JPG，過寬圖片縮到分頁寬度，
 不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
 Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。
 
-撰寫 guide 時注意三項限制：
+撰寫 guide 時注意兩項限制：
 
-- 圖片一定要寫 alt 文字，例如 `![Pulse](pulse.png)`；alt 為空的圖片 GUI 不顯示。
-- 程式碼一律用 fenced code block（```）。Fenced block 與 code span 保留原文；四空格縮排的 code block 內的 `$...$` 會被當成數學式。
+- 網址寫成 `<https://...>` 或 `[文字](網址)`。GUI 不把裸網址當成連結，裸網址內的 `$...$` 會被當成數學式。
 - GUI 只把外部連結交給系統瀏覽器；相對的 `.md` 連結不解析。
 
 Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時同步維護 guide 與資源。
