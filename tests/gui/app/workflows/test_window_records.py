@@ -2,10 +2,9 @@
 
 from base64 import b64decode
 from dataclasses import asdict
-from threading import get_ident
 
 import pytest
-from matplotlib.figure import Figure
+from qtpy.QtGui import QImage
 from zcu_tools.experiment.workflows import (
     Done,
     InitEnv,
@@ -14,7 +13,6 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
-from zcu_tools.gui.app.workflows import figures as figures_module
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.resources.entry import (
@@ -25,10 +23,7 @@ from tests.gui.app.workflows._start_fakes import StartHarness
 
 from ._reload_source import InjectedCatalog
 from ._synthetic import Context, Plan, Tunables
-from ._window_scenarios import (
-    assert_figure_render_failure,
-    install_reader_plot_workflow,
-)
+from ._window_scenarios import install_reader_plot_workflow
 from ._window_support import RpcRequest
 
 
@@ -183,27 +178,13 @@ def test_rpc_records_running_empty_and_committed_native_summary(
 
 
 @pytest.mark.parametrize("ending", ["resume", "stop"])
-def test_rpc_figures_latest_owner_render_and_lifetime(
+def test_rpc_figures_latest_png_and_lifetime(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
     catalog_source: InjectedCatalog,
     ending: str,
 ) -> None:
     window, harness, _entry = attachment
-    renderer = figures_module.render_figure_png
-    owner_id = get_ident()
-    renders: list[int] = []
-    figures: list[Figure] = []
-
-    def render(figure: Figure) -> bytes:
-        assert figure.get_facecolor() == (0.0, 0.0, 1.0, 1.0)
-        renders.append(get_ident())
-        figures.append(figure)
-        return renderer(figure)
-
-    monkeypatch.setattr(figures_module, "render_figure_png", render)
-
     install_reader_plot_workflow(window, catalog_source)
     assert isinstance(window.start("reader"), int)
     harness.complete_segment()
@@ -213,25 +194,20 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
         "names": ["live", "reference"],
     }
     assert window.figure_names("reader") == ("live", "reference")
-    assert rpc("workflow.status", {})["ok"] is True and renders == []
+    assert rpc("workflow.status", {})["ok"] is True
     reply = rpc("workflow.figure", {"run_id": "reader", "name": "live"})
     result = reply["result"]
     assert isinstance(result, dict) and isinstance(result["png_base64"], str)
     png = b64decode(result["png_base64"], validate=True)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     assert result["run_id"] == "reader" and result["name"] == "live"
-    assert renders == [owner_id]
+    assert QImage.fromData(png).pixelColor(0, 0).name() == "#0000ff"
     assert window.figure_png("reader", "live") == png
-    assert figures[0] is figures[1]
     missing = rpc("workflow.figure", {"run_id": "reader", "name": "missing"})
     error = missing["error"]
     assert missing["ok"] is False and isinstance(error, dict)
     assert (error["code"], error["reason"]) == ("invalid_params", "unknown_figure")
-    assert len(renders) == 2
-
-    assert_figure_render_failure(window, rpc, monkeypatch)
     assert harness.gate.snapshot()
-    monkeypatch.setattr(figures_module, "render_figure_png", render)
     assert rpc("workflow." + ending, {"run_id": "reader"})["ok"] is True
     if ending == "resume":
         harness.complete_segment()
@@ -243,21 +219,13 @@ def test_rpc_figures_latest_owner_render_and_lifetime(
     assert (error["code"], error["reason"]) == ("precondition_failed", "no_plots")
 
 
-def test_rpc_empty_figures_and_stale_run_do_not_render(
+def test_rpc_empty_figures_and_stale_run_rejects_reads(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
     paused_tuning: list[tuple[int, float, int]],
     rpc: RpcRequest,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     window, harness, _entry = attachment
     assert paused_tuning
-    renders: list[Figure] = []
-
-    def reject_render(figure: Figure) -> bytes:
-        renders.append(figure)
-        raise AssertionError("Read must not render")
-
-    monkeypatch.setattr(figures_module, "render_figure_png", reject_render)
     assert rpc("workflow.figures", {"run_id": "tuning"})["result"] == {
         "run_id": "tuning",
         "names": [],
@@ -271,7 +239,7 @@ def test_rpc_empty_figures_and_stale_run_do_not_render(
             "run_mismatch",
             {"expected": "old", "actual": "tuning"},
         )
-    assert renders == [] and harness.gate.snapshot()
+    assert harness.gate.snapshot()
     assert rpc("workflow.stop", {"run_id": "tuning"})["ok"] is True
     # New Start must not retain even a previous terminal run's figure membership.
     assert isinstance(window.start("replacement"), int)

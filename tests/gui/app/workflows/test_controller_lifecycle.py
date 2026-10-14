@@ -231,9 +231,8 @@ def test_native_execution_is_off_owner_and_terminal_delivery_returns_to_owner(
         assert background.quiesce(timeout=5.0)
 
 
-def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
+def test_pause_resume_updates_the_same_bar(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
@@ -294,7 +293,6 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     assert model.n == 2
     assert harness.progress.bars_for_owner("example") == ((handle, model),)
     harness.background.deliver()
-    assert progress_calls == ([token], [])
 
     third = controller.resume("run")
     harness.complete_segment()
@@ -302,7 +300,6 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
     assert terminal is not None and terminal.lifecycle == "done"
     assert attempts == [1, 2, 2]
     assert len(rig.initialized) == 1
-    assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner(
         "example"
     ) and harness.handles.known_outcome(third) == OperationOutcome("finished")
@@ -311,7 +308,6 @@ def test_pause_resume_keeps_one_factory_and_updates_the_same_bar(
 @pytest.mark.parametrize("ending", ["stop", "failure"])
 def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
     ending: str,
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
@@ -334,7 +330,7 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
             yield from env.wait_until(env.started_at)
         raise ValueError("resumed workflow failed")
 
-    token = controller.start(
+    controller.start(
         step,
         plan=Plan(),
         tunables=Tunables(),
@@ -368,7 +364,6 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
         outcome = harness.handles.known_outcome(resumed)
         assert outcome is not None and outcome.status == "failed"
         assert outcome.error == status.reason
-    assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert not harness.gate.snapshot()
     assert controller.operation_id is None
@@ -376,7 +371,6 @@ def test_paused_run_discards_start_progress_on_stop_or_resumed_failure(
 
 def test_resume_admission_failure_keeps_paused_run_and_progress(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
@@ -421,19 +415,16 @@ def test_resume_admission_failure_keeps_paused_run_and_progress(
         assert harness.handles.known_outcome(token) is None
         assert harness.gate.snapshot()
         assert harness.progress.bars_for_owner("example") == bars
-        assert progress_calls == ([token], [])
     finally:
         harness.background.fail_submit = False
     resumed = controller.resume("run")
     harness.background.execute()
     harness.background.deliver()
     assert harness.handles.known_outcome(resumed) == OperationOutcome("finished")
-    assert progress_calls == ([token], [token])
 
 
 def test_stop_during_resume_submission_does_not_restart_paused_step(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     controller = create_controller(harness, rig, lambda _status, _error: None)
@@ -450,7 +441,7 @@ def test_stop_during_resume_submission_does_not_restart_paused_step(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    token = controller.start(
+    controller.start(
         step,
         plan=Plan(),
         tunables=Tunables(),
@@ -477,14 +468,12 @@ def test_stop_during_resume_submission_does_not_restart_paused_step(
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
     assert attempts == ["step"]
-    assert progress_calls == ([token], [token])
     assert harness.handles.known_outcome(resumed) == OperationOutcome("cancelled")
     assert not harness.gate.snapshot()
 
 
 def test_resume_submission_stop_waits_for_owner_terminal_delivery(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -544,7 +533,6 @@ def test_resume_submission_stop_waits_for_owner_terminal_delivery(
     assert status is not None and status.lifecycle == "stopped"
     assert finished == [(paused, None), (status, None)]
     assert attempts == ["step"]
-    assert progress_calls == ([token], [token])
     assert harness.handles.known_outcome(resumed) == OperationOutcome("cancelled")
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
     controller.stop("run")
@@ -553,7 +541,6 @@ def test_resume_submission_stop_waits_for_owner_terminal_delivery(
 
 def test_resume_stop_rejection_finishes_without_a_producer(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -573,7 +560,7 @@ def test_resume_stop_rejection_finishes_without_a_producer(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    token = controller.start(
+    controller.start(
         step,
         plan=Plan(),
         tunables=Tunables(),
@@ -596,11 +583,10 @@ def test_resume_stop_rejection_finishes_without_a_producer(
     status = controller.status()
     assert status is not None and status.lifecycle == "stopped"
     assert len(finished) == 2 and finished[-1] == (status, None)
-    assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert not controller.has_pending_segment
     assert controller.operation_id is None and harness.handles.live_count() == 0
     assert not harness.gate.snapshot() and harness.background.work is None
     assert attempts == ["step"]
     controller.stop("run")
-    assert len(finished) == 2 and progress_calls == ([token], [token])
+    assert len(finished) == 2

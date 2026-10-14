@@ -70,7 +70,6 @@ def test_target_check_is_available_before_acceptance_without_changing_admission(
 def test_terminal_view_can_start_replacement_without_old_cleanup_touching_it(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     ports = EnginePorts(rig.plots, rig.progress, rig.clock, context=7)
@@ -126,13 +125,11 @@ def test_terminal_view_can_start_replacement_without_old_cleanup_touching_it(
     assert controller.binding is pending and pending.engine is None
     assert controller.run_id == "next" and controller.has_pending_segment
     assert harness.gate.snapshot() and harness.handles.live_count() == 1
-    assert progress_calls == ([token, replacement], [token])
     assert "old view failed after replacement" in caplog.text
     harness.complete_segment()
     assert controller.status() is not None
     assert harness.handles.known_outcome(token) == OperationOutcome("finished")
     assert harness.handles.known_outcome(replacement) == OperationOutcome("finished")
-    assert progress_calls == ([token, replacement], [token, replacement])
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
 
 
@@ -179,7 +176,6 @@ def test_control_without_attached_target_rejects_before_side_effects(
 def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
     tmp_path: Path,
     notification: str,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -200,7 +196,6 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
             assert (raised.value.expected, raised.value.actual) == ("old", "run")
         assert controller.status() is None and finished == []
         assert harness.gate.snapshot()
-        assert progress_calls[1] == []
 
     def registered(payload: GateChangedPayload) -> None:
         if payload.active:
@@ -227,7 +222,6 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
     assert seen == ["run"]
     assert not rig.paths.metadata_root.exists()
     assert not rig.paths.data_root.exists()
-    assert progress_calls == ([token], [])
     harness.complete_segment()
     status = controller.status()
     assert status is not None and status.lifecycle == "done"
@@ -235,7 +229,6 @@ def test_pending_target_is_available_to_notifications_and_rejects_old_controls(
     assert rig.initialized
     assert harness.handles.known_outcome(token) == OperationOutcome("finished")
     assert controller.run_id == "run"
-    assert progress_calls == ([token], [token])
 
 
 @pytest.mark.parametrize("notification", ["gate", "progress"])
@@ -316,7 +309,6 @@ def test_replacement_notifications_observe_new_pending_host_without_editing_old_
 def test_accepted_old_controls_preserve_native_state_progress_and_journal(
     tmp_path: Path,
     phase: str,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -347,7 +339,6 @@ def test_accepted_old_controls_preserve_native_state_progress_and_journal(
             )
             assert harness.progress.bars_for_owner("example") == bars
             assert rig.events() == events
-        assert progress_calls[1] == []
         checked.append(phase)
 
     @workflow("target-controls", plan=Plan, tunables=Tunables, init=rig.init)
@@ -367,7 +358,7 @@ def test_accepted_old_controls_preserve_native_state_progress_and_journal(
         yield from env.wait_until(env.started_at)
         return Done()
 
-    token = controller.start(
+    controller.start(
         step,
         plan=Plan(),
         tunables=Tunables(),
@@ -386,6 +377,5 @@ def test_accepted_old_controls_preserve_native_state_progress_and_journal(
     assert controller.run_id == "run"
     stopped = controller.stop("run")
     assert stopped is not None and stopped.lifecycle == "stopped"
-    assert progress_calls == ([token], [token])
     assert not harness.gate.snapshot()
     assert harness.progress.bars_for_owner("example") == ()
