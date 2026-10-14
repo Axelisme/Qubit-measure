@@ -60,7 +60,11 @@ Commit `65dcb64e2b404ff869507e292dbf45fbb1c9726b` 於 2025-11-12 有意在 forwa
 
 T1 修正涵蓋 fast／slow forward、pointwise Qcap／Qind／Qqp，以及使用這些 helper 的 fitting 和 channel curves。驗證使用公開計算與擬合入口，不測 private functions。至少保留一個 SI／解析絕對時間 reference；fast 對 slow 的相等和由同一 helper 產生資料再擬合，都不足以證明單位正確。
 
-Purcell 在非零有效耦合且有可用衰減通道時，零溫仍須有 spontaneous emission。Bosonic bath 的 upward factor 是 n_B，downward factor 是 n_B+1。熱人口使用 hν/(k_B T)。修正須以 dressed-state transition 的能量方向建立 rates，不能只根據 creation／annihilation operator 的名稱猜測方向。
+Purcell 在非零有效耦合且有可用衰減通道時，零溫仍須有 spontaneous emission。熱人口使用 hν/(k_B T)。2026-10-14，使用者以「那選A吧」採用保留原模型的修正：以 dressed-state energy difference 篩選方向，能量上升只用 a† 與 n_B，能量下降只用 a 與 n_B+1。不改成完整 X=a+a† bath，也不將兩個 operator 的全方向 rates 分開相加。
+
+Purcell helper 保留 e→g、resonator thermal-averaged escape lifetime 的既有語意，不自動改成 equilibrium relaxation 1/(Γeg+Γge)。此處 upward／downward 描述整體 dressed-state 能量交換，不代表已將 qubit 的正反向 relaxation rates 合併。Detailed balance 以 matched transition pair 驗證，不對多頻率 thermal aggregate 假定單一 Boltzmann ratio。
+
+原 helper 的公式註解與 2025-07-16 commit `9b7ed611c` 的舊 `notebook_md/analysis/percell.md` 都記有 a†/n_B 與 a/(n_B+1)。目前未找到論文引用；保留這份原公式，不宣稱已核實其來源論文。
 
 2026-10-14，使用者對兩票拆分、測試接縫及 kappa 建議回答「可以」。Purcell 的 kappa 表示 linewidth κ/(2π)，輸入單位 GHz；例如 0.001 表示 1 MHz linewidth。進入 rate sum 時使用 2π kappa，單位 ns⁻¹，不把輸入直接當成 decay rate κ。驗收包含零溫 spontaneous decay、有限溫度 detailed balance 與獨立弱耦合 reference。
 
