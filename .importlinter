@@ -164,7 +164,7 @@ forbidden_modules =
     zcu_tools.gui.version_table
 
 # ---------------------------------------------------------------------------
-# docs/adr/draft/module-boundaries.md: package roles and dependency direction.
+# ADR-0072 (docs/adr/0072-module-boundaries.md): package roles and dependency direction.
 # Debt baselines list exact module pairs, each group naming who removes it.
 # Wildcards appear only for legitimate exceptions marked "not debt".
 # ---------------------------------------------------------------------------
