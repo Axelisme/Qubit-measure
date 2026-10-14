@@ -57,19 +57,43 @@ from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAdapter
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAdapter
 from zcu_lab.v2.twotone.rb.gui import RBAdapter
+from zcu_lab.v2.twotone.reset.bath.freq.form import FORM as RESET_BATH_FREQ_FORM
 from zcu_lab.v2.twotone.reset.bath.freq.gui import BathFreqGainAdapter
+from zcu_lab.v2.twotone.reset.bath.length.form import FORM as RESET_BATH_LENGTH_FORM
 from zcu_lab.v2.twotone.reset.bath.length.gui import BathLengthAdapter
+from zcu_lab.v2.twotone.reset.bath.phase.form import FORM as RESET_BATH_PHASE_FORM
 from zcu_lab.v2.twotone.reset.bath.phase.gui import BathPhaseAdapter
+from zcu_lab.v2.twotone.reset.dual_tone.freq.form import (
+    FORM as RESET_DUAL_TONE_FREQ_FORM,
+)
 from zcu_lab.v2.twotone.reset.dual_tone.freq.gui import DualToneFreqAdapter
+from zcu_lab.v2.twotone.reset.dual_tone.length.form import (
+    FORM as RESET_DUAL_TONE_LENGTH_FORM,
+)
 from zcu_lab.v2.twotone.reset.dual_tone.length.gui import DualToneLengthAdapter
+from zcu_lab.v2.twotone.reset.dual_tone.power.form import (
+    FORM as RESET_DUAL_TONE_POWER_FORM,
+)
 from zcu_lab.v2.twotone.reset.dual_tone.power.gui import DualTonePowerAdapter
+from zcu_lab.v2.twotone.reset.rabi_check.form import FORM as RESET_RABI_CHECK_FORM
 from zcu_lab.v2.twotone.reset.rabi_check.gui import RabiCheckAdapter
+from zcu_lab.v2.twotone.reset.single_tone.freq.form import (
+    FORM as RESET_SINGLE_TONE_FREQ_FORM,
+)
 from zcu_lab.v2.twotone.reset.single_tone.freq.gui import SingleToneFreqAdapter
+from zcu_lab.v2.twotone.reset.single_tone.length.form import (
+    FORM as RESET_SINGLE_TONE_LENGTH_FORM,
+)
 from zcu_lab.v2.twotone.reset.single_tone.length.gui import SingleToneLengthAdapter
+from zcu_lab.v2.twotone.ro_optimize.auto_optimize.form import FORM as RO_OPT_AUTO_FORM
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import RoOptAutoAdapter
+from zcu_lab.v2.twotone.ro_optimize.freq.form import FORM as RO_OPT_FREQ_FORM
 from zcu_lab.v2.twotone.ro_optimize.freq.gui import RoOptFreqAdapter
+from zcu_lab.v2.twotone.ro_optimize.freq_gain.form import FORM as RO_OPT_FREQ_GAIN_FORM
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import RoOptFreqGainAdapter
+from zcu_lab.v2.twotone.ro_optimize.length.form import FORM as RO_OPT_LENGTH_FORM
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
+from zcu_lab.v2.twotone.ro_optimize.power.form import FORM as RO_OPT_POWER_FORM
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
@@ -146,6 +170,20 @@ FORMS: dict[str, Form[ConfigBase]] = {
     "onetone/power_dep": ONETONE_POWER_DEP_FORM,
     "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
     "twotone/freq": TWOTONE_FREQ_FORM,
+    "twotone/reset/single_tone/freq": RESET_SINGLE_TONE_FREQ_FORM,
+    "twotone/reset/single_tone/length": RESET_SINGLE_TONE_LENGTH_FORM,
+    "twotone/reset/dual_tone/freq": RESET_DUAL_TONE_FREQ_FORM,
+    "twotone/reset/dual_tone/length": RESET_DUAL_TONE_LENGTH_FORM,
+    "twotone/reset/dual_tone/power": RESET_DUAL_TONE_POWER_FORM,
+    "twotone/reset/bath/freq_gain": RESET_BATH_FREQ_FORM,
+    "twotone/reset/bath/length": RESET_BATH_LENGTH_FORM,
+    "twotone/reset/bath/phase": RESET_BATH_PHASE_FORM,
+    "twotone/reset/check": RESET_RABI_CHECK_FORM,
+    "twotone/ro_optimize/freq": RO_OPT_FREQ_FORM,
+    "twotone/ro_optimize/power": RO_OPT_POWER_FORM,
+    "twotone/ro_optimize/length": RO_OPT_LENGTH_FORM,
+    "twotone/ro_optimize/freq_gain": RO_OPT_FREQ_GAIN_FORM,
+    "twotone/ro_optimize/auto": RO_OPT_AUTO_FORM,
     "jpa/freq": JPA_FREQ_FORM,
     "jpa/flux": JPA_FLUX_FORM,
     "jpa/power": JPA_POWER_FORM,
