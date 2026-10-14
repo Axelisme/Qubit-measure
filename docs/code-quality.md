@@ -84,7 +84,7 @@ interface 驗證結果。只有呼叫順序本身屬於契約時，才把順序�
 例如，驗證量測取消應檢查約定的終止狀態與資源釋放，而不是固定私有 helper 的呼叫次數。
 測試行數、mock 數量、coverage 或有無 `assert` 都不能單獨證明測試有效。
 
-宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/draft/module-boundaries.md#分層)。
+宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/0072-module-boundaries.md#分層)。
 
 ### 讓變更可以獨立審查
 
