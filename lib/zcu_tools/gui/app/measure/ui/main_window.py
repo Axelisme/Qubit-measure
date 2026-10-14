@@ -168,7 +168,11 @@ class MainWindow(QMainWindow):
         # --- status bar ---
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("Ready")
+        # A label, not showMessage(): QStatusBar paints its own message text,
+        # which users cannot select or copy.
+        self._status_label = QLabel("Ready")
+        make_label_selectable(self._status_label)
+        self._status_bar.addWidget(self._status_label, 1)
 
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
@@ -597,7 +601,7 @@ class MainWindow(QMainWindow):
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
-        self._status_bar.showMessage(message)
+        self._status_label.setText(message)
 
     def show_error_dialog(self, title: str, message: str) -> None:
         self._dialog_presenter.critical(self, title, message)
@@ -1002,7 +1006,7 @@ class MainWindow(QMainWindow):
             "tab_ids": state_tab_ids,
             "entry_label": self._entry_label.text(),
             "point_label": self._point_label.text(),
-            "status": self._status_bar.currentMessage() if self._status_bar else "",
+            "status": self._status_label.text(),
             "open_dialogs": [name.value for name in self.list_open_dialogs()],
         }
 
