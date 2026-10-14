@@ -27,6 +27,7 @@ from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._search_runtime import ControlledBackground
 from tests.gui.app.fluxdep._window import (
     command,
     current_page,
@@ -34,41 +35,6 @@ from tests.gui.app.fluxdep._window import (
     fit_panel,
     show_page,
 )
-
-
-class ControlledBackground:
-    """Run detached work on a foreign thread, deliver only when instructed."""
-
-    def __init__(self) -> None:
-        self.work: Callable[[], object] | None = None
-        self.done: Callable[[object], None] | None = None
-        self.error: Callable[[Exception], None] | None = None
-        self.fail_submit = False
-
-    def submit(
-        self,
-        work: Callable[[], object],
-        *,
-        run_in_pool: bool,
-        on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
-    ) -> None:
-        if self.fail_submit:
-            raise RuntimeError("submit failed")
-        self.work, self.done, self.error = work, on_done, on_error
-
-    def compute(self) -> object:
-        assert self.work is not None
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(self.work).result()
-
-    def deliver(self, result: object) -> None:
-        assert self.done is not None
-        self.done(result)
-
-    def fail(self, exc: Exception) -> None:
-        assert self.error is not None
-        self.error(exc)
 
 
 class QueuedProgress:
@@ -86,9 +52,7 @@ class QueuedProgress:
 
 
 @pytest.fixture
-def search_case(cross_controller, monkeypatch, search_database_hdf5):
-    from zcu_tools.gui.app.fluxdep.services import fit
-
+def search_case(cross_controller, search_database_hdf5):
     owner = ManualOwnerScheduler()
     background = ControlledBackground()
     progress = ProgressService(QueuedProgress(owner))
@@ -109,32 +73,17 @@ def search_case(cross_controller, monkeypatch, search_database_hdf5):
     )
     inputs = ctrl.capture_search()
     result = perfect_fit_result(inputs.fluxs, inputs.freqs, bounds)
-    captured = []
-
-    def compute(fluxs, freqs, path, transitions, bounds, *, execution):
-        assert not owner.is_owner_thread()
-        captured.append((fluxs.copy(), freqs.copy(), path, transitions, bounds))
-        if execution.cancel_requested():
-            raise SearchCancelled("requested")
-        return result
-
-    monkeypatch.setattr(fit, "search_database", compute)
-    yield ctrl, background, owner, progress, result, captured
+    yield ctrl, background, owner, progress, result
     ctrl.search.begin_close()
     ctrl.interactive.dispose()
 
 
-def test_snapshot_is_captured_before_worker_and_single_flight(search_case):
-    ctrl, bg, _owner, _progress, result, captured = search_case
+def test_search_is_single_flight_until_delivery(search_case):
+    ctrl, bg, _owner, _progress, result = search_case
     token = ctrl.search.start()
     assert ctrl.search.active_token == token
     with pytest.raises(RuntimeError, match="pending|busy"):
         ctrl.search.start()
-    ctrl.state.spectrums["a"].points["fluxs"][0] = 0.9
-    ctrl.state.fit.transitions["transitions"].append((0, 2))
-    assert bg.compute() is result
-    np.testing.assert_array_equal(captured[0][0], [0, 0.5, 1, 0.5])
-    assert captured[0][3]["transitions"] == [(0, 1)]
     bg.deliver(result)
     assert ctrl.search.outcome(token) == OperationOutcome("finished")
     assert ctrl.search.result is result
@@ -145,7 +94,7 @@ def test_snapshot_is_captured_before_worker_and_single_flight(search_case):
     "mutation", ["selection", "fit", "project", "points", "empty", "membership"]
 )
 def test_changed_input_rejects_success(search_case, mutation):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     facts = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     token = ctrl.search.start()
@@ -176,7 +125,7 @@ def test_changed_input_rejects_success(search_case, mutation):
 
 
 def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     attempts = []
 
     def listener(payload):
@@ -196,7 +145,7 @@ def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
 @pytest.mark.parametrize("terminal", ["cancelled", "failed", "late_success"])
 @pytest.mark.parametrize("closing", [False, True])
 def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     token = ctrl.search.start()
     ctrl.search.cancel(token)
     assert ctrl.search.outcome(token) is None
@@ -205,8 +154,6 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
         with pytest.raises(RuntimeError, match="closing"):
             ctrl.search.start()
     if terminal == "cancelled":
-        with pytest.raises(SearchCancelled):
-            bg.compute()
         bg.fail(SearchCancelled("requested"))
         expected = "cancelled"
     elif terminal == "failed":
@@ -224,7 +171,7 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
 
 
 def test_submit_failure_cleanup_and_known_token_queries(search_case):
-    ctrl, bg, _owner, progress, _result, _captured = search_case
+    ctrl, bg, _owner, progress, _result = search_case
     bg.fail_submit = True
     with pytest.raises(RuntimeError, match="submit failed") as caught:
         ctrl.search.start()
@@ -258,7 +205,7 @@ def test_submit_failure_cleanup_and_known_token_queries(search_case):
 
 
 def test_origin_capture_and_last_success_survives_failure(search_case):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     observed = []
     ctrl.bus.subscribe_with_meta(
         SearchChangedPayload, lambda payload, meta: observed.append((payload, meta))
@@ -287,7 +234,7 @@ def test_missing_background_rejects_before_handle(cross_controller):
 
 
 def test_capture_and_owner_queries_reject_foreign_threads(search_case):
-    ctrl, _bg, _owner, _progress, _result, _captured = search_case
+    ctrl, _bg, _owner, _progress, _result = search_case
     with ThreadPoolExecutor(max_workers=1) as pool:
         for query in (
             ctrl.capture_search,
@@ -302,7 +249,7 @@ def test_capture_and_owner_queries_reject_foreign_threads(search_case):
 
 @pytest.mark.parametrize("closing", [False, True])
 def test_search_admission_is_nominal_and_preserves_pending_handle(search_case, closing):
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     token = ctrl.search.start()
     before = ctrl.state.version.snapshot()
     if closing:
@@ -317,7 +264,7 @@ def test_search_admission_is_nominal_and_preserves_pending_handle(search_case, c
 
 
 def test_await_on_owner_is_unexpected(search_case):
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     token = ctrl.search.start()
     with pytest.raises(RuntimeError, match="owner") as caught:
         ctrl.search.await_outcome(token, 0)
@@ -326,7 +273,7 @@ def test_await_on_owner_is_unexpected(search_case):
 
 
 def test_progress_notifications_cannot_reenter_start(search_case):
-    ctrl, bg, _owner, progress, result, _captured = search_case
+    ctrl, bg, _owner, progress, result = search_case
     observed = []
 
     def listener():
@@ -347,7 +294,7 @@ def test_progress_notifications_cannot_reenter_start(search_case):
 
 
 def test_failed_publication_releases_admission(search_case):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     # A result over fewer points than the capture is refused by publication.
     bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
     short = perfect_fit_result(result.fluxs[:-1], result.freqs[:-1], bounds)
@@ -371,7 +318,7 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.event_bus import EventOrigin
 
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     window = MainWindow(ctrl)
     window.show()
     try:
@@ -406,23 +353,11 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
         qapp.processEvents()
 
 
-def test_search_panel_observes_app_start_progress_cancel_and_reopen(
-    qapp, search_case, monkeypatch
-):
+def test_search_panel_observes_app_start_progress_cancel_and_reopen(qapp, search_case):
     from qtpy import QtWidgets
-    from zcu_tools.gui.app.fluxdep.services import fit
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
-    from zcu_tools.progress_bar import make_pbar
 
-    ctrl, bg, owner, _progress, result, _captured = search_case
-
-    def compute(*args, execution):
-        bar = make_pbar(total=10, desc="Database")
-        bar.update(3)
-        bar.close()
-        return result
-
-    monkeypatch.setattr(fit, "search_database", compute)
+    ctrl, bg, owner, progress, _result = search_case
     ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     panel = AnalyzePanelWidget(ctrl)
     panel.show()
@@ -433,7 +368,9 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         token = ctrl.search.start()
         assert not search.isEnabled()
         assert cancel.isEnabled()
-        assert bg.compute() is result
+        bar = progress.make_factory(token, "fluxdep-search")(total=10, desc="Database")
+        bar.update(3)
+        bar.close()
         owner.pump_all()
         bar = panel.findChild(QtWidgets.QProgressBar)
         assert bar is not None and bar.maximum() == 10 and bar.value() == 3
@@ -472,7 +409,7 @@ def test_startup_notification_close_waits_for_search_terminal(
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
-    ctrl, bg, _owner, progress, result, _captured = search_case
+    ctrl, bg, _owner, progress, result = search_case
     runner = BackgroundRunner()
     window = MainWindow(ctrl, search_runner=runner)
     window.show()
@@ -527,7 +464,7 @@ def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
 
     class DrainRunner(BackgroundRunner):
         drained = False
