@@ -347,17 +347,13 @@ def test_v1_dispatch_uses_dmem_table_no_pmem_stubs():
 
 
 def test_v1_dmem_dispatch_tables_deduplicated():
-    """The resolve step dedupes DmemAddr by table_labels value.
+    """The pipeline dedupes DmemAddr by table_labels value.
 
     Two dispatch instructions referencing identical entry-label tuples must
     share a single dmem table; differing tuples get distinct tables.
     """
     from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, DmemAddr, Immediate
-    from zcu_tools.program.v2.ir.pipeline import (
-        PipeLineConfig,
-        PipeLineContext,
-        _resolve_dmem_dispatch,
-    )
+    from zcu_tools.program.v2.ir.pipeline import IRPipeLine
 
     labels_a = tuple(Label(f"a{i}") for i in range(4))
     labels_b = tuple(Label(f"b{i}") for i in range(3))
@@ -374,13 +370,14 @@ def test_v1_dmem_dispatch_tables_deduplicated():
         )
 
     # Two blocks reference labels_a (must dedup), one references labels_b.
-    chunks = [
+    chunks: list[BasicBlockNode | MetaInst] = [
         _dispatch_block(labels_a),
         _dispatch_block(labels_b),
         _dispatch_block(labels_a),
     ]
-    ctx = PipeLineContext(config=PipeLineConfig(), pmem_budget=1024, dmem_base_offset=7)
-    _resolve_dmem_dispatch(chunks, ctx)
+    out, ctx = IRPipeLine(PipeLineConfig(), [], [])(
+        IRLexer().flatten(chunks), dmem_base_offset=7
+    )
 
     # labels_a + labels_b → exactly 2 tables (labels_a shared by 2 blocks).
     assert len(ctx.dmem_tables) == 2
@@ -390,8 +387,7 @@ def test_v1_dmem_dispatch_tables_deduplicated():
     # The two labels_a blocks resolved to the same base; allocation starts at
     # dmem_base_offset (7); labels_b follows after labels_a's 4 words.
     bases: list[int] = []
-    for b in chunks:
-        inst = b.insts[0]
+    for inst in out:
         assert isinstance(inst, RegWriteInst)
         op = inst.op
         assert isinstance(op, AluExpr) and isinstance(op.rhs, Immediate)
