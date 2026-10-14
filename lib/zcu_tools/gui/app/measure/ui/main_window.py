@@ -36,6 +36,7 @@ from zcu_tools.gui.project import nearest_existing
 from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.widgets import DialogPresenter, DialogRefStore, QtDialogPresenter
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
 from .exp_tab_widget import ExpTabWidget, TabActions
@@ -228,10 +229,12 @@ class MainWindow(QMainWindow):
         ctx_bar = QHBoxLayout()
         ctx_bar.addWidget(QLabel("Entry:"))
         self._entry_label = QLabel("No entry open")
+        make_label_selectable(self._entry_label)
         self._entry_label.setObjectName("current_entry")
         ctx_bar.addWidget(self._entry_label)
         ctx_bar.addWidget(QLabel("Point:"))
         self._point_label = QLabel("No point selected")
+        make_label_selectable(self._point_label)
         self._point_label.setObjectName("current_point")
         ctx_bar.addWidget(self._point_label)
         ctx_bar.addStretch()

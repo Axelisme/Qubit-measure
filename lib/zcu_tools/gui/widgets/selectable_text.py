@@ -1,4 +1,4 @@
-"""Process-wide mouse and keyboard text selection for QMessageBox content."""
+"""Text selection for QMessageBox content and for labels that show data values."""
 
 from __future__ import annotations
 
@@ -54,6 +54,20 @@ def install_selectable_message_boxes(app: QApplication) -> QObject:
     return selector
 
 
+def make_label_selectable(label: QLabel) -> None:
+    """Let the user select and copy label's text with the mouse.
+
+    Adds TextSelectableByMouse to the label's interaction flags; existing
+    flags such as link access are kept. Qt then shows an I-beam cursor over the
+    text and a Copy entry in its context menu. The setting applies to whatever
+    text the label shows now or later. Keyboard selection and focus are not
+    enabled, so the label stays out of the Tab order.
+    """
+    label.setTextInteractionFlags(
+        label.textInteractionFlags() | Qt.TextInteractionFlag.TextSelectableByMouse
+    )
+
+
 def _make_message_box_text_selectable(box: QMessageBox) -> None:
     for label in box.findChildren(QLabel):
         # The icon label shows only a pixmap; text labels carry the message.
@@ -65,4 +79,4 @@ def _make_message_box_text_selectable(box: QMessageBox) -> None:
         )
 
 
-__all__ = ["install_selectable_message_boxes"]
+__all__ = ["install_selectable_message_boxes", "make_label_selectable"]

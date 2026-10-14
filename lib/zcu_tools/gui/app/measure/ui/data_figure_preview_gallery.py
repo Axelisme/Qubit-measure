@@ -55,6 +55,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -166,6 +167,7 @@ class _PreviewCard(QWidget):
         layout.setContentsMargins(8, 12, 8, 12)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label = QLabel(text)
+        make_label_selectable(label)
         label.setObjectName(f"preview{name}_{self._source_key}")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)

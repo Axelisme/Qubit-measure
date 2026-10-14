@@ -15,6 +15,7 @@ from zcu_tools.gui.session.events import (
     SocChangedPayload,
 )
 from zcu_tools.gui.session.services.build import SessionServices
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import RoleResolutionError
 
 _CHIP_STYLE = (
@@ -86,6 +87,7 @@ class WorkflowSessionStrip(QWidget):
         chip.setObjectName(name)
         chip.setStyleSheet(_CHIP_STYLE)
         chip.setMaximumWidth(_CHIP_MAX_WIDTH)
+        make_label_selectable(chip)
         return chip
 
     def refresh(self, *_args: object) -> None:

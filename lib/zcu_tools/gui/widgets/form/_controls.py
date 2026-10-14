@@ -31,6 +31,7 @@ from zcu_tools.gui.widgets.cfg.fields.common import (
     make_value_widget,
     write_value_widget,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import trimmed_decimals
 
 from ._schema_view import FieldView, KeyOrInline
@@ -329,6 +330,7 @@ class FieldRow:
         if field.unit:
             header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
+        make_label_selectable(self.value)
         self.value.setObjectName(self._name("value"))
         self.value.hide()
         header.addWidget(self.value)
@@ -336,6 +338,7 @@ class FieldRow:
             # Keep the fold button beside its label instead of stretching it.
             header.addStretch()
         self.error = QLabel(self.widget)
+        make_label_selectable(self.error)
         self.error.setObjectName(self._name("error"))
         self.error.setWordWrap(True)
         self.error.hide()

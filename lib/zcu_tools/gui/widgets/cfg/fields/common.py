@@ -39,6 +39,7 @@ from zcu_tools.gui.cfg.binding import (
     ScalarField,
     SweepField,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 from ..decoration import FieldDecorationProtocol
@@ -492,6 +493,7 @@ class ScalarInputWidget(QWidget):
             self._layout.addWidget(inp, stretch=1)
 
             self._ghost = QLabel()
+            make_label_selectable(self._ghost)
             self._ghost.setWordWrap(True)
             self._ghost.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
