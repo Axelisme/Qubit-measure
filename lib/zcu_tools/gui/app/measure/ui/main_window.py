@@ -166,13 +166,8 @@ class MainWindow(QMainWindow):
         self._refresh_empty_hint()
 
         # --- status bar ---
-        self._status_bar = QStatusBar()
+        self._status_bar = self._build_status_bar()
         self.setStatusBar(self._status_bar)
-        # A label, not showMessage(): QStatusBar paints its own message text,
-        # which users cannot select or copy.
-        self._status_label = QLabel("Ready")
-        make_label_selectable(self._status_label)
-        self._status_bar.addWidget(self._status_label, 1)
 
         self._events.bind(self._ctrl.get_bus())
         self._control_indicator = ControlIndicator(self._ctrl.control_identity, self)
@@ -227,6 +222,16 @@ class MainWindow(QMainWindow):
         self._tabs.setMovable(writable)
         for tab in self._tab_widgets.values():
             tab.set_writable(writable=writable)
+
+    def _build_status_bar(self) -> QStatusBar:
+        """Create the status bar and its selectable message label (``Ready``)."""
+        status_bar = QStatusBar()
+        # A label, not showMessage(): QStatusBar paints its own message text,
+        # which users cannot select or copy.
+        self._status_label = QLabel("Ready")
+        make_label_selectable(self._status_label)
+        status_bar.addWidget(self._status_label, 1)
+        return status_bar
 
     def _build_context_bar(self) -> QHBoxLayout:
         """Assemble the persistent entry/point controls."""
