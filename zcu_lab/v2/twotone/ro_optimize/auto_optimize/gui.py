@@ -85,7 +85,9 @@ class RoOptAutoAdapter(
             "The qubit pulse uses $qubit.module.x180 as a captured library link, "
             "otherwise a fresh pi_pulse template with a const waveform. "
             "$qubit.module.readout selects a captured library link, otherwise a fresh "
-            "inline readout template with a const waveform. Its required parameter "
+            "inline pulse readout template with a const waveform. Direct readout is "
+            "not supported: frequency, gain and length optimization requires a pulse. "
+            "Its required parameter "
             "sources must still be present. Optional $qubit.module.reset has no fallback: "
             "an unset/dangling slot or unbound alias leaves it disabled and Valid."
         ),

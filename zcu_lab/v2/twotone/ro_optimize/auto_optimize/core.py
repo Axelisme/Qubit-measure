@@ -36,8 +36,8 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     Pulse,
     PulseCfg,
+    PulseReadoutCfg,
     Readout,
-    ReadoutCfg,
     Reset,
     ResetCfg,
     SweepCfg,
@@ -110,7 +110,8 @@ class ReadoutOptimizer:
 class AutoOptModuleCfg(ConfigBase):
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    # Run optimizes freq/gain/length, which require a pulse-driven readout.
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class AutoOptSweepCfg(ConfigBase):
@@ -218,6 +219,9 @@ def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
 _RO_AUTO_ITERATION_AXIS = (
     VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
 )
+# Keep schema 1.0: Direct readout failed at Run's first frequency write, so no
+# valid Direct artifacts exist. Existing Pulse artifacts remain readable. A major
+# bump would reject those valid files at the native reader's version check.
 RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     variables=(
         VariableSpec(
