@@ -24,8 +24,9 @@ from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
 
 # What decides one row's controls: path, kind, options present, expression,
-# fixed and group. The rows are rebuilt when any field's shape changes.
-type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None]
+# fixed, group and whether a model row folds (a disabled nullable model has
+# no fold). The rows are rebuilt when any field's shape changes.
+type _RowShape = tuple[FormWritePath, str, bool, bool, bool, str | None, bool]
 
 
 class FormEditor[F: FormModel](QWidget):
@@ -89,16 +90,28 @@ class FormEditor[F: FormModel](QWidget):
     QActions form.command.<path>.<name> with the schema label as text, also
     in form.input.<path>.actions(); triggering one runs that command (see
     __init__). An option without commands opens no menu.
-    form.enabled.<path> is a nullable-model activation QCheckBox.
+    The editor has no fold buttons: group blocks and model sections fold by
+    a left-button click on their fold title, a bold QLabel whose text is
+    "\u25b8 " (folded) or "\u25be " (expanded) followed by the label.
+    form.fold.<path> is the fold title of the model row at <path>: a nested
+    model, a tagged union, an option row whose selected option draws fields
+    and an enabled nullable model. It is that row's name label, in its
+    level's label column, and folds the row's child rows; a unit follows
+    it, after the row's dropdown or Enabled box if any. Other rows show
+    their name in normal weight without a mark, and a click on it does
+    nothing. form.enabled.<path> is a nullable-model activation QCheckBox
+    beside the title. A disabled nullable model draws only its plain label
+    (no fold mark, no form.fold.<path>) and form.enabled.<path>, without an
+    empty box.
     form.group.<path>.<group> (form.group.<group> at the root level) is the
     block of one Display group of the model level at <path>. It holds the
-    level's fields of that group, in declaration order, under a header with
-    the group name in the level's label column and an Expand/Collapse
-    QPushButton. Each level shows its ungrouped rows first, then its group
-    blocks in the order of each group's first field. A group whose fields
-    are all hidden has no block. While any of its rows (or their children)
-    shows an error, the header shows a "Contains errors" note; a folded
-    group stays folded.
+    level's fields of that group, in declaration order, under a header whose
+    fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
+    root) shows the group name in the level's label column. Each level shows
+    its ungrouped rows first, then its group blocks in the order of each
+    group's first field. A group whose fields are all hidden has no block.
+    While any of its rows (or their children) shows an error, the header
+    shows a "Contains errors" note; a folded group stays folded.
     Groups start folded; model rows start as Display(collapsed=...) says.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.
@@ -119,8 +132,8 @@ class FormEditor[F: FormModel](QWidget):
     (form.input and form.enabled) show the current value in normal colours
     and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
     a wheel turn over them scrolls an enclosing scroll area instead. Option
-    command actions stay listed but disabled. Group and model fold buttons
-    still expand and collapse.
+    command actions stay listed but disabled. Fold titles still fold and
+    unfold on a click, without writing state.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
@@ -264,7 +277,7 @@ class FormEditor[F: FormModel](QWidget):
         """Allow user edits (enabled=True, the initial mode) or make the form read-only.
 
         Read-only (enabled=False) keeps every control enabled and readable:
-        text can be selected and copied, folds still work, and no user input
+        text can be selected and copied, fold titles still fold, and no user input
         changes state or local text (see the class docstring for each
         control). Neither mode writes state or drops local text. External
         state changes remain visible while read-only. Raises RuntimeError
@@ -357,6 +370,7 @@ class FormEditor[F: FormModel](QWidget):
                 field.expression,
                 field.fixed,
                 field.group,
+                field.kind == "model" and field.active,
             )
             for field in flat
         )
