@@ -49,9 +49,11 @@ def test_purcell_t1_scales_inversely_with_resonator_linewidth() -> None:
 
 
 @pytest.mark.parametrize(
-    "temperature", [0.0, 0.04], ids=["zero-temperature", "thermal"]
+    "temperature",
+    [0.0, 0.04, 0.08],
+    ids=["zero-temperature", "thermal-40mK", "thermal-80mK"],
 )
-def test_purcell_sweep_matches_lc_escape_lifetime_in_si(temperature: float) -> None:
+def test_purcell_sweep_matches_lc_equilibrium_t1_in_si(temperature: float) -> None:
     ec_ghz, el_ghz = 0.3, 1.5
     bare_rf_ghz, coupling_ghz, linewidth_ghz = 5.0, 0.001, 0.001
 
@@ -67,13 +69,16 @@ def test_purcell_sweep_matches_lc_escape_lifetime_in_si(temperature: float) -> N
         / (qubit_hz - bare_rf_ghz * 1e9) ** 2
     )
     spontaneous_rate_per_second = 2 * np.pi * linewidth_ghz * 1e9 * mixing_squared
-    downward_thermal_factor = (
-        1.0 if temperature == 0 else -np.expm1(-sc.h * qubit_hz / (sc.k * temperature))
+    # For an LC mode coupled to a thermal bath, Gamma_eg=Gamma0*(n_B+1)
+    # and Gamma_ge=Gamma0*n_B. Their sum is Gamma0*coth(h*nu_q/(2*k_B*T)).
+    # Derive its reciprocal directly from SI constants, not directional helpers.
+    inverse_thermal_sum = (
+        1.0 if temperature == 0 else np.tanh(sc.h * qubit_hz / (2 * sc.k * temperature))
     )
-    expected_ns = 1e9 * downward_thermal_factor / spontaneous_rate_per_second
-    # Resonator photons are spectators for this harmonic qubit-mode decay.
-    # At 40 mK the omitted geometric thermal tail is below 1e-25. This is
-    # escape from e to g, not equilibrium relaxation from both qubit directions.
+    expected_ns = 1e9 * inverse_thermal_sum / spontaneous_rate_per_second
+    # Resonator photons are spectators for this harmonic qubit-mode transition.
+    # Even at 80 mK the omitted geometric thermal tail is below 1e-13.
+    # The reverse rate makes equilibrium T1 shorter than e-to-g escape.
     try:
         actual = fluxonium.calculate_purcell_t1_vs_flux(
             np.array([0.0, 0.3]),
@@ -90,7 +95,7 @@ def test_purcell_sweep_matches_lc_escape_lifetime_in_si(temperature: float) -> N
     assert actual.shape == (2,)
     assert actual.dtype == np.float64
     # First-order admixture has relative corrections of order g²/Δ².
-    np.testing.assert_allclose(actual, expected_ns, rtol=1e-5, atol=0.0)
+    np.testing.assert_allclose(np.asarray(actual), expected_ns, rtol=1e-5, atol=0.0)
 
 
 def test_purcell_matched_pair_obeys_thermal_detailed_balance() -> None:
