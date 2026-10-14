@@ -10,12 +10,12 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import pytest
-import zcu_tools.notebook.analysis.fit_tools.sample_merge as sample_merge
 from numpy.typing import NDArray
 from zcu_tools.notebook.analysis.fit_tools import (
     FluxFrame,
     SampleSource,
     merge_sample_sources,
+    predict_f01_mhz,
     write_merged_samples,
     write_sample_merge_report,
 )
@@ -539,11 +539,9 @@ def test_integer_flux_offset_must_be_an_int(tmp_path: Path) -> None:
         SampleSource(path=source_path, integer_flux_offset=1.0)  # type: ignore[arg-type]
 
 
-def test_merge_fits_one_batch_flux_offset_against_target_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_merge_fits_one_batch_flux_offset_against_target_model(tmp_path: Path) -> None:
     target = _target_frame(flux_int=0.0, flux_period=1.0)
-    raw_fluxs = np.array([0.45, 0.50, 0.55], dtype=np.float64)
+    raw_fluxs = np.array([0.30, 0.35, 0.40], dtype=np.float64)
     true_offset = 0.014
     max_abs = 0.05
     source_values = np.asarray(target.dev_value_from_flux(raw_fluxs), dtype=np.float64)
@@ -553,17 +551,10 @@ def test_merge_fits_one_batch_flux_offset_against_target_model(
         dev_unit="A",
         flux=raw_fluxs,
         measurements={
-            "freq_mhz": 1000.0 + 200.0 * (raw_fluxs + true_offset),
+            "freq_mhz": predict_f01_mhz(target.params, raw_fluxs + true_offset),
             "t1_us": [10.0, 10.0, 10.0],
         },
     )
-
-    def _linear_f01(
-        _params: tuple[float, float, float], fluxs: np.ndarray, *, cutoff: int = 40
-    ) -> np.ndarray:
-        return 1000.0 + 200.0 * np.asarray(fluxs, dtype=np.float64)
-
-    monkeypatch.setattr(sample_merge, "predict_f01_mhz", _linear_f01)
 
     result = merge_sample_sources(
         target_frame=target,
@@ -600,9 +591,7 @@ def test_sample_source_rejects_manual_flux_offset(tmp_path: Path) -> None:
         )
 
 
-def test_batch_fit_cannot_shift_flux_across_integer_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_batch_fit_cannot_shift_flux_across_integer_branch(tmp_path: Path) -> None:
     """The only non-integer post-branch adjustment is the bounded batch fit.
 
     A source flux of -0.5 with ``integer_flux_offset=0`` must stay near -0.5
@@ -619,15 +608,8 @@ def test_batch_fit_cannot_shift_flux_across_integer_branch(
         dev_unit="A",
         flux=raw_fluxs,
         # data consistent with flux -0.47 / -0.42: batch fit would like +0.03
-        measurements={"freq_mhz": 1000.0 + 200.0 * (raw_fluxs + max_abs)},
+        measurements={"freq_mhz": predict_f01_mhz(target.params, raw_fluxs + max_abs)},
     )
-
-    def _linear_f01(
-        _params: tuple[float, float, float], fluxs: np.ndarray, *, cutoff: int = 40
-    ) -> np.ndarray:
-        return 1000.0 + 200.0 * np.asarray(fluxs, dtype=np.float64)
-
-    monkeypatch.setattr(sample_merge, "predict_f01_mhz", _linear_f01)
 
     result = merge_sample_sources(
         target_frame=target,
