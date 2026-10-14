@@ -22,7 +22,6 @@ from zcu_tools.resources.entry import component_registry, role_registry
 from zcu_tools.resources.entry.schema import (
     ComponentSchema,
     PointDocument,
-    PointGeneral,
 )
 
 
@@ -57,20 +56,22 @@ def synthetic_component() -> Generator[None]:
 def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterContext:
     """Capture a Spec with an unresolved child, so existence needs no expansion."""
     return ParameterContext(
-        point=PointDocument(
-            format="zcu.parameter-container",
-            format_version="2.0",
-            general=PointGeneral(created_at="2026-10-14T00:00:00Z"),
-            components={
-                "Q1": {
-                    "kind": "factory/source",
-                    "module": {
-                        "drive": "Q1.pulses.pi",
-                        "empty": None,
-                        "dangling": "Q1.pulses.missing",
-                    },
-                }
-            },
+        point=PointDocument.model_validate(
+            {
+                "format": "zcu.parameter-container",
+                "format_version": "2.0",
+                "general": {"created_at": "2026-10-14T00:00:00Z"},
+                "components": {
+                    "Q1": {
+                        "kind": "factory/source",
+                        "module": {
+                            "drive": "Q1.pulses.pi",
+                            "empty": None,
+                            "dangling": "Q1.pulses.missing",
+                        },
+                    }
+                },
+            }
         ),
         library=LibrarySnapshot(
             ModuleLibraryDocument(
