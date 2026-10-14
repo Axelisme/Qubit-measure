@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
@@ -128,7 +129,7 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 }
 
 # Core-derived forms of migrated adapters, registered with their adapter names.
-FORMS: dict[str, Form[Any]] = {
+FORMS: dict[str, Form[ConfigBase]] = {
     "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
     "twotone/freq": TWOTONE_FREQ_FORM,
 }
