@@ -11,8 +11,6 @@ from types import TracebackType
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.device import DeviceInfo
-from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.workflows import (
     Done,
     InitEnv,
@@ -27,11 +25,7 @@ from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.operation_handles import OperationOutcome
-from zcu_tools.gui.session.services.progress import (
-    BoundProgressFactory,
-    ProgressService,
-)
+from zcu_tools.gui.session.services.device import ConnectDeviceRequest
 from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.workflows.server import build_workflow_tools
@@ -50,29 +44,6 @@ from ._reload_source import InjectedCatalog
 from ._start_fakes import StartHarness
 from ._synthetic import Component, Context, Plan, Tunables, inline_input
 from ._window_support import QUBIT_KIND, RpcRequest, WindowSession
-
-
-@pytest.fixture
-def progress_calls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[list[int], list[int]]:
-    """Observe the run-lifetime factory/discard contract using the real service."""
-    created: list[int] = []
-    discarded: list[int] = []
-    make_factory = ProgressService.make_factory
-    discard_operation = ProgressService.discard_operation
-
-    def make(service: ProgressService, token: int, owner: str) -> BoundProgressFactory:
-        created.append(token)
-        return make_factory(service, token, owner)
-
-    def discard(service: ProgressService, token: int) -> None:
-        discarded.append(token)
-        discard_operation(service, token)
-
-    monkeypatch.setattr(ProgressService, "make_factory", make)
-    monkeypatch.setattr(ProgressService, "discard_operation", discard)
-    return created, discarded
 
 
 @pytest.fixture(scope="session")
@@ -141,6 +112,8 @@ def attachment(
                 harness.background.execute()
                 harness.background.deliver()
             window.close()
+            for driver in harness.services.device.get_connected_devices().values():
+                driver.close()
             window.deleteLater()
             qapp.processEvents()
         try:
@@ -154,17 +127,15 @@ def attachment(
 @pytest.fixture
 def run_attachment(
     attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[WorkflowWindow[Context], StartHarness, ResultEntry]:
-    """Supply typed cached native form info for Window/Controller ownership.
-
-    The substitute does not replace Runner, Controller or native Engine.
-    """
+    """Connect a real FakeDevice through the session-owned operation runtime."""
     _window, harness, _entry = attachment
-    native: dict[str, DeviceInfo] = {"flux": FakeDeviceInfo(address="none", value=0.0)}
-    monkeypatch.setattr(
-        harness.services.device, "capture_native_device_info", lambda: native
+    token = harness.services.device.start_connect_device(
+        ConnectDeviceRequest("FakeDevice", "flux", "none")
     )
+    harness.complete_segment()
+    outcome = harness.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "finished"
     return attachment
 
 
@@ -182,24 +153,6 @@ def escaped_qt_errors(monkeypatch: pytest.MonkeyPatch) -> list[BaseException]:
 
     monkeypatch.setattr(sys, "excepthook", record)
     return errors
-
-
-@pytest.fixture
-def settlements(
-    run_attachment: tuple[WorkflowWindow[Context], StartHarness, ResultEntry],
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[int]:
-    """Record real public settlement calls without replacing their behavior."""
-    _window, harness, _entry = run_attachment
-    tokens: list[int] = []
-    settle = harness.handles.settle
-
-    def record(token: int, outcome: OperationOutcome) -> None:
-        tokens.append(token)
-        settle(token, outcome)
-
-    monkeypatch.setattr(harness.handles, "settle", record)
-    return tokens
 
 
 @pytest.fixture

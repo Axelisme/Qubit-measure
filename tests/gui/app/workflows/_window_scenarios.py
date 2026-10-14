@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 
-import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -13,7 +12,6 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
-from zcu_tools.gui.app.workflows import figures as figures_module
 from zcu_tools.gui.app.workflows.controller import WorkflowController
 from zcu_tools.gui.app.workflows.tunables import TunablesHost
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
@@ -195,20 +193,3 @@ def install_rpc_pause_workflow(
 
     catalog_source.install(step, window)
     return attempts, receipts
-
-
-def assert_figure_render_failure(
-    window: WorkflowWindow[Context], rpc: RpcRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Verify RPC projects renderer failure while direct Window reads re-raise it."""
-
-    def failed_render(_figure: Figure) -> bytes:
-        raise RuntimeError("Renderer failed")
-
-    monkeypatch.setattr(figures_module, "render_figure_png", failed_render)
-    failed = rpc("workflow.figure", {"run_id": "reader", "name": "live"})
-    error = failed["error"]
-    assert failed["ok"] is False and isinstance(error, dict)
-    assert error["code"] == "controller_error" and error["message"] == "Renderer failed"
-    with pytest.raises(RuntimeError, match="Renderer failed"):
-        window.figure_png("reader", "live")
