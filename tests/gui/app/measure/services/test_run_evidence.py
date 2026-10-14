@@ -25,18 +25,15 @@ from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind,
 )
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-    EvalValue,
-    ScalarSpec,
-)
+from zcu_tools.gui.app.measure.services.tab_cfg import TabFormResource, TabFormSources
+from zcu_tools.gui.form import FormEnv
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 
 from tests.device._snapshot_fakes import SnapshotDevice
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._native_save_support import (
     SavingAdapter,
     native_save_session,
@@ -320,6 +317,9 @@ def test_native_run_rejects_an_unpaired_result_without_publishing_evidence(
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     state, tab_id, _ = make_state()
     adapter = SnapshotAdapter()
+    state.get_tab(tab_id).cfg = make_form(
+        adapter.make_form(FormContext(state.session_env.parameters)), state=state
+    )
     flux, unused = SnapshotDevice(), SnapshotDevice()
     flux.set_value(0.25)
     unused.set_value(0.6)
@@ -378,11 +378,7 @@ def test_device_read_failure_rejects_run_before_core() -> None:
 def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
-    from zcu_tools.gui.cfg.resource import CfgResource
     from zcu_tools.gui.session.aliases import AliasRow
-
-    from tests.gui.app.measure._cfg_fakes import PublishedHost
 
     with native_save_session(tmp_path, qapp) as session:
         session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
@@ -390,31 +386,17 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         state = session.state
         adapter = SnapshotAdapter()
         state.get_tab("tab").adapter = adapter
-        schema = CfgSchema(
-            CfgSectionSpec(
-                fields={
-                    "dev": CfgSectionSpec(
-                        fields={
-                            "flux_dev": ScalarSpec(
-                                "Flux", str, choices_source="devices"
-                            )
-                        }
-                    )
-                }
+        resource = TabFormResource(
+            lambda _ctx: Form(SavingCfg, {}),
+            capture=lambda _aliases: TabFormSources(
+                FormEnv(parameters=captured, library=captured.library)
             ),
-            CfgSectionValue(
-                fields={
-                    "dev": CfgSectionValue(fields={"flux_dev": EvalValue("$flux_dev")})
-                }
-            ),
+            mutation_allowed=lambda: True,
         )
-        bindings = MeasureCfgBindings(PublishedHost(state))
-        state.get_tab("tab").cfg = CfgResource(
-            lambda: schema,
-            resolution=lambda: bindings.snapshot(
-                (), captured_values={}, parameters=captured
-            ),
-        )
+        admitted_flux = captured.value("$flux_dev")
+        assert isinstance(admitted_flux, str)
+        resource.write({("dev",): {"flux_dev": admitted_flux}})
+        state.get_tab("tab").cfg = resource
         service, _gate, background, handles = make_run_service(state, devices={})
         inputs = replace(
             make_inputs(state, "tab", adapter),
