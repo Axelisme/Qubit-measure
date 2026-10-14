@@ -169,7 +169,7 @@ class _MiddleElidedLabel(QLabel):
 
 
 def _value_label(item: WritebackItem, text: str) -> QLabel:
-    """Return a selectable middle-elided label for a scalar parameter, else a plain one."""
+    """Return a mouse-selectable label: middle-elided for a scalar parameter, else plain."""
     label: QLabel
     if isinstance(item, ParameterWriteback) and _is_scalar_md_value(
         item.proposed_value

@@ -126,6 +126,8 @@ class _PreviewCard(QWidget):
             "color:#842029; border:1px solid #f5c2c7; background:#f8d7da; "
             "padding:12px 8px; border-radius:6px; font-size:11px;",
         )
+        # The error text names what failed; the empty text is a placeholder.
+        make_label_selectable(self._error_label)
 
         outer.addWidget(self._stack, stretch=1)
 
@@ -167,7 +169,6 @@ class _PreviewCard(QWidget):
         layout.setContentsMargins(8, 12, 8, 12)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label = QLabel(text)
-        make_label_selectable(label)
         label.setObjectName(f"preview{name}_{self._source_key}")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
