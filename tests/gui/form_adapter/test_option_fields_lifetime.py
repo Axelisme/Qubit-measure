@@ -5,13 +5,14 @@ from collections.abc import Callable
 import pytest
 from pydantic import BaseModel
 from zcu_tools.cfg_model import ConfigBase, PulseSpec, ResetSpec
+from zcu_tools.cfg_model import ResetCfg as ResetFamily
 from zcu_tools.gui.form import FormEnv, Option
 from zcu_tools.gui.form_adapter import Form, ModuleInputField, module_form
 
 
 class ResetCfg(ConfigBase):
-    reset: ResetSpec
-    other: ResetSpec
+    reset: ResetFamily
+    other: ResetFamily
 
 
 def inline_fields(options: tuple[Option, ...]) -> dict[str, type[BaseModel]]:

@@ -214,7 +214,7 @@ def test_local_error_recovery_and_external_publication_keep_single_evaluation(
         assert state.preview_reads - before == 1
         before = state.preview_reads
         state.write({("amount",): 5.0}, env)
-        assert control(editor, QLineEdit, "form.input.amount").text() == "5"
+        assert float(control(editor, QLineEdit, "form.input.amount").text()) == 5.0
         assert state.preview_reads - before == 1
         before = state.preview_reads
         commit_text(editor, "6")
