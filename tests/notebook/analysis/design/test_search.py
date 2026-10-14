@@ -191,26 +191,17 @@ def test_calculate_t1_requires_esys(grid: pd.DataFrame) -> None:
         S.calculate_t1(grid, noise_channels=_NOISE_CHANNELS, Temp=0.05)
 
 
-def test_calculate_t1_restores_warning_when_fluxonium_raises(monkeypatch) -> None:
-    import scqubits.core.fluxonium as fluxonium_mod
+def test_calculate_t1_restores_warning_when_noise_channel_is_not_t1(
+    grid_with_esys: pd.DataFrame, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import scqubits.settings as scq
 
-    class FakeFluxonium:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        def t1_effective(self, *_args, **_kwargs) -> float:
-            assert scq.T1_DEFAULT_WARNING is False
-            raise RuntimeError("boom")
-
     monkeypatch.setattr(scq, "T1_DEFAULT_WARNING", True)
-    # Inject a physics failure to verify restoration of the external warning setting.
-    monkeypatch.setattr(fluxonium_mod, "Fluxonium", FakeFluxonium)
-    grid = S.generate_params_table(1.0, 1.0, 1.0)
-    grid["esys"] = [None]
 
-    with pytest.raises(RuntimeError, match="boom"):
-        S.calculate_t1(grid, noise_channels=_NOISE_CHANNELS, Temp=0.05)
+    with pytest.raises(ValueError, match="Only t1 channels"):
+        S.calculate_t1(
+            grid_with_esys, noise_channels=[("tphi_1_over_f_flux", {})], Temp=0.05
+        )
 
     assert scq.T1_DEFAULT_WARNING is True
 
