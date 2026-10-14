@@ -92,6 +92,20 @@ def _image_formats(document: QTextDocument) -> list[QTextImageFormat]:
     return formats
 
 
+def _anchor_hrefs(document: QTextDocument) -> list[str]:
+    hrefs: list[str] = []
+    block = document.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            href = it.fragment().charFormat().anchorHref()
+            if href and href not in hrefs:
+                hrefs.append(href)
+            it += 1
+        block = block.next()
+    return hrefs
+
+
 def _document(browser: QTextBrowser) -> QTextDocument:
     document = browser.document()
     assert document is not None
@@ -188,6 +202,38 @@ def test_clicked_link_opens_in_system_browser_without_navigating(
     assert browser.toPlainText() == text
 
 
+def test_link_destinations_keep_dollars_as_written(open_guide) -> None:
+    markdown = "Read [manual](https://example.org/$x$) or <https://example.org/$y$>."
+    browser = open_guide(AdapterGuide(markdown=markdown, resource_dir=None))
+
+    assert _anchor_hrefs(_document(browser)) == [
+        "https://example.org/$x$",
+        "https://example.org/$y$",
+    ]
+    assert "Read manual or https://example.org/$y$." in browser.toPlainText()
+    assert _image_formats(_document(browser)) == []
+
+
+@pytest.mark.parametrize(
+    ("markdown", "code_line"),
+    [
+        (
+            "> Quoted:\n>\n> ```text\n> keep $x$ and $$y$$\n> ```\n",
+            "keep $x$ and $$y$$",
+        ),
+        ("Indented:\n\n    cost = $x$ + $$y$$\n", "cost = $x$ + $$y$$"),
+    ],
+    ids=["blockquote-fence", "indented-code"],
+)
+def test_code_blocks_keep_dollars_as_written(
+    open_guide, markdown: str, code_line: str
+) -> None:
+    browser = open_guide(AdapterGuide(markdown=markdown, resource_dir=None))
+
+    assert code_line in browser.toPlainText()
+    assert _image_formats(_document(browser)) == []
+
+
 def test_inline_and_display_math_render_as_images(open_guide) -> None:
     markdown = "Energy $E=\\hbar\\omega$ per photon.\n\n$$\\frac{a}{b}$$\n\nAfter."
     browser = open_guide(AdapterGuide(markdown=markdown, resource_dir=None))
@@ -267,6 +313,16 @@ def test_local_images_load_and_wide_images_fit_the_tab(
         "https://example.org/pulse.png",
     ):
         assert _loaded_image(browser, rejected) is None
+
+
+def test_local_image_with_empty_alt_loads(open_guide, tmp_path: Path) -> None:
+    _write_png(tmp_path / "pulse.png", 40, 20)
+    browser = open_guide(
+        AdapterGuide(markdown="![](pulse.png)\n\nAfter.", resource_dir=tmp_path)
+    )
+
+    assert [fmt.name() for fmt in _image_formats(_document(browser))] == ["pulse.png"]
+    assert _loaded_image(browser, "pulse.png") is not None
 
 
 def test_guide_without_resource_dir_does_not_resolve_images(
