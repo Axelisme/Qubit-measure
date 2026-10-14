@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 import pytest
-from pydantic import JsonValue
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
@@ -22,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.cfg.resource import CfgPreconditionError
+from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -104,7 +104,7 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
         resource = application.ctrl.cfg_resources.lookup(tab_id)
         resource.write({("amount",): 7.0})
         state, env, authored = resource.editor_state, resource.env, resource.input.data
-        notifications: list[JsonValue] = []
+        notifications: list[FormValue] = []
         resource.subscribe(lambda: notifications.append(resource.preview().values[("amount",)]))
         broken = True
         with pytest.raises(error, match=match):
