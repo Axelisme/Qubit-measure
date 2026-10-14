@@ -186,6 +186,12 @@ GUI 以 GitHub Markdown 顯示內容，不解析 HTML。外部連結交給系統
 不載入網路圖片或 SVG。MCP 只回 Markdown 原文與資源目錄的絕對路徑，不讀圖或附圖。
 Agent 需要圖片時自行讀取該目錄；遠端 agent 可能無法存取 GUI 主機上的路徑。
 
+撰寫 guide 時注意三項限制：
+
+- 圖片一定要寫 alt 文字，例如 `![Pulse](pulse.png)`；alt 為空的圖片 GUI 不顯示。
+- 程式碼一律用 fenced code block（```）。Fenced block 與 code span 保留原文；四空格縮排的 code block 內的 `$...$` 會被當成數學式。
+- GUI 只把外部連結交給系統瀏覽器；相對的 `.md` 連結不解析。
+
 Wheel 收錄 `zcu_lab` 下的 Markdown、PNG 與 JPG。新增或刪除實驗時同步維護 guide 與資源。
 
 ro-optimize 與 reset 的 peak-picking adapter 以 `smooth_method` 提供 `wavelet` / `gaussian`
