@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from qtpy.QtCore import QPoint, Qt
+from qtpy.QtGui import QImage
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -571,6 +572,134 @@ def test_plain_rows_keep_a_normal_weight_name_without_a_mark(build: Build) -> No
     assert label_of(view, "off", "Off") is off
     assert not child(view, QCheckBox, "form.enabled.off").isChecked()
     assert state.input.data == SECTIONS
+
+
+def tab(start: QWidget, until: Callable[[QWidget], bool]) -> list[str]:
+    """Focus start, then press Tab on the focused widget until until(focused).
+
+    Stops when focus comes back to start, raising if until never held.
+    Returns the object name of each widget focus stopped on, start first.
+    """
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    assert start.hasFocus(), start.objectName()
+    stops = [start.objectName()]
+    for _ in range(100):
+        focused = QApplication.focusWidget()
+        assert focused is not None
+        key_click(focused, Qt.Key.Key_Tab)
+        now = QApplication.focusWidget()
+        assert now is not None
+        if until(now):
+            return stops
+        if now is start:
+            raise AssertionError(f"Tab came back to the start: {stops}")
+        stops.append(now.objectName())
+    raise AssertionError(f"Tab did not come back to the start: {stops}")
+
+
+def tab_to(view: QWidget, name: str) -> QLabel:
+    """Press Tab from the first input until the fold title name has focus."""
+    title = child(view, QLabel, name)
+    tab(child(view, QWidget, "form.input.gain"), lambda now: now is title)
+    return title
+
+
+def press(key: Qt.Key, text: str = "") -> None:
+    """Press and release key on the widget that has keyboard focus."""
+    focused = QApplication.focusWidget()
+    assert focused is not None
+    key_click(focused, key, text=text)
+
+
+SECTION_TITLES = (
+    ("form.fold.drive", "drive.level"),
+    ("form.fold.shape", "shape.x"),
+    ("form.fold.wrapped", "wrapped.payload.level"),
+    ("form.fold.extra", "extra.note"),
+    ("form.fold.group.Advanced", "delay"),
+)
+
+
+def test_tab_stops_on_fold_titles_and_space_or_enter_folds_them(
+    build: Build, qapp: QApplication
+) -> None:
+    view, state = build(SectionsForm, SECTIONS)
+    view.resize(600, 700)
+    view.show()
+    qapp.processEvents()
+    start = child(view, QWidget, "form.input.gain")
+    stops = tab(start, lambda now: now is start)
+    for name, _inner in SECTION_TITLES:
+        assert name in stops, (name, stops)
+    for name, inner in SECTION_TITLES:
+        title = tab_to(view, name)
+        start_expanded = expanded(title)
+        for key, text in (
+            (Qt.Key.Key_Space, " "),
+            (Qt.Key.Key_Return, "\r"),
+            (Qt.Key.Key_Enter, "\r"),
+            (Qt.Key.Key_Space, " "),
+        ):
+            before = expanded(title)
+            press(key, text)
+            assert expanded(title) != before, (name, key)
+            assert shown(view, inner) != before, (name, key)
+        assert expanded(title) == start_expanded, name
+        # No other key folds a title.
+        for key in (Qt.Key.Key_Right, Qt.Key.Key_Left, Qt.Key.Key_Down):
+            press(key)
+            assert expanded(title) == start_expanded, (name, key)
+    assert state.input.data == SECTIONS
+    # Enter in a text field inside a section commits the text, not a fold.
+    level = child(view, QLineEdit, "form.input.drive.level")
+    level.setFocus(Qt.FocusReason.TabFocusReason)
+    key_click(level, Qt.Key.Key_End)
+    type_text(level, "5")
+    key_click(level, Qt.Key.Key_Return)
+    assert state.input.data["drive"] == {"level": 1.05}
+    assert expanded(model_fold(view, "drive"))
+    assert shown(view, "drive.level")
+
+
+def edges_changed(before: QImage, after: QImage) -> list[str]:
+    """The sides of two same-size images whose outermost pixel line differs."""
+    assert before.size() == after.size()
+    width, height = before.width(), before.height()
+    sides = {
+        "top": [(x, 0) for x in range(width)],
+        "bottom": [(x, height - 1) for x in range(width)],
+        "left": [(0, y) for y in range(height)],
+        "right": [(width - 1, y) for y in range(height)],
+    }
+    return [
+        side
+        for side, points in sides.items()
+        if any(before.pixel(x, y) != after.pixel(x, y) for x, y in points)
+    ]
+
+
+def test_a_fold_title_reached_by_tab_shows_an_outline(
+    build: Build, qapp: QApplication
+) -> None:
+    view, _state = build(SectionsForm, SECTIONS)
+    view.resize(600, 700)
+    view.show()
+    qapp.processEvents()
+    for name, _inner in SECTION_TITLES:
+        title = child(view, QLabel, name)
+        unfocused = title.grab().toImage()
+        tab_to(view, name)
+        focused = title.grab().toImage()
+        # A frame around the title: every side of its rendering changes.
+        assert edges_changed(unfocused, focused) == [
+            "top",
+            "bottom",
+            "left",
+            "right",
+        ], name
+        press(Qt.Key.Key_Tab)
+        assert not title.hasFocus(), name
+        assert title.grab().toImage() == unfocused, name
 
 
 class Span(BaseModel):

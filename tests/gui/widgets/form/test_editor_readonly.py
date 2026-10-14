@@ -305,6 +305,41 @@ def test_folds_still_expand_and_collapse_without_writing(
     assert state.input.data == DATA
 
 
+def test_fold_titles_take_tab_focus_and_fold_on_space_or_enter_without_writing(
+    view: View,
+) -> None:
+    editor, state = view
+    start = child(editor, QLineEdit, "form.input.amount")
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    stops = [start.objectName()]
+    for _ in range(50):
+        focused = QApplication.focusWidget()
+        assert focused is not None
+        key_click(focused, Qt.Key.Key_Tab)
+        now = QApplication.focusWidget()
+        assert now is not None
+        if now is start:
+            break
+        stops.append(now.objectName())
+    for name, inner in (
+        ("form.fold.group.Advanced", "form.input.phase"),
+        ("form.fold.section", "form.input.section.level"),
+    ):
+        assert name in stops, (name, stops)
+        title = child(editor, QLabel, name)
+        content = child(editor, QLineEdit, inner)
+        title.setFocus(Qt.FocusReason.TabFocusReason)
+        assert title.hasFocus(), name
+        assert not content.isVisibleTo(editor), inner
+        key_click(title, Qt.Key.Key_Space, text=" ")
+        assert content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25be "), name
+        key_click(title, Qt.Key.Key_Return, text="\r")
+        assert not content.isVisibleTo(editor), inner
+        assert title.text().startswith("\u25b8 "), name
+    assert state.input.data == DATA
+
+
 def test_external_updates_show_while_read_only(view: View) -> None:
     editor, state = view
     state.write({("amount",): 6.0, ("mode",): "slow"}, FormEnv())
