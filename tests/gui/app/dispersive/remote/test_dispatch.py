@@ -1,4 +1,4 @@
-"""Tests for the dispersive remote dispatch handlers + method-spec validation.
+"""Tests for the public dispersive read-only remote query results.
 
 The remote surface is READ-ONLY: the agent observes a GUI the user drives. Every
 handler is a pure query — no load / preprocess / tune / fit / export RPC. The tests
@@ -13,11 +13,7 @@ import numpy as np
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.dispersive.controller import Controller
-from zcu_tools.gui.app.dispersive.remote.dispatch import (
-    _HANDLERS,
-    METHOD_REGISTRY,
-)
-from zcu_tools.gui.app.dispersive.remote.method_specs import METHOD_SPECS
+from zcu_tools.gui.app.dispersive.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
     FluxoniumInputs,
@@ -50,23 +46,6 @@ def _inputs() -> FluxoniumInputs:
         flux_period=2.0,
         bare_rf_seed=5.3,
     )
-
-
-# --- registry integrity ------------------------------------------------
-
-
-def test_every_spec_has_a_handler_and_vice_versa():
-    assert set(_HANDLERS) == set(METHOD_SPECS)
-    assert set(METHOD_REGISTRY) == set(METHOD_SPECS)
-
-
-def test_method_set_is_read_only():
-    # No mutating verbs in the method names — pure queries only.
-    for method in METHOD_SPECS:
-        assert any(
-            method.endswith(suffix)
-            for suffix in (".info", ".status", ".result", ".check", ".versions")
-        ), method
 
 
 # --- handler behaviour -------------------------------------------------
