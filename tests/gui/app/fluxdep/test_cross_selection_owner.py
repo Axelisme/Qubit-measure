@@ -4,7 +4,12 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.fluxdep.cross_selection import (
+    analyze_cross_selection,
+    make_cross_selection_state,
+)
 from zcu_tools.analysis.fluxdep.stroke import BrushPoint, BrushStroke
+from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
     SelectionChangedPayload,
     SpectrumChangedPayload,
@@ -15,6 +20,8 @@ from zcu_tools.gui.app.fluxdep.interactive import (
 )
 from zcu_tools.gui.app.fluxdep.state import (
     SELECTION_VERSION_KEY,
+    FluxDepState,
+    SpectrumEntry,
     spectrum_version_key,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -266,3 +273,122 @@ def test_reopened_cloud_backgrounds_follow_replaced_spectrum_signals(
     np.testing.assert_array_equal(
         background.real_signals, cast2real_and_norm(signals, use_phase=True)
     )
+
+
+@pytest.fixture
+def column_cloud_controller():
+    """One aligned spectrum: same-flux columns of three, singles between them.
+
+    Raw axes span flux [0, 1] and 4-5 GHz, so normalized distances equal the
+    point offsets below. At min_distance 0.1 a second downsample of the kept
+    points drops more of them, so a reopen seeded from kept would not round-trip.
+    """
+    columns = np.linspace(0.0, 1.0, 6)
+    fluxs = np.concatenate([np.repeat(columns, 3), columns[:-1] + 0.02])
+    offsets = np.concatenate([np.tile([0.0, 0.1, 0.2], 6), np.full(5, 0.05)])
+    freqs = 4.0 + offsets
+    state = FluxDepState()
+    state.put_spectrum(
+        SpectrumEntry(
+            name="a",
+            spec_type="TwoTone",
+            raw={
+                "dev_values": np.array([0.0, 0.5, 1.0]),
+                "fluxs": np.array([0.0, 0.5, 1.0]),
+                "freqs": np.array([4.0, 4.5, 5.0]),
+                "signals": np.ones((3, 3), dtype=np.complex128),
+            },
+            points={"dev_values": fluxs.copy(), "fluxs": fluxs, "freqs": freqs},
+            flux_half=0.5,
+            flux_int=1.0,
+            flux_period=1.0,
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl = Controller(state)
+    yield ctrl
+    ctrl.interactive.dispose()
+
+
+def _publish_brushed_draft(ctrl: Controller, min_distance: float) -> np.ndarray:
+    """Erase the first column, finish at min_distance, return the draft's brush."""
+    context = ctrl.interactive.begin_cross_selection()
+    context.plugin.stroke.execute(
+        context.session, BrushStroke((BrushPoint(0.0, 4.1),), 0.1, "erase")
+    )
+    context.plugin.set_min_distance.execute(context.session, min_distance)
+    brush = context.session.snapshot().selected.copy()
+    ctrl.interactive.finish_cross_selection()
+    return brush
+
+
+def test_unchanged_reopened_draft_finishes_to_the_published_kept_mask(
+    column_cloud_controller,
+):
+    ctrl = column_cloud_controller
+    brush = _publish_brushed_draft(ctrl, 0.1)
+    kept = ctrl.state.selection_mask()
+    assert kept is not None and kept.sum() < brush.sum()
+
+    reopened = ctrl.interactive.begin_cross_selection()
+    np.testing.assert_array_equal(reopened.session.snapshot().selected, brush)
+    assert reopened.session.snapshot().min_distance == 0.1
+    ctrl.interactive.finish_cross_selection()
+
+    np.testing.assert_array_equal(ctrl.state.selection_mask(), kept)
+    np.testing.assert_array_equal(ctrl.state.brush_mask(), brush)
+
+
+def test_reopened_draft_recomputes_a_changed_distance_from_the_brush(
+    column_cloud_controller,
+):
+    ctrl = column_cloud_controller
+    brush = _publish_brushed_draft(ctrl, 0.1)
+
+    reopened = ctrl.interactive.begin_cross_selection()
+    reopened.plugin.set_min_distance.execute(reopened.session, 0.05)
+    expected = analyze_cross_selection(
+        reopened.plugin.inputs,
+        make_cross_selection_state(
+            reopened.plugin.inputs, selected=brush, min_distance=0.05
+        ),
+    ).selected
+    ctrl.interactive.finish_cross_selection()
+
+    np.testing.assert_array_equal(ctrl.state.selection_mask(), expected)
+    np.testing.assert_array_equal(ctrl.state.brush_mask(), brush)
+    assert ctrl.state.selection.min_distance == 0.05
+
+
+def test_discarding_a_reopened_draft_keeps_published_kept_and_brush(
+    column_cloud_controller,
+):
+    ctrl = column_cloud_controller
+    brush = _publish_brushed_draft(ctrl, 0.1)
+    kept = ctrl.state.selection_mask()
+
+    reopened = ctrl.interactive.begin_cross_selection()
+    reopened.plugin.clear.execute(reopened.session, None)
+    reopened.plugin.set_min_distance.execute(reopened.session, 0.0)
+    ctrl.interactive.cancel_selection()
+
+    np.testing.assert_array_equal(ctrl.state.selection_mask(), kept)
+    np.testing.assert_array_equal(ctrl.state.brush_mask(), brush)
+    assert ctrl.state.selection.min_distance == 0.1
+
+
+def test_restored_spectrum_reopens_all_selected_with_the_published_distance(
+    column_cloud_controller, tmp_path
+):
+    ctrl = column_cloud_controller
+    _publish_brushed_draft(ctrl, 0.1)
+    filepath = ctrl.export_spectrums(str(tmp_path / "checkpoint.hdf5"))
+    ctrl.remove_spectrum("a")
+    ctrl.load_processed_spectrums(filepath)
+
+    reopened = ctrl.interactive.begin_cross_selection()
+
+    assert reopened.session.snapshot().selected.all()
+    assert reopened.session.snapshot().selected.size == 23
+    assert reopened.session.snapshot().min_distance == 0.1

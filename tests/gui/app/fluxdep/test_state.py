@@ -330,6 +330,81 @@ def test_set_selection_bumps_selection():
     assert st.selection_mask() is not None
 
 
+def _three_point_state() -> FluxDepState:
+    st = FluxDepState()
+    for name in ("a", "b"):
+        st.put_spectrum(_make_entry(name))
+        st.set_alignment(
+            name,
+            AlignmentPublication(0.0, 1.0, 2.0, None),
+            np.linspace(0.0, 1.0, 3),
+            np.empty(0),
+        )
+        three = np.arange(3.0)
+        st.set_points(name, PointsData(dev_values=three, fluxs=three, freqs=three))
+    return st
+
+
+def test_brush_mask_projects_the_published_brush_beside_the_kept_mask():
+    st = _three_point_state()
+    assert st.brush_mask() is None
+    kept = np.array([True, False, False, False, True, False])
+    brush = np.array([True, True, False, False, True, True])
+    st.set_selection(kept, 0.1, brush)
+    np.testing.assert_array_equal(st.selection_mask(), kept)
+    np.testing.assert_array_equal(st.brush_mask(), brush)
+    # Without a separate brush the kept mask is the brush.
+    st.set_selection(kept, 0.0)
+    np.testing.assert_array_equal(st.brush_mask(), kept)
+
+
+@pytest.mark.parametrize(
+    "brush",
+    [np.ones(5, dtype=np.bool_), np.array([False, True, True, True, True, True])],
+)
+def test_set_selection_rejects_a_brush_that_is_misshaped_or_misses_kept_points(
+    brush,
+):
+    st = _three_point_state()
+    before = st.version.snapshot()
+    with pytest.raises(ValueError):
+        st.set_selection(np.array([True, False, False, False, True, False]), 0.1, brush)
+    assert st.brush_mask() is None
+    assert st.selection_mask() is None
+    assert st.version.snapshot() == before
+
+
+@pytest.mark.parametrize("change", ["replace", "remove", "set_points", "reset_points"])
+def test_paths_that_drop_a_filter_mask_drop_its_brush(change: str):
+    st = _three_point_state()
+    st.set_selection(
+        np.array([True, False, False, False, True, False]),
+        0.1,
+        np.array([True, True, False, False, True, True]),
+    )
+    if change == "replace":
+        st.put_spectrum(_make_entry("b"))
+    elif change == "remove":
+        st.remove_spectrum("b")
+    elif change == "set_points":
+        st.set_points(
+            "b",
+            PointsData(
+                dev_values=np.arange(2.0), fluxs=np.arange(2.0), freqs=np.arange(2.0)
+            ),
+        )
+    else:
+        st.reset_points("b")
+    entry_b = st.spectrums.get("b")
+    assert entry_b is None or (
+        entry_b.filter_mask is None and entry_b.brush_mask is None
+    )
+    brush = st.brush_mask()
+    assert brush is not None
+    np.testing.assert_array_equal(brush[:3], [True, True, False])
+    assert brush[3:].all()
+
+
 def test_set_project_bumps_project():
     st = FluxDepState()
     st.set_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
