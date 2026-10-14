@@ -141,7 +141,7 @@ class RoOptLengthAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="best_ro_length",
+                target_name="$qubit.ext.best_ro_length",
                 description="Optimal readout length (us)",
                 proposed_value=result.best_length,
             ),

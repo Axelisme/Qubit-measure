@@ -138,12 +138,12 @@ class RoOptFreqGainAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = [
             ParameterWriteback(
-                target_name="best_ro_freq",
+                target_name="$qubit.ext.best_ro_freq",
                 description="Optimal readout frequency (MHz)",
                 proposed_value=result.best_freq,
             ),
             ParameterWriteback(
-                target_name="best_ro_gain",
+                target_name="$qubit.ext.best_ro_gain",
                 description="Optimal readout gain (a.u.)",
                 proposed_value=result.best_gain,
             ),
