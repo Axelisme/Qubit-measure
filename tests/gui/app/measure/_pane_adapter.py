@@ -54,7 +54,6 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
         post_analysis=True, requires_soc=False, load_data=True
     )
     exp_cls = SavingCore
-    ExpCfg_cls = SavingCfg
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SavingCfg]:

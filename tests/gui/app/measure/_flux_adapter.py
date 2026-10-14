@@ -91,7 +91,6 @@ class SpectrumAdapter(
     )
     force_magnitude: ClassVar[bool] = True
     exp_cls = SpectrumCore
-    ExpCfg_cls = SpectrumCfg
     experiment_tag: ClassVar[str | None] = "test/spectrum"
 
     @classmethod
