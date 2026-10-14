@@ -22,8 +22,9 @@ from __future__ import annotations
 #     INCLUDING pure-internal logic changes that don't touch the wire.
 # This unpublished interface revision includes identity-only project setup,
 # data_root, spectrum evidence/drafts and fit search_db/render/database_info.
-# 9: a new Filter context starts from the published masks (all-selected only
-# without one), so selection.interactive.open evidence reports that seed.
+# 9: a new Filter context starts from the published brush selection (the
+# pre-downsample selection; all-selected without a published mask), so
+# selection.interactive.open evidence reports that seed.
 WIRE_VERSION = 9
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
@@ -45,4 +46,6 @@ WIRE_VERSION = 9
 # the published masks without a Session, Edit/Discard/Finish own the Session,
 # leaving Filter only detaches; a new Filter starts from the published masks;
 # a locked stage stays shown with its inputs disabled.
-GUI_VERSION = 15
+# 16: Filter Apply/Finish also publish the brush selection; a reopened Filter
+# starts from it, so an unchanged Finish reproduces the published kept mask.
+GUI_VERSION = 16

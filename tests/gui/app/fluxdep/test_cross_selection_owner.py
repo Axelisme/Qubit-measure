@@ -217,9 +217,9 @@ def test_apply_failure_keeps_input_and_releases_self_publication_guard(
 ):
     ctrl = cross_controller
 
-    def fail_selection(selected, distance):
+    def fail_selection(selected, distance, brush):
         if publish_before_failure:
-            ctrl.set_selection(selected, distance)
+            ctrl.set_selection(selected, distance, brush)
         raise OSError("selection publication unavailable")
 
     owner = FluxDepInteractiveOwner(

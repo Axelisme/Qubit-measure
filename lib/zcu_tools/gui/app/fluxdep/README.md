@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-14，Fit 頁階段化與 Filter 常駐、Show 隨 Search 連鎖鎖住、Cancel 不受階段鎖、Spectra 階段列、Show 工具列與色弱配色
+**Last updated:** 2026-10-14，Filter 重開從已發布刷選重算、Fit 頁階段化與 Filter 常駐、Show 隨 Search 連鎖鎖住、Cancel 不受階段鎖、Spectra 階段列、Show 工具列與色弱配色
 
 # `zcu_tools.gui.app.fluxdep` — flux-dependence analysis GUI
 
@@ -57,9 +57,10 @@ fit inputs replacement、原生 spectrum／params 匯出、app-owned search／op
   `ProjectDialog` 共用 `gui/widgets/project_dialog.py`（`db_label="Data root"`），並可從
   project root 掃描到的 `result/**/params.json` result scope 下拉選取既有 chip/qubit。
   `SpectrumEntry` 持 raw(SpectrumData)/points(PointsData)/per-spectrum flux 對齊/
-  aligned/points_completed/alignment_seeded/filter_mask。Filter 遮罩依點 index 儲存，
-  set_points、reset_points 與同名取代只清掉該譜的遮罩；對齊保留遮罩。
-  selection_mask() 依插入順序投影成聯合點雲的 bool 陣列，未篩選的譜全選。raw/points 直接複用
+  aligned/points_completed/alignment_seeded/filter_mask/brush_mask。Filter 遮罩（downsample 後的 kept）
+  與刷選（downsample 前的選取）依點 index 儲存，一起發布、一起丟棄：
+  set_points、reset_points、remove 與同名取代只清掉該譜的兩份遮罩；對齊保留遮罩。
+  selection_mask() 與 brush_mask() 依插入順序投影成聯合點雲的 bool 陣列，未篩選的譜全選。raw/points 直接複用
   `analysis.spectrum` 與 `analysis.fluxdep.models` 的 **TypedDict**（欄位用 `[...]` 存取，非 dataclass）。
 - **`services/`** — 薄包裝純運算，mutate State：`load`(LoadService)、
   `alignment`(Alignment/Points)、`store`(SpectrumStore/Selection)、`export`。
@@ -216,11 +217,13 @@ AnalyzePanel 的 public show_tab／current_tab 管理 Filter／Search／Show 三
 目前所在的階段事後變成鎖住時，畫面停在原階段，不自動退回 Filter。
 Search terminal 更新結果，不搶回使用者已切換的畫面。
 
-### 跨譜篩選：從已發布遮罩開始，Edit／Discard／Finish 掌管 Session
-App owner 建立新的跨譜 context 時，以已發布遮罩為初始選取（`State.selection_mask()`，沒有遮罩的譜全選），
-並繼承已發布的 `SelectionState.min_distance`；沒有任何已發布遮罩時全選。GUI 的 Edit 與 RPC
-`selection.interactive.open` 走同一個 owner 入口。已發布遮罩是 downsample 後的 kept 遮罩，
-所以 min_distance 大於 0 時，同一份遮罩再 Finish 會在它上面再 downsample 一次。
+### 跨譜篩選：從已發布刷選開始，Edit／Discard／Finish 掌管 Session
+Apply 與 Finish 一起發布 kept 遮罩、這次 Session 的刷選與 min_distance。App owner 建立新的跨譜
+context 時，以已發布的刷選為初始選取（`State.brush_mask()`，沒有遮罩的譜全選），並繼承已發布的
+`SelectionState.min_distance`；沒有任何已發布遮罩時全選。GUI 的 Edit 與 RPC
+`selection.interactive.open` 走同一個 owner 入口。同刷選、同 min_distance 原樣 Finish，結果等於已發布的
+kept 遮罩；改 min_distance 時從刷選重算。Restore 回來的譜沒有刷選，以全部點當刷選，
+所以 min_distance 大於 0 時，只有這種譜重開後原樣 Finish 可能再刪點。
 
 Fit 頁的 Filter 階段（`ui/filter_stage.FilterStage`）有兩種畫面：
 - 沒有 live context：以 `Controller.render_selection` 唯讀畫出已發布點雲與各譜遮罩（`fluxdep.filter.published`），

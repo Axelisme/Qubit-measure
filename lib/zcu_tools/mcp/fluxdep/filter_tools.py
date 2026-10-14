@@ -96,7 +96,8 @@ def build_filter_tools(bridge: McpBridge) -> ToolTable:
             "handler": filter_points,
             "description": (
                 "Filter the joint cloud (J6). A new draft starts from the published "
-                "masks and min_distance (every point without a published mask). "
+                "brush selection (before downsampling) and min_distance (every "
+                "point without a published mask). "
                 "stroke uses flux/GHz vertices and explicit "
                 f"select/erase mode; width: {declarations['width'].description} "
                 "set_min_distance sets min_distance: "

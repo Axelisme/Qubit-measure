@@ -359,15 +359,18 @@ def test_brush_mask_projects_the_published_brush_beside_the_kept_mask():
 
 
 @pytest.mark.parametrize(
-    "brush",
-    [np.ones(5, dtype=np.bool_), np.array([False, True, True, True, True, True])],
+    ("brush", "message"),
+    [
+        (np.ones(5, dtype=np.bool_), "brush mask must match"),
+        (np.array([False, True, True, True, True, True]), "kept point"),
+    ],
 )
 def test_set_selection_rejects_a_brush_that_is_misshaped_or_misses_kept_points(
-    brush,
+    brush, message: str
 ):
     st = _three_point_state()
     before = st.version.snapshot()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         st.set_selection(np.array([True, False, False, False, True, False]), 0.1, brush)
     assert st.brush_mask() is None
     assert st.selection_mask() is None

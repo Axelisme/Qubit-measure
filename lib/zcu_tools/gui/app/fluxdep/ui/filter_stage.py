@@ -84,7 +84,7 @@ class FilterStage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         self._edit = QPushButton("Edit")
         self._edit.setObjectName("fluxdep.filter.edit")
-        self._edit.setToolTip("Open a Filter draft from the published masks")
+        self._edit.setToolTip("Open a Filter draft from the published brush selection")
         self._edit.clicked.connect(self._on_edit)
         self._discard = QPushButton("Discard")
         self._discard.setObjectName("fluxdep.filter.discard")
