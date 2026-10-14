@@ -29,7 +29,6 @@ from zcu_tools.analysis.fluxdep.search import (
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import FitChangedPayload
-from zcu_tools.gui.app.fluxdep.services import viz
 from zcu_tools.gui.app.fluxdep.services.fit import (
     FitService,
     default_params_path,
@@ -252,11 +251,7 @@ def test_controller_cancelled_search_keeps_published_fit(tiny_database, synchron
         ctrl.interactive.dispose()
 
 
-def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attribution(
-    monkeypatch,
-):
-    from zcu_tools.gui.app.fluxdep.services import fit, viz
-
+def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attribution():
     source_fluxs = np.array([-0.2, 1.2, 1.5, 2.2])
     source_freqs = np.array([4.0, 5.0, 6.0, 7.0])
     state = FluxDepState()
@@ -288,16 +283,9 @@ def test_headless_publication_keeps_captured_unwrapped_coordinates_and_attributi
             ),
         ),
     )
-    monkeypatch.setattr(fit, "search_database", lambda *args, **kwargs: numerical)
-
-    def simulate(params, fluxs, *, cutoff, evals_count):
-        return fluxs, np.tile(np.arange(evals_count, dtype=np.float64), (fluxs.size, 1))
-
-    monkeypatch.setattr(viz, "calculate_energy_vs_flux", simulate)
     ctrl = Controller(state)
     try:
-        result = ctrl.search_database()
-        assert result is numerical
+        ctrl.record_search_result(numerical, ctrl.capture_search())
         assert state.fit_stale_reasons == []
         figure = Figure()
         ctrl.render_fit(figure)
@@ -382,13 +370,7 @@ def test_capture_search_fast_fails_without_points(tiny_database):
 
 
 @pytest.mark.parametrize("shift", [1.0, 0.37])
-def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(
-    monkeypatch, shift
-):
-    def simulate(params, fluxs, *, cutoff, evals_count):
-        return fluxs, np.tile(np.arange(evals_count, dtype=np.float64), (fluxs.size, 1))
-
-    monkeypatch.setattr(viz, "calculate_energy_vs_flux", simulate)
+def test_show_keeps_search_capture_frame_after_alignment_and_source_publication(shift):
     state = FluxDepState()
     entry = SpectrumEntry(
         name="same-spectrum",

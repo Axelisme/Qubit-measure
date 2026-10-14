@@ -33,7 +33,7 @@ from tests.gui.app.fluxdep._window import named
 
 
 @pytest.fixture
-def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch):
+def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure):
     runner = BackgroundRunner()
     transport = QtProgressTransport()
     ctrl = Controller(
@@ -57,11 +57,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch
     )
     result = perfect_fit_result(np.array([0.0, 0.1]), np.array([5.0, 5.1]), bounds)
     if failure == "submit":
-
-        def fail_submit(*args, **kwargs):
-            raise RuntimeError("submit failed")
-
-        monkeypatch.setattr(runner, "submit", fail_submit)
+        runner.stop_accepting()
     yield ctrl, result, runner
     ctrl.search.begin_close()
     assert runner.quiesce()
@@ -70,7 +66,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch
 
 @pytest.fixture
 def search_panel(qapp, search_input, monkeypatch, failure):
-    from zcu_tools.gui.app.fluxdep.services import fit, viz
+    from zcu_tools.gui.app.fluxdep.services import fit
     from zcu_tools.gui.app.fluxdep.ui import analyze_panel
 
     ctrl, result, runner = search_input
@@ -78,7 +74,6 @@ def search_panel(qapp, search_input, monkeypatch, failure):
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     calls: list[str] = []
     warnings: list[tuple[str, str]] = []
-    make_figure = analyze_panel.make_search_diagnostic_figure
     present_figure = analyze_panel.QtPlotHost.present
 
     def search(*args, execution: SearchExecution | None = None):
@@ -89,16 +84,6 @@ def search_panel(qapp, search_input, monkeypatch, failure):
             raise RuntimeError("numeric search failed")
         return result
 
-    def build(actual):
-        calls.append("builder")
-        assert QThread.currentThread() == qapp.thread()
-        assert actual is result
-        assert ctrl.state.fit.params == result.params
-        assert sum(p.has_result for p in facts) == calls.count("search")
-        if failure == "builder":
-            raise RuntimeError("diagnostic builder failed")
-        return make_figure(actual)
-
     def present(host, figure):
         calls.append("present")
         assert QThread.currentThread() == qapp.thread()
@@ -108,14 +93,7 @@ def search_panel(qapp, search_input, monkeypatch, failure):
         present_figure(host, figure)
 
     monkeypatch.setattr(fit, "search_database", search)
-    monkeypatch.setattr(analyze_panel, "make_search_diagnostic_figure", build)
     monkeypatch.setattr(analyze_panel.QtPlotHost, "present", present)
-    monkeypatch.setattr(
-        viz,
-        "calculate_energy_vs_flux",
-        lambda *args, **kwargs: (None, np.zeros((1000, 15))),
-    )
-    monkeypatch.setattr(viz, "render_fit_figure", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         QMessageBox,
         "warning",
@@ -137,7 +115,7 @@ def _click_search(panel: AnalyzePanelWidget, runner: BackgroundRunner) -> None:
     assert runner.quiesce()
 
 
-@pytest.mark.parametrize("failure", [None, "builder", "present", "search", "submit"])
+@pytest.mark.parametrize("failure", [None, "present", "search", "submit"])
 def test_search_button_commits_before_rendering(search_panel, failure):
     panel, ctrl, result, facts, calls, warnings, runner = search_panel
     _click_search(panel, runner)
@@ -160,11 +138,7 @@ def test_search_button_commits_before_rendering(search_panel, failure):
         assert [p.has_result for p in facts if p.has_result] == [True]
         assert export.isEnabled()
         assert any("EJ=5.000" in label.text() for label in panel.findChildren(QLabel))
-        assert calls == (
-            ["search", "builder"]
-            if failure == "builder"
-            else ["search", "builder", "present"]
-        )
+        assert calls == ["search", "present"]
         if failure:
             assert len(warnings) == 1
             assert warnings[0][0] == "Diagnostic plot failed"
