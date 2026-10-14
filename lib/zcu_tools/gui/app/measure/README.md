@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, editor option commands go through resource.run_command
+**Last updated:** 2026-10-14, captured factories bind templates on Open/Reset
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -872,10 +872,13 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
-- Adapter `form` is the core-derived definition. Register it explicitly with the
-  Registry template catalog before opening tabs. Open and Reset derive input
-  against a fixed FormEnv. Legacy builder hooks remain during experiment
-  migration but are not a tab fallback.
+- Adapter `make_form(ctx)` builds a definition from captured source existence.
+  Registry registers adapter classes without evaluating factories or templates.
+  Open and Reset invoke the factory, bind the current Registry catalog and
+  derive input against a fixed FormEnv. Reset replaces shape and defaults
+  atomically; preparation failures retain the previous form and sources.
+  Legacy builder hooks remain during experiment migration but are not a tab
+  fallback.
 - `validate_run_request(req, raw_cfg)` is a mandatory framework member that
   `GuardService` always calls before opening an async handle. `BaseAdapter`
   supplies the no-op default; overrides are pure, predictable preflight only and

@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-14，AliasName 靜態預設與選項契約
+**Last updated:** 2026-10-14，captured factory 與使用時範本綁定
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -29,7 +29,7 @@
 
 Readout 的 ADC 推導由 `PulseReadoutSpec.derive_input_fields` 擁有。生成器將 input 投影回持久形狀後呼叫它，保留其他 invalid leaves。既有 Spec validator 使用同一份推導。
 
-Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Host 的註冊入口負責呼叫它，例如 measure `Registry.register(form=...)`。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
+Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)` 後才解析。Measure 在 Open／Reset 捕捉來源，呼叫 adapter 的 `make_form(ctx)`，再綁定 Registry 的範本目錄。註冊與 reload 不呼叫 factory，也不預檢範本。範本目錄的格式在 `cfg_model`，真實範本表在 `zcu_lab`。
 
 Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的 fresh input，不需先 bind。它沿用 Expr 初值、literal lock 與 Slot fallback 規則。已綁定 Slot 保留 child library key，`to_cfg` 回持久 Spec，不展開 native cfg。Core cfg Form 拒絕這個入口。
 
