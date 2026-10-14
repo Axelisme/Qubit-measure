@@ -36,19 +36,19 @@ from tests.gui.app.fluxdep._window import (
     choose_file,
     command,
     current_page,
+    current_stage,
     drawn_row_text,
     editor,
     fit_panel,
-    has_picker_control,
     list_labels,
     list_tooltips,
     pages,
     picker_button,
-    preview_actions,
-    preview_button,
     project_label,
     show_page,
     spectra_list,
+    stage_button,
+    stage_status,
 )
 
 
@@ -248,16 +248,89 @@ def test_selecting_list_item_sets_active(window, ctrl, spectrum_hdf5):
 # --- editing-area stage switching ------------------------------------------
 
 
-def test_picking_unaligned_from_list_opens_line_picker(window, ctrl, spectrum_hdf5):
+def test_picking_from_list_shows_the_published_preview_first(
+    window, ctrl, spectrum_hdf5
+):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
 
     filepath, *_ = spectrum_hdf5
     name = ctrl.load_spectrum(filepath, spec_type="OneTone")
-    # A human list pick is the Local write intention that opens the stage picker.
+    # Picking a spectrum only shows it; a stage click is the intent to edit.
     spectra_list(window).setCurrentRow(0)
     assert ctrl.state.active_spectrum == name
+    assert isinstance(editor(window), ResultPreviewWidget)
+    assert ctrl.interactive.inspect(name) is None
+    assert current_stage(window) is None
+    stage_button(window, "align").click()
     assert isinstance(editor(window), LinePickerWidget)
-    assert ctrl.interactive.current_line_pick() is not None
+    assert ctrl.interactive.current_line_pick(name) is not None
+    assert current_stage(window) == "align"
+
+
+def test_stage_bar_runs_align_then_sample_above_the_editing_area(
+    qapp, cross_controller
+):
+    from qtpy.QtCore import QPoint
+    from qtpy.QtWidgets import QStackedWidget
+
+    win = MainWindow(cross_controller)
+    win.resize(1200, 800)
+    win.show()
+    qapp.processEvents()
+    try:
+        area = win.findChild(QStackedWidget, "fluxdep.editor")
+        assert area is not None
+        area_top = area.mapTo(win, QPoint(0, 0)).y()
+        align = stage_button(win, "align").mapTo(win, QPoint(0, 0))
+        sample = stage_button(win, "sample").mapTo(win, QPoint(0, 0))
+        assert align.y() < area_top and sample.y() < area_top
+        assert align.y() == sample.y() and align.x() < sample.x()
+        assert stage_button(win, "align").isVisible()
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_stage_bar_marks_open_locked_done_and_draft_stages(window, ctrl, spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    name = ctrl.load_spectrum(filepath, spec_type="OneTone")
+    ctrl.set_active_spectrum(name)
+    # Unaligned: Align can be opened; Sample stays locked until Align is done.
+    assert stage_status(window, "align") == "open"
+    assert stage_status(window, "sample") == "locked"
+    assert stage_button(window, "align").isEnabled()
+    assert not stage_button(window, "sample").isEnabled()
+    stage_button(window, "sample").click()
+    assert ctrl.interactive.inspect(name) is None
+
+    # Publishing the alignment advances the holder to a sampling draft.
+    ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
+    assert stage_status(window, "align") == "done"
+    assert stage_status(window, "sample") == "draft"
+    assert current_stage(window) == "sample"
+    ctrl.interactive.cancel(name)
+    # Aligned without a draft: both stages can be opened.
+    assert stage_status(window, "align") == "done"
+    assert stage_status(window, "sample") == "open"
+    assert stage_button(window, "align").isEnabled()
+    assert stage_button(window, "sample").isEnabled()
+    assert current_stage(window) is None
+
+    ctrl.set_points(name, np.array([0.0, 1.0]), np.array([5.0, 5.1]))
+    # Sampled: both stages are done and either can be reopened.
+    assert stage_status(window, "align") == "done"
+    assert stage_status(window, "sample") == "done"
+    assert stage_button(window, "align").isEnabled()
+    assert stage_button(window, "sample").isEnabled()
+
+    stage_button(window, "align").click()
+    assert stage_status(window, "align") == "draft"
+    assert stage_status(window, "sample") == "done"
+    assert current_stage(window) == "align"
 
 
 def test_aligned_onetone_shows_onetone_widget(window, ctrl, spectrum_hdf5):
@@ -303,7 +376,7 @@ def _sampled_onetone(ctrl, spectrum_hdf5) -> str:
     return name
 
 
-def test_unaligned_preview_offers_only_align(window, ctrl, spectrum_hdf5):
+def test_unaligned_spectrum_opens_only_the_align_stage(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
         ResultPreviewWidget,
@@ -313,26 +386,18 @@ def test_unaligned_preview_offers_only_align(window, ctrl, spectrum_hdf5):
     name = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # A display change alone shows the published spectrum without input.
     ctrl.set_active_spectrum(name)
-    preview = editor(window)
-    assert isinstance(preview, ResultPreviewWidget)
-    assert preview_actions(preview) == {"align"}
-    preview_button(preview, "align").click()
+    assert isinstance(editor(window), ResultPreviewWidget)
+    assert ctrl.interactive.inspect(name) is None
+    stage_button(window, "align").click()
     assert isinstance(editor(window), LinePickerWidget)
     assert ctrl.interactive.current_line_pick(name) is not None
 
 
-def test_aligned_preview_offers_realign_and_sample(window, ctrl, spectrum_hdf5):
-    _sampled_onetone(ctrl, spectrum_hdf5)
-    assert preview_actions(editor(window)) == {"realign", "sample"}
-
-
-def test_preview_realign_opens_a_draft_without_unpublishing(
-    window, ctrl, spectrum_hdf5
-):
+def test_stage_realign_opens_a_draft_without_unpublishing(window, ctrl, spectrum_hdf5):
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     name = _sampled_onetone(ctrl, spectrum_hdf5)
-    preview_button(editor(window), "realign").click()
+    stage_button(window, "align").click()
     picker = editor(window)
     assert isinstance(picker, LinePickerWidget)
     entry = ctrl.state.spectrums[name]
@@ -340,16 +405,16 @@ def test_preview_realign_opens_a_draft_without_unpublishing(
     label = list_labels(window)[0]
     assert "sampled" in label and "align draft" in label
     # Re-aligning an aligned spectrum can still move on to sampling.
-    assert has_picker_control(picker, "sample")
+    assert stage_button(window, "sample").isEnabled()
 
 
-def test_preview_sample_opens_sampling_and_keeps_points_until_finish(
+def test_stage_sample_opens_sampling_and_keeps_points_until_finish(
     window, ctrl, spectrum_hdf5
 ):
     from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 
     name = _sampled_onetone(ctrl, spectrum_hdf5)
-    preview_button(editor(window), "sample").click()
+    stage_button(window, "sample").click()
     assert isinstance(editor(window), OneToneWidget)
     entry = ctrl.state.spectrums[name]
     assert entry.points_completed and entry.point_count == 2
@@ -384,7 +449,7 @@ def test_gui_add_opens_line_picker_for_the_loaded_spectrum(qapp, spectrum_hdf5):
         assert active is not None and active.kind == "line"
         assert current_page(win) == "spectra"
         # An unaligned spectrum has no sampling step to switch to yet.
-        assert not has_picker_control(picker, "sample")
+        assert not stage_button(win, "sample").isEnabled()
     finally:
         win.close()
         win.deleteLater()
@@ -407,13 +472,13 @@ def test_realign_from_sample_draft_confirms_and_cancel_keeps_draft(
         assert draft is not None and draft.kind == "onetone"
         draft.context.plugin.set_threshold.execute(draft.context.session, 0.1)
 
-        picker_button(sampler, "realign").click()
+        stage_button(win, "align").click()
         assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
         assert ctrl.interactive.inspect("one") == draft
         assert editor(win) is sampler
         assert draft.context.session.snapshot().threshold == 0.1
 
-        picker_button(sampler, "realign").click()
+        stage_button(win, "align").click()
         assert len(dialogs.calls) == 2
         assert isinstance(editor(win), LinePickerWidget)
         replaced = ctrl.interactive.inspect("one")
@@ -425,32 +490,50 @@ def test_realign_from_sample_draft_confirms_and_cancel_keeps_draft(
         qapp.processEvents()
 
 
-def test_sample_from_align_draft_confirms_before_discarding(qapp, cross_controller):
+def test_stage_switch_confirms_and_cancel_keeps_the_other_draft(qapp, cross_controller):
     from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
     from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 
     ctrl = cross_controller
-    dialogs = RecordingDialogPresenter(destructive_answers=[False, True])
+    dialogs = RecordingDialogPresenter(destructive_answers=[False, True, False])
     win = MainWindow(ctrl, dialog_presenter=dialogs)
     try:
-        # Opening a stage with no other draft asks nothing.
-        preview_button(editor(win), "realign").click()
-        assert dialogs.calls == []
+        stage_button(win, "align").click()
         aligner = editor(win)
         assert isinstance(aligner, LinePickerWidget)
         draft = ctrl.interactive.inspect("a")
         assert draft is not None and draft.kind == "line"
+        # Reopening the stage that holds the draft asks nothing and keeps it.
+        stage_button(win, "align").click()
+        assert dialogs.calls == []
+        assert ctrl.interactive.inspect("a") == draft
+        aligner = editor(win)
+        assert isinstance(aligner, LinePickerWidget)
 
-        picker_button(aligner, "sample").click()
+        # Declining keeps the align draft, its picker and the stage marks.
+        stage_button(win, "sample").click()
+        assert [call.kind for call in dialogs.calls] == ["destructive_confirm"]
         assert ctrl.interactive.inspect("a") == draft
         assert editor(win) is aligner
+        assert stage_status(win, "align") == "draft"
+        assert current_stage(win) == "align"
 
-        picker_button(aligner, "sample").click()
+        # Confirming discards it and opens sampling; published points remain.
+        stage_button(win, "sample").click()
         assert [call.kind for call in dialogs.calls] == ["destructive_confirm"] * 2
         assert isinstance(editor(win), FindPointsWidget)
         replaced = ctrl.interactive.inspect("a")
         assert replaced is not None and replaced.kind == "twotone"
+        assert stage_status(win, "align") == "done"
+        assert stage_status(win, "sample") == "draft"
+        assert current_stage(win) == "sample"
         assert ctrl.state.spectrums["a"].point_count == 3
+
+        # Going back to Align asks again; declining keeps the sampling draft.
+        stage_button(win, "align").click()
+        assert len(dialogs.calls) == 3
+        assert ctrl.interactive.inspect("a") == replaced
+        assert isinstance(editor(win), FindPointsWidget)
     finally:
         win.close()
         win.deleteLater()
@@ -488,13 +571,13 @@ def test_empty_finish_advances_preview_and_reselect_can_finish_again(
             assert isinstance(preview, ResultPreviewWidget)
             assert "sampled" in list_labels(win)[0]
             if attempt == 0:
-                preview_button(preview, "sample").click()
+                stage_button(win, "sample").click()
                 assert ctrl.state.spectrums[name].points_completed
                 assert "sample draft" in list_labels(win)[0]
                 assert not isinstance(editor(win), ResultPreviewWidget)
         preview = editor(win)
         assert isinstance(preview, ResultPreviewWidget)
-        preview_button(preview, "realign").click()
+        stage_button(win, "align").click()
         assert isinstance(editor(win), LinePickerWidget)
         assert ctrl.state.spectrums[name].aligned
         assert ctrl.state.spectrums[name].points_completed
@@ -520,7 +603,7 @@ def test_empty_preview_reselect_can_commit_nonempty_points(qapp, onetone_control
     try:
         preview = editor(win)
         assert isinstance(preview, ResultPreviewWidget)
-        preview_button(preview, "sample").click()
+        stage_button(win, "sample").click()
         context = ctrl.interactive.current_onetone_pick()
         assert context is not None
         context.plugin.set_threshold.execute(context.session, 0.1)
@@ -718,6 +801,121 @@ def test_agent_spectrum_work_updates_spectra_page_while_user_stays_on_fit(
             context.session.snapshot().flux_int,
         )
         assert "align draft" in list_labels(win)[2]
+        # The stage bar follows the agent's draft without switching pages.
+        assert stage_status(win, "align") == "draft"
+        assert stage_status(win, "sample") == "done"
+        assert current_stage(win) == "align"
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.cancel("b")
+            sampling = ctrl.interactive.begin_sample_pick("b")
+            sampling.plugin.execute_command(sampling.session, "clear", {})
+        assert current_page(win) == "fit"
+        assert stage_status(win, "align") == "done"
+        assert stage_status(win, "sample") == "draft"
+        assert current_stage(win) == "sample"
+    finally:
+        ctrl.control_identity.reclaim_local()
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_agent_cancel_of_the_shown_draft_shows_the_published_preview(
+    qapp, cross_controller
+):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = cross_controller
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        ctrl.control_identity.connect("agent-link", "agent", "owner")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.begin_sample_pick("a")
+        assert isinstance(editor(win), FindPointsWidget)
+        show_page(win, "fit")
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            ctrl.interactive.cancel("a")
+        qapp.processEvents()
+        qapp.processEvents()
+        assert isinstance(editor(win), ResultPreviewWidget)
+        assert current_page(win) == "fit"
+        assert ctrl.interactive.inspect("a") is None
+        assert stage_status(win, "sample") == "done"
+        assert current_stage(win) is None
+    finally:
+        ctrl.control_identity.reclaim_local()
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_cancel_of_the_shown_draft_shows_the_published_preview(qapp, cross_controller):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = cross_controller
+    win = MainWindow(ctrl)
+    win.show()
+    try:
+        stage_button(win, "align").click()
+        assert isinstance(editor(win), LinePickerWidget)
+        ctrl.interactive.cancel("a")
+        qapp.processEvents()
+        qapp.processEvents()
+        # The preview only displays: the holder gets no new picker.
+        assert isinstance(editor(win), ResultPreviewWidget)
+        assert current_page(win) == "spectra"
+        assert ctrl.interactive.inspect("a") is None
+        assert stage_status(win, "align") == "done"
+        assert current_stage(win) is None
+    finally:
+        win.close()
+        win.deleteLater()
+        qapp.processEvents()
+
+
+def test_non_holder_stage_click_views_without_opening_a_picker(qapp, cross_controller):
+    from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidget
+    from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import (
+        ResultPreviewWidget,
+    )
+
+    ctrl = cross_controller
+    dialogs = RecordingDialogPresenter()
+    win = MainWindow(ctrl, dialog_presenter=dialogs)
+    try:
+        ctrl.control_identity.connect("agent-link", "agent", "owner")
+        # A non-holder click views the published spectrum and opens no input.
+        for stage in ("align", "sample"):
+            assert stage_button(win, stage).isEnabled()
+            stage_button(win, stage).click()
+            assert ctrl.interactive.inspect("a") is None
+            assert isinstance(editor(win), ResultPreviewWidget)
+            assert current_stage(win) is None
+        with ctrl.bus.origin(EventOrigin(kind="agent")):
+            agent_draft = ctrl.interactive.begin_sample_pick("a")
+        assert isinstance(editor(win), FindPointsWidget)
+        assert stage_status(win, "sample") == "draft"
+        # Align shows the published preview; the agent's draft stays untouched.
+        stage_button(win, "align").click()
+        assert isinstance(editor(win), ResultPreviewWidget)
+        active = ctrl.interactive.inspect("a")
+        assert active is not None and active.context is agent_draft
+        assert stage_status(win, "sample") == "draft"
+        assert current_stage(win) is None
+        # Sample shows the agent's draft again, never a new or discarded one.
+        stage_button(win, "sample").click()
+        assert isinstance(editor(win), FindPointsWidget)
+        again = ctrl.interactive.inspect("a")
+        assert again == active
+        assert current_stage(win) == "sample"
+        assert dialogs.calls == []
     finally:
         ctrl.control_identity.reclaim_local()
         win.close()

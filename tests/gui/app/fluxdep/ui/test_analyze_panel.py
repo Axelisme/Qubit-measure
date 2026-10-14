@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QTabWidget,
+    QToolBar,
 )
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
@@ -41,7 +43,12 @@ from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
 )
-from tests.gui.app.fluxdep._window import named
+from tests.gui.app.fluxdep._window import (
+    filter_button,
+    fit_stage_button,
+    named,
+    show_canvas,
+)
 
 
 @pytest.fixture
@@ -106,6 +113,7 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     from zcu_tools.gui.app.fluxdep.services import viz
 
     widget, ctrl = panel
+    _unlock_search(ctrl)  # Show also needs an unlocked Search
     ctrl.set_fit_params(
         search_database_hdf5,
         (3.0, 12.0),
@@ -152,18 +160,20 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     assert named(widget, QLabel, "fluxdep.fit.status").text() == search_status
     show_status = named(widget, QLabel, "fluxdep.show.status").text()
     assert bool(show_status) == (display_edit == "missing_frequency")
-    canvas = widget.findChildren(FigureCanvasQTAgg)[0]
+    canvas = show_canvas(widget)
     assert len(canvas.figure.axes) == 1
     lines = canvas.figure.axes[0].lines
     assert len(lines) == 1
     expected_frequency = 2.0 if display_edit == "subset" else 1.0
-    np.testing.assert_allclose(lines[0].get_ydata(), expected_frequency)
+    np.testing.assert_allclose(
+        np.asarray(lines[0].get_ydata(), dtype=float), expected_frequency
+    )
     assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
     assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
 
 
 def _show_title(widget: AnalyzePanelWidget) -> str:
-    return widget.findChildren(FigureCanvasQTAgg)[0].figure.axes[0].get_title()
+    return show_canvas(widget).figure.axes[0].get_title()
 
 
 def _freshness(widget: AnalyzePanelWidget) -> QLabel:
@@ -213,6 +223,8 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    # A published Filter unlocks Search, whose form holds Export.
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
     ctrl.set_fit_params(
         search_database_hdf5,
         (3.0, 12.0),
@@ -243,9 +255,7 @@ def test_upstream_change_marks_search_and_show_stale_until_a_new_result(
         # Show keeps the recorded search cloud, not the newer Filter selection.
         scatter = next(
             artist
-            for artist in widget.findChildren(FigureCanvasQTAgg)[0]
-            .figure.axes[0]
-            .collections
+            for artist in show_canvas(widget).figure.axes[0].collections
             if artist.get_label() == "_points"
         )
         np.testing.assert_allclose(
@@ -281,6 +291,14 @@ def _set_joint_fit_inputs(ctrl: Controller, search_db: str) -> ParamBounds:
         None,
     )
     return bounds
+
+
+def _publish_filter(ctrl: Controller) -> None:
+    """Publish an all-kept Filter over the cross controller's four points.
+
+    An upstream change drops the masks, which locks Search and Show with it.
+    """
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))
 
 
 def _record_perfect_fit(ctrl: Controller, bounds: ParamBounds) -> None:
@@ -326,7 +344,7 @@ def test_repeated_stale_alignment_keeps_captured_show_background(
     try:
         _record_perfect_fit(ctrl, bounds)
         widget.show_tab("show")
-        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        shown = show_canvas(widget).figure
         captured = _assert_native_background(shown, ctrl)
 
         for flux_half, flux_int in ((0.55, 1.05), (0.60, 1.10)):
@@ -381,13 +399,13 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
     widget = AnalyzePanelWidget(ctrl)
     try:
         widget.show_tab("show")
-        assert _click_auto_limits(widget) == _as_displayed(
-            widget, ctrl.fit_auto_limits()
-        ), "before search, Auto limits use the published sources"
+        auto_limits = named(widget, QPushButton, "fluxdep.show.auto_limits")
+        assert not auto_limits.isEnabled(), "Show is locked before a search result"
 
         _record_perfect_fit(ctrl, bounds)
         captured = _click_auto_limits(widget)
@@ -396,6 +414,7 @@ def test_auto_limits_keep_the_recorded_search_frame_until_a_fresh_search(
         # A non-integer shift of one source; the recorded search keeps its frame.
         ctrl.set_alignment("a", 0.685, 1.185)
         assert ctrl.state.fit_stale_reasons == ["a re-aligned"]
+        _publish_filter(ctrl)
         assert _click_auto_limits(widget) == captured
 
         _record_perfect_fit(ctrl, bounds)
@@ -412,6 +431,7 @@ def test_params_only_auto_limits_follow_current_sources(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     _set_joint_fit_inputs(ctrl, search_database_hdf5)
     ctrl.state.set_fit_result((5.0, 1.0, 0.5))
     widget = AnalyzePanelWidget(ctrl)
@@ -419,6 +439,7 @@ def test_params_only_auto_limits_follow_current_sources(
         widget.show_tab("show")
         before = _click_auto_limits(widget)
         ctrl.set_alignment("a", 0.685, 1.185)
+        _publish_filter(ctrl)
         moved = _click_auto_limits(widget)
         assert moved == _as_displayed(widget, ctrl.fit_auto_limits())
         assert moved[0] != before[0], "params-only display has no recorded frame"
@@ -432,6 +453,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
     qapp, cross_controller, search_database_hdf5
 ):
     ctrl = cross_controller
+    _publish_filter(ctrl)
     bounds = _set_joint_fit_inputs(ctrl, search_database_hdf5)
     widget = AnalyzePanelWidget(ctrl)
     try:
@@ -444,7 +466,7 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         )
         show_form = display.findChildren(TransitionsForm)[0]
         x_hi = display.findChildren(QDoubleSpinBox)[1]
-        shown = widget.findChildren(FigureCanvasQTAgg)[0].figure
+        shown = show_canvas(widget).figure
 
         def labels() -> list[str]:
             return [str(line.get_label()) for line in shown.axes[0].lines]
@@ -465,6 +487,9 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         assert show_form.get_transitions() == {"transitions": [(0, 2)]}
         assert x_hi.value() == pytest.approx(0.9)
 
+        # Re-publishing the dropped mask unlocks Show; edits are still pending.
+        _publish_filter(ctrl)
+        assert labels() == ["0 -> 1"]
         named(widget, QPushButton, "fluxdep.show.apply").click()
         assert labels() == ["0 -> 2"]
         assert shown.axes[0].get_xlim()[1] == pytest.approx(0.9)
@@ -474,12 +499,15 @@ def test_upstream_refresh_keeps_unapplied_display_edits_pending(
         widget.deleteLater()
 
 
-def test_three_tabs_filter_search_show(panel):
+def test_three_stages_filter_search_show(panel):
     w, _ = panel
-    tabs = w.findChildren(QTabWidget)
-    assert len(tabs) == 1
-    labels = [tabs[0].tabText(i) for i in range(tabs[0].count())]
-    assert labels == ["Filter", "Search", "Show"]
+    assert w.findChildren(QTabWidget) == []
+    labels = [
+        fit_stage_button(w, stage).text().split(" ")[:2]
+        for stage in ("filter", "search", "show")
+    ]
+    assert labels == [["1", "Filter"], ["2", "Search"], ["3", "Show"]]
+    assert fit_stage_button(w, "filter").isChecked()
 
 
 def test_each_preset_fills_its_own_bounds(panel):
@@ -542,8 +570,36 @@ def test_bounds_preset_names_the_preset_the_bounds_match(panel, search_database_
     assert preset.currentText() == "integer"
 
 
+def _unlock_search(ctrl: Controller) -> None:
+    """Add one sampled spectrum and publish its Filter, which unlocks Search."""
+    from zcu_tools.analysis.fluxdep.models import PointsData
+    from zcu_tools.analysis.spectrum import SpectrumData
+    from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
+
+    fx = np.linspace(0.0, 0.5, 6)
+    raw = SpectrumData(
+        dev_values=fx,
+        fluxs=fx,
+        freqs=np.linspace(4.0, 6.0, 5),
+        signals=np.ones((6, 5), complex),
+    )
+    pts = PointsData(dev_values=fx, fluxs=fx, freqs=np.full(6, 5.0))
+    ctrl.state.put_spectrum(
+        SpectrumEntry(
+            name="sampled",
+            spec_type="TwoTone",
+            raw=raw,
+            points=pts,
+            aligned=True,
+            points_completed=True,
+        )
+    )
+    ctrl.set_selection(np.ones(6, dtype=np.bool_))
+
+
 def test_search_blocked_on_empty_database_path(panel):
     w, ctrl = panel
+    _unlock_search(ctrl)
     _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("")
     named(w, QPushButton, "fluxdep.fit.search").click()
@@ -554,6 +610,7 @@ def test_search_blocked_on_empty_database_path(panel):
 
 def test_search_blocked_on_missing_database_file(panel):
     w, ctrl = panel
+    _unlock_search(ctrl)
     _search_without_frequencies(w)
     named(w, QLineEdit, "fluxdep.fit.search_db").setText("/nonexistent/path/to/db.h5")
     named(w, QPushButton, "fluxdep.fit.search").click()
@@ -594,8 +651,10 @@ def test_auto_limits_match_visualizer(panel, qapp):
     ctrl.state.put_spectrum(
         SpectrumEntry(name="a", spec_type="TwoTone", raw=raw, points=pts, aligned=True)
     )
-    _x, y = _click_auto_limits(w)
-    # y spans the spectrum's freq range [4, 6]
+    # Show is locked before a search result; its Auto limits come from the
+    # Controller query, which spans the spectrum's freq range [4, 6].
+    assert not named(w, QPushButton, "fluxdep.show.auto_limits").isEnabled()
+    _x, y = ctrl.fit_auto_limits()
     assert y == pytest.approx((4.0, 6.0))
 
 
@@ -639,6 +698,7 @@ def test_search_waits_for_a_needed_frequency_and_keeps_the_result(
     qapp, cross_controller, search_database_hdf5, needing, field
 ):
     ctrl = cross_controller
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     _record_perfect_fit(ctrl, _set_joint_fit_inputs(ctrl, search_database_hdf5))
     recorded = ctrl.state.fit.params
     widget = AnalyzePanelWidget(ctrl)
@@ -692,6 +752,9 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
     w = AnalyzePanelWidget(ctrl)
     try:
         w.activate()
+        edit = filter_button(w, "edit")
+        assert edit.isEnabled() == usable
+        edit.click()
         selectors = w.findChildren(SelectorWidget)
         assert len(selectors) == (1 if usable else 0)
         if usable:
@@ -705,7 +768,7 @@ def test_filter_skips_completed_empty_spectra(qapp, spectrum_hdf5, usable):
         qapp.processEvents()
 
 
-def test_activate_attaches_selector_when_points_exist(qapp):
+def test_edit_attaches_selector_when_points_exist(qapp):
     import numpy as np
     from zcu_tools.analysis.fluxdep.models import PointsData
     from zcu_tools.analysis.spectrum import SpectrumData
@@ -735,6 +798,9 @@ def test_activate_attaches_selector_when_points_exist(qapp):
     w = AnalyzePanelWidget(ctrl)
     try:
         w.activate()
+        assert w.findChild(SelectorWidget) is None
+        assert ctrl.interactive.current_cross_selection() is None
+        filter_button(w, "edit").click()
         selector = w.findChild(SelectorWidget)
         assert selector is not None
         assert selector.get_result().selected.all()
@@ -800,6 +866,7 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
             points_completed=True,
         )
     )
+    ctrl.set_selection(np.ones(3, dtype=np.bool_))  # a published Filter unlocks Search
     ctrl.set_fit_params(
         _ranked_database(tmp_path),
         (0.1, 10.0),
@@ -838,6 +905,94 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
     finally:
         ctrl.search.begin_close()
         assert runner.quiesce()
+        widget.quiesce()
+        widget.dispose()
+        widget.deleteLater()
+        ctrl.interactive.dispose()
+
+
+def _drag(canvas: FigureCanvasQTAgg, start, end) -> None:
+    """Press, drag with the left button held, and release between two pixels."""
+    events = (
+        MouseEvent("button_press_event", canvas, *start, button=MouseButton.LEFT),
+        MouseEvent("motion_notify_event", canvas, *end, buttons={MouseButton.LEFT}),
+        MouseEvent("button_release_event", canvas, *end, button=MouseButton.LEFT),
+    )
+    for event in events:
+        canvas.callbacks.process(event.name, event)
+
+
+def test_show_toolbar_box_zooms_the_view_and_home_restores_the_drawing(
+    qapp, cross_controller, search_database_hdf5
+):
+    ctrl = cross_controller
+    _publish_filter(ctrl)
+    ctrl.set_fit_params(
+        search_database_hdf5,
+        (3.0, 12.0),
+        (0.3, 1.5),
+        (0.2, 1.2),
+        TransitionDict({"transitions": [(0, 1)]}),
+        None,
+        None,
+    )
+    bounds = ParamBounds(EJ=(3.0, 12.0), EC=(0.3, 1.5), EL=(0.2, 1.2))
+    fluxs, freqs = ctrl.selected_pointcloud()
+    ctrl.record_search_result(
+        perfect_fit_result(fluxs, freqs, bounds),
+        synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
+    )
+    widget = AnalyzePanelWidget(ctrl)
+    widget.resize(1000, 700)
+    widget.show()
+    try:
+        widget.show_tab("show")
+        qapp.processEvents()
+        toolbar = named(widget, QToolBar, "fluxdep.show.toolbar")
+        tools = {action.text(): action for action in toolbar.actions() if action.text()}
+        # Only view navigation: no tool that opens a blocking dialog.
+        assert set(tools) == {"Home", "Back", "Forward", "Pan", "Zoom"}
+        canvas = show_canvas(widget)
+        canvas.draw()
+        axes = canvas.figure.axes[0]
+        drawn = (axes.get_xlim(), axes.get_ylim())
+        boxes = [
+            box.value() for box in _display_group(widget).findChildren(QDoubleSpinBox)
+        ]
+
+        tools["Zoom"].trigger()
+        corner = axes.transAxes.transform
+        _drag(canvas, corner((0.25, 0.25)), corner((0.75, 0.75)))
+        zoomed_x, zoomed_y = axes.get_xlim(), axes.get_ylim()
+        assert zoomed_x[1] - zoomed_x[0] < 0.75 * (drawn[0][1] - drawn[0][0])
+        assert zoomed_y[1] - zoomed_y[0] < 0.75 * (drawn[1][1] - drawn[1][0])
+        # Zooming changes only this view, not the display choices.
+        assert [
+            box.value() for box in _display_group(widget).findChildren(QDoubleSpinBox)
+        ] == boxes
+
+        tools["Home"].trigger()
+        assert axes.get_xlim() == pytest.approx(drawn[0])
+        assert axes.get_ylim() == pytest.approx(drawn[1])
+
+        # After Apply redraws with new limits, Home returns to that new drawing.
+        y_lo, y_hi = _display_group(widget).findChildren(QDoubleSpinBox)[2:4]
+        y_hi.setValue(y_hi.value() + 1.0)
+        named(widget, QPushButton, "fluxdep.show.apply").click()
+        canvas.draw()
+        redrawn = canvas.figure.axes[0]
+        applied = (redrawn.get_xlim(), redrawn.get_ylim())
+        assert applied[1] == pytest.approx((y_lo.value(), y_hi.value()))
+        _drag(
+            canvas,
+            redrawn.transAxes.transform((0.25, 0.25)),
+            redrawn.transAxes.transform((0.75, 0.75)),
+        )
+        assert redrawn.get_ylim() != pytest.approx(applied[1])
+        tools["Home"].trigger()
+        assert redrawn.get_xlim() == pytest.approx(applied[0])
+        assert redrawn.get_ylim() == pytest.approx(applied[1])
+    finally:
         widget.quiesce()
         widget.dispose()
         widget.deleteLater()

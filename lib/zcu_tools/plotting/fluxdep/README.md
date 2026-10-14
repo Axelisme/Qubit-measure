@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-13 — one OneTone background in every view; diagnostic constrained layout
+**Last updated:** 2026-10-14 — colour-blind-safe shared palette; brush band along the stroke
 
 `make_search_diagnostic_figure(result)` accepts the completed `DatabaseSearchResult`
 from [`analysis.fluxdep.search`](../../analysis/fluxdep/README.md) and returns a
@@ -35,15 +35,18 @@ because `TwoLinePicker` needs it and analysis cannot import plotting.
 
 `twotone.TwoTonePickPlot` renders a numerical `TwoTonePickView` onto a supplied
 Figure in native device/GHz axes. Current points, optional mask and positional
-added/removed changes share the Qt/native renderer. Stroke endpoint outlines use
-normalized radius scaled by each axis span. `make_twotone_pick_figure` computes
+added/removed changes share the Qt/native renderer. The latest stroke draws as
+the band its brush swept along the whole path (`brush.BrushBand`), and
+`show_pointer` draws an uncommitted drag the same way. Each update refits the
+layout and wraps the title, so both title lines stay inside a narrow figure. `make_twotone_pick_figure` computes
 the projection and returns a separate Agg Figure, with optional previous-snapshot
 feedback for Undo. Neither renderer commits state or owns a Qt canvas.
 
 `cross_selection.CrossSelectionPlot` shares calibrated flux/GHz rendering between
 Qt and `make_cross_selection_figure`. Background cells follow sample centers,
 including descending/nonuniform axes. Kept/dropped points, optional index-based
-changes and normalized-radius stroke outlines use the captured joint bounds.
+changes and the stroke's brush band use the captured joint bounds; drags and
+the title behave as in the TwoTone renderer.
 Native output owns a separate Agg canvas; rendering preserves the supplied canvas.
 
 `spectrum.make_spectrum_figure` renders a published raw spectrum in native
@@ -52,6 +55,21 @@ device/GHz axes, with optional committed half/integer lines and sampled points.
 It returns an independent Agg Figure without opening an interactive session.
 The GUI RPC owner captures the published data and encodes the PNG; MCP decides
 when to request this evidence.
+
+`brush.BrushBand` draws the region a normalized-radius brush covers along a
+stroke: one compound path of the circle at every vertex and the strip between
+consecutive vertices, filled once under the nonzero rule. It follows the
+circle-per-sample geometry of `analysis.fluxdep.stroke`, so the band shows what
+the stroke will select or erase.
+
+`palette` holds the point colours every fluxdep view uses, Qt pickers and
+previews as well as notebook and MCP PNGs. They come from the Okabe–Ito palette,
+which red–green colour-blind users can tell apart: Kept/Current orange, Added
+blue hollow circles, Removed reddish-purple crosses, Dropped grey and the brush
+sky blue. `transition_color(i)` cycles the eight Okabe–Ito colours for the fit's
+compiled transitions, so Show's model lines and attributed points match. Half/integer flux lines use `HALF_FLUX_COLOR`/`INTEGER_FLUX_COLOR`
+from `analysis.fluxdep.line_picker`, the line picker's own red and blue, in
+pickers, previews and the spectrum PNG.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

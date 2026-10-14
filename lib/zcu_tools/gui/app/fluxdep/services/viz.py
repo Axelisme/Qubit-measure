@@ -9,7 +9,7 @@ tests can render headless. The layers mirror the notebook visualiser:
                             matching the v1 interactive colouring: white→black,
                             high value = dark, simulation lines / points stand out)
   2. simulation lines     — the fitted (EJ,EC,EL) transition frequencies vs flux
-  3. selected points      — the fit's input (flux, freq) cloud (blue)
+  3. selected points      — the fit's input (flux, freq) cloud (shared Kept colour)
   4. constant-freq lines  — r_f / half·sample_f / (sample_f − r_f) horizontals
   5. dev-value secondary axis — top x-axis showing the device value for each flux
 
@@ -37,6 +37,11 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
     transitions_with_freqs,
 )
+from zcu_tools.plotting.fluxdep.palette import (
+    DROPPED_COLOR,
+    KEPT_COLOR,
+    transition_color,
+)
 from zcu_tools.simulate import flux2value
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
@@ -59,7 +64,8 @@ def render_selection_result(
     """Draw published sampled points and per-spectrum masks, never live drafts.
 
     figure is caller-owned and cleared. Backgrounds use native normalization;
-    excluded points are gray crosses, selected points blue dots in flux/GHz.
+    excluded points are gray crosses, selected points dots in the shared Kept
+    colour, in flux/GHz.
     fit optionally supplies stored EJ/EC/EL and transition choices for J6 model
     curves, including stale or params-only results. Filter points have no residual
     markings. Empty collections produce empty axes. No State, draft or file changes.
@@ -75,12 +81,16 @@ def render_selection_result(
         ax.scatter(
             points["fluxs"][~kept],
             points["freqs"][~kept],
-            color="gray",
+            color=DROPPED_COLOR,
             marker="x",
             zorder=2,
         )
         ax.scatter(
-            points["fluxs"][kept], points["freqs"][kept], color="blue", s=12, zorder=3
+            points["fluxs"][kept],
+            points["freqs"][kept],
+            color=KEPT_COLOR,
+            s=12,
+            zorder=3,
         )
     if fit is not None and fit.params is not None:
         xlim, _ = derive_auto_limits(
@@ -253,7 +263,7 @@ def _plot_simulation_lines(
             t_fluxs,
             freqs[:, index],
             label=label,
-            color=f"C{palette[slot] % 10}",
+            color=transition_color(palette[slot]),
             linewidth=1.0,
             zorder=1,
         )
@@ -504,11 +514,17 @@ def render_fit_figure(
     )
     if attribution is None:
         ax.scatter(
-            s_fluxs, s_freqs, color="blue", s=12, alpha=0.5, zorder=2, label="_points"
+            s_fluxs,
+            s_freqs,
+            color=KEPT_COLOR,
+            s=12,
+            alpha=0.5,
+            zorder=2,
+            label="_points",
         )
     else:
         colors = np.array(
-            [f"C{int(index) % 10}" for index in attribution.transition_indices]
+            [transition_color(int(index)) for index in attribution.transition_indices]
         )
         outliers = attribution.outlier_mask
         ax.scatter(

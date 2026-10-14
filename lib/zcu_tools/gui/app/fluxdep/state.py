@@ -153,6 +153,9 @@ class SpectrumEntry:
     # None means no Filter (all selected). Otherwise, a bool array of length
     # point_count, indexed by this spectrum's points, not joint-cloud positions.
     filter_mask: NDArray[np.bool_] | None = None
+    # The pre-downsample brush selection published with filter_mask, same
+    # indexing and a superset of it. Set and dropped together with filter_mask.
+    brush_mask: NDArray[np.bool_] | None = None
 
     @property
     def point_count(self) -> int:
@@ -196,8 +199,8 @@ class SearchRenderFrame:
 class SelectionState:
     """Stable downsample threshold remembered across selector sessions.
 
-    Filter masks live on each SpectrumEntry. The brush selection in a newly
-    opened selector is all-selected, independent of the published masks.
+    Filter masks live on each SpectrumEntry. A newly opened selector's brush
+    selection starts from their published brush masks (all-selected without one).
     """
 
     min_distance: float = 0.0
@@ -286,13 +289,13 @@ class FluxDepState:
         the name is a *new* member (so a whole-set op such as ``export`` detects
         a concurrently-added spectrum; a re-load/replace of an existing name
         leaves the set cardinality unchanged). Discards this spectrum's Filter
-        mask; bumps ``SELECTION_VERSION_KEY`` if the stored entry had a mask.
-        The incoming entry must have no Filter mask. Otherwise raises ValueError
+        and brush masks; bumps ``SELECTION_VERSION_KEY`` if the stored entry had
+        them. The incoming entry must have neither. Otherwise raises ValueError
         before changing state or versions. Stores the caller's entry directly,
         without changing it.
         """
         self._assert_owner()
-        if entry.filter_mask is not None:
+        if entry.filter_mask is not None or entry.brush_mask is not None:
             raise ValueError("a new spectrum entry cannot carry a Filter mask")
         is_new = entry.name not in self.spectrums
         if not is_new:
@@ -327,8 +330,8 @@ class FluxDepState:
         The removed key reads as 0; reloading the same name continues above its
         previous live version.
         The collection version advances, and an active removed name is cleared.
-        Discards this spectrum's Filter mask; bumps ``SELECTION_VERSION_KEY``
-        if the entry had a mask.
+        Discards this spectrum's Filter and brush masks; bumps
+        ``SELECTION_VERSION_KEY`` if the entry had them.
         """
         self._assert_owner()
         self.get_spectrum(name)
@@ -402,7 +405,8 @@ class FluxDepState:
         """Commit native/mapped points and complete picking, including zero points.
 
         Owner-thread command. Bumps ``spectrum:<name>`` and discards this
-        spectrum's Filter mask. Bumps ``SELECTION_VERSION_KEY`` if it had a mask.
+        spectrum's Filter and brush masks. Bumps ``SELECTION_VERSION_KEY`` if it
+        had them.
         Unknown name raises KeyError. Availability is point_count, not the
         completion flag.
         """
@@ -420,7 +424,8 @@ class FluxDepState:
         """Clear points and completion on an aligned spectrum.
 
         Keep alignment and its seed. Bumps ``spectrum:<name>`` and discards this
-        spectrum's Filter mask. Bumps ``SELECTION_VERSION_KEY`` if it had a mask.
+        spectrum's Filter and brush masks. Bumps ``SELECTION_VERSION_KEY`` if it
+        had them.
         Unknown name raises InvalidInputError
         (unknown_spectrum); unaligned raises FailedPreconditionError
         (spectrum_not_aligned). Both leave data/version unchanged.
@@ -458,24 +463,30 @@ class FluxDepState:
         self.version.bump(f"__pipeline:alignment:{name}")
 
     def _discard_filter_mask(self, name: str) -> None:
-        """Drop a stored spectrum's mask and advance selection only if present."""
+        """Drop a stored spectrum's Filter and brush masks, advancing selection
+        only if present."""
         entry = self.spectrums[name]
         if entry.filter_mask is not None:
             self.version.bump(SELECTION_VERSION_KEY)
-            self.spectrums[name] = replace(entry, filter_mask=None)
+            self.spectrums[name] = replace(entry, filter_mask=None, brush_mask=None)
 
     def set_selection(
-        self, selected: NDArray[np.bool_], min_distance: float = 0.0
+        self,
+        selected: NDArray[np.bool_],
+        min_distance: float = 0.0,
+        brush: NDArray[np.bool_] | None = None,
     ) -> None:
-        """Publish a joint-cloud Filter mask and remember its downsample threshold.
+        """Publish a joint-cloud Filter mask, its brush and downsample threshold.
 
-        ``selected`` must be a one-dimensional bool mask with one value per
-        annotated point across all spectra, in insertion order. Split it into
-        detached per-spectrum masks indexed by each spectrum's points.
-        ``min_distance`` is the normalized downsample threshold for the next
-        selector session. Bumps ``SELECTION_VERSION_KEY`` on publication.
-        Raises ValueError for a shape mismatch before changing data or versions.
-        Must run on the owner thread.
+        ``selected`` is the kept mask: a one-dimensional bool mask with one
+        value per annotated point across all spectra, in insertion order.
+        ``brush`` is the pre-downsample brush selection in the same shape and
+        must include every kept point; None publishes ``selected`` as the brush.
+        Split both into detached per-spectrum masks indexed by each spectrum's
+        points. ``min_distance`` is the normalized downsample threshold for the
+        next selector session. Bumps ``SELECTION_VERSION_KEY`` on publication.
+        Raises ValueError for a shape mismatch or a kept point outside the brush
+        before changing data or versions. Must run on the owner thread.
         """
         self._assert_owner()
         mask = np.asarray(selected, dtype=np.bool_)
@@ -487,10 +498,19 @@ class FluxDepState:
             )
         if mask.shape != (point_count,):
             raise ValueError("selection mask must match the joint point cloud shape")
+        brush_mask = mask if brush is None else np.asarray(brush, dtype=np.bool_)
+        if brush_mask.shape != mask.shape:
+            raise ValueError("brush mask must match the joint point cloud shape")
+        if np.any(mask & ~brush_mask):
+            raise ValueError("every kept point must be in the brush mask")
         offset = 0
         for name, entry in self.spectrums.items():
             end = offset + entry.point_count
-            self.spectrums[name] = replace(entry, filter_mask=mask[offset:end].copy())
+            self.spectrums[name] = replace(
+                entry,
+                filter_mask=mask[offset:end].copy(),
+                brush_mask=brush_mask[offset:end].copy(),
+            )
             offset = end
         self.selection = SelectionState(min_distance=min_distance)
         self.version.bump(SELECTION_VERSION_KEY)
@@ -503,15 +523,28 @@ class FluxDepState:
         publishing points, replacing or removing a spectrum drops its mask.
         """
         self._assert_owner()
-        entries = self.spectrums.values()
-        if not any(entry.filter_mask is not None for entry in entries):
+        return self._project_masks([e.filter_mask for e in self.spectrums.values()])
+
+    def brush_mask(self) -> NDArray[np.bool_] | None:
+        """Project per-spectrum brush masks in joint-cloud insertion order.
+
+        The brush is the pre-downsample selection published with each Filter
+        mask. Return a detached mask, with unfiltered spectra (restored ones
+        included) all-selected. None means no spectrum has a published mask.
+        The brush follows the same index and drop rules as selection_mask.
+        """
+        self._assert_owner()
+        return self._project_masks([e.brush_mask for e in self.spectrums.values()])
+
+    def _project_masks(
+        self, masks: list[NDArray[np.bool_] | None]
+    ) -> NDArray[np.bool_] | None:
+        if all(mask is None for mask in masks):
             return None
         return np.concatenate(
             [
-                entry.filter_mask
-                if entry.filter_mask is not None
-                else np.ones(entry.point_count, dtype=np.bool_)
-                for entry in entries
+                mask if mask is not None else np.ones(entry.point_count, np.bool_)
+                for mask, entry in zip(masks, self.spectrums.values(), strict=True)
             ]
         )
 

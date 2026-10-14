@@ -1,9 +1,14 @@
-"""AnalyzePanelWidget — the v2 analysis panel: Filter / Search / Show tabs.
+"""AnalyzePanelWidget — the v2 analysis panel: Filter -> Search -> Show stages.
 
 One panel (a MainWindow singleton) gathers the three post-selection analysis
-steps that used to be separate buttons:
+steps under a stage bar ``1 Filter -> 2 Search -> 3 Show``. A stage is locked
+until the earlier ones are done: Search until every sampled spectrum has a
+published Filter mask, Show until Search is unlocked and a search result
+exists, and both while a Filter draft is live. A running search's Cancel
+ignores the locks.
 
-- **Filter**: the cross-spectrum selector over the joint point cloud.
+- **Filter**: the published masks read-only, or the live cross-spectrum
+  selector over the joint point cloud (``FilterStage``).
 - **Search**: the database-search form + the search's native diagnostic figure.
 - **Show**: the fit visualisation (background / simulation lines / points /
   constant-freq lines), with display tools — y/x axis limits (default matching
@@ -16,11 +21,13 @@ reported separately and do not invalidate the fit. Search problems (a missing
 database, a rejected search) go to the Search status line and Show drawing
 problems to the Show status line; neither opens a modal.
 
-Public Qt seams (objectName): ``fluxdep.fit.search_db``, ``fluxdep.fit.bounds_preset``,
+Public Qt seams (objectName): the stage buttons ``fluxdep.fit.stage.filter`` /
+``search`` / ``show``, ``fluxdep.fit.search_db``, ``fluxdep.fit.bounds_preset``,
 ``fluxdep.fit.r_f`` / ``fluxdep.fit.sample_f`` with their ``.required`` marks,
 ``fluxdep.fit.search`` / ``cancel`` / ``export_params``, ``fluxdep.fit.status``,
-``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits`` and
-``fluxdep.show.status``.
+``fluxdep.fit.freshness``; ``fluxdep.show.apply`` / ``auto_limits``,
+``fluxdep.show.status``, the Show canvas ``fluxdep.show.canvas`` and its
+navigation ``fluxdep.show.toolbar``.
 """
 
 from __future__ import annotations
@@ -30,12 +37,10 @@ import os
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
-from typing import TYPE_CHECKING, Literal
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
+from typing import Literal
 
 from matplotlib.backend_bases import Event
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import Qt
@@ -53,7 +58,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStackedWidget,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -78,6 +82,8 @@ from zcu_tools.gui.app.fluxdep.state import (
     transitions_need_r_f,
     transitions_need_sample_f,
 )
+from zcu_tools.gui.app.fluxdep.ui.filter_stage import FilterStage
+from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
@@ -110,6 +116,20 @@ _BOUND_PRESETS: dict[str, tuple[tuple[float, float], ...]] = {
 }
 # Preset combo entry shown while the bounds match no preset; choosing it keeps them.
 _CUSTOM_PRESET = "custom"
+
+
+class _ShowToolbar(NavigationToolbar2QT):
+    """Matplotlib's Qt toolbar with only the view-navigation tools.
+
+    Subplots, Customize and Save open blocking dialogs, which fluxdep dialogs
+    avoid; matplotlib chooses the buttons from this class attribute.
+    """
+
+    toolitems = [
+        item
+        for item in NavigationToolbar2QT.toolitems
+        if item[0] in {"Home", "Back", "Forward", "Pan", "Zoom"}
+    ]
 
 
 def _bound_spinbox(value: float, hi: float = 1000.0) -> QDoubleSpinBox:
@@ -171,7 +191,7 @@ def _published_inputs(
 
 
 class AnalyzePanelWidget(QWidget):
-    """Filter / Search / Show tabs over the selected joint point cloud."""
+    """Filter -> Search -> Show stages over the selected joint point cloud."""
 
     def __init__(self, ctrl: Controller, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -179,8 +199,7 @@ class AnalyzePanelWidget(QWidget):
         self._writable = True
         self._bus_subs = EventSubscriptions()
         self._shown_token: int | None = None
-        self._filter_widget: SelectorWidget | None = None
-        self._filter_context_id: int | None = None
+        self._tab: AnalyzeTab = "filter"
         self._shown_fit: _ShowKey | None = None
         self._db_chooser: QFileDialog | None = None
         # True while the entered transitions need a blank r_f / sample_f.
@@ -235,56 +254,56 @@ class AnalyzePanelWidget(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_filter_tab(), "Filter")
-        self._tabs.addTab(self._build_search_tab(), "Search")
-        self._tabs.addTab(self._build_show_tab(), "Show")
-        self._tabs.currentChanged.connect(self._on_tab_changed)
-        root.addWidget(self._tabs)
-
-    # --- Filter tab ------------------------------------------------------
-
-    def _build_filter_tab(self) -> QWidget:
-        holder = QWidget()
-        self._filter_layout = QVBoxLayout(holder)
-        self._filter_placeholder = QLabel(
-            "Select points on a spectrum first, then open this tab."
+        # Clicks reach only unlocked stages; StageBar disables locked buttons.
+        self._stages: StageBar[AnalyzeTab] = StageBar(
+            "fluxdep.fit.stage",
+            (("filter", "Filter"), ("search", "Search"), ("show", "Show")),
+            on_click=self.show_tab,
         )
-        self._filter_placeholder.setEnabled(False)
-        self._filter_layout.addWidget(self._filter_placeholder)
-        return holder
+        root.addWidget(self._stages)
+        self._filter = FilterStage(self._ctrl)
+        self._stage_pages: dict[AnalyzeTab, QWidget] = {
+            "search": self._build_search_tab(),
+            "show": self._build_show_tab(),
+            "filter": self._filter,
+        }
+        self._pages = QStackedWidget()
+        for stage_page in self._stage_pages.values():
+            self._pages.addWidget(stage_page)
+        self._pages.setCurrentWidget(self._filter)
+        root.addWidget(self._pages, stretch=1)
 
-    def _refresh_filter_tab(self) -> None:
-        """Attach the valid app context, after retiring the prior view.
+    def _refresh_stages(self) -> None:
+        """Mark each stage from published State and the live Filter draft.
 
-        The holder reuses or begins the Filter context. A non-holder only
-        reattaches a live one, such as an agent's, and never begins input.
+        Filter is done once every sampled spectrum has a published mask
+        (upstream changes drop masks, which reopens it); Search is done once
+        a search result exists. Search needs a done Filter and no live Filter
+        draft; Show needs an unlocked Search and a result, so an old result
+        stays hidden behind a locked Search. A locked stage stays shown if it
+        is current; its form (Search, with Search and Export) or display
+        choices (Show) are disabled until it unlocks, and always for a
+        non-holder. A running search's Cancel and Show's toolbar ignore the
+        locks (see _refresh_cancel_button; the toolbar only moves the local
+        view).
         """
-        from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
-
-        self.detach()
-        if not any(e.point_count > 0 for e in self._ctrl.state.spectrums.values()):
-            self._filter_placeholder.setVisible(True)
-            return
-        if self._writable:
-            context = self._ctrl.interactive.begin_cross_selection()
-        else:
-            live = self._ctrl.interactive.current_cross_selection()
-            if live is None:
-                self._filter_placeholder.setVisible(True)
-                return
-            context = live
-        active = self._ctrl.interactive.inspect_selection()
-        if active is None or active.context is not context:
-            raise RuntimeError("selection context changed while attaching its view")
-        self._filter_context_id = active.context_id
-        self._filter_placeholder.setVisible(False)
-        selector = SelectorWidget(
-            context, on_apply=self._ctrl.interactive.apply_cross_selection
+        state = self._ctrl.state
+        drafting = self._ctrl.interactive.current_cross_selection() is not None
+        sampled = [e for e in state.spectrums.values() if e.point_count > 0]
+        filtered = bool(sampled) and all(e.filter_mask is not None for e in sampled)
+        has_result = state.fit.has_result
+        search_locked = drafting or not filtered
+        filter_status = stage_status(done=filtered, draft=drafting, locked=False)
+        search_status = stage_status(done=has_result, draft=False, locked=search_locked)
+        show_status = stage_status(
+            done=False, draft=False, locked=search_locked or not has_result
         )
-        self._filter_widget = selector
-        selector.set_editable(editable=self._writable)
-        self._filter_layout.addWidget(selector)
+        self._stages.set_status("filter", filter_status)
+        self._stages.set_status("search", search_status)
+        self._stages.set_status("show", show_status)
+        self._stages.set_current(self._tab)
+        self._search_form.setEnabled(self._writable and search_status != "locked")
+        self._display_box.setEnabled(self._writable and show_status != "locked")
 
     # --- Search tab ------------------------------------------------------
 
@@ -292,6 +311,12 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtWidgets import QSplitter
 
         form_box = self._build_search_form()
+        # Cancel sits outside the form, so the Search stage lock that disables
+        # the form never reaches it; _refresh_cancel_button gates it instead.
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("fluxdep.fit.cancel")
+        self._cancel_btn.clicked.connect(self._on_cancel_search)
+        self._cancel_btn.setEnabled(False)
         # Status lines sit outside the form, so a non-holder reads them enabled.
         self._status = _message_label("Status", "fluxdep.fit.status")
         # Outdated-fit line with its root-change reasons; blank while fresh.
@@ -305,7 +330,9 @@ class AnalyzePanelWidget(QWidget):
         self._diag_container = FigureContainer(self._diag_stack, diag_placeholder)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(_control_column(form_box, self._status, self._freshness))
+        splitter.addWidget(
+            _control_column(form_box, self._cancel_btn, self._status, self._freshness)
+        )
         splitter.addWidget(self._diag_stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -375,18 +402,11 @@ class AnalyzePanelWidget(QWidget):
         form.addRow("sample_f (GHz)", self._sample_f)
 
     def _add_search_actions(self, form: QFormLayout) -> None:
-        """Add Search / Cancel, the progress bar and Export params…."""
+        """Add Search, the progress bar and Export params…."""
         self._search_btn = QPushButton("Search")
         self._search_btn.setObjectName("fluxdep.fit.search")
         self._search_btn.clicked.connect(self._on_search)
-        self._cancel_btn = QPushButton("Cancel")
-        self._cancel_btn.setObjectName("fluxdep.fit.cancel")
-        self._cancel_btn.clicked.connect(self._on_cancel_search)
-        self._cancel_btn.setEnabled(False)
-        run_row = QHBoxLayout()
-        run_row.addWidget(self._search_btn)
-        run_row.addWidget(self._cancel_btn)
-        form.addRow(run_row)
+        form.addRow(self._search_btn)
 
         self._progress = QProgressBar()
         self._progress.setVisible(False)
@@ -404,6 +424,7 @@ class AnalyzePanelWidget(QWidget):
         from qtpy.QtWidgets import QSplitter
 
         tools_box = QGroupBox("Display")
+        self._display_box = tools_box
         tools = QFormLayout(tools_box)
 
         self._x_lo, self._x_hi = _bound_spinbox(0.0), _bound_spinbox(1.0)
@@ -433,13 +454,23 @@ class AnalyzePanelWidget(QWidget):
 
         self._fit_figure = Figure(figsize=(6, 4))
         self._fit_canvas = FigureCanvasQTAgg(self._fit_figure)
+        self._fit_canvas.setObjectName("fluxdep.show.canvas")
         # Show lays out once per draw; re-fit on resize so the title and axis
         # labels stay inside the canvas Qt actually gives the figure.
         self._fit_canvas.mpl_connect("resize_event", self._fit_show_layout)
+        # View navigation only changes this canvas, so it stays usable for
+        # every viewer; set_writable never gates it.
+        self._fit_toolbar = _ShowToolbar(self._fit_canvas, None)
+        self._fit_toolbar.setObjectName("fluxdep.show.toolbar")
+        plot = QWidget()
+        plot_layout = QVBoxLayout(plot)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addWidget(self._fit_toolbar)
+        plot_layout.addWidget(self._fit_canvas, stretch=1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(_control_column(tools_box, self._show_status))
-        splitter.addWidget(self._fit_canvas)
+        splitter.addWidget(plot)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([360, 640])
@@ -505,110 +536,84 @@ class AnalyzePanelWidget(QWidget):
             self._load_from_state()
         self._refresh_search()
         self._refresh_show()
+        self._refresh_stages()
 
     def _on_upstream_changed(self, payload: object) -> None:
-        """Re-read freshness after any publication the recorded fit depends on."""
+        """Re-read freshness and stage locks after a publication fit depends on."""
         del payload
         self._refresh_search()
         self._refresh_show()
+        self._refresh_stages()
 
     @property
     def current_tab(self) -> AnalyzeTab:
-        """Current domain tab: filter, search, or show, on the State owner."""
+        """Current stage: filter, search, or show, on the State owner."""
         self._ctrl.state.assert_owner_thread()
-        return _ANALYZE_TABS[self._tabs.currentIndex()]
+        return self._tab
 
     def show_tab(self, tab: AnalyzeTab) -> None:
-        """Select and refresh a domain tab on the State-owner Qt thread.
+        """Show and refresh a stage on the State-owner Qt thread.
 
-        Filter reuses an attached valid context without resetting input/Undo;
-        a non-holder only reattaches a live one. Search/show detach Filter,
-        even if already selected; the holder's switch also cancels the live
-        Filter context, a non-holder's leaves it open. Search forms/progress
-        refresh from the app owner. Invalid tab raises ValueError;
-        foreign-thread access raises RuntimeError.
+        Locks gate the stage bar's clicks; this entry still shows a locked
+        stage, as window routing and agent following need, with its inputs
+        disabled. Filter reattaches a live
+        context's Selector without resetting input/Undo, else shows the
+        published masks; it never begins a context. Search/show detach the
+        Filter view and never cancel its context. Search forms/progress refresh
+        from the app owner. Invalid tab raises ValueError; foreign-thread
+        access raises RuntimeError.
         This does not raise or activate the top-level window.
         """
         self._ctrl.state.assert_owner_thread()
         if tab not in _ANALYZE_TABS:
             raise ValueError(f"unknown analyze tab {tab!r}")
-        index = _ANALYZE_TABS.index(tab)
-        if index != self._tabs.currentIndex():
-            self._tabs.setCurrentIndex(index)
-        elif tab == "filter":
-            active = self._ctrl.interactive.inspect_selection()
-            if (
-                active is None
-                or active.context_id != self._filter_context_id
-                or self._filter_widget is None
-            ):
-                self._refresh_filter_tab()
+        self._tab = tab
+        self._pages.setCurrentWidget(self._stage_pages[tab])
+        if tab == "filter":
+            self._filter.attach()
         else:
-            self._on_tab_changed(index)
+            self._filter.detach()
+        self._refresh_stages()
         self._refresh_search()
 
     def _on_interactive_changed(self, payload: InteractiveChangedPayload) -> None:
-        if payload.phase == "closed" and payload.context_id == self._filter_context_id:
-            self.detach()
+        # The Filter stage follows its own view; opened/closed drafts move locks.
         if payload.kind == "selection" and payload.phase != "updated":
-            # A live Filter decides whether a non-holder may enter its tab.
-            self._set_tab_availability(editable=self._writable)
+            self._refresh_stages()
 
     def activate(self) -> None:
-        """Activate the singleton; on Filter, reattach valid or new app context.
+        """Refresh the singleton; on Filter, rebuild the stage's view.
 
         Explicit refresh; MainWindow routes Fit page entries through show_tab.
         Retire the old view first, so hidden controls cannot Apply stale data.
-        Empty cloud shows a placeholder; invalid inputs propagate to the caller.
+        It never begins a Filter context; invalid inputs propagate.
         """
         self._refresh_search()
-        if self._tabs.tabText(self._tabs.currentIndex()) == "Filter":
-            self._refresh_filter_tab()
+        if self._tab == "filter":
+            self._filter.detach()
+            self._filter.attach()
+        self._refresh_stages()
 
     def detach(self) -> None:
         """Retire Filter's view without cancelling the app context.
 
-        Call when leaving the Fit page. Other tabs/forms remain intact.
+        Call when leaving the Fit page. Other stages/forms remain intact.
         The app owns context invalidation on active/source/picker switches.
         """
-        if self._filter_widget is not None:
-            self._filter_widget.teardown()
-            self._filter_layout.removeWidget(self._filter_widget)
-            self._filter_widget.deleteLater()
-            self._filter_widget = None
-        self._filter_context_id = None
+        self._filter.detach()
 
     def set_writable(self, *, writable: bool) -> None:
-        """Gate domain input while preserving Show and canvas viewing."""
+        """Gate domain input and Show's display choices; viewing stays available.
+
+        A non-holder keeps the stage bar, the status lines, the canvases and
+        the Show toolbar; Filter's Edit/Discard and Selector controls follow.
+        The holder's Search form and Show display choices also follow the
+        stage locks (see _refresh_stages); a running search's Cancel does not.
+        """
         self._writable = writable
-        self._search_form.setEnabled(writable)
-        self._set_tab_availability(editable=writable)
-        if self._filter_widget is not None:
-            self._filter_widget.set_editable(editable=writable)
-
-    def _set_tab_availability(self, *, editable: bool) -> None:
-        # The holder's Filter entry opens input. A non-holder enters Filter only
-        # to view a live context; Search/Show are pure viewing for everyone.
-        viewable_filter = (
-            editable
-            or self.current_tab == "filter"
-            or self._ctrl.interactive.current_cross_selection() is not None
-        )
-        self._tabs.setTabEnabled(0, viewable_filter)
-
-    def _on_tab_changed(self, index: int) -> None:
-        self._set_tab_availability(editable=self._writable)
-        if self._tabs.tabText(index) == "Filter":
-            self._refresh_filter_tab()
-        else:
-            self.detach()
-            # Only the holder's leaving ends the Session; a viewer's switch
-            # retires the view, like leaving the Fit page.
-            if (
-                self._writable
-                and self._ctrl.interactive.current_cross_selection() is not None
-            ):
-                self._ctrl.interactive.cancel_selection()
+        self._filter.set_writable(writable=writable)
+        self._refresh_stages()
+        self._refresh_cancel_button()
 
     # --- Search actions --------------------------------------------------
 
@@ -699,6 +704,16 @@ class AnalyzePanelWidget(QWidget):
         pending = activity is not None and activity.status == "pending"
         self._search_btn.setEnabled(not pending and not self._needs_frequency)
 
+    def _refresh_cancel_button(self) -> None:
+        """Enable Cancel for the holder while a search is pending.
+
+        Only control authority and the running search gate it; the stage
+        locks do not, so a running search can always be stopped.
+        """
+        activity = self._ctrl.search.current
+        pending = activity is not None and activity.status == "pending"
+        self._cancel_btn.setEnabled(self._writable and pending)
+
     def _on_browse_db(self) -> None:
         from .paths import database_dir
 
@@ -762,7 +777,7 @@ class AnalyzePanelWidget(QWidget):
         activity = self._ctrl.search.current
         pending = activity is not None and activity.status == "pending"
         self._refresh_search_button()
-        self._cancel_btn.setEnabled(pending)
+        self._refresh_cancel_button()
         self._progress.setVisible(pending)
         stale_reasons = self._stale_reasons()
         self._freshness.setText(format_stale_reasons(stale_reasons))
@@ -817,7 +832,7 @@ class AnalyzePanelWidget(QWidget):
         self._apply_auto_limits()
         self._apply_limit_boxes()
         self._refresh_show()
-        # The Show tab is rendered and ready, but stay on Search so the result
+        # The Show stage is rendered and ready, but stay on Search so the result
         # (EJ/EC/EL + diagnostic) is visible; the user switches to Show when ready.
 
     def quiesce(self) -> None:
@@ -826,12 +841,12 @@ class AnalyzePanelWidget(QWidget):
         The host must drain its search runner before disposing this panel.
         Hiding or detaching this view does not cancel app-owned search.
         """
-        if self._filter_widget is not None:
-            self._filter_widget.quiesce()
+        self._filter.quiesce()
 
     def dispose(self) -> None:
         """Release subscriptions and presentation after app search has drained."""
         self._bus_subs.unsubscribe_all()
+        self._filter.dispose()
         if self._progress_dispose is not None:
             self._progress_dispose()
             self._progress_dispose = None
@@ -941,4 +956,6 @@ class AnalyzePanelWidget(QWidget):
             return
         self._show_status.setText(notice or "")
         self._shown_fit = self._show_key()
+        # A new drawing starts a new navigation history: Home returns to it.
+        self._fit_toolbar.update()
         self._fit_canvas.draw_idle()

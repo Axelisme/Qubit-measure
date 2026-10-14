@@ -44,6 +44,7 @@ def search_input(qapp, search_database_hdf5, spectrum_hdf5, failure, monkeypatch
     name = ctrl.load_spectrum(spectrum_hdf5[0], spec_type="TwoTone")
     ctrl.set_alignment(name, flux_half=0.0, flux_int=1.0)
     ctrl.set_points(name, np.array([0.0, 0.1]), np.array([5.0, 5.1]))
+    ctrl.set_selection(np.ones(2, dtype=np.bool_))  # a published Filter unlocks Search
     bounds = ParamBounds(EJ=(2.0, 15.0), EC=(0.2, 2.0), EL=(0.1, 2.0))
     ctrl.set_fit_params(
         search_database_hdf5,

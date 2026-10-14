@@ -423,11 +423,10 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         return result
 
     monkeypatch.setattr(fit, "search_database", compute)
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     panel = AnalyzePanelWidget(ctrl)
     panel.show()
-    tabs = panel.findChild(QtWidgets.QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(1)
+    panel.show_tab("search")
     search = command(panel, "fluxdep.fit.search")
     cancel = command(panel, "fluxdep.fit.cancel")
     try:

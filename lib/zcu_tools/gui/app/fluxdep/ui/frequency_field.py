@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from qtpy.QtGui import QDoubleValidator
+from qtpy.QtGui import QDoubleValidator, QPalette
 from qtpy.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from zcu_tools.gui.widgets.control_indicator import CAUTION_COLOR
@@ -20,6 +20,7 @@ class FrequencyField(QWidget):
 
     The line edit's objectName is object_name; the hint label's is
     ``f"{object_name}.required"`` and shows hint_text in the caution colour.
+    A blank field shows a faded ``(unset)`` so it never reads as a value.
     """
 
     def __init__(
@@ -29,6 +30,12 @@ class FrequencyField(QWidget):
         self._edit = QLineEdit()
         self._edit.setObjectName(object_name)
         self._edit.setPlaceholderText("(unset)")
+        # Some styles draw placeholder text like entered text; fade it.
+        palette = self._edit.palette()
+        faded = palette.color(QPalette.ColorRole.Text)
+        faded.setAlphaF(0.35)
+        palette.setColor(QPalette.ColorRole.PlaceholderText, faded)
+        self._edit.setPalette(palette)
         self._edit.setValidator(QDoubleValidator())
         self._hint = QLabel(hint_text)
         self._hint.setObjectName(f"{object_name}.required")

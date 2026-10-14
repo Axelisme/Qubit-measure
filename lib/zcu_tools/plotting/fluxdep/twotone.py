@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from matplotlib.patches import Ellipse
 
+from zcu_tools.analysis.fluxdep.stroke import BrushPoint
 from zcu_tools.analysis.fluxdep.twotone import (
     TwoToneInputs,
     TwoTonePickState,
     TwoTonePickView,
     project_twotone_pick,
+)
+
+from .brush import BrushBand
+from .palette import (
+    ADDED_COLOR,
+    ADDED_MARKER,
+    KEPT_COLOR,
+    REMOVED_COLOR,
+    REMOVED_MARKER,
 )
 
 
@@ -65,24 +76,31 @@ class TwoTonePickPlot:
             visible=False,
         )
         self._current = self._axes.scatter(
-            [], [], s=12, color="red", label="Current", zorder=4
+            [], [], s=12, color=KEPT_COLOR, label="Current", zorder=4
         )
         self._added = self._axes.scatter(
             [],
             [],
             s=45,
-            edgecolors="#008b6b",
+            marker=ADDED_MARKER,
+            edgecolors=ADDED_COLOR,
             facecolors="none",
             label="Added",
             zorder=5,
         )
         self._removed = self._axes.scatter(
-            [], [], s=30, color="#b04bb3", marker="x", label="Removed", zorder=5
+            [],
+            [],
+            s=30,
+            color=REMOVED_COLOR,
+            marker=REMOVED_MARKER,
+            label="Removed",
+            zorder=5,
         )
-        (self._stroke,) = self._axes.plot(
-            [], [], color="#007e91", linewidth=1, linestyle="--", zorder=6
-        )
-        self._endpoints: list[Ellipse] = []
+        # The latest committed stroke, then an uncommitted drag above it.
+        x_span, y_span = self._x_span, self._y_span
+        self._stroke = BrushBand(self._axes, x_span=x_span, y_span=y_span, zorder=6)
+        self._pointer = BrushBand(self._axes, x_span=x_span, y_span=y_span, zorder=7)
         self._axes.set_xlabel("Device value (native)")
         self._axes.set_ylabel("Frequency (GHz)")
         self._axes.set_xlim(self._extent[:2])
@@ -103,9 +121,11 @@ class TwoTonePickPlot:
         """Project exact derived result and optional latest-change overlays.
 
         Show native device/GHz axes, ticks/grid and current points. show_changes
-        adds separate added/removed markers, stroke and normalized endpoint
-        outlines. show_mask overlays selection. show_origin=False masks the
-        background only. Never modify view or its domain/history.
+        adds separate added/removed markers and the band the stroke's brush
+        swept along its whole path. show_mask overlays selection.
+        show_origin=False masks the background only. The figure layout is
+        refitted so both title lines stay inside it. Never modify view or its
+        domain/history.
         """
         state, result = view.state, view.result
         background = (
@@ -129,24 +149,9 @@ class TwoTonePickPlot:
         self._removed.set_offsets(view.removed_points)
         self._added.set_visible(show_changes)
         self._removed.set_visible(show_changes)
-        for endpoint in self._endpoints:
-            endpoint.remove()
-        self._endpoints.clear()
-        vertices = view.stroke_vertices if show_changes else ()
-        self._stroke.set_data([p.x for p in vertices], [p.y for p in vertices])
-        if vertices:
-            for point in (vertices[0], vertices[-1]):
-                endpoint = Ellipse(
-                    (point.x, point.y),
-                    width=2 * view.stroke_width * self._x_span,
-                    height=2 * view.stroke_width * self._y_span,
-                    fill=False,
-                    edgecolor="#007e91",
-                    linewidth=0.8,
-                    zorder=6,
-                )
-                self._axes.add_patch(endpoint)
-                self._endpoints.append(endpoint)
+        self._stroke.show(
+            view.stroke_vertices if show_changes else (), view.stroke_width
+        )
         info = (
             f"Radius {state.width:g} = {state.width * self._x_span:g} device / "
             f"{state.width * self._y_span:g} GHz; mask {np.count_nonzero(state.mask)}/{state.mask.size}\n"
@@ -157,7 +162,18 @@ class TwoTonePickPlot:
                 f" (+{len(view.added_points)}, -{len(view.removed_points)}); "
                 f"mask +{view.mask_added}, -{view.mask_removed}"
             )
-        self._axes.set_title(info, fontsize=9)
+        # wrap keeps a long line inside a narrow figure; the refit then makes
+        # room above the axes for every line, which may change on each update.
+        self._axes.set_title(info, fontsize=9, wrap=True)
+        self._figure.tight_layout()
+
+    def show_pointer(self, vertices: Sequence[BrushPoint], width: float) -> None:
+        """Show an uncommitted drag: the band its brush sweeps along vertices.
+
+        vertices are native device/GHz; width is the normalized radius the
+        drag will commit. Empty vertices clear it. The caller redraws.
+        """
+        self._pointer.show(vertices, width)
 
 
 def make_twotone_pick_figure(

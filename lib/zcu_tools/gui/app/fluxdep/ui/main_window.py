@@ -6,18 +6,19 @@
   ├───────────────────────────────────────────────────────────────┤
   │ [Spectra] [Fit]                                               │
   │ ┌────────────┬──────────────────────────────┐                 │
-  │ │ spectra    │ editing area (stacked): the  │  Spectra page   │
-  │ │  • a ...   │ active spectrum's picker or  │                 │
-  │ │  • b ...   │ result preview               │                 │
-  │ │ [Remove]   │                              │                 │
+  │ │ spectra    │ [1 Align ✓] → [2 Sample]     │  Spectra page   │
+  │ │  • a ...   │ editing area (stacked): the  │                 │
+  │ │  • b ...   │ active spectrum's picker or  │                 │
+  │ │ [Remove]   │ result preview               │                 │
   │ └────────────┴──────────────────────────────┘                 │
   └───────────────────────────────────────────────────────────────┘
 
-The Spectra page swaps the editing widget by the active spectrum's stage; a
+The Spectra page shows the active spectrum's published preview or live
+draft under a stage bar; clicking a stage opens that stage's picker. A
 widget's ``finished`` signal writes its result back through the Controller,
 which advances the stage and re-triggers the swap. A GUI Add opens the new
 spectrum's line picker. The Fit page hosts the AnalyzePanel singleton
-(Filter / Search / Show). Spectrum work never replaces the Fit page. Pages
+(Filter -> Search -> Show stages). Spectrum work never replaces the Fit page. Pages
 switch only on human intent: a tab click, or a GUI Add / Restore (back to
 Spectra). Agent-origin events update the content of the page they concern.
 """
@@ -31,21 +32,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .analyze_panel import AnalyzePanelWidget, AnalyzeTab
 
-from qtpy.QtCore import QModelIndex, Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QPushButton,
     QSplitter,
     QStackedWidget,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -54,7 +51,6 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.fluxdep.controller import (
     Controller,
     PendingKind,
-    SpectrumRow,
     pending_kind,
 )
 from zcu_tools.gui.app.fluxdep.event_bus import (
@@ -79,6 +75,8 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.find_points import FindPointsWidge
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.interactive.result_preview import ResultPreviewWidget
+from zcu_tools.gui.app.fluxdep.ui.spectrum_list import SpectrumListWidget
+from zcu_tools.gui.app.fluxdep.ui.stage_bar import StageBar, stage_status
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import EventMeta, EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -88,50 +86,6 @@ from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
 
 logger = logging.getLogger(__name__)
-
-# List item role holding a row's second line (kind · stage · points · ...).
-_DETAILS_ROLE = Qt.ItemDataRole.UserRole + 1
-
-
-class _SpectrumRowDelegate(QStyledItemDelegate):
-    """Draw a spectrum row as its name over its details, eliding a long name.
-
-    Each item holds the literal name (UserRole) and the details line
-    (_DETAILS_ROLE). A name wider than the cell is elided in the middle so
-    both ends stay readable; the item tooltip carries the full name. Qt
-    right-elides an overlong details line as usual.
-    """
-
-    def initStyleOption(
-        self,
-        option: QStyleOptionViewItem | None,
-        index: QModelIndex,
-    ) -> None:
-        super().initStyleOption(option, index)
-        if option is None:
-            raise TypeError("initStyleOption needs the option Qt paints with")
-        name = index.data(Qt.ItemDataRole.UserRole)
-        details = index.data(_DETAILS_ROLE)
-        if not isinstance(name, str) or not isinstance(details, str):
-            raise TypeError("spectrum rows hold a str name and str details")
-        widget = option.widget
-        style = widget.style()
-        if style is None:
-            raise RuntimeError("spectrum rows are painted by a styled list widget")
-        text_rect = style.subElementRect(
-            QStyle.SubElement.SE_ItemViewItemText, option, widget
-        )
-        # Qt insets item text by the focus-frame margin plus one on each side.
-        margin = (
-            style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
-        )
-        width = max(text_rect.width() - 2 * margin, 0)
-        elided = option.fontMetrics.elidedText(
-            name, Qt.TextElideMode.ElideMiddle, width
-        )
-        # Qt lays item text out with QTextLayout, which breaks lines only at
-        # U+2028 (QChar.LineSeparator), not at "\n".
-        option.text = f"{elided}\u2028{details}"
 
 
 class MainWindow(QMainWindow):
@@ -160,6 +114,8 @@ class MainWindow(QMainWindow):
         self._close_prompt_open = False
         self._close_confirmed = False
         self._control_disposed = False
+        # Set once an accepted close starts disposing views and owners.
+        self._shutting_down = False
         self._shutdown_application: QApplication | None = None
         self._interactive_runner = interactive_runner
         self._search_runner = search_runner
@@ -171,8 +127,10 @@ class MainWindow(QMainWindow):
         self._routing_editor = False
         self._routing_page = False
         self._editor_context_id: int | None = None
-        # An agent's Filter / Search waits here until the user enters Fit; a
-        # waiting Filter is dropped when its context closes.
+        # The stage whose picker the editing area shows; None for a preview.
+        self._editor_stage: PendingKind | None = None
+        # The stage an agent's Filter / Search leaves for the user's next Fit
+        # entry; a waiting Filter is dropped when its context closes.
         self._fit_entry_tab: AnalyzeTab | None = None
         self.setWindowTitle("fluxdep-gui")
         self.resize(1100, 700)
@@ -243,7 +201,7 @@ class MainWindow(QMainWindow):
         self._spectra_page = self._build_spectra_page()
         self._pages.addTab(self._spectra_page, "Spectra")
         # The Fit page hosts the AnalyzePanel SINGLETON: built on first use and
-        # kept after, so its tabs / form / paths / figures survive page switches.
+        # kept after, so its stages / form / paths / figures survive page switches.
         self._fit_page = QWidget()
         self._fit_page.setObjectName("fluxdep.page.fit")
         self._fit_layout = QVBoxLayout(self._fit_page)
@@ -305,11 +263,7 @@ class MainWindow(QMainWindow):
         """Spectrum list with Remove below it, beside the stage-driven editor."""
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
-        self._list = QListWidget()
-        self._list.setObjectName("fluxdep.spectra")
-        # Rows elide to the list width instead of scrolling sideways.
-        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._list.setItemDelegate(_SpectrumRowDelegate(self._list))
+        self._list = SpectrumListWidget()
         self._list.currentItemChanged.connect(self._on_list_selection)
         left.addWidget(self._list, stretch=1)
         self._remove_btn = self._command_button(
@@ -320,6 +274,13 @@ class MainWindow(QMainWindow):
         left_panel.setLayout(left)
         left_panel.setMinimumWidth(180)
 
+        # The stage bar above the editing area marks the active spectrum's
+        # stages; a click opens (holder) or views (non-holder) that stage.
+        self._stage_bar: StageBar[PendingKind] = StageBar(
+            "fluxdep.stage",
+            (("align", "Align"), ("sample", "Sample")),
+            on_click=self._on_stage_clicked,
+        )
         # Editing area (stacked). The active spectrum's pipeline stage decides
         # which interactive widget is shown; _current_editor is the live one
         # (replaced on stage/active change).
@@ -329,11 +290,17 @@ class MainWindow(QMainWindow):
         self._placeholder.setEnabled(False)
         self._editor_stack.addWidget(self._placeholder)
         self._current_editor: QWidget | None = None
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.addWidget(self._stage_bar)
+        right.addWidget(self._editor_stack, stretch=1)
+        right_panel = QWidget()
+        right_panel.setLayout(right)
 
         # A draggable splitter lets the user resize the spectrum list vs editor.
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
-        splitter.addWidget(self._editor_stack)
+        splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 880])
@@ -373,10 +340,15 @@ class MainWindow(QMainWindow):
         if payload.phase == "closed":
             if payload.context_id == self._editor_context_id:
                 self._clear_editor()
+                # The owner is still emitting; refill once this event returns.
+                QTimer.singleShot(0, self._show_after_closed_draft)
             if payload.kind == "selection" and self._fit_entry_tab == "filter":
                 # An agent's Filter routes the next Fit entry only while live.
                 self._fit_entry_tab = None
+            self._refresh_stage_bar()  # the closed draft's mark and current stage
             return
+        if payload.phase == "opened":
+            self._refresh_stage_bar()  # an opened draft marks its stage
         if meta.origin.kind != "agent" or self._routing_editor:
             return
         active = (
@@ -405,6 +377,7 @@ class MainWindow(QMainWindow):
                 self._mount_picker(active.context)
         finally:
             self._routing_editor = False
+        self._refresh_stage_bar()
 
     def _on_search_changed(
         self, payload: SearchChangedPayload, meta: EventMeta
@@ -445,38 +418,11 @@ class MainWindow(QMainWindow):
                 f"Project: {project.chip_name} / {project.qub_name}"
             )
 
-    def _row_details(self, row: SpectrumRow) -> str:
-        """A list row's second line, from the query that spectrum.list reports.
-
-        Spec type, stage and published point count always show; an unfinished
-        draft kind and the Filter-excluded count only when present.
-        """
-        parts = [row.spec_type, row.stage, f"{row.point_count} pts"]
-        if row.pending is not None:
-            parts.append(f"{row.pending} draft")
-        if row.filter_excluded_count:
-            parts.append(f"{row.filter_excluded_count} excluded")
-        return " · ".join(parts)
-
     def _refresh_list(self) -> None:
         """Rebuild the spectrum list from the Controller's published rows."""
         # Rows first: the query may retire a dead draft and re-enter this refresh.
-        rows = [
-            (row.name, self._row_details(row)) for row in self._ctrl.spectrum_rows()
-        ]
-        active = self._ctrl.state.active_spectrum
-        self._list.blockSignals(True)
-        self._list.clear()
-        for name, details in rows:
-            # Literal name over its details; the delegate elides a long name.
-            item = QListWidgetItem(f"{name}\n{details}")
-            item.setData(Qt.ItemDataRole.UserRole, name)
-            item.setData(_DETAILS_ROLE, details)
-            item.setToolTip(name)
-            self._list.addItem(item)
-            if name == active:
-                self._list.setCurrentItem(item)
-        self._list.blockSignals(False)
+        rows = self._ctrl.spectrum_rows()
+        self._list.show_rows(rows, self._ctrl.state.active_spectrum)
 
     # --- actions ---------------------------------------------------------
 
@@ -486,11 +432,10 @@ class MainWindow(QMainWindow):
         if current is None:
             return
         name = current.data(Qt.ItemDataRole.UserRole)
+        # Picking only shows the spectrum's draft or published preview; a stage
+        # click is the separate intention to edit it.
         if name and name != self._ctrl.state.active_spectrum:
             self._ctrl.set_active_spectrum(name)
-        # Human picking is a separate write intention, never an active-change effect.
-        if name and self._ctrl.control_identity.status().holder == "gui":
-            self._rebuild_editor(open_picker=True)
 
     def _on_active_changed(self, _payload: ActiveSpectrumChangedPayload) -> None:
         self._refresh_list()  # keep the list selection in sync with the active spectrum
@@ -511,14 +456,28 @@ class MainWindow(QMainWindow):
             self._current_editor.deleteLater()
             self._current_editor = None
         self._editor_context_id = None
+        self._editor_stage = None
         self._editor_stack.setCurrentWidget(self._placeholder)
+
+    def _show_after_closed_draft(self) -> None:
+        """Refill an editing area a closed draft left empty, opening no input.
+
+        It runs after the closing event has returned, so the rebuild's inspect
+        never re-enters the owner during retirement. A view mounted meanwhile
+        (a successor picker or a stage advance) stays, and a window that is
+        shutting down stays empty.
+        """
+        if self._shutting_down or self._current_editor is not None:
+            return
+        self._rebuild_editor()
 
     def _rebuild_editor(self, *, open_picker: bool = False) -> None:
         """Show an existing draft or published data without creating input.
 
-        open_picker marks a separate Local write intention, gated by writable.
-        That intention may open the current stage picker. Display-change events
-        never request it, including observer RPCs while Local holds authority.
+        open_picker marks a separate Local write intention, gated by writable:
+        the window opening, a GUI Add, or a published stage advance. That
+        intention may open the current stage picker. Display-change events,
+        list picks and observer RPCs never request it.
         """
         # begin_* emits synchronously; this stage route already mounts its context.
         self._routing_editor = True
@@ -539,15 +498,11 @@ class MainWindow(QMainWindow):
             elif open_picker and self._writable and not entry.points_completed:
                 self._mount_stage(name, "sample")
             else:
-                self._mount(
-                    ResultPreviewWidget(
-                        entry,
-                        on_align=self._request_align,
-                        on_sample=self._request_sample,
-                    )
-                )
+                self._mount(ResultPreviewWidget(entry))
         finally:
             self._routing_editor = False
+            # The bar follows whatever the editing area now shows.
+            self._refresh_stage_bar()
 
     def _mount(self, widget: QWidget) -> None:
         self._current_editor = widget
@@ -569,22 +524,17 @@ class MainWindow(QMainWindow):
         widget: LinePickerWidget | OneToneWidget | FindPointsWidget
         if isinstance(context, LinePickContext):
             entry = self._ctrl.state.spectrums[context.spectrum_name]
-            # Re-aligning an aligned spectrum may switch to sampling instead.
-            widget = LinePickerWidget(
-                context,
-                onetone=entry.spec_type == "OneTone",
-                on_sample=self._request_sample if entry.aligned else None,
-            )
+            widget = LinePickerWidget(context, onetone=entry.spec_type == "OneTone")
             widget.finished.connect(lambda: self._finish_lines(context.spectrum_name))
         elif isinstance(context, OneTonePickContext):
-            widget = OneToneWidget(context, on_realign=self._request_align)
+            widget = OneToneWidget(context)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_onetone_pick(
                     context.spectrum_name
                 )
             )
         else:
-            widget = FindPointsWidget(context, on_realign=self._request_align)
+            widget = FindPointsWidget(context)
             widget.finished.connect(
                 lambda: self._ctrl.interactive.finish_twotone_pick(
                     context.spectrum_name
@@ -595,6 +545,9 @@ class MainWindow(QMainWindow):
         if active is None or active.context is not context:
             raise RuntimeError("picker context changed while attaching its view")
         self._editor_context_id = active.context_id
+        self._editor_stage = (
+            "align" if isinstance(context, LinePickContext) else "sample"
+        )
 
     def _finish_lines(self, name: str) -> None:
         try:
@@ -602,19 +555,74 @@ class MainWindow(QMainWindow):
         except (FailedPreconditionError, ValueError, RuntimeError) as exc:
             self._show_error("Alignment failed", str(exc))
 
-    def _request_align(self) -> None:
-        self._open_stage("align")
+    def _refresh_stage_bar(self) -> None:
+        """Mark the active spectrum's stages from State and its live draft.
 
-    def _request_sample(self) -> None:
-        self._open_stage("sample")
+        Align is done once alignment is published; Sample is locked until
+        then and done once points are also published. A live draft of a stage
+        marks it draft. The current stage is the one whose picker is shown.
+        Without an active spectrum the bar is hidden.
+        """
+        name = self._ctrl.state.active_spectrum
+        self._stage_bar.setVisible(name is not None)
+        if name is None:
+            return
+        entry = self._ctrl.state.spectrums[name]
+        draft = self._ctrl.interactive.inspect(name)
+        pending = None if draft is None else pending_kind(draft)
+        self._stage_bar.set_status(
+            "align",
+            stage_status(done=entry.aligned, draft=pending == "align", locked=False),
+        )
+        self._stage_bar.set_status(
+            "sample",
+            stage_status(
+                done=entry.aligned and entry.points_completed,
+                draft=pending == "sample",
+                locked=not entry.aligned,
+            ),
+        )
+        self._stage_bar.set_current(self._editor_stage)
+
+    def _on_stage_clicked(self, stage: PendingKind) -> None:
+        """A holder click opens stage's picker; a non-holder click only views."""
+        if self._writable:
+            self._open_stage(stage)
+        else:
+            self._view_stage(stage)
+
+    def _view_stage(self, stage: PendingKind) -> None:
+        """Show stage without creating input.
+
+        A live draft of stage, such as an agent's, is shown as its picker;
+        otherwise the published preview is shown. No draft is opened or
+        discarded.
+        """
+        name = self._ctrl.state.active_spectrum
+        if name is None:
+            return
+        draft = self._ctrl.interactive.inspect(name)
+        if (
+            draft is not None
+            and pending_kind(draft) == stage
+            and not isinstance(draft.context, CrossSelectionContext)
+        ):
+            if draft.context_id != self._editor_context_id:
+                self._clear_editor()
+                self._mount_picker(draft.context)
+        elif not isinstance(self._current_editor, ResultPreviewWidget):
+            self._clear_editor()
+            self._mount(ResultPreviewWidget(self._ctrl.state.spectrums[name]))
+        self._refresh_stage_bar()
 
     def _open_stage(self, stage: PendingKind) -> None:
         """Open the active spectrum's align or sample picker on a Local intent.
 
-        This is the holder gate for the preview and picker stage buttons: a
-        non-holder click does nothing. The picker opens as a draft; the
-        published spectrum changes only on Finish. A live draft of the other
-        stage is discarded only after the user confirms; declining keeps it.
+        This is the holder gate for the stage bar: a non-holder call does
+        nothing. The picker opens as a draft;
+        the published spectrum changes only on Finish. A live draft of the
+        other stage is discarded only after the user confirms; declining keeps
+        it.
         """
         name = self._ctrl.state.active_spectrum
         if not self._writable or name is None:
@@ -659,6 +667,7 @@ class MainWindow(QMainWindow):
             self._mount_stage(name, stage)
         finally:
             self._routing_editor = False
+        self._refresh_stage_bar()
 
     # --- pages -----------------------------------------------------------
 
@@ -678,9 +687,9 @@ class MainWindow(QMainWindow):
     def _follow_fit_tab(self, tab: AnalyzeTab) -> None:
         """Follow an agent's Filter or Search on the Fit page, never leaving pages.
 
-        A shown Fit page switches to tab now; otherwise tab waits for the
+        A shown Fit page switches to stage tab now; otherwise tab waits for the
         user's next entry into Fit. A waiting Filter lasts only while a Filter
-        context is live, so a finished agent Filter cannot open a new Session.
+        context is live, so a finished agent Filter no longer picks the stage.
         """
         if self._pages.currentWidget() is self._fit_page:
             self._show_fit_page(tab)
@@ -688,13 +697,11 @@ class MainWindow(QMainWindow):
             self._fit_entry_tab = tab
 
     def _show_fit_page(self, tab: AnalyzeTab | None) -> None:
-        """Show the Fit page and its singleton panel on tab.
+        """Show the Fit page and its singleton panel on stage tab.
 
-        None takes the tab an agent event left waiting, else keeps the current
-        one. Entering Filter opens its input (show_tab), so a non-holder
-        entering Fit without a live Filter context lands on Search instead:
-        viewing never begins input. A live Filter context, such as an agent's,
-        is reattached.
+        None takes the stage an agent event left waiting, else keeps the
+        current one. Entering Filter never opens input: it reattaches a live
+        Filter context, such as an agent's, or shows the published masks.
         """
         from .analyze_panel import AnalyzePanelWidget
 
@@ -705,12 +712,6 @@ class MainWindow(QMainWindow):
         panel = self._analyze_panel
         if tab is None:
             tab = self._fit_entry_tab or panel.current_tab
-            if (
-                tab == "filter"
-                and not self._writable
-                and self._ctrl.interactive.current_cross_selection() is None
-            ):
-                tab = "search"
         self._fit_entry_tab = None
         self._routing_page = True
         try:
@@ -726,7 +727,10 @@ class MainWindow(QMainWindow):
         from .paths import raw_spectrum_dir
 
         dialog = LoadSpectrumDialog(
-            self._ctrl.list_spectrums(),
+            {
+                name: (entry.flux_half, entry.flux_int)
+                for name, entry in self._ctrl.state.spectrums.items()
+            },
             parent=self,
             start_dir=raw_spectrum_dir(self._ctrl.state.project),
         )
@@ -924,6 +928,7 @@ class MainWindow(QMainWindow):
             if a0 is not None:
                 a0.ignore()
             return
+        self._shutting_down = True
         self.dispose_control_watches()
         self._ctrl.interactive.dispose()
         if self._interactive_runner is not None:

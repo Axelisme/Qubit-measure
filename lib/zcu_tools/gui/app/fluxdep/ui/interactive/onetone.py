@@ -25,20 +25,13 @@ class OneToneWidget(InteractiveMplWidget):
     Controls use context.plugin.set_threshold and Session.undo. Finish is a
     request to the app owner; get_result never reads artist or slider caches.
     The control column holds the Threshold slider, Undo, then the status,
-    with an optional Re-align switch above Finish.
+    with Finish pinned at the bottom.
     """
 
-    def __init__(
-        self,
-        context: OneTonePickContext,
-        *,
-        on_realign: Callable[[], None] | None = None,
-    ) -> None:
+    def __init__(self, context: OneTonePickContext) -> None:
         """Attach an open context without taking domain ownership.
 
-        on_realign, when given, adds a Re-align button
-        (``fluxdep.picker.realign``) that calls it; the host uses it to leave
-        sampling for alignment. Teardown detaches only presentation. The owner
+        Teardown detaches only presentation. The owner
         controls cancellation, spectrum invalidation and terminal publication.
         Closed input raises FailedPreconditionError before attachment.
         """
@@ -74,8 +67,6 @@ class OneToneWidget(InteractiveMplWidget):
         self._info.setObjectName(picker_object_name("status"))
         self._info.setWordWrap(True)
         self.controls_layout.addWidget(self._info)
-        if on_realign is not None:
-            self.add_stage_button("Re-align", "realign", on_realign)
         self._finish = self.add_finish_button()
         self._finish.clicked.disconnect()
         self._finish.clicked.connect(self._request_finish)

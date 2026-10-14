@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypeVar
 
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtCore import QMetaObject, QPoint, QRect, Qt, QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -150,11 +151,6 @@ def picker_button(root: QWidget, action: str) -> QPushButton:
     return picker_control(root, action, QPushButton)
 
 
-def has_picker_control(root: QWidget, action: str) -> bool:
-    """Whether root currently holds a fluxdep.picker.<action> control."""
-    return bool(root.findChildren(QWidget, f"fluxdep.picker.{action}"))
-
-
 def column_tops(root: QWidget, actions: list[str]) -> list[int]:
     """Top y of each named picker control within a shown root, in given order."""
     return [
@@ -174,21 +170,68 @@ def unlabelled_inputs(root: QWidget) -> list[str]:
     ]
 
 
-def preview_button(root: QWidget, action: str) -> QPushButton:
-    """The result-preview next-step button fluxdep.preview.<action>."""
-    found = root.findChild(QPushButton, f"fluxdep.preview.{action}")
-    assert found is not None, f"missing preview action {action!r}"
+SpectrumStage = Literal["align", "sample"]
+
+
+def stage_button(root: QWidget, stage: SpectrumStage) -> QPushButton:
+    """The Spectra stage-bar button fluxdep.stage.<stage> under root."""
+    found = root.findChild(QPushButton, f"fluxdep.stage.{stage}")
+    assert found is not None, f"missing stage {stage!r}"
     return found
 
 
-def preview_actions(root: QWidget) -> set[str]:
-    """Next-step actions the result preview under root offers."""
-    prefix = "fluxdep.preview."
-    return {
-        button.objectName().removeprefix(prefix)
-        for button in root.findChildren(QPushButton)
-        if button.objectName().startswith(prefix)
-    }
+def stage_status(root: QWidget, stage: SpectrumStage) -> str:
+    """The status a Spectra stage button shows: open, done, draft or locked."""
+    status = stage_button(root, stage).property("stage_status")
+    assert isinstance(status, str), f"stage {stage!r} shows no status"
+    return status
+
+
+def current_stage(root: QWidget) -> SpectrumStage | None:
+    """The Spectra stage whose picker the editing area shows, else None."""
+    shown: list[SpectrumStage] = [
+        stage for stage in ("align", "sample") if stage_button(root, stage).isChecked()
+    ]
+    assert len(shown) <= 1, f"stages {shown} are all marked current"
+    return shown[0] if shown else None
+
+
+FitStage = Literal["filter", "search", "show"]
+
+
+def fit_stage_button(root: QWidget, stage: FitStage) -> QPushButton:
+    """The Fit stage-bar button fluxdep.fit.stage.<stage> under root."""
+    found = root.findChild(QPushButton, f"fluxdep.fit.stage.{stage}")
+    assert found is not None, f"missing Fit stage {stage!r}"
+    return found
+
+
+def fit_stage_status(root: QWidget, stage: FitStage) -> str:
+    """The status a Fit stage button shows: open, done, draft or locked."""
+    status = fit_stage_button(root, stage).property("stage_status")
+    assert isinstance(status, str), f"Fit stage {stage!r} shows no status"
+    return status
+
+
+def click_fit_stage(root: QWidget, stage: FitStage) -> None:
+    """Click a Fit stage the way a user does; a locked stage fails the call."""
+    button = fit_stage_button(root, stage)
+    assert button.isEnabled(), f"Fit stage {stage!r} is locked"
+    button.click()
+
+
+def show_canvas(root: QWidget) -> FigureCanvasQTAgg:
+    """The Show stage's figure canvas, fluxdep.show.canvas."""
+    found = root.findChild(FigureCanvasQTAgg, "fluxdep.show.canvas")
+    assert found is not None, "missing Show canvas"
+    return found
+
+
+def filter_button(root: QWidget, action: Literal["edit", "discard"]) -> QPushButton:
+    """The Filter stage's Edit or Discard button, fluxdep.filter.<action>."""
+    found = root.findChild(QPushButton, f"fluxdep.filter.{action}")
+    assert found is not None, f"missing Filter {action!r}"
+    return found
 
 
 def choose_file(path: Path | str, activate: Callable[[], None], *, cancel=False):

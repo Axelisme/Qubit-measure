@@ -321,16 +321,21 @@ class Controller(BaseController[FluxDepState, EventBus]):
         return self._selection.derive_pointcloud()
 
     def set_selection(
-        self, selected: NDArray[np.bool_], min_distance: float = 0.0
+        self,
+        selected: NDArray[np.bool_],
+        min_distance: float = 0.0,
+        brush: NDArray[np.bool_] | None = None,
     ) -> list[str]:
-        """Publish a joint bool mask and return this publication's invalidated labels.
+        """Publish a joint kept mask and return this publication's invalidated labels.
 
-        min_distance is the normalized downsample threshold. Shape errors fail
-        before publication. Capture facts before emitting, independent of
+        min_distance is the normalized downsample threshold. brush is the
+        pre-downsample selection that the next Filter draft starts from, a
+        superset of selected; None publishes selected as the brush. Shape or
+        superset errors fail before publication. Capture facts before emitting, independent of
         synchronous subscriber writes. No rollback is claimed on emit failure.
         """
         before = self.state.pipeline_snapshot()
-        self._selection.set_selection(selected, min_distance)
+        self._selection.set_selection(selected, min_distance, brush)
         invalidated = self.state.invalidated(before)
         self._emit(SelectionChangedPayload())
         return invalidated

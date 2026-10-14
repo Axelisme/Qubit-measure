@@ -82,6 +82,21 @@ def test_filter_finish_publishes_closes_and_reports_each_spectrum(
     assert joint_route.ctrl.interactive.inspect_selection() is None
 
 
+def test_filter_open_starts_from_the_published_mask(joint_route: RouteHarness):
+    link = joint_route.client()
+    fresh = _state(_context(joint_route.request(link, "selection.interactive.open")))
+    assert fresh["per_spectrum"] == {"a": [3, 3], "empty": [0, 0], "b": [1, 1]}
+    joint_route.ctrl.interactive.cancel_selection()
+    joint_route.ctrl.set_selection(np.array([True, False, True, False]), 0.025)
+    opened = _context(joint_route.request(link, "selection.interactive.open"))
+    state = _state(opened)
+    assert state["selected"] == [True, False, True, False]
+    assert state["per_spectrum"] == {"a": [2, 3], "empty": [0, 0], "b": [0, 1]}
+    assert state["selected_count"] == 2
+    assert state["min_distance"] == 0.025
+    assert opened["can_undo"] is False
+
+
 def test_published_filter_render_is_readonly_without_a_draft(joint_route: RouteHarness):
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
@@ -118,7 +133,7 @@ def test_published_filter_figure_marks_masks_without_reading_live_draft(
     joint_route.ctrl.set_selection(np.array([True, False, True, False]), 0.025)
     link = joint_route.client()
     context = _context(joint_route.request(link, "selection.interactive.open"))
-    # A fresh Filter starts all-selected; rendering must still use publication.
+    # The draft erases a published point; rendering must still use publication.
     assert _joint_command(
         joint_route,
         link,

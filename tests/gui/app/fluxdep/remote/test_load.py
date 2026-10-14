@@ -350,7 +350,7 @@ def test_rpc_load_updates_the_list_without_opening_a_picker(
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 
     from tests.gui._dialog_fakes import RecordingDialogPresenter
-    from tests.gui.app.fluxdep._window import editor, list_labels, preview_actions
+    from tests.gui.app.fluxdep._window import editor, list_labels, stage_status
 
     ctrl = route_harness.ctrl
     window = MainWindow(
@@ -370,7 +370,8 @@ def test_rpc_load_updates_the_list_without_opening_a_picker(
         # Active only displays: the agent's spectrum shows its published preview.
         preview = editor(window)
         assert isinstance(preview, ResultPreviewWidget)
-        assert preview_actions(preview) == {"align"}
+        assert stage_status(window, "align") == "open"
+        assert stage_status(window, "sample") == "locked"
         assert ctrl.interactive.inspect(name) is None
     finally:
         window.close()

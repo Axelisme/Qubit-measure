@@ -224,15 +224,17 @@ class FluxDepInteractivePorts:
     publish_points receives name and native device/GHz arrays; PointsService owns
     sorting/calibration. derive_pointcloud queries the complete calibrated
     flux/GHz cloud in spectrum insertion order. publish_selection receives that
-    cloud's full bool kept mask and normalized distance; Controller owns its
-    single version bump/fact. Publication errors propagate without rollback.
+    cloud's full bool kept mask, normalized distance and the pre-downsample
+    brush mask; Controller owns its single version bump/fact. Publication errors propagate without rollback.
     """
 
     background: BackgroundSubmitter | None
     publish_alignment: Callable[[str, float, float, str | None], list[str]]
     publish_points: Callable[[str, NDArray[np.float64], NDArray[np.float64]], list[str]]
     derive_pointcloud: Callable[[], tuple[NDArray[np.float64], NDArray[np.float64]]]
-    publish_selection: Callable[[NDArray[np.bool_], float], list[str]]
+    publish_selection: Callable[
+        [NDArray[np.bool_], float, NDArray[np.bool_]], list[str]
+    ]
 
 
 class FluxDepInteractiveOwner:
@@ -272,8 +274,8 @@ class FluxDepInteractiveOwner:
         self._contexts: dict[str, ActiveInteractiveContext] = {}
         self._selection_context: ActiveInteractiveContext | None = None
         self._view_selection = False
-        # Leaving Filter cancels its context, so each return would otherwise redo the
-        # wavelet normalization of every unchanged spectrum.
+        # Each new Filter context would otherwise redo the wavelet normalization
+        # of every unchanged spectrum.
         self._normalized_backgrounds: dict[str, _NormalizedBackground] = {}
         self._next_context_id = 1
         self._context_subscriptions: dict[int, tuple[Callable[[], None], ...]] = {}
@@ -722,11 +724,14 @@ class FluxDepInteractiveOwner:
         return PublicationReceipt(result, invalidated)
 
     def begin_cross_selection(self) -> CrossSelectionContext:
-        """Reuse valid open cross context or capture an all-selected cloud seed.
+        """Reuse valid open cross context or capture a cloud seeded from publication.
 
         Capture every source version, including zero-point entries, and bounds
-        from the usable spectra's raw axes and points. Only published distance is
-        inherited. Spectrum drafts remain live when Filter opens.
+        from the usable spectra's raw axes and points. The new seed starts from
+        the published brush masks (State.brush_mask: unmasked spectra, restored
+        ones included, all-selected) and the published distance, so an unchanged
+        Finish reproduces the published kept mask; with no published mask it
+        starts all-selected. Spectrum drafts remain live when Filter opens.
         FailedPreconditionError rejects disposed owner or no usable cloud;
         invalid numeric input raises ValueError. Reentrant retirement that changes
         context or spectrum/selection publications, or disposes the
@@ -743,7 +748,9 @@ class FluxDepInteractiveOwner:
             return current
         inputs = self._capture_cross_selection_inputs()
         plugin = CrossSelectionPlugin(
-            inputs, min_distance=self._state.selection.min_distance
+            inputs,
+            selected=self._state.brush_mask(),
+            min_distance=self._state.selection.min_distance,
         )
         self._cancel_for_begin(checkpoint, None)
         context = CrossSelectionContext(
@@ -858,7 +865,7 @@ class FluxDepInteractiveOwner:
         return self._publish_cross_selection().result
 
     def _publish_cross_selection(self) -> PublicationReceipt[CrossSelectionResult]:
-        """Synchronously publish the latest complete kept mask once, nonterminally.
+        """Synchronously publish the latest kept mask and brush once, nonterminally.
 
         Validate current context and analyze its snapshot, never pending preview.
         Missing/invalid context raises FailedPreconditionError. Publish errors
@@ -875,14 +882,13 @@ class FluxDepInteractiveOwner:
         active = self._selection_context
         if active is None:
             raise FailedPreconditionError("cross-selection retired")
-        result = analyze_cross_selection(
-            context.plugin.inputs, context.session.snapshot()
-        )
+        snapshot = context.session.snapshot()
+        result = analyze_cross_selection(context.plugin.inputs, snapshot)
         self._publishing_selection = True
         try:
             # Publication and the detached caller result own independent masks.
             invalidated = self._publish_selection(
-                result.selected.copy(), result.min_distance
+                result.selected.copy(), result.min_distance, snapshot.selected
             )
         finally:
             # A publisher may commit and then fail; preserve its actual version, not a rollback.

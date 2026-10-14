@@ -136,6 +136,33 @@ def test_full_mask_downsampling_preserves_order_and_duplicate_identity(inputs):
     assert seed.selected.all()
 
 
+def test_seed_starts_from_a_given_mask_detached_from_the_caller(inputs):
+    mask = np.array([True, False, True, False, True])
+    seed = make_cross_selection_state(inputs, selected=mask, min_distance=0.05)
+    mask[:] = False
+    np.testing.assert_array_equal(seed.selected, [True, False, True, False, True])
+    assert seed.min_distance == 0.05
+    assert seed.last_change is None
+    erased = stroke_cross_selection_state(
+        inputs, seed, BrushStroke((BrushPoint(0.0, 4.0),), 0.0, "erase")
+    )
+    np.testing.assert_array_equal(erased.selected, [False, False, True, False, True])
+
+
+@pytest.mark.parametrize(
+    "selected",
+    [
+        np.ones(4, dtype=np.bool_),
+        np.ones((5, 1), dtype=np.bool_),
+        np.ones(5, dtype=np.int64),
+    ],
+    ids=["short", "two-dimensional", "not-bool"],
+)
+def test_seed_rejects_a_mask_that_is_not_the_cloud(inputs, selected):
+    with pytest.raises(ValueError, match="selected"):
+        make_cross_selection_state(inputs, selected=selected)
+
+
 def test_downsampling_normalizes_different_nonunit_joint_spans():
     captured = CrossSelectionInputs(
         np.array([10.0, 10.16, 12.0, 14.0]),

@@ -4,9 +4,8 @@ A QWidget that owns a matplotlib Figure + FigureCanvasQTAgg and connects the
 canvas mouse events to overridable handlers (``on_press`` / ``on_move`` /
 ``on_release``, all no-ops by default). Subclasses add Qt controls to
 ``controls_layout`` top-down: settings, edit actions (Undo / Clear), then the
-status text. Finish and an optional stage switch stay pinned at the column
-bottom in ``bottom_layout``; the read-only result preview puts its next steps
-there too. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
+status text. Finish stays pinned at the column bottom in ``bottom_layout``;
+the window's stage bar switches stages. Controls carry ``fluxdep.picker.<action>`` objectNames. A "Finish"
 button emits the ``finished`` signal so the host can collect the result and
 write it via the Controller.
 
@@ -18,7 +17,6 @@ painting happens on the Qt main thread, so a plain ``draw_idle`` is sufficient
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import cast
 
 from matplotlib.backend_bases import Event, MouseEvent
@@ -44,7 +42,7 @@ class InteractiveMplWidget(QWidget):
 
     Layout: canvas on the left (stretches), a controls column on the right.
     The column holds ``controls_layout`` on top and ``bottom_layout`` pinned
-    to the column bottom for the stage switch and Finish. ``addWidget`` on
+    to the column bottom for Finish. ``addWidget`` on
     either layout appends below what is already there. The ``finished`` signal
     fires when the user clicks Finish; the host then calls ``get_result()``.
     """
@@ -82,7 +80,7 @@ class InteractiveMplWidget(QWidget):
             self._root.addWidget(controls)
 
         # Subclasses populate controls_layout after super().__init__;
-        # add_stage_button() and add_finish_button() fill the pinned bottom.
+        # add_finish_button() fills the pinned bottom.
 
         # Plot builders lay out once for the default figure size; re-fit on resize
         # so tick and axis labels stay inside the canvas Qt actually gives us.
@@ -114,20 +112,6 @@ class InteractiveMplWidget(QWidget):
         control.setObjectName(picker_object_name(action))
         self.controls_layout.addWidget(label)
         self.controls_layout.addWidget(control)
-
-    def add_stage_button(
-        self, text: str, action: str, on_click: Callable[[], None]
-    ) -> QPushButton:
-        """Pin a button that leaves this picker for another stage above Finish.
-
-        on_click runs on every click; the host decides what the switch does.
-        The button is gated with the other controls by set_editable.
-        """
-        button = QPushButton(text)
-        button.setObjectName(picker_object_name(action))
-        button.clicked.connect(on_click)
-        self.bottom_layout.insertWidget(0, button)
-        return button
 
     def add_finish_button(self) -> QPushButton:
         """Pin the finish button to the bottom of the control column.
