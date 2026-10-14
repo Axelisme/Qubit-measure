@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -52,21 +51,46 @@ class FluxAnalysis:
 
 
 class FluxModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FluxSweepCfg(ConfigBase):
-    jpa_flux: SweepCfg
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+        ),
+    ]
 
 
 class FluxCfg(ProgramV2Cfg, ExpCfgModel):
-    dev: Mapping[str, str] | None = None  # jpa_flux_dev: connected name; None: no bias.
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
+    jpa_flux_dev: Annotated[
+        str | None,
+        FieldMeta(
+            label="JPA flux device",
+            description="Connected flux device name; None skips bias control.",
+        ),
+    ] = None
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
     modules: FluxModuleCfg
     sweep: FluxSweepCfg
-    skew_penalty: float = Field(default=0.0, ge=0.0)
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
 
 
 class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
@@ -77,6 +101,7 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
         result_type=FluxResult,
         cfg_type=FluxCfg,
         tag="jpa/flux",
+        cfg_schema_version="2.0",
     )
 
     def run(self, cfg: FluxCfg, *, context: RunContext) -> FluxResult:
@@ -94,9 +119,9 @@ class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
         )
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
-                if step.cfg.dev is not None:
+                if step.cfg.jpa_flux_dev is not None:
                     set_flux(
-                        context.devices[step.cfg.dev["jpa_flux_dev"]],
+                        context.devices[step.cfg.jpa_flux_dev],
                         jpa_flux,
                         unit=step.cfg.flux_unit,
                         stop=context.cancel_signal,

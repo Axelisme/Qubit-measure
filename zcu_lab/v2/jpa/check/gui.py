@@ -24,23 +24,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2.jpa.check.core import CheckCfg, CheckExp, CheckResult
+from zcu_lab.v2.jpa.check.form import FORM
 
 JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
-
-# Bring-up survey: ~101 readout-frequency points around the resonator. These
-# are inspectable starting bounds, NOT safety certification — the operator must
-# review device and sweep.
-_JPA_CHECK_FREQ_EXPTS = 101
 
 
 @dataclass
@@ -54,6 +43,7 @@ class JpaCheckAdapter(
     experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
     exp_cls = CheckExp
     ExpCfg_cls: ClassVar[Any] = CheckCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -68,16 +58,21 @@ class JpaCheckAdapter(
             "are bring-up defaults, not certified safety limits."
         ),
         expects_md=(
-            "Uses current aliases: qubit (qubit/*), resonator (resonator), and "
-            "jpa (amplifier/jpa). Add a jpa alias row in the global dialog, "
-            "for example $resonator.amplifier. Scalars use $jpa.pump_freq, "
-            "$jpa.pump_power, $jpa.flux and canonical qubit/resonator wiring. "
-            "Missing aliases or calibration leave cfg Invalid; no static fallback."
+            "Uses the resonator alias for $resonator.freq, $resonator.kappa and "
+            "resonator wiring. The qubit alias supplies an optional reset module. "
+            "Select the connected JPA RF device in the form. RF defaults capture "
+            "jpa_rf_dev at Open or Reset; an unbound alias leaves the optional "
+            "field empty. This check does not use "
+            "jpa pump-frequency, pump-power or flux calibration. Missing required "
+            "resonator calibration leaves the form Invalid."
         ),
         expects_ml=(
-            "SMART modules use $qubit.module.x180, $qubit.module.readout and "
-            "optional $qubit.module.reset. Inline readout uses resonator scalar "
-            "and wiring calibration; module waveforms follow their module source."
+            "Readout starts as a fresh readout template, not a library copy. Its "
+            "inline pulse uses $resonator.freq and $resonator.wiring.ch; acquisition "
+            "uses $resonator.freq, $resonator.wiring.ro_ch and "
+            "$resonator.ext.time_of_fly + 0.05. Run replaces both frequencies from the "
+            "sweep. Readout library keys remain selectable. Optional reset uses "
+            "$qubit.module.reset; an unset slot disables reset."
         ),
         typical_writeback=(
             "No writeback — the check is a visual diagnostic: compare the two "
@@ -91,38 +86,6 @@ class JpaCheckAdapter(
             "device: the run toggles its output off then on and leaves it ON."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                },
-            )
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=res_freq_range(expts=_JPA_CHECK_FREQ_EXPTS),
-            )
-            .reps(1000)
-            .rounds(5)
-            .build()
-        )
 
     def run(
         self,

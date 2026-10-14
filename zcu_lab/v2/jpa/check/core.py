@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     AxesSpec,
@@ -47,18 +45,23 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    readout: PulseReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
 
 
 class CheckSweepCfg(ConfigBase):
-    freq: SweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: CheckModuleCfg
-    # Map jpa_rf_dev to a connected driver name.
-    dev: Mapping[str, str] = Field(...)
+    jpa_rf_dev: Annotated[
+        str,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected RF device whose output is toggled off then on.",
+        ),
+    ] = ""
     sweep: CheckSweepCfg
 
 
@@ -75,6 +78,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         result_type=CheckResult,
         cfg_type=CheckCfg,
         tag="jpa/check",
+        cfg_schema_version="2.0",
     )
 
     def run(self, cfg: CheckCfg, *, context: RunContext) -> CheckResult:
@@ -99,7 +103,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
             for output, step in sched.scan("JPA on/off", outputs.tolist()):
                 set_output(
-                    context.devices[step.cfg.dev["jpa_rf_dev"]], self.OUTPUT_MAP[output]
+                    context.devices[step.cfg.jpa_rf_dev], self.OUTPUT_MAP[output]
                 )
                 modules = step.cfg.modules
                 modules.readout.set_param(
