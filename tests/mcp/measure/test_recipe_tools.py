@@ -444,7 +444,7 @@ def test_injected_pipeline_preserves_sources_and_only_writes_after_answer(tmp_pa
         )
         assert question.data["status"] == "awaiting_answer"
         for field, value in (
-            ("modules.readout.module.pulse_cfg.freq", 5100.0),
+            ("modules.readout.module.pulse_cfg.module.freq", 5100.0),
             ("modules.readout.module.ro_cfg.ro_length", 4.0),
             ("modules.readout.module.ro_cfg.trig_offset", 0.25),
             ("rounds", 7),

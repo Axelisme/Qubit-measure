@@ -86,8 +86,6 @@ class _ZigZagScanBase(
         return f"{ctx.qub_name}_zigzag_scan_{self.sweep_key}_{time.strftime('%m%d')}"
 
 
-
-
 class ZigZagScanGainAdapter(_ZigZagScanBase):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:

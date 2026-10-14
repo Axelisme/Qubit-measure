@@ -3,10 +3,11 @@
 import base64
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any
+from typing import Any, ClassVar
 
 from zcu_tools.cfg_model import (
     ConfigBase,
+    DirectReadoutCfg,
     PulseCfg,
     PulseReadoutCfg,
     PulseReadoutSpec,
@@ -86,6 +87,26 @@ class RecipeControls(RecipeControlsBase):
     sweep: SweepCfg
 
 
+class ExecutionModules(ConfigBase):
+    """Nullable module collaborators, not native reset or init pulse execution."""
+
+    reset: DirectReadoutCfg | None = None
+    init_pulse: DirectReadoutCfg | None = None
+    readout: PulseReadoutCfg
+
+
+class ExecutionControls(ConfigBase):
+    """Execution collaborator values; reset is only a disabled-null module seam."""
+
+    rounds: int = 3
+    fixed: int = 2
+    modules: ExecutionModules
+    dev: RecipeDevices = RecipeDevices()
+    flux_unit: str = "A"
+    range: SweepCfg
+    sweep: SweepCfg
+
+
 _READOUT_SPEC = PulseReadoutSpec.model_validate(
     {
         "type": "readout/pulse",
@@ -129,6 +150,8 @@ READOUT_TEMPLATE = TemplateDef(
 
 class LookbackGui:
     """GUI collaborator with distinct Run, save and analysis wire identities."""
+
+    cfg_cls: ClassVar[type[ConfigBase]] = RecipeControls
 
     def __init__(self):
         self.ran = False
@@ -220,7 +243,7 @@ class LookbackGui:
 
     def make_form(self):
         form = Form(
-            RecipeControls,
+            self.cfg_cls,
             {
                 "range": Range.between(1.0, 2.0, expts=11),
                 "sweep": Range.between(1.0, 2.0, expts=51),
@@ -434,3 +457,9 @@ class LookbackGui:
                 "destination_context": {"active_label": "sample"},
             }
         raise AssertionError(method)
+
+
+class ExecutionGui(LookbackGui):
+    """Record execution phases without unrelated native reset family schemas."""
+
+    cfg_cls: ClassVar[type[ConfigBase]] = ExecutionControls

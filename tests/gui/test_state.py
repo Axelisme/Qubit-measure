@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile.native_models import (
     RunMetadata,
     RunSnapshot,
@@ -21,14 +22,11 @@ from zcu_tools.gui.app.measure.state import (
     State,
     TabInteractionState,
 )
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    CfgSectionSpec,
-    CfgSectionValue,
-)
+from zcu_tools.gui.form import FormInput, FormModel
+from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui.app.measure._cfg_fakes import make_cfg
+from tests.gui.app.measure._form_fakes import make_form
 
 
 def _plots_for(figure: Figure) -> Plots:
@@ -47,13 +45,13 @@ def _make_adapter():
     return MagicMock()
 
 
-def _add_tab(state: State, tab_id: str, adapter: MagicMock) -> object:
-    cfg_schema = CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())
+def _add_tab(state: State, tab_id: str, adapter: MagicMock) -> FormInput[FormModel]:
+    resource = make_form(Form(ConfigBase, {}), state=state)
     state.add_tab(
         tab_id,
-        Session(adapter_name="fake", adapter=adapter, cfg=make_cfg(cfg_schema)),
+        Session(adapter_name="fake", adapter=adapter, cfg=resource),
     )
-    return cfg_schema
+    return resource.input
 
 
 @dataclass
@@ -81,12 +79,13 @@ def test_tab_interaction_state_creation():
 def test_add_tab_then_get_tab_returns_correct_tabstate():
     state = State(_make_ctx())
     adapter = _make_adapter()
-    cfg_schema = _add_tab(state, "t1", adapter)
+    form_input = _add_tab(state, "t1", adapter)
     tab = state.get_tab("t1")
     assert isinstance(tab, Session)
     assert tab.adapter_name == "fake"
     assert tab.adapter is adapter
-    assert tab.cfg.snapshot_inputs() == cfg_schema
+    assert tab.cfg.input.model is form_input.model
+    assert tab.cfg.input.data == form_input.data
 
 
 def test_add_tab_duplicate_raises():
@@ -460,17 +459,11 @@ def test_device_state_status_predicates():
 
 
 def test_tab_state_predicates():
-    from zcu_tools.gui.app.measure.state import Session
-    from zcu_tools.gui.cfg import (
-        CfgSchema,
-        CfgSectionSpec,
-        CfgSectionValue,
-    )
-
+    state = State(_make_ctx())
     tab = Session(
         adapter_name="fake",
         adapter=_make_adapter(),
-        cfg=make_cfg(CfgSchema(spec=CfgSectionSpec(), value=CfgSectionValue())),
+        cfg=make_form(Form(ConfigBase, {}), state=state),
     )
     assert tab.has_run_result() is False
     assert tab.has_analyze_result() is False

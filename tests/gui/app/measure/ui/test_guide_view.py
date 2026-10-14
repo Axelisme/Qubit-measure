@@ -25,7 +25,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
 
-from tests.gui.app.measure._cfg_fakes import configure_cfg_lookup
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 
 _IMAGE_RESOURCE = QTextDocument.ResourceType.ImageResource.value
 
@@ -40,7 +40,7 @@ def open_guide(qapp: QApplication) -> Iterator[Callable[[AdapterGuide], QTextBro
         ctrl = MagicMock()
         ctrl.control_identity = ControlIdentity()
         owned_authorities.append(ctrl.control_identity)
-        configure_cfg_lookup(ctrl)
+        configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 300
         ctrl.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = guide

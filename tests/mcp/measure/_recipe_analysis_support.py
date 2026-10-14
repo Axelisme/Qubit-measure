@@ -7,11 +7,11 @@ from threading import Event
 
 from zcu_tools.mcp.measure.analysis_execution import AnalysisStage, AnalysisWriteback
 
-from ._recipe_support import PNG, LookbackGui
+from ._recipe_support import PNG, ExecutionGui
 from ._save_report_support import analysis_report
 
 
-class AnalysisRecipeGui(LookbackGui):
+class AnalysisRecipeGui(ExecutionGui):
     """Record Run/Primary/Post provenance and independent interactive outcomes."""
 
     def __init__(self, *, interactive: bool = False) -> None:

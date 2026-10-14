@@ -18,7 +18,11 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseCfg, PulseSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+)
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
@@ -103,7 +107,9 @@ class TabView:
             self.ctrl.cfg_resources.lookup.side_effect = lambda _tab_id: resource
         self.ctrl.get_left_panel_width.return_value = 500
         self.ctrl.get_tab_adapter_name.return_value = "fake"
-        self.ctrl.get_adapter_guide.return_value = {}
+        self.ctrl.get_adapter_guide.return_value = AdapterGuide(
+            markdown="# Synthetic guide\n", resource_dir=None
+        )
         self.ctrl.progress_control.attach_progress.return_value = lambda: None
         self.ctrl.progress_control.progress_bars.return_value = []
         self.ctrl.get_tab_snapshot.return_value = snapshot()
