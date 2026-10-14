@@ -34,6 +34,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.ui.cfg_binding import make_value_source_input_enhancer
 from zcu_tools.gui.widgets.cfg import CfgFormWidget
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -168,12 +169,16 @@ class _MiddleElidedLabel(QLabel):
 
 
 def _value_label(item: WritebackItem, text: str) -> QLabel:
-    """Return a middle-elided label for a scalar parameter, else a plain one."""
+    """Return a mouse-selectable label: middle-elided for a scalar parameter, else plain."""
+    label: QLabel
     if isinstance(item, ParameterWriteback) and _is_scalar_md_value(
         item.proposed_value
     ):
-        return _MiddleElidedLabel(text)
-    return QLabel(text)
+        label = _MiddleElidedLabel(text)
+    else:
+        label = QLabel(text)
+    make_label_selectable(label)
+    return label
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +363,7 @@ class WritebackWidget(QWidget):
         self._hint.setVisible(False)
         self._apply_btn.setVisible(False)
         label = QLabel(f"Writeback preview unavailable: {reason}")
+        make_label_selectable(label)
         label.setObjectName("writebackPreviewUnavailable")
         label.setTextFormat(Qt.TextFormat.PlainText)
         label.setStyleSheet("color: #b00020;")
@@ -419,6 +425,7 @@ class WritebackWidget(QWidget):
 
         for reason in unavailable_reasons:
             label = QLabel(f"⚠ {reason}")
+            make_label_selectable(label)
             label.setStyleSheet("color: #b7791f;")
             label.setObjectName("writebackUnavailableReason")
             label.setWordWrap(True)
@@ -445,6 +452,7 @@ class WritebackWidget(QWidget):
         current_label.setWordWrap(False)
         proposed_label, proposed_table = self._make_proposed_view(item, fact)
         actual_path = QLabel(fact.actual_path)
+        make_label_selectable(actual_path)
         actual_path.setObjectName("writebackActualPath")
         actual_path.setStyleSheet("color: #6b7688;")
         actual_path.setWordWrap(True)
@@ -665,6 +673,7 @@ class WritebackWidget(QWidget):
         form = QFormLayout()
         # Current is read-only (S2); target and proposed are editable.
         current_label = QLabel(self._display_current(item, compact=False))
+        make_label_selectable(current_label)
         current_label.setObjectName("writebackCurrentReadonly")
         current_label.setStyleSheet("color: #6b7688;")
         form.addRow("Current:", current_label)

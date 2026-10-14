@@ -84,6 +84,7 @@ from zcu_tools.gui.project import DEFAULT_CHIP, DEFAULT_QUBIT
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.widgets.control_indicator import ControlIndicator
 from zcu_tools.gui.widgets.dialog_presenter import DialogPresenter, QtDialogPresenter
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,7 @@ class MainWindow(QMainWindow):
         """Project and control identity on the left, collection commands right."""
         bar = QHBoxLayout()
         self._project_label = QLabel()
+        make_label_selectable(self._project_label)
         self._project_label.setObjectName("fluxdep.session.project")
         bar.addWidget(self._project_label)
         self._indicator = ControlIndicator(self._ctrl.control_identity, self)

@@ -747,6 +747,29 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
     window.show_status_message.assert_called_once_with("Writeback applied: param-1")
 
 
+def _status_bar_labels(window: MainWindow, text: str) -> list[QLabel]:
+    status_bar = window.statusBar()
+    assert status_bar is not None
+    return [label for label in status_bar.findChildren(QLabel) if label.text() == text]
+
+
+def test_status_bar_message_is_mouse_selectable(control_factory, qapp):
+    ctrl = _apply_window_defaults(_mock_ctrl(control_factory))
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.list_tab_ids.return_value = []
+    window = MainWindow(ctrl)
+
+    assert len(_status_bar_labels(window, "Ready")) == 1
+
+    window.show_status_message("Writeback applied: param-1")
+
+    labels = _status_bar_labels(window, "Writeback applied: param-1")
+    assert len(labels) == 1
+    flags = labels[0].textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert window.get_view_snapshot()["status"] == "Writeback applied: param-1"
+
+
 def test_main_window_toolbar_does_not_show_arb_waveforms(control_factory, qapp):
     from qtpy.QtWidgets import QPushButton
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow

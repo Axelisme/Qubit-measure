@@ -42,6 +42,7 @@ from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
 from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.event_bus import EventSubscriptions
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class FilterStage(QWidget):
         self._discard.setToolTip("Drop the Filter draft; the published masks stay")
         self._discard.clicked.connect(self._on_discard)
         self._status = QLabel("")
+        make_label_selectable(self._status)
         self._status.setAccessibleName("Filter status")
         self._status.setWordWrap(True)
         self._status.setSizePolicy(
