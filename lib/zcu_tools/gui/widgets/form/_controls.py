@@ -370,7 +370,8 @@ class FieldRow:
     width for a model level's labels so their controls share a left edge.
     On a model row with rows to fold (every model row except a disabled
     nullable one) label is the bold fold title form.fold.<path>: a fold
-    mark, then the field label, folding group on a click. Other rows,
+    mark, then the field label, folding group on a click, or on Space,
+    Return or Enter while it has Tab focus. Other rows,
     including a disabled nullable model, show the plain field label.
     input is its optional scalar control (read-only text for a fixed one-value
     Literal, which has no mode), or on an option row its one non-editable
@@ -814,7 +815,8 @@ class GroupBlock:
     for the root level), where path is the model level's path and name the
     fields' Display group. Its header holds label, the bold fold title
     form.fold.group.<path>.<name> (form.fold.group.<name> at the root): a
-    fold mark, then the group name, folding body on a click; the editor
+    fold mark, then the group name, folding body on a click, or on Space,
+    Return or Enter while it has Tab focus; the editor
     puts it in the level's label column. A GROUP_ERRORS_NOTE label follows
     it, hidden until set_has_errors(True). body is a QGroupBox, hidden while
     folded, whose layout rows takes the member rows; members are their paths

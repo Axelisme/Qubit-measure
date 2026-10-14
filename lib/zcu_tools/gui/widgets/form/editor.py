@@ -93,6 +93,10 @@ class FormEditor[F: FormModel](QWidget):
     The editor has no fold buttons: group blocks and model sections fold by
     a left-button click on their fold title, a bold QLabel whose text is
     "\u25b8 " (folded) or "\u25be " (expanded) followed by the label.
+    Tab stops on every fold title, while a click does not focus it. A title
+    with keyboard focus shows the style's focus frame around it, and Space,
+    Return or Enter folds or unfolds it; no other key does, and keys typed
+    into an input never reach a title, so Enter there still commits text.
     form.fold.<path> is the fold title of the model row at <path>: a nested
     model, a tagged union, an option row whose selected option draws fields
     and an enabled nullable model. It is that row's name label, in its
@@ -132,8 +136,9 @@ class FormEditor[F: FormModel](QWidget):
     (form.input and form.enabled) show the current value in normal colours
     and ignore mouse clicks, wheel turns and keys other than Tab and Backtab;
     a wheel turn over them scrolls an enclosing scroll area instead. Option
-    command actions stay listed but disabled. Fold titles still fold and
-    unfold on a click, without writing state.
+    command actions stay listed but disabled. Fold titles still take Tab
+    focus and fold and unfold on a click, Space, Return or Enter, without
+    writing state.
 
     Build finishes before subscribing. detach or close removes the subscription,
     disables this view and drops local text without changing caller state.
