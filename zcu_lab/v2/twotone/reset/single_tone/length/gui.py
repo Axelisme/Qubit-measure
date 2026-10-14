@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -17,23 +17,14 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import path_seed
-from zcu_tools.gui.cfg import (
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.single_tone.length.core import (
     LengthCfg,
     LengthExp,
     LengthResult,
 )
+from zcu_lab.v2.twotone.reset.single_tone.length.form import FORM
 
 SingleToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
@@ -55,7 +46,8 @@ class SingleToneLengthAdapter(
 ):
     experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
-    ExpCfg_cls: ClassVar[Any] = LengthCfg
+    ExpCfg_cls = LengthCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -66,15 +58,24 @@ class SingleToneLengthAdapter(
             "found, to pick the shortest length that fully resets the qubit."
         ),
         expects_md=(
-            "Requires $qubit.ext.reset_f for the tested reset frequency. "
-            "Missing, null or invalid values fail cfg lowering. Other drive "
-            "defaults use captured qubit frequency and wiring."
+            "The tested pulse frequency reads $qubit.ext.reset_f. Seeds 50 length points "
+            "from 0.1 to 20.0 us, with relax delay 30.5 us. Open and Reset evaluate "
+            "starting expressions once into direct input using captured sources. Inline "
+            "qubit pulses read $qubit.freq and $qubit.wiring.L01.ch. Inline readout reads "
+            "$resonator.freq, $resonator.wiring.ch, $resonator.wiring.ro_ch and "
+            "$resonator.ext.time_of_fly + 0.05 us for trigger timing. Missing or invalid "
+            "required sources leave the affected fields empty and Invalid; supply "
+            "calibration or direct values before Run. No numeric calibration fallback is "
+            "supplied."
         ),
         expects_ml=(
-            "Builds the tested pulse reset inline and needs a readout "
-            "module. Optionally references a calibrated upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
+            "Tested reset starts inline from the reset template. Optional init pulse uses "
+            "$qubit.module.x180 without fallback; an unset/dangling slot or unbound alias "
+            "leaves it disabled and Valid. $qubit.module.readout selects a captured "
+            "library link, otherwise a fresh inline readout template with a const "
+            "waveform. Its required parameter sources must still be present. Optional "
+            "$qubit.module.reset has no fallback: an unset/dangling slot or unbound alias "
+            "leaves it disabled and Valid."
         ),
         typical_writeback=(
             "No automatic writeback. Analysis plots the length response "
@@ -88,36 +89,6 @@ class SingleToneLengthAdapter(
             "fully relaxes before each reset."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="reset",
-                label="Tested Reset",
-                shape="pulse",
-                init=ModuleInit.INLINE,
-                overrides={
-                    "pulse_cfg.freq": path_seed("$qubit.ext.reset_f", fallback=0.0)
-                },
-            )
-            .readout()
-            .relax_delay(30.5)
-            .sweep(
-                "length",
-                label="Length (us)",
-                default=SweepValue(start=0.1, stop=20.0, expts=50),
-            )
-            .reps(100)
-            .rounds(100)
-            .build()
-        )
 
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.

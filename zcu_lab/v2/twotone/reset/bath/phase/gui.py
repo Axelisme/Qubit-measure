@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -22,19 +22,11 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import path_seed
-from zcu_tools.gui.cfg import (
-    CfgSchema,
-    SweepValue,
-)
+from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
+from zcu_lab.v2.twotone.reset.bath.phase.form import FORM
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
@@ -55,7 +47,8 @@ class BathPhaseAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
-    ExpCfg_cls: ClassVar[Any] = PhaseCfg
+    ExpCfg_cls = PhaseCfg
+    form = FORM
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -66,16 +59,25 @@ class BathPhaseAdapter(
             "hardware. Run last, to fix the pi/2 phase of the reset module."
         ),
         expects_md=(
-            "Requires $qubit.ext.reset_bath_freq and "
-            "$qubit.ext.reset_bath_gain for the tested cavity tone. Missing, "
-            "null or invalid values fail cfg lowering. Other drive defaults "
-            "use captured qubit/resonator frequency and wiring."
+            "Tested cavity frequency and gain read $qubit.ext.reset_bath_freq and "
+            "$qubit.ext.reset_bath_gain. Seeds 201 phase points from -360 to 360 degrees, "
+            "with relax delay 10.5 us. Open and Reset evaluate starting expressions once "
+            "into direct input using captured sources. Inline qubit pulses read "
+            "$qubit.freq and $qubit.wiring.L01.ch. Inline readout reads $resonator.freq, "
+            "$resonator.wiring.ch, $resonator.wiring.ro_ch and $resonator.ext.time_of_fly "
+            "+ 0.05 us for trigger timing. Missing or invalid required sources leave the "
+            "affected fields empty and Invalid; supply calibration or direct values "
+            "before Run. No numeric calibration fallback is supplied."
         ),
         expects_ml=(
-            "Builds the tested bath-reset cfg from captured defaults and "
-            "needs a readout module. Optionally references an upstream reset and an "
-            "init pulse (a library pi pulse when present) — both disabled when "
-            "no library entry exists."
+            "Tested reset starts inline from the bath_reset template. Optional init pulse "
+            "uses $qubit.module.x180 without fallback; an unset/dangling slot or unbound "
+            "alias leaves it disabled and Valid. The pi/2 tone uses $qubit.module.x90, "
+            "otherwise a fresh pi2_pulse template. $qubit.module.readout selects a "
+            "captured library link, otherwise a fresh inline readout template with a "
+            "const waveform. Its required parameter sources must still be present. "
+            "Optional $qubit.module.reset has no fallback: an unset/dangling slot or "
+            "unbound alias leaves it disabled and Valid."
         ),
         typical_writeback=(
             "Proposes phases to $qubit.ext.reset_bath_max_phase and "
@@ -92,41 +94,6 @@ class BathPhaseAdapter(
             "the qubit fully relaxes before each shot."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .reset(
-                "tested_reset",
-                role_id="bath_reset",
-                label="Tested Reset",
-                shape="bath",
-                locked={"pi2_cfg.phase": 0.0},
-                overrides={
-                    "cavity_tone_cfg.freq": path_seed(
-                        "$qubit.ext.reset_bath_freq", fallback=0.0
-                    ),
-                    "cavity_tone_cfg.gain": path_seed(
-                        "$qubit.ext.reset_bath_gain", fallback=0.1
-                    ),
-                },
-            )
-            .readout()
-            .relax_delay(10.5)
-            .sweep(
-                "phase",
-                label="Phase (deg)",
-                default=SweepValue(start=-360.0, stop=360.0, expts=201),
-            )
-            .reps(100)
-            .rounds(1000)
-            .build()
-        )
 
     # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
