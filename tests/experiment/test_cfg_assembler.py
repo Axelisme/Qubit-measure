@@ -83,16 +83,13 @@ def repository_state_guard() -> Iterator[None]:
     ],
 )
 def test_assembly_converts_nested_arb_with_capture_bound_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, family: str, path: tuple[str, ...]
+    tmp_path: Path, family: str, path: tuple[str, ...]
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
     first = tmp_path / "first"
-    ArbWaveformDatabase.init(first)
-    ArbWaveformDatabase.save(
-        "shape", idata=np.array([0.0, 0.5]), time=np.array([0.0, 1.0])
-    )
+    first.mkdir()
+    np.savez(first / "shape.npz", idata=[0.0, 0.5], qdata=[0.0, 0.0], time=[0.0, 1.0])
     captured = LibrarySnapshot(
-        _library().document(), assets=ArbWaveformDatabase.bound_info()
+        _library().document(), assets=ArbWaveformDatabase.info_at(first)
     )
     pulse = _pulse_raw(1000.0)
     pulse["waveform"] = {
@@ -124,10 +121,6 @@ def test_assembly_converts_nested_arb_with_capture_bound_paths(
             "pi2_cfg": pulse,
         }
     fields = ExperimentCfgInput({"modules": {"drive": raw}})
-    ArbWaveformDatabase.init(tmp_path / "other")
-    ArbWaveformDatabase.save(
-        "shape", idata=np.array([0.0, 0.9]), time=np.array([0.0, 9.0])
-    )
     cfg = assemble_experiment_cfg(
         fields,
         _NativeExperimentCfg,
@@ -153,15 +146,11 @@ def test_assembly_converts_nested_arb_with_capture_bound_paths(
 @pytest.mark.parametrize("readout", [False, True])
 @pytest.mark.parametrize("flat_top", [False, True])
 def test_library_arb_assembly_json_roundtrip_needs_no_provider(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readout: bool, flat_top: bool
+    tmp_path: Path, readout: bool, flat_top: bool
 ) -> None:
-    monkeypatch.setattr(ArbWaveformDatabase, "_database_path", None)
-    ArbWaveformDatabase.init(tmp_path / "first")
-    ArbWaveformDatabase.save(
-        "shape",
-        time=np.array([0.0, 1.0]),
-        idata=np.array([0.0, 0.5]),
-    )
+    first = tmp_path / "first"
+    first.mkdir()
+    np.savez(first / "shape.npz", idata=[0.0, 0.5], qdata=[0.0, 0.0], time=[0.0, 1.0])
     ramp = waveform_spec_from_raw({"style": "arb", "data": "shape"})
     waveform = (
         FlatTopWaveformSpec(length=3.0, raise_waveform="Q1.waveforms.ramp")
@@ -189,13 +178,7 @@ def test_library_arb_assembly_json_roundtrip_needs_no_provider(
             format_version="1.0",
             components={"Q1": component},
         ),
-        assets=ArbWaveformDatabase.bound_info(),
-    )
-    ArbWaveformDatabase.init(tmp_path / "second")
-    ArbWaveformDatabase.save(
-        "shape",
-        time=np.array([0.0, 9.0]),
-        idata=np.array([0.9, 0.9]),
+        assets=ArbWaveformDatabase.info_at(first),
     )
     cfg = assemble_experiment_cfg(
         ExperimentCfgInput(
