@@ -64,7 +64,9 @@ Purcell 在非零有效耦合且有可用衰減通道時，零溫仍須有 spont
 
 Purcell helper 保留 e→g、resonator thermal-averaged escape lifetime 的既有語意，不自動改成 equilibrium relaxation 1/(Γeg+Γge)。此處 upward／downward 描述整體 dressed-state 能量交換，不代表已將 qubit 的正反向 relaxation rates 合併。Detailed balance 以 matched transition pair 驗證，不對多頻率 thermal aggregate 假定單一 Boltzmann ratio。
 
-原 helper 的公式註解與 2025-07-16 commit `9b7ed611c` 的舊 `notebook_md/analysis/percell.md` 都記有 a†/n_B 與 a/(n_B+1)。目前未找到論文引用；保留這份原公式，不宣稱已核實其來源論文。
+原 helper 的公式註解與 2025-07-16 commit `9b7ed611c` 的舊 `notebook_md/analysis/percell.md` 都記有 a†/n_B 與 a/(n_B+1)。它們與 Zhang et al. 的 Appendix G.5、G21／G22 相同。更早的 2025-02-24 commit `a8aaafc6488cbe390b6c98b665c5c87a4a356857`，`notebook/percell.ipynb` 同時使用相同公式及論文的 EJ/h=3.395、EC/h=0.479、EL/h=0.132 GHz、resonator 5.7 GHz、bath 60 mK。這是直接來源的強證據，但 Git 未記錄引用，不能排除經其他筆記轉引。
+
+Zhang 的公式涵蓋任意 ℓ→ℓ′；本文的 helper 只取 e→g。原文還將熱激發到高能態納入其完整 Purcell loss 討論，所以本 helper 不宣稱重現該文 Fig. 3(a) 的完整 loss 曲線。新增高能態通道不屬於本次修正。
 
 2026-10-14，使用者對兩票拆分、測試接縫及 kappa 建議回答「可以」。Purcell 的 kappa 表示 linewidth κ/(2π)，輸入單位 GHz；例如 0.001 表示 1 MHz linewidth。進入 rate sum 時使用 2π kappa，單位 ns⁻¹，不把輸入直接當成 decay rate κ。驗收包含零溫 spontaneous decay、有限溫度 detailed balance 與獨立弱耦合 reference。
 
@@ -79,4 +81,5 @@ Measured T1 不因理論 helper 修正而改變。以 measured T1 扣除 relaxat
 - [Scqubits Coherence Times Guide](https://scqubits.readthedocs.io/en/latest/guide/noise/guide-noise.html) 明示 GHz 對應 ns。Latest 頁面會變動，版本計算依據另見下列 tag。
 - [Scqubits v4.3.1 noise.py](https://github.com/scqubits/scqubits/blob/v4.3.1/scqubits/core/noise.py) 與 [v4.2 noise.py](https://github.com/scqubits/scqubits/blob/v4.2/scqubits/core/noise.py)。舊版 guide URL 的查核收到 403，不宣稱已讀取當年 guide。
 - Repo 歷史 commit `65dcb64e2b404ff869507e292dbf45fbb1c9726b` 保存當年的成套修改。
+- Helin Zhang et al., [Universal Fast-Flux Control of a Coherent, Low-Frequency Qubit](https://doi.org/10.1103/PhysRevX.11.011010), Physical Review X 11, 011010，2021。[arXiv:2002.10653v1](https://arxiv.org/abs/2002.10653v1) 的 Appendix G.5、PDF 第 10 頁、G21／G22 給出保留的 Purcell 模型；G22 後說明直接 e→g 與高能態熱激發 loss 的差別。
 - [Fluxonium module README](../../lib/zcu_tools/simulate/fluxonium/README.md) 保存公開 helper 定位。實作與測試承接本篇的單位契約。
