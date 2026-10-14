@@ -1,6 +1,6 @@
 """Headless form resources fix sources until explicit Reset and guard lifetime."""
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from dataclasses import replace
 from inspect import signature
 
@@ -18,7 +18,8 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry import component_registry, role_registry
+from zcu_tools.resources.entry.schema import ComponentSchema, PointDocument, PointGeneral
 
 
 class ScalarCore(ConfigBase):
@@ -47,11 +48,49 @@ def captured_env(amount: float) -> FormEnv:
     return FormEnv(parameters=parameters, library=library)
 
 
+class FactoryComponent(ComponentSchema):
+    """A synthetic component provides a valid direct library-key namespace."""
+
+
+@pytest.fixture
+def factory_component() -> Generator[None]:
+    models = {kind: component_registry.get(kind) for kind in component_registry.kinds()}
+    roles = {name: role_registry.get(name) for name in role_registry.names()}
+    shorthand, focus_kinds = role_registry.shorthand, role_registry.focus_kinds
+    component_registry.register("factory/shape", FactoryComponent)
+    try:
+        yield
+    finally:
+        component_registry.unregister("factory/shape")
+        assert {
+            kind: component_registry.get(kind) for kind in component_registry.kinds()
+        } == models
+        assert {name: role_registry.get(name) for name in role_registry.names()} == roles
+        assert (role_registry.shorthand, role_registry.focus_kinds) == (
+            shorthand, focus_kinds,
+        )
+
+
+def factory_env(amount: float) -> FormEnv:
+    """Capture a known component with no pulse entry in the library."""
+    env = captured_env(amount)
+    parameters = env.parameters
+    assert parameters is not None
+    point = PointDocument.model_validate({
+        "format": "zcu.parameter-container",
+        "format_version": "2.0",
+        "components": {"Q1": {"kind": "factory/shape"}},
+        "general": {"created_at": "2026-10-14T00:00:00Z", "ext": {"amount": amount}},
+    })
+    return FormEnv(parameters=replace(parameters, point=point), library=env.library)
+
+
+@pytest.mark.usefixtures("factory_component")
 def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() -> None:
     assert "make_form" in signature(resource_api.TabFormResource).parameters, (
         "Missing captured Open/Reset form factory"
     )
-    latest = captured_env(2.0)
+    latest = factory_env(2.0)
     calls: list[bool] = []
 
     def make_form(ctx: FormContext) -> Form[ScalarCore]:
@@ -85,7 +124,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
             },
         )
     )
-    parameters = captured_env(5.0).parameters
+    parameters = factory_env(5.0).parameters
     assert parameters is not None
     latest = FormEnv(parameters=replace(parameters, library=library), library=library)
     assert resource.result() == ScalarCore(amount=7.0)
@@ -97,7 +136,7 @@ def test_open_and_reset_factory_replace_shape_and_values_from_current_capture() 
     assert resource.result() == ScalarCore(amount=1.0)
     assert published == [{}]
     assert calls == [False, True]
-    latest = captured_env(9.0)
+    latest = factory_env(9.0)
     resource.reset()
     assert resource.input.data == {"amount": 9.0}
     assert resource.result() == ScalarCore(amount=9.0)
