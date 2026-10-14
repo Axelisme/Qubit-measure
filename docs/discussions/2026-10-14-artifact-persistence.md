@@ -94,3 +94,7 @@ basis:
 
 - 現況程式：`lib/zcu_tools/experiment/run_saving.py`（`SaveArtifact`、`save_artifacts`）、`lib/zcu_tools/resources/entry/save_layout.py`（`ArtifactKey.member`）、`lib/zcu_tools/experiment/native_persistence.py`（`prepare_run_data`、`load_run_with_metadata`）、`lib/zcu_tools/datafile/native_models.py`（`StoredRun`、`CfgSnapshot`）、`lib/zcu_tools/resources/entry/ledger_models.py`（`AcquiredPayload`）、`lib/zcu_tools/gui/app/measure/services/load.py` 與 `services/run.py`、`lib/zcu_tools/gui/app/measure/adapter/types.py`（`WritebackItem`）、`lib/zcu_tools/notebook/adapter.py` 與 `notebook/saving.py`。
 - 相關 ADR：[0063](../adr/0063-persistence-ownership.md)、[0069](../adr/0069-experiment-core-and-frontends.md)、[0067](../adr/0067-gui-application.md)、[0072](../adr/0072-module-boundaries.md)。
+
+## 後記（2026-10-15）
+
+本篇「讀回由誰解讀」一節寫 GUI adapter 把 cfg 轉成表單回填，這是錯的。2026-10-13 已裁定 Load 不再填回表單，討論時遺漏了這個前提。使用者 2026-10-15 確認維持該裁定：Load 只載入結果，設定由 Inspect 檢視。修正後的決策見 ADR draft 的「補充裁定」段。
