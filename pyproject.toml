@@ -60,7 +60,14 @@ design = [
   "ipywidgets",
   "ipympl"
 ]
-gui = ["zcu-tools[client]", "qtpy", "PyQt6", "jsonschema>=4"]
+gui = [
+  "zcu-tools[client]",
+  "qtpy",
+  "PyQt6",
+  "jsonschema>=4",
+  "markdown-it-py",
+  "mdit-py-plugins",
+]
 all = ["zcu-tools[client,gdrive,design,gui]"]
 development = ["zcu-tools[all]"]
 
