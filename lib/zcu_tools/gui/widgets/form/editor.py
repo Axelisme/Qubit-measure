@@ -19,6 +19,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
     WriteRejected,
 )
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ._controls import ROW_SPACING, FieldRow, GroupBlock, LocalText
 from ._schema_view import FieldView, flatten_fields, project_fields
@@ -224,6 +225,7 @@ class FormEditor[F: FormModel](QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(ROW_SPACING)
         self._root_error = QLabel(self)
+        make_label_selectable(self._root_error)
         self._root_error.setObjectName("form.error")
         self._root_error.setWordWrap(True)
         self._root_error.hide()

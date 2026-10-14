@@ -70,13 +70,7 @@ class DummyAdapter:
 
     @classmethod
     def guide(cls) -> AdapterGuide:
-        return AdapterGuide(
-            behavior="dummy",
-            expects_md="dummy",
-            expects_ml="dummy",
-            typical_writeback="dummy",
-            recommended="dummy",
-        )
+        return AdapterGuide(markdown="dummy", resource_dir=None)
 
     @classmethod
     def analyze_params_cls(cls) -> type:

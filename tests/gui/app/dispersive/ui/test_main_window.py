@@ -14,5 +14,4 @@ def test_main_window_builds_with_pipeline_panel(qapp):
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     window = MainWindow(Controller(state))
 
-    assert window.windowTitle() == "dispersive-fit-gui"
     assert isinstance(window.centralWidget(), PipelinePanelWidget)

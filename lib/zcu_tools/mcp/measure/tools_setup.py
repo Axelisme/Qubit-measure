@@ -10,6 +10,7 @@ from copy import deepcopy
 from functools import partial
 from typing import Any, Literal, NotRequired, TypedDict
 
+from zcu_tools.gui.app.measure.remote.guide_types import AdapterGuideView
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -221,9 +222,14 @@ type SetupResult = _SimulationResult | DeviceSetupResult
 
 
 class _RecipeGuideResult(TypedDict):
+    """Recipe registry identity and its adapter's unmodified wire guide."""
+
     recipe: str
+    """Registered recipe name requested by the caller."""
     adapter: str
-    guide: _JsonObject
+    """Adapter name declared by that recipe's definition."""
+    guide: AdapterGuideView
+    """Complete Markdown and absolute resource directory string or null."""
 
 
 def simulation_initialize(
@@ -295,8 +301,11 @@ def recipe_guide(
     """Read the guide for arguments['recipe'] on ctx's existing GUI connection.
 
     recipe must name an entry in the authoritative recipe registry (for example
-    t1). Returns recipe, its declared adapter name and the native guide object.
-    No mutation, operation, attach or reconnect occurs. A missing/unknown recipe
+    t1). Returns recipe, its declared adapter name and guide containing complete
+    Markdown and an absolute resource directory string or null. Images use
+    relative paths; the agent can read them from resource_dir when needed.
+    This tool does not read or attach images. No mutation, operation, attach or
+    reconnect occurs. A missing/unknown recipe
     raises ValueError before GUI access; native query/connection errors raise
     GuiRpcError. Guide contents and adapter mapping are not guessed or rewritten.
     """
@@ -545,8 +554,11 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         },
         "recipe_guide": {
             "handler": partial(recipe_guide, ctx),
-            "description": "Read the native guide of a registered recipe adapter. "
-            "Uses the authoritative recipe registry; does not run a recipe or mutate the GUI.",
+            "description": "Read a registered recipe adapter's complete Markdown guide "
+            "and absolute resource_dir string (null when no guide is declared). "
+            "Images use relative paths; read them yourself from resource_dir when needed. "
+            "This tool does not read or attach images. Uses the authoritative recipe "
+            "registry; does not run a recipe or mutate the GUI.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"recipe": {"type": "string", "minLength": 1}},

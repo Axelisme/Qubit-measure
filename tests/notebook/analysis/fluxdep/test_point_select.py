@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import SpectrumResult
-from zcu_tools.notebook.analysis.fluxdep.interactive import point_select
 from zcu_tools.notebook.analysis.fluxdep.interactive.point_select import (
     InteractiveSelector,
 )
@@ -30,8 +29,7 @@ def _spectrum_result() -> SpectrumResult:
     }
 
 
-def test_selector_initial_filter_mask_matches_selected_points(monkeypatch) -> None:
-    monkeypatch.setattr(point_select, "display", lambda _widget: None)
+def test_selector_initial_filter_mask_matches_selected_points() -> None:
     selected = np.array([True, False, True], dtype=bool)
 
     selector = InteractiveSelector({"sample": _spectrum_result()}, selected=selected)
@@ -41,8 +39,7 @@ def test_selector_initial_filter_mask_matches_selected_points(monkeypatch) -> No
     selector.finish_interactive()
 
 
-def test_selector_rejects_misaligned_selected_mask(monkeypatch) -> None:
-    monkeypatch.setattr(point_select, "display", lambda _widget: None)
+def test_selector_rejects_misaligned_selected_mask() -> None:
 
     with pytest.raises(ValueError, match="selected"):
         InteractiveSelector(

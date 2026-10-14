@@ -2,7 +2,6 @@
 
 from collections.abc import Generator, MutableMapping
 from contextlib import ExitStack, contextmanager
-from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
@@ -172,9 +171,12 @@ def test_declared_kind_patterns_choose_unique_focus_and_derive_reference(
     class Beam(ComponentSchema):
         detector: str
 
-    before = deepcopy(vars(role_registry))
     with ExitStack() as stack:
-        stack.callback(vars(role_registry).update, before)
+        stack.callback(
+            role_registry.configure,
+            shorthand=role_registry.shorthand,
+            focus_kinds=role_registry.focus_kinds,
+        )
         for kind, model in {
             "beam/source": Beam,
             "beam/detector": ComponentSchema,

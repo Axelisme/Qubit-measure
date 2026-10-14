@@ -27,7 +27,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.experiment.run_saving import ArtifactRef
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import (
+    AdapterCapabilities,
+    AdapterGuide,
+    AnalysisMode,
+)
 from zcu_tools.gui.app.measure.services import TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.data_figure_preview_gallery import (
@@ -134,7 +138,9 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
         ctrl.get_tab_adapter_name.return_value = "fake"
-        ctrl.get_adapter_guide.return_value = {}
+        ctrl.get_adapter_guide.return_value = AdapterGuide(
+            markdown="", resource_dir=None
+        )
         ctrl.progress_control.attach_progress.return_value = lambda: None
         ctrl.progress_control.progress_bars.return_value = []
         ctrl.open_seeded_cfg_editor.return_value = ("editor-id", ())

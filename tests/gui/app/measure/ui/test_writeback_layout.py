@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
+    AdapterGuide,
     ParameterWriteback,
     WritebackItem,
 )
@@ -170,7 +171,7 @@ def test_shipped_analysis_scroll_reaches_apply_and_the_last_ledger_row(
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
     ctrl.get_tab_adapter_name.return_value = "fake"
-    ctrl.get_adapter_guide.return_value = {}
+    ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     tab = ExpTabWidget("t", ctrl, AdapterCapabilities())
     tab.resize(600, 500)
     tab.show()

@@ -1,4 +1,9 @@
-"""TwoTone actions and validated commands for one shared interactive Session."""
+"""TwoTone actions and validated commands for one shared interactive Session.
+
+SET_SETTINGS_PARAMS declares optional dimensionless detector settings, including
+the method-dependent sigma limit. Commands require at least one non-null value.
+Remote consumers reuse these declarations without constructing a plugin.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,11 @@ from collections.abc import Callable, Mapping
 
 from zcu_tools.analysis.fluxdep.stroke import BrushStroke, BrushTool
 from zcu_tools.analysis.fluxdep.twotone import (
+    GAUSSIAN_SIGMA_MIN,
+    SIGMA_MAX,
+    SIGMA_MIN,
+    THRESHOLD_MAX,
+    THRESHOLD_MIN,
     TwoToneInputs,
     TwoTonePickResult,
     TwoTonePickState,
@@ -28,6 +38,35 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import Action, Command, PluginDefinition, Session
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
+SET_SETTINGS_PARAMS = (
+    ParamSpec(
+        "threshold",
+        JsonType.NUMBER,
+        required=False,
+        minimum=THRESHOLD_MIN,
+        maximum=THRESHOLD_MAX,
+        description=f"Dimensionless detector threshold [{THRESHOLD_MIN:g},{THRESHOLD_MAX:g}].",
+    ),
+    ParamSpec(
+        "sigma",
+        JsonType.NUMBER,
+        required=False,
+        minimum=SIGMA_MIN,
+        maximum=SIGMA_MAX,
+        description=(
+            f"Dimensionless wavelet sigma [{SIGMA_MIN:g},{SIGMA_MAX:g}]; "
+            f"Gaussian sigma [{GAUSSIAN_SIGMA_MIN:g},{SIGMA_MAX:g}]."
+        ),
+    ),
+    ParamSpec(
+        "smooth_method",
+        JsonType.STRING,
+        required=False,
+        enum=("wavelet", "gaussian"),
+        description="Smoothing method; Gaussian requires the sigma range declared above.",
+    ),
+)
+
 
 class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
     """Share brush/detector transitions between GUI and validated commands.
@@ -48,7 +87,7 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
     def __init__(
         self, inputs: TwoToneInputs, threshold: float = 1.0, brush_width: float = 0.05
     ) -> None:
-        """Declare twotone_pick commands on an all-selected seed.
+        """Declare twotone_pick commands on an empty selection seed.
 
         set_settings accepts optional threshold/sigma/smooth_method; set_tool
         accepts optional width/mode. Both require at least one non-null value.
@@ -59,16 +98,9 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
         and closes input, including for a successful empty selection.
         """
         seed = make_twotone_state(inputs, threshold=threshold, width=brush_width)
-        settings_params = (
-            ParamSpec("threshold", JsonType.NUMBER, required=False),
-            ParamSpec("sigma", JsonType.NUMBER, required=False),
-            ParamSpec(
-                "smooth_method",
-                JsonType.STRING,
-                required=False,
-                enum=("wavelet", "gaussian"),
-            ),
-        )
+        # GUI sampling starts fresh; the numerical/Notebook seed remains all-selected.
+        seed.mask.fill(False)
+
         settings: Action[TwoTonePickState, TwoToneSettings] = Action(
             lambda state, params: _transition(
                 lambda: set_twotone_settings(inputs, state, params)
@@ -100,7 +132,8 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
             session: Session[TwoTonePickState], params: Mapping[str, object]
         ) -> TwoTonePickState:
             return settings.execute(
-                session, _settings_payload(decode_parameters(settings_params, params))
+                session,
+                _settings_payload(decode_parameters(SET_SETTINGS_PARAMS, params)),
             )
 
         def set_tool_command(
@@ -133,7 +166,7 @@ class TwoTonePickPlugin(PluginDefinition[TwoTonePickState, TwoTonePickResult]):
             plugin_id="twotone_pick",
             seed=seed,
             commands=(
-                Command("set_settings", settings_params, set_settings_command),
+                Command("set_settings", SET_SETTINGS_PARAMS, set_settings_command),
                 Command("set_tool", TOOL_PARAMS, set_tool_command),
                 Command("stroke", STROKE_PARAMS, stroke_command),
                 Command("perform_on_all", (), perform_command),

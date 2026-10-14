@@ -6,15 +6,17 @@ The notebook hand-writes a ``TransitionDict`` per fit (categories like
 offers a preset dropdown that fills the per-category fields, which the user can
 then fine-tune.
 
-``TransitionsForm`` is a QWidget: a preset combo + one line edit per category
-holding its ``(i, j)`` pairs as text (e.g. ``(0,1),(0,2)``). ``r_f`` / ``sample_f``
-are NOT edited here (they are separate spin boxes on the fit panel) — this widget
-owns only the transition lists. ``get_transitions`` parses the fields back to a
+``TransitionsForm`` is a QWidget with one line edit per category holding its
+``(i, j)`` pairs as text (e.g. ``(0,1),(0,2)``), each labelled by what the
+category plots rather than by its wire key. ``r_f`` / ``sample_f`` are NOT edited
+here (they are separate fields on the fit panel) — this widget owns only the
+transition lists. ``get_transitions`` parses the fields back to a
 ``TransitionDict``; a malformed field raises ``ValueError`` (fast fail).
 """
 
 from __future__ import annotations
 
+from PyQt6.QtCore import pyqtSignal
 from qtpy.QtWidgets import (
     QFormLayout,
     QLineEdit,
@@ -23,14 +25,22 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 
-# The editable categories (wire-name → label). r_f/sample_f are scalars handled
-# elsewhere, so they are not in this list.
+# The editable categories as TransitionDict wire keys. r_f/sample_f are scalars
+# handled elsewhere, so they are not in this list.
 CATEGORIES: tuple[str, ...] = (
     "transitions",
     "mirror",
     "red side",
     "blue side",
 )
+
+# Row label per category: the frequency each (i, j) pair plots, with f = E_j - E_i.
+_CATEGORY_LABELS: dict[str, str] = {
+    "transitions": "Direct (f)",
+    "mirror": "Mirror (sample_f − f)",
+    "red side": "Red sideband (r_f − f)",
+    "blue side": "Blue sideband (r_f + f)",
+}
 
 # Preset name → {category: list[(i, j)]}. The notebook's common choices.
 PRESETS: dict[str, dict[str, list[tuple[int, int]]]] = {
@@ -90,8 +100,10 @@ class TransitionsForm(QWidget):
     Transitions are independent of the bounds preset (which the fit panel owns):
     each category is a free-text list of ``(i, j)`` level pairs, seeded with the
     default basic set. There is no preset dropdown here — bounds presets live on
-    the fit panel.
+    the fit panel. ``changed`` fires after any field text changes, typed or set.
     """
+
+    changed = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -100,8 +112,9 @@ class TransitionsForm(QWidget):
         self._fields: dict[str, QLineEdit] = {}
         for cat in CATEGORIES:
             edit = QLineEdit()
+            edit.textChanged.connect(lambda _text: self.changed.emit())
             self._fields[cat] = edit
-            layout.addRow(cat, edit)
+            layout.addRow(_CATEGORY_LABELS[cat], edit)
 
         # Seed with the default basic transition set so the form is not empty.
         default = PRESETS[_DEFAULT_PRESET]

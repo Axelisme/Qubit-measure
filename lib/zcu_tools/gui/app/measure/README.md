@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure` — measure-gui
 
-**Last updated:** 2026-10-14, captured factories bind templates on Open/Reset
+**Last updated:** 2026-10-15，Guide view renders through markdown-it-py
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -102,7 +102,7 @@ pointer editing，但保留 figure viewing。FluxPickFrontend 同時保留 align
 
 ## Package Boundaries
 
-- `schema_builder.py`、`seeds.py`、`role_factories.py`：context-free authoring 與通用 deferred defaults。Caller 明傳角色 factory 表；角色詞彙與三個掃描範圍政策留在使用者套件。
+- `form_adapter` 從 core cfg 與作者樹推導 Form。`make_form(ctx)`、範本與實驗初值由使用者套件宣告，舊 builder、seeds 與角色 factory 表已退休。
 - `flux_pick_plugin.py`、`flux_pick_frontend.py`、`interactive_flux_pick.py`：measure 選線的終態結果與 click-follow frontend。Caller 傳 FluxPickInputs 和初始數值，不帶具體實驗或參數容器。共用數值及 single-flight 機制仍由既有 kernel/plugin 擁有。
 - `adapter/`：framework-facing contract、measure-owned finished-cfg ports、analyze params、
   adapter validation與protocol signature需要的session vocabulary；不forward generic cfg API。
@@ -872,13 +872,29 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   `BaseAdapter` 的 import-time 條件 hook 驗證與 concrete adapter 義務見
   [framework BaseAdapter](adapter/base.py)；
   capability 判斷不用 method presence 推測。
+- `AdapterGuide(markdown, resource_dir)` carries complete free-format Markdown
+  and a `Path | None` for resolving relative image paths. `BaseAdapter` authors
+  declare `guide_path = Path(__file__).with_name("guide.md")`, or an explicit
+  sibling filename when adapters share a directory. The base reads UTF-8 on
+  each `guide()` call. No declaration returns an unwritten-guide notice and
+  `None`; a declared missing file raises. `guide_path` is a base-class authoring
+  choice, not a member of `ExpAdapterProtocol`. TabService and Controller return
+  the same named guide; only the remote adapter converts the directory to JSON.
+  The framework does not parse sections. The Guide subtab (`ui/guide_view.py`)
+  is the only reader of referenced images: a read-only view that parses with
+  markdown-it-py (CommonMark plus tables, raw HTML shown as text) and the
+  dollarmath plugin, then shows the HTML in a `QTextBrowser`. Clicked links go
+  to the system browser. The only self-written rendering is the math token hook:
+  inline `$...$` and `$$...$$` blocks become matplotlib mathtext images, while
+  rejected TeX and `\$` stay literal. Code and link destinations keep their
+  text because the library tokenizes them first. PNG/JPG files directly in
+  `resource_dir` scale down to the pane width; network, SVG and
+  other-directory images stay unloaded.
 - Adapter `make_form(ctx)` builds a definition from captured source existence.
   Registry registers adapter classes without evaluating factories or templates.
   Open and Reset invoke the factory, bind the current Registry catalog and
   derive input against a fixed FormEnv. Reset replaces shape and defaults
   atomically; preparation failures retain the previous form and sources.
-  Legacy builder hooks remain during experiment migration but are not a tab
-  fallback.
 - `validate_run_request(req, cfg)` is a mandatory framework member that
   `GuardService` always calls before opening an async handle. `BaseAdapter`
   supplies the no-op default; overrides are pure, predictable preflight only and

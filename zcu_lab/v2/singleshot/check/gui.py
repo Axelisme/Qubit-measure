@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -48,37 +48,7 @@ class CheckAdapter(
 
     exp_cls = CheckExp
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot classification check: takes 'shots' single-shot readouts of the "
-            "prepared state and draws the IQ scatter with the |g>/|e> discrimination "
-            "circles overlaid, reporting the fraction classified ground / excited / "
-            "other. Runs on real hardware; the run itself needs no centres, but the "
-            "analysis classifies the scatter against them."
-        ),
-        expects_md=(
-            "Open and Reset capture the current aliases, parameters and library. Relax "
-            "delay is 5 * $qubit.t1. Fresh inline probe uses $qubit.freq and "
-            "$qubit.wiring.L01.ch. Inline templates read $qubit.freq, "
-            "$qubit.wiring.L01.ch and $resonator.freq/wiring.ch/wiring.ro_ch; readout "
-            "trigger uses $resonator.ext.time_of_fly + 0.05 us. Missing required sources "
-            "remain Invalid; no numeric fallback is supplied."
-        ),
-        expects_ml=(
-            "Optional init/reset use $qubit.module.x180/reset. Probe starts from "
-            "qub_probe. Readout uses $qubit.module.readout or the readout template. Run "
-            "uses this fixed capture."
-        ),
-        typical_writeback=(
-            "No writeback — the check is a visual diagnostic of the existing single-shot "
-            "discrimination."
-        ),
-        recommended=(
-            "Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a well-sampled "
-            "scatter; a tight cluster inside the matching circle indicates good "
-            "discrimination."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     # Standard run path (BaseAdapter.run): CheckExp.run(soc, soccfg, cfg) needs no
     # centres — the trio is an ANALYZE input, read from md in analyze().

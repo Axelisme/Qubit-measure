@@ -4,7 +4,7 @@
 
 `zcu_lab` 只放實驗定義、實驗室宣告與各 workflow 自己的小工具。`zcu_tools` 提供實驗與前端框架，不反向 import 這個套件。使用者 GUI 入口在 `scripts/`，agent MCP 組合根在 `mcp_servers/`，取得定義後顯式注入框架。
 
-`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions、templates 與 migration mapping 模組。
+`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告留在 root 的 components、definitions 與 templates 模組。
 
 `zcu_lab.ALIAS_PRESET` 是唯一的有序 GUI alias 初值表。它保留 qubit 空列、resonator 的 `$qubit.resonator` 軟連結與 flux_dev 空列。Measure launcher 以 `alias_preset` 注入 app、Controller 與 services。框架不選裝置，也不從 cache 綁定 flux_dev。Workflow app 直接重用同一來源，交給 shared `build_session_services(alias_rows=...)`。這份表與 `definitions.py` 相鄰，取得 preset 不需提前載入實驗 catalog。
 
@@ -14,7 +14,7 @@
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 flux_half／flux_period／flux_int 依 `general.ext.flux_unit` 解讀。Global flux 原值存於 `general.ext.flux_value`。Local 的 `Q1.flux_unit` 與 JPA 的 `J1.flux_unit` 各自維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
-`storage_migration.build_mapping` 擁有舊 key、waveforms/modules envelope 裡的 module 候選與 R1/Q1/J1 profile。Kind 由 caller 明確指定，數字維持工作單位。舊 `flux_unit` 對應 `general.ext.flux_unit`，`cur_A` 對應 `general.ext.flux_value`。缺 flux 單位只 pending，不從舊 key 名稱推測單位。`migration_experiments` 明列 core 的 native declarations，以歷史 source_tag 與 cfg_type 配對 generic schema、concrete cfg validation 與 typed reader，另明示 canonical native_tag；Callback 重用 datafile 的完整 cfg 格式規則，再驗證隔離副本，不把派生欄位或 normalized model 回填歷史快照。不建構實驗 instance、不註冊或做動態 discovery。離線 CLI 在 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，正常 runtime 不使用 legacy fallback。
+離線遷移的具體對照（舊 key、module 候選、native declarations）不放在這裡，位於 `migrations/`；遷移完成後整個 `migrations/` 可刪。
 
 `recipes.RECIPES` 明列使用者的 generator definitions。每個 recipe 模組同時擁有流程、手寫 input_schema 與 summary declarations。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 參數，明確以 `aliases={"qubit": target}` 交給 generic `RecipeSession.open_tab`。Target 省略時不覆寫。GUI adapters 不宣告 parameter roles，cfg 與 Run 直接讀固定的全域 alias 表。
 

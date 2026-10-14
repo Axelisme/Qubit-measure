@@ -59,7 +59,7 @@ class WritebackGui(AnalysisRecipeGui):
 
     def __call__(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "adapter.guide":
-            return {"guide": {"adapter": params["adapter_name"]}}
+            return {"guide": {"markdown": params["adapter_name"], "resource_dir": None}}
         if method == "tab.post_analyze":
             self.post_started = True
         if "operation_id" not in params:
@@ -350,7 +350,7 @@ def test_injected_guide_and_estimates_share_the_owning_registry(tmp_path):
     with closing(client.context.session):
         question = client.call("custom", {})
         guide = client.call("recipe_guide", {"recipe": "custom"})
-        assert guide["adapter"] == guide["guide"]["adapter"] == "declared-adapter"
+        assert guide["adapter"] == guide["guide"]["markdown"] == "declared-adapter"
         # Analysis-only has no recipe identity; it uses supplied scalar declarations.
         client.transport.replies["tab.analyze"] = {
             "ok": True,

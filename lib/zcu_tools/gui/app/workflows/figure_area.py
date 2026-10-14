@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.ports import OwnerScheduler
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.plots import Plots
 
 from ._palette import PRIMARY_COLOR
@@ -86,6 +87,7 @@ class WorkflowFigureArea(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         header = QHBoxLayout()
         self._title = QLabel(self)
+        make_label_selectable(self._title)
         self._title.setObjectName("workflow.figures.title")
         self._follow = QCheckBox("Follow latest", self)
         self._follow.setObjectName("workflow.figures.follow")

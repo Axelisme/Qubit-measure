@@ -4,13 +4,13 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
@@ -94,53 +94,7 @@ class OneToneFreqAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "One-tone resonator spectroscopy: sweeps the readout frequency "
-            "and fits the resonator response to extract its frequency and "
-            "linewidth. Runs on real hardware. Typically run after a coarse "
-            "resonator search has placed you near the right frequency."
-        ),
-        expects_md=(
-            "Uses the tab's captured resonator parameters: freq and kappa "
-            "seed the sweep; ext.default_probe_length and ext.time_of_fly "
-            "seed ADC length minus 0.1 us and trigger offset plus 0.05 us; "
-            "wiring.ch and wiring.ro_ch seed channels. Missing or null "
-            "calibration leaves required fields Invalid, without numeric "
-            "fallback. Homophasal sampling requires explicit cfg calibration values "
-            "for r_f, rf_w, and theta0, supplied directly or as expressions. "
-            "Analysis optionally reads the route-matched resonator.ext.edelay "
-            "prior from the same fixed capture."
-        ),
-        expects_ml=(
-            "Starts with a fresh inline pulse readout and a const waveform. "
-            "It does not adopt a calibrated library module or named waveform."
-        ),
-        typical_writeback=(
-            "Proposes fitted values to resonator.freq, resonator.kappa, and "
-            "resonator.ext.theta0 through the captured role binding. With a "
-            "pulse-readout run snapshot, it also proposes "
-            "resonator.readout.readout_rf from that template, changing only "
-            "pulse/readout frequency while preserving gain, lengths, channels, "
-            "and trigger timing. The compound resonator.ext.edelay proposal "
-            "keeps delay and route together; it requires an identifiable "
-            "absolute branch or a trusted prior/manual seed."
-        ),
-        recommended=(
-            "Analysis defaults to the hanger-model fit ('hm') with "
-            "multiplicative amplitude-background fitting on. A sweep spanning "
-            "a few linewidths "
-            "around the known resonator frequency usually captures the dip "
-            "cleanly; widen it if the resonator has drifted. Use "
-            "homophasal sampling after a fit has written 'theta0' when you "
-            "want equal resonator-circle phase spacing instead of a linear "
-            "frequency grid. The homophasal calibration fields start empty; "
-            "fill them with fitted values or expressions before selecting that mode."
-            " Electrical-delay mode 'auto' uses a route-matched calibration "
-            "when available and otherwise runs bounded adaptive search; use "
-            "'calibrated' to require that prior or 'manual' to supply a seed."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @staticmethod
     def _readout_route(result: OneToneFreqRunResult) -> tuple[int, int] | None:

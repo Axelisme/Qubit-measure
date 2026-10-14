@@ -204,6 +204,19 @@ matplotlib or app modules at module import time. Runtime initializes the explici
 plot host, shutdown callback and mathtext support after QApplication exists;
 it does not select a process-wide Matplotlib backend.
 
+When runtime gets or creates the `QApplication`, it calls
+`gui.widgets.selectable_text.install_selectable_message_boxes(app)`. The call
+installs one idempotent application event filter. Every `QMessageBox` shown in
+the process then lets users select its main text, informative text and detailed
+text with the mouse or keyboard. Call sites keep using plain `QMessageBox`; all
+four launchers get the filter because runtime is their only `QApplication`
+factory.
+
+A `QLabel` that shows a data value (device address, name, path, computed value,
+status or error message) calls `make_label_selectable(label)` from the same
+module, so users can select and copy it with the mouse. Labels for field names,
+hints, placeholders and decoration stay unselectable.
+
 ## Project / Result Scope
 
 Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，

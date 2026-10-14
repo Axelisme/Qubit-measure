@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -79,23 +80,17 @@ class AdapterCapabilities:
 
 @dataclass(frozen=True)
 class AdapterGuide:
-    """Human-facing orientation for an adapter — read *before* running it.
+    """Human-facing Markdown and the directory for its relative resources.
 
-    Prose, not a contract: it helps an agent/user grasp the experiment's
-    behaviour and the adapter's built-in recommendations at a glance, but how
-    they actually use it is their call. Written in present tense at the
-    intent level (e.g. "assumes the resonator frequency is already calibrated"),
-    NOT as a literal md-key list or concrete numbers — those would rot against
-    the imperative ``md_get_*`` reads / default values they describe.
+    markdown is the complete guide text, without section parsing or rewriting.
+    An adapter without a guide returns an unwritten-guide notice instead.
+    resource_dir is the directory against which consumers resolve relative image
+    paths, or None when the adapter declares no guide. It does not imply that
+    any referenced image exists or has been read.
     """
 
-    behavior: str  # what this experiment measures and roughly how it runs
-    expects_md: (
-        str  # what it assumes is already in the parameter context (intent level)
-    )
-    expects_ml: str  # what it assumes is in the ModuleLibrary
-    typical_writeback: str  # what a completed run tends to propose writing back
-    recommended: str  # recommended analysis settings + typical usage (when/why)
+    markdown: str
+    resource_dir: Path | None
 
 
 def _is_json_safe(val: object) -> bool:

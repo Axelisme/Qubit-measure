@@ -37,6 +37,7 @@ from zcu_tools.gui.cfg.resource import (
     CfgStatus,
 )
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .fields import (
     CustomReferenceSelection,
@@ -134,6 +135,7 @@ class ResourceCfgFormWidget(QWidget):
         self._tree, self._branch_style = make_dense_cfg_tree()
         layout.addWidget(self._tree)
         self._error = QLabel()
+        make_label_selectable(self._error)
         self._error.setObjectName("cfgSubmitError")
         self._error.setWordWrap(True)
         self._error.hide()

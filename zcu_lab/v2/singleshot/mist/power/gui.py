@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
@@ -59,38 +59,7 @@ class MistPowerAdapter(
 
     exp_cls = PowerExp
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "MIST probe-power sweep: drives a probe pulse whose gain is swept and "
-            "classifies each shot in-program against the |g>/|e> single-shot centres, "
-            "plotting the ground/excited/other populations versus probe gain (or photon "
-            "number when an AC-Stark coefficient is known). Runs on real hardware; the "
-            "result is already populations (no per-point fit)."
-        ),
-        expects_md=(
-            "Open and Reset capture the current aliases, parameters and library. Relax "
-            "delay is 5 * $qubit.t1. Probe gain sweep runs from 0 to 1. Classification "
-            "seeds $qubit.ext.readout_cal.g_center/e_center/radius; missing calibration "
-            "stays Invalid. Inline templates read $qubit.freq, $qubit.wiring.L01.ch and "
-            "$resonator.freq/wiring.ch/wiring.ro_ch; readout trigger uses "
-            "$resonator.ext.time_of_fly + 0.05 us. Missing required sources remain "
-            "Invalid; no numeric fallback is supplied."
-        ),
-        expects_ml=(
-            "Probe starts from res_probe. Optional init/reset use "
-            "$qubit.module.x180/reset. Readout uses $qubit.module.readout or readout "
-            "template. Sweep-overwritten pulse values remain editable and library keys "
-            "stay selectable. Run uses this fixed capture."
-        ),
-        typical_writeback=(
-            "No writeback — the population curves are read off the plot by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep the "
-            "probe gain across the MIST onset; provide '$qubit.ext.ac_stark_coeff' "
-            "(from the AC-Stark experiment) for a photon-number x-axis."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 

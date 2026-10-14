@@ -14,6 +14,6 @@ independently, so the constants live beside the app's own RemoteControlAdapter.
 
 from __future__ import annotations
 
-WIRE_VERSION = 4  # v4: event envelopes carry seq/origin
+WIRE_VERSION = 5  # project.info exposes data_root instead of the ambiguous old name
 
-GUI_VERSION = 6  # owner-thread guard and scheduler injection
+GUI_VERSION = 7  # shared ProjectInfo data-root naming

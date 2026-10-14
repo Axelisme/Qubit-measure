@@ -27,9 +27,12 @@ from .onetone import (
     smoothed_slice,
 )
 from .processing import (
+    OneToneBackground,
     cast2real_and_norm,
+    contrast_limits,
     diff_mirror,
     downsample_points,
+    onetone_background,
     spectrum2d_findpoint,
 )
 from .selection import (
@@ -40,6 +43,7 @@ from .stroke import BrushPoint, apply_mask_stroke, points_in_normalized_stroke
 
 __all__ = [
     "BrushPoint",
+    "OneToneBackground",
     "apply_mask_stroke",
     "points_in_normalized_stroke",
     "FluxPickInputs",
@@ -47,6 +51,7 @@ __all__ = [
     "TwoLinePicker",
     "align_lines",
     "cast2real_and_norm",
+    "contrast_limits",
     "detect_peaks",
     "diff_mirror",
     "downsample_points",
@@ -55,6 +60,7 @@ __all__ = [
     "max_dispersion_freq_index",
     "mirror_loss_at",
     "move_line",
+    "onetone_background",
     "onetone_peak_points",
     "points_in_normalized_brush",
     "smoothed_slice",

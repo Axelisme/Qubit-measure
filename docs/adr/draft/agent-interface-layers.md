@@ -5,7 +5,7 @@ status: draft
 # Agent 介面分層
 
 **狀態：** 使用者已說明定位，本篇待 review 後轉為 accepted。本篇整理既有入口的定位，不新增工具、不改 method policy，也不授權硬體操作。
-**關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [控制身份 draft](control-identity.md)，workflow engine 見 [workflows draft](workflows-engine.md)。
+**關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
 ## 問題
 
@@ -27,7 +27,7 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各自提供工具，[[0068
 | L1 GUI／Notebook | 儀器控制、實驗建立、完整 cfg、實驗參數、單次分析與保存 | Measure 的 `rpc_list`／`rpc_describe`／`rpc_call`、`device_setup`、`simulation_initialize`、`tab_analyze`、`tab_interact`、`apply_writeback` | 一次實驗是多步流程，agent 可以在任兩步之間介入 |
 | L2 Recipe | 常用單次實驗的自動 GUI 操作，參數少，其餘自動推導 | Measure 的各 recipe 工具，搭配 `recipe_guide`、`status`、`wait`、`answer`、`finish_early`、`cancel` | 一次實驗是一個整體。Agent 控制輸入、接受輸出，中途只在 recipe 明確 yield 時協作 |
 | L3 Workflow | 一次設定，執行跨多組實驗的流程，例如 overnight、T1 over flux | Workflows MCP 的 Start、Pause、Resume、Stop 與 tunables | 一次設定後自動執行，中途只在 workflow 明確 yield 時協作 |
-| L3 跨實驗整合分析 | 整合多次量測的資料做聯合分析，例如 flux-dependence fit | Fluxdep MCP 的 pipeline 與互動工具；dispersive MCP 只讀 | 分析步驟由呼叫者驅動 |
+| L3 跨實驗整合分析 | 整合多次量測的資料做聯合分析，例如 flux-dependence fit | Fluxdep MCP 的決策點工具；dispersive MCP 只讀 | 分析步驟由 agent 驅動，順序不固定；agent 的判斷落在宣告的決策點，程式能判斷的事不交給 agent |
 
 Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 
@@ -38,6 +38,8 @@ Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，recipe 在明確需要 agent 的位置 yield，其餘步驟自動執行。Yield 可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有 yield 的位置調整步驟時，改用 L1。
 
 L3 workflow 與 L2 用同一種協作方式。Workflow 決定在哪裡 yield，其餘步驟自動執行。差別在於 workflow 的一次執行跨越多次實驗，yield 可以出現在任一次實驗之間或之內。
+
+跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 
 上層不重做下層的工作。Recipe 經由 L1 的 owner 操作 GUI，workflow 經由同一套 Run 與保存流程執行實驗，跨實驗分析讀取下層已保存的資料。
 
@@ -66,6 +68,54 @@ Agent 先找符合目標的 L3 workflow 或跨實驗分析，再找 L2 recipe，
 
 降到下層時，agent 要說得出上層缺少什麼。降層的原因若反覆出現，應補進上層，不讓 agent 長期在 L1 手動重組同一流程。
 
+## MCP 設計原則
+
+這些原則適用於 GUI app 的 agent MCP，不要求 MCP 完整覆蓋 GUI 或 RPC。2026-10-12 使用者裁決分工：「前者(MCP)面向agent，設計上要考慮agent使用負擔，後者(RPC)是控制接口，設計上要簡單基礎通用。前者透過組裝後者來兼顧雙方需求」。同日裁決操作粒度：「對agent來說，tool本身就是意圖，送什麼tool就切換到什麼階段。」
+
+### RPC 是控制接口，MCP 面向 agent
+
+RPC 提供簡單、基礎、通用的控制，回完整資料，出圖使用獨立 method。MCP 組裝 RPC、分派階段、摘要回覆並選擇出圖時機。GUI 是唯一的業務真相，MCP 不保存另一份業務狀態或驗證規則。傳輸及控制身份分工見 [[0068]]、[[0070]]；MCP→GUI remote 的依賴由 C13 約束。
+
+### 從決策點列能力
+
+先列 agent 必須判斷的事和需要的證據，再列完成這些判斷所需的工具。其餘 GUI 能力留在 RPC。Fluxdep 的決策點是資料可用性、對齊、採樣、躍遷假設、驗收和剔除。2026-10-12 使用者裁定範圍：「mcp的功能不必完全覆蓋gui的能力，只要能滿足：agent用mcp開啟或連上fluxdep_fit gui，讀取/加入/移除新數據，錨定對稱點，生成採樣點，Export數據集與採樣結果，Restore之前的數據集與採樣結果，Filter過濾此採樣點，附帶參數擬合目標參數，查看結果。每一步不一定照順序，也不一定只有一次。」
+
+### 在決策點回證據圖
+
+程式不能代為判斷的事回圖，機械命令回數字摘要。設計者給每個工具決定預設出圖時機，agent 可以要求 image=true。證據圖與 GUI 共用 renderer，兩個前端看同一份資料。Fluxdep 的 finish 回階段圖，fit 回 Show 疊圖。過期或沒有 recorded quality 的結果不回疊圖，這項限制由 fluxdep 的結果契約決定。
+
+### Tool 即意圖
+
+對對象送某個階段的工具，就進入該階段。Agent 不操作 open、cancel 或 context id。階段以編輯命令與 finish 組成；finish 接受並回證據圖，未編輯直接 finish 表示照原樣接受。切換顯示不取消別的對象草稿，GUI 跟隨 agent 操作的對象。Context lifetime 與同對象換階段的草稿處理仍由 GUI owner 決定。
+
+### 命令直接表達動作
+
+模式是命令的參數，不另設隱藏模式。能由其他命令表達的操作不另設命令。每個編輯階段以 finish 結束。Fluxdep 的 move_line 明填角色、位置與 conjugate；MCP 不暴露 swap_lines、set_tool、perform_on_all、clear 或 cancel。
+
+### 只回判斷所需的摘要
+
+逐點陣列留在 RPC 與匯出檔。MCP 回計數、範圍與差量；changes 只列變動欄位的 [before, after]，invalidated 投影原生 publication 的下游失效。點或 mask 的新增／移除計數用 [added, removed]，不與欄位差量混用。參數 schema、範圍與領域詞彙放工具描述，不在每次回覆重複。精確值讀匯出檔。
+
+### 長操作看 agent 中途能否影響結果
+
+操作進行中有 agent 能判斷且能影響結果的事，就回 token 並提供進度與提早停止。沒有時，MCP 輪詢 RPC 到結束，不設整體上限，也不把 token 交給 agent。代價是同一 stdio server 等待期間不處理其他呼叫。Fluxdep 的 auto_align 與 search 採後者；measure Run 可看進度與 early_stop，採前者。
+
+### 人與 agent 共駕
+
+兩邊都能完成每一步，同時只有 holder 寫入。狀態、圖與失效標示由同一 owner 提供，MCP 回覆能在 GUI 核對。控制轉移不取消已接受的工作，拒絕後讀現況再決定，不重送或回滾。
+
+### 先做簡單設計，再按需加法
+
+第一版只實作能力清單所需的命令與回覆。覆寫、選項與細部欄位有具體需求才加入。Fluxdep 的摘要與組裝需求來自實際分析中逐點陣列、schema 與重讀的成本，不把成本估算當驗收門檻。
+
+### 判讀依據放知識庫
+
+Skill 放流程與完成條件，每個決策點保留最小判準，並指向知識庫入口。完整判讀依據、反例與圖例放 measure_knowledge，不由單一前端擁有。GUI、MCP 與 Notebook 的 skill 可以共用它；skill 在沒有知識庫時仍能依最小判準運作。
+
+### Fluxdep 的依賴模型不是跨 app 原則
+
+2026-10-12 使用者對將失效與品質提升成通用範式裁定：「這點還不確定，先不進範式。」Fluxdep 的 alignment → points → Filter → fit 依賴、recorded quality、過期圖與匯出限制是 app 的局部契約，見 [[0068]] 及 app README。其他 app 的失效模型由各自的需求決定。
+
 ## 現況與後續
 
 - **Workflow 的 yield 由進行中的重構實作。** 現行 L3 workflow 把接受度寫在 workflow 定義與 tunables 中，校準失敗或 fit 不被接受時提交具名 reason，agent 只能 Pause 或 Stop。2026-10-12 使用者說明另有 task 正在重構 workflow 並實作此協作。Yield 的介面以該實作為準，本篇不先行規定。
@@ -81,8 +131,8 @@ Agent 先找符合目標的 L3 workflow 或跨實驗分析，再找 L2 recipe，
 
 ## 相關文件
 
-- [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md)：固定工具、recipe 與 execution 的使用契約。
-- [fluxdep MCP README](../../lib/zcu_tools/mcp/fluxdep/README.md)：跨量測整合分析的 pipeline。
-- [zcu_lab workflows README](../../zcu_lab/workflows/README.md)：具體 workflow 的校準、接受度與保存。
-- [run-measure-gui skill](../../.agents/skills/run-measure-gui/SKILL.md)：agent 量測時的操作規則。
+- [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)：固定工具、recipe 與 execution 的使用契約。
+- [fluxdep MCP README](../../../lib/zcu_tools/mcp/fluxdep/README.md)：跨量測整合分析的決策點工具。
+- [zcu_lab workflows README](../../../zcu_lab/workflows/README.md)：具體 workflow 的校準、接受度與保存。
+- [run-measure-gui skill](../../../.agents/skills/run-measure-gui/SKILL.md)：agent 量測時的操作規則。
 - [討論紀錄](../../discussions/2026-10-12-agent-interface-layers.md)：本篇的推導過程與被否決的選項。

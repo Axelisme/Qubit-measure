@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 from zcu_tools.analysis.fluxdep.models import PointsData
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
@@ -35,10 +37,16 @@ def _entry() -> SpectrumEntry:
     )
 
 
+def _figure(widget: ResultPreviewWidget) -> Figure:
+    canvas = widget.findChild(FigureCanvasQTAgg)
+    assert canvas is not None, "the preview must show a figure"
+    return canvas.figure
+
+
 def test_result_preview_builds(qapp):
     w = ResultPreviewWidget(_entry())
     # one axes with the spectrum image + the scatter + two flux markers
-    ax = w._figure.axes[0]
+    ax = _figure(w).axes[0]
     assert len(ax.images) == 1  # the (no-mask) spectrum
     dashed = [ln for ln in ax.get_lines() if ln.get_linestyle() == "--"]
     assert len(dashed) == 2  # half + int flux markers

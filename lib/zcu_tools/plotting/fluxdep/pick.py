@@ -16,11 +16,18 @@ def configure_flux_pick_axes(figure: Figure) -> None:
     """
     for axes in figure.axes:
         if axes.axison:
-            axes.grid(visible=True, color="white", alpha=0.3, linewidth=0.7)
+            axes.grid(visible=True, color="0.5", alpha=0.35, linewidth=0.7)
 
 
-def make_flux_pick_figure(inputs: FluxPickInputs, state: FluxPickState) -> Figure:
-    """Return a separate Agg figure showing the accepted device-axis selection."""
+def make_flux_pick_figure(
+    inputs: FluxPickInputs, state: FluxPickState, *, onetone: bool = False
+) -> Figure:
+    """Return a separate Agg figure showing the accepted device-axis selection.
+
+    onetone draws a OneTone resonator spectrum with the OneTone sample
+    picker's dip-depth background (see ``TwoLinePicker``); otherwise the
+    background is the state's alignment projection.
+    """
     figure = Figure(figsize=(8, 5))
     FigureCanvasAgg(figure)
     picker = TwoLinePicker(
@@ -31,6 +38,7 @@ def make_flux_pick_figure(inputs: FluxPickInputs, state: FluxPickState) -> Figur
         flux_half=state.flux_half,
         flux_int=state.flux_int,
         force_magnitude=state.magnitude_only,
+        onetone=onetone,
     )
     picker.show_state(state)
     configure_flux_pick_axes(figure)

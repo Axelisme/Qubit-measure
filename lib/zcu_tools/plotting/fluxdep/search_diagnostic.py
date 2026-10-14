@@ -10,8 +10,13 @@ from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult
 
 
 def make_search_diagnostic_figure(result: DatabaseSearchResult) -> Figure:
-    """Create a native diagnostic Figure without registering or presenting it."""
-    fig = Figure(figsize=(10, 7))
+    """Create a native diagnostic Figure without registering or presenting it.
+
+    The figure uses constrained layout, so every draw re-fits it to the
+    current canvas size: after a resize the title and each subplot's axis
+    labels stay clear of the neighbouring subplots.
+    """
+    fig = Figure(figsize=(10, 7), layout="constrained")
     FigureCanvasAgg(fig)
     gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 

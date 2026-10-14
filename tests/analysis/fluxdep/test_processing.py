@@ -4,8 +4,10 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep import (
     cast2real_and_norm,
+    contrast_limits,
     diff_mirror,
     downsample_points,
+    onetone_background,
     spectrum2d_findpoint,
 )
 
@@ -43,3 +45,32 @@ def test_diff_mirror_rejects_axis_shape_mismatch() -> None:
     data = np.ones((3, 2), dtype=np.float64)
     with pytest.raises(ValueError, match="first dimension"):
         diff_mirror(xs, data, center=0.5)
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (np.full(4, np.nan), (0.0, 1.0)),
+        (np.zeros(50), (0.0, 1.0)),
+        (np.full(50, -2.0), (-2.0, -1.0)),
+        (np.array([-3.0, *np.zeros(98), 0.0]), (-3.0, 0.0)),
+    ],
+    ids=["no finite", "all zero", "constant", "outlier below zero max"],
+)
+def test_contrast_limits_always_span_a_positive_range(values, expected) -> None:
+    assert contrast_limits(values.astype(np.float64)) == pytest.approx(expected)
+
+
+def test_onetone_background_puts_the_dip_at_the_top_of_its_limits() -> None:
+    devs, freqs = 20, 30
+    center = np.linspace(8, 22, devs).astype(int)
+    magnitude = np.ones((devs, freqs))
+    magnitude[np.arange(devs), center] = 0.2
+    background = onetone_background(magnitude.astype(np.complex128))
+    assert background.values.shape == (devs, freqs)
+    assert background.vmin < background.vmax
+    # Colour level in [0, 1] under the returned limits; gray_r draws 1 darkest.
+    span = background.vmax - background.vmin
+    level = np.clip((background.values - background.vmin) / span, 0.0, 1.0)
+    assert np.all(level[np.arange(devs), center] > 0.9)
+    assert np.median(level) < 0.1

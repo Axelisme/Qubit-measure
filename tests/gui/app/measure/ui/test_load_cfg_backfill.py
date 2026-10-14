@@ -223,4 +223,4 @@ def test_qt_load_status_reports_the_loaded_path(app, qapp, tmp_path, path):
         load_button.click,
         [(RunLoadDialog, open_file), (QFileDialog, choose_file)],
     )
-    assert window.statusBar().currentMessage() == expected
+    assert window.get_view_snapshot()["status"] == expected

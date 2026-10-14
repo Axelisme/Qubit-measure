@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
@@ -19,7 +22,7 @@ def _require_1d_axis(axis: NDArray[np.float64], name: str) -> None:
 
 
 def cast2real_and_norm(
-    signals: NDArray,
+    signals: NDArray[np.complexfloating[Any, Any]],
     use_phase: bool = True,
     sigma: float = 1,
     smooth_method: SmoothMethod = "wavelet",
@@ -45,6 +48,60 @@ def cast2real_and_norm(
         )
 
     return real_signals
+
+
+@dataclass(frozen=True)
+class OneToneBackground:
+    """A OneTone spectrum's display image and its colour limits.
+
+    values is the dip depth shaped like the spectrum (device, frequency): how
+    far each pixel's smoothed magnitude lies below the largest one, so a
+    resonator dip holds the largest values. NaN pixels stay NaN. vmin and
+    vmax are the ``contrast_limits`` of values, with vmin < vmax.
+    """
+
+    values: NDArray[np.float64]
+    vmin: float
+    vmax: float
+
+
+def onetone_background(signals: NDArray[np.complex128]) -> OneToneBackground:
+    """Return the dip-depth image and colour limits every OneTone view draws.
+
+    signals is the complex spectrum shaped (device, frequency). The magnitude
+    is smoothed along frequency (``cast2real_and_norm`` without phase) and
+    subtracted from its largest finite value. Under ``gray_r`` with the
+    returned limits the dip draws dark on a light background. ValueError
+    rejects signals that are not 2D.
+    """
+    magnitude = cast2real_and_norm(signals, use_phase=False)
+    depth = np.nanmax(magnitude) - magnitude
+    vmin, vmax = contrast_limits(depth)
+    return OneToneBackground(values=depth, vmin=vmin, vmax=vmax)
+
+
+def contrast_limits(values: NDArray[np.float64]) -> tuple[float, float]:
+    """Robust display limits (2nd–98th percentile) to boost feature contrast.
+
+    Clipping the colour range to percentiles (instead of min/max) keeps a few
+    outliers from compressing the dynamic range, so the spectral feature stands
+    out against the background. NaNs are ignored. The returned lower limit is
+    always below the upper one:
+
+    - no finite value gives ``(0, 1)``;
+    - coinciding percentiles widen to the finite ``(min, max)``;
+    - a constant finite value ``c`` gives ``(c, c + 1)``.
+    """
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0, 1.0
+    lo, hi = np.percentile(finite, [2.0, 98.0])
+    if hi > lo:
+        return float(lo), float(hi)
+    lowest, highest = float(finite.min()), float(finite.max())
+    if highest > lowest:
+        return lowest, highest
+    return lowest, lowest + 1.0
 
 
 def spectrum2d_findpoint(
@@ -119,7 +176,7 @@ def downsample_points(
 
 
 def diff_mirror(
-    xs: NDArray[np.float64], data: NDArray, center: float
+    xs: NDArray[np.float64], data: NDArray[np.float64], center: float
 ) -> NDArray[np.float64]:
     """Absolute difference between data and its mirror around ``center``."""
 

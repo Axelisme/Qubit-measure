@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.fluxdep.ui.transitions_form import (
-    PRESETS,
     TransitionsForm,
     format_pairs,
     parse_pairs,
@@ -40,14 +39,6 @@ def test_format_pairs_roundtrip():
 
 
 # --- widget ----------------------------------------------------------------
-
-
-def test_form_default_preset_basic(qapp):
-    form = TransitionsForm()
-    t = form.get_transitions()
-    assert t["transitions"] == PRESETS["basic"]["transitions"]
-    assert t["mirror"] == PRESETS["basic"]["mirror"]
-    form.deleteLater()
 
 
 def test_form_get_transitions_drops_empty(qapp):

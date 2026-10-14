@@ -10,14 +10,11 @@ from typing import Literal
 
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, SearchCancelled
 from zcu_tools.gui.app.fluxdep.event_bus import EventBus, SearchChangedPayload
-from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory
+from zcu_tools.gui.app.fluxdep.services.fit import FitService, PbarFactory, SearchInput
 from zcu_tools.gui.app.fluxdep.state import (
     FIT_VERSION_KEY,
     PROJECT_VERSION_KEY,
-    SELECTION_VERSION_KEY,
-    SPECTRUM_SET_VERSION_KEY,
     FluxDepState,
-    spectrum_version_key,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.operation_handles import (
@@ -77,7 +74,7 @@ class FluxDepSearchOwner:
         bus: EventBus,
         owner: OwnerScheduler,
         fit: FitService,
-        publish_result: Callable[[DatabaseSearchResult], None],
+        publish_result: Callable[[DatabaseSearchResult, SearchInput], None],
         *,
         runtime: FluxDepSearchRuntime | None,
     ) -> None:
@@ -167,14 +164,11 @@ class FluxDepSearchOwner:
         if self._progress_control is None:
             raise RuntimeError("search progress service is unavailable")
         inputs = self._fit.capture_search()
-        keys = (
-            PROJECT_VERSION_KEY,
-            FIT_VERSION_KEY,
-            SELECTION_VERSION_KEY,
-            SPECTRUM_SET_VERSION_KEY,
-            *(spectrum_version_key(name) for name in self._state.spectrums),
+        dependencies = (
+            (PROJECT_VERSION_KEY, self._state.version.get(PROJECT_VERSION_KEY)),
+            (FIT_VERSION_KEY, self._state.version.get(FIT_VERSION_KEY)),
+            *((stage.version_key, stage.version) for stage in inputs.stages),
         )
-        dependencies = tuple((key, self._state.version.get(key)) for key in keys)
         stop = Event()
 
         def work(factory: PbarFactory | None) -> DatabaseSearchResult:
@@ -195,7 +189,7 @@ class FluxDepSearchOwner:
                     work=work,
                     run_in_pool=True,
                     on_terminal=lambda bg, settle: self._terminal(
-                        bg, settle, dependencies
+                        bg, settle, dependencies, inputs
                     ),
                     on_opened=self._opened,
                 )
@@ -262,7 +256,11 @@ class FluxDepSearchOwner:
             self.cancel(token)
 
     def _terminal(
-        self, bg: BgResult, settle: SettleFn, dependencies: tuple[tuple[str, int], ...]
+        self,
+        bg: BgResult,
+        settle: SettleFn,
+        dependencies: tuple[tuple[str, int], ...],
+        inputs: SearchInput,
     ) -> None:
         """Commit only a current numeric success, then settle and publish activity."""
         self._assert_owner()
@@ -283,7 +281,7 @@ class FluxDepSearchOwner:
                 outcome = OperationOutcome("failed", "search inputs changed")
             else:
                 result: DatabaseSearchResult = bg.result
-                self._publish_result(result)
+                self._publish_result(result, inputs)
                 self._result = result
                 outcome = OperationOutcome("finished")
         except Exception as exc:

@@ -53,7 +53,7 @@ def test_project_info_reports_state():
     assert info["qub_name"] == "Q1"
     # ProjectInfo derives both paths from chip/qubit in __post_init__
     assert info["result_dir"] == os.path.join("result", "Q5_2D", "Q1")
-    assert info["database_path"] == os.path.join("Database", "Q5_2D", "Q1")
+    assert info["data_root"] == os.path.join("Database", "Q5_2D", "Q1")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,10 @@ def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
                 "spec_type": "OneTone",
                 "aligned": True,
                 "points_completed": True,
+                "stage": "sampled",
+                "filter_excluded_count": 0,
                 "point_count": 0,
+                "pending": None,
             }
         ]
     finally:
@@ -185,10 +188,10 @@ def test_selection_pointcloud_assembles_selected_points(spectrum_hdf5):
 # ---------------------------------------------------------------------------
 
 
-def test_fit_result_reports_inputs_and_result():
+def test_fit_result_reports_inputs_and_result(search_database_hdf5):
     adapter = _adapter()
     adapter.ctrl.set_fit_params(
-        "Database/sim/fluxonium.h5",
+        search_database_hdf5,
         (1.0, 12.0),
         (0.5, 3.0),
         (0.1, 2.0),
@@ -199,7 +202,7 @@ def test_fit_result_reports_inputs_and_result():
     res = _call(adapter, "fit.result", {})
     assert res["has_result"] is False
     assert res["params"] is None
-    assert res["database_path"] == "Database/sim/fluxonium.h5"
+    assert res["search_db"] == search_database_hdf5
     assert res["EJb"] == [1.0, 12.0]
     assert res["transitions"] == {"transitions": [[0, 1]]}
     assert res["r_f"] is None

@@ -29,7 +29,7 @@ class Adapter(ExpAdapterProtocol):
     capabilities = AdapterCapabilities()
     @classmethod
     def guide(cls):
-        return AdapterGuide("VERSION", "", "", "", "")
+        return AdapterGuide(markdown="VERSION", resource_dir=None)
 def register_all(registry):
     registry.register("demo", Adapter)
 """
@@ -44,11 +44,11 @@ def register_all(registry):
             current_registry=Registry(),
         )
         first = loader.load(loader.prepare())
-        assert first.create("demo").guide().behavior == "v1"
+        assert first.create("demo").guide().markdown == "v1"
         path.write_text(source.replace("VERSION", "v2"))
         second = loader.load(loader.prepare())
-        assert second.create("demo").guide().behavior == "v2"
-        assert first.create("demo").guide().behavior == "v1"
+        assert second.create("demo").guide().markdown == "v2"
+        assert first.create("demo").guide().markdown == "v1"
     finally:
         sys.path.remove(str(tmp_path))
         for name in tuple(sys.modules):

@@ -5,13 +5,13 @@ from __future__ import annotations
 import base64
 import copy
 import io
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from PIL import Image
 from zcu_tools.analysis.fluxdep.cross_selection import project_cross_selection
+from zcu_tools.analysis.fluxdep.line_state import FluxPickState
 from zcu_tools.analysis.fluxdep.twotone import project_twotone_pick
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import (
@@ -23,47 +23,19 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     OneTonePickContext,
     TwoTonePickContext,
 )
-from zcu_tools.gui.app.fluxdep.remote import interactive
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
-from zcu_tools.gui.app.fluxdep.ui.interactive.onetone import OneToneWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventMeta
-from zcu_tools.gui.plotting.figure_export import render_figure_png
-from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
-from zcu_tools.plotting.fluxdep.cross_selection import make_cross_selection_figure
-from zcu_tools.plotting.fluxdep.twotone import make_twotone_pick_figure
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
-from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
-
-
-def _copy_sources(harness: RouteHarness, ctrl: Controller) -> RouteHarness:
-    for entry in ctrl.state.spectrums.values():
-        harness.ctrl.state.put_spectrum(copy.deepcopy(entry))
-    harness.ctrl.set_active_spectrum(ctrl.state.active_spectrum)
-    return harness
-
-
-@pytest.fixture
-def one_route(
-    route_harness: RouteHarness, onetone_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, onetone_controller)
-
-
-@pytest.fixture
-def two_route(
-    route_harness: RouteHarness, twotone_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, twotone_controller)
-
-
-@pytest.fixture
-def joint_route(
-    route_harness: RouteHarness, cross_controller: Controller
-) -> RouteHarness:
-    return _copy_sources(route_harness, cross_controller)
+from tests.gui.app.fluxdep.remote._route_harness import (
+    ErrorReply,
+    RouteHarness,
+    RouteReply,
+    copy_sources,
+)
 
 
 def _context(reply: RouteReply) -> dict[str, object]:
@@ -88,28 +60,11 @@ def _changes(reply: RouteReply) -> dict[str, object]:
     return changes
 
 
-def _image(context: Mapping[str, object]) -> np.ndarray:
-    png = context["figure"]
-    assert isinstance(png, dict)
-    encoded = png["png_b64"]
-    assert isinstance(encoded, str)
-    data = base64.b64decode(encoded, validate=True)
-    assert png["bytes"] == len(data)
-    with Image.open(io.BytesIO(data)) as image:
-        assert image.format == "PNG"
-        assert image.size == (640, 480)
-        return np.array(image)
-
-
-def _native_image(figure: Figure) -> np.ndarray:
-    with Image.open(io.BytesIO(render_figure_png(figure))) as image:
-        return np.array(image)
-
-
-def _error(reply: RouteReply, code: str, reason: str | None) -> None:
+def _error(reply: RouteReply, code: str, reason: str | None) -> ErrorReply:
     assert reply["ok"] is False, reply
     assert reply["error"]["code"] == code
     assert reply["error"].get("reason") == reason
+    return reply["error"]
 
 
 def _read_sources(harness: RouteHarness, link: ClientLink) -> None:
@@ -117,6 +72,14 @@ def _read_sources(harness: RouteHarness, link: ClientLink) -> None:
     for name in harness.ctrl.state.spectrums:
         assert harness.request(link, "spectrum.snapshot", name=name)["ok"]
     assert harness.request(link, "selection.snapshot")["ok"]
+
+
+def _read_picker(
+    harness: RouteHarness, link: ClientLink, name: str, **params: object
+) -> RouteReply:
+    return harness.request(
+        link, "interactive.read", target="spectrum", name=name, **params
+    )
 
 
 def _open_picker(
@@ -161,6 +124,161 @@ def _joint_command(
     )
 
 
+def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
+    one_route: RouteHarness,
+):
+    """Supplementary characterization: RPC observes each context's existing worker contract."""
+    deliveries: list[Callable[[object], None]] = []
+
+    def submit(
+        _compute: Callable[[], object],
+        on_done: Callable[[object], None],
+        _on_error: Callable[[Exception], None],
+    ) -> None:
+        deliveries.append(on_done)
+
+    harness = RouteHarness.create(
+        one_route.ctrl.get_project_root(), interactive_background=submit
+    )
+    copy_sources(harness, one_route.ctrl)
+    other = copy.deepcopy(harness.ctrl.state.get_spectrum("one"))
+    other.name = "other"
+    harness.ctrl.state.put_spectrum(other)
+    try:
+        link = harness.client()
+        first = _open_picker(harness, link, "one", "line")
+        second = _open_picker(harness, link, "other", "line")
+        for draft in (first, second):
+            started = _context(_picker_command(harness, link, draft, "auto_align"))
+            assert started["info"] == {"alignment_busy": True, "alignment_error": None}
+        deliveries[0](FluxPickState(flux_half=0.25, flux_int=0.75))
+        completed = _context(
+            _read_picker(harness, link, "one", context_id=first["context_id"])
+        )
+        assert _state(completed)["flux_half"] == 0.25
+        assert _state(completed)["flux_int"] == 0.75
+        assert completed["info"] == {"alignment_busy": False, "alignment_error": None}
+        assert _context(_read_picker(harness, link, "other"))["info"] == {
+            "alignment_busy": True,
+            "alignment_error": None,
+        }
+        assert _picker_command(harness, link, second, "cancel")["ok"]
+        replacement = _open_picker(harness, link, "other", "line")
+        before = _state(replacement)
+        deliveries[1](FluxPickState(flux_half=-1.0, flux_int=1.0))
+        after = _context(
+            _read_picker(harness, link, "other", context_id=replacement["context_id"])
+        )
+        assert _state(after) == before
+        assert after["info"] == {"alignment_busy": False, "alignment_error": None}
+        _error(
+            _read_picker(harness, link, "other", context_id=second["context_id"]),
+            "precondition_failed",
+            "interactive_context_changed",
+        )
+    finally:
+        harness.close()
+
+
+def test_observer_display_does_not_create_draft_while_gui_is_local(
+    one_route: RouteHarness, qapp
+):
+    view = MainWindow(one_route.ctrl)
+    try:
+        one_route.ctrl.interactive.cancel("one")
+        observer = one_route.client(label="observer", mode="readonly")
+        assert one_route.ctrl.control_identity.status().holder == "gui"
+        displayed = one_route.request(observer, "spectrum.set_active", name="one")
+        assert displayed["ok"], displayed
+        assert one_route.ctrl.interactive.inspect("one") is None, (
+            "readonly viewing cannot establish input"
+        )
+    finally:
+        view.close()
+        view.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("retirement", ["cancel", "replace", "remove"])
+def test_guarded_read_refuses_retired_alignment_identity(
+    one_route: RouteHarness, retirement: str
+):
+    link = one_route.client()
+    draft = _open_picker(one_route, link, "one", "line")
+    if retirement == "cancel":
+        one_route.ctrl.interactive.cancel("one")
+    elif retirement == "replace":
+        one_route.ctrl.interactive.begin_onetone_pick("one")
+    else:
+        one_route.ctrl.remove_spectrum("one")
+    guarded = _read_picker(one_route, link, "one", context_id=draft["context_id"])
+    _error(guarded, "precondition_failed", "interactive_context_changed")
+
+
+def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteHarness):
+    link = one_route.client()
+    other = copy.deepcopy(one_route.ctrl.state.get_spectrum("one"))
+    other.name = "other"
+    one_route.ctrl.state.put_spectrum(other)
+    first = _open_picker(one_route, link, "one", "line")
+    second = _open_picker(one_route, link, "other", "line")
+    assert first["context_id"] != second["context_id"]
+    assert _picker_command(
+        one_route, link, first, "move_line", role="half", position=-0.5
+    )["ok"]
+    read = _context(_read_picker(one_route, link, "one"))
+    assert read["context_id"] == first["context_id"]
+    assert _state(read)["flux_half"] == -0.5
+    assert read["can_undo"] is True
+    rendered = one_route.request(
+        link, "interactive.render", target="spectrum", name="one"
+    )
+    assert rendered["ok"] is True, rendered
+    encoded = rendered["result"]["png_b64"]
+    assert isinstance(encoded, str)
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as image:
+        assert image.format == "PNG"
+        assert image.size == (640, 480)
+    assert _context(_read_picker(one_route, link, "one"))["can_undo"] is True
+    denied = one_route.request(
+        link,
+        "spectrum.interactive.command",
+        name="other",
+        context_id=first["context_id"],
+        command="undo",
+    )
+    _error(denied, "precondition_failed", "interactive_context_changed")
+    assert _picker_command(one_route, link, first, "finish")["ok"]
+    assert (
+        _context(_read_picker(one_route, link, "other"))["context_id"]
+        == second["context_id"]
+    )
+    listed = one_route.request(link, "spectrum.list")
+    assert listed["ok"] is True
+    rows = listed["result"]["spectrums"]
+    assert isinstance(rows, list)
+    assert [row["pending"] for row in rows] == [None, "align"]
+
+
+def test_observer_display_selection_is_readonly_and_preserves_drafts(
+    one_route: RouteHarness,
+):
+    owner_link = one_route.client()
+    draft = _open_picker(one_route, owner_link, "one", "line")
+    observer = one_route.client(mode="readonly", label="observer")
+    versions = one_route.ctrl.state.version.snapshot()
+    displayed = one_route.request(observer, "spectrum.set_active", name=None)
+    assert displayed["ok"], displayed
+    assert one_route.ctrl.state.active_spectrum is None
+    assert one_route.ctrl.state.version.snapshot() == versions
+    assert (
+        _context(_read_picker(one_route, observer, "one"))["context_id"]
+        == draft["context_id"]
+    )
+    denied = _picker_command(one_route, observer, draft, "undo")
+    _error(denied, "precondition_failed", "not_holder")
+
+
 def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     one_route: RouteHarness,
 ):
@@ -168,7 +286,7 @@ def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     facts = []
     one_route.ctrl.bus.subscribe(InteractiveChangedPayload, facts.append)
     versions = one_route.ctrl.state.version.snapshot()
-    reply = one_route.request(link, "interactive.read")
+    reply = _read_picker(one_route, link, "one")
     assert reply["ok"] is True
     assert reply["result"] == {"context": None, "effect": None}
     assert one_route.ctrl.interactive.inspect() is None
@@ -177,10 +295,9 @@ def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(
     native = one_route.ctrl.interactive.begin_onetone_pick("one")
     native.plugin.set_threshold.execute(native.session, 0.1)
     prior_facts = len(facts)
-    context = _context(one_route.request(link, "interactive.read"))
+    context = _context(_read_picker(one_route, link, "one"))
     assert context["can_undo"] is True
     assert _state(context)["threshold"] == 0.1
-    _image(context)
     assert native.session.can_undo()
     assert len(facts) == prior_facts
     assert native.session.can_undo()
@@ -196,16 +313,12 @@ def test_line_commands_share_gui_actions_and_feedback_undo(one_route: RouteHarne
     assert initial["kind"] == "line" and initial["plugin"] == "flux_pick"
     assert _state(initial)["magnitude_only"] is True
     assert initial["info"] == {"alignment_busy": False, "alignment_error": None}
-    commands = initial["commands"]
-    assert isinstance(commands, list)
-    move = next(item for item in commands if item["name"] == "move_line")
-    assert move["schema"]["properties"]["role"]["enum"] == ["half", "integer"]
     again = _open_picker(one_route, link, "one", "line")
     assert again["context_id"] == initial["context_id"]
     native = one_route.ctrl.interactive.current_line_pick()
     assert native is not None
     native.plugin.actions.move.execute(native.session, ("half", 0.1))
-    edited = _context(one_route.request(link, "interactive.read"))
+    edited = _context(_read_picker(one_route, link, "one"))
     assert _state(edited)["flux_half"] == 0.1
     moved = _picker_command(
         one_route, link, initial, "move_line", role="integer", position=0.9
@@ -218,7 +331,6 @@ def test_line_commands_share_gui_actions_and_feedback_undo(one_route: RouteHarne
     assert _context(undone)["can_undo"] is False
     assert _changes(undone)["flux_int_before"] == 0.9
     assert _changes(undone)["flux_int_after"] == 0.7
-    _image(_context(undone))
     assert facts[-1][1].origin.kind == "agent"
     assert facts[-1][0].context_id == initial["context_id"]
     finished = _picker_command(one_route, link, initial, "finish")
@@ -226,11 +338,10 @@ def test_line_commands_share_gui_actions_and_feedback_undo(one_route: RouteHarne
     assert (
         terminal["context_id"] == initial["context_id"] and terminal["closed"] is True
     )
-    assert terminal["commands"] == [] and terminal["can_undo"] is False
+    assert terminal["can_undo"] is False
     assert one_route.ctrl.state.spectrums["one"].flux_half == 0.1
     assert one_route.ctrl.state.spectrums["one"].flux_int == 0.7
     assert one_route.ctrl.interactive.inspect() is None
-    _image(terminal)
     # Successful publication advanced this connection's previously read source.
     assert one_route.request(
         link, "spectrum.interactive.open", name="one", kind="onetone"
@@ -256,14 +367,41 @@ def test_onetone_threshold_counts_undo_and_empty_finish(one_route: RouteHarness)
     assert receipt["closed"] is True
     entry = one_route.ctrl.state.spectrums["one"]
     assert entry.points_completed and entry.point_count == 0
-    _image(receipt)
 
 
-def test_twotone_brush_numeric_and_png_use_same_capture_and_undo_inverse(
+def point_count(context: Mapping[str, object]) -> int:
+    """Return the native point count for numeric sampling assertions."""
+    value = _state(context)["point_count"]
+    assert isinstance(value, int), value
+    return value
+
+
+def test_twotone_first_and_reopened_sampling_start_empty(two_route: RouteHarness):
+    link = two_route.client()
+    first = _open_picker(two_route, link, "two", "twotone")
+    assert _state(first)["masked_count"] == 0
+    assert _state(first)["point_count"] == 0
+    assert first["can_undo"] is False
+    selected = _context(_picker_command(two_route, link, first, "perform_on_all"))
+    assert point_count(selected) > 0
+    assert _picker_command(two_route, link, first, "finish")["ok"]
+    assert two_route.ctrl.state.get_spectrum("two").point_count > 0
+    reopened = _open_picker(two_route, link, "two", "twotone")
+    assert _state(reopened)["masked_count"] == 0
+    assert _state(reopened)["point_count"] == 0
+    assert reopened["can_undo"] is False
+    assert reopened["context_id"] != first["context_id"]
+    assert _picker_command(two_route, link, reopened, "finish")["ok"]
+    assert two_route.ctrl.state.get_spectrum("two").point_count == 0
+    assert two_route.ctrl.state.get_spectrum("two").points_completed
+
+
+def test_twotone_brush_feedback_and_undo_inverse(
     two_route: RouteHarness,
 ):
     link = two_route.client()
     context = _open_picker(two_route, link, "two", "twotone")
+    assert _picker_command(two_route, link, context, "perform_on_all")["ok"]
     native = two_route.ctrl.interactive.current_twotone_pick()
     assert isinstance(native, TwoTonePickContext)
     before = native.session.snapshot()
@@ -289,18 +427,6 @@ def test_twotone_brush_numeric_and_png_use_same_capture_and_undo_inverse(
     assert state["mask_shape"] == [24, 80]
     assert state["masked_count"] == np.count_nonzero(after.mask)
     assert state["point_count"] == expected.result.dev_values.size
-    np.testing.assert_array_equal(
-        _image(_context(stroke)),
-        _native_image(
-            make_twotone_pick_figure(
-                native.plugin.inputs,
-                after,
-                previous=before,
-                show_changes=True,
-                show_mask=True,
-            )
-        ),
-    )
     undo = _picker_command(two_route, link, context, "undo")
     inverse = project_twotone_pick(native.plugin.inputs, before, previous=after)
     assert _changes(undo) == {
@@ -309,18 +435,6 @@ def test_twotone_brush_numeric_and_png_use_same_capture_and_undo_inverse(
         "points_added": inverse.added_points.shape[0],
         "points_removed": inverse.removed_points.shape[0],
     }
-    np.testing.assert_array_equal(
-        _image(_context(undo)),
-        _native_image(
-            make_twotone_pick_figure(
-                native.plugin.inputs,
-                before,
-                previous=after,
-                show_changes=True,
-                show_mask=True,
-            )
-        ),
-    )
     settings = _picker_command(
         two_route, link, context, "set_tool", mode="erase", width=0.04
     )
@@ -362,14 +476,6 @@ def test_selection_stroke_duplicate_identities_apply_and_undo(
     after = native.session.snapshot()
     assert _changes(stroke) == {"points_added": 0, "points_removed": 2}
     assert _state(_context(stroke))["selected"] == after.selected.tolist()
-    np.testing.assert_array_equal(
-        _image(_context(stroke)),
-        _native_image(
-            make_cross_selection_figure(
-                native.plugin.inputs, after, previous=before, show_changes=True
-            )
-        ),
-    )
     applied = _context(_joint_command(joint_route, link, context, "apply"))
     assert applied["closed"] is False and applied["can_undo"] is True
     np.testing.assert_array_equal(
@@ -384,7 +490,7 @@ def test_selection_stroke_duplicate_identities_apply_and_undo(
         joint_route.ctrl.state.selection_mask(), before.selected
     )
     closed = _context(_joint_command(joint_route, link, context, "cancel"))
-    assert closed["closed"] and closed["commands"] == []
+    assert closed["closed"]
     assert joint_route.ctrl.interactive.inspect() is None
 
 
@@ -452,10 +558,12 @@ def test_invalid_commands_do_not_change_snapshot_undo_versions_or_facts(
     elif case == "name":
         values["name"] = "other"
         one_route.request(link, "spectrum.snapshot", name="other")
+        reason = "no_interactive_context"
     elif case == "selection_target":
         _read_sources(one_route, link)
         method = "selection.interactive.command"
         values.pop("name")
+        reason = "no_interactive_context"
     elif case == "apply":
         values["command"] = "apply"
         code, reason = "invalid_params", "invalid_interactive_command"
@@ -524,27 +632,9 @@ def test_terminal_reply_retains_old_identity_despite_synchronous_successor(
         "closed": True,
         "changes": _changes(reply),
     }
-    next_context = _context(one_route.request(link, "interactive.read"))
+    next_context = _context(_read_picker(one_route, link, "one"))
     assert next_context["context_id"] != terminal["context_id"]
     assert next_context["kind"] == "onetone" and next_context["closed"] is False
-    _image(terminal)
-
-
-def test_render_failure_does_not_rollback_successful_finish_or_refresh_seen(
-    one_route: RouteHarness, monkeypatch: pytest.MonkeyPatch
-):
-    link = one_route.client()
-    context = _open_picker(one_route, link, "one", "onetone")
-
-    def fail(figure: Figure) -> bytes:
-        raise OSError("PNG unavailable")
-
-    monkeypatch.setattr(interactive, "render_figure_png", fail)
-    reply = _picker_command(one_route, link, context, "finish")
-    assert reply["ok"] is False
-    assert reply["error"]["code"] == "controller_error"
-    assert one_route.ctrl.state.spectrums["one"].points_completed
-    assert one_route.ctrl.interactive.inspect() is None
 
 
 def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
@@ -559,14 +649,10 @@ def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(
         reply = _picker_command(one_route, link, context, "finish")
         terminal = _context(reply)
         assert terminal["closed"] and terminal["kind"] == "line"
-        widget = window.findChild(OneToneWidget)
-        assert widget is not None
-        current = _context(one_route.request(link, "interactive.read"))
-        assert (
-            current["kind"] == "onetone"
-            and current["context_id"] != context["context_id"]
-        )
-        assert window.findChild(OneToneWidget) is widget
+        assert one_route.ctrl.interactive.inspect("one") is None
+        assert one_route.request(
+            link, "interactive.read", target="spectrum", name="one"
+        )["ok"]
     finally:
         window.close()
         window.deleteLater()
@@ -595,14 +681,74 @@ def test_literal_picker_name_does_not_guard_same_prefix_neighbor(
     assert not one_route.ctrl.state.spectrums[name].points_completed
 
 
-@pytest.mark.parametrize("condition", ["inactive", "unaligned", "wrong_type", "absent"])
+def request_sample(harness: RouteHarness, link: ClientLink, name: str) -> RouteReply:
+    """Require valid sampling intent to reach native owner admission."""
+    try:
+        return harness.request(
+            link, "spectrum.interactive.open", name=name, kind="sample"
+        )
+    except RemoteError as error:
+        if error.code != ErrorCode.INVALID_PARAMS or "'kind' must be one of" not in str(
+            error
+        ):
+            raise
+        pytest.fail(f"valid sampling intent rejected by schema: {error.code}: {error}")
+
+
+@pytest.mark.parametrize("name", ["one", "two"])
+def test_sample_intent_opens_actual_picker_kind(
+    route_harness: RouteHarness,
+    onetone_controller: Controller,
+    twotone_controller: Controller,
+    name: str,
+):
+    copy_sources(route_harness, onetone_controller)
+    copy_sources(route_harness, twotone_controller)
+    link = route_harness.client()
+    opened = request_sample(route_harness, link, name)
+    context = _context(opened)
+    assert context["kind"] == ("onetone" if name == "one" else "twotone")
+    assert context["spectrum_name"] == name
+    if name == "two":
+        assert _state(context)["masked_count"] == 0
+    reopened = _context(request_sample(route_harness, link, name))
+    assert reopened["context_id"] == context["context_id"]
+
+
+@pytest.mark.parametrize("condition", ["unaligned", "absent"])
+def test_sample_intent_uses_native_prerequisites(
+    one_route: RouteHarness, condition: str
+):
+    name = "one"
+    if condition == "unaligned":
+        one_route.ctrl.reset_alignment(name)
+    else:
+        name = "absent"
+    link = one_route.client()
+    versions = one_route.ctrl.state.version.snapshot()
+    active = one_route.ctrl.state.active_spectrum
+    reply = request_sample(one_route, link, name)
+    error = _error(
+        reply,
+        "invalid_params" if condition == "absent" else "precondition_failed",
+        "unknown_spectrum" if condition == "absent" else None,
+    )
+    assert (
+        "no spectrum named 'absent'"
+        if condition == "absent"
+        else "requires an aligned spectrum"
+    ) in error["message"]
+    assert one_route.ctrl.state.active_spectrum == active
+    assert one_route.ctrl.state.version.snapshot() == versions
+    assert one_route.ctrl.interactive.inspect() is None
+
+
+@pytest.mark.parametrize("condition", ["unaligned", "wrong_type", "absent"])
 def test_open_uses_native_prerequisites_without_changing_active(
     one_route: RouteHarness, condition: str
 ):
     name, kind = "one", "onetone"
-    if condition == "inactive":
-        one_route.ctrl.set_active_spectrum(None)
-    elif condition == "unaligned":
+    if condition == "unaligned":
         one_route.ctrl.reset_alignment(name)
     elif condition == "wrong_type":
         kind = "twotone"
@@ -665,9 +811,10 @@ def test_open_envelope_rejects_malformed_values_before_begin(
 
 
 @pytest.mark.parametrize(
-    "command,params", [("finish", {}), ("apply", {"extra": 1}), ("undo", {"extra": 1})]
+    "command,params",
+    [("finish", {"extra": 1}), ("apply", {"extra": 1}), ("undo", {"extra": 1})],
 )
-def test_joint_reserved_commands_reject_wrong_kind_and_params(
+def test_joint_reserved_commands_reject_params(
     joint_route: RouteHarness, command: str, params: dict[str, object]
 ):
     link = joint_route.client()
@@ -702,9 +849,9 @@ def test_command_receipt_survives_updated_callback_retirement(one_route: RouteHa
     sub.unsubscribe()
     assert receipt["context_id"] == context["context_id"]
     assert receipt["kind"] == "onetone" and receipt["closed"] is True
-    assert receipt["can_undo"] is False and receipt["commands"] == []
+    assert receipt["can_undo"] is False
     assert _state(receipt)["threshold"] == 0.1
-    successor = _context(one_route.request(link, "interactive.read"))
+    successor = _context(_read_picker(one_route, link, "one"))
     assert (
         successor["kind"] == "line" and successor["context_id"] != receipt["context_id"]
     )
@@ -723,20 +870,20 @@ def test_failed_finish_keeps_native_input_and_undo_editable(one_route: RouteHarn
     _error(
         _picker_command(one_route, link, context, "finish"), "precondition_failed", None
     )
-    live = _context(one_route.request(link, "interactive.read"))
+    live = _context(_read_picker(one_route, link, "one"))
     assert live["context_id"] == context["context_id"] and live["closed"] is False
     assert live["can_undo"] is True
     assert one_route.ctrl.state.version.snapshot() == versions
     assert _picker_command(one_route, link, context, "undo")["ok"]
 
 
-def test_joint_png_read_does_not_refresh_other_clients_and_apply_self_write(
+def test_joint_render_does_not_refresh_other_clients_and_apply_self_write(
     joint_route: RouteHarness,
 ):
     link, other = joint_route.client(), joint_route.client()
     _read_sources(joint_route, link)
     context = _context(joint_route.request(link, "selection.interactive.open"))
-    _image(_context(joint_route.request(other, "interactive.read")))
+    assert joint_route.request(other, "interactive.render", target="selection")["ok"]
     _read_sources(joint_route, other)
     assert _joint_command(joint_route, link, context, "clear")["ok"]
     assert _joint_command(joint_route, link, context, "apply")["ok"]
@@ -748,6 +895,7 @@ def test_joint_png_read_does_not_refresh_other_clients_and_apply_self_write(
 def test_detector_setting_reports_actual_point_changes(two_route: RouteHarness):
     link = two_route.client()
     context = _open_picker(two_route, link, "two", "twotone")
+    assert _picker_command(two_route, link, context, "perform_on_all")["ok"]
     native = two_route.ctrl.interactive.current_twotone_pick()
     assert native is not None
     before = native.session.snapshot()
@@ -796,11 +944,3 @@ def test_distance_changes_kept_count_without_rewriting_input_brush_mask(
     count = state["selected_count"]
     assert isinstance(count, int)
     assert count < len(before.selected)
-    np.testing.assert_array_equal(
-        _image(_context(reply)),
-        _native_image(
-            make_cross_selection_figure(
-                native.plugin.inputs, after, previous=before, show_changes=True
-            )
-        ),
-    )

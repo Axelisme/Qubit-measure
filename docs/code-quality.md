@@ -81,10 +81,18 @@ Notebook 的主要探索流程、腳本的主要行為、文件、設定與靜�
 替身保留被測行為，只替換不屬於這次驗證的協作者。若測試把目標邏輯也 mock 掉，改回經由
 interface 驗證結果。只有呼叫順序本身屬於契約時，才把順序當作驗收條件。
 
+Production 可以提供中性的注入接口，即使目前只有測試替換它。中性接口同時符合四點：以模組自己的概念
+表達（時鐘、對話框呈現、儀器驅動建立），不暴露內部結構；預設值就是 production 行為；替換它只改變外部
+效果，不改變被測邏輯；型別與 docstring 說明該傳什麼。只為了讓測試伸進內部而開的接口不屬於此類，例如
+回傳私有狀態，或讓測試替換被測邏輯本身。外部邊界（Qt modal dialog、時鐘、環境變數、`subprocess`、網路）沒有既有注入點時，
+測試用 pytest `monkeypatch` 替換；`monkeypatch.setenv`、`monkeypatch.chdir` 這類環境隔離一律可用。
+協作者已有公開注入點時走注入。不 patch 被測模組自己的函式或私有 helper，也不用 `vars(obj)` 之類的
+寫法讀寫私有狀態；需要這樣做時，把驗證點移到公開介面。
+
 例如，驗證量測取消應檢查約定的終止狀態與資源釋放，而不是固定私有 helper 的呼叫次數。
 測試行數、mock 數量、coverage 或有無 `assert` 都不能單獨證明測試有效。
 
-宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/draft/module-boundaries.md#分層)。
+宿主的最高測試接縫是註冊介面：合成 workflow 經 caller 註冊清單交給宿主，再從 Window、RPC 或 MCP 觀察結果。共用 registry、reload、分析與匯出機制由各框架 owner 驗證，不逐一走過 lab 實驗清單。實驗錯誤由 GUI 啟動或載入時直接回報。這個邊界與使用者裁決見 [模組定位 ADR](adr/0072-module-boundaries.md#分層)。
 
 ### 讓變更可以獨立審查
 

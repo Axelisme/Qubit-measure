@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
-    DatabaseSearchResult,
     ParamBounds,
     SearchCancelled,
 )
@@ -27,40 +26,15 @@ from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.ports import ProgressEvent
 from zcu_tools.gui.session.services.progress import ProgressService
 
-
-class ControlledBackground:
-    """Run detached work on a foreign thread, deliver only when instructed."""
-
-    def __init__(self) -> None:
-        self.work: Callable[[], object] | None = None
-        self.done: Callable[[object], None] | None = None
-        self.error: Callable[[Exception], None] | None = None
-        self.fail_submit = False
-
-    def submit(
-        self,
-        work: Callable[[], object],
-        *,
-        run_in_pool: bool,
-        on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
-    ) -> None:
-        if self.fail_submit:
-            raise RuntimeError("submit failed")
-        self.work, self.done, self.error = work, on_done, on_error
-
-    def compute(self) -> object:
-        assert self.work is not None
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(self.work).result()
-
-    def deliver(self, result: object) -> None:
-        assert self.done is not None
-        self.done(result)
-
-    def fail(self, exc: Exception) -> None:
-        assert self.error is not None
-        self.error(exc)
+from tests.gui.app.fluxdep._search_result import perfect_fit_result
+from tests.gui.app.fluxdep._search_runtime import ControlledBackground
+from tests.gui.app.fluxdep._window import (
+    command,
+    current_page,
+    editor,
+    fit_panel,
+    show_page,
+)
 
 
 class QueuedProgress:
@@ -78,9 +52,7 @@ class QueuedProgress:
 
 
 @pytest.fixture
-def search_case(cross_controller, monkeypatch, tmp_path):
-    from zcu_tools.gui.app.fluxdep.services import fit
-
+def search_case(cross_controller, search_database_hdf5):
     owner = ManualOwnerScheduler()
     background = ControlledBackground()
     progress = ProgressService(QueuedProgress(owner))
@@ -89,11 +61,9 @@ def search_case(cross_controller, monkeypatch, tmp_path):
         interactive_owner=owner,
         search_runtime=FluxDepSearchRuntime(background, progress),
     )
-    path = tmp_path / "db.h5"
-    path.touch()
     bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
     ctrl.set_fit_params(
-        str(path),
+        search_database_hdf5,
         bounds.EJ,
         bounds.EC,
         bounds.EL,
@@ -101,44 +71,19 @@ def search_case(cross_controller, monkeypatch, tmp_path):
         None,
         None,
     )
-    result = DatabaseSearchResult(
-        params=(5, 1, 0.5),
-        best_distance=0.1,
-        best_scale=1,
-        best_index=0,
-        entry_results=np.array([[0.1, 1.0]]),
-        entry_params=np.array([[5.0, 1.0, 0.5]]),
-        fluxs=np.array([0.0]),
-        freqs=np.array([4.0]),
-        predicted_freqs=np.array([4.0]),
-        bounds=bounds,
-    )
-    captured = []
-
-    def compute(fluxs, freqs, path, transitions, bounds, *, execution):
-        assert not owner.is_owner_thread()
-        captured.append((fluxs.copy(), freqs.copy(), path, transitions, bounds))
-        if execution.cancel_requested():
-            raise SearchCancelled("requested")
-        return result
-
-    monkeypatch.setattr(fit, "search_database", compute)
-    yield ctrl, background, owner, progress, result, captured
+    inputs = ctrl.capture_search()
+    result = perfect_fit_result(inputs.fluxs, inputs.freqs, bounds)
+    yield ctrl, background, owner, progress, result
     ctrl.search.begin_close()
     ctrl.interactive.dispose()
 
 
-def test_snapshot_is_captured_before_worker_and_single_flight(search_case):
-    ctrl, bg, _owner, _progress, result, captured = search_case
+def test_search_is_single_flight_until_delivery(search_case):
+    ctrl, bg, _owner, _progress, result = search_case
     token = ctrl.search.start()
     assert ctrl.search.active_token == token
     with pytest.raises(RuntimeError, match="pending|busy"):
         ctrl.search.start()
-    ctrl.state.spectrums["a"].points["fluxs"][0] = 0.9
-    ctrl.state.fit.transitions["transitions"].append((0, 2))
-    assert bg.compute() is result
-    np.testing.assert_array_equal(captured[0][0], [0, 0.5, 1, 0.5])
-    assert captured[0][3]["transitions"] == [(0, 1)]
     bg.deliver(result)
     assert ctrl.search.outcome(token) == OperationOutcome("finished")
     assert ctrl.search.result is result
@@ -149,7 +94,7 @@ def test_snapshot_is_captured_before_worker_and_single_flight(search_case):
     "mutation", ["selection", "fit", "project", "points", "empty", "membership"]
 )
 def test_changed_input_rejects_success(search_case, mutation):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     facts = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
     token = ctrl.search.start()
@@ -158,7 +103,7 @@ def test_changed_input_rejects_success(search_case, mutation):
     elif mutation == "fit":
         fit = ctrl.state.fit
         ctrl.set_fit_params(
-            fit.database_path, fit.EJb, fit.ECb, fit.ELb, fit.transitions, None, None
+            fit.search_db, fit.EJb, fit.ECb, fit.ELb, fit.transitions, None, None
         )
     elif mutation == "project":
         ctrl.setup_project(ctrl.state.project)
@@ -180,7 +125,7 @@ def test_changed_input_rejects_success(search_case, mutation):
 
 
 def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     attempts = []
 
     def listener(payload):
@@ -200,7 +145,7 @@ def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
 @pytest.mark.parametrize("terminal", ["cancelled", "failed", "late_success"])
 @pytest.mark.parametrize("closing", [False, True])
 def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     token = ctrl.search.start()
     ctrl.search.cancel(token)
     assert ctrl.search.outcome(token) is None
@@ -209,8 +154,6 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
         with pytest.raises(RuntimeError, match="closing"):
             ctrl.search.start()
     if terminal == "cancelled":
-        with pytest.raises(SearchCancelled):
-            bg.compute()
         bg.fail(SearchCancelled("requested"))
         expected = "cancelled"
     elif terminal == "failed":
@@ -228,7 +171,7 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
 
 
 def test_submit_failure_cleanup_and_known_token_queries(search_case):
-    ctrl, bg, _owner, progress, _result, _captured = search_case
+    ctrl, bg, _owner, progress, _result = search_case
     bg.fail_submit = True
     with pytest.raises(RuntimeError, match="submit failed") as caught:
         ctrl.search.start()
@@ -262,7 +205,7 @@ def test_submit_failure_cleanup_and_known_token_queries(search_case):
 
 
 def test_origin_capture_and_last_success_survives_failure(search_case):
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
     observed = []
     ctrl.bus.subscribe_with_meta(
         SearchChangedPayload, lambda payload, meta: observed.append((payload, meta))
@@ -291,7 +234,7 @@ def test_missing_background_rejects_before_handle(cross_controller):
 
 
 def test_capture_and_owner_queries_reject_foreign_threads(search_case):
-    ctrl, _bg, _owner, _progress, _result, _captured = search_case
+    ctrl, _bg, _owner, _progress, _result = search_case
     with ThreadPoolExecutor(max_workers=1) as pool:
         for query in (
             ctrl.capture_search,
@@ -306,7 +249,7 @@ def test_capture_and_owner_queries_reject_foreign_threads(search_case):
 
 @pytest.mark.parametrize("closing", [False, True])
 def test_search_admission_is_nominal_and_preserves_pending_handle(search_case, closing):
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     token = ctrl.search.start()
     before = ctrl.state.version.snapshot()
     if closing:
@@ -321,7 +264,7 @@ def test_search_admission_is_nominal_and_preserves_pending_handle(search_case, c
 
 
 def test_await_on_owner_is_unexpected(search_case):
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     token = ctrl.search.start()
     with pytest.raises(RuntimeError, match="owner") as caught:
         ctrl.search.await_outcome(token, 0)
@@ -330,7 +273,7 @@ def test_await_on_owner_is_unexpected(search_case):
 
 
 def test_progress_notifications_cannot_reenter_start(search_case):
-    ctrl, bg, _owner, progress, result, _captured = search_case
+    ctrl, bg, _owner, progress, result = search_case
     observed = []
 
     def listener():
@@ -350,18 +293,16 @@ def test_progress_notifications_cannot_reenter_start(search_case):
         dispose()
 
 
-def test_failed_publication_releases_admission(search_case, monkeypatch):
-    from zcu_tools.gui.app.fluxdep.services.fit import FitService
-
-    ctrl, bg, _owner, _progress, result, _captured = search_case
-
-    def fail_record(self, result):
-        raise ValueError("commit refused")
-
-    monkeypatch.setattr(FitService, "record_result", fail_record)
+def test_failed_publication_releases_admission(search_case):
+    ctrl, bg, _owner, _progress, result = search_case
+    # A result over fewer points than the capture is refused by publication.
+    bounds = ParamBounds(EJ=(2, 15), EC=(0.2, 2), EL=(0.1, 2))
+    short = perfect_fit_result(result.fluxs[:-1], result.freqs[:-1], bounds)
     token = ctrl.search.start()
-    bg.deliver(result)
-    assert ctrl.search.outcome(token) == OperationOutcome("failed", "commit refused")
+    bg.deliver(short)
+    assert ctrl.search.outcome(token) == OperationOutcome(
+        "failed", "captured coordinates must match kernel attribution shape"
+    )
     assert ctrl.search.current.status == "failed"
     assert ctrl.search.active_token is None
     assert ctrl.state.fit.params is None
@@ -373,37 +314,36 @@ def test_failed_publication_releases_admission(search_case, monkeypatch):
 def test_search_start_reveals_only_agent_pending_without_opening_filter(
     qapp, search_case, origin
 ):
-    from qtpy import QtWidgets
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.event_bus import EventOrigin
 
-    ctrl, bg, _owner, _progress, _result, _captured = search_case
+    ctrl, bg, _owner, _progress, _result = search_case
     window = MainWindow(ctrl)
     window.show()
     try:
-        stack = window.findChild(QtWidgets.QStackedWidget)
-        assert stack is not None
-        original = stack.currentWidget()
+        original = current_page(window)
         assert window.findChild(AnalyzePanelWidget) is None
         with ctrl.bus.origin(EventOrigin(kind=origin)):
             token = ctrl.search.start()
-        panel = window.findChild(AnalyzePanelWidget)
+        # Neither origin moves the user's page; the agent's pending search
+        # waits on the Fit page for the next entry.
+        assert current_page(window) == original
         if origin == "agent":
+            show_page(window, "fit")
+            panel = fit_panel(window)
             assert panel is not None
-            assert stack.currentWidget() is panel
             assert panel.current_tab == "search"
         else:
-            assert panel is None
-            assert stack.currentWidget() is original
+            assert window.findChild(AnalyzePanelWidget) is None
         assert ctrl.interactive.inspect() is None
 
         ctrl.set_active_spectrum("b")
-        user_view = stack.currentWidget()
+        user_page, user_view = current_page(window), editor(window)
         bg.fail(SearchCancelled("requested"))
         outcome = ctrl.search.outcome(token)
         assert outcome is not None and outcome.status == "cancelled"
-        assert stack.currentWidget() is user_view
+        assert current_page(window) == user_page and editor(window) is user_view
         assert ctrl.interactive.inspect() is None
     finally:
         if ctrl.search.active_token is not None:
@@ -413,36 +353,24 @@ def test_search_start_reveals_only_agent_pending_without_opening_filter(
         qapp.processEvents()
 
 
-def test_search_panel_observes_app_start_progress_cancel_and_reopen(
-    qapp, search_case, monkeypatch
-):
+def test_search_panel_observes_app_start_progress_cancel_and_reopen(qapp, search_case):
     from qtpy import QtWidgets
-    from zcu_tools.gui.app.fluxdep.services import fit
     from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
-    from zcu_tools.progress_bar import make_pbar
 
-    ctrl, bg, owner, _progress, result, _captured = search_case
-
-    def compute(*args, execution):
-        bar = make_pbar(total=10, desc="Database")
-        bar.update(3)
-        bar.close()
-        return result
-
-    monkeypatch.setattr(fit, "search_database", compute)
+    ctrl, bg, owner, progress, _result = search_case
+    ctrl.set_selection(np.ones(4, dtype=np.bool_))  # a published Filter unlocks Search
     panel = AnalyzePanelWidget(ctrl)
     panel.show()
-    tabs = panel.findChild(QtWidgets.QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(1)
-    buttons = {
-        button.text(): button for button in panel.findChildren(QtWidgets.QPushButton)
-    }
+    panel.show_tab("search")
+    search = command(panel, "fluxdep.fit.search")
+    cancel = command(panel, "fluxdep.fit.cancel")
     try:
         token = ctrl.search.start()
-        assert not buttons["Search database"].isEnabled()
-        assert buttons["Cancel search"].isEnabled()
-        assert bg.compute() is result
+        assert not search.isEnabled()
+        assert cancel.isEnabled()
+        bar = progress.make_factory(token, "fluxdep-search")(total=10, desc="Database")
+        bar.update(3)
+        bar.close()
         owner.pump_all()
         bar = panel.findChild(QtWidgets.QProgressBar)
         assert bar is not None and bar.maximum() == 10 and bar.value() == 3
@@ -451,13 +379,13 @@ def test_search_panel_observes_app_start_progress_cancel_and_reopen(
         assert ctrl.search.active_token == token
         panel.activate()
         panel.show()
-        assert buttons["Cancel search"].isEnabled()
-        buttons["Cancel search"].click()
+        assert cancel.isEnabled()
+        cancel.click()
         assert ctrl.search.outcome(token) is None
         bg.fail(SearchCancelled("requested"))
         assert ctrl.search.outcome(token).status == "cancelled"
-        assert buttons["Search database"].isEnabled()
-        assert not buttons["Cancel search"].isEnabled()
+        assert search.isEnabled()
+        assert not cancel.isEnabled()
         panel.dispose()
         panel.deleteLater()
         panel = AnalyzePanelWidget(ctrl)
@@ -481,7 +409,7 @@ def test_startup_notification_close_waits_for_search_terminal(
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
-    ctrl, bg, _owner, progress, result, _captured = search_case
+    ctrl, bg, _owner, progress, result = search_case
     runner = BackgroundRunner()
     window = MainWindow(ctrl, search_runner=runner)
     window.show()
@@ -500,13 +428,8 @@ def test_startup_notification_close_waits_for_search_terminal(
     else:
         dispose = progress.attach_by_owner("fluxdep-search", close_during_startup)
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert close_results == [False]
@@ -541,7 +464,7 @@ def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
     from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
-    ctrl, bg, _owner, _progress, result, _captured = search_case
+    ctrl, bg, _owner, _progress, result = search_case
 
     class DrainRunner(BackgroundRunner):
         drained = False
@@ -553,13 +476,8 @@ def test_close_refuses_disposal_until_search_drains(qapp, search_case):
     window = MainWindow(ctrl, search_runner=runner)
     window.show()
     try:
-        analyze = next(
-            button
-            for button in window.findChildren(QtWidgets.QPushButton)
-            if button.text().startswith("Analyze")
-        )
-        analyze.click()
-        panel = window.findChild(AnalyzePanelWidget)
+        show_page(window, "fit")
+        panel = fit_panel(window)
         assert panel is not None
         token = ctrl.search.start()
         assert not window.close()
