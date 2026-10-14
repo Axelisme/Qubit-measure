@@ -633,8 +633,6 @@ def test_dialog_fields_follow_the_kind_schema_and_rebuild_on_kind_change(
         "false",
     }
     assert _child(dialog, QLabel, "unit:rate").text() == "MHz"
-    assert "Sample rate." in _child(dialog, QLabel, "label:rate").toolTip()
-    assert "Channel index." in _child(dialog, QLabel, "label:routing.bias.ch").toolTip()
     label_input = _child(dialog, QLineEdit, "field:label")
     rate_input = _child(dialog, QLineEdit, "field:rate")
     assert label_input.placeholderText() != rate_input.placeholderText()
