@@ -11,7 +11,7 @@ from pydantic import ConfigDict, JsonValue, TypeAdapter
 # qtpy.QtGui.QAction resolves to NoReturn for pyright; PyQt6 is the binding.
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import QEvent, QObject, QPoint, QSize, Qt
-from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPalette
+from qtpy.QtGui import QColor, QKeyEvent, QMouseEvent, QPaintEvent, QPalette
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,9 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QSizePolicy,
+    QStyle,
+    QStyleOptionFocusRect,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
 )
@@ -68,6 +71,8 @@ _BLOCKED_EVENTS = frozenset(
     }
 )
 _FOCUS_KEYS = frozenset({Qt.Key.Key_Tab, Qt.Key.Key_Backtab})
+# Keys that fold or unfold a fold title that has keyboard focus.
+_FOLD_KEYS = frozenset({Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter})
 
 
 class _UserInputBlock(QObject):
@@ -238,15 +243,18 @@ def _tight_label(text: str, parent: QWidget) -> QLabel:
 
 
 class _FoldTitle(QLabel):
-    """A bold section title that folds its body on a left-button click.
+    """A bold section title that folds its body on a click or a key.
 
     Its text is FOLDED_MARK while body is hidden, EXPANDED_MARK while body
     is shown, then a space and label. A press of the left button flips
-    body's visibility and the mark, then calls toggled(). It is a title,
-    not an input, so a read-only form still folds; a disabled one gets no
-    mouse input.
-    A QLabel that overrides mousePressEvent is the plainest Qt widget that
-    reads as a title and reacts to a click.
+    body's visibility and the mark, then calls toggled(). Tab (not a click)
+    gives the title keyboard focus; while it has focus the style's focus
+    frame is drawn around it, and Space, Return or Enter flips it the same
+    way. Other keys do nothing, and keys typed into other widgets never
+    reach it. It is a title, not an input, so a read-only form still folds;
+    a disabled one gets no mouse or key input.
+    A QLabel that overrides the mouse, key and paint events is the plainest
+    Qt widget that reads as a title and reacts to a click.
     """
 
     def __init__(
@@ -265,6 +273,7 @@ class _FoldTitle(QLabel):
         self.setFont(font)
         # Never take spare width, so controls sit beside the title.
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._show_mark()
 
     def sizeHint(self) -> QSize:
@@ -287,6 +296,28 @@ class _FoldTitle(QLabel):
             super().mousePressEvent(ev)
             return
         ev.accept()
+        self._flip()
+
+    def keyPressEvent(self, ev: QKeyEvent | None) -> None:
+        """Fold or unfold the body on a Space, Return or Enter press ev."""
+        if ev is None or ev.key() not in _FOLD_KEYS:
+            super().keyPressEvent(ev)
+            return
+        ev.accept()
+        self._flip()
+
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        """Paint the title, then the style's focus frame while it has focus."""
+        super().paintEvent(a0)
+        if not self.hasFocus():
+            return
+        option = QStyleOptionFocusRect()
+        option.initFrom(self)
+        painter = QStylePainter(self)
+        painter.drawPrimitive(QStyle.PrimitiveElement.PE_FrameFocusRect, option)
+        painter.end()
+
+    def _flip(self) -> None:
         self._body.setVisible(self._body.isHidden())
         self._show_mark()
         self._toggled()
