@@ -199,6 +199,9 @@ class FormEditor[F: FormModel](QWidget):
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
         self._layout.addWidget(self._content)
+        # The host owns the capture lifetime; only refresh replaces this schema.
+        self._schema = state.input_schema(env)
+        self._publication_count = 0
         self._publish()
         # The state callback must not keep the QWidget alive. No Python slot is
         # connected to destroyed: cyclic GC may clear such a slot before Qt
@@ -220,12 +223,15 @@ class FormEditor[F: FormModel](QWidget):
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
 
-        Keep still-active local unparseable or rejected input. Never reset
-        state, run domain defaults, poll sources or echo a write. External
+        Recompute input_schema even if env is the same capture; ordinary state
+        publications reuse it. Keep still-active local unparseable or rejected
+        input. Never reset state, run domain defaults, poll sources or echo a
+        write. External
         state publications refresh parsed controls through the subscription.
         Inactive branch text is discarded. Raises RuntimeError after detach.
         """
-        self._require_state()
+        state = self._require_state()
+        self._schema = state.input_schema(env)
         self._env = env
         self._publish()
 
@@ -252,6 +258,8 @@ class FormEditor[F: FormModel](QWidget):
         after detach.
         """
         self._require_state()
+        if self._editing_enabled == enabled:
+            return
         self._editing_enabled = enabled
         self._publish()
 
@@ -293,6 +301,7 @@ class FormEditor[F: FormModel](QWidget):
             self._unsubscribe = None
         self._state = None
         self._env = None
+        self._schema = {}
         self._local.clear()
         self.setEnabled(False)
 
@@ -315,9 +324,8 @@ class FormEditor[F: FormModel](QWidget):
     def _publish(self) -> None:
         state = self._require_state()
         env = self._require_env()
-        schema = state.input_schema(env)
         preview = state.preview(env)
-        fields = project_fields(schema, state.input.data, preview)
+        fields = project_fields(self._schema, state.input.data, preview)
         flat = flatten_fields(fields)
         self._state_errors = preview.errors
         # Text does not survive its path becoming a model section, nor does a
@@ -350,6 +358,7 @@ class FormEditor[F: FormModel](QWidget):
                 field, self._local.get(field.path), editable=self._editing_enabled
             )
         self._show_errors()
+        self._publication_count += 1
 
     def _rebuild(self, fields: tuple[FieldView, ...]) -> None:
         old = self._content
@@ -431,6 +440,7 @@ class FormEditor[F: FormModel](QWidget):
     ) -> None:
         """Install batch from the row at path, or keep it local if rejected."""
         state = self._require_state()
+        publication = self._publication_count
         self._local.pop(path, None)
         if self._host_write is None:
             state.write(batch, self._require_env())
@@ -441,12 +451,15 @@ class FormEditor[F: FormModel](QWidget):
                 # The host installed nothing: keep this input local, like
                 # unparseable text; the publish below redraws state around it.
                 self._local[path] = self._rows[path].rejected_input(exc.message)
-        # Unchanged writes do not publish but can clear a local parse error.
-        self._publish()
+        # A changed write already rendered synchronously in the subscriber.
+        # Unchanged/rejected writes still need to update view-local errors.
+        if self._publication_count == publication:
+            self._publish()
 
     def _run_command(self, path: FormWritePath, name: str) -> None:
         """Run option command name at path, or keep its rejection local."""
         state = self._require_state()
+        publication = self._publication_count
         self._local.pop(path, None)
         if self._host_command is None:
             state.run_command(path, name, self._require_env())
@@ -456,7 +469,8 @@ class FormEditor[F: FormModel](QWidget):
             except WriteRejected as exc:
                 # The host changed nothing: show its message at the field.
                 self._local[path] = self._rows[path].rejected_input(exc.message)
-        self._publish()
+        if self._publication_count == publication:
+            self._publish()
 
     def _unparsed(self, path: FormWritePath, local: LocalText) -> None:
         self._local[path] = local
