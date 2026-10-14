@@ -49,7 +49,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
-- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；保留歷史 2π 修改證據，T1／Purcell helper 修正尚待落實。
+- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
 
 局部分析／預測契約見 [fluxdep](../../lib/zcu_tools/analysis/fluxdep/README.md)、[fitting](../../lib/zcu_tools/analysis/fitting/README.md) 與 [prediction](../../lib/zcu_tools/simulate/fluxonium/README.md)；waveform 資產契約見 [repository 參考](../../lib/zcu_tools/resources/waveform_assets.md)。
 

@@ -8,7 +8,7 @@ status: accepted
 
 2026-10-14，使用者要求「這個報告值得建立一個adr錨定，helper問題一起修」。本篇確立 simulate 與 notebook analysis 共用的物理單位契約。修正範圍包含 T1 forward helpers、pointwise Q extraction 與 Purcell，不包含 FTF 模擬環境實作。
 
-決策已採用，helper 修正尚未落實。現行 forward helpers 仍有額外的 2π，pointwise Q 也有對應偏差。Purcell 的熱因子與零溫衰減另需修正，不能只用一個常數換算處理。
+Forward helpers、pointwise Q 與 Purcell 實作遵循本篇契約。T1 由 SI 絕對時間及 raw scqubits regressions 驗證；Purcell 由弱耦合 LC escape lifetime、零溫極限及 matched-pair detailed balance 驗證。Purcell 修正包含熱因子與 spontaneous decay，不只是常數換算。
 
 ## 共用單位契約
 
@@ -46,7 +46,7 @@ API Returns docstring 的「2π (system units)」措辭有歧義，不能單憑�
 
 另用零溫 unsymmetrized voltage-noise spectrum S_V = 2ℏ/(CQ)，以及 analytic |n₀₁|² = hν/(16EC)，SI Fermi golden rule 給 Γ = (2e)²|n₀₁|²S_V/ℏ²，得到相同 lifetime。這兩個 reference 不依賴 scqubits 的回傳值。
 
-在 1 mK 下，scqubits 4.3.1 的 capacitive T1 與單通道 effective T1 都為 83882.020174145 ns；現行 repo helper 為 527046.276694730 ns，恰為前者的 2π 倍。此案例固定標準 Q 與 physical ns，排除 forward 和 inverse 彼此抵消的可能。
+在 1 mK 下，scqubits 4.3.1 的 capacitive T1 與單通道 effective T1 都為 83882.020174145 ns；修正前 repo helper 為 527046.276694730 ns，恰為前者的 2π 倍。此案例固定標準 Q 與 physical ns，排除 forward 和 inverse 彼此抵消的可能。
 
 ## 歷史修改與相容性取捨
 

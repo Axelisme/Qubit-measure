@@ -49,16 +49,15 @@
 
 ### `coherence/` — T1 與 Purcell
 
-- `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` — 包裝 `scqubits.t1_effective`,接受 `noise_channels` list,計算 1→0 有效 T1。
-  - **單位契約**：scqubits 在 GHz 設定下回傳 ns，不需要外乘 `2π`，見 [ADR-0071](../../../../docs/adr/0071-coherence-units.md)。目前 helper 仍多乘 `2π`，修正尚待落實；舊 fit 不自動換算。
-  - `_with` 版本接受已建好的 `Fluxonium` 物件與可選的 `spectrum_data`,供重複呼叫時重用。
-  - 內部用 `scq_settings.scq_t1_default_warning(False)` 暫時關閉 `scq_settings.T1_DEFAULT_WARNING`,並以 1 秒門檻啟動 `tqdm` 進度條(短任務不顯示)。
-- **`calculate_eff_t1_vs_flux_fast` / `calculate_eff_t1_fast`**(`coherence_fast.py`)— scqubits-free numpy 等效,**~60x**(13.6s→0.36s/100flux/4ch)。**逐點對齊 scqubits 到 ~1e-13 相對**(見 `tests/simulate/fluxonium/test_coherence_fast.py`)。**兩個瓶頸都繞掉**:(1) eigensolve 用 `energies.py` 的 cos/sin 預算技巧自己 `eigh`(`H=-EJ·cos(φ+β)`);(2) flux-dependent noise 算子(`dH/dflux=-2πEJ·sin(φ+β)`、`sin(φ/2+π·flux)`)用三角恆等式 `sin(αφ+β)=sin(αφ)cos(β)+cos(αφ)sin(β)` 從一次算好的 `sin/cos(αφ)` 重組,**消掉 scqubits 每 flux 一次的 `scipy.linalg.sinm`**(profiling:flux_bias_line 2.6s + quasiparticle 5.6s/100flux 全在 sinm)。**5 個 noise spectral density 公式逐字移植自 `scqubits/core/noise.py`**(常數 `R_k=h/e²`、`to_standard_units=×1e9`、`calc_therm_ratio`、各 channel 的 Q_cap/Q_ind/Y_qp 預設),Fermi rate = `|⟨i|op|j⟩|²·[S(ω)+S(-ω)]`、現行回傳 `2π/Σrate`，與 ADR-0071 要求的 `T1[ns]=1/Σrate` 不符。fast／slow 相等尚不能證明絕對時間單位正確。介面同 scqubits(`noise_channels` 為 str 或 `(str,opts)`,支援 per-channel Q_cap/Q_ind/Y_qp/M/Z/x_qp/Delta);不支援的 channel raise `UnsupportedNoiseChannelError`。**fast-fail kwarg 驗證**:固定 `total=True`,傳 `total=False`、頂層未知 kwarg、或 per-channel opts 放了該 channel 不接受的鍵(如 `t1_capacitive` 放 `M`),都 raise `UnsupportedNoiseOptionError`(不靜默丟棄,免回傳 wrong-but-plausible T1)。每 channel 的合法 opts 在 `_CHANNELS` 第二元素(frozenset)。**flux-independent 算子用 `_t1_operators` @lru_cache(params,cutoff,qub_dim)**(對標 dispersive 的 `_fluxonium_operators`;noise opts/Temp/transition 不進 key,不同 noise 設定共用同份算子)——同 params 重複呼叫(t1_curve 掃 noise_values 的典型場景)固定成本(~110ms 的 scqubits 算子建構)只付一次。**per-flux loop 已批次化**:H 堆成 `(N,dim,dim)` 一次 batched `np.linalg.eigh`,算子變換/Fermi rate 全向量化。warm cache 下各 N 比 scqubits 慢路徑快 ~7-10x;cold + 小 N(<~50)單次呼叫仍可能比慢路徑慢(一次性 ~110ms,刻意不加 N 閾值 dispatch 以免複雜化語義)。**半通量 0.5**:quasiparticle `sin(φ/2)` 矩陣元 parity-vanish → T1~∞(~1e32 ns),fast 與 scqubits 都同意 rate≈0(殘差相對差大但物理上都是無限,非 bug)。舊 scqubits 版全保留。
-- `calculate_purcell_t1_vs_flux(..., progress=True)` — 自訂 Purcell 通道 T1,手動求和 resonator 熱態佔據下的 `⟨0,n'|a†|1,n⟩` / `⟨0,n'|a|1,n⟩` 矩陣元；`progress=False` 會暫時關閉 scqubits sweep progress，供 fitting loop 內部靜音使用:
-  - `P_res(n) = (1 − e^{−βℏωr}) e^{−nβℏωr}`
-  - `Γ↑ = Σ P_res(n) κ n_th(ΔE) |⟨…|a†|…⟩|²`
-  - `Γ↓ = Σ P_res(n) κ (n_th(−ΔE)+1) |⟨…|a|…⟩|²`
-  - 回傳 `1/(Γ↑+Γ↓)` (ns)。以上是目標物理公式；現行 kernel 的 spontaneous decay、thermal frequency conversion 與 kappa 定義仍待修正，見 ADR-0071。
+- `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` 包裝 scqubits，回傳 physical ns，不再外乘 2π。`_with` 接受既有 Fluxonium 與 eigenpairs／spectrum data，供重用本徵分解。
+- `calculate_eff_t1_fast` / `calculate_eff_t1_vs_flux_fast` 使用快取算子與批次 numpy 計算，和 slow 路徑使用相同的物理 rates，`T1 = 1/Σrate`。支援 capacitive、inductive、charge impedance、flux bias line 與 quasiparticle channels。Fast 固定 `total=True`；不支援的 channel／options 直接報錯，需要單向 rate 時使用 slow 路徑。
+- 絕對單位由 SI LC energy lifetime 與 raw scqubits regressions 驗證，fast／slow 相等不是唯一 oracle。半通量附近 matrix element 可能因 parity 消失，應比較接近零的 rate，不能只比較巨大 T1 的相對差。
+- `calculate_purcell_t1_vs_flux(..., progress=True)` 回傳 resonator thermal-averaged qubit e→g escape lifetime，單位 ns。這不是 equilibrium relaxation `1/(Γeg+Γge)`。
+  - `kappa` 是 linewidth κ/(2π)，單位 GHz；rate 使用 `2π kappa`，單位 ns⁻¹。
+  - 熱人口使用 `hν/(k_B T)`。依 dressed-state energy difference 篩選方向，上升用 `a† n_B` 的矩陣元與熱權重，下降用 `a (n_B+1)`，零溫仍保有允許通道的 spontaneous decay。
+  - 保留原 frequency-selected bath 模型，不改成完整 `X=a+a†`。Creation／annihilation 的矩陣元取絕對值平方，熱因子另乘在 rate 上。
+  - `progress=False` 暫時關閉 scqubits sweep progress，結束後恢復。
+- 單位與模型取捨見 [ADR-0071](../../../../docs/adr/0071-coherence-units.md)。舊 fitted Q／x_qp 需重新擬合或審核，不自動換算歷史資料。
 
 ### `prediction.py` — `FluxoniumPrediction` engine
 
