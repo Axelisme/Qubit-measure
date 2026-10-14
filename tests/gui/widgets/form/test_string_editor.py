@@ -78,3 +78,35 @@ def test_string_mode_writes_expression_and_projects_preview_and_errors(
     text.setText("$device")
     assert state.input.data[field] == "$device"
     assert state.preview(env).values[(field,)] == "$device"
+
+
+def test_string_direct_mode_fills_the_resolved_name(
+    name_editor: tuple[FormEditor[StringForm], FormState[StringForm], FormEnv],
+) -> None:
+    editor, state, env = name_editor
+    state.write({("name",): {"expr": "$device"}}, env)
+    mode = editor.findChild(QAction, "form.mode.name")
+    assert isinstance(mode, QAction)
+
+    mode.trigger()
+
+    assert not mode.isChecked()
+    assert state.input.data["name"] == "yoko1"
+    text = editor.findChild(QLineEdit, "form.input.name")
+    assert isinstance(text, QLineEdit)
+    assert text.text() == "yoko1"
+
+
+def test_string_direct_mode_keeps_an_unresolved_expression_as_literal_text(
+    name_editor: tuple[FormEditor[StringForm], FormState[StringForm], FormEnv],
+) -> None:
+    editor, state, env = name_editor
+    state.write({("name",): {"expr": "$unbound"}}, env)
+    mode = editor.findChild(QAction, "form.mode.name")
+    assert isinstance(mode, QAction)
+
+    mode.trigger()
+
+    assert not mode.isChecked()
+    assert state.input.data["name"] == "$unbound"
+    assert editor.errors() is None
