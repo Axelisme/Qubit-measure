@@ -119,6 +119,7 @@ def test_joint_fit_rejects_candidate_with_failed_calibration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import zcu_tools.analysis.fitting.singleshot_rabi as rabi_fit
+    from scipy.optimize import OptimizeResult, minimize_scalar
 
     rng = np.random.default_rng(84)
     gains = np.linspace(0.0, 1.0, 15)
@@ -126,12 +127,16 @@ def test_joint_fit_rejects_candidate_with_failed_calibration(
     excited = rng.random((gains.size, 300)) < p_e[:, None]
     signals = rng.normal(np.where(excited, 1.0, -1.0), 0.18).astype(np.complex128)
 
-    def fail_calibration(params: RabiPhysicalParams) -> Any:
-        raise RuntimeError("radius optimization failed")
+    def optimizer(*args, **options):
+        if "options" in options:
+            return OptimizeResult(success=False, x=np.nan)
+        return minimize_scalar(*args, **options)
 
-    monkeypatch.setattr(rabi_fit, "_confusion_matrix", fail_calibration)
+    # Valid separated IQ data cannot reliably make SciPy's radius search fail.
+    monkeypatch.setattr(rabi_fit, "_minimize_scalar", optimizer)
     fit = fit_rabi_joint(gains, signals, decay=False)
     assert not fit.backend.valid
+    assert np.isnan(fit.radius)
     assert np.isnan(fit.confusion_matrix).all()
 
 

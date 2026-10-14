@@ -1,10 +1,9 @@
 """Tests for ir/passes/control_flow/unpack_branch.py.
 
-Covers:
-- _first_basic_block(): BasicBlockNode, nested BlockNode, no-head cases
-- _case_entry_label(): existing label reuse, label synthesis (head/no-head)
-- UnpackIRBranchPass.transform(): non-IRBranch passthrough, 2-case, 3-case,
-  big-pmem jump, end-label uniqueness
+Covers public branch expansion and pipeline lowering:
+- case-entry label reuse and synthesis for head/no-head cases
+- non-IRBranch passthrough, 2-case and 3-case control flow
+- big-pmem jumps and whole-pipeline label uniqueness
 """
 
 from __future__ import annotations
@@ -27,10 +26,8 @@ from zcu_tools.program.v2.ir.node import (
 from zcu_tools.program.v2.ir.operands import Register, SrcKeyword
 from zcu_tools.program.v2.ir.passes.control_flow.unpack_branch import (
     UnpackIRBranchPass,
-    _case_entry_label,
-    _first_basic_block,
 )
-from zcu_tools.program.v2.ir.pipeline import PipeLineConfig, PipeLineContext
+from zcu_tools.program.v2.ir.pipeline import IRPipeLine, PipeLineConfig, PipeLineContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,18 +49,15 @@ def _ctx(pmem_capacity: int = 512) -> PipeLineContext:
     )
 
 
-def _apply_unpack(root: BlockNode, pmem_capacity: int = 512) -> tuple[BlockNode, bool]:
-    """Run UnpackIRBranchPass on root via the real post-order driver."""
-    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
-
-    ctx = _ctx(pmem_capacity)
-    result = _optimize_tree(root, [UnpackIRBranchPass()], ctx)
-    if isinstance(result, BlockNode):
-        return result, result is not root
-    return BlockNode(insts=[result]), True
+def _apply_unpack(root: BlockNode, pmem_capacity: int = 512) -> BlockNode:
+    """Exercise the public branch-pass contract on a prepared branch."""
+    assert len(root.insts) == 1
+    node = root.insts[0]
+    result = UnpackIRBranchPass().transform(node, _ctx(pmem_capacity))
+    return BlockNode(insts=[node if result is None else result])
 
 
-def _collect_nodes(root: IRNode, cls: type) -> list:
+def _collect_nodes[T: IRNode](root: IRNode, cls: type[T]) -> list[T]:
     """Recursively collect all nodes of a given type in the tree."""
     found = []
     if isinstance(root, cls):
@@ -76,105 +70,76 @@ def _collect_nodes(root: IRNode, cls: type) -> list:
     return found
 
 
-# ---------------------------------------------------------------------------
-# _first_basic_block
-# ---------------------------------------------------------------------------
+def _expand_single_case(case: IRNode) -> tuple[BlockNode, Label]:
+    branch = IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case])
+    ctx = _ctx()
+    out = UnpackIRBranchPass().transform(branch, ctx)
+    assert isinstance(out, BlockNode)
+    dispatch = out.insts[0]
+    assert isinstance(dispatch, IRDispatch)
+    expanded_case = out.insts[1]
+    if not isinstance(expanded_case, BlockNode):
+        expanded_case = BlockNode(insts=[expanded_case])
+    return expanded_case, dispatch.target_labels[0]
 
 
-def test_first_basic_block_returns_itself_when_given_bb():
-    bb = _nop_block("a")
-    assert _first_basic_block(bb) is bb
-
-
-def test_first_basic_block_recurses_into_block_node():
-    inner = _nop_block("inner")
-    outer = BlockNode(insts=[inner, _nop_block("other")])
-    assert _first_basic_block(outer) is inner
-
-
-def test_first_basic_block_returns_none_for_empty_block_node():
-    empty = BlockNode(insts=[])
-    assert _first_basic_block(empty) is None
-
-
-def test_first_basic_block_returns_none_for_non_block_node():
-    loop = IRLoop(
-        name="lp",
-        counter_reg=Register("r0"),
-        n=3,
-        body=BlockNode(insts=[_nop_block()]),
-    )
-    assert _first_basic_block(loop) is None
-
-
-# ---------------------------------------------------------------------------
-# _case_entry_label
-# ---------------------------------------------------------------------------
-
-
-def test_case_entry_label_reuses_existing_label():
+def test_unpack_reuses_basic_block_entry_label():
     existing = _label_inst("my_entry")
-    bb = BasicBlockNode(labels=[existing], insts=[NopInst()])
-    case2, entry = _case_entry_label(bb, "fallback", set())
-
-    assert case2 is bb
-    assert entry == Label("my_entry")
-    # original labels untouched
-    assert bb.labels == [existing]
-
-
-def test_case_entry_label_synthesises_label_when_head_has_none():
-    bb = BasicBlockNode(labels=[], insts=[NopInst()])
-    case2, entry = _case_entry_label(bb, "sel_case_entry_0", set())
-
-    # case2 is the same bb object (label inserted in-place)
-    assert case2 is bb
-    assert entry == Label("sel_case_entry_0")
-    assert bb.labels[0].name == Label("sel_case_entry_0")
-
-
-def test_case_entry_label_synthesises_unique_label_on_conflict():
-    bb = BasicBlockNode(labels=[], insts=[NopInst()])
-    # "sel_case_entry_0" is already allocated
-    _, entry = _case_entry_label(bb, "sel_case_entry_0", {"sel_case_entry_0"})
-
-    # make_label must have produced a suffixed variant
-    assert entry != Label("sel_case_entry_0")
-    assert bb.labels[0].name == entry
-
-
-def test_case_entry_label_no_head_block_node_wraps_in_block():
-    # A BlockNode whose first child is not a BasicBlockNode has no BB head.
-    loop = IRLoop(
-        name="lp",
-        counter_reg=Register("r0"),
-        n=2,
-        body=BlockNode(insts=[_nop_block()]),
+    case, target = _expand_single_case(
+        BasicBlockNode(labels=[existing], insts=[NopInst()])
     )
-    inner = BlockNode(insts=[loop])
-    case2, entry = _case_entry_label(inner, "br_case_entry_0", set())
-
-    assert isinstance(case2, BlockNode)
-    # First child of the new BlockNode must be a labelled BasicBlockNode
-    head = case2.insts[0]
+    head = case.insts[0]
     assert isinstance(head, BasicBlockNode)
-    assert head.labels[0].name == entry
+    assert head.labels == [existing]
+    assert target == existing.name
+    assert head.insts == [NopInst()]
 
 
-def test_case_entry_label_no_head_non_block_node_wraps_in_block():
-    loop = IRLoop(
-        name="lp",
-        counter_reg=Register("r0"),
-        n=2,
-        body=BlockNode(insts=[_nop_block()]),
+def test_unpack_reuses_nested_block_entry_label():
+    inner = _nop_block("inner")
+    case, target = _expand_single_case(
+        BlockNode(insts=[BlockNode(insts=[inner]), _nop_block("other")])
     )
-    case2, entry = _case_entry_label(loop, "br_case_entry_0", set())
+    assert target == Label("inner")
+    assert case.insts[0].children()[0] == inner
 
-    assert isinstance(case2, BlockNode)
-    head = case2.insts[0]
+
+def test_unpack_synthesises_entry_for_unlabelled_head():
+    case, target = _expand_single_case(_nop_block())
+    head = case.insts[0]
     assert isinstance(head, BasicBlockNode)
-    assert head.labels[0].name == entry
-    assert case2.insts[1] is loop
+    assert [label.name for label in head.labels] == [target]
+    assert head.insts == [NopInst()]
+
+
+def test_unpack_synthesises_entry_for_empty_case():
+    case, target = _expand_single_case(BlockNode())
+    head = case.insts[0]
+    assert isinstance(head, BasicBlockNode)
+    assert [label.name for label in head.labels] == [target]
+    assert not head.insts
+
+
+def test_unpack_synthesises_entry_before_loop_case():
+    loop = IRLoop(
+        name="lp", counter_reg=Register("r0"), n=2, body=BlockNode(insts=[_nop_block()])
+    )
+    case, target = _expand_single_case(loop)
+    head = case.insts[0]
+    assert isinstance(head, BasicBlockNode)
+    assert [label.name for label in head.labels] == [target]
+    assert case.insts[1] == loop
+
+
+def test_unpack_synthesises_entry_for_block_starting_with_loop():
+    loop = IRLoop(
+        name="lp", counter_reg=Register("r0"), n=2, body=BlockNode(insts=[_nop_block()])
+    )
+    case, target = _expand_single_case(BlockNode(insts=[loop]))
+    head = case.insts[0]
+    assert isinstance(head, BasicBlockNode)
+    assert [label.name for label in head.labels] == [target]
+    assert case.insts[1] == loop
 
 
 # ---------------------------------------------------------------------------
@@ -183,17 +148,7 @@ def test_case_entry_label_no_head_non_block_node_wraps_in_block():
 
 
 def test_unpack_branch_ignores_non_branch_node():
-    bb = _nop_block("x")
-    root = BlockNode(insts=[bb])
-    out, changed = _apply_unpack(root)
-
-    assert not changed
-    assert out.insts[0] is bb
-
-
-# ---------------------------------------------------------------------------
-# UnpackIRBranchPass.transform — 2-case branch (small pmem)
-# ---------------------------------------------------------------------------
+    assert UnpackIRBranchPass().transform(_nop_block("x"), _ctx()) is None
 
 
 def _make_branch(name: str, n_cases: int) -> IRBranch:
@@ -214,7 +169,7 @@ def _make_branch(name: str, n_cases: int) -> IRBranch:
 def test_unpack_two_case_produces_ir_dispatch():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     dispatches = _collect_nodes(out, IRDispatch)
     assert len(dispatches) == 1
@@ -224,7 +179,7 @@ def test_unpack_two_case_produces_ir_dispatch():
 def test_unpack_two_case_dispatch_targets_match_case_entry_labels():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     dispatch = _collect_nodes(out, IRDispatch)[0]
     assert dispatch.target_labels[0] == Label("br_case_entry_0")
@@ -234,7 +189,7 @@ def test_unpack_two_case_dispatch_targets_match_case_entry_labels():
 def test_unpack_two_case_first_case_has_jump_to_end():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     # Flatten the children of the result BlockNode
     expanded = out.insts[0]  # the BlockNode replacing IRBranch
@@ -253,7 +208,7 @@ def test_unpack_two_case_first_case_has_jump_to_end():
 def test_unpack_two_case_last_case_has_no_extra_jump():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
@@ -273,7 +228,7 @@ def test_unpack_two_case_last_case_has_no_extra_jump():
 def test_unpack_three_case_produces_two_inter_case_jumps():
     branch = _make_branch("br", 3)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
@@ -295,7 +250,7 @@ def test_unpack_three_case_produces_two_inter_case_jumps():
 def test_unpack_big_pmem_uses_reg_write_s15_jump():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root, pmem_capacity=4096)
+    out = _apply_unpack(root, pmem_capacity=4096)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
@@ -317,7 +272,7 @@ def test_unpack_big_pmem_uses_reg_write_s15_jump():
 def test_unpack_small_pmem_does_not_use_s15():
     branch = _make_branch("br", 2)
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root, pmem_capacity=512)
+    out = _apply_unpack(root, pmem_capacity=512)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
@@ -345,7 +300,7 @@ def test_unpack_end_label_is_unique_when_name_conflicts():
     )
     branch = IRBranch(name="br", compare_reg=Register("r_sel"), cases=[case_0, case_1])
     root = BlockNode(insts=[branch])
-    out, _ = _apply_unpack(root)
+    out = _apply_unpack(root)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
@@ -356,8 +311,7 @@ def test_unpack_end_label_is_unique_when_name_conflicts():
 
 
 def test_unpack_same_named_branches_keep_labels_globally_unique():
-    from zcu_tools.program.v2.ir.factory import IRParser
-    from zcu_tools.program.v2.ir.pipeline import _optimize_tree
+    from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 
     def _unlabeled_branch() -> IRBranch:
         return IRBranch(
@@ -371,23 +325,21 @@ def test_unpack_same_named_branches_keep_labels_globally_unique():
 
     root = BlockNode(insts=[_unlabeled_branch(), _unlabeled_branch()])
     parser = IRParser(pmem_size=512)
-    ctx = PipeLineContext(
-        config=PipeLineConfig(pmem_capacity=512),
-        pmem_budget=1024,
-        allocated_names={"sel"},
+    insts = IRLexer().flatten(parser.unparse(root))
+    pipeline = IRPipeLine(
+        PipeLineConfig(pmem_capacity=512), [], [], [UnpackIRBranchPass()]
     )
-
-    optimized = _optimize_tree(root, [UnpackIRBranchPass()], ctx)
-    assert isinstance(optimized, BlockNode)
-
-    chunks = parser.unparse(optimized)
-    labels = [
-        lbl.name.name
-        for chunk in chunks
-        if isinstance(chunk, BasicBlockNode)
-        for lbl in chunk.labels
-    ]
+    out, _ = pipeline(insts)
+    labels = [inst.name for inst in out if isinstance(inst, LabelInst)]
+    assert labels
     assert len(labels) == len(set(labels))
+    references = [
+        inst.label.as_label()
+        for inst in out
+        if isinstance(inst, JumpInst) and inst.label is not None
+    ]
+    assert references
+    assert set(references) <= set(labels)
 
 
 def test_unpack_after_branch_roundtrip_does_not_duplicate_old_skeleton():
@@ -404,7 +356,7 @@ def test_unpack_after_branch_roundtrip_does_not_duplicate_old_skeleton():
         ],
     )
     rebuilt = parser.parse(parser.unparse(BlockNode(insts=[branch])))
-    out, _ = _apply_unpack(rebuilt)
+    out = _apply_unpack(rebuilt)
 
     expanded = out.insts[0]
     assert isinstance(expanded, BlockNode)
