@@ -21,12 +21,13 @@ def charge_spectral_density(
 def charge_spectral_density(
     omega: float | NDArray[np.float64], Temp: float, EC: float
 ) -> float | NDArray[np.float64]:
-    """omega: rad/ns, EC: GHz, T: K -> GHz"""
+    """Unit-Q capacitive spectral rate in ns⁻¹ for omega (rad/ns), Temp (K), EC (GHz)."""
     therm_ratio = calc_therm_ratio(omega, Temp)
     return (
         2
         * 8
         * EC
+        * (2 * np.pi)  # EC/h in GHz -> EC/ħ in ns⁻¹ (ADR-0071).
         * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
         / (1 + np.exp(-therm_ratio))
     )
@@ -40,7 +41,7 @@ def calc_cap_dipole(
 ) -> NDArray[np.float64]:
     """Calculate the dipole of the charge operator.
 
-    params: GHz, omega: rad/ns, T: K, EC: GHz -> GHz
+    params: (EJ, EC, EL) in GHz, omegas: rad/ns, Temp: K -> unit-Q rate in ns⁻¹.
     """
     _EJ, EC, _EL = params
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import scipy.constants as const
 from zcu_tools.notebook.analysis.t1_curve.Qcap import (
     calc_Qcap_vs_omega,
     charge_spectral_density,
@@ -17,13 +18,17 @@ def test_charge_spectral_density_golden_values() -> None:
     temp = 0.06
     ec = 0.95
 
-    assert charge_spectral_density(omega, temp, ec) == pytest.approx(15.48377415649128)
-    assert charge_spectral_density(-omega, temp, ec) == pytest.approx(
-        0.28377415649128146
-    )
+    # EC is energy/h in GHz. Fermi rates require EC/ħ, not EC/h.
+    # The thermal exponent uses the cycles frequency in Hz with h.
+    ratio = const.h * 5e9 / (const.k * temp)
+    thermal = 1 / np.tanh(ratio / 2)
+    prefactor = 16 * (ec * 1e9 * const.h) / const.hbar * 1e-9
+    expected = prefactor * thermal / (1 + np.exp(-np.array([ratio, -ratio])))
+    assert charge_spectral_density(omega, temp, ec) == pytest.approx(expected[0])
+    assert charge_spectral_density(-omega, temp, ec) == pytest.approx(expected[1])
 
     actual = charge_spectral_density(np.array([omega, -omega]), temp, ec)
-    np.testing.assert_allclose(actual, [15.48377415649128, 0.28377415649128146])
+    np.testing.assert_allclose(actual, expected)
 
 
 def test_inductive_spectral_density_golden_values() -> None:
@@ -31,15 +36,15 @@ def test_inductive_spectral_density_golden_values() -> None:
     temp = 0.06
     el = 0.58
 
-    assert inductive_spectral_density(omega, temp, el) == pytest.approx(
-        1.1816564487848609
-    )
-    assert inductive_spectral_density(-omega, temp, el) == pytest.approx(
-        0.021656448784860956
-    )
+    # EL/h (cycles/ns) becomes EL/ħ (1/ns) in the spectral rate.
+    ratio = const.h * 5e9 / (const.k * temp)
+    prefactor = 2 * (el * 1e9 * const.h) / const.hbar * 1e-9
+    expected = prefactor / np.tanh(ratio / 2) / (1 + np.exp(-np.array([ratio, -ratio])))
+    assert inductive_spectral_density(omega, temp, el) == pytest.approx(expected[0])
+    assert inductive_spectral_density(-omega, temp, el) == pytest.approx(expected[1])
 
     actual = inductive_spectral_density(np.array([omega, -omega]), temp, el)
-    np.testing.assert_allclose(actual, [1.1816564487848609, 0.021656448784860956])
+    np.testing.assert_allclose(actual, expected)
 
 
 @pytest.mark.parametrize("mechanism", ["capacitive", "inductive"])

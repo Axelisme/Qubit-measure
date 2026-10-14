@@ -22,16 +22,20 @@ def calculate_eff_t1_with(
     esys: tuple[NDArray[np.float64], NDArray[np.complex128]] | None = None,
     **other_noise_options,
 ) -> float:
+    """Return effective 1→0 T1 in ns, setting ``fluxonium.flux`` to ``flux``.
+
+    ``Temp`` is K and ``flux`` is Φ/Φ₀. Channel tuples contain scqubits names and
+    per-channel options. Optional ``esys`` reuses eigenpairs at this flux.
+    Other options pass to scqubits; ``total`` defaults to True (both directions).
+    """
     fluxonium.flux = flux
     with scq_t1_default_warning(False):
-        t1s = fluxonium.t1_effective(
+        # With energy/h in GHz, scqubits already returns physical ns (ADR-0071).
+        return fluxonium.t1_effective(
             noise_channels=noise_channels,
             common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
             esys=esys,
         )
-
-    # scqubits returns t1 in units of ns/rad, so we need to convert to ns
-    return 2 * np.pi * t1s
 
 
 def calculate_eff_t1(
@@ -43,6 +47,12 @@ def calculate_eff_t1(
     evals_count: int = 20,
     **other_noise_options,
 ) -> float:
+    """Return effective 1→0 T1 in ns for ``params=(EJ, EC, EL)`` in GHz.
+
+    ``flux`` is Φ/Φ₀, ``Temp`` is K, and ``cutoff``/``evals_count`` select the
+    oscillator basis/retained levels. Channel tuples and additional options
+    use scqubits conventions; ``total`` defaults to True (both directions).
+    """
     from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=evals_count)
@@ -60,6 +70,13 @@ def calculate_eff_t1_vs_flux_with(
     spectrum_data: SpectrumData | None = None,
     **other_noise_options,
 ) -> NDArray[np.float64]:
+    """Return effective 1→0 T1 in ns with the same shape/order as ``fluxs``.
+
+    ``fluxs`` are Φ/Φ₀ and ``Temp`` is K. Channel tuples and additional options
+    use scqubits conventions; ``total`` defaults to True (both directions).
+    Optional ``spectrum_data`` must match this flux grid. This call sets
+    ``fluxonium.flux`` to each successive flux, ending at the last point.
+    """
     start_t = time.time()
     pbar = None
 
@@ -86,7 +103,7 @@ def calculate_eff_t1_vs_flux_with(
     if pbar is not None:
         pbar.close()
 
-    return 2 * np.pi * eff_t1s
+    return eff_t1s
 
 
 def calculate_eff_t1_vs_flux(
@@ -98,6 +115,13 @@ def calculate_eff_t1_vs_flux(
     evals_count: int = 20,
     **other_options,
 ) -> NDArray[np.float64]:
+    """Return effective 1→0 T1 in ns with the same shape/order as ``fluxs``.
+
+    ``params=(EJ, EC, EL)`` are GHz, ``fluxs`` are Φ/Φ₀, and ``Temp`` is K.
+    ``cutoff``/``evals_count`` select the oscillator basis/retained levels.
+    Channel tuples and additional options use scqubits conventions;
+    ``total`` defaults to True (both directions).
+    """
     from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
