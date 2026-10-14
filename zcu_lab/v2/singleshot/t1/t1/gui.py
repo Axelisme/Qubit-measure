@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -17,20 +17,11 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import SweepDefault, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarSpec,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
+from zcu_lab.v2.singleshot.t1.t1.form import FORM
 
 # Transition-rate analysis publishes figures without numeric writeback.
 SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
@@ -45,92 +36,45 @@ class SsT1Adapter(
     BaseAdapter[T1Cfg, SsT1RunResult, SsT1AnalyzeResult, NoAnalyzeParams]
 ):
     experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
+    form = FORM
     exp_cls = T1Exp
-    ExpCfg_cls: ClassVar[Any] = T1Cfg
+    ExpCfg_cls = T1Cfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Single-shot T1: applies a π pulse, waits for a variable delay, "
-            "reads out, and classifies each shot in-program against the |g>/|e> "
-            "IQ-cluster centres. Repeats from both |g> and |e> initial states "
-            "(Branch). Plots the ground / excited / other populations versus "
-            "delay time with dual-transition-rate fits for T1 and T1_b. "
-            "Runs on real hardware."
+            "Single-shot T1: applies a π pulse, waits for a variable delay, reads out, "
+            "and classifies each shot in-program against the |g>/|e> IQ-cluster centres. "
+            "Repeats from both |g> and |e> initial states (Branch). Plots the ground / "
+            "excited / other populations versus delay time with dual-transition-rate fits "
+            "for T1 and T1_b. Runs on real hardware."
         ),
         expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. "
-            "Optionally reads 'confusion_matrix' to readout-correct populations "
-            "at analyze time; 't1' to seed the sweep stop (5*t1; "
-            "fallback 500 us) and relax delay (5*t1; fallback 100 us); "
-            "'q_f' / 'qub_ch' for the pi pulse; 'r_f' / "
-            "'res_ch' / 'ro_ch' / 'timeFly' for readout."
+            "Open and Reset capture the current aliases, parameters and library. Relax "
+            "delay and length stop are 5 * $qubit.t1. Classification seeds "
+            "$qubit.ext.readout_cal.g_center/e_center/radius; missing calibration stays "
+            "Invalid. Inline templates read $qubit.freq, $qubit.wiring.L01.ch and "
+            "$resonator.freq/wiring.ch/wiring.ro_ch; readout trigger uses "
+            "$resonator.ext.time_of_fly + 0.05 us. Missing required sources remain "
+            "Invalid; no numeric fallback is supplied."
         ),
         expects_ml=(
-            "Needs a qubit pi-pulse module and a readout module. "
-            "Optional reset (disabled when no library entry exists)."
+            "Pi pulse uses $qubit.module.x180 or pi_pulse. Reset is optional; readout "
+            "uses $qubit.module.readout or readout template. Sweep-overwritten pulse "
+            "values remain editable and library keys stay selectable. Run uses this fixed "
+            "capture."
         ),
         typical_writeback=(
-            "No writeback — T1 is shown in the plot title only. "
-            "Use 'singleshot/t1_tone' if you need the T1 scalar in the "
-            "parameter context."
+            "No writeback — T1 is shown in the plot title only. Use 'singleshot/t1_tone' "
+            "if you need the T1 scalar in the parameter context."
         ),
         recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "A delay sweep reaching ~5*T1 lets the "
-            "decay flatten; with no prior 't1', the sweep spans 0–500 us. "
-            "Set 'uniform=True' to sweep linearly; leave False to cluster more "
-            "points along the expected exponential decay while preserving the "
-            "configured start/stop window and point count."
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. A delay sweep "
+            "reaching ~5*T1 lets the decay flatten. Missing t1 leaves the length stop and "
+            "relax delay Invalid. Set 'uniform=True' to sweep linearly; leave False to "
+            "cluster more points along the expected exponential decay while preserving "
+            "the configured start/stop window and point count."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
-            )
-            .sweep(
-                "length",
-                label="Delay (us)",
-                default=SweepDefault(
-                    start=0.0,
-                    # The fallback is the fully scaled 5 * 100 us window.
-                    stop=scaled_path_seed(
-                        "$qubit.t1", factor=5.0, fallback_value=500.0
-                    ),
-                    expts=101,
-                ),
-            )
-            .field(
-                "g_center",
-                spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.g_center"),
-            )
-            .field(
-                "e_center",
-                spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.e_center"),
-            )
-            .field(
-                "radius",
-                spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("$qubit.ext.readout_cal.radius"),
-            )
-            .bool("uniform", label="Uniform (linear) sweep", default=False)
-            .reps(1000)
-            .rounds(10)
-            .build()
-        )
 
     def run(
         self,

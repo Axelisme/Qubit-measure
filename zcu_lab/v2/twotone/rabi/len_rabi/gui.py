@@ -24,33 +24,12 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import (
-    SweepDefault,
-    custom,
-    module_seed,
-    path_seed,
-    scaled_path_seed,
-)
-from zcu_tools.gui.app.measure.spec_helpers import (
-    make_pulse_module_spec,
-    make_pulse_readout_module_spec,
-    make_readout_module_spec,
-    make_reset_module_spec,
-)
 from zcu_tools.gui.cfg import (
     CfgSchema,
-    ReferenceValue,
-    make_custom_reference_key,
-    make_default_value,
 )
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalyzeOptions,
     LenRabiCfg,
@@ -58,36 +37,9 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiResult,
 )
 
+from .form import FORM
+
 LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
-
-
-def _blank_rabi_pulse(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_module_spec().allowed[0])
-    value.with_field("freq", path_seed("$qubit.freq", fallback=4000.0).resolve(ctx))
-    value.with_field("ch", path_seed("$qubit.wiring.L01.ch", fallback=0).resolve(ctx))
-    value.with_field("nqz", 2)
-    value.with_field("gain", 0.3)
-    value.with_field("waveform.length", 1.0)
-    return ReferenceValue(make_custom_reference_key("Pulse"), value)
-
-
-def _blank_readout(ctx: SessionEnv) -> ReferenceValue:
-    value = make_default_value(make_pulse_readout_module_spec().allowed[0])
-    frequency = path_seed("$resonator.freq", fallback=6000.0).resolve(ctx)
-    value.with_field("pulse_cfg.freq", frequency)
-    value.with_field(
-        "pulse_cfg.ch", path_seed("$resonator.wiring.ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("pulse_cfg.nqz", 2)
-    value.with_field("pulse_cfg.gain", 0.1)
-    value.with_field("pulse_cfg.waveform.length", 1.0)
-    value.with_field("ro_cfg.ro_freq", frequency)
-    value.with_field(
-        "ro_cfg.ro_ch", path_seed("$resonator.wiring.ro_ch", fallback=0).resolve(ctx)
-    )
-    value.with_field("ro_cfg.ro_length", 0.9)
-    value.with_field("ro_cfg.trig_offset", 0.55)
-    return ReferenceValue(make_custom_reference_key("Pulse Readout"), value)
 
 
 @dataclass
@@ -116,52 +68,50 @@ class LenRabiAdapter(
         LenRabiAnalyzeParams,
     ]
 ):
+    form = FORM
     experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Length Rabi: drives the qubit at its known frequency and sweeps "
-            "the drive-pulse length, fitting the Rabi oscillation to find the "
-            "pi and pi/2 pulse lengths. Runs on real hardware. Run once you "
-            "know the qubit frequency, to calibrate a pi pulse by duration "
-            "(the pulse gain stays fixed)."
+            "Length Rabi: drives the qubit at its known frequency and sweeps the "
+            "drive-pulse length, fitting the Rabi oscillation to find the pi and pi/2 "
+            "pulse lengths. Runs on real hardware. Run once you know the qubit "
+            "frequency, to calibrate a pi pulse by duration (the pulse gain stays "
+            "fixed)."
         ),
         expects_md=(
-            "Uses the tab's captured qubit and resonator roles. Length sweep "
-            "stop is 4 * qubit.module.x180.waveform.length (fallback 0.3 us); "
-            "relax delay is 5 * qubit.t1 (fallback 30.5 us). Fresh drive uses "
-            "qubit.freq (fallback 4000 MHz) and wiring.L01.ch (fallback 0). "
-            "Fresh readout uses resonator.freq (fallback 6000 MHz) and "
-            "wiring.ch/wiring.ro_ch (fallback 0), with trigger offset 0.55 us."
+            "Length runs 0.03 to 4 * qubit.module.x180.waveform.length us over 101 "
+            "points; Run overwrites drive length. Relax delay is 5 * qubit.t1 us. "
+            "Missing calibration leaves the affected fields empty and Invalid; no "
+            "numeric fallback."
         ),
         expects_ml=(
-            "Mounts captured qubit.module.x180/readout/reset slots. Missing "
-            "or dangling drive/readout slots use fresh inline pulses; reset "
-            "stays disabled. The length sweep owns waveform.length, locked "
-            "at 1 us in the cfg. Inline drive gain is 0.3; inline readout "
-            "gain is 0.1, const length 1 us and ADC window 0.9 us. No named "
-            "waveform is adopted."
+            "Uses captured qubit.module.readout with a readout template fallback, and "
+            "qubit.module.reset with no fallback (disabled when absent). The drive uses "
+            "qubit.module.x180 with a pi_pulse template fallback. Unset or dangling "
+            "slots use the named template, not a legacy blank. Key choices remain "
+            "available. Inline templates read qubit.freq, qubit.wiring.L01.ch, "
+            "resonator.freq, resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + "
+            "0.05 us; missing required calibration remains Invalid."
         ),
         typical_writeback=(
-            "Proposes qubit.ext.rabi_freq in MHz from the fit. With a source "
-            "cfg, copies the drive pulse into captured qubit.pulses.pi_amp "
-            "and pi2_amp, replacing waveform.length with fitted pi and pi/2 "
-            "lengths. Separately proposes qubit.module.x180/x90 pointing to "
-            "those resolved keys, even when already bound to them, plus "
-            "qubit.ext.pi_product = source gain * fitted pi length (a.u. * us). "
-            "Every item is independently selectable. Without cfg only "
-            "rabi_freq remains. No separate length scalars or live defaults."
+            "Proposes qubit.ext.rabi_freq in MHz from the fit. With a source cfg, "
+            "copies the drive pulse into captured qubit.pulses.pi_amp and pi2_amp, "
+            "replacing waveform.length with fitted pi and pi/2 lengths. Separately "
+            "proposes qubit.module.x180/x90 pointing to those resolved keys, even when "
+            "already bound to them, plus qubit.ext.pi_product = source gain * fitted pi "
+            "length (a.u. * us). Every item is independently selectable. Without cfg "
+            "only rabi_freq remains. No separate length scalars or live defaults."
         ),
         recommended=(
-            "Phase defaults to fixed 0/180 degrees; enable Fit phase offset "
-            "when pulse shaping shifts the length oscillation. "
-            "Analysis defaults to fitting a decay envelope on the oscillation; "
-            "keep it on when the Rabi oscillation visibly damps over the "
-            "sweep, turn it off for a pure undamped cosine fit. A length sweep "
-            "spanning a few pi lengths (up to 4*pi_len when calibrated) captures a full "
-            "oscillation; widen it if no full period is visible."
+            "Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse "
+            "shaping shifts the length oscillation. Analysis defaults to fitting a "
+            "decay envelope on the oscillation; keep it on when the Rabi oscillation "
+            "visibly damps over the sweep, turn it off for a pure undamped cosine fit. "
+            "A length sweep spanning a few pi lengths (up to 4*pi_len when calibrated) "
+            "captures a full oscillation; widen it if no full period is visible."
         ),
     )
 
@@ -175,56 +125,6 @@ class LenRabiAdapter(
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = LenRabiExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .field(
-                "modules.reset",
-                spec=make_reset_module_spec(optional=True),
-                default=module_seed("$qubit.module.reset", fallback=None),
-            )
-            .field(
-                "modules.qub_pulse",
-                spec=make_pulse_module_spec(label="Rabi Pulse").lock_literal(
-                    "waveform.length", 1.0
-                ),
-                default=module_seed(
-                    "$qubit.module.x180",
-                    fallback=custom(_blank_rabi_pulse, description="inline rabi pulse"),
-                ),
-            )
-            .field(
-                "modules.readout",
-                spec=make_readout_module_spec(),
-                default=module_seed(
-                    "$qubit.module.readout",
-                    fallback=custom(_blank_readout, description="inline readout"),
-                ),
-            )
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5),
-            )
-            .sweep(
-                "length",
-                label="Length (us)",
-                default=SweepDefault(
-                    start=0.03,
-                    stop=scaled_path_seed(
-                        "$qubit.module.x180.waveform.length",
-                        factor=4.0,
-                        fallback_value=0.3,
-                    ),
-                    expts=101,
-                ),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def validate_run_request(
         self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]

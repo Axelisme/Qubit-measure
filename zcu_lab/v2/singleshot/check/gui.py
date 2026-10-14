@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -17,15 +17,8 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import scaled_path_seed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_shared import read_ge_centers
 from zcu_lab.v2.singleshot.check.core import (
     CheckAnalyzeOptions,
@@ -33,6 +26,7 @@ from zcu_lab.v2.singleshot.check.core import (
     CheckExp,
     CheckResult,
 )
+from zcu_lab.v2.singleshot.check.form import FORM
 
 CheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
@@ -47,65 +41,41 @@ class CheckAdapter(
     BaseAdapter[CheckCfg, CheckRunResult, CheckAnalyzeResult, NoAnalyzeParams]
 ):
     experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
+    form = FORM
     exp_cls = CheckExp
-    ExpCfg_cls: ClassVar[Any] = CheckCfg
+    ExpCfg_cls = CheckCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Single-shot classification check: takes 'shots' single-shot "
-            "readouts of the prepared state and draws the IQ scatter with the "
-            "|g>/|e> discrimination circles overlaid, reporting the fraction "
-            "classified ground / excited / other. Runs on real hardware; the "
-            "run itself needs no centres, but the analysis classifies the "
-            "scatter against them."
+            "Single-shot classification check: takes 'shots' single-shot readouts of the "
+            "prepared state and draws the IQ scatter with the |g>/|e> discrimination "
+            "circles overlaid, reporting the fraction classified ground / excited / "
+            "other. Runs on real hardware; the run itself needs no centres, but the "
+            "analysis classifies the scatter against them."
         ),
         expects_md=(
-            "REQUIRES the single-shot discrimination calibration in the "
-            "parameter context for ANALYSIS — run 'singleshot/ge' first and apply its "
-            "writeback so 'g_center' / 'e_center' / 'ge_radius' are present; "
-            "the analyze classifies the scatter against them and fast-fails if "
-            "any is missing. Also reads 't1' to set the relax delay; 'q_f' / "
-            "'qub_ch' seed the probe drive."
+            "Open and Reset capture the current aliases, parameters and library. Relax "
+            "delay is 5 * $qubit.t1. Fresh inline probe uses $qubit.freq and "
+            "$qubit.wiring.L01.ch. Inline templates read $qubit.freq, "
+            "$qubit.wiring.L01.ch and $resonator.freq/wiring.ch/wiring.ro_ch; readout "
+            "trigger uses $resonator.ext.time_of_fly + 0.05 us. Missing required sources "
+            "remain Invalid; no numeric fallback is supplied."
         ),
         expects_ml=(
-            "Needs a probe pulse and a readout module. Optionally references a "
-            "calibrated reset and an init pulse — both disabled when no library "
-            "entry exists."
+            "Optional init/reset use $qubit.module.x180/reset. Probe starts from "
+            "qub_probe. Readout uses $qubit.module.readout or the readout template. Run "
+            "uses this fixed capture."
         ),
         typical_writeback=(
-            "No writeback — the check is a visual diagnostic of the existing "
-            "single-shot discrimination."
+            "No writeback — the check is a visual diagnostic of the existing single-shot "
+            "discrimination."
         ),
         recommended=(
-            "Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a "
-            "well-sampled scatter; a tight cluster inside the matching circle "
-            "indicates good discrimination."
+            "Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a well-sampled "
+            "scatter; a tight cluster inside the matching circle indicates good "
+            "discrimination."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .pulse(
-                "probe_pulse",
-                role_id="qub_probe",
-                label="Probe Pulse",
-                init=ModuleInit.INLINE,
-            )
-            .readout()
-            .relax_delay(
-                scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=100.0)
-            )
-            .int("shots", label="Shots", default=5000)
-            .reps(1, locked=True)
-            .rounds(1, locked=True)
-            .build()
-        )
 
     # Standard run path (BaseAdapter.run): CheckExp.run(soc, soccfg, cfg) needs no
     # centres — the trio is an ANALYZE input, read from md in analyze().

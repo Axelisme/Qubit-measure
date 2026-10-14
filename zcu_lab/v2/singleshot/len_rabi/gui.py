@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, ClassVar, Literal, TypeAlias
 
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -20,19 +20,8 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import SweepDefault, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarSpec,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2.singleshot.len_rabi.core import (
     LenRabiAnalyzeOptions,
@@ -40,6 +29,7 @@ from zcu_lab.v2.singleshot.len_rabi.core import (
     LenRabiExp,
     LenRabiResult,
 )
+from zcu_lab.v2.singleshot.len_rabi.form import FORM
 
 # ``LenRabiExp`` from ``singleshot`` — sweeps the qubit-drive pulse *length* and
 # preserves every raw IQ shot. Analysis derives populations from that canonical
@@ -70,95 +60,49 @@ class SsLenRabiAdapter(
     ]
 ):
     experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
+    form = FORM
     exp_cls = LenRabiExp
-    ExpCfg_cls: ClassVar[Any] = LenRabiCfg
+    ExpCfg_cls = LenRabiCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Single-shot Length Rabi: sweeps the qubit-drive pulse length, "
-            "preserves every raw IQ shot, and derives ground / excited / other "
-            "population curves during live view and analysis. Runs on real hardware."
+            "Single-shot Length Rabi: sweeps the qubit-drive pulse length, preserves "
+            "every raw IQ shot, and derives ground / excited / other population curves "
+            "during live view and analysis. Runs on real hardware."
         ),
         expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. These values support live classification; "
-            "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_len' "
-            "to seed the sweep stop (4*pi_len when calibrated; fallback sweep "
-            "0.03–0.2 us); "
-            "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
+            "Open and Reset capture the current aliases, parameters and library. Relax "
+            "delay starts at 50.5 us. Length sweep is 0.03 us to 4 * "
+            "$qubit.module.x180.waveform.length. Inline qubit gain starts at 1.0. "
+            "Classification seeds $qubit.ext.readout_cal.g_center/e_center/radius; "
+            "missing calibration stays Invalid. Inline templates read $qubit.freq, "
+            "$qubit.wiring.L01.ch and $resonator.freq/wiring.ch/wiring.ro_ch; readout "
+            "trigger uses $resonator.ext.time_of_fly + 0.05 us. Missing required sources "
+            "remain Invalid; no numeric fallback is supplied."
         ),
         expects_ml=(
-            "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
-            "Optional reset (disabled when no library entry exists)."
+            "Qubit pulse starts from qub_probe. Reset uses optional $qubit.module.reset; "
+            "readout uses $qubit.module.readout or readout template. Sweep-overwritten "
+            "pulse values remain editable and library keys stay selectable. Run uses this "
+            "fixed capture."
         ),
         typical_writeback=(
-            "When the joint fit is valid and its complete calibration is finite, "
-            "proposes g_center, e_center, ge_radius, and confusion_matrix as four "
-            "independent items. The four-item proposal is all-or-none."
+            "When the joint fit is valid and its complete calibration is finite, proposes "
+            "$qubit.ext.readout_cal.g_center, $qubit.ext.readout_cal.e_center, "
+            "$qubit.ext.readout_cal.radius, and $qubit.ext.readout_cal.confusion_matrix "
+            "as four independent items. The four-item proposal is all-or-none."
         ),
         recommended=(
-            "Set Initial State to the predominant state before the swept drive pulse "
-            "even when the first sweep point is nonzero. Fit phase offset "
-            "allows a correction within +/-90 degrees of that initial-state "
-            "direction; the extrapolated zero-length population can then differ "
-            "from the pre-pulse population. It is disabled by default. "
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. A sweep spanning a few pi lengths "
-            "captures a full oscillation. Review the measured population curves "
-            "and overlaid joint-fit curves before applying all four calibration "
-            "proposals."
+            "Set Initial State to the predominant state before the swept drive pulse even "
+            "when the first sweep point is nonzero. Fit phase offset allows a correction "
+            "within +/-90 degrees of that initial-state direction; the extrapolated "
+            "zero-length population can then differ from the pre-pulse population. It is "
+            "disabled by default. Set calibration cfg directly or seed it with "
+            "'singleshot/ge'. A sweep spanning a few pi lengths captures a full "
+            "oscillation. Review the measured population curves and overlaid joint-fit "
+            "curves before applying all four calibration proposals."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                init=ModuleInit.INLINE,
-                overrides={"gain": 1.0},
-            )
-            .readout()
-            .relax_delay(50.5)
-            .sweep(
-                "length",
-                label="Length (us)",
-                default=SweepDefault(
-                    start=0.03,
-                    stop=scaled_path_seed(
-                        "$qubit.module.x180.waveform.length",
-                        factor=4.0,
-                        fallback_value=0.2,
-                    ),
-                    expts=51,
-                ),
-            )
-            .int("shots", label="Shots", default=1000)
-            .field(
-                "g_center",
-                spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.g_center"),
-            )
-            .field(
-                "e_center",
-                spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.e_center"),
-            )
-            .field(
-                "radius",
-                spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("$qubit.ext.readout_cal.radius"),
-            )
-            .reps(1, locked=True)
-            .rounds(1, locked=True)
-            .build()
-        )
 
     def run(
         self,

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from qick.asm_v2 import QickParam, QickSweep1D
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
     AxesSpec,
@@ -47,10 +47,10 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    X90_pulse: PulseCfg
-    X180_pulse: PulseCfg | None = None
-    readout: ReadoutCfg
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 def _reset_pi(reset: ResetCfg | None) -> PulseCfg:
@@ -66,9 +66,23 @@ def _reset_pi(reset: ResetCfg | None) -> PulseCfg:
 
 class ZigZagCfg(ProgramV2Cfg, ExpCfgModel):
     modules: ZigZagModuleCfg
-    n_times: int = Field(ge=0)
-    repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse"
-    reset_phase_cycle: bool = Field(
+    n_times: Annotated[
+        int,
+        FieldMeta(
+            label="Max repetitions",
+            description="Repetition counts run from zero to this value.",
+        ),
+    ] = Field(ge=0)
+    repeat_on: Annotated[
+        Literal["X90_pulse", "X180_pulse"],
+        FieldMeta(
+            label="Repeat pulse",
+            description="X90 repeats in pairs; each count adds one pi rotation.",
+        ),
+    ] = "X180_pulse"
+    reset_phase_cycle: Annotated[
+        bool, FieldMeta(label="Cycle reset pi phase (0/180)")
+    ] = Field(
         default=False,
         description="Alternate the final reset qubit pulse by 180 degrees between averaging sweeps. Requires even reps and a scalar reset phase; adds no RF pulses or programmed wait.",
     )

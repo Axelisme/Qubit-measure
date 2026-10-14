@@ -15,23 +15,16 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.cfg import (
-    SweepValue,
-)
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import qub_freq_range
 from zcu_lab.v2.twotone.power_dep.core import PowerCfg, PowerExp, PowerResult
+
+from .form import FORM
 
 PowerDepRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
+    form = FORM
     experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
     ExpCfg_cls: ClassVar[Any] = PowerCfg
@@ -41,40 +34,37 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "Two-tone qubit power dependence: a 2D scan sweeping the "
-            "qubit-drive gain (outer) against the drive frequency (inner), "
-            "reading out the resonator at each point, to map how the qubit "
-            "line shifts and broadens with drive power (AC-Stark shift, power "
-            "broadening, multi-photon lines). Runs on real hardware. No "
-            "automated fit — read off the 2D map by eye."
+            "Two-tone qubit power dependence: a 2D scan sweeping the qubit-drive gain "
+            "(outer) against the drive frequency (inner), reading out the resonator at "
+            "each point, to map how the qubit line shifts and broadens with drive power "
+            "(AC-Stark shift, power broadening, multi-photon lines). Runs on real "
+            "hardware. No automated fit — read off the 2D map by eye."
         ),
         expects_md=(
-            "Reads from the parameter context (all optional): 'q_f' — qubit frequency, "
-            "centring the inner sweep (~2000–6000 MHz); 'qf_w' — qubit "
-            "linewidth, half-span 1.5*qf_w (~1–50 MHz); 'qub_ch' — qubit-drive "
-            "channel; 'r_f' — resonator frequency for the readout tone "
-            "(~4000–8000 MHz); 'res_ch' / 'ro_ch' — readout drive / ADC "
-            "channels; 'timeFly' — readout trigger-offset cable delay (~0–1 "
-            "us). Absent 'q_f'/'qf_w' → ±30 MHz around 4000 MHz."
+            "Inline templates read qubit.freq, qubit.wiring.L01.ch, resonator.freq, "
+            "resonator.wiring.ch/ro_ch and resonator.ext.time_of_fly + 0.05 us from the "
+            "fixed capture. Missing required calibration remains Invalid; no numeric "
+            "fallback. Frequency sweep is qubit.freq ± 1.5 * qubit.kappa; gain runs "
+            "0.001 to 1.0."
         ),
         expects_ml=(
-            "Needs a qubit-probe pulse module and a pulse-readout module; "
-            "references a ModuleLibrary waveform named 'ro_waveform' when "
-            "present. Optionally references a calibrated reset module "
-            "(disabled when none exists)."
+            "Uses captured qubit.module.readout with a fresh readout template when "
+            "unset or dangling. Optional qubit.module.reset stays disabled without a "
+            "source. Library references remain selectable; sweeps overwrite their "
+            "controlled fields only at Run. Qubit probe starts inline at template "
+            "gain/frequency; both are overwritten by the sweeps."
         ),
         typical_writeback=(
             "No analysis and no writeback (the underlying experiment raises "
-            "NotImplementedError). Inspect the 2D map manually; pick the "
-            "low-power qubit frequency to feed back into 'q_f' yourself."
+            "NotImplementedError). Inspect the 2D map manually; pick the low-power "
+            "qubit frequency to feed back into 'qubit.freq' yourself."
         ),
         recommended=(
-            "No fit options. Default sweep: gain ~0.001→0.5 over ~101 points, "
-            "frequency ~201 points spanning 1.5 linewidths around 'q_f'. Start "
-            "the gain sweep low to find the unsaturated line, then extend the "
-            "upper bound to watch the AC-Stark shift and power broadening; "
-            "widen the frequency span if higher-power features fall outside "
-            "the window."
+            "No fit options. Default sweep: gain ~0.001→1.0 over ~101 points, frequency "
+            "~201 points spanning 1.5 linewidths around 'qubit.freq'. Start the gain "
+            "sweep low to find the unsaturated line, then extend the upper bound to "
+            "watch the AC-Stark shift and power broadening; widen the frequency span if "
+            "higher-power features fall outside the window."
         ),
     )
 
@@ -88,36 +78,6 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         cfg = self.build_exp_cfg(raw_cfg, req)
         result = PowerExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse(
-                "qub_pulse",
-                role_id="qub_probe",
-                init=ModuleInit.INLINE,
-                locked={"freq": 0.0, "gain": 0.0},
-            )
-            .readout()
-            .relax_delay(1.0)
-            .sweep(
-                "gain",
-                label="Gain (a.u.)",
-                default=SweepValue(start=0.001, stop=1.0, expts=101),
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=qub_freq_range(expts=201),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     def make_filename_stem(self, ctx: SessionEnv) -> str:
         return f"{ctx.qub_name}_qubit_power_{time.strftime('%H%M')}"

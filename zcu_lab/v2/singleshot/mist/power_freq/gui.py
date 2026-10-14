@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
@@ -17,24 +17,10 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
-from zcu_tools.gui.app.measure.seeds import custom, scaled_path_seed
-from zcu_tools.gui.cfg import (
-    EvalValue,
-    ScalarSpec,
-    SweepValue,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.singleshot_shared import (
     read_confusion_matrix,
-    readout_probe_freq,
-    readout_probe_freq_range,
 )
 from zcu_lab.v2.singleshot.mist.power_freq.core import (
     FreqPowerAnalyzeOptions,
@@ -42,6 +28,7 @@ from zcu_lab.v2.singleshot.mist.power_freq.core import (
     FreqPowerExp,
     FreqPowerResult,
 )
+from zcu_lab.v2.singleshot.mist.power_freq.form import FORM
 
 MistPowerFreqRunResult: TypeAlias = RunRecord[FreqPowerCfg, FreqPowerResult]
 
@@ -60,97 +47,43 @@ class MistPowerFreqAdapter(
     ]
 ):
     experiment_tag: ClassVar[str | None] = FreqPowerExp.persistence_tag()
+    form = FORM
     exp_cls = FreqPowerExp
-    ExpCfg_cls: ClassVar[Any] = FreqPowerCfg
+    ExpCfg_cls = FreqPowerCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
-            "MIST probe power × frequency landscape: drives a probe pulse while "
-            "sweeping its gain and frequency (2D), classifying each shot "
-            "in-program against the |g>/|e> single-shot centres, and plotting "
-            "the ground/excited/other populations as 2D maps over (gain, freq). "
-            "Runs on real hardware; the result is already populations (no "
-            "per-point fit)."
+            "MIST probe power × frequency landscape: drives a probe pulse while sweeping "
+            "its gain and frequency (2D), classifying each shot in-program against the "
+            "|g>/|e> single-shot centres, and plotting the ground/excited/other "
+            "populations as 2D maps over (gain, freq). Runs on real hardware; the result "
+            "is already populations (no per-point fit)."
         ),
         expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. The run classifies each "
-            "shot using these values; missing or invalid cfg calibration fails "
-            "before hardware. Optionally reads 'confusion_matrix' for readout "
-            "correction at analyze time, and 't1' to set the "
-            "relax delay; 'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the "
-            "probe drive and frequency sweep."
+            "Open and Reset capture the current aliases, parameters and library. Relax "
+            "delay is 5 * $qubit.t1. Probe frequency is $resonator.freq +/- 1.5 * "
+            "$resonator.kappa; gain sweep is 0 to 1. Classification seeds "
+            "$qubit.ext.readout_cal.g_center/e_center/radius; missing calibration stays "
+            "Invalid. Inline templates read $qubit.freq, $qubit.wiring.L01.ch and "
+            "$resonator.freq/wiring.ch/wiring.ro_ch; readout trigger uses "
+            "$resonator.ext.time_of_fly + 0.05 us. Missing required sources remain "
+            "Invalid; no numeric fallback is supplied."
         ),
         expects_ml=(
-            "Needs a probe pulse and a readout module. Optionally references a "
-            "calibrated reset and an init pulse — both disabled when no library "
-            "entry exists."
+            "Probe starts from res_probe. Optional init/reset use "
+            "$qubit.module.x180/reset. Readout uses $qubit.module.readout or readout "
+            "template. Sweep-overwritten pulse values remain editable and library keys "
+            "stay selectable. Run uses this fixed capture."
         ),
         typical_writeback=(
             "No writeback — the population landscapes are read off the plot by eye."
         ),
         recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep "
-            "the probe gain across the MIST onset and the frequency around the "
+            "Set calibration cfg directly or seed it with 'singleshot/ge'. Sweep the "
+            "probe gain across the MIST onset and the frequency around the "
             "qubit/resonator line of interest."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("init_pulse", role_id="pi_pulse", optional=True)
-            .pulse(
-                "probe_pulse",
-                role_id="res_probe",
-                label="Probe Pulse",
-                init=ModuleInit.INLINE,
-                overrides={
-                    "freq": custom(
-                        readout_probe_freq,
-                        description="readout probe frequency",
-                    )
-                },
-            )
-            .readout()
-            .relax_delay(scaled_path_seed("$qubit.t1", factor=5.0, fallback_value=30.5))
-            .sweep(
-                "freq",
-                label="Probe frequency (MHz)",
-                default=custom(
-                    lambda ctx: readout_probe_freq_range(ctx, 51),
-                    description="readout probe frequency range",
-                ),
-            )
-            .sweep(
-                "gain",
-                label="Probe gain (a.u.)",
-                default=SweepValue(start=0.0, stop=1.0, expts=51),
-            )
-            .field(
-                "g_center",
-                spec=ScalarSpec("Ground center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.g_center"),
-            )
-            .field(
-                "e_center",
-                spec=ScalarSpec("Excited center", complex),
-                default=EvalValue("$qubit.ext.readout_cal.e_center"),
-            )
-            .field(
-                "radius",
-                spec=ScalarSpec("Classification radius", float),
-                default=EvalValue("$qubit.ext.readout_cal.radius"),
-            )
-            .reps(1000)
-            .rounds(100)
-            .build()
-        )
 
     # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
 

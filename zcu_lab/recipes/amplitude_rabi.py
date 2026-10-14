@@ -127,14 +127,14 @@ def amplitude_rabi(  # noqa: PLR0913 - Typed keywords preserve the public tool i
     if pulse_length_us is None and tab.read_field("modules.qub_pulse").mode == "key":
         tab.retain_module_source(
             "modules.qub_pulse",
-            summary_field="modules.qub_pulse.module.waveform.length",
+            summary_field="modules.qub_pulse.module.waveform.module.length",
             value_path=("waveform", "length"),
         )
     else:
         if pulse_length_us is not None:
             tab.use_inline("modules.qub_pulse")
         tab.set(
-            "modules.qub_pulse.module.waveform.length",
+            "modules.qub_pulse.module.waveform.module.length",
             pulse_length_us,
             source="explicit",
         )
@@ -188,7 +188,9 @@ DEFINITION = RecipeDefinition(
     adapter_name="twotone/rabi/amp_rabi",
     summary_parameters=(
         SummaryParameter(
-            "readout_frequency_mhz", "modules.readout.module.pulse_cfg.freq", "MHz"
+            "readout_frequency_mhz",
+            "modules.readout.module.pulse_cfg.module.freq",
+            "MHz",
         ),
         SummaryParameter(
             "ro_frequency_mhz", "modules.readout.module.ro_cfg.ro_freq", "MHz"
@@ -200,7 +202,7 @@ DEFINITION = RecipeDefinition(
         SummaryParameter("frequency_mhz", "modules.qub_pulse.module.freq", "MHz"),
         SummaryParameter("drive_ref", "modules.qub_pulse"),
         SummaryParameter(
-            "pulse_length_us", "modules.qub_pulse.module.waveform.length", "us"
+            "pulse_length_us", "modules.qub_pulse.module.waveform.module.length", "us"
         ),
         SummaryParameter("gain_sweep", "sweep.gain"),
     ),
