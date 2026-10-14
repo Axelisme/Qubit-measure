@@ -71,6 +71,8 @@ Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_to
 
 - [Measure 表單從 core cfg 推導](draft/measure-form-derivation.md)：表單形狀從 core 的 pydantic cfg 推導，欄位說明用 `Annotated[..., FieldMeta]` 放 core，起始值與偏差寫在每個實驗的 `form.py` 樹；module 節點只有 `Slot` 與 `Template`，角色表改為組合根注入的範本目錄；`dev` 改為 core 的具名裝置欄位。設計已採用，measure-form task 實作完成後轉正式 ADR。
 
+- [量測成果 Artifact、設定快照與讀回](draft/artifact-persistence.md)：核准方向、尚未實作。設定快照正本只在 `data.h5`，ledger 不存 cfg，Notebook 與 GUI 都讀 `data.h5`。Artifact 與 Writeback 各成子模組，`experiment` 共用核心依項目種類決定格式，GUI 子模組管顯示與 adapter 介面。讀回經 `StoredRun` 與核心 `from_stored`，資料優先、cfg 可缺。待 measure-form 與 cfgschema-retire 落地後實作。
+
 - [Pydantic 表單、輸入與宿主提交](draft/pydantic-form-tool.md)：Qt-free core 與 editor 分離，共用 defaults hook、evaluator 與 complex codec。Expression 保存在 input，Engine journal 只記普通值。不遷移 CfgSchema／Measure。
 
 - [Agent 介面分層](draft/agent-interface-layers.md)：L0 實驗環境、L1 GUI／Notebook、L2 recipe、L3 workflow 與跨實驗分析的定位；L1 由 agent 決定在哪一步介入，L2 recipe 與 L3 workflow 由自己決定在哪裡 yield；自動推導歸 recipe、workflow 內部或 GUI adapter 的初始參數生成；層間以共享狀態交接，選層由上而下。Workflow yield 由進行中的重構實作；無人回應時停在 yield，預設決定與 L0 強制有需求再設計。
