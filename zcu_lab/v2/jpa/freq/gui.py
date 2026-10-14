@@ -26,39 +26,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.freq.core import FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.jpa.freq.form import FORM
 
 JpaFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
-
-_JPA_FREQ_SWEEP_EXPTS = 101
-# Bring-up seed: ±2% around the centre. These are inspectable starting bounds,
-# NOT safety certification — the operator must review device and sweep.
-_JPA_FREQ_SEED_SPAN = 0.02
-
-
-def jpa_freq_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_FREQ_SWEEP_EXPTS
-) -> SweepValue:
-    """Store ±2% around $jpa.pump_freq without reading ctx calibration.
-
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
-    return SweepValue(
-        start=EvalValue(expr=f"(1 - {_JPA_FREQ_SEED_SPAN}) * $jpa.pump_freq"),
-        stop=EvalValue(expr=f"(1 + {_JPA_FREQ_SEED_SPAN}) * $jpa.pump_freq"),
-        expts=expts,
-    )
 
 
 @dataclass
@@ -87,7 +60,9 @@ class JpaFreqAdapter(
         expects_md=(
             "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The "
             "pump-frequency bounds use $jpa.pump_freq. Select the connected JPA RF "
-            "device in the form. Missing required aliases or calibration leave the "
+            "device in the form. RF defaults capture jpa_rf_dev at Open or Reset; "
+            "an unbound alias leaves the optional field empty. Missing required "
+            "aliases or calibration leave the "
             "form Invalid."
         ),
         expects_ml=(
@@ -109,36 +84,6 @@ class JpaFreqAdapter(
             "Analysis picks the peak of the absolute signal difference."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "jpa_freq",
-                label="JPA pump freq (MHz)",
-                default=custom(
-                    jpa_freq_sweep_seed,
-                    description="jpa pump frequency range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,

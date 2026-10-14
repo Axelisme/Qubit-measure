@@ -24,24 +24,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-    ModuleInit,
-)
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
-from zcu_lab.v2._support.measure.seeds import res_freq_range
 from zcu_lab.v2.jpa.check.core import CheckCfg, CheckExp, CheckResult
 from zcu_lab.v2.jpa.check.form import FORM
 
 JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
-
-# Bring-up survey: ~101 readout-frequency points around the resonator. These
-# are inspectable starting bounds, NOT safety certification — the operator must
-# review device and sweep.
-_JPA_CHECK_FREQ_EXPTS = 101
 
 
 @dataclass
@@ -72,7 +60,9 @@ class JpaCheckAdapter(
         expects_md=(
             "Uses the resonator alias for $resonator.freq, $resonator.kappa and "
             "resonator wiring. The qubit alias supplies an optional reset module. "
-            "Select the connected JPA RF device in the form. This check does not use "
+            "Select the connected JPA RF device in the form. RF defaults capture "
+            "jpa_rf_dev at Open or Reset; an unbound alias leaves the optional "
+            "field empty. This check does not use "
             "jpa pump-frequency, pump-power or flux calibration. Missing required "
             "resonator calibration leaves the form Invalid."
         ),
@@ -96,38 +86,6 @@ class JpaCheckAdapter(
             "device: the run toggles its output off then on and leaves it ON."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .readout(
-                pulse_only=True,
-                init=ModuleInit.INLINE,
-                locked={
-                    "pulse_cfg.freq": 0.0,
-                    "ro_cfg.ro_freq": 0.0,
-                },
-            )
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "freq",
-                label="Freq (MHz)",
-                default=res_freq_range(expts=_JPA_CHECK_FREQ_EXPTS),
-            )
-            .reps(1000)
-            .rounds(5)
-            .build()
-        )
 
     def run(
         self,

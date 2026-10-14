@@ -27,28 +27,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import alias_name_seed, custom
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
     JPAOptimizeResult,
 )
 from zcu_lab.v2.jpa.auto_optimize.form import FORM
-from zcu_lab.v2.jpa.flux.gui import jpa_flux_sweep_seed
-from zcu_lab.v2.jpa.freq.gui import jpa_freq_sweep_seed
-from zcu_lab.v2.jpa.power.gui import jpa_power_sweep_seed
 
 JpaAutoRunResult = RunRecord[JPAOptCfg, JPAOptimizeResult]
-
-# Bring-up iteration budget (contract: GUI default may use 1001).
-_JPA_AUTO_NUM_POINTS_DEFAULT = 1001
 
 
 def _relabel_auto_figure(fig: Figure) -> None:
@@ -96,7 +84,9 @@ class JpaAutoOptimizeAdapter(
             "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. "
             "Search bounds use $jpa.flux, $jpa.pump_freq and $jpa.pump_power. The "
             "required JPA flux device resolves flux_dev once at Open or Reset; select "
-            "the connected RF device in the form. flux_unit starts as A with no "
+            "the connected RF device in the form. RF defaults capture jpa_rf_dev "
+            "at Open or Reset; an unbound alias leaves the optional field empty. "
+            "flux_unit starts as A with no "
             "conversion. Missing required aliases or calibration leave the form "
             "Invalid."
         ),
@@ -128,82 +118,6 @@ class JpaAutoOptimizeAdapter(
             "evaluated point with no tuning knobs."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        sweep_label = "Search bounds + relative resolution hints"
-        sweep_tooltip = (
-            "Start/stop set this axis's search bounds. Expts is a relative "
-            "resolution hint compared with the other axes when allocating "
-            "phase-1 flux slices; it is not a Cartesian or exact sample count."
-        )
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(30.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .device(
-                "jpa_flux_dev",
-                label="JPA flux device",
-                default=alias_name_seed("flux_dev"),
-                required=False,
-            )
-            .choice(
-                "flux_unit",
-                label="Flux unit",
-                choices=("A", "V", "native"),
-                default="A",
-                tooltip="Working unit for the selected flux driver; no conversion.",
-            )
-            .sweep(
-                "jpa_flux",
-                label="JPA flux device value",
-                default=custom(
-                    jpa_flux_sweep_seed,
-                    description="jpa flux device value search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .sweep(
-                "jpa_freq",
-                label="JPA pump freq (MHz)",
-                default=custom(
-                    jpa_freq_sweep_seed,
-                    description="jpa pump frequency search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .sweep(
-                "jpa_power",
-                label="JPA pump power (dBm)",
-                default=custom(
-                    jpa_power_sweep_seed,
-                    description="jpa pump power search bounds",
-                ),
-                section_label=sweep_label,
-                tooltip=sweep_tooltip,
-            )
-            .int(
-                "num_points",
-                label="Global optimizer points",
-                default=_JPA_AUTO_NUM_POINTS_DEFAULT,
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(1000)
-            .rounds(1)
-            .build()
-        )
 
     def validate_run_request(
         self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]

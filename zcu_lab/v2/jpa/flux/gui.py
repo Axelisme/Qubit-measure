@@ -27,32 +27,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
 from zcu_lab.v2.jpa.flux.form import FORM
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
-
-_JPA_FLUX_SWEEP_EXPTS = 101
-_JPA_FLUX_SEED_SPAN = 5.0e-3
-
-
-def jpa_flux_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_FLUX_SWEEP_EXPTS
-) -> SweepValue:
-    """Store ±5e-3 around $jpa.flux without reading ctx calibration.
-
-    Values use the selected device's working unit, not a unit conversion.
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx
-    return SweepValue(
-        start=EvalValue(expr=f"$jpa.flux - {_JPA_FLUX_SEED_SPAN}"),
-        stop=EvalValue(expr=f"$jpa.flux + {_JPA_FLUX_SEED_SPAN}"),
-        expts=expts,
-    )
 
 
 @dataclass

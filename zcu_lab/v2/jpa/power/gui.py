@@ -27,37 +27,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.schema_builder import (
-    MeasureCfgBuilder,
-    MeasureCfgDefinition,
-)
-from zcu_tools.gui.app.measure.seeds import custom
-from zcu_tools.gui.cfg import EvalValue, SweepValue
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2.jpa.power.core import PowerCfg, PowerExp, PowerResult
 from zcu_lab.v2.jpa.power.form import FORM
 
 JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
-
-_JPA_POWER_SWEEP_EXPTS = 101
-_JPA_POWER_SEED_SPAN_DB = 5.0
-
-
-def jpa_power_sweep_seed(
-    ctx: SessionEnv, *, expts: int = _JPA_POWER_SWEEP_EXPTS
-) -> SweepValue:
-    """Store a ±5 dB sweep around $jpa.pump_power without reading ctx.
-
-    Missing aliases/calibration become Invalid during cfg resolution.
-    """
-    del ctx  # Defaults retain expressions; the resource owns source reads.
-    return SweepValue(
-        start=EvalValue(expr=f"$jpa.pump_power - {_JPA_POWER_SEED_SPAN_DB}"),
-        stop=EvalValue(expr=f"$jpa.pump_power + {_JPA_POWER_SEED_SPAN_DB}"),
-        expts=expts,
-    )
 
 
 @dataclass
@@ -99,7 +74,9 @@ class JpaPowerAdapter(
         expects_md=(
             "Uses the qubit (qubit/*), resonator and jpa (amplifier/jpa) aliases. The "
             "pump-power bounds use $jpa.pump_power. Select the connected JPA RF device "
-            "in the form. Missing required aliases or calibration leave the form "
+            "in the form. RF defaults capture jpa_rf_dev at Open or Reset; an unbound "
+            "alias leaves the optional field empty. Missing required aliases or "
+            "calibration leave the form "
             "Invalid."
         ),
         expects_ml=(
@@ -123,36 +100,6 @@ class JpaPowerAdapter(
             "signal difference."
         ),
     )
-
-    @classmethod
-    def cfg_definition(cls) -> MeasureCfgDefinition:
-        return (
-            MeasureCfgBuilder(
-                role_factories=ROLE_FACTORIES,
-            )
-            .reset(optional=True)
-            .pulse("pi_pulse", role_id="pi_pulse")
-            .readout()
-            .relax_delay(0.5)
-            .device(
-                "jpa_rf_dev",
-                label="JPA RF device",
-                default="",
-                required=False,
-            )
-            .sweep(
-                "jpa_power",
-                label="JPA pump power (dBm)",
-                default=custom(
-                    jpa_power_sweep_seed,
-                    description="jpa pump power range",
-                ),
-            )
-            .float("skew_penalty", label="Skew penalty", default=0.0, decimals=3)
-            .reps(10000)
-            .rounds(1)
-            .build()
-        )
 
     def run(
         self,
