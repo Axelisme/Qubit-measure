@@ -17,6 +17,8 @@ from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from tests.gui.app.measure._cfg_fakes import parameter_capture
+
 from ._run_support import make_plots, make_run_service
 
 
@@ -57,6 +59,7 @@ class ChoiceAdapter(BaseAdapter[ChoiceCfg, str]):
 @pytest.mark.parametrize("phase", ["guard", "run"])
 def test_form_output_is_forwarded_without_rebuilding(phase: str) -> None:
     adapter = ChoiceAdapter()
+    parameters = parameter_capture()
     captures: list[str] = []
     factories: list[str] = []
 
@@ -66,10 +69,17 @@ def test_form_output_is_forwarded_without_rebuilding(phase: str) -> None:
 
     def capture(_aliases: object) -> TabFormSources:
         captures.append("capture")
-        return TabFormSources(FormEnv())
+        return TabFormSources(FormEnv(parameters=parameters))
 
     resource = TabFormResource(factory, capture=capture, mutation_allowed=lambda: True)
-    state = State(SessionEnv(readiness=ContextReadiness.ACTIVE))
+    state = State(
+        SessionEnv(
+            parameters=parameters,
+            soc=None,
+            soccfg=None,
+            readiness=ContextReadiness.ACTIVE,
+        )
+    )
     state.add_tab(
         "choice", Session(adapter_name="choice", adapter=adapter, cfg=resource)
     )
