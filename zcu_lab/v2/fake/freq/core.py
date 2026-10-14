@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.resonance.hanger import HangerModel
 from zcu_tools.analysis.fitting.resonance.transmission import TransmissionModel
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.axes_spec import MHZ_TO_HZ, AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.base import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -32,7 +32,7 @@ from zcu_lab.v2.onetone.freq.core import (
 
 
 class FakeFreqSweepCfg(ProgramV2Cfg):
-    freq: SweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ Param: TypeAlias = "HangerSimParams | TransmissionSimParams"
 class FakeFreqModuleCfg(ConfigBase):
     # Mirrors the real onetone ExpCfg modules: readout only. No init_pulse (no
     # qubit-drive pulse) and no reset (one-tone runs without a qubit reset).
-    readout: ReadoutCfg
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
 
 
 class FakeFreqCfg(ProgramV2Cfg, ExpCfgModel):

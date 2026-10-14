@@ -10,6 +10,7 @@ from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
+from zcu_lab.v2.fake.freq.form import FORM as FAKE_FREQ_FORM
 from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
@@ -17,10 +18,13 @@ from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
 from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
+from zcu_lab.v2.lookback.form import FORM as LOOKBACK_FORM
 from zcu_lab.v2.lookback.gui import LookbackAdapter
 from zcu_lab.v2.onetone.flux_dep.form import FORM as ONETONE_FLUX_DEP_FORM
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
+from zcu_lab.v2.onetone.freq.form import FORM as ONETONE_FREQ_FORM
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
+from zcu_lab.v2.onetone.power_dep.form import FORM as ONETONE_POWER_DEP_FORM
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
 from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
 from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
@@ -130,6 +134,10 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 
 # Core-derived forms of migrated adapters, registered with their adapter names.
 FORMS: dict[str, Form[ConfigBase]] = {
+    "lookback": LOOKBACK_FORM,
+    "fake/freq": FAKE_FREQ_FORM,
+    "onetone/freq": ONETONE_FREQ_FORM,
+    "onetone/power_dep": ONETONE_POWER_DEP_FORM,
     "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
     "twotone/freq": TWOTONE_FREQ_FORM,
 }

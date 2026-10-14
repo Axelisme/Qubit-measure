@@ -61,7 +61,16 @@ def onetone_spectrum(  # noqa: PLR0913 - Typed keywords preserve the public tool
     )
     if missing:
         raise RecipeNeedsParameters(missing)
-    tab.set("modules.readout.pulse_cfg.gain", gain)
+    if gain is None and tab.read_field("modules.readout").mode == "key":
+        tab.retain_module_source(
+            "modules.readout",
+            summary_field="modules.readout.module.pulse_cfg.module.gain",
+            value_path=("pulse_cfg", "gain"),
+        )
+    else:
+        if gain is not None:
+            tab.use_inline("modules.readout")
+        tab.set("modules.readout.module.pulse_cfg.module.gain", gain)
     tab.set("reps", reps)
     tab.set("rounds", rounds)
     run, status = yield tab.run()
@@ -104,7 +113,7 @@ DEFINITION = RecipeDefinition(
     adapter_name="onetone/freq",
     summary_parameters=(
         SummaryParameter("frequency_sweep", "sweep.freq", "MHz"),
-        SummaryParameter("gain", "modules.readout.pulse_cfg.gain"),
+        SummaryParameter("gain", "modules.readout.module.pulse_cfg.module.gain"),
         SummaryParameter("readout_ref", "modules.readout"),
         SummaryParameter("reps", "reps"),
         SummaryParameter("rounds", "rounds"),

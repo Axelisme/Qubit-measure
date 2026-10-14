@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-14，選項清單與無 previous 的 defaults
+**Last updated:** 2026-10-14，AliasName 靜態預設與選項契約
 
 本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
@@ -12,6 +12,8 @@
 - `ModuleInputField(family, *, nullable=False, ref_family=None)`：把具體持久 ModuleSpec class 或其 union 生成為手寫 FormModel 可用的 tagged 欄位。`annotation` 是 runtime Pydantic 型別，`options(env)` 是同一欄位的選項與複製指令。`family` 決定 inline 家族，`ref_family` 只限制 captured ref keys，省略時沿用 family。`nullable` 單獨決定 None，不在 family 再放 None。空、不支援或超出 inline family 的 ref 宣告在建構時拒絕。`to_spec(value)` 接收該欄位的成功 FormState.result 值，ref 回 literal key，inline 回 detached、驗證過的持久 Spec，nullable None 保 None。它保留 child keys、不讀來源或 materialize，屏蔽欄位由 Spec defaults 補回。其他欄位的 generated 值或不合法 Spec 明確拒絕。
 
 手寫表單在自己的 `options(env)` hook 將 `ModuleInputField.options(env)` 放到欄位路徑；既有最深 local choices 規則照舊。Python 型別檢查器不能反射 runtime `annotation`，靜態別名可用 `ModuleRef | ModuleInline` 作 nominal value view，nullable 時另含 None。這個 view 只供保存結果與傳給 `to_spec`，不表示 generated `.module` 已是持久 Spec。Workflows 三個 plan 表單共用這個入口，先取持久形式再交既有 core/native factories；校準 policy 仍屬 workflows。
+
+`AliasName` 的 devices 選項包含 core 欄位的靜態字串預設，空字串顯示為 None。Schema 與驗證共用同一份 choices。缺 alias 時 input 保持缺席，有 core 預設就用該預設，無預設的 required 欄位仍 Invalid。綁定 alias 照舊帶入裝置名，其他未列出的值仍被拒絕。
 
 生成器擁有兩條翻譯政策，host 與 `gui.form` 不重做：
 
