@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from qtpy.QtWidgets import QLineEdit
 from zcu_tools.gui.app.fluxdep.ui.export_dialog import ExportSpectrumsDialog
 
 
@@ -35,11 +36,7 @@ def test_default_path_from_project_result_dir(qapp):
 
 
 def test_path_can_be_overridden(dialog):
-    dialog._path_edit.setText("/tmp/custom.hdf5")
+    edit = dialog.findChild(QLineEdit)
+    assert edit is not None
+    edit.setText("/tmp/custom.hdf5")
     assert dialog.export_path() == "/tmp/custom.hdf5"
-
-
-def test_no_chip_qub_edit_fields(dialog):
-    # the chip/qubit editing moved to the Project dialog
-    assert not hasattr(dialog, "_chip_edit")
-    assert not hasattr(dialog, "_qub_edit")

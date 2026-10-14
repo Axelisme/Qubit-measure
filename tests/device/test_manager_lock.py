@@ -35,22 +35,9 @@ def manager() -> DeviceManager:
 # ---------------------------------------------------------------------------
 
 
-def _make_slow_ramp_device() -> FakeDevice:
-    """FakeDevice with real sleep ramp and a tiny rampstep.
-
-    The ramp spans many linspace steps, giving other threads a wide window to
-    call manager APIs while the ramp holds the per-instance lock.
-    """
-    dev = FakeDevice(fast_mode=False)
-    dev._rampstep = 1e-2  # many steps => long ramp window
-    return dev
-
-
 def _make_fast_device() -> FakeDevice:
     """FakeDevice that completes setup instantly (for the observer device B)."""
-    dev = FakeDevice(fast_mode=True)
-    dev._rampstep = 0.1
-    return dev
+    return FakeDevice(fast_mode=True)
 
 
 class _CloseProbe:
@@ -116,87 +103,35 @@ def _hook_close(
 
 def test_get_info_not_blocked_by_concurrent_setup_on_other_device(
     manager: DeviceManager,
+    paused_ramp: tuple[threading.Event, threading.Event],
 ) -> None:
-    """get_info("B") must return before device A's ramp finishes.
-
-    Old implementation: manager._lock was held for the entire setup() call,
-    so get_info("B") would block until A's ramp completed.
-
-    New implementation: manager._lock is released before per-device I/O, so
-    get_info("B") resolves independently from A's ramp.
-
-    Verification strategy
-    ---------------------
-    - ramp_started  : set inside A's _setup hook, guarantees thread 2 fires
-                      while A definitely holds its per-instance lock.
-    - writer_done   : set after A's setup() returns.
-    - get_info_returned : set by thread 2 as soon as get_info("B") returns.
-
-    We assert get_info_returned is set while writer_done is *not* yet set,
-    proving get_info("B") completed before A's ramp finished.
-    """
-    dev_a = _make_slow_ramp_device()
+    dev_a = FakeDevice(fast_mode=False)
     dev_b = _make_fast_device()
     manager.register_device("A", dev_a)
     manager.register_device("B", dev_b)
-
-    cfg_a = FakeDeviceInfo(
-        address="none", output="on", value=1.0, rampstep=dev_a._rampstep
+    cfg_a = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.25)
+    cfg_b = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
+    manager.setup_devices({"B": cfg_b}, progress=False)
+    entered, release = paused_ramp
+    worker = threading.Thread(
+        target=lambda: manager.setup_devices({"A": cfg_a}, progress=False)
     )
-    cfg_b = FakeDeviceInfo(
-        address="none", output="on", value=0.5, rampstep=dev_b._rampstep
-    )
-    # Pre-configure B so get_info() has a meaningful state to return.
-    manager.setup_devices({"B": cfg_b})
 
-    ramp_started = threading.Event()
-    writer_done = threading.Event()
-    get_info_returned = threading.Event()
-    writer_done_at_get_info_time: list[bool] = []
+    worker.start()
+    try:
+        assert entered.wait(5.0)
+        info_b = manager.get_info("B")
+        assert isinstance(info_b, FakeDeviceInfo)
+        assert info_b.value == cfg_b.value
+        assert worker.is_alive(), "get_info('B') waited for A's ramp to finish"
+    finally:
+        release.set()
+        worker.join(timeout=5.0)
 
-    original_setup = dev_a._setup
-
-    def hooked_setup(*args, **kwargs):  # type: ignore[no-untyped-def]
-        ramp_started.set()  # signal: A's per-instance lock is now held
-        original_setup(*args, **kwargs)
-
-    dev_a._setup = hooked_setup  # type: ignore[method-assign]
-
-    def writer() -> None:
-        try:
-            manager.setup_devices({"A": cfg_a})
-        finally:
-            dev_a._setup = original_setup  # type: ignore[method-assign]
-            writer_done.set()
-
-    def reader() -> None:
-        ramp_started.wait()  # wait until A's ramp is in progress
-        manager.get_info("B")
-        # Record whether writer_done was already set at the moment get_info returned.
-        writer_done_at_get_info_time.append(writer_done.is_set())
-        get_info_returned.set()
-
-    t_writer = threading.Thread(target=writer)
-    t_reader = threading.Thread(target=reader)
-    t_writer.start()
-    t_reader.start()
-
-    # get_info("B") must return well before the ramp finishes.
-    # Timeout of 5 s is generous; a blocked call would hold until the full ramp
-    # (many steps × 0.01 s sleep each) completes — orders of magnitude longer.
-    returned_in_time = get_info_returned.wait(timeout=5.0)
-
-    t_writer.join()
-    t_reader.join()
-
-    assert returned_in_time, (
-        "get_info('B') did not return within 5 s while A's ramp was in progress; "
-        "the manager lock is likely still held across the setup() I/O."
-    )
-    assert not writer_done_at_get_info_time[0], (
-        "get_info('B') returned only after device A's ramp finished; "
-        "expected it to return before writer_done was set (lock-free path)."
-    )
+    assert not worker.is_alive()
+    info_a = manager.get_info("A")
+    assert isinstance(info_a, FakeDeviceInfo)
+    assert info_a.value == cfg_a.value
 
 
 def test_register_device_rejects_non_base_device_without_mutating_registry(
@@ -344,13 +279,11 @@ def test_setup_devices_explicit_cancel_signal_skips_before_first_device(
 def test_setup_devices_mid_ramp_cancel_stops_before_next_device(
     manager: DeviceManager,
 ) -> None:
-    dev_a = _make_slow_ramp_device()
+    dev_a = FakeDevice(fast_mode=False)
     dev_b = _make_fast_device()
     manager.register_device("A", dev_a)
     manager.register_device("B", dev_b)
-    cfg_a = FakeDeviceInfo(
-        address="none", output="on", value=1.0, rampstep=dev_a._rampstep
-    )
+    cfg_a = FakeDeviceInfo(address="none", output="on", value=1.0, rampstep=0.01)
     cfg_b = FakeDeviceInfo(address="none", output="on", value=0.5, rampstep=0.1)
     cancel_signal = threading.Event()
     timer = threading.Timer(0.03, cancel_signal.set)

@@ -1,14 +1,10 @@
-"""Integration test: the full dispersive pipeline through the Controller.
-
-Exercises load_fit_inputs → load_onetone → preprocess → predict → autofit → export,
-with scqubits-backed calls monkeypatched to cheap stubs, asserting the EventBus
-fires and the predictor cache is bound to the right (params, flux-axis).
-"""
+"""Integration tests for the public dispersive Controller pipeline."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
-import zcu_tools.simulate.fluxonium.prediction as prediction_mod
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
@@ -20,12 +16,6 @@ from zcu_tools.gui.app.dispersive.event_bus import (
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.project import ProjectInfo
 from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
-
-
-def _stub(params, fluxs, bare_rf, g, *, progress=False, res_dim=4, **kw):
-    rf0 = np.full(len(fluxs), 5.5 + 2.0 * (g - 0.06))
-    rf1 = np.full(len(fluxs), 5.9)
-    return rf0, rf1
 
 
 def _params_json(tmp_path):
@@ -46,8 +36,7 @@ def _params_json(tmp_path):
     return path
 
 
-def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
+def test_full_pipeline(tmp_path, onetone_hdf5):
     onetone_path, *_ = onetone_hdf5
     params_path = _params_json(tmp_path)
 
@@ -79,9 +68,10 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
     assert state.preprocess is not None
     assert "PreprocessChangedPayload" in events
 
-    # 4. predict (cached, stubbed) — the tune worker's compute
+    # 4. predict over the full preprocessed axis
     rf = ctrl.predict_dispersive(0.06, 5.3, return_dim=2)
     assert len(rf) == 2
+    assert all(line.shape == result.sp_fluxs.shape for line in rf)
 
     # 5. accept the tuning — the manual g/bare_rf IS the final fit (no auto-fit)
     ctrl.set_manual_fit(0.06, 5.3, res_dim=4)
@@ -96,18 +86,15 @@ def test_full_pipeline(monkeypatch, tmp_path, onetone_hdf5):
     assert saved.require_fluxdep_fit().params == (4.0, 1.0, 0.5)
 
 
-def test_predictor_rebuilt_when_inputs_change(monkeypatch, tmp_path, onetone_hdf5):
-    monkeypatch.setattr(prediction_mod, "calculate_dispersive_vs_flux_fast", _stub)
+def test_predict_flux_axis_updates_when_preprocess_changes(tmp_path, onetone_hdf5):
     onetone_path, *_ = onetone_hdf5
-    params_path = _params_json(tmp_path)
     state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
     ctrl = Controller(state)
-
-    ctrl.load_fit_inputs(params_path)
+    ctrl.load_fit_inputs(_params_json(tmp_path))
     ctrl.load_onetone(onetone_path)
-    ctrl.record_preprocess(ctrl.compute_preprocess())
-    p1 = ctrl._predictor()
-    # re-recording preprocess (new object) rebuilds the predictor
-    ctrl.record_preprocess(ctrl.compute_preprocess())
-    p2 = ctrl._predictor()
-    assert p1 is not p2
+    result = ctrl.preprocess()
+    np.testing.assert_array_equal(ctrl.predict_flux_axis(), result.sp_fluxs)
+
+    updated = replace(result, sp_fluxs=result.sp_fluxs + 0.25)
+    ctrl.record_preprocess(updated)
+    np.testing.assert_array_equal(ctrl.predict_flux_axis(), updated.sp_fluxs)

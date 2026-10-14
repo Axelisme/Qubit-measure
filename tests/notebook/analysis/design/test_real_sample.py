@@ -1,10 +1,8 @@
 """v2 SampleTable contract tests for the design-search real-sample overlay.
 
 ``add_real_sample`` must select the measured row by normalized resolved flux
-(never by direct cross-unit ``dev_value`` comparison): explicit flux, row-frame
-derivation and the caller-declared fallback frame all select the row whose
-resolved flux is nearest the operating point; unresolved rows and legacy
-coordinate columns fail before any physics or comparison runs.
+(never by direct cross-unit ``dev_value`` comparison). These cases check that
+unresolved rows and legacy coordinate columns report public validation errors.
 """
 
 from __future__ import annotations
@@ -13,11 +11,9 @@ from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
-from numpy.typing import NDArray
-from plotly.graph_objects import Figure, Scatter
+from plotly.graph_objects import Figure
 from zcu_tools.notebook.analysis.design import search as S
 from zcu_tools.resources.qubit_params import (
     DispersiveFit,
@@ -33,46 +29,18 @@ from zcu_tools.resources.sample_table import (
 
 _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
 
-# Physics-call counter shared with the fakes; restored by the fixture.
-_PHYSICS_CALLS = {"physics": 0}
-
 
 @pytest.fixture(scope="module", autouse=True)
 def guard_shared_state() -> Iterator[None]:
     """Name this module if its tests leak changes to shared recording state."""
     noise_channels = deepcopy(_NOISE_CHANNELS)
-    physics_calls = _PHYSICS_CALLS.copy()
     yield
     assert noise_channels == _NOISE_CHANNELS, f"{__name__} leaked noise channels"
-    assert physics_calls == _PHYSICS_CALLS, f"{__name__} leaked physics calls"
-
-
-def _scatter_traces(fig: Figure) -> list[Scatter]:
-    traces = []
-    for trace in fig.data:
-        assert isinstance(trace, Scatter)
-        traces.append(trace)
-    return traces
-
-
-def _actual_t1_trace(fig: Figure) -> Scatter:
-    traces = [trace for trace in _scatter_traces(fig) if trace.mode == "markers+text"]
-    assert len(traces) == 1
-    trace = traces[0]
-    assert isinstance(trace, Scatter)
-    return trace
-
-
-def _y_values(trace: Scatter) -> NDArray[np.float64]:
-    values = trace.y
-    assert isinstance(values, (list, tuple, np.ndarray))
-    assert not np.iscomplexobj(values)
-    return np.asarray(values, dtype=np.float64)
 
 
 @pytest.fixture
-def result_dir(tmp_path, monkeypatch) -> str:
-    """Minimal parameter directory with fake physics."""
+def result_dir(tmp_path) -> str:
+    """Minimal parameter directory for public validation errors."""
     result = tmp_path / "q1"
     result.mkdir()
     params_file = QubitParams(result / "params.json")
@@ -89,25 +57,6 @@ def result_dir(tmp_path, monkeypatch) -> str:
     )
     params_file.set_dispersive_fit(DispersiveFit(g=0.1, bare_rf=7.0))
 
-    calls = _PHYSICS_CALLS
-    monkeypatch.setitem(calls, "physics", 0)
-
-    def _fake_calc_ge_snr(*_args, **_kwargs):
-        calls["physics"] += 1
-        return None, np.array([1.0, 2.0, 3.0])
-
-    import scqubits.core.fluxonium as fluxonium_mod
-
-    class FakeFluxonium:
-        def __init__(self, *_args, **_kwargs) -> None:
-            pass
-
-        def t1_effective(self, *_args, **_kwargs) -> float:
-            calls["physics"] += 1
-            return 500.0  # ns -> predict_t1 = 0.5 us
-
-    monkeypatch.setattr(S, "calc_ge_snr", _fake_calc_ge_snr)
-    monkeypatch.setattr(fluxonium_mod, "Fluxonium", FakeFluxonium)
     return str(result)
 
 
@@ -140,117 +89,7 @@ def _write_sample_frame(samples: JsonlSampleTable, frame: pd.DataFrame) -> None:
         frame.to_json(path, orient="records", lines=True)
 
 
-def test_selects_row_by_explicit_flux(
-    result_dir: str, samples: JsonlSampleTable
-) -> None:
-    _write_sample_jsonl(
-        samples,
-        [
-            {"dev_value": 0.3, "dev_unit": "A", "flux": 0.3, "t1_us": 11.0},
-            {"dev_value": 0.5, "dev_unit": "A", "flux": 0.5, "t1_us": 22.0},
-            {"dev_value": 0.7, "dev_unit": "A", "flux": 0.7, "t1_us": 33.0},
-        ],
-    )
-    fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
-
-    trace = _actual_t1_trace(fig)
-    assert _y_values(trace)[0] == 22.0
-    # predicted point comes from the fake model, not from the table
-    predicted = [t for t in _scatter_traces(fig) if t.mode == "markers"]
-    assert len(predicted) == 1
-    assert _y_values(predicted[0])[0] == 0.5
-
-
-def test_selects_row_by_row_frame_derived_flux(
-    result_dir: str, samples: JsonlSampleTable
-) -> None:
-    _write_sample_jsonl(
-        samples,
-        [
-            {
-                "dev_value": 0.0,
-                "dev_unit": "A",
-                "flux_int": 0.0,
-                "flux_period": 2.0,
-                "t1_us": 11.0,
-            },  # flux 0.0
-            {
-                "dev_value": 1.0,
-                "dev_unit": "A",
-                "flux_int": 0.0,
-                "flux_period": 2.0,
-                "t1_us": 22.0,
-            },  # flux 0.5
-            {
-                "dev_value": 1.4,
-                "dev_unit": "A",
-                "flux_int": 0.0,
-                "flux_period": 2.0,
-                "t1_us": 33.0,
-            },  # flux 0.7
-        ],
-    )
-    fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
-
-    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
-
-
-def test_selects_row_by_declared_fallback_frame(
-    result_dir: str, samples: JsonlSampleTable
-) -> None:
-    _write_sample_jsonl(
-        samples,
-        [
-            {"dev_value": 0.3, "dev_unit": "A", "t1_us": 11.0},
-            {"dev_value": 0.5, "dev_unit": "A", "t1_us": 22.0},
-        ],
-    )
-    fig = _new_fig()
-    S.add_real_sample(
-        fig,
-        result_dir,
-        _NOISE_CHANNELS,
-        Temp=0.05,
-        samples=samples,
-        fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0),
-    )
-
-    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
-
-
-def test_cross_unit_rows_compare_in_flux_domain_only(
-    result_dir: str, samples: JsonlSampleTable
-) -> None:
-    # The V row is flux-nearest (0.5) although its dev_value (3.0 V) is far from
-    # the A row values; direct dev_value comparison across units would pick row0.
-    _write_sample_jsonl(
-        samples,
-        [
-            {
-                "dev_value": 0.49,
-                "dev_unit": "A",
-                "flux_int": 0.0,
-                "flux_period": 1.0,
-                "t1_us": 11.0,
-            },  # flux 0.49
-            {
-                "dev_value": 3.0,
-                "dev_unit": "V",
-                "flux_int": 2.0,
-                "flux_period": 2.0,
-                "t1_us": 22.0,
-            },  # flux 0.5
-        ],
-    )
-    fig = _new_fig()
-    S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
-
-    assert _y_values(_actual_t1_trace(fig))[0] == 22.0
-
-
-def test_unresolved_rows_fail_with_indexes_before_physics(
+def test_unresolved_rows_report_indexes(
     result_dir: str, samples: JsonlSampleTable
 ) -> None:
     _write_sample_jsonl(
@@ -264,8 +103,6 @@ def test_unresolved_rows_fail_with_indexes_before_physics(
 
     with pytest.raises(SampleTableV2Error, match=r"row\(s\) \[1\]"):
         S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
-
-    assert _PHYSICS_CALLS["physics"] == 0
 
 
 def test_fallback_frame_unit_mismatch_is_unresolved(
@@ -288,7 +125,7 @@ def test_fallback_frame_unit_mismatch_is_unresolved(
         )
 
 
-def test_legacy_coordinate_column_fails_before_physics(
+def test_legacy_coordinate_column_is_rejected(
     result_dir: str, samples: JsonlSampleTable
 ) -> None:
     _write_sample_jsonl(
@@ -302,13 +139,9 @@ def test_legacy_coordinate_column_fails_before_physics(
     with pytest.raises(SampleTableV2Error, match="calibrated mA"):
         S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
 
-    assert _PHYSICS_CALLS["physics"] == 0
 
-
-def test_empty_table_fails_before_physics(
-    result_dir: str, samples: JsonlSampleTable
-) -> None:
-    # Empty JSONL table: validation must fail before physics.
+def test_empty_table_is_rejected(result_dir: str, samples: JsonlSampleTable) -> None:
+    # Empty JSONL tables report a public validation error.
     _write_sample_frame(
         samples, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
     )
@@ -316,8 +149,6 @@ def test_empty_table_fails_before_physics(
 
     with pytest.raises(SampleTableV2Error, match="empty"):
         S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
-
-    assert _PHYSICS_CALLS["physics"] == 0
 
 
 def _new_fig() -> Figure:

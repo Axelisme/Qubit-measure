@@ -116,51 +116,38 @@ def test_pool_delivers_error(qapp):
     assert errs == [boom]
 
 
-def test_progress_ambient_installs_pbar_factory(qapp):
-    # progress_ambient installs the pbar ContextVar so the worker thread can
-    # create progress bars (ADR-0066). We verify it is callable from the
-    # worker by reading back the ContextVar value directly.
-    from zcu_tools.progress_bar.interface import _pbar_factory as _cv
+@pytest.mark.parametrize("nested_none", [False, True])
+def test_progress_ambient_routes_worker_bars_to_factory(qapp, nested_none):
+    from zcu_tools.gui.session.services.progress import ProgressService
+    from zcu_tools.progress_bar.interface import make_pbar
+
+    from tests.gui._progress_fakes import DirectProgressTransport
 
     bg = _bg()
-    sentinel = object()
-    seen: list[object] = []
+    progress = ProgressService(DirectProgressTransport())
+    factory = progress.make_factory(1, owner_id="worker")
+    done: list[object] = []
 
     def work() -> object:
-        with progress_ambient(sentinel):  # type: ignore[arg-type]
-            seen.append(_cv.get())
+        with (
+            progress_ambient(factory),
+            progress_ambient(None if nested_none else factory),
+        ):
+            bar = make_pbar(total=10, desc="working")
+            bar.set_progress(4)
         return 1
 
     bg.submit(
         work,
         run_in_pool=False,
-        on_done=lambda r: None,
-        on_error=lambda e: None,
+        on_done=done.append,
+        on_error=lambda e: pytest.fail(str(e)),
     )
-    _pump_until(qapp, lambda: seen)
-    assert seen == [sentinel]
-
-
-def test_progress_ambient_none_factory_is_noop(qapp):
-    # progress_ambient(None) is a no-op: the pbar ContextVar stays at its default.
-    from zcu_tools.progress_bar.interface import _pbar_factory as _cv
-
-    bg = _bg()
-    seen: list[object] = []
-
-    def work() -> object:
-        with progress_ambient(None):
-            seen.append(_cv.get())
-        return 1
-
-    bg.submit(
-        work,
-        run_in_pool=False,
-        on_done=lambda r: None,
-        on_error=lambda e: None,
-    )
-    _pump_until(qapp, lambda: seen)
-    assert seen == [None]
+    _pump_until(qapp, lambda: done)
+    ((_, model),) = progress.bars_for_owner("worker")
+    assert model.n == 4
+    assert model.total == 10
+    assert model.label == "working"
 
 
 @pytest.mark.parametrize("run_in_pool", [True, False])

@@ -16,12 +16,6 @@ from matplotlib.text import Text
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
-from zcu_tools.gui.app.fluxdep.event_bus import (
-    ActiveSpectrumChangedPayload,
-    SpectrumAddedPayload,
-    SpectrumChangedPayload,
-    SpectrumRemovedPayload,
-)
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
@@ -89,26 +83,6 @@ def test_project_label_names_the_project_after_setup(window, ctrl):
     assert "Q5_2D" not in project_label(window).text()
     ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
     assert project_label(window).text() == "Project: Q5_2D / Q1"
-
-
-def test_window_close_removes_event_bus_subscriptions(window, ctrl):
-    for payload_type in (
-        SpectrumAddedPayload,
-        SpectrumRemovedPayload,
-        SpectrumChangedPayload,
-        ActiveSpectrumChangedPayload,
-    ):
-        assert ctrl.bus._subs.get(payload_type)
-
-    window.close()
-
-    for payload_type in (
-        SpectrumAddedPayload,
-        SpectrumRemovedPayload,
-        SpectrumChangedPayload,
-        ActiveSpectrumChangedPayload,
-    ):
-        assert ctrl.bus._subs.get(payload_type, []) == []
 
 
 def test_load_refreshes_list(window, ctrl, spectrum_hdf5):

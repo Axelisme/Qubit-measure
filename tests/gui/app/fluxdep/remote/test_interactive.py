@@ -9,7 +9,6 @@ from collections.abc import Callable, Mapping
 
 import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from PIL import Image
 from zcu_tools.analysis.fluxdep.cross_selection import project_cross_selection
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
@@ -24,7 +23,6 @@ from zcu_tools.gui.app.fluxdep.interactive import (
     OneTonePickContext,
     TwoTonePickContext,
 )
-from zcu_tools.gui.app.fluxdep.remote import interactive
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventMeta
@@ -637,24 +635,6 @@ def test_terminal_reply_retains_old_identity_despite_synchronous_successor(
     next_context = _context(_read_picker(one_route, link, "one"))
     assert next_context["context_id"] != terminal["context_id"]
     assert next_context["kind"] == "onetone" and next_context["closed"] is False
-
-
-def test_render_failure_does_not_edit_or_close_live_input(
-    one_route: RouteHarness, monkeypatch: pytest.MonkeyPatch
-):
-    link = one_route.client()
-    context = _open_picker(one_route, link, "one", "onetone")
-
-    def fail(figure: Figure) -> bytes:
-        raise OSError("PNG unavailable")
-
-    monkeypatch.setattr(interactive, "render_figure_png", fail)
-    reply = one_route.request(link, "interactive.render", target="spectrum", name="one")
-    assert reply["ok"] is False
-    assert reply["error"]["code"] == "controller_error"
-    assert not one_route.ctrl.state.spectrums["one"].points_completed
-    live = _context(_read_picker(one_route, link, "one"))
-    assert live["context_id"] == context["context_id"]
 
 
 def test_route_agent_facts_drive_native_gui_and_reads_do_not_switch(

@@ -108,10 +108,8 @@ def test_published_fit_inputs_reach_search_and_show(
 
 @pytest.mark.parametrize("display_edit", ["none", "subset", "missing_frequency"])
 def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
-    panel, monkeypatch, display_edit, search_database_hdf5
+    panel, display_edit, search_database_hdf5
 ):
-    from zcu_tools.gui.app.fluxdep.services import viz
-
     widget, ctrl = panel
     _unlock_search(ctrl)  # Show also needs an unlocked Search
     ctrl.set_fit_params(
@@ -145,14 +143,6 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
         synthetic_search_input(ctrl.state, fluxs, freqs, bounds),
     )
     assert show_form.get_transitions() == display_before_result
-    monkeypatch.setattr(
-        viz,
-        "calculate_energy_vs_flux",
-        lambda params, fluxs, **kwargs: (
-            None,
-            np.tile(np.arange(15, dtype=float), (len(fluxs), 1)),
-        ),
-    )
     search_status = named(widget, QLabel, "fluxdep.fit.status").text()
     widget.show_tab("show")
     named(widget, QPushButton, "fluxdep.show.apply").click()
@@ -164,10 +154,7 @@ def test_fit_publication_preserves_display_edits_and_renders_owner_inputs(
     assert len(canvas.figure.axes) == 1
     lines = canvas.figure.axes[0].lines
     assert len(lines) == 1
-    expected_frequency = 2.0 if display_edit == "subset" else 1.0
-    np.testing.assert_allclose(
-        np.asarray(lines[0].get_ydata(), dtype=float), expected_frequency
-    )
+    assert lines[0].get_label() == ("0 -> 2" if display_edit == "subset" else "0 -> 1")
     assert ctrl.state.fit.transitions == {"transitions": [(0, 1)]}
     assert ctrl.state.fit.params == (5.0, 1.0, 0.5)
 

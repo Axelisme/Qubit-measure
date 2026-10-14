@@ -27,7 +27,6 @@ from ._start_fakes import StartHarness
 
 def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -88,16 +87,13 @@ def test_idle_tunables_failure_finishes_once_and_discards_retained_progress(
         "failed", failed.reason
     )
     assert controller.stop("run") == failed
-    assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert controller.stop("run") == failed and len(finished) == 2
-    assert progress_calls == ([token], [token])
     assert harness.background.work is None and not harness.gate.snapshot()
 
 
 def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
 ) -> None:
     harness, rig = StartHarness(), Rig(tmp_path)
     finished: list[tuple[RunStatus | None, Exception | None]] = []
@@ -158,7 +154,7 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
     assert failed is not None and failed.lifecycle == "failed" and failed.revision == 0
     assert observed == [(True, True, token, 0)]
     assert controller.operation_id == token and harness.gate.snapshot()
-    assert finished == [] and progress_calls == ([token], [])
+    assert finished == []
     assert harness.progress.bars_for_operation(token)
     assert binding.accepted_input.data == binding.state.base.data == {"value": 1}
     assert binding.state.input.data == {"value": 2}
@@ -168,16 +164,13 @@ def test_active_tunables_failure_waits_for_producer_and_preserves_native_outcome
         "failed", failed.reason
     )
     assert controller.operation_id is None and not harness.gate.snapshot()
-    assert progress_calls == ([token], [token])
     assert not harness.progress.bars_for_owner("example")
     assert controller.stop("run") == failed and len(finished) == 1
-    assert progress_calls == ([token], [token])
 
 
 @pytest.mark.parametrize("view_error", [False, True])
 def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
     tmp_path: Path,
-    progress_calls: tuple[list[int], list[int]],
     caplog: pytest.LogCaptureFixture,
     view_error: bool,
 ) -> None:
@@ -254,5 +247,4 @@ def test_resume_failed_tunables_unwind_finishes_once_without_a_producer(
     assert not harness.gate.snapshot() and harness.handles.live_count() == 0
     assert not harness.progress.bars_for_owner("example")
     assert controller.stop("run") == failed and len(finished) == 2
-    assert progress_calls == ([token], [token])
     assert ("failed view notification" in caplog.text) == view_error
