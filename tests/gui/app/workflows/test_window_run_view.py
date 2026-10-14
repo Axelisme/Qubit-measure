@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.app.workflows.panel import WorkflowFormPanel
 from zcu_tools.gui.app.workflows.window import WorkflowWindow
 
-from tests.gui._user_input import key_click, type_text
+from tests.gui._user_input import key_click, mouse_click, type_text
 
 from ._window_support import (
     FigurePoint,
@@ -303,16 +303,9 @@ class Readable:
     input_kept: bool
 
 
-def model_fold(panel: QWidget, path: str) -> QPushButton:
-    """The Expand/Collapse button in the header of the model row at path."""
-    row = child(panel, QLabel, f"form.value.{path}").parentWidget()
-    assert row is not None
-    (fold,) = [
-        button
-        for button in row.findChildren(QPushButton)
-        if button.parentWidget() is row and button.text() in ("Expand", "Collapse")
-    ]
-    return fold
+def model_fold(panel: QWidget, path: str) -> QLabel:
+    """The fold title in the header of the model row at path."""
+    return child(panel, QLabel, f"form.fold.{path}")
 
 
 def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
@@ -333,7 +326,8 @@ def test_running_start_forms_stay_readable_and_unfold_but_ignore_typing(
         key_click(locked_count, Qt.Key.Key_Return)
         alpha = child(plan, QLineEdit, "form.input.first.alpha")
         folded_before = not alpha.isVisibleTo(plan)
-        model_fold(plan, "first").click()
+        title = model_fold(plan, "first")
+        mouse_click(title, title.rect().center())
         qapp.processEvents()
         seen.append(
             Readable(
