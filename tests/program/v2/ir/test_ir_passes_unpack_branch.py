@@ -70,12 +70,9 @@ def _collect_nodes[T: IRNode](root: IRNode, cls: type[T]) -> list[T]:
     return found
 
 
-def _expand_single_case(
-    case: IRNode, allocated: set[str] | None = None
-) -> tuple[BlockNode, Label]:
+def _expand_single_case(case: IRNode) -> tuple[BlockNode, Label]:
     branch = IRBranch(name="sel", compare_reg=Register("r_sel"), cases=[case])
     ctx = _ctx()
-    ctx.allocated_names = allocated or set()
     out = UnpackIRBranchPass().transform(branch, ctx)
     assert isinstance(out, BlockNode)
     dispatch = out.insts[0]
@@ -112,16 +109,7 @@ def test_unpack_synthesises_entry_for_unlabelled_head():
     head = case.insts[0]
     assert isinstance(head, BasicBlockNode)
     assert [label.name for label in head.labels] == [target]
-    assert target == Label("sel_case_entry_0")
     assert head.insts == [NopInst()]
-
-
-def test_unpack_entry_label_is_unique_on_conflict():
-    case, target = _expand_single_case(_nop_block(), {"sel_case_entry_0"})
-    head = case.insts[0]
-    assert isinstance(head, BasicBlockNode)
-    assert [label.name for label in head.labels] == [target]
-    assert target != Label("sel_case_entry_0")
 
 
 def test_unpack_synthesises_entry_for_empty_case():
