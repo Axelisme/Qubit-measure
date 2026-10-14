@@ -2,8 +2,9 @@
 
 from collections.abc import Iterator
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from qtpy.QtWidgets import QApplication
@@ -13,8 +14,10 @@ from zcu_tools.mcp.core.bridge import GuiTransportTimeoutError
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
 
+from ._pipeline_recipe import PIPELINE
 from ._support import MeasureClient, WireTransport, make_client
 
 
@@ -717,6 +720,41 @@ def test_recipe_guide_queries_authoritative_adapter_and_returns_native_object(
         method in {"simulation.initialize", "device.setup", "operation.await"}
         for method, _ in client.transport.sent
     )
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_recipe_guide_delivers_markdown_from_registered_adapter(
+    qapp, tmp_path: Path, request, monkeypatch: pytest.MonkeyPatch, declared: bool
+) -> None:
+    markdown = "# 指南\n\n自由 **Markdown**。\n![pulse](not-read.png)\n"
+    (tmp_path / "guide.md").write_text(markdown, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    class GuideAdapter(SampleAdapter):
+        guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
+
+    fixture = Fixture(empty_project=True, headless=True)
+    fixture.registry.register("guide-test", GuideAdapter)
+    port = fixture.start()
+    _, call = mcp_client(
+        port,
+        tmp_path,
+        request=request,
+        recipes=(replace(PIPELINE, adapter_name="guide-test"),),
+    )
+    try:
+        call("connect", {"port": port})
+        assert call("recipe_guide", {"recipe": "pipeline"}) == {
+            "recipe": "pipeline",
+            "adapter": "guide-test",
+            "guide": {
+                "markdown": markdown if declared else "(no guide written yet)",
+                "resource_dir": str(tmp_path) if declared else None,
+            },
+        }
+    finally:
+        fixture.stop()
+        qapp.processEvents()
 
 
 def test_unknown_recipe_is_rejected_without_querying_gui(setup_client):
