@@ -1,13 +1,20 @@
 """Display hints and fixed values change which rows the editor draws, and how."""
 
 from collections.abc import Callable, Iterator
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from PyQt6.QtGui import QAction
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QComboBox, QLabel, QLineEdit, QWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QWidget,
+)
 from zcu_tools.gui.form import (
     Display,
     FormEnv,
@@ -223,3 +230,136 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     assert row_label(view, "choice") == "Choice"
     state.write({("choice", "kind"): "alpha"}, FormEnv())
     assert row_label(view, "choice") == "Choice"
+
+
+class Body(BaseModel):
+    """An ordinary model whose fields carry their own presentation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: Annotated[
+        float, Display(label="Drive level", unit="V", description="Output level")
+    ] = 1.0
+    shape: Literal["flat", "ramp"] = "flat"
+    width: Annotated[float, Display(group="Advanced")] = 2.0
+
+    @model_validator(mode="after")
+    def validate_cover(self) -> Self:
+        """Leave a model-wide error at this model's own path."""
+        if self.width < self.level:
+            raise ValueError("Width must cover level")
+        return self
+
+
+class Packed(BaseModel):
+    """A branch whose only field besides its tag is an ordinary model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["packed"] = "packed"
+    payload: Body = Field(default_factory=Body)
+
+
+class Bare(BaseModel):
+    """A branch with no fields besides its tag."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["bare"] = "bare"
+
+
+class Nullable(BaseModel):
+    """A branch whose only field is a nullable model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["optional"] = "optional"
+    payload: Body | None = None
+
+
+class Nested(BaseModel):
+    """A branch whose only field is itself a selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["nested"] = "nested"
+    payload: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+        default_factory=Packed
+    )
+
+
+class Pair(BaseModel):
+    """A branch with an ordinary model beside another field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["pair"] = "pair"
+    payload: Body = Field(default_factory=Body)
+    note: float = 0.0
+
+
+def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
+    build: Build,
+) -> None:
+    class FlattenForm(FormModel):
+        choice: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Packed
+        )
+
+    view, state = build(FlattenForm, None)
+
+    # The lone model has no row of its own; its fields keep their full paths.
+    assert row_names(view, "choice.payload") == []
+    assert row_label(view, "choice.payload.level") == "Drive level"
+    level_row = child(view, QLabel, "form.value.choice.payload.level").parentWidget()
+    assert level_row is not None
+    texts = [
+        item.text()
+        for item in level_row.findChildren(
+            QLabel, "", Qt.FindChildOption.FindDirectChildrenOnly
+        )
+    ]
+    assert "V" in texts
+    assert "Output level" in level_row.toolTip()
+    width = child(view, QLineEdit, "form.input.choice.payload.width")
+    assert any(
+        block.objectName().startswith("form.group.") and block.isAncestorOf(width)
+        for block in view.findChildren(QWidget)
+    )
+
+    shape = child(view, QComboBox, "form.input.choice.payload.shape")
+    shape.setCurrentIndex(shape.findText("ramp"))
+    assert state.input.data["choice"] == {
+        "kind": "packed",
+        "payload": {"level": 1.0, "shape": "ramp", "width": 2.0},
+    }
+
+    # An error of the undrawn model shows at the nearest drawn row.
+    state.write({("choice", "payload", "level"): 5.0}, FormEnv())
+    error = child(view, QLabel, "form.error.choice")
+    assert "Width must cover level" in error.text()
+    assert not error.isHidden()
+
+
+def test_an_option_whose_lone_field_is_nullable_or_selectable_keeps_its_row(
+    build: Build,
+) -> None:
+    class KeepForm(FormModel):
+        optional: Annotated[Nullable | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nullable
+        )
+        nested: Annotated[Nested | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nested
+        )
+        pair: Annotated[Pair | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Pair
+        )
+
+    view, _state = build(KeepForm, None)
+
+    assert row_label(view, "optional.payload") == "Payload"
+    assert child(view, QCheckBox, "form.enabled.optional.payload") is not None
+    assert row_label(view, "nested.payload") == "Payload"
+    assert child(view, QComboBox, "form.input.nested.payload") is not None
+    assert row_label(view, "pair.payload") == "Payload"
+    assert child(view, QLineEdit, "form.input.pair.note") is not None
