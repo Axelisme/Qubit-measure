@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
@@ -29,7 +29,6 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.zigzag import (
-    EXPECTS_ML,
     add_gate_modules,
     add_repeat_fields,
 )
@@ -128,37 +127,12 @@ class _ZigZagScanBase(
         return f"{ctx.qub_name}_zigzag_scan_{self.sweep_key}_{time.strftime('%m%d')}"
 
 
-_SCAN_RECOMMENDED = (
-    "Analysis picks the sweep value whose signal changes least across "
-    "repetitions (smoothed sum of step differences). Set 'Search from' / "
-    "'Search to' to ignore edges of the sweep. Keep n_times small (~6); the "
-    "sweep multiplies the run time."
-)
-
-
 class ZigZagScanGainAdapter(_ZigZagScanBase):
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "gain"
     sweep_label: ClassVar[str] = "Gain (a.u.)"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Zig-zag gain scan: runs the zig-zag repetition sequence at each "
-            "gain of the repeated pulse, and picks the gain where the signal "
-            "stays flattest across repetitions. Runs on real hardware."
-        ),
-        expects_md=(
-            "Reads 'pi_gain' to seed the gain sweep as 0.8–1.2*pi_gain "
-            "(fallback 0.4–0.6); with repeat on X90_pulse, set the sweep "
-            "around 'pi2_gain' instead. 't1' seeds relax_delay as 5*t1."
-        ),
-        expects_ml=EXPECTS_ML,
-        typical_writeback=(
-            "No writeback. The summary reports 'best_value', the best gain "
-            "for the repeated pulse; update the pulse module yourself."
-        ),
-        recommended=_SCAN_RECOMMENDED,
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
     @classmethod
     def sweep_default(cls) -> SweepDefault:
@@ -178,25 +152,7 @@ class ZigZagScanFreqAdapter(_ZigZagScanBase):
     sweep_key: ClassVar[str] = "freq"
     sweep_label: ClassVar[str] = "Frequency (MHz)"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Zig-zag frequency scan: runs the zig-zag repetition sequence at "
-            "each drive frequency of the repeated pulse, and picks the "
-            "frequency where the signal stays flattest across repetitions. "
-            "Runs on real hardware. The simulator measures drive phase from "
-            "the start of each shot, while hardware uses absolute time."
-        ),
-        expects_md=(
-            "Reads 'q_f' to seed the frequency sweep as q_f ± 2 MHz "
-            "(fallback 4998–5002 MHz). 't1' seeds relax_delay as 5*t1."
-        ),
-        expects_ml=EXPECTS_ML,
-        typical_writeback=(
-            "No writeback. The summary reports 'best_value', the best drive "
-            "frequency (MHz); update 'q_f' or the pulse module yourself."
-        ),
-        recommended=_SCAN_RECOMMENDED,
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")
 
     @classmethod
     def sweep_default(cls) -> Seed[SweepValue]:

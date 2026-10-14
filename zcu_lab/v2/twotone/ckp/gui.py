@@ -6,13 +6,13 @@ import math
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -89,39 +89,7 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
     exp_cls = CKP_Exp
     ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "CKP ground/excited-resolved spectroscopy: prepares the qubit in g "
-            "and e, drives resonator and qubit probe tones concurrently over a "
-            "two-dimensional frequency sweep, and fits the two resonator branches "
-            "to extract dispersive shift chi, linewidth kappa, and the readout "
-            "frequency. Runs on real hardware."
-        ),
-        expects_md=(
-            "Reads from the parameter context (all optional, seeding fresh cfg defaults): "
-            "'r_f' and 'rf_w' set the resonator sweep and pulse timing; 'q_f' sets "
-            "the qubit-probe sweep; 'qub_ch' / 'qub_1_4_ch' / 'qub_4_5_ch' select "
-            "the qubit drive channel; 'res_ch' / 'ro_ch' select readout channels; "
-            "'timeFly' seeds the readout trigger offset."
-        ),
-        expects_ml=(
-            "Needs a calibrated qubit pi pulse (typically 'pi_amp' or 'pi_len'), "
-            "an inline resonator-drive pulse, an inline qubit-probe pulse, and a "
-            "pulse-readout module (typically 'readout_dpm' or 'readout_rf'). "
-            "Optionally references a calibrated reset module."
-        ),
-        typical_writeback=(
-            "Proposes fitted chi into parameter context 'chi', fitted kappa into 'rf_w', "
-            "and fitted readout frequency into 'readout_f'. No ModuleLibrary "
-            "writeback."
-        ),
-        recommended=(
-            "Run only after qubit frequency, pi pulse, resonator frequency, and "
-            "resonator linewidth are calibrated. Review both g/e maps and fitted "
-            "branches before applying writeback; a branch-selection or fit failure "
-            "can produce plausible-looking scalar values."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     def run(
         self,

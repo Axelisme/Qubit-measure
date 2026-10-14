@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -11,7 +12,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterGuide,
     AnalysisMode,
     RunRequest,
     SessionEnv,
@@ -25,7 +25,6 @@ from zcu_tools.gui.app.measure.seeds import scaled_path_seed
 
 from zcu_lab.v2._support.measure.defaults.role_factories import ROLE_FACTORIES
 from zcu_lab.v2._support.measure.zigzag import (
-    EXPECTS_ML,
     add_gate_modules,
     add_repeat_fields,
 )
@@ -42,35 +41,7 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         analysis=AnalysisMode.NONE, load_data=True
     )
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Zig-zag: applies an X90 pulse, then repeats the chosen pulse "
-            "0..n_times times before readout, amplifying small pulse-amplitude "
-            "errors into a growing zig-zag of the signal versus repetition "
-            "count. Runs on real hardware. Run after amplitude Rabi has "
-            "calibrated the pi and pi/2 pulses."
-        ),
-        expects_md=(
-            "Reads 't1' (us) to seed relax_delay as 5*t1 (fallback ~30 us). "
-            "Pulse modules pull 'q_f' (~2000–6000 MHz) and 'qub_ch'; readout "
-            "pulls 'r_f', 'res_ch' / 'ro_ch' and 'timeFly'."
-        ),
-        expects_ml=EXPECTS_ML,
-        typical_writeback=(
-            "No analysis and no writeback. Preparation coherence, contrast, "
-            "and drive history can also change the trace; compare controls "
-            "before changing gate calibration."
-        ),
-        recommended=(
-            "Repeat on X180_pulse to check the pi pulse; repeat on X90_pulse "
-            "(applied in pairs) to check the pi/2 pulse. About 10 repetitions "
-            "usually show a mis-calibration clearly. Use the zig-zag scan "
-            "adapters to sweep the repeated pulse's gain or frequency. "
-            "reset_phase_cycle alternates the final reset pi phase by 180 degrees "
-            "between averaging sweeps (even reps, two-pulse/bath reset). It adds "
-            "no RF pulse or programmed wait; verify population and phase witnesses."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

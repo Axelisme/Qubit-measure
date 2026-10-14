@@ -25,13 +25,13 @@ import time
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -213,41 +213,7 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
     outer_default: ClassVar[SweepValue] = SweepValue(start=0.0, stop=1.0, expts=21)
     filename_token: ClassVar[str] = "gain"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot T1-with-tone, probe-gain sweep: at each probe gain it "
-            "sweeps the wait-plus-probe length from both |g> and |e> initial "
-            "states (Branch), classifies each shot in-program against the "
-            "|g>/|e> centres, fits the dual transition rates per gain, and "
-            "renders the 3×3 rate landscape over (gain, time). Runs on real "
-            "hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
-            "(readout correction) and 'ac_stark_coeff' (rescales the gain axis to photon "
-            "number) at analyze time; 't1' to seed the length sweep stop; "
-            "'readout_f' or 'r_f' plus 'res_ch' seed the probe tone."
-        ),
-        expects_ml=(
-            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-            "readout module. Optional reset (disabled when no library entry "
-            "exists)."
-        ),
-        typical_writeback=(
-            "No writeback — the rate landscape is read off the grid by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "Keep the gain sweep coarse (the inner "
-            "length sweep multiplies the run time). Provide 'ac_stark_coeff' "
-            "for a photon-number x-axis. 'uniform=True' (default) uses a linear "
-            "length sweep; set False to cluster points along the expected "
-            "exponential decay while preserving the configured window and count."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
 
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
@@ -259,39 +225,4 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
     )
     filename_token: ClassVar[str] = "freq"
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot T1-with-tone, probe-frequency sweep: at each probe "
-            "frequency it sweeps the wait-plus-probe length from both |g> and "
-            "|e> initial states (Branch), classifies each shot in-program "
-            "against the |g>/|e> centres, fits the dual transition rates per "
-            "frequency, and renders the 3×3 rate landscape over (freq, time). "
-            "Runs on real hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. Optionally reads 'confusion_matrix' "
-            "(readout correction) at analyze time; 't1' to seed the length sweep stop; "
-            "'readout_f' or 'r_f' plus 'rf_w' / 'res_ch' seed the probe drive "
-            "and frequency sweep. "
-            "('ac_stark_coeff' applies only to a gain sweep, not this one.)"
-        ),
-        expects_ml=(
-            "Needs a qubit pi-pulse module, a probe-tone pulse module, and a "
-            "readout module. Optional reset (disabled when no library entry "
-            "exists)."
-        ),
-        typical_writeback=(
-            "No writeback — the rate landscape is read off the grid by eye."
-        ),
-        recommended=(
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. "
-            "Keep the frequency sweep coarse (the "
-            "inner length sweep multiplies the run time). 'uniform=True' "
-            "(default) uses a linear length sweep; set False to cluster points "
-            "along the expected exponential decay while preserving the configured "
-            "window and count."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

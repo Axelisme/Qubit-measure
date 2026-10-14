@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
@@ -9,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
-    AdapterGuide,
     AnalysisMode,
     RunRequest,
     SessionEnv,
@@ -89,41 +89,7 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         analysis=AnalysisMode.NONE, load_data=True
     )
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "One-tone resonator power dependence: a 2D sweep of readout power "
-            "(gain) versus readout frequency, mapping how the resonator "
-            "response shifts with drive strength. Used to find the punch-out / "
-            "high-power transition and to pick a good low-power readout gain. "
-            "Runs on real hardware; requires a SoC connection."
-        ),
-        expects_md=(
-            "Reads fixed tab parameters: resonator.freq and resonator.kappa "
-            "seed the frequency sweep; resonator.wiring.ch/ro_ch seed the "
-            "generator/ADC channels. Captured resonator.ext.default_probe_length "
-            "minus 0.1 us seeds the ADC window, and resonator.ext.time_of_fly "
-            "plus 0.05 us seeds trigger timing. Missing/null calibrations use "
-            "the declared bring-up fallbacks; source and role errors propagate."
-        ),
-        expects_ml=(
-            "Starts with a fresh inline pulse readout and const waveform. "
-            "It does not adopt a library module or named waveform."
-        ),
-        typical_writeback=(
-            "No writeback — this adapter has no analysis step (the underlying "
-            "experiment is measurement-only). It produces a 2D map for "
-            "visual inspection only; read off the punch-out power and "
-            "low-power frequency by eye and update parameters in another step."
-        ),
-        recommended=(
-            "No analysis. Typical sweep: gain ~0.001 to 0.5 over ~101 points "
-            "(low to high power), frequency resonator.freq ± linewidths over "
-            "~201 points. 'earlystop_snr' enters the run config (0 disables): "
-            "set it positive to stop a column early once a signal-to-noise "
-            "target is reached, speeding up the scan. Narrow the gain range "
-            "once you've located the transition."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

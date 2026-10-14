@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     NoAnalyzeParams,
@@ -47,30 +47,7 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
 
     exp_cls = RB_Exp
     ExpCfg_cls: ClassVar[type[RBCfg]] = RBCfg
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-qubit Clifford RB: each independent random seed supplies a "
-            "shared prefix across depths, followed by its inverse and readout. "
-            "Depth counts Cliffords, not physical pulses. Z rotations are virtual. "
-            "Runs one hardware program per seed, sweeping depth within it."
-        ),
-        expects_md="Uses t1 (us) for a 5*t1 recovery delay, fallback 200 us.",
-        expects_ml=(
-            "Requires calibrated X90 (pi2_amp/pi2_len), X180 (pi_amp/pi_len) "
-            "and readout modules. Verify both drive frequencies and channels. "
-            "Identity uses X90 at zero gain. Reset is optional."
-        ),
-        typical_writeback=(
-            "No writeback. Fits mean projected IQ to A*p**depth+B; reports "
-            "epc=(1-p)/2 and fidelity=1-epc per Clifford, not per physical gate."
-        ),
-        recommended=(
-            "Calibrate frequency and pulse amplitudes first. Start with few "
-            "seeds and shallow depths to verify execution, then use independent "
-            "seeds and depths spanning the decay. Seed controls reproducibility. "
-            "Review residuals and seed variation before interpreting fidelity."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
@@ -10,7 +11,6 @@ from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterGuide,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
@@ -73,43 +73,7 @@ class SsLenRabiAdapter(
     exp_cls = LenRabiExp
     ExpCfg_cls: ClassVar[Any] = LenRabiCfg
 
-    guide_text: ClassVar[AdapterGuide] = AdapterGuide(
-        behavior=(
-            "Single-shot Length Rabi: sweeps the qubit-drive pulse length, "
-            "preserves every raw IQ shot, and derives ground / excited / other "
-            "population curves during live view and analysis. Runs on real hardware."
-        ),
-        expects_md=(
-            "Run freezes 'g_center' / 'e_center' / 'ge_radius' from resolved "
-            "cfg, not live parameter context. Enter direct cfg values or optionally seed "
-            "defaults with 'singleshot/ge' writeback. Missing or invalid cfg "
-            "calibration fails before hardware. These values support live classification; "
-            "the saved raw-IQ analysis jointly refits its calibration. Reads 'pi_len' "
-            "to seed the sweep stop (4*pi_len when calibrated; fallback sweep "
-            "0.03–0.2 us); "
-            "'q_f' / 'qub_ch' to seed the qubit-drive defaults."
-        ),
-        expects_ml=(
-            "Needs a qubit drive-pulse module (qub_pulse) and a readout module. "
-            "Optional reset (disabled when no library entry exists)."
-        ),
-        typical_writeback=(
-            "When the joint fit is valid and its complete calibration is finite, "
-            "proposes g_center, e_center, ge_radius, and confusion_matrix as four "
-            "independent items. The four-item proposal is all-or-none."
-        ),
-        recommended=(
-            "Set Initial State to the predominant state before the swept drive pulse "
-            "even when the first sweep point is nonzero. Fit phase offset "
-            "allows a correction within +/-90 degrees of that initial-state "
-            "direction; the extrapolated zero-length population can then differ "
-            "from the pre-pulse population. It is disabled by default. "
-            "Set calibration cfg directly or seed it with 'singleshot/ge'. A sweep spanning a few pi lengths "
-            "captures a full oscillation. Review the measured population curves "
-            "and overlaid joint-fit curves before applying all four calibration "
-            "proposals."
-        ),
-    )
+    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @classmethod
     def cfg_definition(cls) -> MeasureCfgDefinition:
