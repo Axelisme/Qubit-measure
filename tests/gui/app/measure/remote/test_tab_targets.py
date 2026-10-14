@@ -18,7 +18,7 @@ from zcu_tools.gui.app.measure.remote.handlers.tab import (
 )
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.aliases import AliasRow
@@ -47,14 +47,20 @@ class TargetCfg(SampleCfg):
 
 
 class TargetAdapter(SampleAdapter):
-    form = Form(
-        TargetCfg,
-        {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TargetCfg]:
+        del ctx
+        return Form(
+            TargetCfg,
+            {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
+        )
 
 
 class RolelessAdapter(SampleAdapter):
-    form = Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TargetCfg]:
+        del ctx
+        return Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
 @dataclass

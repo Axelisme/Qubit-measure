@@ -38,7 +38,7 @@ from zcu_tools.gui.app.measure.services.save import SaveService
 from zcu_tools.gui.app.measure.services.save_control import SaveControlFacet
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
@@ -77,7 +77,12 @@ class SavingAdapter(
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 
     exp_cls = SavingCore
-    form = Form(SavingCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SavingCfg]:
+        del ctx
+        return Form(SavingCfg, {})
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
@@ -216,7 +221,7 @@ def native_save_session(
         Session(
             adapter_name="saving",
             adapter=AnalysisSavingAdapter(),
-            cfg=make_form(SavingAdapter.form, state=state),
+            cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )
     state.update_tab_result("tab", record, metadata=metadata, parameters=captured)

@@ -29,7 +29,7 @@ from zcu_tools.gui.app.measure.schema_builder import (
     ModuleInit,
 )
 from zcu_tools.gui.cfg import SweepSpec, SweepValue
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
@@ -70,7 +70,11 @@ class SampleAnalysis(AnalyzeResultBase):
 
 
 class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SampleParams]):
-    form = Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
     )

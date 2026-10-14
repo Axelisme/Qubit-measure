@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -28,25 +28,31 @@ class PulseReferenceCfg(SampleCfg):
 
 
 class PulseReferenceAdapter(SampleAdapter):
-    form = Form(
-        PulseReferenceCfg,
-        {
-            "sweep": Range.between(1.0, 2.0, expts=3),
-            "linked": Slot("Q1.pulses.seed"),
-            "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
-        },
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.seed"),
+                "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
+            },
+        )
 
 
 class WaveformReferenceAdapter(SampleAdapter):
-    form = Form(
-        PulseReferenceCfg,
-        {
-            "sweep": Range.between(1.0, 2.0, expts=3),
-            "linked": Slot("Q1.pulses.carrier", copy=True),
-            "inline": Slot("Q1.pulses.carrier", copy=True),
-        },
-    )
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+        del ctx
+        return Form(
+            PulseReferenceCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "linked": Slot("Q1.pulses.carrier", copy=True),
+                "inline": Slot("Q1.pulses.carrier", copy=True),
+            },
+        )
 
 
 @pytest.fixture(params=["module", "waveform"])

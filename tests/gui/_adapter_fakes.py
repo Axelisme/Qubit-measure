@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
 from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -25,7 +26,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec, CfgSectionValue
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 
@@ -63,7 +64,11 @@ class DummyAdapter:
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
     experiment_tag: ClassVar[str | None] = None
     exp_cls = DummyExp
-    form = Form(ExpCfgModel, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+        del ctx
+        return Form(ExpCfgModel, {})
 
     @classmethod
     def guide(cls) -> AdapterGuide:

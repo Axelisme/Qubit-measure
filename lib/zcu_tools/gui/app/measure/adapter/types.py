@@ -14,9 +14,8 @@ from typing import (
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
-    from zcu_tools.cfg_model import CfgValidationContext
+    from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
     from zcu_tools.datafile import RunMetadata
-    from zcu_tools.experiment.cfg_model import ExpCfgModel
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.storage import PointStorageBinding
@@ -31,8 +30,8 @@ from zcu_tools.gui.cfg import CfgSchema
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
-T_Cfg = TypeVar("T_Cfg", bound="ExpCfgModel")
-T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ExpCfgModel", contravariant=True)
+T_Cfg = TypeVar("T_Cfg", bound="ConfigBase")
+T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ConfigBase", contravariant=True)
 T_Result_co = TypeVar("T_Result_co")
 
 

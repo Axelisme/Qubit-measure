@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_chec
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
     from zcu_tools.datafile import AnalysisDocument, RunMetadata
@@ -97,12 +97,13 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Return the static human-facing orientation guide (no instance state)."""
         ...
 
-    @property
-    def form(self) -> Form[ConfigBase]:
-        """Return this adapter's registry-bound core-derived form definition.
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+        """Build a definition using the newly captured Open/Reset context.
 
-        The host captures FormEnv only on Open/Reset and owns editable state.
-        Register this same definition explicitly with Registry.register(form=...).
+        ctx only queries captured reference existence. The framework binds its
+        template catalog after return and owns editable state. Factory and
+        template errors propagate at use, never during catalog registration.
         """
         ...
 

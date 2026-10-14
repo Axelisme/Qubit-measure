@@ -44,7 +44,7 @@ from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
     FailedPreconditionError,
 )
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.program.v2 import ProgramV2Cfg
 
@@ -242,13 +242,16 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
     class RecordingSnapshotAdapter(SampleAdapter):
-        form = Form(
-            SampleCfg,
-            {
-                "gain": Expr("general.ext.gain"),
-                "sweep": Range.between(5, 6, expts=11),
-            },
-        )
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[SampleCfg]:
+            del ctx
+            return Form(
+                SampleCfg,
+                {
+                    "gain": Expr("general.ext.gain"),
+                    "sweep": Range.between(5, 6, expts=11),
+                },
+            )
 
         def run(
             self,

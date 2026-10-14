@@ -18,7 +18,7 @@ from zcu_tools.gui.cfg import (
     DirectValue,
     ScalarSpec,
 )
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._adapter_fakes import DummyAdapter
 
@@ -33,7 +33,11 @@ class OldAdapter(DummyAdapter):
     """Context-free cfg adapter for reload tests, without native persistence."""
 
     experiment_tag: ClassVar[str | None] = None
-    form = Form(ReloadCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+        del ctx
+        return Form(ReloadCfg, {})
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:
         """Reject native Load requests; this reload-only fake has no loader."""
@@ -71,7 +75,7 @@ class NewAdapter(OldAdapter):
 class Loader:
     def __init__(self) -> None:
         self.candidate = Registry()
-        self.candidate.register("demo", NewAdapter, form=NewAdapter.form)
+        self.candidate.register("demo", NewAdapter)
         self.failure: CatalogReloadError | None = None
         self.prepare_failure: Exception | None = None
         self.during_load: Callable[[], None] = lambda: None

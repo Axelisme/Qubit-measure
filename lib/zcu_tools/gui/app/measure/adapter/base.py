@@ -43,7 +43,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.lowering import validate_schema
 from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition, Session
 
 if TYPE_CHECKING:
@@ -144,6 +144,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
 
     # Concrete adapters publish one core-derived definition; the host owns state.
     form: Form[T_Cfg]
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T_Cfg]:
+        """Build a fresh definition for captured Open/Reset sources.
+
+        Concrete adapters provide this factory. No fixed definition fallback is
+        supplied; missing factories raise NotImplementedError when used.
+        """
+        del ctx
+        raise NotImplementedError("Adapters must implement make_form")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

@@ -21,7 +21,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -51,7 +51,11 @@ class LoadAdapter(OldAdapter):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         load_data=True, analysis=AnalysisMode.NONE
     )
-    form = Form(RuntimeCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[RuntimeCfg]:
+        del ctx
+        return Form(RuntimeCfg, {})
 
     def load(
         self, req: LoadDataRequest

@@ -7,10 +7,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormPath, FormPreview
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AnalysisMode, WritebackItem
@@ -211,9 +213,14 @@ class TabService:
             from_dict is not None,
         )
 
+        def make_form(ctx: FormContext) -> Form[ConfigBase]:
+            form = adapter.make_form(ctx)
+            form.bind_templates(self._registry.templates, adapter=adapter_name)
+            return form
+
         cfg = self._cfg_resources.create(
             tab_id,
-            adapter.form,
+            make_form,
             capture=self._form_sources,
             initial=from_dict.cfg_input if from_dict is not None else None,
         )

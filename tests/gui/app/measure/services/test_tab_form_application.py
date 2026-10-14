@@ -36,7 +36,11 @@ class TraceCfg(ExpCfgModel):
 class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
     """Return accepted cfg without devices, acquisition or result persistence."""
 
-    form = Form(TraceCfg, {"amount": Expr("general.ext.amount")})
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[TraceCfg]:
+        del ctx
+        return Form(TraceCfg, {"amount": Expr("general.ext.amount")})
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
@@ -67,7 +71,8 @@ class FactoryCfg(ConfigBase):
 
 @pytest.mark.parametrize("failure", ["template", "factory"])
 def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
-    qapp: QApplication, failure: str,
+    qapp: QApplication,
+    failure: str,
 ) -> None:
     assert hasattr(ExpAdapterProtocol, "make_form"), (
         "Missing adapter factory contract for Open/Reset"
@@ -81,6 +86,7 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
 
         @staticmethod
         def make_form(ctx: FormContext) -> Form[FactoryCfg]:
+            del ctx
             if broken:
                 if failure == "factory":
                     raise RuntimeError("factory source failed")
@@ -105,7 +111,9 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
         resource.write({("amount",): 7.0})
         state, env, authored = resource.editor_state, resource.env, resource.input.data
         notifications: list[FormValue] = []
-        resource.subscribe(lambda: notifications.append(resource.preview().values[("amount",)]))
+        resource.subscribe(
+            lambda: notifications.append(resource.preview().values[("amount",)])
+        )
         broken = True
         with pytest.raises(error, match=match):
             resource.reset()
@@ -128,7 +136,7 @@ def test_open_edit_run_reset_and_reopen_restore_use_public_form_authority(
     qapp: QApplication,
 ) -> None:
     application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter, form=TraceAdapter.form)
+    application.registry.register("trace", TraceAdapter)
     parameters = application.ctrl.context_control.read_context()
     application.ctrl.context_control.set_parameter(
         parameters.target, "general.ext.amount", 2.0
@@ -188,7 +196,7 @@ def test_public_restore_reports_dropped_inputs_and_keeps_compatible_values(
     qapp: QApplication,
 ) -> None:
     application = Fixture(headless=True)
-    application.registry.register("trace", TraceAdapter, form=TraceAdapter.form)
+    application.registry.register("trace", TraceAdapter)
     try:
         tab_id = application.ctrl.new_tab("trace")
         resource = application.ctrl.cfg_resources.lookup(tab_id)

@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.adapter.types import (
     PostAnalyzeResultBase,
     T_PostAnalyzeResult,
 )
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -55,7 +55,12 @@ class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
     )
     exp_cls = SavingCore
     ExpCfg_cls = SavingCfg
-    form = Form(SavingCfg, {})
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SavingCfg]:
+        del ctx
+        return Form(SavingCfg, {})
+
     experiment_tag: ClassVar[str | None] = "test/saving"
 
     @classmethod
