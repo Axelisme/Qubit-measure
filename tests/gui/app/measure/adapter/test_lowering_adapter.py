@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import pytest
 from zcu_tools.cfg_model import module_spec_from_raw
-from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.adapter.lowering import schema_to_raw_dict
 from zcu_tools.gui.app.measure.cfg_binding import MeasureCfgBindings
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
@@ -27,12 +24,11 @@ from zcu_tools.gui.cfg import (
 )
 from zcu_tools.gui.cfg.resource import CfgEdit, CfgResource, CfgStatus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
 from tests.gui.app.measure._cfg_fakes import PublishedHost, parameter_capture
 from tests.gui.app.measure._components import QubitSchema
-from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter, CalibrationCfg
+from tests.gui.app.measure.adapter._cfg_fakes import CalibrationAdapter
 
 
 @pytest.fixture
@@ -204,91 +200,6 @@ def test_optional_calibration_parse_error_is_not_ignored_by_mode(mode: str) -> N
 
     with pytest.raises(RuntimeError, match="calibration.frequency|missing_calibration"):
         schema_to_raw_dict(schema, ctx.parameters)
-
-
-@pytest.mark.parametrize("mode", ["plain", "calibrated"])
-def test_resolved_calibration_is_assembled_from_cfg_not_metadict(mode: str) -> None:
-    adapter, ctx, schema = _calibration_schema(mode)
-    calibration = schema.value.fields["calibration"]
-    assert isinstance(calibration, CfgSectionValue)
-    for key, value in {"frequency": 6000.0, "width": 10.0, "phase": 0.1}.items():
-        calibration.fields[key] = DirectValue(value)
-    ctx = SessionEnv(
-        parameters=parameter_capture(frequency=7000.0, width=20.0, phase=0.2),
-        soc=None,
-        soccfg=None,
-    )
-    raw = schema_to_raw_dict(schema, ctx.parameters)
-    cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, cfg_context=None)
-    )
-
-    assert cfg.mode == mode
-    assert cfg.calibration.model_dump() == {
-        "frequency": 6000.0,
-        "width": 10.0,
-        "phase": 0.1,
-    }
-
-
-def test_empty_optional_calibration_uses_model_defaults() -> None:
-    adapter = CalibrationAdapter()
-    schema = adapter.make_default_cfg(
-        SessionEnv(parameters=None, soc=None, soccfg=None)
-    )
-    schema.value.fields["mode"] = DirectValue("plain")
-    raw = schema_to_raw_dict(schema, None)
-    cfg = adapter.build_exp_cfg(
-        raw, RunRequest(soc=None, soccfg=None, cfg_context=None)
-    )
-    assert cfg.mode == "plain"
-    assert cfg.calibration == CalibrationCfg()
-
-
-@pytest.mark.parametrize(
-    "field, value",
-    [
-        ("frequency", None),
-        ("width", None),
-        ("phase", None),
-        ("frequency", 0.0),
-        ("frequency", -1.0),
-        ("width", 0.0),
-        ("width", -1.0),
-    ],
-)
-def test_adapter_run_rejects_invalid_calibration_before_device_io(
-    field: str, value: float | None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    adapter = CalibrationAdapter()
-    schema = adapter.make_default_cfg(
-        SessionEnv(parameters=None, soc=None, soccfg=None)
-    )
-    schema.value.fields["mode"] = DirectValue("calibrated")
-    raw = schema_to_raw_dict(schema, None)
-    raw["calibration"] = {
-        "frequency": 6000.0,
-        "width": 10.0,
-        "phase": 0.1,
-        field: value,
-    }
-
-    def unexpected_device_read(_manager):
-        pytest.fail("Invalid calibration reached device I/O")
-
-    monkeypatch.setattr(DeviceManager, "get_all_info", unexpected_device_read)
-    with pytest.raises(ValueError, match=field):
-        adapter.run(
-            RunRequest(soc=None, soccfg=None, cfg_context=None),
-            raw,
-            context=RunContext(
-                None,
-                None,
-                Plots(NonPresentingHost()),
-                devices={},
-                cancel_signal=StopSignal(),
-            ),
-        )
 
 
 def _unknown_reference_schema(*, disabled: bool) -> CfgSchema:

@@ -266,11 +266,7 @@ def template_input(
     catalog: Mapping[str, TemplateDef],
     expected: tuple[type[BaseModel], ...],
     env: FormEnv | None,
-    *,
-    active: tuple[str, ...] = (),
 ) -> dict[str, JsonValue]:
-    if template.id in active:
-        raise ValueError(f"Recursive template fallback: {(*active, template.id)!r}")
     if template.id not in catalog:
         raise ValueError(f"Unknown template {template.id!r}")
     definition = catalog[template.id]
@@ -301,18 +297,9 @@ def template_input(
             )
             if not allowed:
                 raise ValueError(f"Slot seed requires a module field: {path!r}")
-            if seed.fallback is not None:
-                template_input(
-                    seed.fallback, catalog, allowed, None, active=(*active, template.id)
-                )
             if (
                 env is not None
-                and (
-                    value := nested_slot(
-                        seed, catalog, allowed, env, active=(*active, template.id)
-                    )
-                )
-                is not None
+                and (value := nested_slot(seed, allowed, env)) is not None
             ):
                 set_path(data, path, value)
     for path, value in template.lock.items():
@@ -324,9 +311,9 @@ def template_input(
 def template_seed_tree(
     template: Template, catalog: Mapping[str, TemplateDef]
 ) -> dict[str, JsonValue]:
-    """Describe authored defaults, including nested fallbacks, without reading sources.
+    """Describe authored defaults without reading sources.
 
-    Call after template_input validates IDs, families, paths and recursion.
+    Call after template_input validates IDs, families and paths.
     This tree is only for deriving field requirements, never for Slot presence
     or actual input. Literal overrides and locks replace earlier Expr seeds.
     """
@@ -337,11 +324,7 @@ def template_seed_tree(
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
-            nested = (
-                template_seed_tree(seed.fallback, catalog)
-                if seed.fallback is not None
-                else {}
-            )
+            nested: dict[str, JsonValue] = {}
             for child_path, value in seed.set.items():
                 set_path(nested, child_path, scalar_seed(value))
             for child_path, value in seed.lock.items():
@@ -356,11 +339,8 @@ def template_seed_tree(
 
 def nested_slot(
     slot: Slot,
-    catalog: Mapping[str, TemplateDef],
     expected: tuple[type[BaseModel], ...],
     env: FormEnv,
-    *,
-    active: tuple[str, ...] = (),
 ) -> JsonValue:
     key = slot_key(slot, env)
     if key is not None and env.library is not None:
@@ -381,6 +361,4 @@ def nested_slot(
         for path, value in slot.lock.items():
             set_path(data, path, scalar_seed(value))
         return data
-    if slot.fallback is not None:
-        return template_input(slot.fallback, catalog, expected, env, active=active)
     return None

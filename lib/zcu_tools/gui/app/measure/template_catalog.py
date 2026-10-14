@@ -112,14 +112,9 @@ class TemplateCatalog:
         Nested reference discriminator seeds select an allowed inline shape.
         Slot(path) seeds on module references use SMART linked defaults from the
         create operation's capture: unbound aliases stay linked empty, while
-        bound unset/dangling slots use fallback=Template(id) when specified, or
-        the nested structural defaults otherwise. Fallback IDs may refer forward
-        within this mapping; definitions are detached at registration. The fallback
-        expands seeded inline values with default component placeholders only.
-        Waveform Slots, Slot.copy/set/lock, Template.set/lock and nondefault
-        Template.qubit/resonator bindings raise TypeError at registration. Unknown
-        fallback IDs, recursive fallbacks and incompatible module families also
-        fail at registration, with the template ID and seed field path. Slot with
+        bound unset/dangling slots keep nested structural defaults. Definitions
+        are detached at registration. Waveform Slots and Slot.copy/set/lock raise
+        TypeError at registration, with the template ID and seed field path. Slot with
         inline child seeds raises ValueError.
         Invalid seed paths/shapes raise ValueError or TypeError; duplicate IDs
         raise ValueError. Call only at startup, not on catalog reload.

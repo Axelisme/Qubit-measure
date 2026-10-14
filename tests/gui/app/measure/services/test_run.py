@@ -13,7 +13,6 @@ directly (replacing the old `_on_run_*` method calls).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
@@ -22,7 +21,6 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.device import set_flux
@@ -228,7 +226,9 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     bg.run_work()
 
     context = adapter.run.call_args.kwargs["context"]
-    adapter.run.assert_called_once_with(inputs.request, {"gain": 0.25}, context=context)
+    adapter.run.assert_called_once_with(
+        inputs.request, inputs.accepted_cfg.cfg, context=context
+    )
     assert context.plots is plots
     assert context.soc is inputs.request.soc
     assert context.soccfg is inputs.request.soccfg
@@ -256,13 +256,13 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         def run(
             self,
             req: RunRequest,
-            raw_cfg: Mapping[str, ExperimentCfgValue],
+            cfg: SampleCfg,
             *,
             context: RunContext,
         ) -> SampleRun:
             # Controlled execution produces an artifact with the real domain cfg builder.
             return RunRecord(
-                cfg=self.build_exp_cfg(dict(raw_cfg), req),
+                cfg=cfg,
                 result=SampleResult(np.empty(0)),
             )
 

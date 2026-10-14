@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
@@ -32,7 +32,7 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyResult,
 )
 
-from .form import FORM
+from .form import make_form
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,13 @@ class T2RamseyAdapter(
         T2RamseyAnalyzeParams,
     ]
 ):
-    form = FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T2RamseyCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = T2RamseyExp.persistence_tag()
     exp_cls = T2RamseyExp
-    ExpCfg_cls: ClassVar[Any] = T2RamseyCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -122,11 +125,11 @@ class T2RamseyAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T2RamseyCfg,
         *,
         context: RunContext,
     ) -> T2RamseyRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = self.exp_cls().run(cfg, context=context)
         logger.info("T2Ramsey true detune: %s MHz", result.true_activate_detune)
         return RunRecord(cfg=cfg, result=result)

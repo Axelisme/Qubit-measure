@@ -102,7 +102,9 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
     adapter = cast(MagicMock, inputs.adapter)
-    adapter.validate_run_request.assert_called_once_with(inputs.request, {})
+    adapter.validate_run_request.assert_called_once_with(
+        inputs.request, inputs.accepted_cfg.cfg
+    )
 
 
 def test_run_inputs_freezes_published_expression_and_provenance() -> None:

@@ -12,7 +12,6 @@ from zcu_tools.datafile import (
     RunSnapshot,
     SoftwareProvenance,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_saving import ArtifactRef, SaveReport
@@ -98,12 +97,11 @@ class SavingAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SavingCfg,
         *,
         context: RunContext,
     ) -> RunRecord[SavingCfg, SavingResult]:
         """Acquire a typed record using only the offline fake backend."""
-        cfg = SavingCfg.model_validate(raw_cfg)
         return RunRecord(cfg, SavingCore().run(cfg, context=context))
 
 

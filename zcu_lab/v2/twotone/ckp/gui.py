@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,11 +21,12 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result
 
-from .form import FORM
+from .form import make_form
 
 CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
 
@@ -39,10 +39,13 @@ class CKPAnalyzeResult(AnalyzeResultBase):
 
 
 class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
-    form = FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = CKP_Exp.persistence_tag()
     exp_cls = CKP_Exp
-    ExpCfg_cls: ClassVar[Any] = CKP_Cfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -83,11 +86,11 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: CKP_Cfg,
         *,
         context: RunContext,
     ) -> CKPRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = CKP_Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

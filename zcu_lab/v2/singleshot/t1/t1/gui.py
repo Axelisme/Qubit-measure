@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -17,11 +15,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
-from zcu_lab.v2.singleshot.t1.t1.form import FORM
+from zcu_lab.v2.singleshot.t1.t1.form import make_form
 
 # Transition-rate analysis publishes figures without numeric writeback.
 SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
@@ -36,9 +35,13 @@ class SsT1Adapter(
     BaseAdapter[T1Cfg, SsT1RunResult, SsT1AnalyzeResult, NoAnalyzeParams]
 ):
     experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T1Cfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = T1Exp
-    ExpCfg_cls = T1Cfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -79,11 +82,11 @@ class SsT1Adapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T1Cfg,
         *,
         context: RunContext,
     ) -> SsT1RunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, T1Exp().run(cfg, context=context))
 
     def analyze(

@@ -879,11 +879,14 @@ Invalid recipe、key collision、missing asset 等錯誤由 handler 轉為帶穩
   atomically; preparation failures retain the previous form and sources.
   Legacy builder hooks remain during experiment migration but are not a tab
   fallback.
-- `validate_run_request(req, raw_cfg)` is a mandatory framework member that
+- `validate_run_request(req, cfg)` is a mandatory framework member that
   `GuardService` always calls before opening an async handle. `BaseAdapter`
   supplies the no-op default; overrides are pure, predictable preflight only and
   must not touch devices or mutate cfg/state.
-- Adapter `run()` receives a concrete config and performs the experiment.
+- Adapter `run()` and preflight receive the exact validated Form output.
+  The framework neither inspects its concrete type nor validates it again.
+  BaseAdapter connects Form[T_Cfg] to run(T_Cfg); the heterogeneous Protocol
+  treats only those cfg positions as opaque.
 - `analyze()` / interactive analysis hooks must match `AdapterCapabilities`.
 - `get_writeback_items()` and `get_post_writeback_items()` return domain writeback
   candidates for their owning analysis pane; the base post hook returns no candidates,

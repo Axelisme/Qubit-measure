@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.cfg import CfgSchema, CfgSectionSpec
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
     from zcu_tools.datafile import AnalysisDocument, RunMetadata
-    from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import PreparedRunData
     from zcu_tools.plotting.plots import Plots
@@ -69,13 +67,14 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
 
     This Protocol lists *only* the members the framework actually calls; it
     carries no generics and no implementation. The shared default behaviour
-    (build_exp_cfg delegation, save-path policy, no-op analysis, …) lives in
+    (run delegation, save-path policy, no-op analysis, …) lives in
     ``zcu_tools.gui.app.measure.adapter.base.BaseAdapter``, which adapters
     inherit and which satisfies this Protocol structurally.
 
     Keeping the framework side generic-free is deliberate: the GUI handles
     every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
-    results remain opaque. Native acquisition evidence checks only the RunRecord
+    results remain opaque. cfg is the output of this adapter's own Form;
+    the framework does not check its type. Native acquisition evidence checks only the RunRecord
     envelope described by run(), not its concrete cfg/result types. Results
     cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
@@ -98,7 +97,7 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         ...
 
     @staticmethod
-    def make_form(ctx: FormContext) -> Form[ConfigBase]:
+    def make_form(ctx: FormContext) -> Form[Any]:
         """Build a definition using the newly captured Open/Reset context.
 
         ctx only queries captured reference existence. The framework binds its
@@ -120,23 +119,21 @@ class ExpAdapterProtocol(InteractivePluginProvider, Protocol):
         """Build the analyze parameter instance presented to the user."""
         ...
 
-    def validate_run_request(
-        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
-    ) -> None:
+    def validate_run_request(self, req: RunRequest, cfg: Any) -> None:
         """Validate adapter-specific run constraints before opening an operation."""
         ...
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: Any,
         *,
         context: RunContext,
     ) -> Any:
         """Execute detached resolved inputs; never resolve from live context.
 
-        req provides accepted device/SoC inputs; raw_cfg contains the accepted
-        lowered cfg, and context owns this acquisition's plots and stop signal.
+        req provides accepted device/SoC inputs; cfg is this adapter's validated
+        Form output, forwarded unchanged, and context owns this acquisition's plots and stop signal.
         With experiment_tag set and a saved tab origin, return RunRecord(cfg,
         result) for native evidence. A bare result then raises TypeError at the
         Run publication boundary and publishes neither result nor metadata.

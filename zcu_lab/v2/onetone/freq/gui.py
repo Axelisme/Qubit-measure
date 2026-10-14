@@ -7,7 +7,6 @@ from numbers import Integral, Real
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -22,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
 
@@ -34,7 +34,7 @@ from zcu_lab.v2.onetone.freq.core import (
     FreqExp,
     FreqResult,
 )
-from zcu_lab.v2.onetone.freq.form import FORM
+from zcu_lab.v2.onetone.freq.form import make_form
 
 OneToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
@@ -88,8 +88,11 @@ class OneToneFreqAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
-    ExpCfg_cls = FreqCfg
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -230,11 +233,11 @@ class OneToneFreqAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqCfg,
         *,
         context: RunContext,
     ) -> OneToneFreqRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FreqExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

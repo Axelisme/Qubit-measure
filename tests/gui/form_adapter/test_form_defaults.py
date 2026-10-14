@@ -95,13 +95,11 @@ def bound_form(node: Slot | Template) -> Form[Core]:
     [
         "key",
         "copy",
-        "dangling_fallback",
-        "unbound_fallback",
         "dangling_empty",
         "unbound_empty",
     ],
 )
-def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
+def test_slot_resolution_ref_copy_or_invalid(scenario: str) -> None:
     node = (
         Slot("Q.pulses.probe", copy=scenario == "copy")
         if scenario in {"key", "copy"}
@@ -109,7 +107,6 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
             "$unbound.module.probe"
             if scenario.startswith("unbound")
             else "Q.pulses.missing",
-            fallback=Template("pulse") if scenario.endswith("fallback") else None,
         )
     )
     form = bound_form(node)
@@ -123,7 +120,7 @@ def test_slot_resolution_ref_copy_fallback_or_invalid(scenario: str) -> None:
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, Core), cfg
-    assert cfg.probe.ch == (2 if scenario.endswith("fallback") else 1)
+    assert cfg.probe.ch == 1
     probe = state.input.data["probe"]
     assert isinstance(probe, dict)
     assert probe["kind"] == ("ref" if scenario == "key" else "inline")
@@ -183,18 +180,12 @@ def test_locked_slot_is_inline_and_branch_defaults_reapply_only_lock() -> None:
     assert isinstance(state.result(env), FormErrors)
 
 
-@pytest.mark.parametrize("mode", ["copy", "fallback"])
 @pytest.mark.parametrize("expression", ["$unbound.value", "'not a number'", "2 * 3"])
 def test_root_slot_expression_overrides_require_input(
-    mode: str,
     expression: str,
 ) -> None:
     form = bound_form(
         Slot("Q.pulses.probe", copy=True, set={"phase": Expr(expression)})
-        if mode == "copy"
-        else Slot(
-            "missing", fallback=Template("pulse"), set={"phase": Expr(expression)}
-        )
     )
     env = environment()
     state = FormState(form.default_input(env))
@@ -210,11 +201,7 @@ def test_root_slot_expression_overrides_require_input(
     if isinstance(cfg, FormErrors):
         pytest.fail(str(cfg.messages))
     assert cfg.probe.phase == (6 if expression == "2 * 3" else 4)
-    control = bound_form(
-        Slot("Q.pulses.probe", copy=True)
-        if mode == "copy"
-        else Slot("missing", fallback=Template("pulse"))
-    )
+    control = bound_form(Slot("Q.pulses.probe", copy=True))
     control_result = FormState(control.default_input(env)).result(env)
     if isinstance(control_result, FormErrors):
         pytest.fail(str(control_result.messages))
@@ -448,64 +435,6 @@ def test_nested_template_expression_and_static_defaults_are_isolated(
     )
     assert native.ro_cfg.trig_offset == native.pulse_cfg.phase == 0
     assert state.result(env) == result
-
-
-@pytest.mark.parametrize("phase", [Expr("$unbound.value"), Expr("2 * 3"), None])
-def test_nested_slot_fallback_expression_defaults_require_input(
-    phase: Expr | None,
-) -> None:
-    catalog = templates()
-    pulse = Template("pulse", set={"phase": phase} if phase is not None else {})
-    catalog["readout"] = TemplateDef(
-        PulseReadoutSpec,
-        "Readout",
-        {
-            "pulse_cfg": Slot("missing", fallback=pulse),
-            "ro_cfg.ro_ch": 0,
-            "ro_cfg.ro_length": 0.2,
-            "ro_cfg.ro_freq": 100,
-        },
-    )
-    form = Form(ReadoutCore, {"readout": Template("readout")})
-    form.bind_templates(catalog, adapter="synthetic")
-    env = FormEnv()
-    state = FormState(form.default_input(env))
-    result = state.result(env)
-    if phase == Expr("$unbound.value"):
-        assert isinstance(result, FormErrors), result
-        assert result.messages == {
-            ("readout", "module", "pulse_cfg", "module", "phase"): "Field required"
-        }
-    else:
-        if isinstance(result, FormErrors):
-            pytest.fail(str(result.messages))
-        cfg = form.to_cfg(result, env)
-        if isinstance(cfg, FormErrors):
-            pytest.fail(str(cfg.messages))
-        assert cfg.readout.pulse_cfg.phase == (0 if phase is None else 6)
-    # Removing a fallback still leaves its unresolved required slot absent.
-    catalog["readout"] = TemplateDef(
-        PulseReadoutSpec,
-        "Readout",
-        {
-            "pulse_cfg": Slot("missing"),
-            "ro_cfg.ro_ch": 0,
-            "ro_cfg.ro_length": 0.2,
-            "ro_cfg.ro_freq": 100,
-        },
-    )
-    control = Form(ReadoutCore, {"readout": Template("readout")})
-    control.bind_templates(catalog, adapter="synthetic-control")
-    control_state = FormState(control.default_input(env))
-    readout = control_state.input.data["readout"]
-    assert isinstance(readout, dict)
-    module = readout["module"]
-    assert isinstance(module, dict) and "pulse_cfg" not in module
-    control_result = control_state.result(env)
-    assert isinstance(control_result, FormErrors)
-    assert control_result.messages == {
-        ("readout", "module", "pulse_cfg"): "Field required"
-    }
 
 
 @pytest.mark.parametrize("nested", [False, True])

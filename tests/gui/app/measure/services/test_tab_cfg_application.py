@@ -244,9 +244,7 @@ class GlobalSourceAdapter(SampleAdapter):
             {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)},
         )
 
-    def run(
-        self, req: RunRequest, raw_cfg: Mapping[str, object], *, context: RunContext
-    ) -> NoReturn:
+    def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> NoReturn:
         raise AssertionError("Admission-only adapter must not execute")
 
 

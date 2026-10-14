@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,10 +22,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.cfg_schemas import module_cfg_to_value
 from zcu_tools.gui.cfg import CfgSchema
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
-from zcu_lab.v2.twotone.reset.bath.phase.form import FORM
+from zcu_lab.v2.twotone.reset.bath.phase.form import make_form
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
@@ -47,8 +47,11 @@ class BathPhaseAdapter(
 ):
     experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
-    ExpCfg_cls = PhaseCfg
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PhaseCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -101,11 +104,11 @@ class BathPhaseAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: PhaseCfg,
         *,
         context: RunContext,
     ) -> BathPhaseRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = PhaseExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

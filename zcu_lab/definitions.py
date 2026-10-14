@@ -1,135 +1,63 @@
 """Explicit user-owned measure catalog; importing it performs no registration."""
 
-from typing import Any
-
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.template_catalog import TemplateCatalog
-from zcu_tools.gui.form_adapter import Form
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
-from zcu_lab.v2.fake.freq.form import FORM as FAKE_FREQ_FORM
-from zcu_lab.v2.fake.freq.gui import FakeFreqAdapter
-from zcu_lab.v2.jpa.auto_optimize.form import FORM as JPA_AUTO_OPTIMIZE_FORM
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
-from zcu_lab.v2.jpa.check.form import FORM as JPA_CHECK_FORM
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
-from zcu_lab.v2.jpa.flux.form import FORM as JPA_FLUX_FORM
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
-from zcu_lab.v2.jpa.flux_onetone.form import FORM as JPA_FLUX_ONETONE_FORM
 from zcu_lab.v2.jpa.flux_onetone.gui import JpaFluxOneToneAdapter
-from zcu_lab.v2.jpa.freq.form import FORM as JPA_FREQ_FORM
 from zcu_lab.v2.jpa.freq.gui import JpaFreqAdapter
-from zcu_lab.v2.jpa.power.form import FORM as JPA_POWER_FORM
 from zcu_lab.v2.jpa.power.gui import JpaPowerAdapter
-from zcu_lab.v2.lookback.form import FORM as LOOKBACK_FORM
 from zcu_lab.v2.lookback.gui import LookbackAdapter
-from zcu_lab.v2.onetone.flux_dep.form import FORM as ONETONE_FLUX_DEP_FORM
 from zcu_lab.v2.onetone.flux_dep.gui import OneToneFluxDepAdapter
-from zcu_lab.v2.onetone.freq.form import FORM as ONETONE_FREQ_FORM
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAdapter
-from zcu_lab.v2.onetone.power_dep.form import FORM as ONETONE_POWER_DEP_FORM
 from zcu_lab.v2.onetone.power_dep.gui import OneTonePowerDepAdapter
-from zcu_lab.v2.singleshot.ac_stark.form import FORM as SS_AC_STARK_FORM
 from zcu_lab.v2.singleshot.ac_stark.gui import SsAcStarkAdapter
-from zcu_lab.v2.singleshot.amp_rabi.form import FORM as SS_AMP_RABI_FORM
 from zcu_lab.v2.singleshot.amp_rabi.gui import SsAmpRabiAdapter
-from zcu_lab.v2.singleshot.check.form import FORM as SS_CHECK_FORM
 from zcu_lab.v2.singleshot.check.gui import CheckAdapter
-from zcu_lab.v2.singleshot.ge.form import FORM as SS_GE_FORM
 from zcu_lab.v2.singleshot.ge.gui import GEAdapter
-from zcu_lab.v2.singleshot.len_rabi.form import FORM as SS_LEN_RABI_FORM
 from zcu_lab.v2.singleshot.len_rabi.gui import SsLenRabiAdapter
-from zcu_lab.v2.singleshot.mist.freq.form import FORM as SS_MIST_FREQ_FORM
 from zcu_lab.v2.singleshot.mist.freq.gui import MistFreqAdapter
-from zcu_lab.v2.singleshot.mist.power.form import FORM as SS_MIST_POWER_FORM
 from zcu_lab.v2.singleshot.mist.power.gui import MistPowerAdapter
-from zcu_lab.v2.singleshot.mist.power_freq.form import FORM as SS_MIST_POWER_FREQ_FORM
 from zcu_lab.v2.singleshot.mist.power_freq.gui import MistPowerFreqAdapter
-from zcu_lab.v2.singleshot.reset_check.form import FORM as SS_RESET_CHECK_FORM
 from zcu_lab.v2.singleshot.reset_check.gui import SsResetCheckAdapter
-from zcu_lab.v2.singleshot.t1.t1.form import FORM as SS_T1_FORM
 from zcu_lab.v2.singleshot.t1.t1.gui import SsT1Adapter
-from zcu_lab.v2.singleshot.t1.t1_with_tone.form import FORM as SS_T1_TONE_FORM
 from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import SsT1ToneAdapter
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
-    FORM_FREQ as SS_T1_TONE_SWEEP_FREQ_FORM,
-)
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
-    FORM_GAIN as SS_T1_TONE_SWEEP_GAIN_FORM,
-)
 from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
-from zcu_lab.v2.twotone.allxy.form import FORM as TWOTONE_ALLXY_FORM
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
-from zcu_lab.v2.twotone.ckp.form import FORM as TWOTONE_CKP_FORM
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
-from zcu_lab.v2.twotone.fluxdep.form import FORM as TWOTONE_FLUX_DEP_FORM
 from zcu_lab.v2.twotone.fluxdep.gui import FluxDepAdapter
-from zcu_lab.v2.twotone.freq.form import FORM as TWOTONE_FREQ_FORM
 from zcu_lab.v2.twotone.freq.gui import FreqAdapter
-from zcu_lab.v2.twotone.irb.form import FORM as TWOTONE_IRB_FORM
 from zcu_lab.v2.twotone.irb.gui import IRBAdapter
-from zcu_lab.v2.twotone.power_dep.form import FORM as TWOTONE_POWER_DEP_FORM
 from zcu_lab.v2.twotone.power_dep.gui import PowerDepAdapter
-from zcu_lab.v2.twotone.rabi.amp_rabi.form import FORM as TWOTONE_AMP_RABI_FORM
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAdapter
-from zcu_lab.v2.twotone.rabi.len_rabi.form import FORM as TWOTONE_LEN_RABI_FORM
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAdapter
-from zcu_lab.v2.twotone.rb.form import FORM as TWOTONE_RB_FORM
 from zcu_lab.v2.twotone.rb.gui import RBAdapter
-from zcu_lab.v2.twotone.reset.bath.freq.form import FORM as RESET_BATH_FREQ_FORM
 from zcu_lab.v2.twotone.reset.bath.freq.gui import BathFreqGainAdapter
-from zcu_lab.v2.twotone.reset.bath.length.form import FORM as RESET_BATH_LENGTH_FORM
 from zcu_lab.v2.twotone.reset.bath.length.gui import BathLengthAdapter
-from zcu_lab.v2.twotone.reset.bath.phase.form import FORM as RESET_BATH_PHASE_FORM
 from zcu_lab.v2.twotone.reset.bath.phase.gui import BathPhaseAdapter
-from zcu_lab.v2.twotone.reset.dual_tone.freq.form import (
-    FORM as RESET_DUAL_TONE_FREQ_FORM,
-)
 from zcu_lab.v2.twotone.reset.dual_tone.freq.gui import DualToneFreqAdapter
-from zcu_lab.v2.twotone.reset.dual_tone.length.form import (
-    FORM as RESET_DUAL_TONE_LENGTH_FORM,
-)
 from zcu_lab.v2.twotone.reset.dual_tone.length.gui import DualToneLengthAdapter
-from zcu_lab.v2.twotone.reset.dual_tone.power.form import (
-    FORM as RESET_DUAL_TONE_POWER_FORM,
-)
 from zcu_lab.v2.twotone.reset.dual_tone.power.gui import DualTonePowerAdapter
-from zcu_lab.v2.twotone.reset.rabi_check.form import FORM as RESET_RABI_CHECK_FORM
 from zcu_lab.v2.twotone.reset.rabi_check.gui import RabiCheckAdapter
-from zcu_lab.v2.twotone.reset.single_tone.freq.form import (
-    FORM as RESET_SINGLE_TONE_FREQ_FORM,
-)
 from zcu_lab.v2.twotone.reset.single_tone.freq.gui import SingleToneFreqAdapter
-from zcu_lab.v2.twotone.reset.single_tone.length.form import (
-    FORM as RESET_SINGLE_TONE_LENGTH_FORM,
-)
 from zcu_lab.v2.twotone.reset.single_tone.length.gui import SingleToneLengthAdapter
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.form import FORM as RO_OPT_AUTO_FORM
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import RoOptAutoAdapter
-from zcu_lab.v2.twotone.ro_optimize.freq.form import FORM as RO_OPT_FREQ_FORM
 from zcu_lab.v2.twotone.ro_optimize.freq.gui import RoOptFreqAdapter
-from zcu_lab.v2.twotone.ro_optimize.freq_gain.form import FORM as RO_OPT_FREQ_GAIN_FORM
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import RoOptFreqGainAdapter
-from zcu_lab.v2.twotone.ro_optimize.length.form import FORM as RO_OPT_LENGTH_FORM
 from zcu_lab.v2.twotone.ro_optimize.length.gui import RoOptLengthAdapter
-from zcu_lab.v2.twotone.ro_optimize.power.form import FORM as RO_OPT_POWER_FORM
 from zcu_lab.v2.twotone.ro_optimize.power.gui import RoOptPowerAdapter
-from zcu_lab.v2.twotone.time_domain.t1.form import FORM as TWOTONE_T1_FORM
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1Adapter
-from zcu_lab.v2.twotone.time_domain.t2echo.form import FORM as TWOTONE_T2ECHO_FORM
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoAdapter
-from zcu_lab.v2.twotone.time_domain.t2ramsey.form import FORM as TWOTONE_T2RAMSEY_FORM
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAdapter
-from zcu_lab.v2.twotone.zigzag.form import FORM as TWOTONE_ZIGZAG_FORM
 from zcu_lab.v2.twotone.zigzag.gui import ZigZagAdapter
-from zcu_lab.v2.twotone.zigzag_sweep.form import FREQ_FORM as TWOTONE_ZIGZAG_FREQ_FORM
-from zcu_lab.v2.twotone.zigzag_sweep.form import GAIN_FORM as TWOTONE_ZIGZAG_GAIN_FORM
 from zcu_lab.v2.twotone.zigzag_sweep.gui import (
     ZigZagScanFreqAdapter,
     ZigZagScanGainAdapter,
@@ -137,9 +65,8 @@ from zcu_lab.v2.twotone.zigzag_sweep.gui import (
 
 from . import ALIAS_PRESET as ALIAS_PRESET
 
-ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
+ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "lookback": LookbackAdapter,
-    "fake/freq": FakeFreqAdapter,
     "onetone/freq": OneToneFreqAdapter,
     "onetone/power_dep": OneTonePowerDepAdapter,
     "onetone/flux_dep": OneToneFluxDepAdapter,
@@ -194,61 +121,6 @@ ADAPTERS: dict[str, type[BaseAdapter[Any, Any, Any, Any]]] = {
 }
 
 # Core-derived forms of migrated adapters, registered with their adapter names.
-FORMS: dict[str, Form[ConfigBase]] = {
-    "lookback": LOOKBACK_FORM,
-    "fake/freq": FAKE_FREQ_FORM,
-    "onetone/freq": ONETONE_FREQ_FORM,
-    "onetone/power_dep": ONETONE_POWER_DEP_FORM,
-    "onetone/flux_dep": ONETONE_FLUX_DEP_FORM,
-    "twotone/freq": TWOTONE_FREQ_FORM,
-    "twotone/allxy": TWOTONE_ALLXY_FORM,
-    "twotone/ckp": TWOTONE_CKP_FORM,
-    "twotone/flux_dep": TWOTONE_FLUX_DEP_FORM,
-    "twotone/irb": TWOTONE_IRB_FORM,
-    "twotone/power_dep": TWOTONE_POWER_DEP_FORM,
-    "twotone/rabi/amp_rabi": TWOTONE_AMP_RABI_FORM,
-    "twotone/rabi/len_rabi": TWOTONE_LEN_RABI_FORM,
-    "twotone/rb": TWOTONE_RB_FORM,
-    "twotone/t1": TWOTONE_T1_FORM,
-    "twotone/t2echo": TWOTONE_T2ECHO_FORM,
-    "twotone/t2ramsey": TWOTONE_T2RAMSEY_FORM,
-    "twotone/zigzag": TWOTONE_ZIGZAG_FORM,
-    "twotone/zigzag_scan/gain": TWOTONE_ZIGZAG_GAIN_FORM,
-    "twotone/zigzag_scan/freq": TWOTONE_ZIGZAG_FREQ_FORM,
-    "twotone/reset/single_tone/freq": RESET_SINGLE_TONE_FREQ_FORM,
-    "twotone/reset/single_tone/length": RESET_SINGLE_TONE_LENGTH_FORM,
-    "twotone/reset/dual_tone/freq": RESET_DUAL_TONE_FREQ_FORM,
-    "twotone/reset/dual_tone/length": RESET_DUAL_TONE_LENGTH_FORM,
-    "twotone/reset/dual_tone/power": RESET_DUAL_TONE_POWER_FORM,
-    "twotone/reset/bath/freq_gain": RESET_BATH_FREQ_FORM,
-    "twotone/reset/bath/length": RESET_BATH_LENGTH_FORM,
-    "twotone/reset/bath/phase": RESET_BATH_PHASE_FORM,
-    "twotone/reset/check": RESET_RABI_CHECK_FORM,
-    "twotone/ro_optimize/freq": RO_OPT_FREQ_FORM,
-    "twotone/ro_optimize/power": RO_OPT_POWER_FORM,
-    "twotone/ro_optimize/length": RO_OPT_LENGTH_FORM,
-    "twotone/ro_optimize/freq_gain": RO_OPT_FREQ_GAIN_FORM,
-    "twotone/ro_optimize/auto": RO_OPT_AUTO_FORM,
-    "singleshot/ge": SS_GE_FORM,
-    "singleshot/check": SS_CHECK_FORM,
-    "singleshot/reset_check": SS_RESET_CHECK_FORM,
-    "singleshot/len_rabi": SS_LEN_RABI_FORM,
-    "singleshot/amp_rabi": SS_AMP_RABI_FORM,
-    "singleshot/t1": SS_T1_FORM,
-    "singleshot/t1_tone": SS_T1_TONE_FORM,
-    "singleshot/t1_tone_sweep_gain": SS_T1_TONE_SWEEP_GAIN_FORM,
-    "singleshot/t1_tone_sweep_freq": SS_T1_TONE_SWEEP_FREQ_FORM,
-    "singleshot/ac_stark": SS_AC_STARK_FORM,
-    "singleshot/mist/freq": SS_MIST_FREQ_FORM,
-    "singleshot/mist/power": SS_MIST_POWER_FORM,
-    "singleshot/mist/power_freq": SS_MIST_POWER_FREQ_FORM,
-    "jpa/freq": JPA_FREQ_FORM,
-    "jpa/flux": JPA_FLUX_FORM,
-    "jpa/power": JPA_POWER_FORM,
-    "jpa/auto_optimize": JPA_AUTO_OPTIMIZE_FORM,
-    "jpa/flux_onetone": JPA_FLUX_ONETONE_FORM,
-    "jpa/check": JPA_CHECK_FORM,
-}
 
 
 def register_all(
@@ -266,12 +138,11 @@ def register_all(
     component models and roles. Omit these startup receivers on reload to
     preserve identities. Duplicate entries and invalid definitions raise the
     receiving catalog's registration errors; duplicate adapters raise ValueError.
-    Each FORMS entry is registered with its adapter, binding registry.templates;
-    an unknown template id or incompatible seed raises ValueError naming them.
+    Registration does not build forms or validate templates; Open/Reset does.
     """
     if components is not None:
         register_components(components)
     if template_catalog is not None:
         template_catalog.register_definitions(registry.templates)
     for name, cls in ADAPTERS.items():
-        registry.register(name, cls, form=FORMS.get(name))
+        registry.register(name, cls)

@@ -144,11 +144,9 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
 def test_generated_inline_selection_uses_fresh_template_not_the_key_or_previous_draft() -> (
     None
 ):
-    from zcu_tools.cfg_model import Slot, Template, TemplateDef
+    from zcu_tools.cfg_model import Template, TemplateDef
 
-    form = Form(
-        ModuleSection, {"probe": Slot("Q.pulses.probe", fallback=Template("pulse"))}
-    )
+    form = Form(ModuleSection, {"probe": Template("pulse")})
     form.bind_templates(
         {
             "pulse": TemplateDef(
@@ -441,67 +439,6 @@ def test_public_module_read_is_detached_and_field_local(mode: str) -> None:
     assert input.data == before
 
 
-@pytest.mark.parametrize("fallback", [True, False], ids=["template", "blank"])
-@pytest.mark.parametrize("missing", ["library", "key"])
-def test_required_module_branch_switch_uses_owner_fallback(
-    fallback: bool, missing: str
-) -> None:
-    from zcu_tools.cfg_model import Slot, Template, TemplateDef
-
-    form = Form(
-        ModuleCore,
-        {
-            "modules": {
-                "probe": Slot(
-                    "$qubit.module.probe",
-                    fallback=Template("pulse") if fallback else None,
-                )
-            }
-        },
-    )
-    form.bind_templates(
-        {
-            "pulse": TemplateDef(
-                PulseSpec,
-                "Pulse",
-                {
-                    "ch": 1,
-                    "nqz": 1,
-                    "freq": 90.0,
-                    "gain": 0.2,
-                    "waveform.style": "const",
-                    "waveform.length": 0.1,
-                },
-            )
-        },
-        adapter="synthetic",
-    )
-    env = FormEnv() if missing == "library" else module_env()
-    # FormInput can preserve an invalid draft; ordinary write rejects missing refs.
-    input = FormInput(
-        form.model, {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.missing"}}}
-    )
-    before = input.data
-    state = FormState(input)
-    notifications: list[str] = []
-    state.subscribe(lambda: notifications.append("changed"))
-    state.write({("modules", "probe", "kind"): "inline"}, env)
-    assert notifications == ["changed"]
-    assert input.data == before
-    module = expect_object(expect_object(state.input.data["modules"])["probe"])
-    assert module["kind"] == "inline"
-    assert expect_object(module["module"])["type"] == "pulse"
-    if fallback:
-        observed = form.read_module(state.input, ("modules", "probe"), env)
-        assert not isinstance(observed, FormErrors), observed
-        assert observed.value["freq"] == 90.0
-    else:
-        state.write({("modules", "probe", "module", "freq"): 125.0}, env)
-        assert (
-            state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0
-        )
-
-
 def expect_object(value: JsonValue) -> dict[str, JsonValue]:
     """Narrow a public input observation without altering it."""
     assert isinstance(value, dict)
@@ -604,3 +541,53 @@ def test_locked_module_field_with_spec_decimals_has_input_schema() -> None:
     assert not isinstance(value, FormErrors), value
     cfg = form.to_cfg(value, env)
     assert isinstance(cfg, ModuleCore) and cfg.modules.probe.freq == 100.0
+
+
+@pytest.mark.parametrize("missing", ["library", "key"])
+def test_required_module_branch_switch_uses_blank_defaults(missing: str) -> None:
+    from zcu_tools.cfg_model import Slot, TemplateDef
+
+    form = Form(
+        ModuleCore,
+        {
+            "modules": {
+                "probe": Slot(
+                    "$qubit.module.probe",
+                )
+            }
+        },
+    )
+    form.bind_templates(
+        {
+            "pulse": TemplateDef(
+                PulseSpec,
+                "Pulse",
+                {
+                    "ch": 1,
+                    "nqz": 1,
+                    "freq": 90.0,
+                    "gain": 0.2,
+                    "waveform.style": "const",
+                    "waveform.length": 0.1,
+                },
+            )
+        },
+        adapter="synthetic",
+    )
+    env = FormEnv() if missing == "library" else module_env()
+    # FormInput can preserve an invalid draft; ordinary write rejects missing refs.
+    input = FormInput(
+        form.model, {"modules": {"probe": {"kind": "ref", "name": "Q.pulses.missing"}}}
+    )
+    before = input.data
+    state = FormState(input)
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+    state.write({("modules", "probe", "kind"): "inline"}, env)
+    assert notifications == ["changed"]
+    assert input.data == before
+    module = expect_object(expect_object(state.input.data["modules"])["probe"])
+    assert module["kind"] == "inline"
+    assert expect_object(module["module"])["type"] == "pulse"
+    state.write({("modules", "probe", "module", "freq"): 125.0}, env)
+    assert state.preview(env).values[("modules", "probe", "module", "freq")] == 125.0

@@ -768,9 +768,6 @@ def _make_concrete_adapter() -> BaseAdapter:
         def cfg_definition(cls) -> MeasureCfgDefinition:
             return _empty_cfg_definition()
 
-        def build_exp_cfg(self, raw_cfg, req):
-            return MagicMock()
-
         def make_filename_stem(self, ctx):
             return "fake_stem"
 
@@ -859,9 +856,6 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
             def cfg_definition(cls) -> MeasureCfgDefinition:
                 return _empty_cfg_definition()
 
-            def build_exp_cfg(self, raw_cfg, req):
-                return MagicMock()
-
             def make_filename_stem(self, ctx):
                 return "stem"
 
@@ -896,9 +890,6 @@ def test_analyze_params_cls_fallback_when_no_annotation():
         @classmethod
         def cfg_definition(cls) -> MeasureCfgDefinition:
             return _empty_cfg_definition()
-
-        def build_exp_cfg(self, raw_cfg, req):
-            return MagicMock()
 
         def make_filename_stem(self, ctx):
             return "stem"

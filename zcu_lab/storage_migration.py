@@ -16,7 +16,7 @@ from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.6", "qubit/transmon": "1.7"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.8", "qubit/transmon": "1.9"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),

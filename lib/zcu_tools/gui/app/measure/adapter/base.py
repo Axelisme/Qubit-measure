@@ -3,13 +3,12 @@ from __future__ import annotations
 import dataclasses
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, cast
 
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
@@ -117,7 +116,7 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     """Shared implementation for experiment adapters.
 
     Concrete adapters subclass this and fill in the experiment-specific knowledge
-    (``form``, ``build_exp_cfg``, ``make_filename_stem``
+    (``make_form``, ``make_filename_stem``
     and — when the experiment supports analysis — ``get_analyze_params``/``analyze``).
     Everything else (run delegation, save-path policy,
     save) is provided here once.
@@ -141,9 +140,6 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
     guide_text: ClassVar[AdapterGuide] = _NO_GUIDE
-
-    # Concrete adapters publish one core-derived definition; the host owns state.
-    form: Form[T_Cfg]
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T_Cfg]:
@@ -327,31 +323,16 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
         """
         return cls.guide_text
 
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> T_Cfg:
-        """Validate an accepted Form dump as this adapter's concrete core cfg.
-
-        raw_cfg contains the already lowered values from TabFormResource.accept,
-        not authored input or library references. req remains the Run request;
-        this conversion needs no sources, assets or hardware. Return the type
-        published by form.core_cfg. Core ValidationError propagates for invalid
-        mappings. The mapping and request are not modified or reassembled.
-        """
-        del req
-        return self.form.core_cfg.model_validate(raw_cfg)
-
-    def validate_run_request(
-        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
-    ) -> None:
+    def validate_run_request(self, req: RunRequest, cfg: T_Cfg) -> None:
         """Pure run preflight for adapter-specific constraints.
 
         GuardService calls this before opening an async run handle. The default is
-        intentionally empty because most adapters have no constraints beyond
-        lowering + model construction; adapters that need SoC-dependent checks
-        override it and must not touch devices or mutate cfg/state.
+        intentionally empty: cfg is the output already validated by this adapter's
+        Form, not raw input. Adapters that need SoC-dependent checks override it
+        and must not touch devices or mutate cfg/state. Validation failures
+        propagate to GuardService's admission error translation.
         """
-        del req, raw_cfg
+        del req, cfg
 
     @abstractmethod
     def make_filename_stem(self, ctx: SessionEnv) -> str:
@@ -508,11 +489,17 @@ class BaseAdapter(ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T_Cfg,
         *,
         context: RunContext,
     ) -> T_Result:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        """Pass this adapter's validated Form output to its core unchanged.
+
+        req supplies admission inputs; context owns acquisition dependencies.
+        No form rebuild, source capture or cfg validation happens here.
+        Core execution failures propagate to the operation owner.
+        """
+        del req
         return cast(T_Result, self.exp_cls().run(cfg, context=context))
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:

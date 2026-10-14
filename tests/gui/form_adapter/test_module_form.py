@@ -709,7 +709,7 @@ def creation_templates() -> dict[str, TemplateDef]:
         "reset": TemplateDef(
             PulseResetSpec,
             "Synthetic reset",
-            {"pulse_cfg": Slot("Q.pulses.probe", fallback=Template("pulse"))},
+            {"pulse_cfg": Slot("Q.pulses.probe")},
         ),
     }
 
@@ -903,33 +903,15 @@ def test_template_input_models_isolate_locks_defaults_and_recomputation(
     assert dict(second_template.set) == {"phase": 7.0}
 
 
-@pytest.mark.parametrize("bound", [True, False], ids=["bound-key", "unbound-fallback"])
-def test_template_input_slot_keeps_bound_key_or_uses_inline_fallback(
-    creation_templates: dict[str, TemplateDef], bound: bool
+def test_template_input_slot_keeps_bound_key(
+    creation_templates: dict[str, TemplateDef],
 ) -> None:
     form = form_adapter.module_form(PulseResetSpec)
     env = creation_env()
-    template = (
-        Template("reset")
-        if bound
-        else Template(
-            "reset",
-            set={"pulse_cfg": Slot("Q.pulses.missing", fallback=Template("pulse"))},
-        )
-    )
-    input = form.template_input(template, creation_templates, env)
+    input = form.template_input(Template("reset"), creation_templates, env)
     cfg = result_spec(form, FormState(input), env)
-
-    if bound:
-        assert input.data["pulse_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
-        assert cfg.pulse_cfg == "Q.pulses.probe"
-    else:
-        assert isinstance(cfg.pulse_cfg, PulseSpec)
-        assert cfg.pulse_cfg.freq == 120.0 and cfg.pulse_cfg.gain == 0.25
-        assert cfg.pulse_cfg.model_dump(mode="json")["waveform"] == {
-            "style": "const",
-            "length": 0.4,
-        }
+    assert input.data["pulse_cfg"] == {"kind": "ref", "name": "Q.pulses.probe"}
+    assert cfg.pulse_cfg == "Q.pulses.probe"
 
 
 @pytest.mark.parametrize(

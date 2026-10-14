@@ -417,7 +417,7 @@ class Form[C: ConfigBase]:
     model is a generated FormModel class, used only through the public form API.
     default_input resolves names once against the supplied captured FormEnv;
     hosts use the same env until Reset. The host calls bind_templates with its
-    template catalog before resolving Template/fallback nodes. Slot copies
+    template catalog before resolving Template nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
     structural defaults. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
@@ -504,7 +504,7 @@ class Form[C: ConfigBase]:
         raises the same ValueError, naming the template id and the dotted seed
         path; to_cfg fills those fields only from Spec defaults. Seeds for other
         fields, including $-prefixed strings, stay literal. No sources are read.
-        Call before default_input when the tree contains Template/fallback nodes.
+        Call before default_input when the tree contains Template nodes.
         Definitions remain immutable and the caller's mapping is never retained.
         """
         self._section.bind_templates(MappingProxyType(dict(templates)), adapter)
@@ -591,7 +591,7 @@ class Form[C: ConfigBase]:
         TemplateDef values. env supplies captured parameters and library for
         Expr initial values and Slot resolution. Partial seeds overlay Spec
         defaults; failed Expr initial values leave required fields unfilled.
-        Bound Slots keep child library keys; unbound Slots use their fallback.
+        Bound Slots keep child library keys; unbound Slots leave required input absent.
         No native cfg or asset is materialized. to_cfg returns the original Spec.
 
         input.model may be a subclass of this Form's model, specialized for
@@ -605,7 +605,7 @@ class Form[C: ConfigBase]:
         The input model retains a detached catalog mapping, not the caller's map.
 
         Core cfg Forms raise TypeError. Unknown IDs, incompatible Spec families,
-        unsupported or malformed seed/lock paths and recursive fallbacks raise
+        unsupported or malformed seed/lock paths raise
         ValueError naming the template or path. Captured-source and default
         factory failures propagate; they never silently use a fallback.
         """

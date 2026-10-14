@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from inspect import signature
 from typing import Any, ClassVar
 
 import pytest
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterCfgDefinition,
     AnalysisMode,
-    ExpAdapterProtocol,
     NoAnalysisResult,
     NoAnalyzeParams,
     PostAnalyzeResultBase,
@@ -291,15 +289,9 @@ def test_intermediate_base_forbidden_implementation_is_detected() -> None:
             )
 
 
-def test_run_preflight_protocol_and_base_signatures_match() -> None:
-    assert signature(ExpAdapterProtocol.validate_run_request) == signature(
-        BaseAdapter.validate_run_request
-    )
-
-
 def test_base_run_preflight_default_is_noop() -> None:
     req: Any = object()
-    raw_cfg: dict[str, ExperimentCfgValue] = {"sentinel": "unchanged"}
+    cfg = ConfigBase()
 
-    assert _MinimalNoAnalysisAdapter().validate_run_request(req, raw_cfg) is None
-    assert set(raw_cfg) == {"sentinel"}
+    assert _MinimalNoAnalysisAdapter().validate_run_request(req, cfg) is None
+    assert cfg.model_dump() == {}

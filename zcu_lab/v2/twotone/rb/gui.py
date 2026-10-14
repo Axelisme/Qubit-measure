@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,11 +17,12 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.rb.core import RB_Exp, RB_Result, RBCfg
 
-from .form import FORM
+from .form import make_form
 
 RBRunResult: TypeAlias = RunRecord[RBCfg, RB_Result]
 
@@ -37,13 +36,16 @@ class RBAnalyzeResult(AnalyzeResultBase):
 
 
 class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams]):
-    form = FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[RBCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
     experiment_tag: ClassVar[str | None] = RB_Exp.persistence_tag()
 
     exp_cls = RB_Exp
-    ExpCfg_cls: ClassVar[type[RBCfg]] = RBCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
             "Single-qubit Clifford RB: each independent random seed supplies a shared "
@@ -81,12 +83,12 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: RBCfg,
         *,
         context: RunContext,
     ) -> RBRunResult:
         """Execute the accepted cfg; propagate acquisition failures to the GUI."""
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
 
     def analyze(

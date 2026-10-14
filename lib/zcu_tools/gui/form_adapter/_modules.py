@@ -656,13 +656,7 @@ class ModuleField:
         return _module_options(key_commands, kind_fields, nullable=self.nullable)
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
-        template = (
-            self.node
-            if isinstance(self.node, Template)
-            else self.node.fallback
-            if self.node is not None
-            else None
-        )
+        template = self.node if isinstance(self.node, Template) else None
         seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
@@ -717,10 +711,6 @@ class ModuleField:
             module = persistent_input(
                 model,
                 supported_input(model, spec.model_dump(mode="json", exclude_none=True)),
-            )
-        elif self.node.fallback is not None:
-            module = template_input(
-                self.node.fallback, self.catalog, self.editable, env
             )
         else:
             return None
@@ -779,13 +769,7 @@ class ModuleField:
 
     def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
         """Build fresh Template/blank input and locks without copying any prior ref."""
-        template = (
-            self.node
-            if isinstance(self.node, Template)
-            else self.node.fallback
-            if self.node is not None
-            else None
-        )
+        template = self.node if isinstance(self.node, Template) else None
         if template is not None:
             module = template_input(template, self.catalog, self.editable, env)
         elif len(self.editable) == 1:

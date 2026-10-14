@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias, cast
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -36,10 +35,11 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEAnalyzeOptions,
     GEPostAnalyzeOptions,
 )
-from zcu_lab.v2.singleshot.ge.form import FORM
+from zcu_lab.v2.singleshot.ge.form import make_form
 
 if TYPE_CHECKING:
-    from zcu_tools.plotting.plots import Plots
+    from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
@@ -88,9 +88,13 @@ class GEPostAnalyzeResult(PostAnalyzeResultBase):
 
 class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams]):
     experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[GE_Cfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = GE_Exp
-    ExpCfg_cls = GE_Cfg
     # FIT primary analysis + a confusion-diagnostic post-analysis layer.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
@@ -141,11 +145,11 @@ class GEAdapter(BaseAdapter[GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParam
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: GE_Cfg,
         *,
         context: RunContext,
     ) -> GERunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = GE_Exp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

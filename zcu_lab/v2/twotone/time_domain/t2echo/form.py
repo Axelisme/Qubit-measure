@@ -4,7 +4,7 @@ from typing import Annotated
 
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form import Display, FormModel
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.detune import resolve_detune
 
@@ -25,22 +25,30 @@ def lower_detune(extras: DetuneInput, cfg: T2EchoCfg) -> T2EchoCfg:
     return cfg
 
 
-FORM = Form(
-    T2EchoCfg,
-    tree={
-        "modules": {
-            "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse")),
-            "pi2_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse")),
-            "readout": Slot("$qubit.module.readout", fallback=Template("readout")),
+def make_form(ctx: FormContext) -> Form[T2EchoCfg]:
+    """Build starting values and shape from the captured source availability."""
+    return Form(
+        T2EchoCfg,
+        tree={
+            "modules": {
+                "reset": Slot("$qubit.module.reset"),
+                "pi_pulse": Slot("$qubit.module.x180")
+                if ctx.has("$qubit.module.x180")
+                else Template("pi_pulse"),
+                "pi2_pulse": Slot("$qubit.module.x90")
+                if ctx.has("$qubit.module.x90")
+                else Template("pi2_pulse"),
+                "readout": Slot("$qubit.module.readout")
+                if ctx.has("$qubit.module.readout")
+                else Template("readout"),
+            },
+            "sweep": {"length": Range.between(0.0, "1.5 * $qubit.t2e", expts=101)},
+            "relax_delay": Expr("5 * $qubit.t1"),
+            "initial_delay": Hidden(),
+            "reps": 1000,
+            "rounds": 100,
+            "detune": Hidden(),
         },
-        "sweep": {"length": Range.between(0.0, "1.5 * $qubit.t2e", expts=101)},
-        "relax_delay": Expr("5 * $qubit.t1"),
-        "initial_delay": Hidden(),
-        "reps": 1000,
-        "rounds": 100,
-        "detune": Hidden(),
-    },
-    extras=DetuneInput,
-    lower=lower_detune,
-)
+        extras=DetuneInput,
+        lower=lower_detune,
+    )

@@ -57,28 +57,25 @@ class Slot:
     placeholders. Forms resolve it at Reset to a direct key. ``copy=False`` keeps
     a reference; ``copy=True`` copies the module inline. ``set`` maps relative
     dotted paths to initial literal, Expr or Slot seeds; ``lock`` maps relative
-    scalar paths to fixed literals and forces inline form content. ``fallback``
-    optionally requests a fresh Template when the slot is unset, dangling or its
-    alias is unbound. Without fallback, forms leave the input absent: required
+    scalar paths to fixed literals and forces inline form content. When the slot
+    is unset, dangling or its alias is unbound, forms leave input absent: required
     core fields are Invalid; nullable core fields with a None default remain
     disabled and Valid. Set is initialization-only; locks are reapplied on form
     branch switches.
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or
-    references. The library creation catalog accepts Slot(path) and optional
-    fallback=Template(id), but rejects Slot.copy/set/lock, Template.set/lock and
-    nondefault Template component bindings with TypeError. Its bound unset/dangling
-    sources expand fallback inline; unbound aliases stay linked empty. Without a
-    library fallback, nested structural defaults remain. Each consumer owns source
-    lookup and schema compatibility failures.
+    references. The library creation catalog accepts Slot(path), but rejects
+    Slot.copy/set/lock with TypeError. Bound unset/dangling sources keep nested
+    structural defaults; unbound aliases stay linked empty. Each consumer owns
+    source lookup and schema compatibility failures. Form authors choose alternate
+    sources in make_form(ctx), not in this declaration.
     """
 
     path: str
     copy: bool = False
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
     lock: Mapping[str, TemplateLiteral] = field(default_factory=dict)
-    fallback: Template | None = None
 
     def __post_init__(self) -> None:
         if not self.path.strip():

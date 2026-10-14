@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -35,14 +34,15 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
-from zcu_lab.v2.onetone.flux_dep.form import FORM
+from zcu_lab.v2.onetone.flux_dep.form import make_form
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
-    from zcu_tools.plotting.plots import Plots
+    from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 
@@ -52,8 +52,12 @@ class OneToneFluxDepAdapter(
 ):
     experiment_tag: ClassVar[str | None] = FluxDepExp.persistence_tag()
     exp_cls = FluxDepExp
-    ExpCfg_cls = FluxDepCfg
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )
@@ -132,11 +136,11 @@ class OneToneFluxDepAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FluxDepCfg,
         *,
         context: RunContext,
     ) -> OneToneFluxDepRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FluxDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

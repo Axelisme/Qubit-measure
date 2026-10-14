@@ -1,13 +1,11 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
-from collections.abc import Mapping
 from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
@@ -55,11 +53,11 @@ class TraceAdapter(BaseAdapter[TraceCfg, TraceCfg]):
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: TraceCfg,
         *,
         context: RunContext,
     ) -> TraceCfg:
-        return TraceCfg.model_validate(raw_cfg)
+        return cfg
 
 
 class FactoryCfg(ConfigBase):

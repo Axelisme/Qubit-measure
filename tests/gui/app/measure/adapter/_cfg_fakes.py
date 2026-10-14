@@ -75,7 +75,6 @@ class CalibrationAdapter(BaseAdapter[CalibrationInput, float]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False
     )
-    ExpCfg_cls = CalibrationInput
     exp_cls = _RejectRun
 
     @classmethod

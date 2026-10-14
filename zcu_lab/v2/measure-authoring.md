@@ -353,7 +353,7 @@ cfg-only module。DualToneFreq 與 BathFreqGain 只提出純量。框架不提�
 保留 downstream 的 reset/readout/x180/x90/probe slots。Reset 校準不讀
 sideband/dual_tone/bath_g/bath_e 方案 slots。Migration profile 將舊 reset 純量映到上述
 ext 名稱，resetf_w 映到 reset_fwhm；舊 reset modules 映到四個固定 roots，不猜
-module.reset 的目前方案。Mapping revisions 為 fluxonium 1.6、transmon 1.7。
+module.reset 的目前方案。Mapping revisions 為 fluxonium 1.8、transmon 1.9。
 
 Bath `freq_gain` 保留 single-role 3D HDF5。Tomography phase 是同一 Result 的內部
 sweep axis，不拆成四個 phase-resolved sidecar，也不改 Save 政策。

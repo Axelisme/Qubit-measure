@@ -1,11 +1,9 @@
 """Minimal adapters exercising controller Run and interactive operation lifetimes."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
@@ -48,7 +46,7 @@ class RecordingAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: ExpCfgModel,
         *,
         context: RunContext,
     ) -> object:

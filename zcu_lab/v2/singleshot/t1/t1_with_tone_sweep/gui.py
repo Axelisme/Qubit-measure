@@ -22,11 +22,9 @@ only in which outer sweep they declare + its default.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -38,6 +36,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import (
@@ -50,7 +49,10 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core import (
     T1WithToneSweepExp,
     T1WithToneSweepResult,
 )
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import FORM_FREQ, FORM_GAIN
+from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
+    make_form_freq,
+    make_form_gain,
+)
 
 SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
 
@@ -75,7 +77,6 @@ class _SsT1ToneSweepBase(
     """
 
     exp_cls = T1WithToneSweepExp
-    ExpCfg_cls = T1WithToneSweepCfg
 
     # Subclasses supply the Form, analysis axis label and filename token.
     outer_label: ClassVar[str]
@@ -84,11 +85,11 @@ class _SsT1ToneSweepBase(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: T1WithToneSweepCfg,
         *,
         context: RunContext,
     ) -> SsT1ToneSweepRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))
 
     def analyze(
@@ -117,7 +118,11 @@ class _SsT1ToneSweepBase(
 
 
 class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
-    form = FORM_GAIN
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form_gain(ctx)
+
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
     filename_token: ClassVar[str] = "gain"
@@ -162,7 +167,11 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
 
 
 class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
-    form = FORM_FREQ
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form_freq(ctx)
+
     experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
     filename_token: ClassVar[str] = "freq"

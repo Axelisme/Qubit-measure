@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -36,14 +35,15 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
-from .form import FORM
+from .form import make_form
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.ui.interactive_frontend import (
         InteractiveFrontend,
         InteractiveFrontendEnv,
     )
-    from zcu_tools.plotting.plots import Plots
+    from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
 
 FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 
@@ -51,10 +51,13 @@ FluxDepRunResult: TypeAlias = RunRecord[FreqFluxCfg, FreqFluxResult]
 class FluxDepAdapter(
     BaseAdapter[FreqFluxCfg, FluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
-    form = FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = FreqFluxExp.persistence_tag()
     exp_cls = FreqFluxExp
-    ExpCfg_cls = FreqFluxCfg
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True
     )
@@ -113,11 +116,11 @@ class FluxDepAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: FreqFluxCfg,
         *,
         context: RunContext,
     ) -> FluxDepRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = FreqFluxExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

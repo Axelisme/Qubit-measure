@@ -206,7 +206,7 @@ def _seeded_section(
                 raise ValueError(f"Slot seed {key!r} cannot also have inline children")
             try:
                 value.fields[key] = _slot_reference(
-                    node_spec, value.fields[key], seed, templates, active, env
+                    node_spec, value.fields[key], seed, templates, env
                 )
             except (TypeError, ValueError) as exc:
                 raise type(exc)(f"{location}.{key}: {exc}") from exc
@@ -243,7 +243,6 @@ def _slot_reference(
     current: object,
     slot: Slot,
     templates: Mapping[str, TemplateDef],
-    active: tuple[str, ...],
     env: SessionEnv | None,
 ) -> ReferenceValue | None:
     if not isinstance(spec, ReferenceSpec):
@@ -251,18 +250,13 @@ def _slot_reference(
     if spec.kind != "module":
         raise TypeError("Library Slot seeds support only module references")
     if slot.copy or slot.set or slot.lock:
-        raise TypeError(
-            "Library seeds support Slot(path) with optional Template(id) fallback, "
-            "without copy/set/lock"
-        )
+        raise TypeError("Library seeds support Slot(path) without copy/set/lock")
     if not isinstance(current, ReferenceValue) and current is not None:
         raise TypeError("Slot field requires a structural reference default")
-    if slot.fallback is not None:
-        _template_reference(slot.fallback, templates, spec.allowed, active, None)
     if env is None:
         # Startup validates syntax/shape without consulting a session source.
         return current
-    fallback: LibraryReferenceFallback = slot.fallback
+    fallback: LibraryReferenceFallback = None
     if fallback is None and isinstance(current, ReferenceValue):
 
         def structural_default(_env: SessionEnv) -> ReferenceValue:

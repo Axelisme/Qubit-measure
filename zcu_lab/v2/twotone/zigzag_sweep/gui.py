@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.zigzag_sweep.core import (
@@ -28,7 +27,7 @@ from zcu_lab.v2.twotone.zigzag_sweep.core import (
     ZigZagScanResult,
 )
 
-from .form import FREQ_FORM, GAIN_FORM
+from .form import make_freq_form, make_gain_form
 
 ZigZagScanRunResult: TypeAlias = RunRecord[ZigZagScanCfg, ZigZagScanResult]
 
@@ -55,18 +54,17 @@ class _ZigZagScanBase(
     """Shared body; subclasses choose the single swept parameter."""
 
     exp_cls = ZigZagScanExp
-    ExpCfg_cls: ClassVar[Any] = ZigZagScanCfg
 
     sweep_key: ClassVar[str]
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: ZigZagScanCfg,
         *,
         context: RunContext,
     ) -> ZigZagScanRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = ZigZagScanExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 
@@ -97,7 +95,11 @@ _SCAN_RECOMMENDED = (
 
 
 class ZigZagScanGainAdapter(_ZigZagScanBase):
-    form = GAIN_FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_gain_form(ctx)
+
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "gain"
 
@@ -133,7 +135,11 @@ class ZigZagScanGainAdapter(_ZigZagScanBase):
 
 
 class ZigZagScanFreqAdapter(_ZigZagScanBase):
-    form = FREQ_FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_freq_form(ctx)
+
     experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
     sweep_key: ClassVar[str] = "freq"
 

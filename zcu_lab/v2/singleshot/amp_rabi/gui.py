@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -19,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
@@ -29,7 +29,7 @@ from zcu_lab.v2.singleshot.amp_rabi.core import (
     AmpRabiFit,
     AmpRabiResult,
 )
-from zcu_lab.v2.singleshot.amp_rabi.form import FORM
+from zcu_lab.v2.singleshot.amp_rabi.form import make_form
 
 SsAmpRabiRunResult = RunRecord[AmpRabiCfg, AmpRabiResult]
 
@@ -58,9 +58,13 @@ class SsAmpRabiAdapter(
     ]
 ):
     experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = AmpRabiExp
-    ExpCfg_cls = AmpRabiCfg
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
             "Hardware gain sweep preserving every raw IQ shot. Live view classifies "
@@ -101,11 +105,11 @@ class SsAmpRabiAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: AmpRabiCfg,
         *,
         context: RunContext,
     ) -> SsAmpRabiRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = AmpRabiExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

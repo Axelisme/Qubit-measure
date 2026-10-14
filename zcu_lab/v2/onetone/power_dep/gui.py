@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -15,9 +13,10 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg, PowerDepExp, PowerDepResult
-from zcu_lab.v2.onetone.power_dep.form import FORM
+from zcu_lab.v2.onetone.power_dep.form import make_form
 
 OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 
@@ -25,8 +24,12 @@ OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
     experiment_tag: ClassVar[str | None] = PowerDepExp.persistence_tag()
     exp_cls = PowerDepExp
-    ExpCfg_cls = PowerDepCfg
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=True
     )
@@ -68,44 +71,26 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
         ),
     )
 
-    def build_exp_cfg(
-        self, raw_cfg: Mapping[str, ExperimentCfgValue], req: RunRequest
-    ) -> PowerDepCfg:
-        """Assemble accepted cfg values with req's captured device snapshot.
-
-        raw_cfg is the resolved experiment tree from cfg acceptance. Positive
-        numeric earlystop_snr enables stopping; nonpositive values disable it.
-        Return the typed cfg without hardware I/O; assembly errors propagate.
-        """
-        cfg_raw = dict(raw_cfg)
-        cfg_raw.pop("earlystop_snr", None)
-        cfg = super().build_exp_cfg(cfg_raw, req)
-        cfg.earlystop_snr = self._earlystop_snr(raw_cfg)
-        return cfg
-
-    def _earlystop_snr(self, raw_cfg: Mapping[str, ExperimentCfgValue]) -> float | None:
-        value = raw_cfg.get("earlystop_snr")
-        if not isinstance(value, (int, float)):
-            return None
-        snr = float(value)
-        if snr <= 0:
-            return None
-        return snr
-
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: PowerDepCfg,
         *,
         context: RunContext,
     ) -> OneTonePowerDepRunResult:
         """Acquire a power/frequency map from accepted cfg values.
 
-        req supplies captured device settings for assembly; context supplies
-        live SoC/device handles, cancellation and plots for acquisition.
+        cfg is this adapter's validated Form output. Nonpositive earlystop_snr
+        disables stopping on a detached copy; context supplies live SoC/device
+        handles, cancellation and plots. req is unused.
         Return this run's typed cfg and result. Acquisition errors propagate.
         """
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
+        cfg = cfg.with_updates(
+            earlystop_snr=cfg.earlystop_snr
+            if cfg.earlystop_snr is not None and cfg.earlystop_snr > 0
+            else None
+        )
         result = PowerDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

@@ -7,11 +7,9 @@ fits power and detuning errors; the summary reports them.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.allxy.core import (
@@ -32,7 +31,7 @@ from zcu_lab.v2.twotone.allxy.core import (
     AllXYCfg,
 )
 
-from .form import FORM
+from .form import make_form
 
 AllXYRunResult: TypeAlias = RunRecord[AllXYCfg, AllXY_Result]
 
@@ -54,10 +53,13 @@ class AllXYAnalyzeResult(AnalyzeResultBase):
 class AllXYAdapter(
     BaseAdapter[AllXYCfg, AllXYRunResult, AllXYAnalyzeResult, AllXYAnalyzeParams]
 ):
-    form = FORM
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[AllXYCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     experiment_tag: ClassVar[str | None] = AllXY_Exp.persistence_tag()
     exp_cls = AllXY_Exp
-    ExpCfg_cls: ClassVar[Any] = AllXYCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -104,11 +106,11 @@ class AllXYAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: AllXYCfg,
         *,
         context: RunContext,
     ) -> AllXYRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         return RunRecord(cfg=cfg, result=AllXY_Exp().run(cfg, context=context))
 
     def analyze(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import socket
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +26,7 @@ from qtpy.QtWidgets import (
     QTreeWidget,
     QWidget,
 )
-from zcu_tools.cfg_model import waveform_spec_from_raw
+from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -87,10 +87,8 @@ class StoppableAdapter(OldAdapter):
         requires_soc=False
     )
 
-    def run(
-        self, req: RunRequest, raw_cfg: Mapping[str, Any], *, context: RunContext
-    ) -> object:
-        del req, raw_cfg
+    def run(self, req: RunRequest, cfg: ConfigBase, *, context: RunContext) -> object:
+        del req, cfg
         if not context.cancel_signal.event.wait(5):
             raise RuntimeError("test run was not stopped")
         return object()

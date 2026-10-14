@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import AnalysisDocument, RunMetadata
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import PreparedRunData
@@ -92,19 +91,17 @@ class DummyAdapter:
         del result, ctx
         return DummyAnalyzeParams()
 
-    def validate_run_request(
-        self, req: RunRequest, raw_cfg: Mapping[str, ExperimentCfgValue]
-    ) -> None:
-        del req, raw_cfg
+    def validate_run_request(self, req: RunRequest, cfg: ConfigBase) -> None:
+        del req, cfg
 
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: ConfigBase,
         *,
         context: RunContext,
     ):
-        del req, raw_cfg, context
+        del req, cfg, context
         return object()
 
     def load(self, req: LoadDataRequest) -> tuple[object, RunMetadata]:

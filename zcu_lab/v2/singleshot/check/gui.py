@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, TypeAlias
 
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -17,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import read_ge_centers
@@ -26,7 +25,7 @@ from zcu_lab.v2.singleshot.check.core import (
     CheckExp,
     CheckResult,
 )
-from zcu_lab.v2.singleshot.check.form import FORM
+from zcu_lab.v2.singleshot.check.form import make_form
 
 CheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
@@ -41,9 +40,13 @@ class CheckAdapter(
     BaseAdapter[CheckCfg, CheckRunResult, CheckAnalyzeResult, NoAnalyzeParams]
 ):
     experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
-    form = FORM
+
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[CheckCfg]:
+        """Build this adapter's definition using captured Open/Reset sources."""
+        return make_form(ctx)
+
     exp_cls = CheckExp
-    ExpCfg_cls = CheckCfg
 
     guide_text: ClassVar[AdapterGuide] = AdapterGuide(
         behavior=(
@@ -85,11 +88,11 @@ class CheckAdapter(
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: CheckCfg,
         *,
         context: RunContext,
     ) -> CheckRunResult:
-        cfg = self.build_exp_cfg(raw_cfg, req)
+        del req
         result = CheckExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)
 

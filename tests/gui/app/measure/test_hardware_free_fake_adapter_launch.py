@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 from qtpy.QtCore import QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea, QTreeWidget
-from zcu_tools.experiment.cfg_assembler import ExperimentCfgValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
@@ -35,6 +34,7 @@ from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._synthetic import (
     PairAdapter,
     SampleAnalysis,
+    SampleCfg,
     SampleRun,
 )
 from tests.gui.app.measure._templates import register_all_templates
@@ -47,11 +47,11 @@ class LedgerAdapter(PairAdapter):
     def run(
         self,
         req: RunRequest,
-        raw_cfg: Mapping[str, ExperimentCfgValue],
+        cfg: SampleCfg,
         *,
         context: RunContext,
     ) -> SampleRun:
-        return super().run(req, dict(raw_cfg), context=context)
+        return super().run(req, cfg, context=context)
 
     def get_writeback_items(
         self, req: WritebackRequest[SampleRun, SampleAnalysis]
