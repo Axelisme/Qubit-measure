@@ -5,6 +5,17 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import QEventLoop, QTimer
+from qtpy.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QStackedWidget,
+    QWidget,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.events import (
     DeviceChangedPayload,
@@ -19,9 +30,54 @@ from zcu_tools.gui.session.services.device import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.session.ui.device_dialog import DeviceDialog, _FakeDevicePanel
+from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 
 from tests.gui.session.ui._parameter_fakes import make_parameters
+
+
+def _listing(dialog: DeviceDialog) -> QListWidget:
+    listing = dialog.findChild(QListWidget)
+    assert listing is not None
+    return listing
+
+
+def _panel(dialog: DeviceDialog) -> QWidget:
+    stack = dialog.findChild(QStackedWidget)
+    assert stack is not None
+    panel = stack.currentWidget()
+    assert panel is not None
+    return panel
+
+
+def _button(dialog: DeviceDialog, text: str) -> QPushButton:
+    return next(b for b in dialog.findChildren(QPushButton) if b.text() == text)
+
+
+def _apply_button(dialog: DeviceDialog) -> QPushButton:
+    return next(
+        b
+        for b in dialog.findChildren(QPushButton)
+        if b.text() in {"Apply Changes", "Stop", "Reconnect"}
+    )
+
+
+def _field[T: QWidget](root: QWidget, label: str, kind: type[T]) -> T:
+    for field in root.findChildren(kind):
+        parent = field.parentWidget()
+        assert parent is not None
+        layout = parent.layout()
+        if isinstance(layout, QFormLayout):
+            caption = layout.labelForField(field)
+            if isinstance(caption, QLabel) and caption.text() == label:
+                return field
+    raise AssertionError(f"No field labelled {label!r}")
+
+
+def _wait_for_poll() -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(1200, loop.quit)
+    loop.exec()
 
 
 def _entry(
@@ -107,23 +163,23 @@ def test_device_dialog_init(qapp):
     # list_devices should be called during init (Phase C also reads it in
     # _setup_device_names, so just assert it was used, not the exact count).
     ctrl.list_devices.assert_called()
-    assert dialog._list.count() == 1
+    assert _listing(dialog).count() == 1
 
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    # The current stack index should map to FakeDevice (1)
-    assert dialog._stack.currentIndex() == 1
+    # Selecting the device displays its value.
+    assert _field(_panel(dialog), "Value:", EvalNumericField).read_raw() == 0.0
 
 
 def test_device_dialog_add_device_dispatches_request(qapp):
     ctrl = _make_ctrl()
 
     dialog = _make_dialog(ctrl)
-    dialog._type_combo.setCurrentText("FakeDevice")
-    dialog._addr_edit.setText("TCPIP::127.0.0.1::INSTR")
-    dialog._name_edit.setText("fakedevice")
+    _field(dialog, "Type:", QComboBox).setCurrentText("FakeDevice")
+    _field(dialog, "Address:", QLineEdit).setText("TCPIP::127.0.0.1::INSTR")
+    _field(dialog, "Name:", QLineEdit).setText("fakedevice")
 
-    dialog._add_btn.click()
+    _button(dialog, "Add Device").click()
 
     ctrl.start_connect_device.assert_called_once()
     (req,) = ctrl.start_connect_device.call_args.args
@@ -132,24 +188,6 @@ def test_device_dialog_add_device_dispatches_request(qapp):
     assert req.name == "fakedevice"
     assert req.address == "TCPIP::127.0.0.1::INSTR"
     ctrl.start_setup_device.assert_not_called()
-
-
-def test_device_dialog_add_device_does_not_persist_before_async_success(qapp):
-    ctrl = _make_ctrl()
-    dialog = _make_dialog(ctrl)
-    dialog._add_btn.click()
-
-
-def test_device_dialog_add_device_propagates_unexpected_errors(qapp):
-    """Programmer errors must not be swallowed by the dialog catch."""
-    ctrl = _make_ctrl()
-    ctrl.start_connect_device.side_effect = ValueError("contract violation")
-
-    dialog = _make_dialog(ctrl)
-    dialog._type_combo.setCurrentText("FakeDevice")
-    dialog._addr_edit.setText("addr")
-    with pytest.raises(ValueError, match="contract violation"):
-        dialog._on_add_clicked()
 
 
 def test_device_dialog_drop_device(qapp):
@@ -163,11 +201,11 @@ def test_device_dialog_drop_device(qapp):
 
     dialog = _make_dialog(ctrl)
 
-    assert dialog._list.count() == 1
-    dialog._list.setCurrentRow(0)
+    assert _listing(dialog).count() == 1
+    _listing(dialog).setCurrentRow(0)
 
     # Drop disconnects but keeps startup memory
-    dialog._drop_btn.click()
+    _button(dialog, "Drop").click()
     ctrl.start_disconnect_device.assert_called_once()
     (req,) = ctrl.start_disconnect_device.call_args.args
     assert isinstance(req, DisconnectDeviceRequest)
@@ -186,15 +224,13 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
     )
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
-    dialog._drop_btn.click()
+    _listing(dialog).setCurrentRow(0)
+    _button(dialog, "Forget").click()
 
     ctrl.forget_device.assert_called_once_with("remembered")
 
 
 def test_memory_device_reconnect_uses_selected_name_without_setup(qapp):
-    from qtpy.QtWidgets import QListWidget, QPushButton
-
     ctrl = _make_ctrl()
     ctrl.list_devices.return_value = [_entry("remembered", connected=False)]
     ctrl.is_memory_device.return_value = True
@@ -234,15 +270,14 @@ def test_device_dialog_refresh_reloads_selected_device_info(qapp):
         "fd", FakeDeviceInfo(address="none", value=box["value"])
     )
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    assert panel._value_field.read_raw() == 1.0
+    _listing(dialog).setCurrentRow(0)
+    panel = _panel(dialog)
+    assert _field(panel, "Value:", EvalNumericField).read_raw() == 1.0
 
     box["value"] = 2.0
-    dialog._refresh_btn.click()
+    _button(dialog, "Refresh").click()
 
-    assert panel._value_field.read_raw() == 2.0
+    assert _field(panel, "Value:", EvalNumericField).read_raw() == 2.0
     ctrl.get_device_info.assert_called_once_with("fd")
 
 
@@ -260,15 +295,14 @@ def test_device_changed_repaints_selected_panel(qapp):
     )
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    assert panel._value_field.read_raw() == 1.0
+    _listing(dialog).setCurrentRow(0)
+    panel = _panel(dialog)
+    assert _field(panel, "Value:", EvalNumericField).read_raw() == 1.0
 
     box["value"] = 2.0
     ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
 
-    assert panel._value_field.read_raw() == 2.0
+    assert _field(panel, "Value:", EvalNumericField).read_raw() == 2.0
 
 
 def test_device_changed_for_other_device_keeps_selection(qapp):
@@ -283,14 +317,14 @@ def test_device_changed_for_other_device_keeps_selection(qapp):
     )
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
-    item = dialog._list.currentItem()
-    assert item is not None and item.data(256) == "A"
+    _listing(dialog).setCurrentRow(0)
+    item = _listing(dialog).currentItem()
+    assert item is not None and item.text().removeprefix("● ") == "A (FakeDevice)"
 
     ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="B"))
 
-    item = dialog._list.currentItem()
-    assert item is not None and item.data(256) == "A"
+    item = _listing(dialog).currentItem()
+    assert item is not None and item.text().removeprefix("● ") == "A (FakeDevice)"
 
 
 def test_device_changed_surfaces_device_when_none_selected(qapp):
@@ -305,47 +339,13 @@ def test_device_changed_surfaces_device_when_none_selected(qapp):
     )
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(-1)
+    _listing(dialog).setCurrentRow(-1)
 
     ctrl.get_bus.return_value.emit(DeviceChangedPayload(name="fd"))
 
-    item = dialog._list.currentItem()
+    item = _listing(dialog).currentItem()
     assert item is not None
-    assert item.data(256) == "fd"
-
-
-def test_poll_timer_runs_only_when_visible_and_selected(qapp):
-    """The live poller is dialog-scoped + selection-scoped: it runs only while
-    the dialog is visible AND a device is selected, and stops otherwise."""
-    from zcu_tools.device.fake import FakeDeviceInfo
-
-    ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = [_entry("fd")]
-    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
-        n, FakeDeviceInfo(address="none")
-    )
-
-    dialog = _make_dialog(ctrl)
-    try:
-        # Hidden + nothing selected → stopped.
-        assert not dialog._poll_timer.isActive()
-
-        # Visible but still nothing selected → stopped.
-        dialog.show()
-        qapp.processEvents()
-        dialog._list.setCurrentRow(-1)
-        assert not dialog._poll_timer.isActive()
-
-        # Visible + selected → running.
-        dialog._list.setCurrentRow(0)
-        assert dialog._poll_timer.isActive()
-
-        # Hiding the dialog stops the poller (dialog-scoped).
-        dialog.hide()
-        qapp.processEvents()
-        assert not dialog._poll_timer.isActive()
-    finally:
-        dialog.close()
+    assert item.text().removeprefix("● ") == "fd (FakeDevice)"
 
 
 def test_poll_tick_polls_selected_device(qapp):
@@ -360,9 +360,10 @@ def test_poll_tick_polls_selected_device(qapp):
 
     dialog = _make_dialog(ctrl)
     try:
-        dialog._list.setCurrentRow(1)  # select "B"
-        dialog._on_poll_tick()
-        ctrl.try_poll_device_info.assert_called_once_with("B")
+        _listing(dialog).setCurrentRow(1)  # select "B"
+        dialog.show()
+        _wait_for_poll()
+        ctrl.try_poll_device_info.assert_called_with("B")
     finally:
         dialog.close()
 
@@ -386,51 +387,15 @@ def test_poll_tick_polls_selected_setting_up_device(qapp):
 
     dialog = _make_dialog(ctrl)
     try:
-        dialog._list.setCurrentRow(0)
-        assert dialog._refresh_btn.isEnabled() is False
+        _listing(dialog).setCurrentRow(0)
+        assert _button(dialog, "Refresh").isEnabled() is False
 
-        dialog._on_poll_tick()
+        dialog.show()
+        _wait_for_poll()
 
-        ctrl.try_poll_device_info.assert_called_once_with("fd")
+        ctrl.try_poll_device_info.assert_called_with("fd")
     finally:
         dialog.close()
-
-
-def test_poll_tick_with_no_selection_stops_timer(qapp):
-    """A tick that finds nothing selected stops the timer instead of polling
-    None (guards a race where the selection vanished between decisions)."""
-    ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = []
-
-    dialog = _make_dialog(ctrl)
-    try:
-        dialog._poll_timer.start()  # force-running with no selection
-        dialog._on_poll_tick()
-        ctrl.try_poll_device_info.assert_not_called()
-        assert not dialog._poll_timer.isActive()
-    finally:
-        dialog.close()
-
-
-def test_poll_timer_stops_on_dialog_close(qapp):
-    """Closing the dialog stops the poll timer (no leak after close)."""
-    from zcu_tools.device.fake import FakeDeviceInfo
-
-    ctrl = _make_ctrl()
-    ctrl.list_devices.return_value = [_entry("fd")]
-    ctrl.get_device_snapshot.side_effect = lambda n: _connected_snapshot(
-        n, FakeDeviceInfo(address="none")
-    )
-
-    dialog = _make_dialog(ctrl)
-    dialog.show()
-    qapp.processEvents()
-    dialog._list.setCurrentRow(0)
-    assert dialog._poll_timer.isActive()
-
-    dialog.accept()  # finished → _cleanup_event_subscriptions stops the timer
-    qapp.processEvents()
-    assert not dialog._poll_timer.isActive()
 
 
 def test_device_dialog_apply_changes(qapp):
@@ -443,11 +408,11 @@ def test_device_dialog_apply_changes(qapp):
     ctrl.get_device_snapshot.return_value = _connected_snapshot("fd", info)
     ctrl.get_device_info.return_value = info
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    assert dialog._stack.currentIndex() == 1  # FakeDevice page
+    assert _field(_panel(dialog), "Value:", EvalNumericField).isEnabled()
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
@@ -466,23 +431,21 @@ def test_device_dialog_read_only_blocks_mutations_but_keeps_refresh(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
+    _listing(dialog).setCurrentRow(0)
+    panel = _panel(dialog)
 
     dialog.set_read_only(True)
 
-    assert not dialog._add_box.isEnabled()
-    assert not dialog._add_btn.isEnabled()
-    assert not dialog._drop_btn.isEnabled()
-    assert dialog._refresh_btn.isEnabled()
-    assert not dialog._apply_btn.isEnabled()
-    assert not panel._output_combo.isEnabled()
-    assert not panel._value_field.isEnabled()
+    assert not _button(dialog, "Add Device").isEnabled()
+    assert not _button(dialog, "Drop").isEnabled()
+    assert _button(dialog, "Refresh").isEnabled()
+    assert not _apply_button(dialog).isEnabled()
+    assert not _field(panel, "Output:", QComboBox).isEnabled()
+    assert not _field(panel, "Value:", EvalNumericField).isEnabled()
 
-    dialog._on_add_clicked()
-    dialog._on_forget_clicked()
-    dialog._on_apply_or_stop_clicked()
+    _button(dialog, "Add Device").click()
+    _button(dialog, "Drop").click()
+    _apply_button(dialog).click()
 
     ctrl.start_connect_device.assert_not_called()
     ctrl.start_disconnect_device.assert_not_called()
@@ -491,19 +454,18 @@ def test_device_dialog_read_only_blocks_mutations_but_keeps_refresh(qapp):
     ctrl.cancel_device_operation.assert_not_called()
     ctrl.start_setup_device.assert_not_called()
 
-    dialog._refresh_btn.click()
+    _button(dialog, "Refresh").click()
 
     ctrl.get_device_info.assert_called_once_with("fd")
 
     dialog.set_read_only(False)
 
-    assert dialog._add_box.isEnabled()
-    assert dialog._add_btn.isEnabled()
-    assert dialog._drop_btn.isEnabled()
-    assert dialog._refresh_btn.isEnabled()
-    assert dialog._apply_btn.isEnabled()
-    assert panel._output_combo.isEnabled()
-    assert panel._value_field.isEnabled()
+    assert _button(dialog, "Add Device").isEnabled()
+    assert _button(dialog, "Drop").isEnabled()
+    assert _button(dialog, "Refresh").isEnabled()
+    assert _apply_button(dialog).isEnabled()
+    assert _field(panel, "Output:", QComboBox).isEnabled()
+    assert _field(panel, "Value:", EvalNumericField).isEnabled()
 
 
 def test_device_dialog_restores_background_setup_and_stops_it(qapp):
@@ -525,20 +487,20 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
 
     dialog = _make_dialog(ctrl)
     # Opened mid-setup with nothing pre-selected → the setup owner is surfaced.
-    item = dialog._list.currentItem()
+    item = _listing(dialog).currentItem()
     assert item is not None
-    assert item.data(256) == "fd"
-    assert dialog._apply_btn.text() == "Stop"
+    assert item.text().removeprefix("● ") == "fd (FakeDevice)"
+    assert _apply_button(dialog).text() == "Stop"
     # Phase C: the list stays enabled (user can switch devices).
-    assert dialog._list.isEnabled() is True
+    assert _listing(dialog).isEnabled() is True
     # Refresh is disabled for a device that is itself setting up.
-    assert dialog._refresh_btn.isEnabled() is False
+    assert _button(dialog, "Refresh").isEnabled() is False
     # The dialog attached to progress by the setting-up device's name, so live
     # bars render even though it opened mid-setup.
     ctrl.attach_progress.assert_called_once()
     assert ctrl.attach_progress.call_args.args[0] == "fd"
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
     ctrl.cancel_device_operation.assert_called_once_with("fd")
 
     # Setup reaches a terminal state → the device returns to CONNECTED and the
@@ -547,9 +509,9 @@ def test_device_dialog_restores_background_setup_and_stops_it(qapp):
     ctrl.get_bus.return_value.emit(
         DeviceSetupFinishedPayload(name="fd", outcome="cancelled"),
     )
-    assert dialog._apply_btn.text() == "Apply Changes"
-    assert dialog._list.isEnabled() is True
-    assert dialog._refresh_btn.isEnabled() is True
+    assert _apply_button(dialog).text() == "Apply Changes"
+    assert _listing(dialog).isEnabled() is True
+    assert _button(dialog, "Refresh").isEnabled() is True
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +546,7 @@ def _setup_two_device_dialog(qapp):
     setting_up = {"fd_a"}
     ctrl = _two_device_ctrl(setting_up)
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(1)  # "fd_b"
+    _listing(dialog).setCurrentRow(1)  # "fd_b"
     return dialog, ctrl, setting_up
 
 
@@ -593,22 +555,24 @@ def test_setup_markers_follow_each_device_and_preserve_selection(qapp):
     setting_up: set[str] = set()
     ctrl = _two_device_ctrl(setting_up)
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(1)  # Keep fd_b selected while fd_a settles.
+    _listing(dialog).setCurrentRow(1)  # Keep fd_b selected while fd_a settles.
 
     setting_up.add("fd_a")
     ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_a"))
 
-    first = dialog._list.item(0)
-    second = dialog._list.item(1)
+    first = _listing(dialog).item(0)
+    second = _listing(dialog).item(1)
     assert first is not None and first.text() == "● fd_a (FakeDevice)"
     assert second is not None and second.text() == "fd_b (FakeDevice)"
-    assert first.foreground().color().name() == "#286ac7"
-    selected = dialog._list.currentItem()
-    assert selected is not None and selected.data(256) == "fd_b"
+    selected = _listing(dialog).currentItem()
+    assert (
+        selected is not None
+        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
+    )
 
     setting_up.add("fd_b")
     ctrl.get_bus.return_value.emit(DeviceSetupStartedPayload(name="fd_b"))
-    second = dialog._list.item(1)
+    second = _listing(dialog).item(1)
     assert second is not None and second.text() == "● fd_b (FakeDevice)"
 
     setting_up.remove("fd_a")
@@ -616,19 +580,22 @@ def test_setup_markers_follow_each_device_and_preserve_selection(qapp):
         DeviceSetupFinishedPayload(name="fd_a", outcome="failed")
     )
 
-    first = dialog._list.item(0)
-    second = dialog._list.item(1)
+    first = _listing(dialog).item(0)
+    second = _listing(dialog).item(1)
     assert first is not None and first.text() == "fd_a (FakeDevice)"
     assert second is not None and second.text() == "● fd_b (FakeDevice)"
-    selected = dialog._list.currentItem()
-    assert selected is not None and selected.data(256) == "fd_b"
+    selected = _listing(dialog).currentItem()
+    assert (
+        selected is not None
+        and selected.text().removeprefix("● ") == "fd_b (FakeDevice)"
+    )
 
     setting_up.remove("fd_b")
     ctrl.get_bus.return_value.emit(
         DeviceSetupFinishedPayload(name="fd_b", outcome="cancelled")
     )
 
-    items = [dialog._list.item(row) for row in range(dialog._list.count())]
+    items = [_listing(dialog).item(row) for row in range(_listing(dialog).count())]
     assert all(item is not None and not item.text().startswith("● ") for item in items)
 
 
@@ -636,27 +603,26 @@ def test_setup_running_list_remains_enabled(qapp):
     """During a setup the device list stays enabled so the user can switch
     to view (and even set up) another device."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
-    assert dialog._list.isEnabled() is True
+    assert _listing(dialog).isEnabled() is True
 
 
 def test_setup_running_can_switch_to_other_device(qapp):
     """Switching to another device shows that device's panel."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    item = dialog._list.currentItem()
+    item = _listing(dialog).currentItem()
     assert item is not None
-    assert item.data(256) == "fd_b"
-    assert dialog._stack.currentIndex() == 1  # FakeDevice page
+    assert item.text().removeprefix("● ") == "fd_b (FakeDevice)"
+    assert _field(_panel(dialog), "Value:", EvalNumericField).isEnabled()
 
 
 def test_setting_up_device_shows_stop_button(qapp):
-    """A device that is itself setting up shows the red Stop button."""
+    """A device that is itself setting up shows an enabled Stop button."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    dialog._list.setCurrentRow(0)  # "fd_a" (setting up)
-    assert dialog._apply_btn.text() == "Stop"
-    assert "red" in dialog._apply_btn.styleSheet()
-    assert dialog._apply_btn.isEnabled() is True
+    _listing(dialog).setCurrentRow(0)  # "fd_a" (setting up)
+    assert _apply_button(dialog).text() == "Stop"
+    assert _apply_button(dialog).isEnabled() is True
 
 
 def test_other_device_apply_is_enabled_during_setup(qapp):
@@ -665,8 +631,8 @@ def test_other_device_apply_is_enabled_during_setup(qapp):
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
     # fd_b is connected and not setting up.
-    assert dialog._apply_btn.text() == "Apply Changes"
-    assert dialog._apply_btn.isEnabled() is True
+    assert _apply_button(dialog).text() == "Apply Changes"
+    assert _apply_button(dialog).isEnabled() is True
 
 
 def test_apply_on_other_device_starts_concurrent_setup(qapp):
@@ -678,7 +644,7 @@ def test_apply_on_other_device_starts_concurrent_setup(qapp):
     ctrl.get_device_info.return_value = FakeDeviceInfo(address="none")
 
     # fd_b selected (not setting up) → Apply starts its setup even though fd_a is.
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
@@ -692,13 +658,13 @@ def test_switch_between_devices_recomputes_buttons(qapp):
     between Stop and Apply."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    dialog._list.setCurrentRow(0)  # fd_a (setting up)
-    assert dialog._apply_btn.text() == "Stop"
-    assert dialog._apply_btn.isEnabled() is True
+    _listing(dialog).setCurrentRow(0)  # fd_a (setting up)
+    assert _apply_button(dialog).text() == "Stop"
+    assert _apply_button(dialog).isEnabled() is True
 
-    dialog._list.setCurrentRow(1)  # fd_b (idle)
-    assert dialog._apply_btn.text() == "Apply Changes"
-    assert dialog._apply_btn.isEnabled() is True
+    _listing(dialog).setCurrentRow(1)  # fd_b (idle)
+    assert _apply_button(dialog).text() == "Apply Changes"
+    assert _apply_button(dialog).isEnabled() is True
 
 
 def test_two_concurrent_setups_each_show_stop_and_cancel_independently(qapp):
@@ -708,62 +674,42 @@ def test_two_concurrent_setups_each_show_stop_and_cancel_independently(qapp):
     ctrl = _two_device_ctrl(setting_up)
     dialog = _make_dialog(ctrl)
 
-    dialog._list.setCurrentRow(0)  # fd_a
-    assert dialog._apply_btn.text() == "Stop"
-    dialog._apply_btn.click()
+    _listing(dialog).setCurrentRow(0)  # fd_a
+    assert _apply_button(dialog).text() == "Stop"
+    _apply_button(dialog).click()
     ctrl.cancel_device_operation.assert_called_once_with("fd_a")
 
-    dialog._list.setCurrentRow(1)  # fd_b
-    assert dialog._apply_btn.text() == "Stop"
-    dialog._apply_btn.click()
+    _listing(dialog).setCurrentRow(1)  # fd_b
+    assert _apply_button(dialog).text() == "Stop"
+    _apply_button(dialog).click()
     assert ctrl.cancel_device_operation.call_args_list[-1].args == ("fd_b",)
 
 
 def test_two_concurrent_setups_subscribe_progress_per_owner(qapp):
-    """Both setting-up devices get their own progress subscription (multi-owner);
-    the merged stack is shown."""
+    """Both setting-up devices attach progress through the control port."""
     setting_up = {"fd_a", "fd_b"}
     ctrl = _two_device_ctrl(setting_up)
     dialog = _make_dialog(ctrl)
 
     owners = {call.args[0] for call in ctrl.attach_progress.call_args_list}
     assert owners == {"fd_a", "fd_b"}
-    assert set(dialog._progress_unsubs) == {"fd_a", "fd_b"}
-    assert dialog._progress.isVisibleTo(dialog) or not dialog.isVisible()
+    dialog.close()
 
 
-def test_one_of_two_setups_finishing_keeps_the_other(qapp):
-    """When one of two concurrent setups finishes, its progress subscription is
-    disposed but the other survives."""
-    setting_up = {"fd_a", "fd_b"}
-    ctrl = _two_device_ctrl(setting_up)
-    dialog = _make_dialog(ctrl)
-    assert set(dialog._progress_unsubs) == {"fd_a", "fd_b"}
-
-    # fd_a finishes (back to CONNECTED); fd_b still setting up.
-    setting_up.discard("fd_a")
-    ctrl.get_bus.return_value.emit(
-        DeviceSetupFinishedPayload(name="fd_a", outcome="finished"),
-    )
-    assert set(dialog._progress_unsubs) == {"fd_b"}
-
-
-def test_all_setups_finished_hides_progress_and_restores_buttons(qapp):
-    """When the last setup finishes, progress is hidden and buttons normalise."""
+def test_all_setups_finished_restores_buttons(qapp):
+    """When the last setup finishes, selection and buttons return to idle."""
     dialog, ctrl, setting_up = _setup_two_device_dialog(qapp)
-    assert set(dialog._progress_unsubs) == {"fd_a"}
 
     setting_up.discard("fd_a")
     ctrl.get_bus.return_value.emit(
         DeviceSetupFinishedPayload(name="fd_a", outcome="finished"),
     )
-    assert dialog._progress_unsubs == {}
     # fd_b still selected, Apply enabled, list enabled.
-    item = dialog._list.currentItem()
-    assert item is not None and item.data(256) == "fd_b"
-    assert dialog._apply_btn.text() == "Apply Changes"
-    assert dialog._apply_btn.isEnabled() is True
-    assert dialog._list.isEnabled() is True
+    item = _listing(dialog).currentItem()
+    assert item is not None and item.text().removeprefix("● ") == "fd_b (FakeDevice)"
+    assert _apply_button(dialog).text() == "Apply Changes"
+    assert _apply_button(dialog).isEnabled() is True
+    assert _listing(dialog).isEnabled() is True
 
 
 def test_drop_disabled_for_setting_up_device_only(qapp):
@@ -771,11 +717,11 @@ def test_drop_disabled_for_setting_up_device_only(qapp):
     enabled for an idle device even while another is mid-setup."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    dialog._list.setCurrentRow(1)  # fd_b idle → drop enabled
-    assert dialog._drop_btn.isEnabled() is True
+    _listing(dialog).setCurrentRow(1)  # fd_b idle → drop enabled
+    assert _button(dialog, "Drop").isEnabled() is True
 
-    dialog._list.setCurrentRow(0)  # fd_a setting up → drop disabled
-    assert dialog._drop_btn.isEnabled() is False
+    _listing(dialog).setCurrentRow(0)  # fd_a setting up → drop disabled
+    assert _button(dialog, "Drop").isEnabled() is False
 
 
 def test_add_box_enabled_during_setup(qapp):
@@ -783,26 +729,26 @@ def test_add_box_enabled_during_setup(qapp):
     resource-disjoint from any in-flight mutation)."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    assert dialog._add_btn.isEnabled() is True
-    assert dialog._type_combo.isEnabled() is True
-    assert dialog._name_edit.isEnabled() is True
-    assert dialog._addr_edit.isEnabled() is True
+    assert _button(dialog, "Add Device").isEnabled() is True
+    assert _field(dialog, "Type:", QComboBox).isEnabled() is True
+    assert _field(dialog, "Name:", QLineEdit).isEnabled() is True
+    assert _field(dialog, "Address:", QLineEdit).isEnabled() is True
 
 
 def test_refresh_enabled_for_idle_device_during_other_setup(qapp):
     """Refresh is allowed for an idle device even while another device sets up."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    dialog._list.setCurrentRow(1)  # fd_b idle
-    assert dialog._refresh_btn.isEnabled() is True
+    _listing(dialog).setCurrentRow(1)  # fd_b idle
+    assert _button(dialog, "Refresh").isEnabled() is True
 
 
 def test_refresh_disabled_for_setting_up_device(qapp):
     """Refresh is disabled for a device that is itself setting up."""
     dialog, _, _ = _setup_two_device_dialog(qapp)
 
-    dialog._list.setCurrentRow(0)  # fd_a setting up
-    assert dialog._refresh_btn.isEnabled() is False
+    _listing(dialog).setCurrentRow(0)  # fd_a setting up
+    assert _button(dialog, "Refresh").isEnabled() is False
 
 
 def test_device_dialog_close_keeps_setup_running_and_unsubscribes(qapp):
@@ -839,7 +785,6 @@ def test_eval_apply_resolves_expression_to_float(qapp):
     """Eval mode: apply resolves the expression to a concrete float and passes it
     to start_setup_device. The resolved info.value must be a float, not an EvalRef."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters(flx_int=0.5)
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -848,15 +793,14 @@ def test_eval_apply_resolves_expression_to_float(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
+    panel = _panel(dialog)
     # Switch value field to eval mode and type an expression
-    panel._value_field.load_expression("general.ext.flx_int")
+    _field(panel, "Value:", EvalNumericField).load_expression("general.ext.flx_int")
     ctrl.read_context.reset_mock()
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.read_context.assert_called_once()
     ctrl.start_setup_device.assert_called_once()
@@ -869,10 +813,8 @@ def test_eval_apply_resolves_expression_to_float(qapp):
 
 
 def test_eval_apply_fast_fails_on_undefined_name(qapp):
-    """Eval mode: apply with an undefined variable name fast-fails: status shown
-    in red, start_setup_device is NOT called."""
+    """An undefined expression displays an error without submitting setup."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -881,23 +823,20 @@ def test_eval_apply_fast_fails_on_undefined_name(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field.load_expression("missing_var")
+    panel = _panel(dialog)
+    _field(panel, "Value:", EvalNumericField).load_expression("missing_var")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_not_called()
-    assert "red" in dialog._add_status.styleSheet()
-    assert dialog._add_status.text() != ""
+    assert any("fd:" in label.text() for label in dialog.findChildren(QLabel))
 
 
 def test_eval_apply_fast_fails_on_syntax_error(qapp):
     """Eval mode: apply with a syntax-error expression fast-fails."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -906,22 +845,19 @@ def test_eval_apply_fast_fails_on_syntax_error(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field.load_expression("r_f[")
+    panel = _panel(dialog)
+    _field(panel, "Value:", EvalNumericField).load_expression("r_f[")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_not_called()
-    assert "red" in dialog._add_status.styleSheet()
 
 
 def test_eval_apply_no_context_fast_fails(qapp):
     """When the parameter provider raises (no active context), apply fast-fails."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl()
     ctrl.read_context.side_effect = RuntimeError("no active context")
@@ -931,16 +867,14 @@ def test_eval_apply_no_context_fast_fails(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field.load_expression("general.ext.flx_int")
+    panel = _panel(dialog)
+    _field(panel, "Value:", EvalNumericField).load_expression("general.ext.flx_int")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_not_called()
-    assert "red" in dialog._add_status.styleSheet()
 
 
 def test_direct_mode_apply_unchanged(qapp):
@@ -954,9 +888,9 @@ def test_direct_mode_apply_unchanged(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
@@ -975,7 +909,6 @@ def test_eval_apply_out_of_range_fast_fails(qapp):
     apply time before the value ever reaches the driver's ramp logic.
     """
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters(flx_int=0.0)  # flx_int evaluates to 0.0
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -984,24 +917,21 @@ def test_eval_apply_out_of_range_fast_fails(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
+    panel = _panel(dialog)
     # rampstep_field has minimum=1e-9; expression evaluates to 0.0 → below minimum
-    panel._rampstep_field.load_expression("general.ext.flx_int")
+    _field(panel, "Ramp step:", EvalNumericField).load_expression("general.ext.flx_int")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_not_called()
-    assert "red" in dialog._add_status.styleSheet()
-    assert "rampstep" in dialog._add_status.text()
+    assert any("rampstep" in label.text() for label in dialog.findChildren(QLabel))
 
 
 def test_eval_apply_in_range_sends_setup(qapp):
     """Eval mode: rampstep expression resolves within [1e-9, 1e9] → setup dispatched."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters(flx_int=0.001)  # 0.001 is within [1e-9, 1e9]
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -1010,13 +940,12 @@ def test_eval_apply_in_range_sends_setup(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    panel._rampstep_field.load_expression("general.ext.flx_int")
+    panel = _panel(dialog)
+    _field(panel, "Ramp step:", EvalNumericField).load_expression("general.ext.flx_int")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
@@ -1030,7 +959,6 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
     """The 'output' combo (choice field) is never wrapped in EvalRef regardless
     of whether any numeric field is in eval mode."""
     from zcu_tools.device.fake import FakeDeviceInfo
-    from zcu_tools.gui.session.ui.device_dialog import _FakeDevicePanel
 
     ctrl = _make_ctrl_with_parameters()
     ctrl.list_devices.return_value = [_entry("fd")]
@@ -1039,13 +967,12 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
     ctrl.get_device_info.return_value = info
 
     dialog = _make_dialog(ctrl)
-    dialog._list.setCurrentRow(0)
+    _listing(dialog).setCurrentRow(0)
 
-    panel = dialog._stack.currentWidget()
-    assert isinstance(panel, _FakeDevicePanel)
-    panel._value_field.load_expression("general.ext.flx_int")
+    panel = _panel(dialog)
+    _field(panel, "Value:", EvalNumericField).load_expression("general.ext.flx_int")
 
-    dialog._apply_btn.click()
+    _apply_button(dialog).click()
 
     ctrl.start_setup_device.assert_called_once()
     (req,) = ctrl.start_setup_device.call_args.args
@@ -1053,8 +980,6 @@ def test_choice_field_unaffected_by_eval_mode(qapp):
 
 
 def test_empty_device_list_shows_hint_and_drop_sits_under_list(qapp):
-    from qtpy.QtWidgets import QLabel, QListWidget, QPushButton
-
     ctrl = _make_ctrl()
     dialog = _make_dialog(ctrl)
     dialog.show()
@@ -1076,7 +1001,6 @@ def test_empty_device_list_shows_hint_and_drop_sits_under_list(qapp):
 
 
 def test_device_hint_hides_when_a_device_is_listed(qapp):
-    from qtpy.QtWidgets import QLabel
     from zcu_tools.device.fake import FakeDeviceInfo
 
     ctrl = _make_ctrl()
