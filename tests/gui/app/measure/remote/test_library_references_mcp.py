@@ -2,7 +2,6 @@
 
 import pytest
 from zcu_tools.cfg_model import (
-    ConstWaveformCfg,
     ModuleCfgFactory,
     PulseCfg,
     PulseSpec,
@@ -15,7 +14,6 @@ from zcu_tools.gui.app.measure.cfg_schemas import (
     waveform_cfg_to_value,
 )
 from zcu_tools.gui.cfg import CfgSchema
-from zcu_tools.gui.form import ModuleInline
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import LibraryChange
 
@@ -98,12 +96,14 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     tab_id = fx.ctrl.new_tab("references")
     owner = fx.ctrl.cfg_resources.lookup(tab_id)
     if kind == "waveform":
-        pulse = (
-            fx.ctrl.read_context()
-            .library.module_spec("Q1.pulses.carrier")
-            .model_copy(update={"waveform": ConstWaveformCfg(length=0.75)})
+        owner.write(
+            {
+                ("inline", "module", "waveform"): {
+                    "kind": "inline",
+                    "module": {"style": "const", "length": 0.75},
+                }
+            }
         )
-        owner.write({("inline",): ModuleInline(module=pulse).model_dump(mode="json")})
     fx.start()
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
     try:
@@ -115,11 +115,11 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         if kind == "module":
             assert linked == {"kind": "ref", "name": path}
         else:
-            assert linked["module"]["waveform"] == path
+            assert linked["module"]["waveform"] == {"kind": "ref", "name": path}
         inline_path = (
             ("inline", "module", field)
             if kind == "module"
-            else ("inline", "module", "waveform", field)
+            else ("inline", "module", "waveform", "module", field)
         )
         leaves = {tuple(item["path"]): item["value"] for item in before["values"]}
         assert leaves[inline_path] == 0.75
